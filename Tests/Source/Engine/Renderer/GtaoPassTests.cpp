@@ -266,7 +266,7 @@ namespace Engine {
 			RenderSnapshot snapshot;
 			snapshot.HasCamera = true;
 			snapshot.Camera = MakeGtaoCamera(RenderProjection::Orthographic);
-			snapshot.Post = { .Tonemap = RenderTonemapper::Linear, .SsaoRadius = 1.5f, .SsaoIntensity = 2.0f, .SsaoQuality = RenderSsaoQuality::High, .BloomEnabled = false, .FxaaEnabled = false };
+			snapshot.Post = { .Tonemap = RenderTonemapper::Linear, .SsaoRadius = 1.5f, .SsaoIntensity = 2.0f, .SsaoQuality = RenderSsaoQuality::High, .BloomEnabled = false, .AntiAliasing = RenderAntiAliasing::None };
 			snapshot.Environment.FallbackColor = glm::vec3(0.2f);
 			snapshot.Environment.ShowSkybox = false;
 			for (const glm::vec3 position : { glm::vec3(0, 0, -4.0f), glm::vec3(0, 0, -3.7f) })
@@ -725,7 +725,7 @@ namespace Engine {
 				}));
 				snapshot.Post.ExposureEV = 8.0f;
 				snapshot.Post.BloomEnabled = true;
-				snapshot.Post.FxaaEnabled = true;
+				snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 				snapshot.Environment.Intensity = 20.0f;
 				const AssetHandle material = PublishZeroGtaoMaterial(assets);
 				for (MeshDrawItem& mesh : snapshot.Meshes)

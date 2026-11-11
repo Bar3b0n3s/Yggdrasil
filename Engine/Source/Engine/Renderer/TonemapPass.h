@@ -6,6 +6,7 @@
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 
+#include <glm/glm.hpp>
 #include <nvrhi/nvrhi.h>
 
 #include <cstdint>
@@ -84,6 +85,17 @@ namespace Engine {
 		nvrhi::ITexture* BlueNoise = nullptr;
 		nvrhi::ITexture* LdrColor = nullptr; // LdrColorFormat with isUAV; never null
 		TonemapSettings Settings{};
+		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decision 15, stream X-A): optional, the Exposure pass's adapted
+		// exposure buffer (ExposurePass's layout), which multiplies ViewConstants::Exposure (TonemapFlagAutoExposure); null
+		// keeps the manual exposure alone.
+		nvrhi::IBuffer* AdaptedExposure = nullptr;
+		// M26 (C26.1, R-LUT; decision 15, stream X-B): optional, the grading LUT's 3D texture (GpuLut::Texture) and its domain,
+		// applied after the curve with LutIntensity as its share (TonemapFlagLut); null grades nothing. The pass folds the
+		// domain and the texture's size into TonemapConstants' LutScale and LutOffset (Shared/TonemapConstants.h).
+		nvrhi::ITexture* Lut = nullptr;
+		glm::vec3 LutDomainMin = glm::vec3(0.0f);
+		glm::vec3 LutDomainMax = glm::vec3(1.0f);
+		float LutIntensity = 0.0f;
 	};
 
 	class TonemapPass

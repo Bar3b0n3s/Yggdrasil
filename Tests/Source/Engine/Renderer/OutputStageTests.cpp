@@ -112,7 +112,7 @@ namespace Engine {
 					.PickId = 1 });
 				snapshot.PickTable = { UUID(900) };
 				snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional, .Intensity = 1.0f, .Direction = glm::vec3(0.0f, 0.0f, -1.0f) });
-				snapshot.Post = PostProcessSettings{ .ExposureEV = 0.0f, .Tonemap = RenderTonemapper::Linear, .SsaoEnabled = false, .BloomEnabled = false, .FxaaEnabled = false };
+				snapshot.Post = PostProcessSettings{ .ExposureEV = 0.0f, .Tonemap = RenderTonemapper::Linear, .SsaoEnabled = false, .BloomEnabled = false, .AntiAliasing = RenderAntiAliasing::None };
 				snapshot.Quality.ShadowMapSize = 256;
 				snapshot.Output = output;
 				snapshot.FrameIndex = ++m_FrameIndex;
@@ -534,7 +534,7 @@ namespace Engine {
 			// SceneColor holds the linear value of the sRGB texel (200, 100, 50); the post settings would all change it.
 			snapshot.Camera.ClearColor = glm::vec3(static_cast<float>(Test::SrgbToLinear(200.0 / 255.0)), static_cast<float>(Test::SrgbToLinear(100.0 / 255.0)),
 				static_cast<float>(Test::SrgbToLinear(50.0 / 255.0)));
-			snapshot.Post = PostProcessSettings{ .ExposureEV = 2.0f, .Tonemap = RenderTonemapper::AgX, .BloomEnabled = true, .FxaaEnabled = true };
+			snapshot.Post = PostProcessSettings{ .ExposureEV = 2.0f, .Tonemap = RenderTonemapper::AgX, .BloomEnabled = true, .AntiAliasing = RenderAntiAliasing::Fxaa };
 			snapshot.Output.PixelArt = true;
 			const Image pixelArt = setup.Render(snapshot);
 			for (uint32_t y = OffsetY; y < OffsetY + Scale * SceneHeight; ++y)

@@ -66,7 +66,7 @@ namespace Engine {
 				snapshot.Camera.ClearColor = glm::vec3(0);
 				snapshot.Camera.ClearToSkybox = false;
 				snapshot.Post.BloomEnabled = false;
-				snapshot.Post.FxaaEnabled = false;
+				snapshot.Post.AntiAliasing = RenderAntiAliasing::None;
 				snapshot.Post.SsaoEnabled = false;
 				snapshot.Post.Tonemap = RenderTonemapper::Linear;
 				snapshot.Quality.ShadowMapSize = 256;

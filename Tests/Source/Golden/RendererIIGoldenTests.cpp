@@ -58,7 +58,7 @@ namespace Engine {
 			{
 				options.EditSnapshot = [edit = options.EditSnapshot](RenderSnapshot& snapshot)
 				{
-					CHECK(snapshot.Post.FxaaEnabled);
+					CHECK(snapshot.Post.AntiAliasing == RenderAntiAliasing::Fxaa);
 					snapshot.Quality.ShadowMapSize = 1024;
 					if (edit)
 						edit(snapshot);

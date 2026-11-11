@@ -5,6 +5,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/DisabledTag.h"
+#include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Support/SceneTestFixture.h"
@@ -36,7 +37,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 47);
+			static_assert(BuiltinComponents::Size == 52);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -57,6 +58,8 @@ namespace Engine {
 			static_assert(!TypeListContains<PendingDestroyTag, BuiltinComponents>);
 			// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 29): an Animator's sampled pose is runtime state.
 			static_assert(!TypeListContains<AnimationPoseComponent, BuiltinComponents>);
+			// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 5): an emitter's live particles are runtime state.
+			static_assert(!TypeListContains<ParticleStateComponent, BuiltinComponents>);
 			static_assert(!TypeListContains<DisabledTag, BuiltinComponents>);
 			static_assert(!TypeListContains<UnknownComponentsComponent, BuiltinComponents>);
 			static_assert(std::is_empty_v<DisabledTag>);
@@ -65,6 +68,7 @@ namespace Engine {
 			static_assert(!TypeListContains<PrefabOverride, BuiltinComponents>);
 			static_assert(!TypeListContains<PrefabEntityKeys, BuiltinComponents>);
 			static_assert(!TypeListContains<AnimatorLayer, BuiltinComponents>);
+			static_assert(!TypeListContains<TerrainLayer, BuiltinComponents>);
 			CHECK(TypeListContains<ScriptComponent, BuiltinComponents>);
 		}
 
@@ -478,6 +482,69 @@ namespace Engine {
 			CHECK(SkinnedMeshComponent{}.MorphWeights.empty());
 		}
 
+		// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decisions 4, 5 and 20).
+		TEST_CASE("BuiltinComponents: particle, probe and terrain defaults follow the component table")
+		{
+			const ParticleEmitterComponent emitter;
+			CHECK(emitter.Playing);
+			CHECK(emitter.Loop);
+			CHECK(emitter.Duration == 5.0f);
+			CHECK(emitter.Rate == 10.0f);
+			CHECK(emitter.Burst == 0);
+			CHECK(emitter.MaxParticles == 256);
+			CHECK(emitter.Seed == 0);
+			CHECK(emitter.Lifetime == glm::vec2(1.0f, 2.0f));
+			CHECK(emitter.Speed == glm::vec2(1.0f, 2.0f));
+			CHECK(emitter.Size == glm::vec2(0.1f, 0.2f));
+			CHECK(emitter.Shape == ParticleEmitterShape::Cone);
+			CHECK(emitter.ShapeRadius == 0.25f);
+			CHECK(emitter.ConeAngle == 25.0f);
+			CHECK(emitter.BoxHalfExtents == glm::vec3(0.5f));
+			CHECK(emitter.Acceleration == glm::vec3(0.0f));
+			CHECK(emitter.Drag == 0.0f);
+			CHECK(emitter.SimulationSpace == ParticleSimulationSpace::World);
+			CHECK_FALSE(emitter.Texture.IsValid());
+			CHECK(emitter.Blend == ParticleBlend::Alpha);
+			CHECK(emitter.ColorOverLife.empty());
+			CHECK(emitter.SizeOverLife.empty());
+
+			const IrradianceVolumeComponent volume;
+			CHECK_FALSE(volume.Data.IsValid());
+			CHECK(volume.Size == glm::vec3(10.0f, 4.0f, 10.0f));
+			CHECK(volume.ProbeCountX == 4);
+			CHECK(volume.ProbeCountY == 3);
+			CHECK(volume.ProbeCountZ == 4);
+			CHECK(volume.Intensity == 1.0f);
+			CHECK(volume.BlendDistance == 1.0f);
+
+			const ReflectionProbeComponent probe;
+			CHECK_FALSE(probe.Data.IsValid());
+			CHECK(probe.Size == glm::vec3(10.0f, 5.0f, 10.0f));
+			CHECK(probe.BoxProjection);
+			CHECK(probe.Resolution == 128);
+			CHECK(probe.Intensity == 1.0f);
+			CHECK(probe.BlendDistance == 1.0f);
+
+			const TerrainComponent terrain;
+			CHECK_FALSE(terrain.Heightfield.IsValid());
+			CHECK(terrain.Size == glm::vec2(64.0f));
+			CHECK(terrain.HeightScale == 16.0f);
+			CHECK(terrain.Layers.empty());
+			CHECK_FALSE(terrain.SplatMap.IsValid());
+			CHECK(terrain.ReceiveShadows);
+			CHECK(terrain.LodBias == 1.0f);
+			const TerrainLayer layer;
+			CHECK(layer.Tint == glm::vec3(1.0f));
+			CHECK(layer.Tiling == 4.0f);
+			CHECK(layer.Roughness == 0.9f);
+			CHECK(layer.Metallic == 0.0f);
+
+			const TerrainColliderComponent collider;
+			CHECK(collider.Layer == "Default");
+			CHECK(collider.Friction == 0.5f);
+			CHECK(collider.Restitution == 0.0f);
+		}
+
 		TEST_CASE("BuiltinComponents: every listed type is registered in list order")
 		{
 			TypeRegistry registry;
@@ -572,6 +639,13 @@ namespace Engine {
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 28): after M21's and M22's categories on phase 2's merged tree.
 				"Animator",
 				"SkinnedMesh",
+				// M26 (Docs/Decisions/0037-m26-contract.md decision 4): ADR 0028's phase-3 ledger's categories after Animation,
+				// Particles, Probes and Terrain in that order.
+				"ParticleEmitter",
+				"IrradianceVolume",
+				"ReflectionProbe",
+				"Terrain",
+				"TerrainCollider",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -583,7 +657,7 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation" };
+				"Animation", "Particles", "Probes", "Terrain" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), and PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3). Every other component is at version 1.

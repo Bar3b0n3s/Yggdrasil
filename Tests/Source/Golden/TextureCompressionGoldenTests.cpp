@@ -70,7 +70,7 @@ namespace Engine {
 		{
 			const Test::GoldenSceneOptions options{ .EditSnapshot = [&edit](RenderSnapshot& snapshot)
 			{
-				CHECK(snapshot.Post.FxaaEnabled);
+				CHECK(snapshot.Post.AntiAliasing == RenderAntiAliasing::Fxaa);
 				if (edit)
 					edit(snapshot);
 			},

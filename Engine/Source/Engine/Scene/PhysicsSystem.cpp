@@ -347,6 +347,12 @@ namespace Engine {
 				const MeshShapeGeometry& other = std::get<MeshShapeGeometry>(b);
 				return mesh->Vertices == other.Vertices && mesh->Indices == other.Indices;
 			}
+			// M26 (C26.1, decision 21): a terrain's height field, which stream T-B composes.
+			if (const HeightFieldShapeGeometry* heightField = std::get_if<HeightFieldShapeGeometry>(&a))
+			{
+				const HeightFieldShapeGeometry& other = std::get<HeightFieldShapeGeometry>(b);
+				return heightField->SampleCount == other.SampleCount && heightField->CellSize == other.CellSize && heightField->Heights == other.Heights;
+			}
 			return std::get<SharedShapeGeometry>(a).Shape == std::get<SharedShapeGeometry>(b).Shape;
 		}
 

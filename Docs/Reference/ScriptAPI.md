@@ -208,7 +208,7 @@ All modes; LoadTime|Runtime|Test; pure/read.
 
 `(type: string) -> FieldDescriptor`
 
-Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, StringTable, Skeleton or AnimationClip), with a null default; any other name fails the import.
+Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, StringTable, Skeleton, AnimationClip, IrradianceVolume, Lut or Heightfield), with a null default; any other name fails the import.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -2468,7 +2468,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2538,6 +2538,14 @@ The immutable 16-digit hexadecimal UUID.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.IrradianceVolume
+
+`IrradianceVolume?`
+
+The entity's IrradianceVolume component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.IsActive
 
 `(self: Entity) -> boolean`
@@ -2594,6 +2602,14 @@ The entity name; a written name is UTF-8 without NUL and at most 256 bytes.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### Entity.ParticleEmitter
+
+`ParticleEmitter?`
+
+The entity's ParticleEmitter component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.PixelPerfectCamera
 
 `PixelPerfectCamera?`
@@ -2623,6 +2639,14 @@ All modes; Runtime|Test; pure/read.
 `PostProcess?`
 
 The entity's PostProcess component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.ReflectionProbe
+
+`ReflectionProbe?`
+
+The entity's ReflectionProbe component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2711,6 +2735,22 @@ All modes; Runtime|Test; pure/read.
 `SpriteRenderer?`
 
 The entity's SpriteRenderer component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.Terrain
+
+`Terrain?`
+
+The entity's Terrain component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.TerrainCollider
+
+`TerrainCollider?`
+
+The entity's TerrainCollider component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2898,6 +2938,66 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 An authenticated immutable Field constructor descriptor.
 
+## IrradianceVolume
+
+A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.
+
+### IrradianceVolume.BlendDistance
+
+`number`
+
+The distance inside the box's faces over which its light fades to the Environment's, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### IrradianceVolume.Data
+
+`AssetRef?`
+
+The baked volume that lighting.bake writes beside the scene and assigns; null (not baked) lights nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### IrradianceVolume.Intensity
+
+`number`
+
+The unitless strength of the baked indirect light.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### IrradianceVolume.ProbeCountX
+
+`number`
+
+The probes along the box's local X axis, the outer ones on its faces.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### IrradianceVolume.ProbeCountY
+
+`number`
+
+The probes along the box's local Y axis, the outer ones on its faces.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### IrradianceVolume.ProbeCountZ
+
+`number`
+
+The probes along the box's local Z axis, the outer ones on its faces.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### IrradianceVolume.Size
+
+`vector`
+
+The box's size in metres, centred on the entity in its local axes.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## Light2D
 
 A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
@@ -3035,6 +3135,178 @@ All modes; Runtime|Test; mutates.
 `boolean`
 
 Whether the mesh is drawn at all.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## ParticleEmitter
+
+Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision.
+
+### ParticleEmitter.Acceleration
+
+`vector`
+
+The acceleration of every live particle, in metres per second squared, in the SimulationSpace (set (0, -9.81, 0) for gravity).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Blend
+
+`ParticleBlend`
+
+How particles are blended into the image.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.BoxHalfExtents
+
+`vector`
+
+The Box shape's half extents, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Burst
+
+`number`
+
+Particles emitted at once at the start of each cycle, at most MaxParticles.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.ColorOverLife
+
+`{{Time: number, Color: Color}}`
+
+At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.ConeAngle
+
+`number`
+
+The Cone shape's half angle from the local -Z axis, in degrees.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Drag
+
+`number`
+
+How quickly particles slow down, per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Duration
+
+`number`
+
+The length of one emission cycle, in seconds; Burst is emitted at each cycle's start.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Lifetime
+
+`vector`
+
+The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Loop
+
+`boolean`
+
+Whether emission repeats every Duration seconds; otherwise it stops after one cycle.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.MaxParticles
+
+`number`
+
+The most particles alive at once; beyond it no new particle is emitted until one dies.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Playing
+
+`boolean`
+
+Whether the emitter emits; live particles finish their lives either way.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Rate
+
+`number`
+
+Particles emitted per second while playing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Seed
+
+`number`
+
+Seeds the emitter's random stream together with the entity's id, so a replay shows the same particles in every build.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Shape
+
+`ParticleEmitterShape`
+
+Where new particles start and which way they move.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.ShapeRadius
+
+`number`
+
+The radius of the Sphere shape and of the Cone shape's base disc, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.SimulationSpace
+
+`ParticleSimulationSpace`
+
+Whether live particles stay where they were emitted or move with the emitter.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Size
+
+`vector`
+
+The range a new particle's size is drawn from, in metres: (minimum, maximum).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.SizeOverLife
+
+`{{Time: number, Size: number}}`
+
+At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Speed
+
+`vector`
+
+The range a new particle's speed is drawn from, in metres per second: (minimum, maximum).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Texture
+
+`AssetRef?`
+
+The particle's texture; null uses the built-in soft disc (engine://Textures/Particle).
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3421,6 +3693,58 @@ All modes; Runtime|Test; pure/read.
 Draws a uniform direction from this stream with deterministic trigonometry.
 
 All modes; Runtime|Test; pure/read.
+
+## ReflectionProbe
+
+A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it.
+
+### ReflectionProbe.BlendDistance
+
+`number`
+
+The distance inside the box's faces over which its reflection fades to the Environment's, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ReflectionProbe.BoxProjection
+
+`boolean`
+
+Whether reflections are corrected for the box (parallax-corrected), so a room's reflection lines up with its walls.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ReflectionProbe.Data
+
+`AssetRef?`
+
+The baked reflection, an Environment that lighting.bake writes beside the scene and assigns; null (not baked) reflects nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ReflectionProbe.Intensity
+
+`number`
+
+The unitless strength of the reflection.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ReflectionProbe.Resolution
+
+`number`
+
+The bake's capture cube face, in texels: a power of two.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ReflectionProbe.Size
+
+`vector`
+
+The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes.
+
+All modes; Runtime|Test; pure/read; setter mutates.
 
 ## RigidBody
 
@@ -4177,6 +4501,94 @@ All modes; Runtime|Test; pure/read; setter mutates.
 ## TaskHandle
 
 An opaque coroutine handle owned by one script VM.
+
+## Terrain
+
+A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit.
+
+### Terrain.HeightScale
+
+`number`
+
+The height of the largest heightfield sample above the entity's origin, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Terrain.Heightfield
+
+`AssetRef?`
+
+The heightfield whose samples shape the terrain; null draws nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Terrain.Layers
+
+`{{BaseColorMap: AssetRef?, NormalMap: AssetRef?, Tint: Color, Tiling: number, Roughness: number, Metallic: number}}`
+
+At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Terrain.LodBias
+
+`number`
+
+Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Terrain.ReceiveShadows
+
+`boolean`
+
+Whether shadows fall on the terrain.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Terrain.Size
+
+`vector`
+
+The terrain's extent along its local X and Z axes from the entity's origin, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Terrain.SplatMap
+
+`AssetRef?`
+
+The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## TerrainCollider
+
+The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn.
+
+### TerrainCollider.Friction
+
+`number`
+
+The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TerrainCollider.Layer
+
+`string`
+
+Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). A value a script writes holds at most 4096 bytes of text.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### TerrainCollider.Restitution
+
+`number`
+
+The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values.
+
+All modes; Runtime|Test; pure/read; setter mutates.
 
 ## Text
 
@@ -5242,6 +5654,12 @@ The kind of a loadable asset (§7.1).
 
 - `AnimationClip`: An animation clip (a glTF's animation sub-asset): keyed joint transforms and morph weights, with named events.
 
+- `IrradianceVolume`: A baked irradiance volume (.irradiance, written by lighting.bake): a grid of probes' SH9 irradiance that an IrradianceVolume component lights with.
+
+- `Lut`: A colour-grading 3D lookup table (.cube, or a built-in LUT) that a PostProcess applies after its tonemap curve.
+
+- `Heightfield`: A terrain's heightfield (.heightfield): a square grid of at most 1025 x 1025 16-bit height samples that a Terrain lays out.
+
 ## Attenuation
 
 How a spatial sound's volume falls off with distance.
@@ -5879,6 +6297,34 @@ What a type of a game's native module is.
 - `Component`: Data on entities, saved in scenes and prefabs as Native.<Name>.
 
 - `Resource`: One value per play session, part of the state hash, never saved.
+
+## ParticleBlend
+
+How a particle's colour reaches the image.
+
+- `Alpha`: Straight-alpha blending, the emitter's particles drawn back to front.
+
+- `Additive`: Added to the image (colour times alpha): glows, sparks and fire, in any order.
+
+## ParticleEmitterShape (enum)
+
+Where a ParticleEmitter's new particles start and which way they move.
+
+- `Point`: At the emitter's origin, moving in a uniformly random direction.
+
+- `Sphere`: Uniformly inside a sphere of ShapeRadius, moving away from its centre.
+
+- `Cone`: On a disc of ShapeRadius in the local XY plane, moving within ConeAngle of the local -Z axis.
+
+- `Box`: Uniformly inside a box of BoxHalfExtents, moving down the local -Z axis.
+
+## ParticleSimulationSpace
+
+Which space a ParticleEmitter's live particles move in.
+
+- `World`: Spawned at the emitter's pose, then independent of it: a moving emitter leaves a trail.
+
+- `Local`: Simulated in the emitter's local space, so they move with the emitter.
 
 ## Physics2DQueryShape
 

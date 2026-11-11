@@ -1,0 +1,49 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "PostProcessV1",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"PostProcess": 2
+	},
+	"Entities": [
+		{
+			"ID": "5e2b7c4a91d03f68",
+			"Name": "Post",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PostProcess": {
+					"ExposureEV": 1.5,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "ACES",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.75,
+					"SsaoIntensity": 1.25,
+					"SsaoQuality": "High",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.08,
+					"AntiAliasing": "None"
+				}
+			}
+		}
+	]
+}

@@ -26,6 +26,12 @@ namespace Engine {
 			snapshot.Sprites.push_back(SpriteItem{});
 			snapshot.Tilemaps.push_back(TilemapItem{});
 			snapshot.Lights2D.push_back(Light2DItem{});
+			// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decisions 7, 16 and 22).
+			snapshot.ParticleEmitters.push_back(ParticleEmitterItem{});
+			snapshot.Particles.push_back(ParticleItem{});
+			snapshot.IrradianceVolumes.push_back(IrradianceVolumeItem{});
+			snapshot.ReflectionProbes.push_back(ReflectionProbeItem{});
+			snapshot.Terrains.push_back(TerrainItem{});
 			snapshot.DebugDraw.AddLine(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec4(1.0f));
 			snapshot.AnnotationDraw.AddLine(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec4(1.0f));
 			CHECK(snapshot.Meshes.get_allocator().resource() == &arena);
@@ -36,6 +42,11 @@ namespace Engine {
 			CHECK(snapshot.Sprites.get_allocator().resource() == &arena);
 			CHECK(snapshot.Tilemaps.get_allocator().resource() == &arena);
 			CHECK(snapshot.Lights2D.get_allocator().resource() == &arena);
+			CHECK(snapshot.ParticleEmitters.get_allocator().resource() == &arena);
+			CHECK(snapshot.Particles.get_allocator().resource() == &arena);
+			CHECK(snapshot.IrradianceVolumes.get_allocator().resource() == &arena);
+			CHECK(snapshot.ReflectionProbes.get_allocator().resource() == &arena);
+			CHECK(snapshot.Terrains.get_allocator().resource() == &arena);
 			CHECK(snapshot.DebugDraw.GetMemoryResource() == &arena);
 			CHECK(snapshot.AnnotationDraw.GetMemoryResource() == &arena);
 

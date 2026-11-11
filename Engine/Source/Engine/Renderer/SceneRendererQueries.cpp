@@ -15,6 +15,13 @@ namespace Engine {
 		return m_State->RecordedPicking ? m_State->Targets.EntityId.Get() : nullptr;
 	}
 
+	// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 8): a contract stub, implemented by stream Q-A.
+	nvrhi::ITexture* SceneRenderer::GetSceneColorTexture() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
 	uint64_t SceneRenderer::GetViewGeneration() const
 	{
 		return m_State->Generation;

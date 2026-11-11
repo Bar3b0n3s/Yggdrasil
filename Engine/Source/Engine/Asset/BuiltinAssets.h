@@ -68,6 +68,9 @@ namespace Engine {
 		static constexpr AssetHandle SpriteRoundedTexture{ 0x0188 };
 		static constexpr AssetHandle SpriteBevelTexture{ 0x0189 };
 		static constexpr AssetHandle SpriteCircleTexture{ 0x018a };
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7; ADR 0028's phase-3 ledger): engine://Textures/Particle,
+		// the procedural particle texture (BuiltinTexture::Particle), never compressed. Its catalogue entries are stream P-B's.
+		static constexpr AssetHandle ParticleTexture{ 0x018b };
 		// engine://Fonts/Default: Inter Regular (SIL OFL), Resources/Fonts/Inter-Regular.ttf through FontImporter.
 		static constexpr AssetHandle DefaultFont{ 0x01c1 };
 		// engine://Environments/{Studio, Sky}: Poly Haven CC0 studio_small_09 and kloofendal_48d_partly_cloudy_puresky at 1k,
@@ -75,6 +78,11 @@ namespace Engine {
 		// (Editor --bake-engine-assets) and shipped in Engine.pak.
 		static constexpr AssetHandle StudioEnvironment{ 0x0201 };
 		static constexpr AssetHandle SkyEnvironment{ 0x0202 };
+
+		// M26 (C26.1, R-LUT; Docs/Decisions/0037-m26-contract.md decision 15; ADR 0028's phase-3 ledger): the built-in LUTs'
+		// block, 0x0281 to 0x02c0, the identity LUT first: engine://Luts/Identity (BuiltinLut::Identity, Asset/LutData.h),
+		// procedural. Its catalogue entries are stream X-B's.
+		static constexpr AssetHandle IdentityLut{ 0x0281 };
 		// M12: engine://Audio/{Click, Blip, Coin, Jump, Hit, Explosion, PowerUp, LineClear, Win, Lose}, the sound-effect presets
 		// (§7.1, §10.3): File entries, Resources/Audio/<Name>.sfx through SoundEffectImporter.
 		static constexpr AssetHandle ClickSound{ 0x0241 };

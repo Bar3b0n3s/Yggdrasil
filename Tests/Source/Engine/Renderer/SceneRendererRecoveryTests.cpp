@@ -85,7 +85,7 @@ namespace Engine {
 			snapshot.SelectedEntities = { UUID(900) };
 			snapshot.Post.SsaoEnabled = true;
 			snapshot.Post.BloomEnabled = true;
-			snapshot.Post.FxaaEnabled = true;
+			snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 			snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional,
 				.Intensity = 2.0f,
 				.Direction = glm::normalize(glm::vec3(0.0f, -1.0f, -1.0f)),
@@ -226,7 +226,7 @@ namespace Engine {
 					Snapshot.Camera.ClearColor = glm::vec3(0);
 					Snapshot.Camera.ClearToSkybox = false;
 					Snapshot.Post.BloomEnabled = false;
-					Snapshot.Post.FxaaEnabled = false;
+					Snapshot.Post.AntiAliasing = RenderAntiAliasing::None;
 					Snapshot.Post.SsaoEnabled = false;
 					Snapshot.Post.Tonemap = RenderTonemapper::Linear;
 					Snapshot.Quality.ShadowMapSize = 256;

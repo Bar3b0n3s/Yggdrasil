@@ -30,7 +30,13 @@ namespace Engine {
 		SpriteBevel,   // opaque grey levels of a raised tile, with d1 = min(x, y) and d2 = min(15 - x, 15 - y): 255 where d1 < 2
 					   // and d1 <= d2 (the lit top and left edges), else 128 where d2 < 2 (the shaded bottom and right edges),
 					   // else 204 (the face); the three values are sRGB-encoded and repeated in R, G and B
-		SpriteCircle   // a disc of radius 8 texels centred at (8, 8): opaque where (2x + 1 - 16)^2 + (2y + 1 - 16)^2 <= 256
+		SpriteCircle,  // a disc of radius 8 texels centred at (8, 8): opaque where (2x + 1 - 16)^2 + (2y + 1 - 16)^2 <= 256
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): engine://Textures/Particle
+		// (BuiltinAssetHandles::ParticleTexture, ADR 0028's phase-3 ledger's 0x018b), the particles' default texture, generated
+		// by GenerateBuiltinParticleTexture: 32 x 32 RGBA8Srgb, one mip level, never compressed, a white soft disc whose texel
+		// (x, y) has alpha round(255 * max(0, 1 - d^2)^2) with d = the distance of its centre (x + 0.5, y + 0.5) from (16, 16) over
+		// 16, computed in integer arithmetic on (2x + 1 - 32)^2 + (2y + 1 - 32)^2 against 1024 (colour (255, 255, 255))
+		Particle
 	};
 
 	// "White", "Black", ...; the name in engine://Textures/<Name>. "Unknown" for a value outside the enumeration (a pure
@@ -46,5 +52,11 @@ namespace Engine {
 	// SpriteCircle, asserted), as the enumerators' comments define it, in integer arithmetic only, so its bytes are identical
 	// in every configuration. The result passes ValidateTextureData.
 	[[nodiscard]] TextureData GenerateBuiltinSpriteTexture(BuiltinTexture texture);
+
+	// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 7, stream P-B): the particle texture, as BuiltinTexture::Particle's
+	// comment defines it, in integer arithmetic only, so its bytes are identical in every configuration. The result passes
+	// ValidateTextureData. Stream P-B adds its catalogue entries (Resources/EngineAssets.json, kept sorted by handle, and the
+	// procedural table of BuiltinAssets.cpp).
+	[[nodiscard]] TextureData GenerateBuiltinParticleTexture();
 
 }

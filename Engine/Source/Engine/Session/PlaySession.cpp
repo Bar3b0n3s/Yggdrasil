@@ -25,6 +25,7 @@
 #include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/ParticleSystem.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/PrefabAsset.h"
@@ -391,6 +392,9 @@ namespace Engine {
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the scene's animation (GetAnimation), created after the physics
 		// systems and replaced with them at a scene transition; never null once the session is created.
 		Scope<AnimationSystem> Animation{};
+		// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 6): the Particles phase's system (GetParticles); null until
+		// stream P-A creates it.
+		Scope<ParticleSystem> Particles{};
 		Scope<ScriptApiRegistry> OwnedApi{};
 		ScriptApiRegistry* Api = nullptr;
 		Ref<const ScriptFieldSchemaSource> Schemas{};
@@ -1230,6 +1234,7 @@ namespace Engine {
 			case PlaySessionPhase::FrameTransformUpdate:    return "FrameTransformUpdate";
 			case PlaySessionPhase::FrameUiLayout:           return "FrameUiLayout";
 			case PlaySessionPhase::AudioUpdate:             return "AudioUpdate";
+			case PlaySessionPhase::Particles:               return "Particles";
 			case PlaySessionPhase::RenderExtraction:        return "RenderExtraction";
 		}
 
@@ -1800,6 +1805,16 @@ namespace Engine {
 	const AnimationSystem* PlaySession::GetAnimation() const
 	{
 		return m_State->Animation.get();
+	}
+
+	ParticleSystem* PlaySession::GetParticles()
+	{
+		return m_State->Particles.get();
+	}
+
+	const ParticleSystem* PlaySession::GetParticles() const
+	{
+		return m_State->Particles.get();
 	}
 
 	AudioSystem* PlaySession::GetAudioSystem()

@@ -625,7 +625,7 @@ namespace Engine {
 				snapshot.Meshes[0].Materials = { wire.Material };
 				snapshot.Meshes[0].World = wire.Transform;
 				snapshot.Post.BloomEnabled = true;
-				snapshot.Post.FxaaEnabled = true;
+				snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 				snapshot.Flags = RenderViewFlags::Picking;
 				fixture.Submit(snapshot);
 				Readback readback(gpu.GetDevice());
@@ -713,7 +713,7 @@ namespace Engine {
 			auto snapshot = Utils::WireframeTestSnapshot(assets, false, false, false);
 			snapshot.Flags = RenderViewFlags::Picking;
 			snapshot.Post.BloomEnabled = false;
-			snapshot.Post.FxaaEnabled = false;
+			snapshot.Post.AntiAliasing = RenderAntiAliasing::None;
 			snapshot.Camera.ClearColor = glm::vec3(0.0f);
 			snapshot.Camera.ClearToSkybox = false;
 			std::array<Image, 2> ids;

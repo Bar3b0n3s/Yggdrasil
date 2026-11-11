@@ -53,6 +53,11 @@ Every component of the type registry, in canonical component order: the order of
 | `UiTextInput` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit. |
 | `Animator` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow. |
 | `SkinnedMesh` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights. |
+| `ParticleEmitter` | Particles | Serializable, ScriptVisible, EditorVisible, Removable | Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision. |
+| `IrradianceVolume` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it. |
+| `ReflectionProbe` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it. |
+| `Terrain` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit. |
+| `TerrainCollider` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn. |
 
 ## ID
 
@@ -1465,6 +1470,184 @@ Script members of `SkinnedMesh`:
 | `MorphWeights` | proxy field | `{number}` | read/write | All | One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it. |
 | `SetMorphWeight` | method | `(self: SkinnedMesh, target: string, weight: number) -> ()` |  | All | Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one. |
 
+## ParticleEmitter
+
+Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision.
+
+- Category: Particles
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Playing` | `Bool` | `true` |  |  |  | Whether the emitter emits; live particles finish their lives either way. |
+| `Loop` | `Bool` | `true` |  |  |  | Whether emission repeats every Duration seconds; otherwise it stops after one cycle. |
+| `Duration` | `Float` | `5` | 0.01 to 3600 | s |  | The length of one emission cycle, in seconds; Burst is emitted at each cycle's start. |
+| `Rate` | `Float` | `10` | 0 to 10000 | 1/s |  | Particles emitted per second while playing. |
+| `Burst` | `UInt32` | `0` | 0 to 4096 |  |  | Particles emitted at once at the start of each cycle, at most MaxParticles. |
+| `MaxParticles` | `UInt32` | `256` | 1 to 4096 |  |  | The most particles alive at once; beyond it no new particle is emitted until one dies. |
+| `Seed` | `UInt32` | `0` |  |  |  | Seeds the emitter's random stream together with the entity's id, so a replay shows the same particles in every build. |
+| `Lifetime` | `Vec2` | `[1,2]` | 0.001 to 1000 | s |  | The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum). |
+| `Speed` | `Vec2` | `[1,2]` | 0 to 1000 | m/s |  | The range a new particle's speed is drawn from, in metres per second: (minimum, maximum). |
+| `Size` | `Vec2` | `[0.1,0.2]` | 1e-04 to 1000 | m |  | The range a new particle's size is drawn from, in metres: (minimum, maximum). |
+| `Shape` | `ParticleEmitterShape` | `"Cone"` |  |  |  | Where new particles start and which way they move. |
+| `ShapeRadius` | `Float` | `0.25` | 0 to 1000 | m |  | The radius of the Sphere shape and of the Cone shape's base disc, in metres. |
+| `ConeAngle` | `Float` | `25` | 0 to 180 | deg |  | The Cone shape's half angle from the local -Z axis, in degrees. |
+| `BoxHalfExtents` | `Vec3` | `[0.5,0.5,0.5]` | 0 to 1000 | m |  | The Box shape's half extents, in metres. |
+| `Acceleration` | `Vec3` | `[0,0,0]` |  | m/s^2 |  | The acceleration of every live particle, in metres per second squared, in the SimulationSpace (set (0, -9.81, 0) for gravity). |
+| `Drag` | `Float` | `0` | 0 to 100 | 1/s |  | How quickly particles slow down, per second. |
+| `SimulationSpace` | `ParticleSimulationSpace` | `"World"` |  |  |  | Whether live particles stay where they were emitted or move with the emitter. |
+| `Texture` | `AssetRef(Texture)` | `null` |  |  |  | The particle's texture; null uses the built-in soft disc (engine://Textures/Particle). |
+| `Blend` | `ParticleBlend` | `"Alpha"` |  |  |  | How particles are blended into the image. |
+| `ColorOverLife` | `Array<ParticleColorKey>` | `[]` |  |  |  | At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque. |
+| `SizeOverLife` | `Array<ParticleSizeKey>` | `[]` |  |  |  | At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size. |
+
+Script members of `ParticleEmitter`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Acceleration` | proxy field | `vector` | read/write | All | The acceleration of every live particle, in metres per second squared, in the SimulationSpace (set (0, -9.81, 0) for gravity). |
+| `Blend` | proxy field | `ParticleBlend` | read/write | All | How particles are blended into the image. |
+| `BoxHalfExtents` | proxy field | `vector` | read/write | All | The Box shape's half extents, in metres. |
+| `Burst` | proxy field | `number` | read/write | All | Particles emitted at once at the start of each cycle, at most MaxParticles. |
+| `ColorOverLife` | proxy field | `{{Time: number, Color: Color}}` | read/write | All | At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque. |
+| `ConeAngle` | proxy field | `number` | read/write | All | The Cone shape's half angle from the local -Z axis, in degrees. |
+| `Drag` | proxy field | `number` | read/write | All | How quickly particles slow down, per second. |
+| `Duration` | proxy field | `number` | read/write | All | The length of one emission cycle, in seconds; Burst is emitted at each cycle's start. |
+| `Lifetime` | proxy field | `vector` | read/write | All | The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum). |
+| `Loop` | proxy field | `boolean` | read/write | All | Whether emission repeats every Duration seconds; otherwise it stops after one cycle. |
+| `MaxParticles` | proxy field | `number` | read/write | All | The most particles alive at once; beyond it no new particle is emitted until one dies. |
+| `Playing` | proxy field | `boolean` | read/write | All | Whether the emitter emits; live particles finish their lives either way. |
+| `Rate` | proxy field | `number` | read/write | All | Particles emitted per second while playing. |
+| `Seed` | proxy field | `number` | read/write | All | Seeds the emitter's random stream together with the entity's id, so a replay shows the same particles in every build. |
+| `Shape` | proxy field | `ParticleEmitterShape` | read/write | All | Where new particles start and which way they move. |
+| `ShapeRadius` | proxy field | `number` | read/write | All | The radius of the Sphere shape and of the Cone shape's base disc, in metres. |
+| `SimulationSpace` | proxy field | `ParticleSimulationSpace` | read/write | All | Whether live particles stay where they were emitted or move with the emitter. |
+| `Size` | proxy field | `vector` | read/write | All | The range a new particle's size is drawn from, in metres: (minimum, maximum). |
+| `SizeOverLife` | proxy field | `{{Time: number, Size: number}}` | read/write | All | At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size. |
+| `Speed` | proxy field | `vector` | read/write | All | The range a new particle's speed is drawn from, in metres per second: (minimum, maximum). |
+| `Texture` | proxy field | `AssetRef?` | read/write | All | The particle's texture; null uses the built-in soft disc (engine://Textures/Particle). |
+
+## IrradianceVolume
+
+A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.
+
+- Category: Probes
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Data` | `AssetRef(IrradianceVolume)` | `null` |  |  |  | The baked volume that lighting.bake writes beside the scene and assigns; null (not baked) lights nothing. |
+| `Size` | `Vec3` | `[10,4,10]` | 0.01 to 10000 | m |  | The box's size in metres, centred on the entity in its local axes. |
+| `ProbeCountX` | `UInt32` | `4` | 2 to 16 |  |  | The probes along the box's local X axis, the outer ones on its faces. |
+| `ProbeCountY` | `UInt32` | `3` | 2 to 16 |  |  | The probes along the box's local Y axis, the outer ones on its faces. |
+| `ProbeCountZ` | `UInt32` | `4` | 2 to 16 |  |  | The probes along the box's local Z axis, the outer ones on its faces. |
+| `Intensity` | `Float` | `1` | 0 to 65504 |  |  | The unitless strength of the baked indirect light. |
+| `BlendDistance` | `Float` | `1` | 0 to 1000 | m |  | The distance inside the box's faces over which its light fades to the Environment's, in metres. |
+
+Script members of `IrradianceVolume`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `BlendDistance` | proxy field | `number` | read/write | All | The distance inside the box's faces over which its light fades to the Environment's, in metres. |
+| `Data` | proxy field | `AssetRef?` | read/write | All | The baked volume that lighting.bake writes beside the scene and assigns; null (not baked) lights nothing. |
+| `Intensity` | proxy field | `number` | read/write | All | The unitless strength of the baked indirect light. |
+| `ProbeCountX` | proxy field | `number` | read/write | All | The probes along the box's local X axis, the outer ones on its faces. |
+| `ProbeCountY` | proxy field | `number` | read/write | All | The probes along the box's local Y axis, the outer ones on its faces. |
+| `ProbeCountZ` | proxy field | `number` | read/write | All | The probes along the box's local Z axis, the outer ones on its faces. |
+| `Size` | proxy field | `vector` | read/write | All | The box's size in metres, centred on the entity in its local axes. |
+
+## ReflectionProbe
+
+A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it.
+
+- Category: Probes
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Data` | `AssetRef(Environment)` | `null` |  |  |  | The baked reflection, an Environment that lighting.bake writes beside the scene and assigns; null (not baked) reflects nothing. |
+| `Size` | `Vec3` | `[10,5,10]` | 0.01 to 10000 | m |  | The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes. |
+| `BoxProjection` | `Bool` | `true` |  |  |  | Whether reflections are corrected for the box (parallax-corrected), so a room's reflection lines up with its walls. |
+| `Resolution` | `UInt32` | `128` | 32 to 512 | texels |  | The bake's capture cube face, in texels: a power of two. |
+| `Intensity` | `Float` | `1` | 0 to 65504 |  |  | The unitless strength of the reflection. |
+| `BlendDistance` | `Float` | `1` | 0 to 1000 | m |  | The distance inside the box's faces over which its reflection fades to the Environment's, in metres. |
+
+Script members of `ReflectionProbe`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `BlendDistance` | proxy field | `number` | read/write | All | The distance inside the box's faces over which its reflection fades to the Environment's, in metres. |
+| `BoxProjection` | proxy field | `boolean` | read/write | All | Whether reflections are corrected for the box (parallax-corrected), so a room's reflection lines up with its walls. |
+| `Data` | proxy field | `AssetRef?` | read/write | All | The baked reflection, an Environment that lighting.bake writes beside the scene and assigns; null (not baked) reflects nothing. |
+| `Intensity` | proxy field | `number` | read/write | All | The unitless strength of the reflection. |
+| `Resolution` | proxy field | `number` | read/write | All | The bake's capture cube face, in texels: a power of two. |
+| `Size` | proxy field | `vector` | read/write | All | The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes. |
+
+## Terrain
+
+A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit.
+
+- Category: Terrain
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Heightfield` | `AssetRef(Heightfield)` | `null` |  |  |  | The heightfield whose samples shape the terrain; null draws nothing. |
+| `Size` | `Vec2` | `[64,64]` | 0.01 to 1e+05 | m |  | The terrain's extent along its local X and Z axes from the entity's origin, in metres. |
+| `HeightScale` | `Float` | `16` | 0.001 to 1e+05 | m |  | The height of the largest heightfield sample above the entity's origin, in metres. |
+| `Layers` | `Array<TerrainLayer>` | `[]` |  |  |  | At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer. |
+| `SplatMap` | `AssetRef(Texture)` | `null` |  |  |  | The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone. |
+| `ReceiveShadows` | `Bool` | `true` |  |  |  | Whether shadows fall on the terrain. |
+| `LodBias` | `Float` | `1` | 0.25 to 4 |  |  | Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther. |
+
+Script members of `Terrain`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `HeightScale` | proxy field | `number` | read/write | All | The height of the largest heightfield sample above the entity's origin, in metres. |
+| `Heightfield` | proxy field | `AssetRef?` | read/write | All | The heightfield whose samples shape the terrain; null draws nothing. |
+| `Layers` | proxy field | `{{BaseColorMap: AssetRef?, NormalMap: AssetRef?, Tint: Color, Tiling: number, Roughness: number, Metallic: number}}` | read/write | All | At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer. |
+| `LodBias` | proxy field | `number` | read/write | All | Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther. |
+| `ReceiveShadows` | proxy field | `boolean` | read/write | All | Whether shadows fall on the terrain. |
+| `Size` | proxy field | `vector` | read/write | All | The terrain's extent along its local X and Z axes from the entity's origin, in metres. |
+| `SplatMap` | proxy field | `AssetRef?` | read/write | All | The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone. |
+
+## TerrainCollider
+
+The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn.
+
+- Category: Terrain
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Terrain`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). |
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values. |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values. |
+
+Script members of `TerrainCollider`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values. |
+| `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). A value a script writes holds at most 4096 bytes of text. |
+| `Restitution` | proxy field | `number` | read/write | All | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -1480,6 +1663,24 @@ One layer of an Animator's blend stack: a clip played at a time, speed and weigh
 | `Speed` | `Float` | `1` | 0 to 100 |  |  | How fast the layer's time advances; 0 holds it. |
 | `Weight` | `Float` | `1` | 0 to 1 |  |  | How much the layer's animated joints override the layers before it, from 0 (none) to 1 (fully). |
 | `Loop` | `Bool` | `true` |  |  |  | Whether the clip starts again at its end; otherwise its last pose holds. |
+
+### ParticleColorKey
+
+One key of a particle colour curve over the particle's life.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Time` | `Float` | `0` | 0 to 1 |  |  | The particle's age over its lifetime at this key, from 0 (born) to 1 (dying). |
+| `Color` | `Color4` | `[1,1,1,1]` | 0 to 1 |  |  | The linear colour with opacity in the fourth component at this key. |
+
+### ParticleSizeKey
+
+One key of a particle size curve over the particle's life.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Time` | `Float` | `0` | 0 to 1 |  |  | The particle's age over its lifetime at this key, from 0 (born) to 1 (dying). |
+| `Size` | `Float` | `1` | 0 to 1000 |  |  | The factor of the particle's start size at this key. |
 
 ### PrefabOverride
 
@@ -1502,6 +1703,19 @@ One behaviour of a Script component.
 | `Script` | `AssetRef(Script)` | `null` |  |  |  | The Behaviour script. |
 | `Fields` | `Map<Variant>` | `{}` |  |  |  | Overrides of the script's declared fields, by name. |
 | `ExecutionOrder` | `Int32` | `0` |  |  |  | Callbacks run in (ExecutionOrder, canonical entity order, slot) order. |
+
+### TerrainLayer
+
+One material layer of a Terrain, tiled over its surface where its splat map channel weighs it.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `BaseColorMap` | `AssetRef(Texture)` | `null` |  |  |  | The layer's colour texture; null is white, so the layer is its Tint. |
+| `NormalMap` | `AssetRef(Texture)` | `null` |  |  |  | The layer's tangent-space normal map; null is flat. |
+| `Tint` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The linear colour that multiplies the layer's base colour. |
+| `Tiling` | `Float` | `4` | 0.001 to 1000 | m |  | The metres one repeat of the layer's maps covers in the terrain's local XZ plane. |
+| `Roughness` | `Float` | `0.9` | 0 to 1 |  |  | The layer's perceptual roughness. |
+| `Metallic` | `Float` | `0` | 0 to 1 |  |  | The layer's metalness. |
 
 ### UiPadding
 
@@ -1597,6 +1811,35 @@ How a moving body is checked for collisions between steps.
 |---|---|
 | `Discrete` | Collisions are checked at the end of each step (fast bodies can tunnel through thin ones). |
 | `LinearCast` | Continuous collision detection along the step's motion; prevents tunnelling. |
+
+### ParticleBlend
+
+How a particle's colour reaches the image.
+
+| Value | Description |
+|---|---|
+| `Alpha` | Straight-alpha blending, the emitter's particles drawn back to front. |
+| `Additive` | Added to the image (colour times alpha): glows, sparks and fire, in any order. |
+
+### ParticleEmitterShape
+
+Where a ParticleEmitter's new particles start and which way they move.
+
+| Value | Description |
+|---|---|
+| `Point` | At the emitter's origin, moving in a uniformly random direction. |
+| `Sphere` | Uniformly inside a sphere of ShapeRadius, moving away from its centre. |
+| `Cone` | On a disc of ShapeRadius in the local XY plane, moving within ConeAngle of the local -Z axis. |
+| `Box` | Uniformly inside a box of BoxHalfExtents, moving down the local -Z axis. |
+
+### ParticleSimulationSpace
+
+Which space a ParticleEmitter's live particles move in.
+
+| Value | Description |
+|---|---|
+| `World` | Spawned at the emitter's pose, then independent of it: a moving emitter leaves a trail. |
+| `Local` | Simulated in the emitter's local space, so they move with the emitter. |
 
 ### PrefabOverrideKind
 

@@ -12,7 +12,7 @@
 
 // §8.3 pass 12, FXAA 3.11 (Lottes; quality preset 12) as one compute pass from an LdrColor target into its ping-pong partner
 // (both LdrColorFormat, display-encoded values, §8.9). Luma is computed from the encoded colour, as FXAA expects perceptual
-// input. Optional per view (PostProcessSettings::FxaaEnabled); the golden images render with it on (§15.4).
+// input. Optional per view (PostProcessSettings::AntiAliasing Fxaa, M26); the golden images render with it on (§15.4).
 //
 // Binding layout: the source (sampled through LinearClamp) and the destination (storage image, [vk::image_format("rgba8")]).
 // Created once per device at startup and owned by SceneRendererPipelines; the pass keeps no binding sets: each Record takes

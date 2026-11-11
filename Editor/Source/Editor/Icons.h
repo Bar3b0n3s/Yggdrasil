@@ -23,11 +23,14 @@ namespace Engine {
 		Script,
 		Font,
 		Replay,
-		SpriteSheet,  // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
-		Tilemap,      // M21: a grid with a staircase of painted cells (Docs/Decisions/0032-m21-contract.md decision 23)
-		StringTable,  // M22: a page of lines beside a speech bubble (Docs/Decisions/0033-m22-contract.md decision 10)
-		Skeleton,     // M23: a chain of joints from a root (Docs/Decisions/0034-m23-contract.md decision 23)
-		AnimationClip // M23: a keyed curve on a timeline (Docs/Decisions/0034-m23-contract.md decision 23)
+		SpriteSheet,      // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
+		Tilemap,          // M21: a grid with a staircase of painted cells (Docs/Decisions/0032-m21-contract.md decision 23)
+		StringTable,      // M22: a page of lines beside a speech bubble (Docs/Decisions/0033-m22-contract.md decision 10)
+		Skeleton,         // M23: a chain of joints from a root (Docs/Decisions/0034-m23-contract.md decision 23)
+		AnimationClip,    // M23: a keyed curve on a timeline (Docs/Decisions/0034-m23-contract.md decision 23)
+		IrradianceVolume, // M26: a box of probe spheres (Docs/Decisions/0037-m26-contract.md decision 3)
+		Lut,              // M26: a cube of graded colour cells (Docs/Decisions/0037-m26-contract.md decision 3)
+		Heightfield       // M26: a ridge of hills over a grid (Docs/Decisions/0037-m26-contract.md decision 3)
 	};
 
 	// First-party vector glyphs drawn with ImDrawList lines, no downloaded assets or icon licence. Main thread, inside an

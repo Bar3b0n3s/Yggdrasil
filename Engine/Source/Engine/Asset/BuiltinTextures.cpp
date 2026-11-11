@@ -267,6 +267,8 @@ namespace Engine {
 				case BuiltinTexture::SpriteBevel:
 				case BuiltinTexture::SpriteCircle:
 					return GenerateBuiltinSpriteTexture(texture);
+				case BuiltinTexture::Particle:
+					return GenerateBuiltinParticleTexture();
 			}
 			ENGINE_CORE_ASSERT(false, "Unknown BuiltinTexture {}", std::to_underlying(texture));
 			return CreateChecker(Magenta, Black);
@@ -287,6 +289,7 @@ namespace Engine {
 			case BuiltinTexture::SpriteRounded: return "SpriteRounded";
 			case BuiltinTexture::SpriteBevel:   return "SpriteBevel";
 			case BuiltinTexture::SpriteCircle:  return "SpriteCircle";
+			case BuiltinTexture::Particle:      return "Particle";
 		}
 		return "Unknown";
 	}
@@ -308,6 +311,12 @@ namespace Engine {
 		// One level: sprites sample without mips.
 		Utils::AppendLevel(generated, SpriteSize, SpriteSize, texels);
 		return generated;
+	}
+
+	TextureData GenerateBuiltinParticleTexture()
+	{
+		ENGINE_CONTRACT_STUB();
+		return {};
 	}
 
 	TextureData GenerateBuiltinTexture(BuiltinTexture texture)

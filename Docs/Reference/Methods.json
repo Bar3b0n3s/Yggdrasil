@@ -216,7 +216,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -409,7 +409,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -499,7 +499,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -585,7 +585,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -702,7 +702,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -875,7 +875,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -942,7 +942,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -1019,7 +1019,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -1126,7 +1126,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -1224,7 +1224,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -1350,7 +1350,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -1452,7 +1452,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -1682,7 +1682,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -3308,6 +3308,21 @@
 							},
 							"SkinnedMesh": {
 								"$ref": "#/$defs/SkinnedMesh"
+							},
+							"ParticleEmitter": {
+								"$ref": "#/$defs/ParticleEmitter"
+							},
+							"IrradianceVolume": {
+								"$ref": "#/$defs/IrradianceVolume"
+							},
+							"ReflectionProbe": {
+								"$ref": "#/$defs/ReflectionProbe"
+							},
+							"Terrain": {
+								"$ref": "#/$defs/Terrain"
+							},
+							"TerrainCollider": {
+								"$ref": "#/$defs/TerrainCollider"
 							}
 						},
 						"additionalProperties": false
@@ -5663,6 +5678,401 @@
 						},
 						"additionalProperties": false
 					},
+					"ParticleEmitter": {
+						"description": "Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision.",
+						"type": "object",
+						"properties": {
+							"Playing": {
+								"description": "Whether the emitter emits; live particles finish their lives either way.",
+								"type": "boolean"
+							},
+							"Loop": {
+								"description": "Whether emission repeats every Duration seconds; otherwise it stops after one cycle.",
+								"type": "boolean"
+							},
+							"Duration": {
+								"description": "The length of one emission cycle, in seconds; Burst is emitted at each cycle's start.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 3600
+							},
+							"Rate": {
+								"description": "Particles emitted per second while playing.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10000
+							},
+							"Burst": {
+								"description": "Particles emitted at once at the start of each cycle, at most MaxParticles.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4096
+							},
+							"MaxParticles": {
+								"description": "The most particles alive at once; beyond it no new particle is emitted until one dies.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 4096
+							},
+							"Seed": {
+								"description": "Seeds the emitter's random stream together with the entity's id, so a replay shows the same particles in every build.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Lifetime": {
+								"description": "The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0.001,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Speed": {
+								"description": "The range a new particle's speed is drawn from, in metres per second: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Size": {
+								"description": "The range a new particle's size is drawn from, in metres: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 1e-04,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 1e-04,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Shape": {
+								"description": "Where new particles start and which way they move.",
+								"enum": ["Point", "Sphere", "Cone", "Box"]
+							},
+							"ShapeRadius": {
+								"description": "The radius of the Sphere shape and of the Cone shape's base disc, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"ConeAngle": {
+								"description": "The Cone shape's half angle from the local -Z axis, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 180
+							},
+							"BoxHalfExtents": {
+								"description": "The Box shape's half extents, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Acceleration": {
+								"description": "The acceleration of every live particle, in metres per second squared, in the SimulationSpace (set (0, -9.81, 0) for gravity).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Drag": {
+								"description": "How quickly particles slow down, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SimulationSpace": {
+								"description": "Whether live particles stay where they were emitted or move with the emitter.",
+								"enum": ["World", "Local"]
+							},
+							"Texture": {
+								"description": "The particle's texture; null uses the built-in soft disc (engine://Textures/Particle).",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Blend": {
+								"description": "How particles are blended into the image.",
+								"enum": ["Alpha", "Additive"]
+							},
+							"ColorOverLife": {
+								"description": "At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ParticleColorKey"
+								}
+							},
+							"SizeOverLife": {
+								"description": "At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ParticleSizeKey"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"IrradianceVolume": {
+						"description": "A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.",
+						"type": "object",
+						"properties": {
+							"Data": {
+								"description": "The baked volume that lighting.bake writes beside the scene and assigns; null (not baked) lights nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "IrradianceVolume"
+							},
+							"Size": {
+								"description": "The box's size in metres, centred on the entity in its local axes.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"ProbeCountX": {
+								"description": "The probes along the box's local X axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"ProbeCountY": {
+								"description": "The probes along the box's local Y axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"ProbeCountZ": {
+								"description": "The probes along the box's local Z axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"Intensity": {
+								"description": "The unitless strength of the baked indirect light.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 65504
+							},
+							"BlendDistance": {
+								"description": "The distance inside the box's faces over which its light fades to the Environment's, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"ReflectionProbe": {
+						"description": "A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it.",
+						"type": "object",
+						"properties": {
+							"Data": {
+								"description": "The baked reflection, an Environment that lighting.bake writes beside the scene and assigns; null (not baked) reflects nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Environment"
+							},
+							"Size": {
+								"description": "The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"BoxProjection": {
+								"description": "Whether reflections are corrected for the box (parallax-corrected), so a room's reflection lines up with its walls.",
+								"type": "boolean"
+							},
+							"Resolution": {
+								"description": "The bake's capture cube face, in texels: a power of two.",
+								"type": "integer",
+								"minimum": 32,
+								"maximum": 512
+							},
+							"Intensity": {
+								"description": "The unitless strength of the reflection.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 65504
+							},
+							"BlendDistance": {
+								"description": "The distance inside the box's faces over which its reflection fades to the Environment's, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"Terrain": {
+						"description": "A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit.",
+						"type": "object",
+						"properties": {
+							"Heightfield": {
+								"description": "The heightfield whose samples shape the terrain; null draws nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Heightfield"
+							},
+							"Size": {
+								"description": "The terrain's extent along its local X and Z axes from the entity's origin, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 100000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 100000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"HeightScale": {
+								"description": "The height of the largest heightfield sample above the entity's origin, in metres.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							},
+							"Layers": {
+								"description": "At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/TerrainLayer"
+								}
+							},
+							"SplatMap": {
+								"description": "The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"ReceiveShadows": {
+								"description": "Whether shadows fall on the terrain.",
+								"type": "boolean"
+							},
+							"LodBias": {
+								"description": "Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther.",
+								"type": "number",
+								"minimum": 0.25,
+								"maximum": 4
+							}
+						},
+						"additionalProperties": false
+					},
+					"TerrainCollider": {
+						"description": "The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn.",
+						"type": "object",
+						"properties": {
+							"Layer": {
+								"description": "Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's).",
+								"type": "string"
+							},
+							"Friction": {
+								"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -5926,6 +6336,126 @@
 							"Loop": {
 								"description": "Whether the clip starts again at its end; otherwise its last pose holds.",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"ParticleColorKey": {
+						"description": "One key of a particle colour curve over the particle's life.",
+						"type": "object",
+						"properties": {
+							"Time": {
+								"description": "The particle's age over its lifetime at this key, from 0 (born) to 1 (dying).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Color": {
+								"description": "The linear colour with opacity in the fourth component at this key.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							}
+						},
+						"additionalProperties": false
+					},
+					"ParticleSizeKey": {
+						"description": "One key of a particle size curve over the particle's life.",
+						"type": "object",
+						"properties": {
+							"Time": {
+								"description": "The particle's age over its lifetime at this key, from 0 (born) to 1 (dying).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Size": {
+								"description": "The factor of the particle's start size at this key.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"TerrainLayer": {
+						"description": "One material layer of a Terrain, tiled over its surface where its splat map channel weighs it.",
+						"type": "object",
+						"properties": {
+							"BaseColorMap": {
+								"description": "The layer's colour texture; null is white, so the layer is its Tint.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"NormalMap": {
+								"description": "The layer's tangent-space normal map; null is flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Tint": {
+								"description": "The linear colour that multiplies the layer's base colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Tiling": {
+								"description": "The metres one repeat of the layer's maps covers in the terrain's local XZ plane.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000
+							},
+							"Roughness": {
+								"description": "The layer's perceptual roughness.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Metallic": {
+								"description": "The layer's metalness.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
 							}
 						},
 						"additionalProperties": false
@@ -6637,6 +7167,21 @@
 							},
 							"SkinnedMesh": {
 								"$ref": "#/$defs/SkinnedMesh"
+							},
+							"ParticleEmitter": {
+								"$ref": "#/$defs/ParticleEmitter"
+							},
+							"IrradianceVolume": {
+								"$ref": "#/$defs/IrradianceVolume"
+							},
+							"ReflectionProbe": {
+								"$ref": "#/$defs/ReflectionProbe"
+							},
+							"Terrain": {
+								"$ref": "#/$defs/Terrain"
+							},
+							"TerrainCollider": {
+								"$ref": "#/$defs/TerrainCollider"
 							}
 						},
 						"additionalProperties": false
@@ -8999,6 +9544,401 @@
 						},
 						"additionalProperties": false
 					},
+					"ParticleEmitter": {
+						"description": "Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision.",
+						"type": "object",
+						"properties": {
+							"Playing": {
+								"description": "Whether the emitter emits; live particles finish their lives either way.",
+								"type": "boolean"
+							},
+							"Loop": {
+								"description": "Whether emission repeats every Duration seconds; otherwise it stops after one cycle.",
+								"type": "boolean"
+							},
+							"Duration": {
+								"description": "The length of one emission cycle, in seconds; Burst is emitted at each cycle's start.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 3600
+							},
+							"Rate": {
+								"description": "Particles emitted per second while playing.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10000
+							},
+							"Burst": {
+								"description": "Particles emitted at once at the start of each cycle, at most MaxParticles.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4096
+							},
+							"MaxParticles": {
+								"description": "The most particles alive at once; beyond it no new particle is emitted until one dies.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 4096
+							},
+							"Seed": {
+								"description": "Seeds the emitter's random stream together with the entity's id, so a replay shows the same particles in every build.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Lifetime": {
+								"description": "The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0.001,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Speed": {
+								"description": "The range a new particle's speed is drawn from, in metres per second: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Size": {
+								"description": "The range a new particle's size is drawn from, in metres: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 1e-04,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 1e-04,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Shape": {
+								"description": "Where new particles start and which way they move.",
+								"enum": ["Point", "Sphere", "Cone", "Box"]
+							},
+							"ShapeRadius": {
+								"description": "The radius of the Sphere shape and of the Cone shape's base disc, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"ConeAngle": {
+								"description": "The Cone shape's half angle from the local -Z axis, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 180
+							},
+							"BoxHalfExtents": {
+								"description": "The Box shape's half extents, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Acceleration": {
+								"description": "The acceleration of every live particle, in metres per second squared, in the SimulationSpace (set (0, -9.81, 0) for gravity).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Drag": {
+								"description": "How quickly particles slow down, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SimulationSpace": {
+								"description": "Whether live particles stay where they were emitted or move with the emitter.",
+								"enum": ["World", "Local"]
+							},
+							"Texture": {
+								"description": "The particle's texture; null uses the built-in soft disc (engine://Textures/Particle).",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Blend": {
+								"description": "How particles are blended into the image.",
+								"enum": ["Alpha", "Additive"]
+							},
+							"ColorOverLife": {
+								"description": "At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ParticleColorKey"
+								}
+							},
+							"SizeOverLife": {
+								"description": "At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ParticleSizeKey"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"IrradianceVolume": {
+						"description": "A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.",
+						"type": "object",
+						"properties": {
+							"Data": {
+								"description": "The baked volume that lighting.bake writes beside the scene and assigns; null (not baked) lights nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "IrradianceVolume"
+							},
+							"Size": {
+								"description": "The box's size in metres, centred on the entity in its local axes.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"ProbeCountX": {
+								"description": "The probes along the box's local X axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"ProbeCountY": {
+								"description": "The probes along the box's local Y axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"ProbeCountZ": {
+								"description": "The probes along the box's local Z axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"Intensity": {
+								"description": "The unitless strength of the baked indirect light.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 65504
+							},
+							"BlendDistance": {
+								"description": "The distance inside the box's faces over which its light fades to the Environment's, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"ReflectionProbe": {
+						"description": "A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it.",
+						"type": "object",
+						"properties": {
+							"Data": {
+								"description": "The baked reflection, an Environment that lighting.bake writes beside the scene and assigns; null (not baked) reflects nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Environment"
+							},
+							"Size": {
+								"description": "The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"BoxProjection": {
+								"description": "Whether reflections are corrected for the box (parallax-corrected), so a room's reflection lines up with its walls.",
+								"type": "boolean"
+							},
+							"Resolution": {
+								"description": "The bake's capture cube face, in texels: a power of two.",
+								"type": "integer",
+								"minimum": 32,
+								"maximum": 512
+							},
+							"Intensity": {
+								"description": "The unitless strength of the reflection.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 65504
+							},
+							"BlendDistance": {
+								"description": "The distance inside the box's faces over which its reflection fades to the Environment's, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"Terrain": {
+						"description": "A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit.",
+						"type": "object",
+						"properties": {
+							"Heightfield": {
+								"description": "The heightfield whose samples shape the terrain; null draws nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Heightfield"
+							},
+							"Size": {
+								"description": "The terrain's extent along its local X and Z axes from the entity's origin, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 100000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 100000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"HeightScale": {
+								"description": "The height of the largest heightfield sample above the entity's origin, in metres.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							},
+							"Layers": {
+								"description": "At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/TerrainLayer"
+								}
+							},
+							"SplatMap": {
+								"description": "The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"ReceiveShadows": {
+								"description": "Whether shadows fall on the terrain.",
+								"type": "boolean"
+							},
+							"LodBias": {
+								"description": "Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther.",
+								"type": "number",
+								"minimum": 0.25,
+								"maximum": 4
+							}
+						},
+						"additionalProperties": false
+					},
+					"TerrainCollider": {
+						"description": "The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn.",
+						"type": "object",
+						"properties": {
+							"Layer": {
+								"description": "Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's).",
+								"type": "string"
+							},
+							"Friction": {
+								"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -9262,6 +10202,126 @@
 							"Loop": {
 								"description": "Whether the clip starts again at its end; otherwise its last pose holds.",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"ParticleColorKey": {
+						"description": "One key of a particle colour curve over the particle's life.",
+						"type": "object",
+						"properties": {
+							"Time": {
+								"description": "The particle's age over its lifetime at this key, from 0 (born) to 1 (dying).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Color": {
+								"description": "The linear colour with opacity in the fourth component at this key.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							}
+						},
+						"additionalProperties": false
+					},
+					"ParticleSizeKey": {
+						"description": "One key of a particle size curve over the particle's life.",
+						"type": "object",
+						"properties": {
+							"Time": {
+								"description": "The particle's age over its lifetime at this key, from 0 (born) to 1 (dying).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Size": {
+								"description": "The factor of the particle's start size at this key.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"TerrainLayer": {
+						"description": "One material layer of a Terrain, tiled over its surface where its splat map channel weighs it.",
+						"type": "object",
+						"properties": {
+							"BaseColorMap": {
+								"description": "The layer's colour texture; null is white, so the layer is its Tint.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"NormalMap": {
+								"description": "The layer's tangent-space normal map; null is flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Tint": {
+								"description": "The linear colour that multiplies the layer's base colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Tiling": {
+								"description": "The metres one repeat of the layer's maps covers in the terrain's local XZ plane.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000
+							},
+							"Roughness": {
+								"description": "The layer's perceptual roughness.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Metallic": {
+								"description": "The layer's metalness.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
 							}
 						},
 						"additionalProperties": false
@@ -13306,7 +14366,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -13424,7 +14484,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -13632,6 +14692,21 @@
 							},
 							"SkinnedMesh": {
 								"$ref": "#/$defs/SkinnedMesh"
+							},
+							"ParticleEmitter": {
+								"$ref": "#/$defs/ParticleEmitter"
+							},
+							"IrradianceVolume": {
+								"$ref": "#/$defs/IrradianceVolume"
+							},
+							"ReflectionProbe": {
+								"$ref": "#/$defs/ReflectionProbe"
+							},
+							"Terrain": {
+								"$ref": "#/$defs/Terrain"
+							},
+							"TerrainCollider": {
+								"$ref": "#/$defs/TerrainCollider"
 							}
 						},
 						"additionalProperties": false
@@ -15983,6 +17058,401 @@
 						},
 						"additionalProperties": false
 					},
+					"ParticleEmitter": {
+						"description": "Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision.",
+						"type": "object",
+						"properties": {
+							"Playing": {
+								"description": "Whether the emitter emits; live particles finish their lives either way.",
+								"type": "boolean"
+							},
+							"Loop": {
+								"description": "Whether emission repeats every Duration seconds; otherwise it stops after one cycle.",
+								"type": "boolean"
+							},
+							"Duration": {
+								"description": "The length of one emission cycle, in seconds; Burst is emitted at each cycle's start.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 3600
+							},
+							"Rate": {
+								"description": "Particles emitted per second while playing.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10000
+							},
+							"Burst": {
+								"description": "Particles emitted at once at the start of each cycle, at most MaxParticles.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4096
+							},
+							"MaxParticles": {
+								"description": "The most particles alive at once; beyond it no new particle is emitted until one dies.",
+								"type": "integer",
+								"minimum": 1,
+								"maximum": 4096
+							},
+							"Seed": {
+								"description": "Seeds the emitter's random stream together with the entity's id, so a replay shows the same particles in every build.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Lifetime": {
+								"description": "The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.001,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0.001,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Speed": {
+								"description": "The range a new particle's speed is drawn from, in metres per second: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Size": {
+								"description": "The range a new particle's size is drawn from, in metres: (minimum, maximum).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 1e-04,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 1e-04,
+										"maximum": 1000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Shape": {
+								"description": "Where new particles start and which way they move.",
+								"enum": ["Point", "Sphere", "Cone", "Box"]
+							},
+							"ShapeRadius": {
+								"description": "The radius of the Sphere shape and of the Cone shape's base disc, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"ConeAngle": {
+								"description": "The Cone shape's half angle from the local -Z axis, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 180
+							},
+							"BoxHalfExtents": {
+								"description": "The Box shape's half extents, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Acceleration": {
+								"description": "The acceleration of every live particle, in metres per second squared, in the SimulationSpace (set (0, -9.81, 0) for gravity).",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Drag": {
+								"description": "How quickly particles slow down, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SimulationSpace": {
+								"description": "Whether live particles stay where they were emitted or move with the emitter.",
+								"enum": ["World", "Local"]
+							},
+							"Texture": {
+								"description": "The particle's texture; null uses the built-in soft disc (engine://Textures/Particle).",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Blend": {
+								"description": "How particles are blended into the image.",
+								"enum": ["Alpha", "Additive"]
+							},
+							"ColorOverLife": {
+								"description": "At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ParticleColorKey"
+								}
+							},
+							"SizeOverLife": {
+								"description": "At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/ParticleSizeKey"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"IrradianceVolume": {
+						"description": "A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.",
+						"type": "object",
+						"properties": {
+							"Data": {
+								"description": "The baked volume that lighting.bake writes beside the scene and assigns; null (not baked) lights nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "IrradianceVolume"
+							},
+							"Size": {
+								"description": "The box's size in metres, centred on the entity in its local axes.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"ProbeCountX": {
+								"description": "The probes along the box's local X axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"ProbeCountY": {
+								"description": "The probes along the box's local Y axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"ProbeCountZ": {
+								"description": "The probes along the box's local Z axis, the outer ones on its faces.",
+								"type": "integer",
+								"minimum": 2,
+								"maximum": 16
+							},
+							"Intensity": {
+								"description": "The unitless strength of the baked indirect light.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 65504
+							},
+							"BlendDistance": {
+								"description": "The distance inside the box's faces over which its light fades to the Environment's, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"ReflectionProbe": {
+						"description": "A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it.",
+						"type": "object",
+						"properties": {
+							"Data": {
+								"description": "The baked reflection, an Environment that lighting.bake writes beside the scene and assigns; null (not baked) reflects nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Environment"
+							},
+							"Size": {
+								"description": "The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"BoxProjection": {
+								"description": "Whether reflections are corrected for the box (parallax-corrected), so a room's reflection lines up with its walls.",
+								"type": "boolean"
+							},
+							"Resolution": {
+								"description": "The bake's capture cube face, in texels: a power of two.",
+								"type": "integer",
+								"minimum": 32,
+								"maximum": 512
+							},
+							"Intensity": {
+								"description": "The unitless strength of the reflection.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 65504
+							},
+							"BlendDistance": {
+								"description": "The distance inside the box's faces over which its reflection fades to the Environment's, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"Terrain": {
+						"description": "A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit.",
+						"type": "object",
+						"properties": {
+							"Heightfield": {
+								"description": "The heightfield whose samples shape the terrain; null draws nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Heightfield"
+							},
+							"Size": {
+								"description": "The terrain's extent along its local X and Z axes from the entity's origin, in metres.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 100000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 100000
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"HeightScale": {
+								"description": "The height of the largest heightfield sample above the entity's origin, in metres.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100000
+							},
+							"Layers": {
+								"description": "At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/TerrainLayer"
+								}
+							},
+							"SplatMap": {
+								"description": "The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"ReceiveShadows": {
+								"description": "Whether shadows fall on the terrain.",
+								"type": "boolean"
+							},
+							"LodBias": {
+								"description": "Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther.",
+								"type": "number",
+								"minimum": 0.25,
+								"maximum": 4
+							}
+						},
+						"additionalProperties": false
+					},
+					"TerrainCollider": {
+						"description": "The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn.",
+						"type": "object",
+						"properties": {
+							"Layer": {
+								"description": "Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's).",
+								"type": "string"
+							},
+							"Friction": {
+								"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values.",
+								"type": "number",
+								"minimum": 0
+							},
+							"Restitution": {
+								"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -16249,6 +17719,126 @@
 							}
 						},
 						"additionalProperties": false
+					},
+					"ParticleColorKey": {
+						"description": "One key of a particle colour curve over the particle's life.",
+						"type": "object",
+						"properties": {
+							"Time": {
+								"description": "The particle's age over its lifetime at this key, from 0 (born) to 1 (dying).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Color": {
+								"description": "The linear colour with opacity in the fourth component at this key.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 4,
+								"maxItems": 4
+							}
+						},
+						"additionalProperties": false
+					},
+					"ParticleSizeKey": {
+						"description": "One key of a particle size curve over the particle's life.",
+						"type": "object",
+						"properties": {
+							"Time": {
+								"description": "The particle's age over its lifetime at this key, from 0 (born) to 1 (dying).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Size": {
+								"description": "The factor of the particle's start size at this key.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"TerrainLayer": {
+						"description": "One material layer of a Terrain, tiled over its surface where its splat map channel weighs it.",
+						"type": "object",
+						"properties": {
+							"BaseColorMap": {
+								"description": "The layer's colour texture; null is white, so the layer is its Tint.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"NormalMap": {
+								"description": "The layer's tangent-space normal map; null is flat.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Texture"
+							},
+							"Tint": {
+								"description": "The linear colour that multiplies the layer's base colour.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									},
+									{
+										"type": "number",
+										"minimum": 0,
+										"maximum": 1
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"Tiling": {
+								"description": "The metres one repeat of the layer's maps covers in the terrain's local XZ plane.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000
+							},
+							"Roughness": {
+								"description": "The layer's perceptual roughness.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Metallic": {
+								"description": "The layer's metalness.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							}
+						},
+						"additionalProperties": false
 					}
 				}
 			},
@@ -16316,7 +17906,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -20874,7 +22464,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -21306,7 +22896,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -21418,7 +23008,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -21522,7 +23112,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -22970,7 +24560,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false

@@ -12,7 +12,8 @@ namespace Engine {
 
 		constexpr EditorIcon AllEditorIcons[] = { EditorIcon::Folder, EditorIcon::Scene, EditorIcon::Prefab, EditorIcon::Mesh, EditorIcon::Material,
 			EditorIcon::Texture, EditorIcon::Environment, EditorIcon::Audio, EditorIcon::Script, EditorIcon::Font, EditorIcon::Replay,
-			EditorIcon::SpriteSheet, EditorIcon::Tilemap, EditorIcon::StringTable, EditorIcon::Skeleton, EditorIcon::AnimationClip };
+			EditorIcon::SpriteSheet, EditorIcon::Tilemap, EditorIcon::StringTable, EditorIcon::Skeleton, EditorIcon::AnimationClip,
+			EditorIcon::IrradianceVolume, EditorIcon::Lut, EditorIcon::Heightfield };
 
 		struct DrawnIcon
 		{
@@ -93,6 +94,10 @@ namespace Engine {
 			// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 23).
 			CHECK(AssetTypeToEditorIcon(AssetType::Skeleton) == EditorIcon::Skeleton);
 			CHECK(AssetTypeToEditorIcon(AssetType::AnimationClip) == EditorIcon::AnimationClip);
+			// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 3).
+			CHECK(AssetTypeToEditorIcon(AssetType::IrradianceVolume) == EditorIcon::IrradianceVolume);
+			CHECK(AssetTypeToEditorIcon(AssetType::Lut) == EditorIcon::Lut);
+			CHECK(AssetTypeToEditorIcon(AssetType::Heightfield) == EditorIcon::Heightfield);
 		}
 	}
 

@@ -48,7 +48,8 @@
 //      diagnostic, and passes no blue noise (no dither) when that check fails or the mirror IsPlaceholder: a manager
 //      without the built-in (InMemoryAssetManager, a test's AssetTestFixture without the engine resources) must not log
 //      GetOrPlaceholder's ASSET_MISSING error on every render.
-//  12. FXAA (FxaaPass.h): when PostProcessSettings::FxaaEnabled, LdrColor into its ping-pong partner.
+//  12. FXAA (FxaaPass.h): when PostProcessSettings::AntiAliasing is Fxaa (M26: FxaaEnabled before PostProcess version 2),
+//      LdrColor into its ping-pong partner.
 //  13. Wireframe edges, selection mask/dilation/composite, then grid/icons and the snapshot's DebugDrawList, depth-tested
 //      against SceneDepth or on top. Grid/icons/selection require EditorOverlays and their respective flags.
 //  14. Text (TextRenderer.h): world texts (depth-tested), then screen texts, then the debug list's labels.
@@ -395,6 +396,11 @@ namespace Engine {
 		// Transparent geometry and text do not write EntityId; Opaque/Mask use the same discard and cull rules as depth.
 		// M18: at the scene resolution (GetOutputMapping).
 		[[nodiscard]] nvrhi::ITexture* GetEntityIdTexture() const;
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 8, stream Q-A): the last Render's SceneColor
+		// (SceneColorFormat: linear HDR radiance after the forward passes, the skybox and the Sprites stage, before the HDR post
+		// chain), at the scene resolution, borrowed until the next Render, Resize, ReleaseTargets or destruction; null before
+		// the first Render. ProbeCapture reads a bake's faces back from it. Until stream Q-A it returns null.
+		[[nodiscard]] nvrhi::ITexture* GetSceneColorTexture() const;
 		// Monotonic, nonzero; increments after actual resize or CancelPicks, never wraps/reuses a generation.
 		// Host calls CancelPicks on camera change, scene replacement, play target switch and hidden/minimized transition.
 		// M10 image.Generation is exactly this value; options that change visible geometry also invalidate it.

@@ -16,7 +16,7 @@
 // Collision shapes in engine types (Architecture §9.1, §9.2). A body's shape is built from one or more collider shapes:
 // each is a primitive (box, sphere, capsule), a convex hull, a triangle mesh or an already built shape that bodies share
 // (SharedShapeGeometry: the play session's mesh shape cache), scaled, then rotated and translated within the body (Jolt's
-// RotatedTranslatedShape). Several colliders form a StaticCompoundShape.
+// RotatedTranslatedShape). Several colliders form a StaticCompoundShape. M26 (C26.1) appends a terrain's height field.
 //
 // Collider identity (§9.2 "Collider identity in compounds"): each collider's index (ColliderShapeDescription::UserData)
 // is the compound's sub-shape user data (CompoundShapeSettings::AddShape(..., userData)). The Physics module resolves a
@@ -83,8 +83,27 @@ namespace Engine {
 		Ref<const PhysicsShape> Shape{};
 	};
 
-	using PhysicsShapeGeometry =
-		std::variant<BoxShapeGeometry, SphereShapeGeometry, CapsuleShapeGeometry, ConvexHullShapeGeometry, MeshShapeGeometry, SharedShapeGeometry>;
+	// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 21; ADR 0028's phase-3 ledger: appended last to the
+	// variant, so the existing alternatives keep their indices; a frozen-header change of M11's PhysicsShape.h, reviewed at
+	// C26.1): a terrain's height field, Jolt's HeightFieldShape. SampleCount x SampleCount heights in metres (SampleCount in
+	// [3, 1025]: Jolt's block size of 2 needs two blocks, and ADR 0028's ledger caps a heightfield at 1025 squared samples),
+	// row-major: the sample at column x, row z is Heights[x + SampleCount * z] and sits at the local point
+	// (x * CellSize.x, Heights[...], z * CellSize.y), so the field spans [0, (SampleCount - 1) CellSize] along X and Z from the
+	// collider's origin, each cell split along its diagonal from (x, z) to (x + 1, z + 1) as Asset/TerrainGeometry.h states.
+	// Every height finite, CellSize's components > 0. Static and Kinematic bodies only (PHYSICS_NONCONVEX_DYNAMIC, as a
+	// triangle mesh); a height field never collides with a triangle mesh or another height field (PhysicsWorld drops such
+	// pairs, as mesh pairs). Scale applies as for a mesh (non-uniform allowed). Stream T-B builds it (Jolt's
+	// HeightFieldShapeSettings, its quantization fine enough that a body rests within the rest-height acceptance's
+	// tolerance, decision 21); until then Create refuses it with Unsupported.
+	struct HeightFieldShapeGeometry
+	{
+		std::vector<float> Heights{};
+		uint32_t SampleCount = 0;
+		glm::vec2 CellSize = glm::vec2(1.0f);
+	};
+
+	using PhysicsShapeGeometry = std::variant<BoxShapeGeometry, SphereShapeGeometry, CapsuleShapeGeometry, ConvexHullShapeGeometry, MeshShapeGeometry,
+		SharedShapeGeometry, HeightFieldShapeGeometry>;
 
 	// One collider within its body: Geometry scaled by Scale (in the collider's own axes), then rotated by Rotation and
 	// moved to Position, both relative to the body's origin. Spheres and capsules need a uniform Scale (Shape::IsValidScale;

@@ -25,6 +25,9 @@ namespace Engine {
 				AssetType::StringTable,
 				AssetType::Skeleton,
 				AssetType::AnimationClip,
+				AssetType::IrradianceVolume,
+				AssetType::Lut,
+				AssetType::Heightfield,
 			};
 			for (const AssetType type : Types)
 			{
@@ -57,6 +60,12 @@ namespace Engine {
 			// renumbered at M23's landing (Docs/Decisions/0034-m23-contract.md decision 23, "Landing").
 			static_assert(std::to_underlying(AssetType::Skeleton) == 14);
 			static_assert(std::to_underlying(AssetType::AnimationClip) == 15);
+			// M26's irradiance volumes, LUTs and heightfields (C26.1, Docs/Decisions/0037-m26-contract.md decision 3): 16 to 18,
+			// after phase 2's types in the ledger's order; M24 takes no type (its graphs stay Script assets), so they follow
+			// AnimationClip unless a sibling lands a type first, when M26's merge of main renumbers them.
+			static_assert(std::to_underlying(AssetType::IrradianceVolume) == 16);
+			static_assert(std::to_underlying(AssetType::Lut) == 17);
+			static_assert(std::to_underlying(AssetType::Heightfield) == 18);
 			CHECK(AssetTypeToString(static_cast<AssetType>(999)) == "None");
 		}
 	}

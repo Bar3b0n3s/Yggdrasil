@@ -227,12 +227,13 @@ namespace Engine {
 			CHECK((*targets)["Format"] == "FuzzTargets");
 			CHECK((*targets)["Version"] == 1);
 			// The required readers of decision 13 and of later milestones' new readers (M23's Ogg Opus and OpenEXR decodes,
-			// Docs/Decisions/0034-m23-contract.md decision 19, and its skeleton and animation clip payloads, decision 24);
-			// Targets.json may list more.
+			// Docs/Decisions/0034-m23-contract.md decision 19, and its skeleton and animation clip payloads, decision 24; M26's
+			// irradiance volumes, LUTs and heightfields, Docs/Decisions/0037-m26-contract.md decision 24); Targets.json may list
+			// more.
 			const std::vector<std::string> required = { "AnimationClipData", "AssetMetadata", "AudioClipData", "AudioDecoder", "AudioDecoderOpus",
 				"AutosaveRecovery", "BinaryReader", "BuiltinAssetCatalog", "Bindings", "CookedFormat", "DecodePng", "EditorPreferences", "EnvironmentData",
-				"EnvironmentImporter", "EnvironmentImporterExr", "FontData", "FontImporter", "Framing", "GameManifest", "GltfImporter", "JsonReader", "JsonRpc",
-				"MaterialData", "MeshData", "PakReader", "PakToc", "PlayInputEventCodec", "Prefab", "ProjectLock", "ProjectSerializer", "ReplayData",
+				"EnvironmentImporter", "EnvironmentImporterExr", "FontData", "FontImporter", "Framing", "GameManifest", "GltfImporter", "HeightfieldData",
+				"IrradianceVolumeData", "JsonReader", "JsonRpc", "LutData", "MaterialData", "MeshData", "PakReader", "PakToc", "PlayInputEventCodec", "Prefab", "ProjectLock", "ProjectSerializer", "ReplayData",
 				"SceneSerializer", "ScriptCompiler", "ScriptData", "ShaderReflection", "SkeletonData", "SoundEffect", "TextureData", "TextureImporter" };
 			const Json& listed = (*targets)["Targets"];
 			REQUIRE(listed.is_array());

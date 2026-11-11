@@ -14,16 +14,19 @@
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/IDComponent.h"
+#include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
+#include "Engine/Scene/Components/ParticleEmitterComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PolygonCollider2DComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
+#include "Engine/Scene/Components/ReflectionProbeComponent.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
@@ -34,6 +37,8 @@
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
+#include "Engine/Scene/Components/TerrainColliderComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
@@ -85,7 +90,11 @@ namespace Engine {
 		// Animation (Registration/AnimationRegistration.cpp; M23, Docs/Decisions/0034-m23-contract.md decision 28). ADR 0028's
 		// phase-2 ledger: a milestone's new components go in categories of their own after Scripting, appended in landing
 		// order, so M23, the last lander, appended this category after M21's and M22's at its merge.
-		AnimatorComponent, SkinnedMeshComponent>;
+		AnimatorComponent, SkinnedMeshComponent,
+		// Particles (Registration/ParticlesRegistration.cpp), Probes (Registration/ProbesRegistration.cpp) and Terrain
+		// (Registration/TerrainRegistration.cpp; M26, Docs/Decisions/0037-m26-contract.md decision 4). ADR 0028's phase-3
+		// ledger: M26's components go in categories of their own after Animation, in that order; M24 adds none.
+		ParticleEmitterComponent, IrradianceVolumeComponent, ReflectionProbeComponent, TerrainComponent, TerrainColliderComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -102,8 +111,12 @@ namespace Engine {
 	void RegisterUiComponents(TypeRegistry& registry);
 	// M23 (Docs/Decisions/0034-m23-contract.md decision 28), after M21's and M22's categories.
 	void RegisterAnimationComponents(TypeRegistry& registry);
+	// M26 (Docs/Decisions/0037-m26-contract.md decision 4), after Animation, in ADR 0028's phase-3 ledger's order.
+	void RegisterParticlesComponents(TypeRegistry& registry);
+	void RegisterProbesComponents(TypeRegistry& registry);
+	void RegisterTerrainComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the nine functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the twelve functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

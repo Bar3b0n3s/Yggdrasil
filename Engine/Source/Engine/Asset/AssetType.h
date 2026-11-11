@@ -39,7 +39,15 @@ namespace Engine {
 		// M21's and M22's types; M23's merge of main renumbered them after main's (Docs/Decisions/0034-m23-contract.md,
 		// "Landing"; the values live only in cooked headers, so its checkouts' cooked caches were rebuilt).
 		Skeleton,
-		AnimationClip
+		AnimationClip,
+		// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 3): 16 to 18, a baked irradiance volume's probes, a
+		// colour-grading LUT and a terrain's heightfield, in ADR 0028's phase-3 ledger's order (IrradianceVolume, Lut,
+		// Heightfield; no ReflectionProbe type: a reflection probe's bake is an Environment asset). M24 keeps its graphs as
+		// Script assets and takes no type (the lead's ledger amendment for C24.1), so M26's types follow AnimationClip; M26's
+		// merge of main renumbers them only if a sibling lands a type first (the values live only in cooked headers).
+		IrradianceVolume,
+		Lut,
+		Heightfield
 	};
 
 	// The PascalCase name of `type` ("AudioClip"), the spelling used in .meta files, reflected AssetFilter metadata, the
@@ -49,22 +57,25 @@ namespace Engine {
 	{
 		switch (type)
 		{
-			case AssetType::None:          return "None";
-			case AssetType::Scene:         return "Scene";
-			case AssetType::Prefab:        return "Prefab";
-			case AssetType::Mesh:          return "Mesh";
-			case AssetType::Material:      return "Material";
-			case AssetType::Texture:       return "Texture";
-			case AssetType::Environment:   return "Environment";
-			case AssetType::AudioClip:     return "AudioClip";
-			case AssetType::Script:        return "Script";
-			case AssetType::Font:          return "Font";
-			case AssetType::Replay:        return "Replay";
-			case AssetType::SpriteSheet:   return "SpriteSheet";
-			case AssetType::Tilemap:       return "Tilemap";
-			case AssetType::StringTable:   return "StringTable";
-			case AssetType::Skeleton:      return "Skeleton";
-			case AssetType::AnimationClip: return "AnimationClip";
+			case AssetType::None:             return "None";
+			case AssetType::Scene:            return "Scene";
+			case AssetType::Prefab:           return "Prefab";
+			case AssetType::Mesh:             return "Mesh";
+			case AssetType::Material:         return "Material";
+			case AssetType::Texture:          return "Texture";
+			case AssetType::Environment:      return "Environment";
+			case AssetType::AudioClip:        return "AudioClip";
+			case AssetType::Script:           return "Script";
+			case AssetType::Font:             return "Font";
+			case AssetType::Replay:           return "Replay";
+			case AssetType::SpriteSheet:      return "SpriteSheet";
+			case AssetType::Tilemap:          return "Tilemap";
+			case AssetType::StringTable:      return "StringTable";
+			case AssetType::Skeleton:         return "Skeleton";
+			case AssetType::AnimationClip:    return "AnimationClip";
+			case AssetType::IrradianceVolume: return "IrradianceVolume";
+			case AssetType::Lut:              return "Lut";
+			case AssetType::Heightfield:      return "Heightfield";
 		}
 		return "None";
 	}
@@ -90,6 +101,9 @@ namespace Engine {
 			AssetType::StringTable,
 			AssetType::Skeleton,
 			AssetType::AnimationClip,
+			AssetType::IrradianceVolume,
+			AssetType::Lut,
+			AssetType::Heightfield,
 		};
 		for (const AssetType type : Types)
 		{

@@ -51,6 +51,7 @@ namespace Engine {
 	class IScriptTestHost;
 	class NativeModuleTypes;
 	class NativeWorld;
+	class ParticleSystem;
 	class TypeRegistry;
 	class UiSystem;
 	struct RenderExtractionRequest;
@@ -120,6 +121,11 @@ namespace Engine {
 							  //     as this frame draws it; in Play and Simulate
 		AudioUpdate,          // 3: AudioSystem::Update, then, while the session owns audio time, the simulation-time pulls of
 							  //    the ticks run since the last pull (M12; see "Audio" below)
+		Particles,            // 3a: ParticleSystem::Step, every ParticleEmitter's presentation-only simulation advanced one fixed
+							  //     step per tick run since the last frame (M26, C26.1, Docs/Decisions/0037-m26-contract.md
+							  //     decision 6; ADR 0028's phase-3 ledger): after every phase that moves an emitter or queues an
+							  //     emit, right before the extraction that copies the particles; in Play and Simulate, whether
+							  //     or not extraction is enabled; it writes nothing the state hash covers
 		RenderExtraction      // 4: the game view's snapshot (ExtractRenderSnapshot), unless extraction is disabled
 	};
 
@@ -534,6 +540,13 @@ namespace Engine {
 		// costs it two empty views per tick and changes nothing (decision 29).
 		[[nodiscard]] AnimationSystem* GetAnimation();
 		[[nodiscard]] const AnimationSystem* GetAnimation() const;
+
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 6): the session's particles (Scene/ParticleSystem.h),
+		// which the Particles frame phase steps, in Play and Simulate alike. Stream P-A creates it with the session (and keeps
+		// it across a scene transition: its state lives in the scene's runtime components) and enters the phase; until then it
+		// is null and the session has no Particles phase.
+		[[nodiscard]] ParticleSystem* GetParticles();
+		[[nodiscard]] const ParticleSystem* GetParticles() const;
 
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's

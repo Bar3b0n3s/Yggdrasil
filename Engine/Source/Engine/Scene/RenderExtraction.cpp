@@ -591,7 +591,9 @@ namespace Engine {
 					.SsaoQuality = Utils::ToRenderSsaoQuality(component->SsaoQuality),
 					.BloomEnabled = component->BloomEnabled,
 					.BloomIntensity = component->BloomIntensity,
-					.FxaaEnabled = component->FxaaEnabled,
+					// M26 (C26.1, decision 12): version 1's FxaaEnabled as PostProcess version 2's AntiAliasing until stream X-A
+					// registers version 2 and copies its members.
+					.AntiAliasing = component->FxaaEnabled ? RenderAntiAliasing::Fxaa : RenderAntiAliasing::None,
 				};
 			}
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): listed in canonical order, sorted into draw order below.

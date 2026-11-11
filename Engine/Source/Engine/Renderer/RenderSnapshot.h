@@ -39,8 +39,13 @@
 // phase-2 ledger places phase 2's members, and C21.2 (decisions 21, 22 and 24) the tilemaps and the 2D lights after them
 // (TilemapItem, Tilemaps, Light2DItem, Lights2D) and a sprite's normal map. The M22 contract (C22.1,
 // Docs/Decisions/0033-m22-contract.md decision 7) added the UI draw list (Ui, Renderer/UiDrawList.h) after M21's members, in
-// landing order. Additions are frozen-header changes reviewed by their contract owner; no member here changes meaning. A
-// plain value type: copyable, movable, thread-compatible.
+// landing order. The M26 contract (C26.1, Docs/Decisions/0037-m26-contract.md decisions 7, 10, 11, 12, 16 and 22) added,
+// after M22's member and in ADR 0028's phase-3 ledger's order, the particles (ParticleEmitterItem, ParticleItem), the probes
+// (IrradianceVolumeItem, ReflectionProbeItem) and the terrains (TerrainItem); the camera's temporal inputs (the previous
+// view-projection, the jitter and the frame's delta time, the temporal-state section, decision 10) and the mesh item's
+// PreviousWorld filled from the view's history (decision 11); and PostProcess version 2's settings, where the AntiAliasing
+// enum replaces FxaaEnabled (decision 12). Additions are frozen-header changes reviewed by their contract owner; no member
+// here changes meaning. A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
 // Icons, M21's Sprites, Tilemaps and Lights2D, the commands of DebugDraw and AnnotationDraw, and M22's Ui items and
@@ -48,7 +53,9 @@
 // resource, which must outlive the snapshot; a default-constructed one, and every copy (std::pmr's copy construction),
 // allocates from std::pmr::get_default_resource(), the global heap unless a host changed it. Assignment keeps the target's
 // resource. SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh
-// item's Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list) keep the default allocator.
+// item's Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list, a terrain item's Layers)
+// keep the default allocator; M26's ParticleEmitters, Particles, IrradianceVolumes, ReflectionProbes and Terrains are the
+// snapshot's own containers and follow the rule.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
@@ -127,6 +134,11 @@ namespace Engine {
 		// light list, which a clustered render equals byte for byte (R-CLC).
 		bool Instancing = true;
 		bool ClusteredLights = true;
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 8): whether the forward passes add the probes'
+		// indirect term (IrradianceVolumes and ReflectionProbes). True in every host; lighting.bake's captures turn it off, so a
+		// bake sees the scene's direct light, its Environment and its emission, never an earlier bake (one bounce, and two
+		// bakes in a row are byte-identical).
+		bool Probes = true;
 	};
 
 	// A world-space ray. Camera pixel rays are normalized; SceneRaycast also accepts and normalizes non-unit directions.
@@ -234,6 +246,17 @@ namespace Engine {
 		glm::vec3 ClearColor = glm::vec3(0.05f, 0.05f, 0.06f);
 		bool ClearToSkybox = true; // CameraComponent::Clear == ClearMode::Skybox
 		UUID Entity{};             // the camera entity; the invalid UUID for an explicit camera (the editor's scene view)
+		// M26 (C26.1, R-TAA-VEL; Docs/Decisions/0037-m26-contract.md decision 10, the temporal-state section): the view's
+		// temporal inputs, which its RenderViewHistory (Renderer/TemporalHistory.h) fills before each Render and nothing else
+		// writes. PreviousViewProjection: Projection * View of the view's previous rendered frame, unjittered; empty when the
+		// history was reset (the first frame of a view, a capture's first warm-up frame, a camera cut, a scene change), and the
+		// renderer then starts its temporal state afresh: zero motion, the current image as TAA's history and an exposure that
+		// converges at once. Jitter: the sub-pixel offset, in scene pixels in [-0.5, 0.5], the renderer adds to the projection
+		// for TAA (GetTaaJitter of the history's frame); (0, 0) without TAA, in pixel-art mode, and in every snapshot no history
+		// filled. DeltaTime: seconds since the view's previous rendered frame (0 after a reset), what auto-exposure adapts over.
+		std::optional<glm::mat4> PreviousViewProjection{};
+		glm::vec2 Jitter = glm::vec2(0.0f);
+		float DeltaTime = 0.0f;
 	};
 
 	// One MeshRenderer to draw (§8.2 "world matrix, mesh handle+version, material per submesh, flags"). The renderer resolves
@@ -244,7 +267,9 @@ namespace Engine {
 	{
 		glm::mat4 World = glm::mat4(1.0f); // the rendered (interpolated, §5.2) world matrix
 		// M23 (C23.1): the item's world matrix at the previous frame's render, for motion vectors (M26's TAA): the instance
-		// record's PreviousWorld. Empty means no motion (the record takes World); extraction leaves it empty until M26.
+		// record's PreviousWorld. Empty means no motion (the record takes World). M26 (C26.1, decision 11): extraction still
+		// leaves it empty; the view's RenderViewHistory fills it from the item's World at the view's previous rendered frame,
+		// by Entity (empty for an item it did not see then, and after a reset).
 		std::optional<glm::mat4> PreviousWorld{};
 		AssetHandle Mesh{}; // a null handle draws nothing
 		// MeshRendererComponent::Materials: one slot per submesh; a missing or null slot uses the mesh's default material.
@@ -313,19 +338,50 @@ namespace Engine {
 		glm::vec3 FallbackColor = glm::vec3(0.2f, 0.22f, 0.25f); // linear
 	};
 
+	// M26 (C26.1, R-TAA; Docs/Decisions/0037-m26-contract.md decision 12): PostProcess version 2's AntiAliasing, which replaces
+	// version 1's FxaaEnabled (true is Fxaa, false None). Taa is opt-in and acts as None in the output stage's pixel-art mode.
+	enum class RenderAntiAliasing : uint8_t
+	{
+		None,
+		Fxaa, // FXAA on the LDR image (the default, so every existing image stays as it was)
+		Taa   // the jittered HDR image resolved against its history, first in HdrPost (Renderer/TaaPass.h)
+	};
+
+	// M26 (C26.1, R-AEX; decision 12): PostProcess version 2's ExposureMode.
+	enum class RenderExposureMode : uint8_t
+	{
+		Manual, // the image times 2^ExposureEV, as version 1 did
+		Auto    // the histogram's adapted exposure (Renderer/AutoExposure.h), compensated by ExposureEV
+	};
+
 	// The scene's PostProcessComponent (§5.3), or its defaults when the scene has none. M8 applies the exposure, the
-	// tonemapper (with the blue-noise dither), bloom and FXAA; the Ssao members take effect with GTAO (M9).
+	// tonemapper (with the blue-noise dither), bloom and FXAA; the Ssao members take effect with GTAO (M9). M26 (C26.1,
+	// decision 12): PostProcess version 2's members, whose defaults render as version 1 did (the manual ExposureEV, no LUT,
+	// SSR off, FXAA): render extraction copies them from the component (version 1's FxaaEnabled as Fxaa or None until stream
+	// X-A registers version 2), and each takes effect with its stream (X-A the exposure, X-B the LUT, X-C TAA, X-D SSR).
 	struct PostProcessSettings
 	{
-		float ExposureEV = 0.0f; // multiplier 2^ExposureEV
+		float ExposureEV = 0.0f; // multiplier 2^ExposureEV; with Auto, the compensation added to the adapted exposure
+		RenderExposureMode ExposureMode = RenderExposureMode::Manual;
+		float AutoExposureMinEV = -6.0f; // the adapted exposure's range, in EV (the multiplier's log2)
+		float AutoExposureMaxEV = 12.0f;
+		float AutoExposureSpeedUp = 3.0f;   // EV per second towards a brighter target
+		float AutoExposureSpeedDown = 1.0f; // EV per second towards a darker target
 		RenderTonemapper Tonemap = RenderTonemapper::AgX;
+		AssetHandle Lut{};         // the grading LUT (Asset/LutData.h); null grades nothing
+		float LutIntensity = 1.0f; // [0, 1]: the graded value's share
 		bool SsaoEnabled = true;
 		float SsaoRadius = 0.5f;
 		float SsaoIntensity = 1.0f;
 		RenderSsaoQuality SsaoQuality = RenderSsaoQuality::Medium;
+		bool SsrEnabled = false;      // glossy screen-space reflections (Renderer/SsrPass.h)
+		float SsrIntensity = 1.0f;    // [0, 1]
+		float SsrMaxDistance = 50.0f; // metres a reflected ray travels
+		float SsrThickness = 0.2f;    // metres a surface is assumed thick behind its depth
+		float SsrMaxRoughness = 0.6f; // perceptual roughness above which only the probes reflect
 		bool BloomEnabled = true;
 		float BloomIntensity = 0.04f;
-		bool FxaaEnabled = true;
+		RenderAntiAliasing AntiAliasing = RenderAntiAliasing::Fxaa;
 	};
 
 	// World text pixels per metre: a world TextItem of Size s has an em of s / WorldTextPixelsPerMetre metres before the
@@ -371,7 +427,10 @@ namespace Engine {
 		uint32_t SceneHeight = 0;
 		// The 2D colour path (decision 7): the post chain runs the Linear tonemapper at exposure 1 (2^0) with the sRGB OETF
 		// and without the blue-noise dither, bloom or FXAA, whatever Post says, so a texel drawn into SceneColor (a sprite's,
-		// M21) reaches the output unchanged. GTAO still follows Post (it shades meshes only).
+		// M21) reaches the output unchanged. GTAO still follows Post (it shades meshes only). M26 (C26.1; Docs/Decisions/
+		// 0037-m26-contract.md decision 10) keeps the rule for its post-processing: in pixel-art mode TAA acts as None (no
+		// jitter, no resolve), ExposureMode Auto as Manual at exposure 1 (no Exposure pass) and no LUT grades the image, so
+		// a pixel-art capture never needs the temporal warm-up (NeedsTemporalWarmup).
 		bool PixelArt = false;
 		// The letterbox around the upscaled scene image: linear RGB, encoded with the sRGB OETF like a clear colour.
 		glm::vec3 LetterboxColor = glm::vec3(0.0f);
@@ -477,6 +536,96 @@ namespace Engine {
 		UUID Entity{};
 	};
 
+	// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): how a ParticleEmitter's particles are blended
+	// (ParticleEmitterComponent::Blend).
+	enum class RenderParticleBlend : uint8_t
+	{
+		Alpha,   // straight alpha, the emitter's particles back to front in the view
+		Additive // added (colour times alpha), in any order
+	};
+
+	// One live particle to draw (decision 7): a square quad facing the camera, in world space.
+	struct ParticleItem
+	{
+		glm::vec3 Position = glm::vec3(0.0f); // world space, at the extraction's alpha between the particle's last two steps
+		float Size = 0.1f;                    // the quad's side, metres
+		glm::vec4 Color = glm::vec4(1.0f);    // linear RGB, straight alpha; multiplies the texture
+	};
+
+	// One ParticleEmitter's live particles (decision 7), from render extraction: RenderSnapshot::Particles[First, First +
+	// Count). The Particles pass (the Sprites stage, after Lights2D) draws each emitter's particles as QuadBatcher quads with its
+	// texture (the built-in particle texture, BuiltinAssetHandles::ParticleTexture, when null), depth-tested against SceneDepth
+	// without writing it, in the order of ParticleEmitters; an Alpha emitter's particles back to front in the view (by view
+	// depth, ties by index), an Additive one's in its order.
+	struct ParticleEmitterItem
+	{
+		AssetHandle Texture{};
+		RenderParticleBlend Blend = RenderParticleBlend::Alpha;
+		uint32_t First = 0;
+		uint32_t Count = 0;
+		UUID Entity{};
+	};
+
+	// One IrradianceVolume to light with (M26, C26.1, R-GI-PROBE; decision 16), from render extraction: every effectively
+	// enabled IrradianceVolume whose Data is set, in canonical entity order. The forward passes shade the diffuse indirect
+	// term inside its box from its probes (Common/Probes.slang), the renderer resolving Data through its GpuResourceCache.
+	struct IrradianceVolumeItem
+	{
+		glm::mat4 World = glm::mat4(1.0f); // the rendered world matrix; the box is Size centred on its origin, in its axes
+		glm::vec3 Size = glm::vec3(10.0f, 4.0f, 10.0f);
+		AssetHandle Data{};
+		float Intensity = 1.0f;
+		float BlendDistance = 1.0f;
+		UUID Entity{};
+	};
+
+	// One ReflectionProbe to reflect (decision 16), from render extraction: every effectively enabled ReflectionProbe whose
+	// Data is set, in canonical entity order. Data is an Environment; the forward passes sample its prefiltered specular cube
+	// inside the box (box-projected with BoxProjection), and SSR falls back to it.
+	struct ReflectionProbeItem
+	{
+		glm::mat4 World = glm::mat4(1.0f); // the rendered world matrix; the box is Size centred on its origin, in its axes
+		glm::vec3 Size = glm::vec3(10.0f, 5.0f, 10.0f);
+		AssetHandle Data{};
+		bool BoxProjection = true;
+		float Intensity = 1.0f;
+		float BlendDistance = 1.0f;
+		UUID Entity{};
+	};
+
+	// One material layer of a TerrainItem (TerrainComponent's TerrainLayer).
+	struct TerrainLayerItem
+	{
+		AssetHandle BaseColorMap{}; // null: white
+		AssetHandle NormalMap{};    // null: flat
+		glm::vec3 Tint = glm::vec3(1.0f);
+		float Tiling = 4.0f;
+		float Roughness = 0.9f;
+		float Metallic = 0.0f;
+	};
+
+	// One Terrain to draw (M26, C26.1, C-TERR; decision 22), from render extraction: every effectively enabled Terrain whose
+	// Heightfield is set, in canonical entity order. The renderer resolves the heightfield and the splat map through its
+	// GpuResourceCache and draws the terrain's LOD chunks (Renderer/TerrainLod.h) in TerrainDepthNormal (the prepass's
+	// targets, picking included) and TerrainForward (lit by M23's light loop and the probes), with Asset/TerrainGeometry.h's
+	// placement; a heightfield that is missing or fails to load draws nothing. It has no PreviousWorld (the view's history
+	// keeps the mesh items' only): TerrainDepthNormal writes the camera's motion alone to SceneVelocity, as for an item whose
+	// world did not change, so a terrain that moves (under a moving parent, or moved by a script) ghosts under TAA, a kept
+	// limit (decision 22, Backlog §6).
+	struct TerrainItem
+	{
+		glm::mat4 World = glm::mat4(1.0f); // the rendered world matrix; the terrain spans [0, Size.x] x [0, Size.y] in local XZ
+		AssetHandle Heightfield{};
+		glm::vec2 Size = glm::vec2(64.0f);
+		float HeightScale = 16.0f;
+		std::vector<TerrainLayerItem> Layers{}; // at most MaxTerrainLayers; empty draws one white layer
+		AssetHandle SplatMap{};                 // null: the first layer alone
+		bool ReceiveShadows = true;
+		float LodBias = 1.0f;
+		UUID Entity{};
+		uint32_t PickId = 0; // 0: not pickable; otherwise PickTable[PickId - 1] is Entity, as a mesh item's
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
 	// is deterministic; Sprites (M21) are in draw order instead.
 	struct RenderSnapshot
@@ -539,6 +688,17 @@ namespace Engine {
 		// draws no Screen canvas, but for C22.3's World canvases (ExtractRenderSnapshot). The Ui pass draws it after game
 		// Text in the SceneOverlay stage; the data views (AO, ShadowCascades, Overdraw) show none, as they show no Text.
 		UiDrawList Ui{};
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7), in ADR 0028's phase-3 ledger's order after Ui: the
+		// play scene's live particles (an edit scene has none), per emitter in canonical entity order, drawn in a Lit view by the
+		// Particles pass (the data views and the Overdraw view draw none, as they draw no sprites).
+		std::pmr::vector<ParticleEmitterItem> ParticleEmitters{};
+		std::pmr::vector<ParticleItem> Particles{};
+		// M26 (C26.1, R-GI-PROBE; decision 16): the probes the forward passes light and reflect with.
+		std::pmr::vector<IrradianceVolumeItem> IrradianceVolumes{};
+		std::pmr::vector<ReflectionProbeItem> ReflectionProbes{};
+		// M26 (C26.1, C-TERR; decision 22): the terrains, drawn in TerrainDepthNormal and TerrainForward. A pickable terrain's
+		// PickId follows the meshes' in PickTable.
+		std::pmr::vector<TerrainItem> Terrains{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

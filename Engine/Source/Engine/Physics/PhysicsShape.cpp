@@ -290,6 +290,14 @@ namespace Engine {
 			return CreateColliderShape(settings, index);
 		}
 
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 21): a terrain's height field as a Jolt
+		// HeightFieldShape, scaled by `scale`. A contract stub of M26's C26.1, implemented by stream T-B.
+		[[nodiscard]] static JoltShapeResult CreateHeightField(const HeightFieldShapeGeometry& /*heightField*/, const glm::vec3& /*scale*/, size_t /*index*/)
+		{
+			ENGINE_CONTRACT_STUB();
+			return MakeError(ErrorCode::Unsupported, "M26 terrain contract (Docs/Decisions/0037-m26-contract.md decision 21, stream T-B)");
+		}
+
 		[[nodiscard]] static std::string_view GetGeometryName(const PhysicsShapeGeometry& geometry)
 		{
 			if (std::holds_alternative<BoxShapeGeometry>(geometry))
@@ -302,6 +310,8 @@ namespace Engine {
 				return "convex hull";
 			if (std::holds_alternative<MeshShapeGeometry>(geometry))
 				return "triangle mesh";
+			if (std::holds_alternative<HeightFieldShapeGeometry>(geometry))
+				return "height field";
 			return "shared shape";
 		}
 
@@ -394,6 +404,12 @@ namespace Engine {
 			else if (const MeshShapeGeometry* mesh = std::get_if<MeshShapeGeometry>(&collider.Geometry))
 			{
 				created = Utils::CreateMesh(*mesh, collider.Scale, index);
+				state.HasMesh = true;
+			}
+			else if (const HeightFieldShapeGeometry* heightField = std::get_if<HeightFieldShapeGeometry>(&collider.Geometry))
+			{
+				// A height field is not convex: as a mesh, never a Dynamic body's.
+				created = Utils::CreateHeightField(*heightField, collider.Scale, index);
 				state.HasMesh = true;
 			}
 			else if (shared != nullptr)

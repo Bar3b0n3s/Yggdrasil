@@ -12,7 +12,7 @@ export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | 
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
 
 -- The kind of a loadable asset (§7.1).
-export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Tilemap" | "StringTable" | "Skeleton" | "AnimationClip"
+export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Tilemap" | "StringTable" | "Skeleton" | "AnimationClip" | "IrradianceVolume" | "Lut" | "Heightfield"
 
 -- How a spatial sound's volume falls off with distance.
 export type Attenuation = "None" | "Inverse" | "Linear" | "Exponential"
@@ -97,6 +97,15 @@ export type MouseButton = "Left" | "Right" | "Middle" | "Button4" | "Button5" | 
 
 -- What a type of a game's native module is.
 export type NativeTypeRole = "Component" | "Resource"
+
+-- How a particle's colour reaches the image.
+export type ParticleBlend = "Alpha" | "Additive"
+
+-- Where a ParticleEmitter's new particles start and which way they move.
+export type ParticleEmitterShape = "Point" | "Sphere" | "Cone" | "Box"
+
+-- Which space a ParticleEmitter's live particles move in.
+export type ParticleSimulationSpace = "World" | "Local"
 
 -- The shape of a 2D overlap query.
 export type Physics2DQueryShape = "Circle" | "Box"
@@ -604,6 +613,11 @@ declare extern type Entity with
 	function GetComponent(self, name: "UiTextInput"): UiTextInput?
 	function GetComponent(self, name: "Animator"): Animator?
 	function GetComponent(self, name: "SkinnedMesh"): SkinnedMesh?
+	function GetComponent(self, name: "ParticleEmitter"): ParticleEmitter?
+	function GetComponent(self, name: "IrradianceVolume"): IrradianceVolume?
+	function GetComponent(self, name: "ReflectionProbe"): ReflectionProbe?
+	function GetComponent(self, name: "Terrain"): Terrain?
+	function GetComponent(self, name: "TerrainCollider"): TerrainCollider?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -620,6 +634,8 @@ declare extern type Entity with
 	HasTag: (self: Entity, tag: string) -> boolean
 	-- The immutable 16-digit hexadecimal UUID. [All modes; Runtime|Test; pure/read]
 	ID: string
+	-- The entity's IrradianceVolume component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	IrradianceVolume: IrradianceVolume?
 	-- The effective active state including every ancestor. [All modes; Runtime|Test; pure/read]
 	IsActive: (self: Entity) -> boolean
 	-- The entity's local active state. [All modes; Runtime|Test; pure/read]
@@ -634,6 +650,8 @@ declare extern type Entity with
 	MeshRenderer: MeshRenderer?
 	-- The entity name; a written name is UTF-8 without NUL and at most 256 bytes. [All modes; Runtime|Test; pure/read; setter mutates]
 	Name: string
+	-- The entity's ParticleEmitter component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	ParticleEmitter: ParticleEmitter?
 	-- The entity's PixelPerfectCamera component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PixelPerfectCamera: PixelPerfectCamera?
 	-- The entity's PointLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -642,6 +660,8 @@ declare extern type Entity with
 	PolygonCollider2D: PolygonCollider2D?
 	-- The entity's PostProcess component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PostProcess: PostProcess?
+	-- The entity's ReflectionProbe component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	ReflectionProbe: ReflectionProbe?
 	-- Remove a removable component when no present component requires it. [All modes; Runtime|Test; mutates]
 	RemoveComponent: (self: Entity, name: string) -> ()
 	-- Remove a tag if present. [All modes; Runtime|Test; mutates]
@@ -664,6 +684,10 @@ declare extern type Entity with
 	SpriteAnimator: SpriteAnimator?
 	-- The entity's SpriteRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SpriteRenderer: SpriteRenderer?
+	-- The entity's Terrain component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Terrain: Terrain?
+	-- The entity's TerrainCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	TerrainCollider: TerrainCollider?
 	-- The entity's Text component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Text: Text?
 	-- The entity's TilemapCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -718,6 +742,24 @@ end
 declare extern type FieldDescriptor with
 end
 
+-- A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.
+declare extern type IrradianceVolume with
+	-- The distance inside the box's faces over which its light fades to the Environment's, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	BlendDistance: number
+	-- The baked volume that lighting.bake writes beside the scene and assigns; null (not baked) lights nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Data: AssetRef?
+	-- The unitless strength of the baked indirect light. [All modes; Runtime|Test; pure/read; setter mutates]
+	Intensity: number
+	-- The probes along the box's local X axis, the outer ones on its faces. [All modes; Runtime|Test; pure/read; setter mutates]
+	ProbeCountX: number
+	-- The probes along the box's local Y axis, the outer ones on its faces. [All modes; Runtime|Test; pure/read; setter mutates]
+	ProbeCountY: number
+	-- The probes along the box's local Z axis, the outer ones on its faces. [All modes; Runtime|Test; pure/read; setter mutates]
+	ProbeCountZ: number
+	-- The box's size in metres, centred on the entity in its local axes. [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: vector
+end
+
 -- A 2D light: lights the lit sprites and tilemaps of the view, never unlit ones; no shadows.
 declare extern type Light2D with
 	-- The light's linear colour. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -760,6 +802,52 @@ declare extern type MeshRenderer with
 	SetMaterial: (self: MeshRenderer, index: number, asset: AssetRef?) -> ()
 	-- Whether the mesh is drawn at all. [All modes; Runtime|Test; pure/read; setter mutates]
 	Visible: boolean
+end
+
+-- Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision.
+declare extern type ParticleEmitter with
+	-- The acceleration of every live particle, in metres per second squared, in the SimulationSpace (set (0, -9.81, 0) for gravity). [All modes; Runtime|Test; pure/read; setter mutates]
+	Acceleration: vector
+	-- How particles are blended into the image. [All modes; Runtime|Test; pure/read; setter mutates]
+	Blend: ParticleBlend
+	-- The Box shape's half extents, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	BoxHalfExtents: vector
+	-- Particles emitted at once at the start of each cycle, at most MaxParticles. [All modes; Runtime|Test; pure/read; setter mutates]
+	Burst: number
+	-- At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque. [All modes; Runtime|Test; pure/read; setter mutates]
+	ColorOverLife: {{Time: number, Color: Color}}
+	-- The Cone shape's half angle from the local -Z axis, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
+	ConeAngle: number
+	-- How quickly particles slow down, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	Drag: number
+	-- The length of one emission cycle, in seconds; Burst is emitted at each cycle's start. [All modes; Runtime|Test; pure/read; setter mutates]
+	Duration: number
+	-- The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum). [All modes; Runtime|Test; pure/read; setter mutates]
+	Lifetime: vector
+	-- Whether emission repeats every Duration seconds; otherwise it stops after one cycle. [All modes; Runtime|Test; pure/read; setter mutates]
+	Loop: boolean
+	-- The most particles alive at once; beyond it no new particle is emitted until one dies. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxParticles: number
+	-- Whether the emitter emits; live particles finish their lives either way. [All modes; Runtime|Test; pure/read; setter mutates]
+	Playing: boolean
+	-- Particles emitted per second while playing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Rate: number
+	-- Seeds the emitter's random stream together with the entity's id, so a replay shows the same particles in every build. [All modes; Runtime|Test; pure/read; setter mutates]
+	Seed: number
+	-- Where new particles start and which way they move. [All modes; Runtime|Test; pure/read; setter mutates]
+	Shape: ParticleEmitterShape
+	-- The radius of the Sphere shape and of the Cone shape's base disc, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShapeRadius: number
+	-- Whether live particles stay where they were emitted or move with the emitter. [All modes; Runtime|Test; pure/read; setter mutates]
+	SimulationSpace: ParticleSimulationSpace
+	-- The range a new particle's size is drawn from, in metres: (minimum, maximum). [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: vector
+	-- At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size. [All modes; Runtime|Test; pure/read; setter mutates]
+	SizeOverLife: {{Time: number, Size: number}}
+	-- The range a new particle's speed is drawn from, in metres per second: (minimum, maximum). [All modes; Runtime|Test; pure/read; setter mutates]
+	Speed: vector
+	-- The particle's texture; null uses the built-in soft disc (engine://Textures/Particle). [All modes; Runtime|Test; pure/read; setter mutates]
+	Texture: AssetRef?
 end
 
 -- Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.
@@ -880,6 +968,22 @@ declare extern type RandomGenerator with
 	Shuffle: EngineSignature_15_RandomGenerator_Shuffle
 	-- Draws a uniform direction from this stream with deterministic trigonometry. [All modes; Runtime|Test; pure/read]
 	UnitVector: (self: RandomGenerator) -> vector
+end
+
+-- A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it.
+declare extern type ReflectionProbe with
+	-- The distance inside the box's faces over which its reflection fades to the Environment's, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	BlendDistance: number
+	-- Whether reflections are corrected for the box (parallax-corrected), so a room's reflection lines up with its walls. [All modes; Runtime|Test; pure/read; setter mutates]
+	BoxProjection: boolean
+	-- The baked reflection, an Environment that lighting.bake writes beside the scene and assigns; null (not baked) reflects nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Data: AssetRef?
+	-- The unitless strength of the reflection. [All modes; Runtime|Test; pure/read; setter mutates]
+	Intensity: number
+	-- The bake's capture cube face, in texels: a power of two. [All modes; Runtime|Test; pure/read; setter mutates]
+	Resolution: number
+	-- The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes. [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: vector
 end
 
 -- Simulates the entity with Jolt physics.
@@ -1096,6 +1200,34 @@ end
 
 -- An opaque coroutine handle owned by one script VM.
 declare extern type TaskHandle with
+end
+
+-- A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit.
+declare extern type Terrain with
+	-- The height of the largest heightfield sample above the entity's origin, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	HeightScale: number
+	-- The heightfield whose samples shape the terrain; null draws nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Heightfield: AssetRef?
+	-- At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer. [All modes; Runtime|Test; pure/read; setter mutates]
+	Layers: {{BaseColorMap: AssetRef?, NormalMap: AssetRef?, Tint: Color, Tiling: number, Roughness: number, Metallic: number}}
+	-- Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther. [All modes; Runtime|Test; pure/read; setter mutates]
+	LodBias: number
+	-- Whether shadows fall on the terrain. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReceiveShadows: boolean
+	-- The terrain's extent along its local X and Z axes from the entity's origin, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	Size: vector
+	-- The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone. [All modes; Runtime|Test; pure/read; setter mutates]
+	SplatMap: AssetRef?
+end
+
+-- The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn.
+declare extern type TerrainCollider with
+	-- The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	Friction: number
+	-- Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Layer: string
+	-- The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	Restitution: number
 end
 
 -- Draws a text string on the screen or in the world.
@@ -1448,7 +1580,7 @@ declare Debug: {
 declare Field: {
 	-- Declare an empty array whose element keeps its complete nested field schema. [All modes; LoadTime|Runtime|Test; pure/read]
 	Array: (element: FieldDescriptor) -> FieldDescriptor,
-	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, StringTable, Skeleton or AnimationClip), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, StringTable, Skeleton, AnimationClip, IrradianceVolume, Lut or Heightfield), with a null default; any other name fails the import. [All modes; LoadTime|Runtime|Test; pure/read]
 	Asset: (type: string) -> FieldDescriptor,
 	-- Declare a boolean; the omitted default is false. [All modes; LoadTime|Runtime|Test; pure/read]
 	Bool: (default: boolean?, options: FieldOptions?) -> FieldDescriptor,

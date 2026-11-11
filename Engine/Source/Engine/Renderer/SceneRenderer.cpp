@@ -2594,7 +2594,7 @@ namespace Engine {
 	{
 		const PostProcessSettings& post = frame.Snapshot->Post;
 		// FXAA blends texels across edges: never in a debug view, the wireframe or the 2D colour path (decision 7).
-		if (!frame.IsLit || frame.Wireframe || frame.PixelArt || !post.FxaaEnabled)
+		if (!frame.IsLit || frame.Wireframe || frame.PixelArt || post.AntiAliasing != RenderAntiAliasing::Fxaa)
 			return;
 		nvrhi::ICommandList& commandList = *frame.CommandList;
 		frame.Recording->BeginPass("FXAA", &commandList);

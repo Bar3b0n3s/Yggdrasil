@@ -7,6 +7,9 @@
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/FontData.h"
+#include "Engine/Asset/HeightfieldData.h"
+#include "Engine/Asset/IrradianceVolumeData.h"
+#include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/ReplayData.h"
@@ -121,6 +124,21 @@ namespace Engine {
 			return LoadCookedAnimationClip(cooked);
 		}
 
+		static Result<AssetRef<IrradianceVolumeData>> LoadIrradianceVolume(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedIrradianceVolume(cooked);
+		}
+
+		static Result<AssetRef<LutData>> LoadLut(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedLut(cooked);
+		}
+
+		static Result<AssetRef<HeightfieldData>> LoadHeightfield(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedHeightfield(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -195,28 +213,35 @@ namespace Engine {
 		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decision 24).
 		registry.Register(CreateScope<PayloadLoader<SkeletonData, &Utils::LoadSkeleton>>());
 		registry.Register(CreateScope<PayloadLoader<AnimationClipData, &Utils::LoadAnimationClip>>());
+		// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 3).
+		registry.Register(CreateScope<PayloadLoader<IrradianceVolumeData, &Utils::LoadIrradianceVolume>>());
+		registry.Register(CreateScope<PayloadLoader<LutData, &Utils::LoadLut>>());
+		registry.Register(CreateScope<PayloadLoader<HeightfieldData, &Utils::LoadHeightfield>>());
 	}
 
 	std::optional<uint16_t> GetCookedFormatVersion(AssetType type)
 	{
 		switch (type)
 		{
-			case AssetType::None:          return std::nullopt;
-			case AssetType::Scene:         return SceneData::FormatVersion;
-			case AssetType::Prefab:        return PrefabData::FormatVersion;
-			case AssetType::Mesh:          return MeshData::FormatVersion;
-			case AssetType::Material:      return MaterialData::FormatVersion;
-			case AssetType::Texture:       return TextureData::FormatVersion;
-			case AssetType::Environment:   return EnvironmentData::FormatVersion;
-			case AssetType::AudioClip:     return AudioClipData::FormatVersion;
-			case AssetType::Script:        return ScriptData::FormatVersion;
-			case AssetType::Font:          return FontData::FormatVersion;
-			case AssetType::Replay:        return ReplayData::FormatVersion;
-			case AssetType::SpriteSheet:   return SpriteSheetData::FormatVersion;
-			case AssetType::Tilemap:       return TilemapData::FormatVersion;
-			case AssetType::StringTable:   return StringTableData::FormatVersion;
-			case AssetType::Skeleton:      return SkeletonData::FormatVersion;
-			case AssetType::AnimationClip: return AnimationClipData::FormatVersion;
+			case AssetType::None:             return std::nullopt;
+			case AssetType::Scene:            return SceneData::FormatVersion;
+			case AssetType::Prefab:           return PrefabData::FormatVersion;
+			case AssetType::Mesh:             return MeshData::FormatVersion;
+			case AssetType::Material:         return MaterialData::FormatVersion;
+			case AssetType::Texture:          return TextureData::FormatVersion;
+			case AssetType::Environment:      return EnvironmentData::FormatVersion;
+			case AssetType::AudioClip:        return AudioClipData::FormatVersion;
+			case AssetType::Script:           return ScriptData::FormatVersion;
+			case AssetType::Font:             return FontData::FormatVersion;
+			case AssetType::Replay:           return ReplayData::FormatVersion;
+			case AssetType::SpriteSheet:      return SpriteSheetData::FormatVersion;
+			case AssetType::Tilemap:          return TilemapData::FormatVersion;
+			case AssetType::StringTable:      return StringTableData::FormatVersion;
+			case AssetType::Skeleton:         return SkeletonData::FormatVersion;
+			case AssetType::AnimationClip:    return AnimationClipData::FormatVersion;
+			case AssetType::IrradianceVolume: return IrradianceVolumeData::FormatVersion;
+			case AssetType::Lut:              return LutData::FormatVersion;
+			case AssetType::Heightfield:      return HeightfieldData::FormatVersion;
 		}
 		return std::nullopt;
 	}

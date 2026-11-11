@@ -173,7 +173,7 @@ namespace Engine {
 			snapshot.SelectedEntities = { UUID(900) };
 			snapshot.Post.SsaoEnabled = true;
 			snapshot.Post.BloomEnabled = true;
-			snapshot.Post.FxaaEnabled = true;
+			snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 			LightData directional;
 			directional.CastShadows = true;
 			directional.ShadowDistance = 10;
@@ -375,7 +375,8 @@ namespace Engine {
 					snapshot.Meshes.clear();
 					snapshot.DebugView = RenderDebugView::Overdraw;
 					snapshot.Post.ExposureEV = 10;
-					snapshot.Post.SsaoEnabled = snapshot.Post.BloomEnabled = snapshot.Post.FxaaEnabled = true;
+					snapshot.Post.SsaoEnabled = snapshot.Post.BloomEnabled = true;
+					snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 					snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Grid | RenderViewFlags::Icons | RenderViewFlags::Selection | RenderViewFlags::Wireframe;
 					snapshot.SelectedEntities = { UUID(900) };
 					snapshot.DebugDraw.AddLine({ -1, 0, -1 }, { 1, 0, -1 }, glm::vec4(1), 0, DebugDepthMode::OnTop);

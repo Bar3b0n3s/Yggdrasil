@@ -111,12 +111,15 @@ namespace Engine {
 			// after the other editor overlays and the letterbox repaint last; M23's Skinning after Prepare (C23.3), PointShadows
 			// after SpotShadows and LightClusters after the GTAO denoise; M21's Sprites, then Lights2D (C21.2), in the Sprites
 			// stage, between the forward passes and Bloom, and M22's Ui after Text in M18's reserved slot
-			// (Docs/Decisions/0033-m22-contract.md decision 7): ADR 0028's phase-2 ledger's 31 rows, a frozen contract of
-			// stats.get.
-			constexpr std::array<std::string_view, 31> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
-				"DepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters", "ForwardOpaque", "Skybox",
-				"ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Bloom", "Tonemap", "FXAA", "Text", "Ui", "Upscale", "SelectionMask",
-				"SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
+			// (Docs/Decisions/0033-m22-contract.md decision 7): ADR 0028's phase-2 ledger's 31 rows. M26's six (C26.1,
+			// Docs/Decisions/0037-m26-contract.md decision 13) at the places phase 3's ledger fixes: TerrainDepthNormal after
+			// DepthNormal, TerrainForward after ForwardOpaque, SSR after Skybox, Particles after Lights2D, TAA before Bloom and
+			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get.
+			constexpr std::array<std::string_view, 37> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
+				"DepthNormal", "TerrainDepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters",
+				"ForwardOpaque", "TerrainForward", "Skybox", "SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA",
+				"Bloom", "Exposure", "Tonemap", "FXAA", "Text", "Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal",
+				"SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
 				CHECK(RenderStatsOrder[index] == Expected[index]);
@@ -152,6 +155,46 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Ui") == 0);
 			// M23: the point shadows draw with the Shadows declaration's caster pipelines.
 			CHECK(GetDeclaredPipelineCountOf("PointShadows") == 0);
+		}
+
+		// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decisions 13 and 14): the six passes at phase 3's ledger's places, in
+		// existing stages, with their targets; the prepass gains its velocity and roughness targets after EntityId. Their
+		// pipelines join with their streams, so the contract adds none to the startup count.
+		TEST_CASE("RenderPassDeclarations: M26's passes take the ledger's places and targets")
+		{
+			const auto find = [](std::string_view name)
+			{
+				const auto found = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [name](const RenderPassDeclaration& declaration)
+				{
+					return declaration.Name == name;
+				});
+				REQUIRE_MESSAGE(found != ScenePassDeclarations.end(), name);
+				return found;
+			};
+			CHECK(find("TerrainDepthNormal")->Stage == RenderStage::DepthNormal);
+			CHECK((find("TerrainDepthNormal") - 1)->Name == "DepthNormal");
+			CHECK(find("TerrainForward")->Stage == RenderStage::Forward);
+			CHECK((find("TerrainForward") - 1)->Name == "ForwardOpaque");
+			CHECK((find("TerrainForward") + 1)->Name == "Skybox");
+			CHECK(find("Ssr")->Stage == RenderStage::Forward);
+			CHECK((find("Ssr") - 1)->Name == "Skybox");
+			CHECK((find("Ssr") + 1)->Name == "ForwardTransparent");
+			CHECK(find("Particles")->Stage == RenderStage::Sprites);
+			CHECK((find("Particles") - 1)->Name == "Lights2D");
+			CHECK(find("Taa")->Stage == RenderStage::HdrPost);
+			CHECK((find("Taa") + 1)->Name == "Bloom");
+			CHECK(find("Exposure")->Stage == RenderStage::HdrPost);
+			CHECK((find("Exposure") - 1)->Name == "Bloom");
+			CHECK((find("Exposure") + 1)->Stage == RenderStage::Tonemap);
+			const auto depthNormal = find("DepthNormal");
+			REQUIRE(depthNormal->Targets.size() == 5);
+			CHECK(depthNormal->Targets[2] == "EntityId");
+			CHECK(depthNormal->Targets[3] == "SceneVelocity");
+			CHECK(depthNormal->Targets[4] == "SceneRoughness");
+			REQUIRE(find("Ssr")->Targets.size() == 1);
+			CHECK(find("Ssr")->Targets[0] == "SsrColor");
+			REQUIRE(find("Taa")->Targets.size() == 1);
+			CHECK(find("Taa")->Targets[0] == "TaaHistory");
 		}
 
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the Skinning pass's one compute pipeline joins

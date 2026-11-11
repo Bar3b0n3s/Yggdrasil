@@ -70,7 +70,12 @@ namespace Engine {
 			.Entry(AssetType::StringTable, "StringTable", "A string table (.stringtable): keyed strings in several locales, read by Loc.Get.")
 			.Entry(AssetType::Skeleton, "Skeleton", "A skeleton (a glTF's skin sub-asset): named joints in a hierarchy with their rest pose and inverse binds.")
 			.Entry(AssetType::AnimationClip, "AnimationClip",
-				"An animation clip (a glTF's animation sub-asset): keyed joint transforms and morph weights, with named events.");
+				"An animation clip (a glTF's animation sub-asset): keyed joint transforms and morph weights, with named events.")
+			.Entry(AssetType::IrradianceVolume, "IrradianceVolume",
+				"A baked irradiance volume (.irradiance, written by lighting.bake): a grid of probes' SH9 irradiance that an IrradianceVolume component lights with.")
+			.Entry(AssetType::Lut, "Lut", "A colour-grading 3D lookup table (.cube, or a built-in LUT) that a PostProcess applies after its tonemap curve.")
+			.Entry(AssetType::Heightfield, "Heightfield",
+				"A terrain's heightfield (.heightfield): a square grid of at most 1025 x 1025 16-bit height samples that a Terrain lays out.");
 
 		registry.Struct<AssetSummary>("AssetSummary", "An asset's canonical id with its readable path and type.")
 			.Field("id", &AssetSummary::Id, "The asset's handle: 16 lowercase hex digits.")

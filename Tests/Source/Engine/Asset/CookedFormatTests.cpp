@@ -91,6 +91,7 @@ namespace Engine {
 			CHECK(value > std::to_underlying(AssetType::Tilemap));
 			CHECK(value > std::to_underlying(AssetType::StringTable));
 			CHECK(value > std::to_underlying(AssetType::AnimationClip));
+			CHECK(value > std::to_underlying(AssetType::Heightfield));
 			Buffer artifact = WriteCookedArtifact(AssetType::Texture, 1, 1, payload);
 			constexpr size_t TypeOffset = 6; // the little-endian uint16 after the magic and the format version
 			for (const uint16_t unknown : { uint16_t{ 0 }, value, uint16_t{ 0xFFFF } })

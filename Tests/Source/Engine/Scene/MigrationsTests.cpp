@@ -153,6 +153,79 @@ namespace Engine {
 			CHECK(*saved == *golden);
 		}
 
+		// M26 (C26.1, R-AEX, R-LUT, R-TAA, R-SSR; Docs/Decisions/0037-m26-contract.md decision 12, stream X-A): PostProcess
+		// version 2's one migration: the AntiAliasing enum replaces FxaaEnabled (false becomes None, true Fxaa) and the exposure,
+		// LUT and SSR fields arrive with the defaults that render as version 1 did (the manual ExposureEV, no LUT, SSR off); a
+		// version 1 component loads through it and saves as the upgraded fixture.
+		TEST_CASE("Migrations: PostProcessV1 fixture upgrades to version 2" * doctest::skip(true))
+		{
+			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Scene/PostProcessV1.scene");
+			const Result<std::string> golden = Test::ReadTestDataText("Formats/Scene/PostProcessV1.upgraded.scene");
+			REQUIRE(legacy.has_value());
+			REQUIRE(golden.has_value());
+
+			Test::SceneTestFixture setup;
+			LoadReport report;
+			const Status loaded = SceneSerializer::LoadFromString(setup.GetScene(), *legacy, LoadOptions{}, report);
+			REQUIRE_MESSAGE(loaded.has_value(), (loaded ? std::string() : loaded.error().ToString()));
+			CHECK(report.FileVersion == 1);
+			CHECK(report.Migrated);
+
+			const Result<std::string> saved = SceneSerializer::SaveToString(setup.GetScene());
+			REQUIRE(saved.has_value());
+			CHECK(*saved == *golden);
+		}
+
+		// M26 (C26.1's review; Docs/Decisions/0037-m26-contract.md decision 12, stream X-A): the prefab overrides that target a
+		// PostProcess migrated from version 1 follow it, as M20's Script overrides do: a Field override of FxaaEnabled becomes
+		// one of AntiAliasing with its value mapped (false None, true Fxaa), another field's override stays, and an
+		// AddComponent override's value migrates as the component does. Otherwise an instance's FXAA override would be
+		// dropped as stale and the instance render with FXAA. (Two PostProcess components in one document only exercise the
+		// migration, which never checks UniquePerScene.)
+		TEST_CASE("Migrations: prefab overrides of a version 1 PostProcess follow it to version 2" * doctest::skip(true))
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Looks", "Seed": 0,
+				"ComponentVersions": { "Prefab": 2, "PrefabLink": 1, "PostProcess": 1 },
+				"Entities": [ { "ID": "5e00000000000001", "Name": "Look", "Parent": null, "Active": true, "Tags": [],
+				                "Components": {
+				                  "Prefab": { "Prefab": "11d04163305d2e9f", "Overrides": [
+				                    { "Path": ["55425a047af78945"], "Kind": "Field", "Component": "PostProcess", "Field": "FxaaEnabled", "Value": false },
+				                    { "Path": ["55425a047af78946"], "Kind": "Field", "Component": "PostProcess", "Field": "FxaaEnabled", "Value": true },
+				                    { "Path": ["55425a047af78945"], "Kind": "Field", "Component": "PostProcess", "Field": "ExposureEV", "Value": 2 },
+				                    { "Path": ["55425a047af78947"], "Kind": "AddComponent", "Component": "PostProcess", "Field": "",
+				                      "Value": { "ExposureEV": 0, "Tonemap": "AgX", "SsaoEnabled": false, "SsaoRadius": 0.5, "SsaoIntensity": 1,
+				                                 "SsaoQuality": "Medium", "BloomEnabled": true, "BloomIntensity": 0.04, "FxaaEnabled": false } } ] },
+				                  "PrefabLink": { "PrefabEntityID": "55425a047af78945", "InstanceRoot": "5e00000000000001", "OuterPrefabEntityID": null },
+				                  "PostProcess": { "ExposureEV": 2, "Tonemap": "AgX", "SsaoEnabled": false, "SsaoRadius": 0.5, "SsaoIntensity": 1,
+				                                   "SsaoQuality": "Medium", "BloomEnabled": true, "BloomIntensity": 0.04, "FxaaEnabled": false } } } ] })");
+			LoadReport report;
+			const Status upgraded = Migrations::UpgradeDocument(document, DocumentKind::Scene, *registry, report);
+			REQUIRE_MESSAGE(upgraded.has_value(), (upgraded ? std::string() : upgraded.error().ToString()));
+			// The member `key` of `object`, or null when it has none (so a failed check never reads a missing member).
+			const auto memberOf = [](const Json& object, const std::string& key)
+			{
+				const auto found = object.find(key);
+				return found == object.end() ? Json() : *found;
+			};
+			CHECK(memberOf(document["ComponentVersions"], "PostProcess") == Json(2));
+			const Json& component = document["Entities"][0]["Components"]["PostProcess"];
+			CHECK_FALSE(component.contains("FxaaEnabled"));
+			CHECK(memberOf(component, "AntiAliasing") == Json("None"));
+			const Json& overrides = document["Entities"][0]["Components"]["Prefab"]["Overrides"];
+			REQUIRE(overrides.size() == 4);
+			CHECK(memberOf(overrides[0], "Field") == Json("AntiAliasing"));
+			CHECK(memberOf(overrides[0], "Value") == Json("None"));
+			CHECK(memberOf(overrides[1], "Field") == Json("AntiAliasing"));
+			CHECK(memberOf(overrides[1], "Value") == Json("Fxaa"));
+			CHECK(memberOf(overrides[2], "Field") == Json("ExposureEV"));
+			CHECK(memberOf(overrides[2], "Value") == Json(2));
+			const Json added = memberOf(overrides[3], "Value");
+			CHECK_FALSE(added.contains("FxaaEnabled"));
+			CHECK(memberOf(added, "AntiAliasing") == Json("None"));
+			CHECK(memberOf(added, "BloomIntensity") == Json(0.04));
+		}
+
 		// The Script overrides follow only the upgrade of the Script component itself: a document whose Script component is
 		// at version 2 keeps its overrides as they are, whatever their Field.
 		TEST_CASE("Migrations: prefab overrides of a current Script component are not rewritten")

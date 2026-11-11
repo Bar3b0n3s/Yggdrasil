@@ -574,7 +574,7 @@ namespace Engine {
 				.Function("Entity", Utils::FieldConstructor<FieldType::EntityRef>, "() -> FieldDescriptor", "Declare an Entity reference with a null default.", pure)
 				.Function("Asset", Utils::FieldConstructor<FieldType::AssetRef>, "(type: string) -> FieldDescriptor",
 					"Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for "
-					"imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, StringTable, Skeleton or AnimationClip), with a null "
+					"imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, StringTable, Skeleton, AnimationClip, IrradianceVolume, Lut or Heightfield), with a null "
 					"default; any other name fails the import.",
 					pure)
 				.Function("Enum", Utils::FieldConstructor<FieldType::Enum>, "(values: {string}, default: string?) -> FieldDescriptor", "Declare ordered unique string choices; the omitted default is the first choice.", pure)

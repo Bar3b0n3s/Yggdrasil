@@ -56,7 +56,7 @@ namespace Engine {
 		// on the tested pixels.
 		PostProcessSettings MakeLinearPost()
 		{
-			return PostProcessSettings{ .ExposureEV = 0.0f, .Tonemap = RenderTonemapper::Linear, .BloomEnabled = false, .FxaaEnabled = false };
+			return PostProcessSettings{ .ExposureEV = 0.0f, .Tonemap = RenderTonemapper::Linear, .BloomEnabled = false, .AntiAliasing = RenderAntiAliasing::None };
 		}
 
 		// A perspective camera at (0, 0, 5) looking down -Z at the unit cube, whose +Z face fills the centre of the view, lit
@@ -1104,7 +1104,7 @@ namespace Engine {
 					.SsaoEnabled = true,
 					.BloomEnabled = true,
 					.BloomIntensity = 1.0f,
-					.FxaaEnabled = true };
+					.AntiAliasing = RenderAntiAliasing::Fxaa };
 				snapshot.Output.PixelArt = true;
 				const Image pixelArt = RenderToImage(gpu.GetDevice(), **renderer, snapshot);
 				const std::vector<std::string> pixelArtPasses = GetPassNames((*renderer)->GetRenderStats());
@@ -1425,7 +1425,8 @@ namespace Engine {
 			auto snapshot = fixture.Snapshot();
 			snapshot.DebugView = RenderDebugView::ShadowCascades;
 			snapshot.Post.ExposureEV = 9;
-			snapshot.Post.BloomEnabled = snapshot.Post.FxaaEnabled = true;
+			snapshot.Post.BloomEnabled = true;
+			snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 			LightData light;
 			light.CastShadows = true;
 			light.CascadeCount = 2;
@@ -1734,7 +1735,7 @@ namespace Engine {
 			RenderSnapshot snapshot = fixture.Snapshot();
 			snapshot.Post.SsaoEnabled = true;
 			snapshot.Post.BloomEnabled = true;
-			snapshot.Post.FxaaEnabled = true;
+			snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 			snapshot.Flags = RenderViewFlags::EditorOverlays | RenderViewFlags::Selection;
 			snapshot.SelectedEntities = { UUID(900) };
 			snapshot.DebugDraw.AddLine({ -1, 0, -2 }, { 1, 0, -2 }, { 1, 0, 0, 1 });

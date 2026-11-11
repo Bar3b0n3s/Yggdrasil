@@ -135,6 +135,30 @@ namespace Engine {
 					circle({ 0.5f, 0.5f }, 0.04f);
 					circle({ 0.85f, 0.25f }, 0.04f);
 					break;
+				case EditorIcon::IrradianceVolume:
+					// A box with a probe sphere at four of its grid points: a baked irradiance volume.
+					path({ { 0.15f, 0.15f }, { 0.85f, 0.15f }, { 0.85f, 0.85f }, { 0.15f, 0.85f }, { 0.15f, 0.15f } });
+					circle({ 0.35f, 0.35f }, 0.08f);
+					circle({ 0.65f, 0.35f }, 0.08f);
+					circle({ 0.35f, 0.65f }, 0.08f);
+					circle({ 0.65f, 0.65f }, 0.08f);
+					break;
+				case EditorIcon::Lut:
+					// A cube seen at a corner, its front face cut into a two by two grid of cells: a 3D lookup table.
+					path({ { 0.15f, 0.35f }, { 0.65f, 0.35f }, { 0.65f, 0.85f }, { 0.15f, 0.85f }, { 0.15f, 0.35f } });
+					path({ { 0.15f, 0.35f }, { 0.35f, 0.15f }, { 0.85f, 0.15f }, { 0.65f, 0.35f } });
+					path({ { 0.85f, 0.15f }, { 0.85f, 0.65f }, { 0.65f, 0.85f } });
+					path({ { 0.4f, 0.35f }, { 0.4f, 0.85f } });
+					path({ { 0.15f, 0.6f }, { 0.65f, 0.6f } });
+					break;
+				case EditorIcon::Heightfield:
+					// A ridge of two hills over a ground line, with the grid's posts below it: a terrain's heightfield.
+					path({ { 0.1f, 0.85f }, { 0.9f, 0.85f } });
+					path({ { 0.1f, 0.7f }, { 0.3f, 0.35f }, { 0.48f, 0.55f }, { 0.68f, 0.2f }, { 0.9f, 0.6f } });
+					path({ { 0.3f, 0.35f }, { 0.3f, 0.85f } });
+					path({ { 0.48f, 0.55f }, { 0.48f, 0.85f } });
+					path({ { 0.68f, 0.2f }, { 0.68f, 0.85f } });
+					break;
 			}
 			return segments;
 		}
@@ -157,22 +181,25 @@ namespace Engine {
 	{
 		switch (type)
 		{
-			case AssetType::None:          return EditorIcon::Folder;
-			case AssetType::Scene:         return EditorIcon::Scene;
-			case AssetType::Prefab:        return EditorIcon::Prefab;
-			case AssetType::Mesh:          return EditorIcon::Mesh;
-			case AssetType::Material:      return EditorIcon::Material;
-			case AssetType::Texture:       return EditorIcon::Texture;
-			case AssetType::Environment:   return EditorIcon::Environment;
-			case AssetType::AudioClip:     return EditorIcon::Audio;
-			case AssetType::Script:        return EditorIcon::Script;
-			case AssetType::Font:          return EditorIcon::Font;
-			case AssetType::Replay:        return EditorIcon::Replay;
-			case AssetType::SpriteSheet:   return EditorIcon::SpriteSheet;
-			case AssetType::Tilemap:       return EditorIcon::Tilemap;
-			case AssetType::StringTable:   return EditorIcon::StringTable;
-			case AssetType::Skeleton:      return EditorIcon::Skeleton;
-			case AssetType::AnimationClip: return EditorIcon::AnimationClip;
+			case AssetType::None:             return EditorIcon::Folder;
+			case AssetType::Scene:            return EditorIcon::Scene;
+			case AssetType::Prefab:           return EditorIcon::Prefab;
+			case AssetType::Mesh:             return EditorIcon::Mesh;
+			case AssetType::Material:         return EditorIcon::Material;
+			case AssetType::Texture:          return EditorIcon::Texture;
+			case AssetType::Environment:      return EditorIcon::Environment;
+			case AssetType::AudioClip:        return EditorIcon::Audio;
+			case AssetType::Script:           return EditorIcon::Script;
+			case AssetType::Font:             return EditorIcon::Font;
+			case AssetType::Replay:           return EditorIcon::Replay;
+			case AssetType::SpriteSheet:      return EditorIcon::SpriteSheet;
+			case AssetType::Tilemap:          return EditorIcon::Tilemap;
+			case AssetType::StringTable:      return EditorIcon::StringTable;
+			case AssetType::Skeleton:         return EditorIcon::Skeleton;
+			case AssetType::AnimationClip:    return EditorIcon::AnimationClip;
+			case AssetType::IrradianceVolume: return EditorIcon::IrradianceVolume;
+			case AssetType::Lut:              return EditorIcon::Lut;
+			case AssetType::Heightfield:      return EditorIcon::Heightfield;
 		}
 		return EditorIcon::Folder;
 	}

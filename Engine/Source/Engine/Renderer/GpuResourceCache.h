@@ -126,6 +126,39 @@ namespace Engine {
 		uint64_t Version = 0;
 	};
 
+	// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16, stream Q-B): an irradiance volume's GPU mirror
+	// (Asset/IrradianceVolumeData.h): its probes' SH9 coefficients as a structured buffer of CountX * CountY * CountZ * 9
+	// float4 (xyz the coefficient, w 0), probes in the asset's order, which Common/Probes.slang reads trilinearly.
+	struct GpuIrradianceVolume
+	{
+		nvrhi::BufferHandle Probes{};
+		uint32_t CountX = 0;
+		uint32_t CountY = 0;
+		uint32_t CountZ = 0;
+		uint64_t Version = 0;
+	};
+
+	// M26 (C26.1, R-LUT; decision 15, stream X-B): a LUT's GPU mirror: its table as a Size^3 3D texture, RGBA16_FLOAT (rgb
+	// the entry, a 1), ShaderResource, with the domain the tonemap pass maps its input through.
+	struct GpuLut
+	{
+		nvrhi::TextureHandle Texture{};
+		uint32_t Size = 0;
+		glm::vec3 DomainMin{ 0.0f };
+		glm::vec3 DomainMax{ 1.0f };
+		uint64_t Version = 0;
+	};
+
+	// M26 (C26.1, C-TERR; decision 22, stream T-C): a heightfield's GPU mirror: its samples as a Resolution^2 R16_UNORM
+	// texture (sample / 65535, so a shader's height is the texel times HeightScale), ShaderResource, which the terrain's
+	// vertex shaders read per chunk vertex (Renderer/TerrainLod.h).
+	struct GpuHeightfield
+	{
+		nvrhi::TextureHandle Heights{};
+		uint32_t Resolution = 0;
+		uint64_t Version = 0;
+	};
+
 	struct GpuResourceCacheStats
 	{
 		size_t MeshCount = 0; // live mirrors, placeholders included
@@ -134,6 +167,12 @@ namespace Engine {
 		// M8 additions.
 		size_t MaterialCount = 0;
 		size_t EnvironmentCount = 0;
+		// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decisions 15, 16 and 22): the live mirrors of M26's types, so the
+		// cache tests can show CollectStale, TrimUnused and a scene unload releasing them; each is 0 until its Get's stream
+		// (Q-B, X-B, T-C) keeps mirrors and counts them in GetStats.
+		size_t IrradianceVolumeCount = 0;
+		size_t LutCount = 0;
+		size_t HeightfieldCount = 0;
 	};
 
 	// Owns every asset GPU mirror (§8.14 item 1), keyed by (handle, version): a hot reload bumps the asset's version, the
@@ -197,6 +236,18 @@ namespace Engine {
 		// AssetUploadFailedCode for an upload failure; each is logged once (Error) by the manager. The pointer stays valid
 		// until the next call that uploads, CollectStale or Clear.
 		[[nodiscard]] const GpuEnvironment* GetEnvironment(AssetHandle handle);
+
+		// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decisions 15, 16 and 22): the mirrors of M26's asset types, each as
+		// GetEnvironment: the mirror of `handle` at its current version, or nullptr for a null handle or an asset that cannot be
+		// loaded (none of the three has a placeholder: an irradiance volume that fails lights with the Environment, a LUT that
+		// fails grades nothing, a heightfield that fails draws no terrain) or uploaded, each failure reported once per (handle,
+		// version) through AssetManager::ReportDiagnostic with GetOrPlaceholder's codes. The pointer stays valid until the next
+		// call that uploads, CollectStale, Clear, ReleaseGpuObjects or TrimUnused, which release these mirrors with the others
+		// (the placement rule's place 3, so a device loss drops them and the next Get uploads them again). GetIrradianceVolume
+		// is stream Q-B's, GetLut stream X-B's and GetHeightfield stream T-C's; until then each returns nullptr.
+		[[nodiscard]] const GpuIrradianceVolume* GetIrradianceVolume(AssetHandle handle);
+		[[nodiscard]] const GpuLut* GetLut(AssetHandle handle);
+		[[nodiscard]] const GpuHeightfield* GetHeightfield(AssetHandle handle);
 
 		// Releases mirrors (meshes, textures, materials, environments) whose version is older than their asset's current
 		// version, and those not used through Get since the previous CollectStale when `releaseUnused` is true (scene unload:

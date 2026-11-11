@@ -1077,4 +1077,24 @@ namespace Engine {
 		};
 	}
 
+	// M26 (C26.1): the mirrors of M26's asset types (GpuResourceCache.h), contract stubs of Docs/Decisions/0037-m26-contract.md
+	// decisions 15, 16 and 22, implemented by streams Q-B, X-B and T-C: until then no volume, LUT or heightfield is uploaded.
+	const GpuIrradianceVolume* GpuResourceCache::GetIrradianceVolume(AssetHandle /*handle*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	const GpuLut* GpuResourceCache::GetLut(AssetHandle /*handle*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
+	const GpuHeightfield* GpuResourceCache::GetHeightfield(AssetHandle /*handle*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
+	}
+
 }
