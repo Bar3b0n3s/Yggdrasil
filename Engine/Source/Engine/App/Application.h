@@ -93,6 +93,11 @@ namespace Engine {
 		// imgui.ini while no project is open, relative to the user-data folder (user://, §8.11): the editor's
 		// "Editor/imgui.ini". Run resolves it to the native path under ProcessContext's user-data root. Empty: no ini file.
 		std::string ImGuiIniPath{};
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 18; stream V): ask the ImGuiLayer for
+		// Dear ImGui's platform windows (ImGuiLayerSpecification::PlatformWindows), which it turns on only on Windows in a
+		// windowed process; the frame then draws them after the main window's submission (ImGuiLayer::RenderPlatformWindows).
+		// The editor sets it from the user's PlatformWindows preference; the Runtime never does.
+		bool ImGuiPlatformWindows = false;
 #endif
 		// M7: the exported game's Engine.pak (EngineContextSpecification::EnginePak): mounted as engine:// instead of
 		// EngineResourcesDirectory, and its Shaders/ are the ShaderLibrary's root in every configuration, so an exported game

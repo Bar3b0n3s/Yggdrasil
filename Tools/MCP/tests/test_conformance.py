@@ -237,6 +237,41 @@ class ConformanceTests(unittest.TestCase):
         # The attached editor's project is unknown (launcher state), so nothing reached a transcript.
         self.assertFalse((self.directory / "BuildLog.jsonl").exists())
 
+    @unittest.skip("contract stub: Docs/Decisions/0035-m24-contract.md decision 12, stream G-C")
+    def test_sdk_client_builds_a_graph_behaviour_through_the_graph_tools_alone(self) -> None:
+        # Roadmap M24's "an agent builds a graph through MCP only" (Docs/Decisions/0035-m24-contract.md decision 12): a
+        # behaviour graph made, read and played through the bridge's tools, with no engine_call and no file written by
+        # hand.
+        graph = "Assets/Scripts/Counter.graph"
+        number = {"Kind": "Number", "Element": "Number", "AssetType": "", "EnumValues": []}
+        kinds = ["Event.OnFixedUpdate", "Self.Get.Count", "Self.Get.Step", "Number.Add", "Self.Set.Count"]
+        links = [((1, "Then"), (5, "In")), ((2, "Value"), (4, "A")), ((3, "Value"), (4, "B")),
+                 ((4, "Result"), (5, "Value"))]
+        results = self.run_session([
+            ("editor_launch", {"project": str(self.directory / "Game"), "create": True, "template": "Empty"}),
+            ("scene_new", {"path": "Assets/Scenes/Main.scene"}),
+            ("graph_create", {"path": graph}),
+            ("graph_set_members", {"graph": graph, "fields": [{"Name": "Step", "Default": 2, "Options": {}, **number}],
+                                   "variables": [{"Name": "Count", "Default": 0, **number}]}),
+            *[("graph_add_node", {"graph": graph, "kind": kind}) for kind in kinds],
+            *[("graph_connect", {"graph": graph, "from": {"Node": source[0], "Pin": source[1]},
+                                 "to": {"Node": target[0], "Pin": target[1]}}) for source, target in links],
+            ("graph_read", {"graph": graph}),
+            ("entity_create", {"name": "Counter", "components": {
+                "Script": {"Scripts": [{"Script": graph, "Fields": {}, "ExecutionOrder": 0}]}}}),
+            ("play_start", {"lockstep": True}),
+            ("play_step", {"ticks": 3}),
+            ("script_eval", {"context": "play", "entity": "/Counter", "code": "return self.Count"}),
+        ])
+        for result in results:
+            self.assertFalse(result["isError"], result["text"])
+        added = [result["structuredContent"]["node"] for result in results[4:4 + len(kinds)]]
+        self.assertEqual(added, [1, 2, 3, 4, 5])
+        read = results[4 + len(kinds) + len(links)]["structuredContent"]
+        self.assertEqual(read["diagnostics"], [])
+        self.assertEqual(len(read["document"]["Links"]), len(links))
+        self.assertEqual(results[-1]["structuredContent"]["value"], 6)
+
     def bridge_environment(self, environment: dict[str, str] | None, count_coverage: bool = True) -> dict[str, str]:
         """The bridge's settings from this process's environment, then `environment` over them. Without
         `count_coverage` the bridge records no method coverage (calls a stand-in server answers prove nothing about the

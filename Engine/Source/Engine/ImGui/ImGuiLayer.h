@@ -12,14 +12,17 @@
 
 // Dear ImGui for an application (Architecture §8.11): the context, the vendored GLFW platform backend
 // (ImGui_ImplGlfw_InitForVulkan, compiled in ImGui/ImGuiGlfwImplementation.cpp), the NVRHI renderer (ImGuiRenderer) and
-// the imgui.ini location. Docking is on, multi-viewport off. Headless processes run on GLFW's null platform, where the
-// vendored backend cannot initialize (on Windows it asserts that the window has an HWND to subclass), so there the layer
-// is the platform backend itself: the display size and framebuffer scale from the window each frame and GLFW's in-memory
-// clipboard (ImGui/ImGuiLayer.cpp). The full editor UI therefore renders offscreen there (editor.screenshot, §8.13, §13.9).
+// the imgui.ini location. Docking is on; multi-viewport (platform windows) only where the specification asks for it and
+// CheckPlatformWindowSupport allows it (M24; ImGuiLayerSpecification::PlatformWindows). Headless processes run on GLFW's
+// null platform, where the vendored backend cannot initialize (on Windows it asserts that the window has an HWND to
+// subclass), so there the layer is the platform backend itself: the display size and framebuffer scale from the window
+// each frame and GLFW's in-memory clipboard (ImGui/ImGuiLayer.cpp). The full editor UI therefore renders offscreen there
+// (editor.screenshot, §8.13, §13.9).
 
 namespace Engine {
 
 	class GraphicsDevice;
+	class ImGuiPlatformWindows;
 	class ImGuiRenderer;
 	class PipelineFactory;
 	class Window;
@@ -32,6 +35,13 @@ namespace Engine {
 		std::filesystem::path IniFilePath{};
 		// GraphicsSpecification::FramesInFlight, for the renderer.
 		uint32_t FramesInFlight = 2;
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 18; stream V): Dear ImGui's platform
+		// windows, panels undocked into OS windows of their own. Create sets ImGuiConfigFlags_ViewportsEnable and creates the
+		// ImGuiPlatformWindows (ImGui/ImGuiPlatformWindows.h) only when this is set, the GLFW backend is in use and
+		// CheckPlatformWindowSupport (Platform/PlatformWindowSupport.h) allows them; otherwise the flag stays cleared, as before
+		// M24, and GetPlatformWindowSupport says why. The editor sets it from the user's PlatformWindows preference
+		// (ApplicationSpecification::ImGuiPlatformWindows); the Runtime's overlay never does.
+		bool PlatformWindows = false;
 	};
 
 	// One per process at a time (Dear ImGui's current context is global; Create fails while a context exists). Not copyable
@@ -103,6 +113,20 @@ namespace Engine {
 		[[nodiscard]] ImGuiRenderer& GetRenderer();
 		// The draw data of the last EndFrame; nullptr before the first.
 		[[nodiscard]] ImDrawData* GetDrawData() const;
+
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 18; stream V). EndFrame also calls
+		// ImGui::UpdatePlatformWindows when platform windows are on, and EndInterruptedFrame leaves the platform windows as they
+		// are (their targets are the recreation protocol's).
+		// Ok when platform windows are on. Errors: InvalidState when the specification did not ask for them; Unsupported from
+		// CheckPlatformWindowSupport (Linux and macOS, a headless process); those of ImGuiPlatformWindows::Create, which leave
+		// them off.
+		[[nodiscard]] Status GetPlatformWindowSupport() const;
+		// ImGuiPlatformWindows::Render for this frame; Ok, doing nothing, when platform windows are off. Application calls it
+		// after the main window's submission and before FramePacer::EndFrame, on every frame that rendered the UI. Errors: those
+		// of ImGuiPlatformWindows::Render, which the Application treats as ImGuiLayer::Render's.
+		[[nodiscard]] Status RenderPlatformWindows(uint32_t frameSlot);
+		// The platform windows; nullptr when they are off.
+		[[nodiscard]] ImGuiPlatformWindows* GetPlatformWindows();
 	private:
 		// GLFW's null platform (headless processes): the layer is the platform backend itself (see ImGuiLayer.cpp).
 		void InstallNullPlatform();
@@ -114,10 +138,11 @@ namespace Engine {
 		std::filesystem::path m_IniFilePath;
 		std::string m_IniFileName; // m_IniFilePath as UTF-8: the storage io.IniFilename points at
 		Scope<ImGuiRenderer> m_Renderer;
-		Window* m_Window = nullptr;        // documented back-reference
-		ImGuiContext* m_Context = nullptr; // created by Create, destroyed by the destructor
-		bool m_UsesGlfwBackend = false;    // the vendored GLFW backend is initialized (native platforms)
-		bool m_UsesNullPlatform = false;   // InstallNullPlatform ran (GLFW's null platform)
+		Scope<ImGuiPlatformWindows> m_PlatformWindows; // M24: with platform windows on, created after the renderer
+		Window* m_Window = nullptr;                    // documented back-reference
+		ImGuiContext* m_Context = nullptr;             // created by Create, destroyed by the destructor
+		bool m_UsesGlfwBackend = false;                // the vendored GLFW backend is initialized (native platforms)
+		bool m_UsesNullPlatform = false;               // InstallNullPlatform ran (GLFW's null platform)
 	};
 
 }

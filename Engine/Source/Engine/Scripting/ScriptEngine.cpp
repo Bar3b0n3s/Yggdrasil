@@ -657,4 +657,10 @@ namespace Engine {
 		return m_State->TestHost;
 	}
 
+	Result<ScriptInstanceValues> ScriptEngine::ReadInstanceValues(UUID /*entity*/, uint32_t /*slot*/) const
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "ScriptEngine::ReadInstanceValues (Docs/Decisions/0035-m24-contract.md decision 14, stream B)");
+	}
+
 }

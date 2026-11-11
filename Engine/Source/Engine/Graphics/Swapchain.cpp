@@ -186,6 +186,13 @@ namespace Engine {
 		DestroySurface();
 	}
 
+	Result<Scope<Swapchain>> Swapchain::CreateForNativeWindow(GraphicsDevice& /*device*/, void* /*nativeWindow*/,
+		const SwapchainSpecification& /*specification*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "Swapchain::CreateForNativeWindow (Docs/Decisions/0035-m24-contract.md decision 18, stream V)");
+	}
+
 	Result<Scope<Swapchain>> Swapchain::Create(GraphicsDevice& device, Window& window, const SwapchainSpecification& specification)
 	{
 		ENGINE_CORE_VERIFY(specification.FramesInFlight >= 1, "Swapchain needs at least one frame in flight");

@@ -20,6 +20,11 @@ namespace Engine {
 		// export a game's native module (NativeModuleHost). Changed only by the Native panel's checkbox; no automation method
 		// writes it. Every writer of the file reads it first and writes it back as read.
 		bool AllowNativeCode = false;
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 20; stream V): "PlatformWindows", whether
+		// panels may be undocked into OS windows of their own (ApplicationSpecification::ImGuiPlatformWindows), read when the
+		// editor starts, so a change takes effect at the next start. On by default; it has an effect only on Windows in a windowed
+		// editor. Presentation, so no automation method writes it (decision 20); the View menu's checkbox does.
+		bool PlatformWindows = true;
 		std::string ExternalEditorExecutable{};
 		// Individual argv entries. {path} and {line} substituted without a shell.
 		std::vector<std::string> ExternalEditorArguments{};

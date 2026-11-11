@@ -18,6 +18,8 @@
 
 namespace Engine {
 
+	class VfsPath;
+
 	// Classification is by the returned value's authenticated load-time registration, never by the filename or table shape.
 	enum class ScriptKind : uint8_t
 	{
@@ -97,6 +99,23 @@ namespace Engine {
 		std::vector<ScriptRequire> Requires{};
 		ScriptSourceMap SourceMap{};
 	};
+
+	// Whether `name` is reserved for a behaviour's own members, so no script field may take it: "Entity", "Fields", every
+	// lifecycle callback's name (appended in landing order, ADR 0028's ledgers) and any name starting with "__". A graph's
+	// fields and variables, which become instance members, follow the same rule (M24, C24.1;
+	// Docs/Decisions/0035-m24-contract.md decision 4). Pure.
+	[[nodiscard]] bool IsReservedScriptFieldName(std::string_view name);
+
+	// The script source rule (M24, C24.1; Docs/Decisions/0035-m24-contract.md decision 9; stream G-B): whether `path` names a
+	// script's origin, a project:// path below "Assets/" whose extension is ".luau" (a Luau source, ScriptImporter's) or ".graph"
+	// (a visual-scripting graph, GraphImporter's, whose cooked script is its transpiled Luau text under the .graph path).
+	// Every site that accepts a script's origin uses it, so a graph's script extracts, type-checks, instantiates, caches as a
+	// module and hot-reloads as a .luau one does: LoadTimeVm::Extract's request, Sandbox::RunModule's module rule, the module
+	// path of RequireResolver::Resolve's importer and of EnterModule (which every behaviour instance enters), hot reload's
+	// candidates and staged values (BeginReload, StageReload), ScriptTypeChecker::CheckScript's request and project.validate's
+	// Scene scope (stream G-D). The module a require request resolves to keeps the .luau rule: no script requires a graph
+	// (decision 23). Pure.
+	[[nodiscard]] bool IsScriptSourcePath(const VfsPath& path);
 
 	// Builds only from engine-compiled bytecode and validated load-time metadata. The complete ECKD Script artifact,
 	// including the schema, resolved require list and source map. Pure; identical inputs produce identical bytes.

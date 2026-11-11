@@ -343,6 +343,17 @@ namespace Engine {
 
 	ScriptFieldSchemaSource::~ScriptFieldSchemaSource() = default;
 
+	bool IsReservedScriptFieldName(std::string_view name)
+	{
+		return Utils::IsReservedScriptField(name);
+	}
+
+	bool IsScriptSourcePath(const VfsPath& /*path*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return false;
+	}
+
 	Result<Buffer> CookScript(const ScriptData& script, uint32_t importerVersion)
 	{
 		ENGINE_TRY(Utils::CheckScriptArtifact(script));

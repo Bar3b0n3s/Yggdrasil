@@ -13,6 +13,7 @@
 #include "Engine/Scripting/ScriptHost.h"
 #include "Engine/Scripting/ScriptTestHost.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -74,6 +75,35 @@ namespace Engine {
 	{
 		bool Deferred = false;
 		std::vector<AssetHandle> Scripts{}; // dependency order: required modules first, then dependent behaviours
+	};
+
+	// M24 (C24.1, Docs/Decisions/0035-m24-contract.md decision 14; stream B): the instance member a graph behaviour's
+	// transpiled text writes its live values into, a table keyed "<node>.<pin>" (AssetPipeline/Graph/GraphTranspiler.h). It
+	// starts with "__", so no script field can take its name (IsReservedScriptFieldName).
+	inline constexpr std::string_view ScriptLiveValuesKey = "__GraphLive";
+	// The most entries ReadInstanceValues returns in each list; the rest are left out and Truncated is set.
+	inline constexpr size_t MaxScriptInstanceValues = 16384;
+
+	// One value of an instance as ReadInstanceValues reads it.
+	struct ScriptInstanceValue
+	{
+		std::string Key{};      // a member's name, or a live-value key
+		std::string TypeName{}; // Luau's type name of the value ("number", "boolean", "string", "vector", "table") or the
+								// engine type's ("Color", "Quat", "Entity", "AssetRef", a component proxy's type)
+		// The value in reflection's JSON spelling (§6): a boolean, a finite number, a string, [x, y, z] for a vector,
+		// [r, g, b, a] for a Color, [x, y, z, w] for a Quat, 16 hex digits for an Entity or an AssetRef; null for a value of
+		// another type (a table, a function, a proxy) and for a non-finite number, whose TypeName still names it.
+		VariantValue Value{};
+
+		bool operator==(const ScriptInstanceValue&) const = default;
+	};
+
+	// One instance's values between frames, for the graph editor's live values (graph.liveValues).
+	struct ScriptInstanceValues
+	{
+		std::vector<ScriptInstanceValue> Members{};    // the instance table's own string-keyed members, byte-wise by Key
+		std::vector<ScriptInstanceValue> LiveValues{}; // the entries of its ScriptLiveValuesKey table, byte-wise by Key
+		bool Truncated = false;                        // a list was cut at MaxScriptInstanceValues
 	};
 
 	// One runtime-scene VM and its instances, tasks, require cache and error stream (§11). Main-thread-only, including
@@ -195,6 +225,16 @@ namespace Engine {
 		// loaded modules and attached behaviours that transitively require it. Unloaded project scripts that require it
 		// (for example test suites) are not part of the chain. Executes no script code and publishes nothing.
 		[[nodiscard]] Result<std::vector<AssetHandle>> GetReloadChain(AssetHandle script);
+		// M24 (C24.1, Docs/Decisions/0035-m24-contract.md decision 14; stream B): the values of the instance (entity, slot), its
+		// own members and its live-value table's entries, read between phases for the editor's live values. It runs no Luau
+		// and allocates nothing in the VM: raw reads only (no metamethod, so a class member behind __index is not listed),
+		// iterating the tables as they are, pushing no new string, table or userdata, so neither the VM's heap nor its
+		// collector's debt changes, every later result of the session is what it would have been without the read, and the
+		// state hash, which instance tables are outside of anyway, is unchanged. A member that is not a string-keyed entry,
+		// and a live-value table that is missing or not a table, contribute nothing. Main thread, never inside a protected
+		// call (a callback, a task, an evaluation). Errors: NotFound when no instance is (entity, slot) (its hint names the
+		// entity's behaviours); InvalidState after Stop and inside a protected call.
+		[[nodiscard]] Result<ScriptInstanceValues> ReadInstanceValues(UUID entity, uint32_t slot) const;
 		// Runs `operation`, host work that executes no Luau (Test.Screenshot's capture; Test.ReloadScript's reimport and type
 		// check), with its time excluded from the callback budget of the protected call it runs in (§11.1, ADR 0022
 		// "Integration"): the watchdog's wall deadline moves later by the time the operation took and the CPU time it used is

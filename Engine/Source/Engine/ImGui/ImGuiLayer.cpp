@@ -5,6 +5,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/PipelineFactory.h"
+#include "Engine/ImGui/ImGuiPlatformWindows.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Window.h"
@@ -231,6 +232,24 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer::GetDrawData with another Dear ImGui context current");
 		// Dear ImGui's draw data is valid from Render (EndFrame) to the next NewFrame; before the first EndFrame it is null.
 		return ImGui::GetDrawData();
+	}
+
+	Status ImGuiLayer::GetPlatformWindowSupport() const
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "ImGuiLayer::GetPlatformWindowSupport (Docs/Decisions/0035-m24-contract.md decision 18, stream V)");
+	}
+
+	Status ImGuiLayer::RenderPlatformWindows(uint32_t /*frameSlot*/)
+	{
+		ENGINE_CONTRACT_STUB();
+		return MakeError(ErrorCode::Unsupported, "ImGuiLayer::RenderPlatformWindows (Docs/Decisions/0035-m24-contract.md decision 18, stream V)");
+	}
+
+	ImGuiPlatformWindows* ImGuiLayer::GetPlatformWindows()
+	{
+		ENGINE_CONTRACT_STUB();
+		return nullptr;
 	}
 
 	void ImGuiLayer::InstallNullPlatform()

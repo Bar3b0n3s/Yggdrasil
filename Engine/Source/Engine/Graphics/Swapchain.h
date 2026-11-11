@@ -106,6 +106,15 @@ namespace Engine {
 		// or the graphics queue family cannot present to it; Gpu for a failed Vulkan call or image wrapping.
 		[[nodiscard]] static Result<Scope<Swapchain>> Create(GraphicsDevice& device, Window& window, const SwapchainSpecification& specification);
 
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decision 18; stream V): Create for a GLFW window that is
+		// not an engine Window, a Dear ImGui platform window the vendored GLFW backend made (`nativeWindow`, a GLFWwindow*,
+		// ImGuiViewport::PlatformHandle): the swapchain reads the framebuffer size and the iconified state from GLFW itself where
+		// Create reads them from the Window, and behaves as Create's otherwise (its surface on the device's instance, the
+		// presentation check, every recreation rule). The window must outlive the swapchain. Errors: as Create's;
+		// InvalidArgument for a null window.
+		[[nodiscard]] static Result<Scope<Swapchain>> CreateForNativeWindow(GraphicsDevice& device, void* nativeWindow,
+			const SwapchainSpecification& specification);
+
 		// Acquires the next image for frame slot `frameSlot` (FramePacer::GetFrameSlot). First, when the window's
 		// framebuffer size differs from the swapchain's (a resize) or a recreation is pending, recreates the swapchain
 		// (GraphicsDevice::WaitForIdle first) and returns Skipped; a minimized window (Window::IsMinimized: iconified, or a
