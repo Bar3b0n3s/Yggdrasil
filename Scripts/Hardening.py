@@ -172,11 +172,16 @@ STEP_NAMES = {
     "fuzz": "fuzz Release (ASan)",
 }
 # Seconds per step (ADR 0024 decision 19's TIMEOUTS as amended at integration: perf 1200 s, the ASan build 7200 s, every
-# other step 3600 s). The fuzz step's timeout follows its measured per-target costs and the shard count that runs
-# (hardening.fuzz_timeout_seconds; ADR 0028 decision 16, T-FUZZMODEL), within its budget of 5,400 s per 35 targets
-# (hardening.fuzz_budget_seconds). Measured on the 24-thread workstation: perf 3 min, soak 16 min, ASan build 20 min
-# from scratch and 2 min incremental, ASan unit 21 min, ASan feature 1 min, fuzz 52 min (M17: 55 min at 18 shards).
-TIMEOUTS = {"perf": 1200.0, "soak": 3600.0, "asan-generate": 3600.0, "asan-build": 7200.0, "asan-unit": 3600.0,
+# other step 3600 s; M18's debug-heap step 7200 s, Docs/Decisions/0029-m18-contract.md decision 37; the soak 6000 s
+# since phase 3's reservation ledger, Docs/Decisions/0028-backlog-program.md, which estimates phase 3's soak at about 82
+# subjects in about 3,400 s from phase 2's measured 41 s a subject, so more than a third of it stays spare). The fuzz
+# step's timeout follows its measured per-target costs and the shard count that runs (hardening.fuzz_timeout_seconds;
+# ADR 0028 decision 16, T-FUZZMODEL), within its budget of 5,400 s per 35 targets (hardening.fuzz_budget_seconds).
+# Measured on the 24-thread workstation: perf 3 min, soak 16 min, ASan build 20 min from scratch and 2 min incremental,
+# ASan unit 21 min, ASan feature 1 min, fuzz 52 min (M17: 55 min at 18 shards); at phase 2's hardened gate (M23,
+# 2026-11-11): perf 4 min, soak 44 min (65 subjects), ASan build 6 min, ASan unit 39 min, ASan feature 2 min, debug heap
+# 31 min, fuzz 70 min (46 targets at 18 shards).
+TIMEOUTS = {"perf": 1200.0, "soak": 6000.0, "asan-generate": 3600.0, "asan-build": 7200.0, "asan-unit": 3600.0,
             "asan-feature": 3600.0, "debug-heap": 7200.0}
 # What the sanitized suites' and the debug-heap step's Test.py runs get beyond their own --timeout, to write their
 # reports after it.

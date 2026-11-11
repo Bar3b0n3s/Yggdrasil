@@ -340,9 +340,10 @@ class FuzzTests(unittest.TestCase):
                          sum(hardening_script.TIMEOUTS.values()) + 3 * 60.0 + hardening.fuzz_budget_seconds(35))
         bound = ci_script.TIMEOUTS["hardening"]
         self.assertGreater(bound, hardening_script.longest_run_seconds(len(hardening.read_fuzz_targets())))
-        # The limit the documents state (ADR 0028 decision 16, CI.py's TIMEOUTS): up to 49 targets fit, 50 do not.
-        self.assertGreater(bound, hardening_script.longest_run_seconds(49))
-        self.assertLessEqual(bound, hardening_script.longest_run_seconds(50))
+        # The limit the documents state (ADR 0028 decision 16 and its phase-3 ledger, CI.py's TIMEOUTS): up to 56
+        # targets fit, phase 3's 50 and six more, and 57 do not.
+        self.assertGreater(bound, hardening_script.longest_run_seconds(56))
+        self.assertLessEqual(bound, hardening_script.longest_run_seconds(57))
 
     def test_the_fuzz_step_refuses_to_start_without_the_memory_its_budget_needs(self) -> None:
         # 11 GiB available on a 24-CPU machine gives 11 shards, below the 14 the 5,400 s budget needs without a
@@ -1480,7 +1481,7 @@ class SoakDeadlineTests(unittest.TestCase):
                          ["FeatureTest:A.scene", "FeatureTest:B.scene"])
         step = hardening_script.soak_step("soak Release", outcome, 1100.0, None, report, junit)
         self.assertEqual(step.status, Status.TIMEOUT)
-        self.assertIn("did not finish within 3600 s", step.detail)
+        self.assertIn(f"did not finish within {hardening_script.TIMEOUTS['soak']:.0f} s", step.detail)
         self.assertEqual(step.data["notRun"], ["Runtime:FeatureTest"])
 
     def test_the_reports_are_written_when_a_subject_raises(self) -> None:
@@ -1634,7 +1635,8 @@ class SoakFramesTests(unittest.TestCase):
         self.assertEqual(hardening_script.soak_timeout(hardening.SOAK_FRAMES), hardening_script.TIMEOUTS["soak"])
         self.assertEqual(hardening_script.soak_timeout(40_000), 4 * hardening_script.TIMEOUTS["soak"])
         deadline = hardening_script.SoakDeadline(0.0, FakeClock(), hardening_script.soak_timeout(20_000))
-        self.assertIn("7200 s deadline passed after tick 250", deadline.error("after tick 250"))
+        self.assertIn(f"{2 * hardening_script.TIMEOUTS['soak']:.0f} s deadline passed after tick 250",
+                      deadline.error("after tick 250"))
         samples = [hardening.SoakSample(tick / 20_000, 100_000_000, 100_000_000, 10, 5, 0, 1000, 100)
                    for tick in range(0, 20_001, hardening.SOAK_SAMPLE_INTERVAL)]
         subjects = [hardening_script.SoakSubject("FeatureTest:A.scene", "test", lambda limit: (samples, []))]
@@ -1647,7 +1649,7 @@ class SoakFramesTests(unittest.TestCase):
         self.assertIn("over 20000 frames", step.detail)
         outcome.timed_out = True
         step = hardening_script.soak_step("soak Release", outcome, 10.0, None, report, junit, frames=20_000)
-        self.assertIn("did not finish within 7200 s", step.detail)
+        self.assertIn(f"did not finish within {2 * hardening_script.TIMEOUTS['soak']:.0f} s", step.detail)
 
 
 class TestScriptSanitizerTests(unittest.TestCase):

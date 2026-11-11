@@ -240,14 +240,15 @@ TIMEOUTS = {
     "portability": 600.0,
     "clang-cl": 7200.0,
     "runtime-map": 600.0,
-    # Scripts/Hardening.py bounds each of its steps itself (its TIMEOUTS: perf 1200 s, soak 3600 s, asan generate
-    # 3600 s, asan build 7200 s, asan unit 3600 s, asan feature 3600 s, debug heap 7200 s (ADR 0029, R-GPUCRASH),
-    # 30,000 s in all, plus 60 s of grace for each sanitized suite and for the debug-heap step, and the fuzz step's
-    # timeout, which follows its measured per-target costs within a budget of 5,400 s per 35 targets, Lib/hardening.py
-    # fuzz_budget_seconds: 5,400 s for today's 35); this bounds the whole run above their sum (Hardening.py
-    # longest_run_seconds), which holds up to 49 fuzz targets (ADR 0024 "Integration", budgets and timeouts;
-    # Tests/Automation/test_hardening.py checks it for the committed fuzz targets and the 49).
-    "hardening": 37860.0,
+    # Scripts/Hardening.py bounds each of its steps itself (its TIMEOUTS: perf 1200 s, soak 6000 s (ADR 0028's phase-3
+    # ledger), asan generate 3600 s, asan build 7200 s, asan unit 3600 s, asan feature 3600 s, debug heap 7200 s (ADR
+    # 0029, R-GPUCRASH), 32,400 s in all, plus 60 s of grace for each sanitized suite and for the debug-heap step, and
+    # the fuzz step's timeout, which follows its measured per-target costs within a budget of 5,400 s per 35 targets,
+    # Lib/hardening.py fuzz_budget_seconds: 8,640 s for 56); this bounds the whole run above their sum (Hardening.py
+    # longest_run_seconds), which holds up to 56 fuzz targets: phase 3's 50 and six more, as many as phase 2 added (ADR
+    # 0024 "Integration", budgets and timeouts; ADR 0028 decision 16 and its phase-3 ledger;
+    # Tests/Automation/test_hardening.py checks it for the committed fuzz targets and the 56).
+    "hardening": 41300.0,
 }
 
 

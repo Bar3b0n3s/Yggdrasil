@@ -431,7 +431,7 @@ def fuzz_budget_seconds(target_count: int) -> float:
     1,000,000 iterations (ADR 0024 decision 14). The step's timeout never exceeds it (fuzz_timeout_seconds), so CI.py's
     bound on the whole hardening run must exceed the other steps' timeouts and graces plus this budget (Hardening.py
     longest_run_seconds; Tests/Automation/test_hardening.py checks it for the committed targets and that it holds up to
-    49 targets)."""
+    56 targets, phase 3's 50 and six more, Docs/Decisions/0028-backlog-program.md's phase-3 ledger)."""
     return FUZZ_REFERENCE_TIMEOUT_SECONDS * target_count / FUZZ_REFERENCE_TARGETS
 
 

@@ -26,8 +26,11 @@
 // deformed vertices); PointShadows in Shadows, after SpotShadows; LightClusters at the end of Ambient, after the depth
 // pyramid it can bound clusters with and before the forward passes read the clusters; Sprites and Lights2D in the Sprites
 // stage (Sprites, then Lights2D: M21's C21.2 records the accumulated light before the lit sprites that sample it); Ui after
-// Text in SceneOverlay (declared by M22's contract, C22.1). Phase 3's (Particles, Exposure, Lut, Taa, Ssr and terrain)
-// take the stages their contracts name. A declaration with no stats row creates pipelines its users record under their own
+// Text in SceneOverlay (declared by M22's contract, C22.1). Phase 3's, all M26's, take the places ADR 0028's phase-3 ledger
+// fixes, adding no stage: TerrainDepthNormal after DepthNormal; TerrainForward after ForwardOpaque, then Ssr after Skybox,
+// before ForwardTransparent; Particles after Lights2D in Sprites; Taa first in HdrPost, before Bloom, and Exposure after
+// Bloom; the grading LUT is applied inside Tonemap, with no declaration of its own; the prepass's velocity and roughness
+// targets join DepthNormal's. A declaration with no stats row creates pipelines its users record under their own
 // rows (the QuadBatcher), or is a startup-only computation (the DFG LUT); one with no pipeline records with another
 // declaration's pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the
 // Upscale pipelines, Ui the QuadBatcher's and the Text pipelines).
