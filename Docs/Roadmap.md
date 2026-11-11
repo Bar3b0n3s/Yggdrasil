@@ -518,7 +518,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 
 **Acceptance**: M17's feature list on sprites and UI, with no MeshRenderer cells and no Screen Text HUD. Its replays are strict-hash identical in both editors and the testing Dist export, and each fails without its input. Its suites are green; `StartScene` and `Export.BuildScenes` set; `project.validate` clean; Dist export smoke exits 0 (the games suite's three halves); `AuditProvenance.py --project Projects/Tetris` passes from a fresh clone; the soak passes.
 
-**Parallelization**: one builder in a fresh top-level session, `D:\Engine` holding M25's branch for the builder window.
+**Parallelization**: one builder per session, a background agent of the lead's session (as M17's were; `Docs/Decisions/0036-m25-tetris-pixel-art.md`), `D:\Engine` holding M25's branch for the builder window.
 
 ---
 
