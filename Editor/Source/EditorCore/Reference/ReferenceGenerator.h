@@ -55,8 +55,9 @@ namespace Engine {
 	//   FileFormats.md                every file format (Format/Version header, schema link, example) and every source
 	//                                 format by importer and extension (ImporterRegistry, SourceFormat::Importable)
 	//   Schemas/<Format>.schema.json  one JSON Schema per authored format: AssetMeta, BatchRequest, GameManifest, Material,
-	//                                 Prefab, Project, Provenance, Replay, Scene, SoundEffect, SpriteSheet, Tilemap; only the subset
-	//                                 JsonSchema::Validate supports, unknown components and keys allowed where §6 allows them
+	//                                 Prefab, Project, Provenance, Replay, Scene, SoundEffect, SpriteSheet, Tilemap, StringTable;
+	//                                 only the subset JsonSchema::Validate supports, unknown components and keys allowed
+	//                                 where §6 allows them
 	// Errors: InvalidArgument for a missing source (the built-in catalogue included); InvalidState for a registry that is not
 	// frozen; Validation naming every empty or whitespace-only description (§5.4, gate 7: CollectDescriptions and
 	// FindMissingDescriptions of DescriptionInventory.h, so the generator and the gate share one walk).

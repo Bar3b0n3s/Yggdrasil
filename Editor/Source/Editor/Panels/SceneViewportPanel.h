@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Editor/Ui/UiAuthoringOverlay.h"
 #include "Editor/Viewport/TilemapBrush.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
 #include "EditorCore/Viewport/GizmoController.h"
@@ -32,6 +33,9 @@ namespace Engine {
 	// camera's target when it meets no point of it), through entity.create. With one entity holding a TilemapRenderer whose
 	// Tilemap is set selected, the toolbar shows the tile brush's controls and an armed brush takes the image's left and
 	// right strokes, each one tilemap.paint (Editor/Viewport/TilemapBrush.h; M21, decision 26).
+	// M22 (Docs/Decisions/0033-m22-contract.md decisions 33 and 34): the Overlays popup's "UI preview" (EditorViewportOptions::
+	// UiPreview) shows the game frame letterboxed in the view (UiPreview.h) under the UI authoring overlay (UiAuthoringOverlay.h),
+	// whose item takes the image's presses; the camera's controls, the gizmo, Frame and mesh picking are off meanwhile.
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class SceneViewportPanel
 	{
@@ -56,6 +60,7 @@ namespace Engine {
 		std::vector<UUID> m_DragSelection{};
 		bool m_DragInPlay = false;
 		std::string m_LastError{};
+		UiAuthoringOverlay m_UiOverlay{};
 	};
 
 }

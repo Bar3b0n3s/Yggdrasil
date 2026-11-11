@@ -9,6 +9,7 @@
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Support/SceneTestFixture.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -35,7 +36,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 36);
+			static_assert(BuiltinComponents::Size == 47);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -322,6 +323,143 @@ namespace Engine {
 			CHECK_FALSE(TilemapColliderComponent{}.IsTrigger);
 		}
 
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 2): the Ui category's defaults.
+		TEST_CASE("BuiltinComponents: UI defaults follow the component table")
+		{
+			const UiCanvasComponent canvas;
+			CHECK(canvas.SortOrder == 0);
+			CHECK(canvas.ScaleMode == UiScaleMode::ConstantPixelSize);
+			CHECK(canvas.ScaleFactor == 1.0f);
+			CHECK(canvas.ReferenceHeight == 1080.0f);
+			CHECK(canvas.PixelSnap);
+			// C22.2 (decision 25): the canvas's theme.
+			CHECK_FALSE(canvas.Font.IsValid());
+			CHECK(canvas.Theme.Normal == glm::vec4(1.0f));
+			CHECK(canvas.Theme.Hovered == glm::vec4(0.85f, 0.85f, 0.85f, 1.0f));
+			CHECK(canvas.Theme.Pressed == glm::vec4(0.6f, 0.6f, 0.6f, 1.0f));
+			CHECK(canvas.Theme.Focused == glm::vec4(0.75f, 0.85f, 1.0f, 1.0f));
+			CHECK(canvas.Theme.Disabled == glm::vec4(0.5f, 0.5f, 0.5f, 0.5f));
+			// C22.2 (decision 23): no default focus, so navigation starts only from a press or Ui.SetFocus.
+			CHECK_FALSE(canvas.DefaultFocus.IsValid());
+			// C22.3 (decision 49): a Screen canvas; a World canvas's size and scale (registered by stream W).
+			CHECK(canvas.RenderMode == UiCanvasRenderMode::Screen);
+			CHECK(canvas.WorldWidth == 1024u);
+			CHECK(canvas.WorldHeight == 576u);
+			CHECK(canvas.PixelsPerUnit == 512.0f);
+
+			const UiRectComponent rect;
+			CHECK(rect.AnchorMin == glm::vec2(0.5f));
+			CHECK(rect.AnchorMax == glm::vec2(0.5f));
+			CHECK(rect.Pivot == glm::vec2(0.5f));
+			CHECK(rect.Position == glm::vec2(0.0f));
+			CHECK(rect.Size == glm::vec2(100.0f));
+			CHECK_FALSE(rect.ClipChildren);
+
+			const UiImageComponent image;
+			CHECK_FALSE(image.Sheet.IsValid());
+			CHECK(image.Frame == 0);
+			CHECK(image.Color == glm::vec4(1.0f));
+			CHECK(image.Type == UiImageType::Simple);
+			CHECK(image.BorderScale == 1.0f);
+			CHECK(image.Filter == UiImageFilter::Point);
+			CHECK(image.RaycastTarget);
+
+			const UiTextComponent text;
+			CHECK(text.Text.empty());
+			CHECK_FALSE(text.Font.IsValid());
+			CHECK(text.Size == 32.0f);
+			CHECK(text.Color == glm::vec4(1.0f));
+			CHECK(text.Alignment == TextAlignment::Left);
+			CHECK(text.VerticalAlignment == UiTextVerticalAlignment::Top);
+			CHECK(text.Wrap);
+			CHECK(text.LineSpacing == 1.0f);
+			CHECK(text.RaycastTarget);
+
+			const UiLayoutComponent layout;
+			CHECK(layout.Kind == UiLayoutKind::Stack);
+			CHECK(layout.Direction == UiLayoutDirection::Vertical);
+			CHECK(layout.Padding == UiPadding{});
+			CHECK(layout.Spacing == glm::vec2(0.0f));
+			CHECK(layout.MainAlignment == UiMainAlignment::Start);
+			CHECK(layout.CrossAlignment == UiCrossAlignment::Start);
+			CHECK(layout.Columns == 0);
+			CHECK(layout.CellSize == glm::vec2(100.0f));
+			CHECK_FALSE(layout.Wrap);
+
+			const UiLayoutElementComponent element;
+			CHECK_FALSE(element.IgnoreLayout);
+			CHECK(element.Grow == 0.0f);
+			CHECK(element.Shrink == 1.0f);
+			CHECK(element.MinSize == glm::vec2(0.0f));
+
+			// C22.2 (Docs/Decisions/0033-m22-contract.md decision 21): the widgets.
+			const UiButtonComponent button;
+			CHECK(button.Interactable);
+			CHECK(button.Focusable);
+
+			const UiToggleComponent toggle;
+			CHECK(toggle.Interactable);
+			CHECK(toggle.Focusable);
+			CHECK_FALSE(toggle.IsOn);
+			CHECK_FALSE(toggle.Graphic.IsValid());
+
+			const UiSliderComponent slider;
+			CHECK(slider.Interactable);
+			CHECK(slider.Focusable);
+			CHECK(slider.Value == 0.0f);
+			CHECK(slider.Min == 0.0f);
+			CHECK(slider.Max == 1.0f);
+			CHECK_FALSE(slider.WholeNumbers);
+			CHECK(slider.Step == 0.0f);
+			CHECK(slider.Direction == UiLayoutDirection::Horizontal);
+			CHECK_FALSE(slider.Fill.IsValid());
+			CHECK_FALSE(slider.Handle.IsValid());
+
+			const UiScrollViewComponent scrollView;
+			CHECK(scrollView.Interactable);
+			CHECK_FALSE(scrollView.Focusable);
+			CHECK_FALSE(scrollView.Content.IsValid());
+			CHECK_FALSE(scrollView.Horizontal);
+			CHECK(scrollView.Vertical);
+			CHECK(scrollView.ScrollPosition == glm::vec2(0.0f));
+			CHECK(scrollView.ScrollStep == 40.0f);
+
+			// C22.3 (decision 45): the text input.
+			const UiTextInputComponent textInput;
+			CHECK(textInput.Interactable);
+			CHECK(textInput.Focusable);
+			CHECK(textInput.Text.empty());
+			CHECK(textInput.MaxLength == 256u);
+			CHECK(textInput.Caret == 0u);
+			CHECK_FALSE(textInput.TextElement.IsValid());
+			CHECK_FALSE(textInput.Placeholder.IsValid());
+		}
+
+		// Several paths read only the added component's own Excludes (Entity:AddComponent, component.list and component.schema,
+		// the generated reference), so both components of an exclusion declare it: RigidBody and CharacterController, UiCanvas
+		// and UiRect (the C22.1 review, Docs/Decisions/0033-m22-contract.md decision 2), and each pair of C22.2's four widgets
+		// (decision 21) and C22.3's text input (decision 45): five widgets, 20 ordered pairs.
+		TEST_CASE("BuiltinComponents: every exclusion is declared by both components")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			size_t exclusions = 0;
+			for (const ComponentInfo* component : registry->GetComponents())
+			{
+				for (const ComponentInfo* excluded : component->GetExcludes())
+				{
+					INFO(component->GetName(), " excludes ", excluded->GetName());
+					CHECK(std::find(excluded->GetExcludes().begin(), excluded->GetExcludes().end(), component) != excluded->GetExcludes().end());
+					++exclusions;
+				}
+			}
+			CHECK(exclusions == 24);
+			const ComponentInfo* canvas = registry->FindComponent<UiCanvasComponent>();
+			const ComponentInfo* rect = registry->FindComponent<UiRectComponent>();
+			REQUIRE(canvas != nullptr);
+			REQUIRE(rect != nullptr);
+			CHECK(std::find(rect->GetExcludes().begin(), rect->GetExcludes().end(), canvas) != rect->GetExcludes().end());
+		}
+
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 28).
 		TEST_CASE("BuiltinComponents: animation defaults follow the component table")
 		{
@@ -419,6 +557,18 @@ namespace Engine {
 				"CircleCollider2D",
 				"PolygonCollider2D",
 				"TilemapCollider", // C21.2
+				// M22 (Docs/Decisions/0033-m22-contract.md decision 2), after M21's categories (landing order).
+				"UiCanvas",
+				"UiRect",
+				"UiImage",
+				"UiText",
+				"UiLayout",
+				"UiLayoutElement",
+				"UiButton",
+				"UiToggle",
+				"UiSlider",
+				"UiScrollView",
+				"UiTextInput",
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 28): after M21's and M22's categories on phase 2's merged tree.
 				"Animator",
 				"SkinnedMesh",
@@ -432,7 +582,8 @@ namespace Engine {
 		TEST_CASE("BuiltinComponents: every component has a category, a version and descriptions")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Animation" };
+			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
+				"Animation" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), and PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3). Every other component is at version 1.

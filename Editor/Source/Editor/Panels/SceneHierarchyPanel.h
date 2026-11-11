@@ -12,7 +12,8 @@ namespace Engine {
 	struct EditorPanelContext;
 
 	// Case-insensitive tree/search, stable UUID ImGui IDs, multi-select, active toggles and prefab badges. Rename,
-	// duplicate and create-child actions live in each row's context menu. Drag reparent/reorder goes
+	// duplicate, create-child and "Create UI child" actions live in each row's context menu, and "Create UI" in the
+	// background's (M22: ui.createWidget through Editor/Ui/UiCreateMenu.h, edit scene only). Drag reparent/reorder goes
 	// through entity.reparent with keepWorld=true as one action; reject descendant cycles before writing. A row's strip
 	// inserts before that row (a move down within one parent targets one slot earlier; a drop in place queues nothing).
 	// Selection uses edit.select and clears the selected asset; rows highlight only a selection of the shown scene.

@@ -656,12 +656,14 @@ namespace Engine {
 		{
 			Utils::EditorSectionHeading("Create asset");
 			// Indices 5 to 7 are the script templates (script.create); the others are asset.create types. M18's sprite sheet is
-			// appended last, so the earlier entries keep their indices (Docs/Decisions/0029-m18-contract.md decision 18), and M21's
-			// tilemap after it (Docs/Decisions/0032-m21-contract.md decision 23; ADR 0028's phase-2 create-list rule).
+			// appended last, so the earlier entries keep their indices (Docs/Decisions/0029-m18-contract.md decision 18), then
+			// M21's tilemap (Docs/Decisions/0032-m21-contract.md decision 23) and M22's string table
+			// (Docs/Decisions/0033-m22-contract.md decision 10) in landing order (ADR 0028's phase-2 create-list rule).
 			constexpr const char* Labels[] = { "Folder", "Scene", "Material", "Prefab", "Sound effect", "Behaviour script", "Module script", "Test script", "Sprite sheet",
-				"Tilemap" };
-			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet", "Tilemap" };
-			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau", ".spritesheet", ".tilemap" };
+				"Tilemap", "String table" };
+			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet", "Tilemap", "StringTable" };
+			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau", ".spritesheet", ".tilemap",
+				".stringtable" };
 			constexpr int FirstScriptTemplate = 5;
 			constexpr int LastScriptTemplate = 7;
 			ImGui::TextDisabled("In %s", m_ActionDirectory.c_str());

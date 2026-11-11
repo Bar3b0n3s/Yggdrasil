@@ -33,8 +33,9 @@
 // cube, a sphere and a ground plane) extracted from a scene and rendered by the scene renderer through the viewport
 // capture (viewport.screenshot's path); and the M8 goldens of Roadmap M8 (MaterialGrid, IblOnly, Tonemappers, Bloom,
 // AlphaModes, DebugDraw, Text, GltfFixture), each a scene of Projects/FeatureTest/Assets/Scenes/Golden rendered through
-// Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14). They run in the golden stage (Release) on
-// this machine's device class; Test.py --update-golden writes candidates for review.
+// Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14), and M22's Ui, UiWidgets, UiCjk,
+// UiArabic, UiHebrew and UiWorld, the scenes of golden scaffolds of their own, rendered the same way. They run in the
+// golden stage (Release) on this machine's device class; Test.py --update-golden writes candidates for review.
 
 namespace Engine {
 
@@ -251,6 +252,63 @@ namespace Engine {
 			// Projects/FeatureTest/Assets/Models/Golden by the scaffold and instantiated as prefabs, under the Studio HDRI
 			// with a blurred skybox (SkyboxBlur) and a sun.
 			CheckGoldenScene("GltfFixture");
+		}
+
+		TEST_CASE("Golden: Ui")
+		{
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 14): the scene of the golden scaffold Scaffold/UiGolden.jsonl
+			// (IdSeed 2002) over a cleared camera view: a 16 x 8 sprite frame at 1:1 and four times larger, point sampled; a
+			// 9-sliced frame stretched over a clipping panel that holds a horizontal stack, whose last child the panel clips,
+			// and a wrapped, centred label in the Default font; and a second canvas at two scene pixels per unit drawn over the
+			// first.
+			CheckGoldenScene("Ui");
+		}
+
+		TEST_CASE("Golden: UiWidgets")
+		{
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 36): the scene of the golden scaffold
+			// Scaffold/UiWidgetsGolden.jsonl (IdSeed 2012), the widgets at rest over a cleared camera view, as the edit scene
+			// draws them (no interaction state, so each widget's image takes its canvas's Normal tint, or Disabled when it is
+			// not interactable): an enabled button and a disabled one, a toggle on (its check shown) and one off (hidden), a
+			// horizontal and a vertical slider at a quarter (fill and handle placed by the value), and a list of eight items
+			// scrolled 60 units within its 200-unit clip, labels in the Default font.
+			CheckGoldenScene("UiWidgets");
+		}
+
+		// M22 W22.3 (Docs/Decisions/0033-m22-contract.md decisions 42, 43 and 55): the three scenes of the golden scaffold
+		// Scaffold/UiScriptsGolden.jsonl (IdSeed 2016), over a cleared camera view. Their canvas's font is a copy of Inter whose
+		// Fallbacks name Noto Sans Arabic, Hebrew and JP (each imported with Ranges of the scenes' texts), so every codepoint
+		// Inter lacks falls back through that chain, shaped by HarfBuzz and ordered by the bidirectional algorithm.
+
+		TEST_CASE("Golden: UiCjk")
+		{
+			// Japanese in kanji, hiragana and katakana at three alignments, a line mixing Latin, digits and kanji, and a centred
+			// line of Japanese and Latin wrapped at a space.
+			CheckGoldenScene("UiCjk");
+		}
+
+		TEST_CASE("Golden: UiArabic")
+		{
+			// Arabic in its joined forms right to left, right-aligned; Arabic-Indic digits, left to right after their label; a
+			// right-to-left line holding Latin and European digits; a left-to-right line in which the digits after an Arabic word
+			// are Arabic numbers (UAX #9 rule W2) and stay with it; and a centred sentence wrapped onto two lines.
+			CheckGoldenScene("UiArabic");
+		}
+
+		TEST_CASE("Golden: UiHebrew")
+		{
+			// Hebrew right to left, without and with its points (marks the font positions), a right-to-left line whose
+			// parentheses are mirrored, a left-to-right line holding Hebrew and digits, and a centred line of Latin, Hebrew,
+			// Arabic and Japanese through one chain.
+			CheckGoldenScene("UiHebrew");
+		}
+
+		TEST_CASE("Golden: UiWorld")
+		{
+			// M22 W22.3 (decisions 49, 51 and 55): the scene of the golden scaffold Scaffold/UiWorldGolden.jsonl (IdSeed 2017):
+			// a World canvas turned in a lit 3D scene, a pillar in front of part of it (the canvas is depth-tested against the
+			// scene), its images and texts in its own canvas pixels, under a Screen HUD drawn over everything.
+			CheckGoldenScene("UiWorld");
 		}
 	}
 

@@ -102,6 +102,8 @@ BUILD_FIXTURE_FINDINGS = {
                                              r"JPH_CROSS_PLATFORM_DETERMINISTIC"),
     "FastMathJolt": re.compile(r"JoltPhysics uses a non-precise floating-point model"),
     "FastMathMikkTSpace": re.compile(r"MikkTSpace uses a non-precise floating-point model"),
+    "FastMathHarfBuzz": re.compile(r"HarfBuzz uses a non-precise floating-point model"),
+    "FastMathSheenBidi": re.compile(r"SheenBidi uses a non-precise floating-point model"),
     "FastMathCMPCore": re.compile(r"CMP_Core uses a non-precise floating-point model"),
     "FastMathTinyExr": re.compile(r"tinyexr uses a non-precise floating-point model"),
     "LuauContraction": re.compile(r"\[linux\] .*Luau uses a non-precise floating-point model: -ffp-contract=off is "

@@ -1306,9 +1306,9 @@ end
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7,
 			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
-			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, and M23's
+			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, and M23's
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes.
-			CHECK(codes.size() == 47 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			CHECK(codes.size() == 50 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1330,7 +1330,7 @@ end
 			// lesson; Docs/Decisions/0032-m21-contract.md decisions 12 and 30): the sprite codes, then the 2D physics codes, then
 			// TILEMAP_FRAME_OUT_OF_RANGE, then the milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, one after another. M23, the
 			// last lander, appends its block after its siblings' (Docs/Decisions/0034-m23-contract.md decisions 18 and 30): after
-			// M21's, then its own chain.
+			// M22's, then its own chain, which ends the list.
 			CHECK(position("TEST_SUITE_INVALID") + 1 == position(ScriptComputedAssetLoadCode));
 			CHECK(position(ScriptComputedAssetLoadCode) + 1 == position(PrefabCycleCode));
 			CHECK(position(PrefabCycleCode) < position(SpriteUnknownSortingLayerCode));
@@ -1340,7 +1340,12 @@ end
 			CHECK(position(Physics2DMixedWorldsCode) + 1 == position(Physics2DOffPlaneCode));
 			CHECK(position(Physics2DOffPlaneCode) + 1 == position(TilemapFrameOutOfRangeCode));
 			CHECK(position(TilemapFrameOutOfRangeCode) + 1 == position(SpriteFrameOutsideTextureCode));
-			CHECK(position(SpriteFrameOutsideTextureCode) < position(RenderPointShadowBudgetCode));
+			// M22's block follows M21's, which landed first (Docs/Decisions/0033-m22-contract.md decisions 13 and 35, "Landing").
+			CHECK(position(SpriteFrameOutsideTextureCode) + 1 == position("UI_ELEMENT_WITHOUT_CANVAS"));
+			CHECK(position("UI_ELEMENT_WITHOUT_CANVAS") + 1 == position("UI_IMAGE_FRAME_OUT_OF_RANGE"));
+			CHECK(position("UI_IMAGE_FRAME_OUT_OF_RANGE") + 1 == position("UI_WIDGET_PART_INVALID"));
+			// M23's block follows M22's, at M23's landing (Docs/Decisions/0034-m23-contract.md, "Landing").
+			CHECK(position("UI_WIDGET_PART_INVALID") + 1 == position(RenderPointShadowBudgetCode));
 			CHECK(position(RenderPointShadowBudgetCode) + 1 == position(AnimationNoAnimatorCode));
 			CHECK(position(AnimationNoAnimatorCode) + 1 == position(AnimationSkeletonMismatchCode));
 			CHECK(codes.back() == AnimationSkeletonMismatchCode);
@@ -1702,6 +1707,174 @@ end
 			}
 			std::ranges::sort(files);
 			CHECK(files == std::vector<std::string>{ "Assets/Prefabs/A.prefab", "Assets/Prefabs/B.prefab" });
+		}
+
+		// Docs/Decisions/0033-m22-contract.md decision 13 (the W22.1 review: the fixtures check only which codes a project
+		// reports): each faulty element is named once, at its entity and component, and valid UI stays quiet: an element
+		// reached through a grouping entity without a UiRect, one below a nested canvas, an image at its sheet's last frame
+		// and a plain image (a null sheet) whatever its Frame.
+		TEST_CASE("ProjectValidator: UI_ELEMENT_WITHOUT_CANVAS and UI_IMAGE_FRAME_OUT_OF_RANGE name the element and stay quiet for valid UI")
+		{
+			Test::EditorTestFixture fixture("ValidatorUi");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			// Plain.spritesheet: three frames, no texture.
+			Result<std::string> sheet = Test::ReadTestDataText("Assets/SpriteSheets/Plain.spritesheet");
+			REQUIRE(sheet.has_value());
+			WriteValidatorFile(editor, "Assets/Ui/Plain.spritesheet", *sheet);
+			WriteValidatorFile(editor, "Assets/Ui/Plain.spritesheet.meta",
+				R"({"Format": "AssetMeta", "Version": 1, "Handle": "3a7e000000000009", "Type": "SpriteSheet", "Importer": "SpriteSheet", "ImporterVersion": 1, "Settings": null, "SubAssets": []})");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+
+			Scene& scene = editor.GetScene();
+			{
+				SceneEdit edit(editor, "UI");
+				// `name` below `parent` (the scene root when invalid) with `components`, each added with its JSON in order.
+				const auto add = [&scene](std::string_view name, Entity parent, std::initializer_list<std::pair<std::string_view, std::string_view>> components)
+				{
+					const Entity entity = parent.IsValid() ? scene.CreateEntity(name, parent) : scene.CreateEntity(name);
+					for (const auto& [component, json] : components)
+					{
+						const Json value = ParseValidatorJson(json);
+						const Status added = ComponentAccess::AddComponent(entity, component, &value);
+						REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+					}
+					return entity;
+				};
+				const Entity hud = add("Hud", Entity(), { { "UiCanvas", "{}" } });
+				const Entity group = add("Group", hud, {});
+				add("LastFrame", group, { { "UiRect", "{}" }, { "UiImage", R"({"Sheet": "3a7e000000000009", "Frame": 2})" } });
+				const Entity panel = add("Panel", hud, { { "UiRect", "{}" } });
+				const Entity inner = add("Inner", panel, { { "UiCanvas", "{}" } });
+				add("Plain", inner, { { "UiRect", "{}" }, { "UiImage", R"({"Frame": 7})" } });
+				add("PastLast", hud, { { "UiRect", "{}" }, { "UiImage", R"({"Sheet": "3a7e000000000009", "Frame": 3})" } });
+				const Entity loose = add("Loose", Entity(), {});
+				add("Stray", loose, { { "UiRect", "{}" }, { "UiText", R"({"Text": "Score"})" } });
+				REQUIRE(edit.Commit().has_value());
+			}
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<const ProjectDiagnostic*> found;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code.starts_with("UI_"))
+					found.push_back(&diagnostic);
+			}
+			REQUIRE(found.size() == 2);
+			const ProjectDiagnostic* withoutCanvas = FindDiagnostic(*report, "UI_ELEMENT_WITHOUT_CANVAS");
+			REQUIRE(withoutCanvas != nullptr);
+			CHECK(withoutCanvas->Severity == DiagnosticSeverity::Warning);
+			CHECK(withoutCanvas->File == "Assets/Scenes/Main.scene");
+			CHECK(withoutCanvas->Entity == scene.FindEntityByPath("/Loose/Stray").GetUUID().ToString());
+			CHECK(withoutCanvas->Component == "UiRect");
+			CHECK(withoutCanvas->Field.empty());
+			CHECK_FALSE(withoutCanvas->AutoFixable);
+			const ProjectDiagnostic* frame = FindDiagnostic(*report, "UI_IMAGE_FRAME_OUT_OF_RANGE");
+			REQUIRE(frame != nullptr);
+			CHECK(frame->Severity == DiagnosticSeverity::Warning);
+			CHECK(frame->File == "Assets/Scenes/Main.scene");
+			CHECK(frame->Entity == scene.FindEntityByPath("/Hud/PastLast").GetUUID().ToString());
+			CHECK(frame->Component == "UiImage");
+			CHECK(frame->Field == "Frame");
+			CHECK_FALSE(frame->AutoFixable);
+		}
+
+		// M22 C22.2 (Docs/Decisions/0033-m22-contract.md decision 35; stream B, the review's m9): a widget part (a UiToggle's
+		// Graphic, a UiSlider's Fill or Handle, a UiScrollView's Content, and C22.3's UiTextInput TextElement and Placeholder,
+		// decision 53) that is not a UI element below its widget in the same canvas is named once, at its widget's entity,
+		// component and field; valid parts and null parts stay quiet.
+		TEST_CASE("ProjectValidator: UI_WIDGET_PART_INVALID names each widget part that is not an element below its widget and stays quiet for valid parts")
+		{
+			Test::EditorTestFixture fixture("ValidatorUiParts");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			{
+				SceneEdit edit(editor, "UI parts");
+				const auto add = [&scene](std::string_view name, Entity parent, std::string_view component, const std::string& json)
+				{
+					const Entity entity = parent.IsValid() ? scene.CreateEntity(name, parent) : scene.CreateEntity(name);
+					if (!component.empty())
+					{
+						const Json value = ParseValidatorJson(json);
+						const Status added = ComponentAccess::AddComponent(entity, component, &value);
+						REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+					}
+					return entity;
+				};
+				const auto addWidget = [](Entity entity, std::string_view component, const std::string& json)
+				{
+					const Json value = ParseValidatorJson(json);
+					const Status added = ComponentAccess::AddComponent(entity, component, &value);
+					REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+				};
+				const Entity hud = add("Hud", Entity(), "UiCanvas", "{}");
+				const Entity other = add("Other", Entity(), "UiCanvas", "{}");
+				const Entity elsewhere = add("Elsewhere", other, "UiRect", "{}");
+				const Entity loose = add("Loose", Entity(), "", "");
+				const Entity panel = add("Panel", hud, "UiRect", "{}");
+				// Faulty: a Graphic in another canvas, a Fill that is the slider's parent element, a Handle that is no element.
+				const Entity toggle = add("Toggle", panel, "UiRect", "{}");
+				addWidget(toggle, "UiToggle", std::format(R"({{"Graphic": "{}"}})", elsewhere.GetUUID().ToString()));
+				const Entity slider = add("Slider", panel, "UiRect", "{}");
+				addWidget(slider, "UiSlider", std::format(R"({{"Fill": "{}", "Handle": "{}"}})", panel.GetUUID().ToString(), loose.GetUUID().ToString()));
+				// Quiet: a toggle whose Graphic is its child, a slider whose parts are its children, a scroll view without content.
+				const Entity valid = add("Valid", hud, "UiRect", "{}");
+				const Entity check = add("Check", valid, "UiRect", "{}");
+				addWidget(valid, "UiToggle", std::format(R"({{"Graphic": "{}"}})", check.GetUUID().ToString()));
+				const Entity volume = add("Volume", hud, "UiRect", "{}");
+				const Entity fill = add("Fill", volume, "UiRect", "{}");
+				const Entity handle = add("Handle", volume, "UiRect", "{}");
+				addWidget(volume, "UiSlider", std::format(R"({{"Fill": "{}", "Handle": "{}"}})", fill.GetUUID().ToString(), handle.GetUUID().ToString()));
+				const Entity scroll = add("Scroll", hud, "UiRect", "{}");
+				addWidget(scroll, "UiScrollView", "{}");
+				// Faulty: a scroll view whose Content is an element of its canvas outside it. Quiet: a toggle whose Graphic names
+				// no entity, which is ENTITY_DANGLING_REFERENCE's.
+				const Entity list = add("List", hud, "UiRect", "{}");
+				addWidget(list, "UiScrollView", std::format(R"({{"Content": "{}"}})", panel.GetUUID().ToString()));
+				const Entity dangling = add("Dangling", hud, "UiRect", "{}");
+				addWidget(dangling, "UiToggle", R"({"Graphic": "7e57000000000123"})");
+				// C22.3. Faulty: a text input whose TextElement is in another canvas and whose Placeholder is the input itself.
+				// Quiet: a text input whose two parts are its children.
+				const Entity strayInput = add("Field", hud, "UiRect", "{}");
+				addWidget(strayInput, "UiTextInput",
+					std::format(R"({{"TextElement": "{}", "Placeholder": "{}"}})", elsewhere.GetUUID().ToString(), strayInput.GetUUID().ToString()));
+				const Entity validInput = add("Name", hud, "UiRect", "{}");
+				const Entity shown = add("Shown", validInput, "UiRect", "{}");
+				const Entity hint = add("Hint", validInput, "UiRect", "{}");
+				addWidget(validInput, "UiTextInput",
+					std::format(R"({{"TextElement": "{}", "Placeholder": "{}"}})", shown.GetUUID().ToString(), hint.GetUUID().ToString()));
+				REQUIRE(edit.Commit().has_value());
+			}
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			std::vector<std::string> found;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code != "UI_WIDGET_PART_INVALID")
+					continue;
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Warning);
+				CHECK(diagnostic.File == "Assets/Scenes/Main.scene");
+				CHECK_FALSE(diagnostic.AutoFixable);
+				found.push_back(std::format("{} {}.{}", diagnostic.Entity, diagnostic.Component, diagnostic.Field));
+			}
+			std::ranges::sort(found);
+			std::vector<std::string> expected = {
+				std::format("{} UiToggle.Graphic", scene.FindEntityByPath("/Hud/Panel/Toggle").GetUUID().ToString()),
+				std::format("{} UiSlider.Fill", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
+				std::format("{} UiSlider.Handle", scene.FindEntityByPath("/Hud/Panel/Slider").GetUUID().ToString()),
+				std::format("{} UiScrollView.Content", scene.FindEntityByPath("/Hud/List").GetUUID().ToString()),
+				std::format("{} UiTextInput.TextElement", scene.FindEntityByPath("/Hud/Field").GetUUID().ToString()),
+				std::format("{} UiTextInput.Placeholder", scene.FindEntityByPath("/Hud/Field").GetUUID().ToString()),
+			};
+			std::ranges::sort(expected);
+			CHECK(found == expected);
 		}
 
 		TEST_CASE("ProjectValidator: GetCodes lists the M6 asset codes")

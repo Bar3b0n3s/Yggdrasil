@@ -38,6 +38,17 @@
 #include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiButtonComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
+#include "Engine/Scene/Components/UiLayoutComponent.h"
+#include "Engine/Scene/Components/UiLayoutElementComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 
 namespace Engine {
 
@@ -66,9 +77,14 @@ namespace Engine {
 		SpriteRendererComponent, SpriteAnimatorComponent, PixelPerfectCameraComponent, Light2DComponent, TilemapRendererComponent,
 		// Physics2D (Registration/Physics2DRegistration.cpp; M21, Docs/Decisions/0032-m21-contract.md decisions 9 and 25)
 		RigidBody2DComponent, BoxCollider2DComponent, CircleCollider2DComponent, PolygonCollider2DComponent, TilemapColliderComponent,
+		// Ui (Registration/UiRegistration.cpp; M22, Docs/Decisions/0033-m22-contract.md decision 2: phase 2's categories go
+		// after Scripting in landing order, ADR 0028's phase-2 ledger, so after M21's; C22.2's widgets appended, decision 21;
+		// C22.3's text input appended, decision 45)
+		UiCanvasComponent, UiRectComponent, UiImageComponent, UiTextComponent, UiLayoutComponent, UiLayoutElementComponent,
+		UiButtonComponent, UiToggleComponent, UiSliderComponent, UiScrollViewComponent, UiTextInputComponent,
 		// Animation (Registration/AnimationRegistration.cpp; M23, Docs/Decisions/0034-m23-contract.md decision 28). ADR 0028's
 		// phase-2 ledger: a milestone's new components go in categories of their own after Scripting, appended in landing
-		// order, so M23, the last lander, appends this category after M21's and M22's at its merge.
+		// order, so M23, the last lander, appended this category after M21's and M22's at its merge.
 		AnimatorComponent, SkinnedMeshComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
@@ -82,10 +98,12 @@ namespace Engine {
 	// M21 (ADR 0028's phase-2 ledger: a milestone's new components go in categories of their own after Scripting).
 	void RegisterRendering2DComponents(TypeRegistry& registry);
 	void RegisterPhysics2DComponents(TypeRegistry& registry);
-	// M23 (Docs/Decisions/0034-m23-contract.md decision 28), after M21's categories.
+	// M22 (ADR 0028's phase-2 ledger: after M21's categories, in landing order).
+	void RegisterUiComponents(TypeRegistry& registry);
+	// M23 (Docs/Decisions/0034-m23-contract.md decision 28), after M21's and M22's categories.
 	void RegisterAnimationComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the nine functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

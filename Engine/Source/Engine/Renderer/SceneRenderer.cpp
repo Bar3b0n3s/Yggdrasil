@@ -722,6 +722,7 @@ namespace Engine {
 		LightClusterBindings.Clear();
 		SkinningBindings.Clear();
 		UpscaleBindings.Clear();
+		UiQuadBindings.Clear();
 		Materials.Clear();
 	}
 
@@ -744,6 +745,7 @@ namespace Engine {
 		SpriteBindings.ReleaseUnused();
 		Lights2DBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
+		UiQuadBindings.ReleaseUnused();
 
 		Materials.ReleaseUnused();
 	}

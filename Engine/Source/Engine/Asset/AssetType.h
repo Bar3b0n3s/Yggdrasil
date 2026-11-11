@@ -30,10 +30,14 @@ namespace Engine {
 		// M21 and M22 to land; M21 landed first, so M22 renumbers its own to follow it at its merge (the value lives only in
 		// cooked headers, so its checkouts' cooked caches are rebuilt).
 		Tilemap,
-		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decision 23): a skin's joints and an animation's channels, the glTF
-		// importer's sub-assets. ADR 0028's phase-2 ledger gives M23, the last lander, 14 and 15 after M21's and M22's types;
-		// M23's merge of main renumbers them after main's (13 and 14 after M21's Tilemap until M22's StringTable lands; the
-		// values live only in cooked headers, so its checkouts' cooked caches are rebuilt).
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10): 13. ADR 0028's phase-2 ledger gives 13 to the later of M21
+		// and M22 to land; M22 landed after M21 and renumbered its own at its merge (Docs/Decisions/0033-m22-contract.md,
+		// "Landing"; the value lives only in cooked headers, so its checkouts' cooked caches were rebuilt).
+		StringTable,
+		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decision 23): 14 and 15, a skin's joints and an animation's
+		// channels, the glTF importer's sub-assets. ADR 0028's phase-2 ledger gives M23, the last lander, 14 and 15 after
+		// M21's and M22's types; M23's merge of main renumbered them after main's (Docs/Decisions/0034-m23-contract.md,
+		// "Landing"; the values live only in cooked headers, so its checkouts' cooked caches were rebuilt).
 		Skeleton,
 		AnimationClip
 	};
@@ -58,6 +62,7 @@ namespace Engine {
 			case AssetType::Replay:        return "Replay";
 			case AssetType::SpriteSheet:   return "SpriteSheet";
 			case AssetType::Tilemap:       return "Tilemap";
+			case AssetType::StringTable:   return "StringTable";
 			case AssetType::Skeleton:      return "Skeleton";
 			case AssetType::AnimationClip: return "AnimationClip";
 		}
@@ -82,6 +87,7 @@ namespace Engine {
 			AssetType::Replay,
 			AssetType::SpriteSheet,
 			AssetType::Tilemap,
+			AssetType::StringTable,
 			AssetType::Skeleton,
 			AssetType::AnimationClip,
 		};

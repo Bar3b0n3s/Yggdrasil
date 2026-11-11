@@ -18,6 +18,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/UiExtraction.h"
 
 #include <algorithm>
 #include <cmath>
@@ -62,6 +63,10 @@ namespace Engine {
 			|| std::to_underlying(options.Labels) > std::to_underlying(RenderAnnotationLabels::Explicit)
 			|| (options.Labels != RenderAnnotationLabels::Explicit && !options.LabelEntities.empty()))
 			return MakeError(ErrorCode::InvalidArgument, "invalid render annotation options or alpha");
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 9): the UI elements' outlines and labels, in scene pixels, whether or
+		// not the view has a camera (a view without a primary camera draws its UI), so the call precedes the camera early return
+		// that the mesh and light paths follow (the ADR's W22.1 review). It cannot fail, so the append stays atomic.
+		AppendUiRenderAnnotations(scene, snapshot);
 		if (!snapshot.HasCamera)
 			return {};
 		DebugDrawList debug = snapshot.AnnotationDraw;

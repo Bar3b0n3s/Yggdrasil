@@ -610,7 +610,8 @@ namespace Engine {
 			for (const char* name : { "session.hello", "session.info", "session.shutdown", "rpc.discover", "scene.tree", "scene.query", "scene.get",
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
 					 "play.setTimeScale", "input.inject", "viewport.screenshot", "physics.bodyInfo", "audio.stats", "stats.get",
-					 "script.eval", "script.errors", "play.waitFor", "input.record", "input.replay", "physics2d.raycast", "physics2d.overlap", "physics2d.bodyInfo" })
+					 "script.eval", "script.errors", "play.waitFor", "input.record", "input.replay", "physics2d.raycast", "physics2d.overlap", "physics2d.bodyInfo",
+					 "ui.tree" })
 			{
 				INFO(std::string(name));
 				const MethodDescriptor* method = methods.Find(name);

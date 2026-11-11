@@ -157,11 +157,14 @@ namespace Engine {
 	//
 	// The state hash (PlaySession::ComputeStateHash) covers the simulated world: the scene's minified canonical
 	// serialization (every entity with its id, name, parent, active flag, tags and serialized components, a Script
-	// component's authored Fields included), the tick, the session's Random state, the UUIDGenerator's draw count and every body's
-	// physics state (position, rotation, linear and angular velocity, sleep flag). It does not cover Luau instance state
-	// (script tables such as self.State and module locals), audio voices, input state, the camera view or anything
-	// rendered: scripts are observed through their effects on the world and through Expect. Two runs with equal hashes at
-	// a tick have equal worlds there; they may still differ in script state that has not yet reached the world.
+	// component's authored Fields included), the tick, the session's Random state, the UUIDGenerator's draw count, every
+	// body's physics state (position, rotation, linear and angular velocity, sleep flag), the native module's block (its
+	// resources; empty without a native module, M19) and the ui block (the UI interaction state, focus, hover, press,
+	// drag, the stick's direction and the pointer over the UI, with the UI events still queued; empty without a canvas,
+	// M22). It does not cover Luau instance state (script tables such as self.State and module locals), audio voices, any
+	// other input state, the camera view or anything rendered: scripts are observed through their effects on the world and
+	// through Expect. Two runs with equal hashes at a tick have equal worlds there; they may still differ in script state
+	// that has not yet reached the world.
 	struct ReplayDocument
 	{
 		uint32_t Version = ReplayFormatVersion;

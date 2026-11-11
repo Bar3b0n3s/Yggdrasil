@@ -120,6 +120,13 @@ namespace Engine {
 		Latch(InputPhase::Frame);
 	}
 
+	void InputState::SetFrameView(const InputState& source)
+	{
+		const size_t index = Utils::GetPhaseIndex(InputPhase::Frame);
+		m_Views[index] = source.m_Views[index];
+		m_Pending[index] = PhaseChanges{};
+	}
+
 	bool InputState::IsKeyDown(InputPhase phase, Key key) const
 	{
 		const size_t index = std::to_underlying(key);

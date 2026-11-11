@@ -93,6 +93,9 @@ class NoticesTests(unittest.TestCase):
             with self.subTest(library=library):
                 self.assertEqual(sources[library].shipped, "yes")
         self.assertTrue(any("Vulkan-Headers" in str(path) for path in sources["NVRHI"].license_files))
+        # HarfBuzz compiles a table generated from Microsoft's Universal Shaping Engine data, whose licence ships with
+        # it (Docs/Decisions/0033-m22-contract.md, W22.3's stream S).
+        self.assertIn(("ms-use", "COPYING"), {path.parts[-2:] for path in sources["HarfBuzz"].license_files})
         self.assertEqual(sources["doctest"].shipped, "no")
         self.assertIn("Inter", {entry.name for entry in entries if entry.shipped == "yes"})
         self.assertEqual(sorted(entry.name for entry in entries if entry.shipped == "macOS"),
@@ -100,6 +103,7 @@ class NoticesTests(unittest.TestCase):
         text = notices.generate_notices(REPOSITORY_ROOT, "windows")
         self.assertEqual(text, notices.generate_notices(REPOSITORY_ROOT, "windows"))
         self.assertIn("SIL OPEN FONT LICENSE", text.upper())
+        self.assertIn("Copyright (c) Microsoft Corporation.", text)
         self.assertNotIn("MoltenVK", text)
         self.assertIn("MoltenVK", notices.generate_notices(REPOSITORY_ROOT, "macosx"))
 

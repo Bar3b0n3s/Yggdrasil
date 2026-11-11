@@ -109,6 +109,15 @@ namespace Engine {
 					path({ { 0.37f, 0.62f }, { 0.9f, 0.62f } });
 					path({ { 0.63f, 0.38f }, { 0.9f, 0.38f } });
 					break;
+				case EditorIcon::StringTable:
+					// A page of three text lines, and a speech bubble at its lower right: localized strings.
+					path({ { 0.15f, 0.12f }, { 0.62f, 0.12f }, { 0.62f, 0.5f } });
+					path({ { 0.15f, 0.12f }, { 0.15f, 0.88f }, { 0.45f, 0.88f } });
+					path({ { 0.25f, 0.27f }, { 0.52f, 0.27f } });
+					path({ { 0.25f, 0.42f }, { 0.52f, 0.42f } });
+					path({ { 0.25f, 0.57f }, { 0.4f, 0.57f } });
+					path({ { 0.5f, 0.55f }, { 0.88f, 0.55f }, { 0.88f, 0.78f }, { 0.68f, 0.78f }, { 0.58f, 0.9f }, { 0.6f, 0.78f }, { 0.5f, 0.78f }, { 0.5f, 0.55f } });
+					break;
 				case EditorIcon::Skeleton:
 					// A chain of three bones from a root joint, branching at the second joint.
 					circle({ 0.25f, 0.8f }, 0.07f);
@@ -161,6 +170,7 @@ namespace Engine {
 			case AssetType::Replay:        return EditorIcon::Replay;
 			case AssetType::SpriteSheet:   return EditorIcon::SpriteSheet;
 			case AssetType::Tilemap:       return EditorIcon::Tilemap;
+			case AssetType::StringTable:   return EditorIcon::StringTable;
 			case AssetType::Skeleton:      return EditorIcon::Skeleton;
 			case AssetType::AnimationClip: return EditorIcon::AnimationClip;
 		}

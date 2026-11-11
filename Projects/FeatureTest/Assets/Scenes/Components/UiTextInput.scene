@@ -1,0 +1,652 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "UiTextInput",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"Script": 2,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiImage": 1,
+		"UiText": 1,
+		"UiButton": 1,
+		"UiScrollView": 1,
+		"UiTextInput": 1
+	},
+	"Entities": [
+		{
+			"ID": "303569402aae43c2",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.06, 0.07, 0.09]
+				}
+			}
+		},
+		{
+			"ID": "b0bd8e3a39b9cd02",
+			"Name": "Form",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "3b167ff11ec44c82",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": null,
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
+				}
+			}
+		},
+		{
+			"ID": "4c70f2f26a658427",
+			"Name": "Title",
+			"Parent": "b0bd8e3a39b9cd02",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 24],
+					"Size": [700, 48],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Text input",
+					"Font": null,
+					"Size": 36,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": false
+				}
+			}
+		},
+		{
+			"ID": "fba79b6de39c5de2",
+			"Name": "Name",
+			"Parent": "b0bd8e3a39b9cd02",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 100],
+					"Size": [400, 48],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.15, 0.15, 0.15, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiTextInput": {
+					"Interactable": true,
+					"Focusable": true,
+					"Text": "",
+					"MaxLength": 12,
+					"Caret": 0,
+					"TextElement": "e3276476a36825d7",
+					"Placeholder": "afd9f6937b8f4677"
+				}
+			}
+		},
+		{
+			"ID": "e3276476a36825d7",
+			"Name": "NameText",
+			"Parent": "fba79b6de39c5de2",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [-16, -8],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "afd9f6937b8f4677",
+			"Name": "NamePlaceholder",
+			"Parent": "fba79b6de39c5de2",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [-16, -8],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Your name",
+					"Font": null,
+					"Size": 24,
+					"Color": [0.6, 0.6, 0.6, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "b352828dcad7a8f4",
+			"Name": "Greeting",
+			"Parent": "b0bd8e3a39b9cd02",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 170],
+					"Size": [400, 48],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.15, 0.15, 0.15, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiTextInput": {
+					"Interactable": true,
+					"Focusable": true,
+					"Text": "Zoë says hi",
+					"MaxLength": 256,
+					"Caret": 3,
+					"TextElement": "620eee0d4ac8ab6f",
+					"Placeholder": "f0261177d3952b64"
+				}
+			}
+		},
+		{
+			"ID": "620eee0d4ac8ab6f",
+			"Name": "GreetingText",
+			"Parent": "b352828dcad7a8f4",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [-16, -8],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "f0261177d3952b64",
+			"Name": "GreetingPlaceholder",
+			"Parent": "b352828dcad7a8f4",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [-16, -8],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Say something",
+					"Font": null,
+					"Size": 24,
+					"Color": [0.6, 0.6, 0.6, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "4d19697cd258573a",
+			"Name": "Locked",
+			"Parent": "b0bd8e3a39b9cd02",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 240],
+					"Size": [400, 48],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.1, 0.1, 0.1, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiTextInput": {
+					"Interactable": false,
+					"Focusable": true,
+					"Text": "Read only",
+					"MaxLength": 256,
+					"Caret": 0,
+					"TextElement": "bef083a6022b8194",
+					"Placeholder": null
+				}
+			}
+		},
+		{
+			"ID": "bef083a6022b8194",
+			"Name": "LockedText",
+			"Parent": "4d19697cd258573a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [-16, -8],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "cbb3ef6e09847e33",
+			"Name": "Code",
+			"Parent": "b0bd8e3a39b9cd02",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 310],
+					"Size": [400, 48],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.15, 0.15, 0.15, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiTextInput": {
+					"Interactable": true,
+					"Focusable": false,
+					"Text": "",
+					"MaxLength": 256,
+					"Caret": 0,
+					"TextElement": "b723719075de267f",
+					"Placeholder": "95cf12eacb8d6c2a"
+				}
+			}
+		},
+		{
+			"ID": "b723719075de267f",
+			"Name": "CodeText",
+			"Parent": "cbb3ef6e09847e33",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [-16, -8],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "95cf12eacb8d6c2a",
+			"Name": "CodePlaceholder",
+			"Parent": "cbb3ef6e09847e33",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [-16, -8],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Not focusable",
+					"Font": null,
+					"Size": 24,
+					"Color": [0.6, 0.6, 0.6, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "9af59e591b30f4f9",
+			"Name": "Send",
+			"Parent": "b0bd8e3a39b9cd02",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 380],
+					"Size": [200, 48],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.25, 0.55, 0.35, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "83eb474e59494f34",
+			"Name": "SendLabel",
+			"Parent": "9af59e591b30f4f9",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Send",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "e510d28c17e7ebe7",
+			"Name": "Log",
+			"Parent": "b0bd8e3a39b9cd02",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [560, 100],
+					"Size": [320, 200],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.12, 0.12, 0.16, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiScrollView": {
+					"Interactable": true,
+					"Focusable": false,
+					"Content": "426c26511a474ed0",
+					"Horizontal": false,
+					"Vertical": true,
+					"ScrollPosition": [0, 0],
+					"ScrollStep": 40
+				}
+			}
+		},
+		{
+			"ID": "426c26511a474ed0",
+			"Name": "Lines",
+			"Parent": "e510d28c17e7ebe7",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 0],
+					"Pivot": [0, 0],
+					"Position": [0, 0],
+					"Size": [0, 400],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Log line 1\nLog line 2\nLog line 3\nLog line 4\nLog line 5\nLog line 6\nLog line 7\nLog line 8\nLog line 9\nLog line 10\nLog line 11\nLog line 12",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Top",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		}
+	]
+}

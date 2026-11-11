@@ -179,6 +179,125 @@ return Bag
 
 A behaviour creates it in `OnStart` with `Bag.New(Random.New(Random.Integer(0, 2147483647)))` and calls `self.Bag:Draw()`; a test passes a `Random.New(<constant>)` to get a known sequence.
 
+## UI
+
+UI is entities with UI components below a `UiCanvas`, laid out in scene pixels (`skills/game-building/ui`). Scripts use their proxies like any component's: `entity.UiText.Text`, `entity.UiRect.Position` and `Size` (canvas units), `entity.UiImage.Frame` and `Color`, `entity.UiLayout.Padding` (a `{Left, Top, Right, Bottom}` table, written whole). `Ui.GetRect(element)` reads where the layout placed an element; automation's `ui.tree` lists them all.
+- Show and hide an element with `SetActive`; a disabled element and its subtree take no space in a container.
+- UI components are in the state hash, like `Text`: write them in `OnFixedUpdate`, and `UiText.Text` only when its string changes.
+- Strings come from string tables: `Loc.Get(table, key)` returns the key's string in the project's `Localization.Locale` (the table's locale equal to it, else its language's, else the table's first; empty reads the first), `Loc.Has(table, key)` tests a key and `Loc.GetLocale()` returns the locale. A key the table lacks raises a located error naming the closest keys, so let a suite read every key the game uses. Hold the table in a `Field.Asset("StringTable")` field, or load it by a literal path.
+- Widgets (`UiButton`, `UiToggle`, `UiSlider`, `UiScrollView`, `UiTextInput`) raise UI events in the fixed step, from latched input, before `OnFixedUpdate`: `OnUiClick(self, element)`, `OnUiValueChanged(self, element, value)` (a toggle's boolean or a slider's number), `OnUiFocus(self, element, focused)`, `OnUiHover(self, element, hovered)`, `OnUiCancel(self, element)` (at the focused element, else the last canvas), `OnUiScroll(self, element, position)`, and a text input's `OnUiTextChanged(self, element, text)` (typing or an editing key changed its `Text`) and `OnUiSubmit(self, element, text)` (Enter, or the gamepad's Submit, while it has focus; a gamepad focuses, submits and leaves a text input but cannot type into it: there is no on-screen keyboard), each with the input's `Text`. Each event bubbles from its element through its ancestors to every started behaviour that defines the callback, in slot order; returning `true` stops it after that entity. So one behaviour on a menu's canvas or panel handles its widgets by `element.Name`. Interaction writes the widget's `IsOn`, `Value`, `ScrollPosition`, or a text input's `Text` and `Caret`, itself; a script's writes raise no event.
+- The `Ui` module reads the interaction state: `Ui.GetFocus()`, `Ui.GetHovered()`, `Ui.GetPressed()`, `Ui.IsPointerOverUi()` (skip a gameplay click the UI caught) and `Ui.GetRect(element)` (`{Min, Max, Canvas}`: its rectangle in scene pixels, or for an element of a World canvas in that canvas's own pixels, and its canvas; nil when it is not laid out). `Ui.SetFocus(element)` focuses a laid-out, interactable and focusable widget at once, laid out as the scene is at the call, so a menu the same callback has just shown takes focus (its `OnUiFocus` follows in the next UiEvents phase), `Ui.SetFocus(nil)` clears focus, and any other element raises. Keyboard and gamepad navigation moves focus only from a focused widget, or first to the canvas's `DefaultFocus`: a menu that opens over a game whose play uses the arrows names it or calls `Ui.SetFocus`, and the game's HUD buttons stay not `Focusable` (`skills/game-building/ui`, "Where navigation starts").
+- UI input and its callbacks run in the fixed step, so `Time.SetTimeScale(0)`, which stops the ticks, stops them too: no widget reacts and no `OnUi*` runs until ticks run again. Pause gameplay with a flag the behaviours check (`if self.Paused then return end`) and keep the time scale, so a pause menu stays interactive.
+- `Input.GetText()` returns the characters typed in the latched view, as UTF-8: the tick's in the fixed step (`OnFixedUpdate`, tasks, UI callbacks), every tick's since the previous frame in `OnUpdate`; empty when none were typed. A text input takes them by itself while it has focus; read them for typing without a field (a console, a cheat code). Characters are committed ones only: no IME composition, selection or clipboard.
+- In live play a frame that runs no fixed step already sees the device input of the next tick, so `OnUpdate` reacts to a press in its own frame; lockstep sessions, recordings, replays and test runs never preview, and injected input never is. Decide in `OnFixedUpdate` and use `OnUpdate`'s earlier view only for presentation (a highlight that follows the cursor).
+
+```luau path=Assets/Scripts/ScoreLabel.luau
+--!strict
+-- Shows the score in its entity's UiText, in the project's locale, rewriting the text only when the score changes.
+export type ScoreLabel = ScriptInstance & {
+	Strings: AssetRef?,
+	Score: number,
+	Shown: number,
+}
+
+local ScoreLabel = {}
+
+ScoreLabel.Fields = {
+	Strings = Field.Asset("StringTable"),
+}
+
+function ScoreLabel.OnStart(self: ScoreLabel)
+	self.Score = 0
+	self.Shown = -1
+end
+
+function ScoreLabel.OnFixedUpdate(self: ScoreLabel)
+	local label = self.Entity.UiText
+	local strings = self.Strings
+	if label == nil or strings == nil or self.Score == self.Shown then
+		return
+	end
+	self.Shown = self.Score
+	label.Text = `{Loc.Get(strings, "Hud.Score")} {self.Score}`
+end
+
+return Script.Define("ScoreLabel", ScoreLabel)
+```
+
+```luau path=Assets/Scripts/OptionsMenu.luau
+--!strict
+-- On an options menu's canvas, whose DefaultFocus names its first widget: its widgets' events bubble here and are told
+-- apart by the element's name. Returning true stops an event at this entity; nil lets it bubble on.
+export type OptionsMenu = ScriptInstance & {
+	Volume: number,
+	Music: boolean,
+}
+
+local OptionsMenu = {}
+
+function OptionsMenu.OnStart(self: OptionsMenu)
+	self.Volume = 1
+	self.Music = true
+end
+
+function OptionsMenu.OnUiValueChanged(self: OptionsMenu, element: Entity, value: boolean | number): boolean?
+	if element.Name == "Volume" and type(value) == "number" then
+		self.Volume = value
+	elseif element.Name == "Music" and type(value) == "boolean" then
+		self.Music = value
+	end
+	return true
+end
+
+-- Back (a click, or Submit while it has focus) and Cancel (Escape, the gamepad's East) close the menu.
+function OptionsMenu.OnUiClick(self: OptionsMenu, element: Entity): boolean?
+	if element.Name ~= "Back" then
+		return nil
+	end
+	self.Entity:SetActive(false)
+	return true
+end
+
+function OptionsMenu.OnUiCancel(self: OptionsMenu): boolean?
+	self.Entity:SetActive(false)
+	return true
+end
+
+return Script.Define("OptionsMenu", OptionsMenu)
+```
+
+```luau path=Assets/Scripts/NameEntry.luau
+--!strict
+-- On a name-entry panel holding a UiTextInput named "Name", a UiButton named "Confirm" and a UiText named "Greeting": the
+-- text input's events bubble here. Confirm is interactable only while a name is typed, and Enter in the field (or the
+-- gamepad's Submit) greets the name.
+export type NameEntry = ScriptInstance
+
+local NameEntry = {}
+
+function NameEntry.OnUiTextChanged(self: NameEntry, element: Entity, text: string): boolean?
+	local confirm = Scene.FindByName("Confirm")
+	local button = if confirm ~= nil then confirm.UiButton else nil
+	if element.Name ~= "Name" or button == nil then
+		return nil
+	end
+	button.Interactable = text ~= ""
+	return true
+end
+
+function NameEntry.OnUiSubmit(self: NameEntry, element: Entity, text: string): boolean?
+	local greeting = Scene.FindByName("Greeting")
+	local label = if greeting ~= nil then greeting.UiText else nil
+	if element.Name ~= "Name" or label == nil or text == "" then
+		return nil
+	end
+	label.Text = `Hello, {text}!`
+	return true
+end
+
+return Script.Define("NameEntry", NameEntry)
+```
+
 ## Determinism pitfalls
 
 - Write non-trivial powers with `math.pow(x, y)`, which uses the engine's deterministic math. The `^` operator is exact only when the exponent is a `2`, `3` or `0.5` the compiler knows: written in the expression (`x ^ 2`) or held in a local initialized with it and never reassigned. An exponent held in a parameter, a table field or a reassigned local (`x ^ n`, even when `n` is 2) and every other constant call the platform's C runtime and may differ between machines, and a constant expression such as `2 ^ 10` is folded with the compiling editor's C runtime. A curve such as a gravity speed per level is safest as a frozen integer table indexed by level. `math.sin` and the other `math` functions and `vector.angle` are already deterministic.

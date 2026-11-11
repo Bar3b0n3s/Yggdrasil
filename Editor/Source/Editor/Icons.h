@@ -25,6 +25,7 @@ namespace Engine {
 		Replay,
 		SpriteSheet,  // M18: a texture cut into a grid of frames (Docs/Decisions/0029-m18-contract.md decision 18)
 		Tilemap,      // M21: a grid with a staircase of painted cells (Docs/Decisions/0032-m21-contract.md decision 23)
+		StringTable,  // M22: a page of lines beside a speech bubble (Docs/Decisions/0033-m22-contract.md decision 10)
 		Skeleton,     // M23: a chain of joints from a root (Docs/Decisions/0034-m23-contract.md decision 23)
 		AnimationClip // M23: a keyed curve on a timeline (Docs/Decisions/0034-m23-contract.md decision 23)
 	};

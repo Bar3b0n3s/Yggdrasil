@@ -16,6 +16,7 @@
 #include "Engine/Automation/Methods/ScriptMethods.h"
 #include "Engine/Automation/Methods/SessionMethods.h"
 #include "Engine/Automation/Methods/StatsMethods.h"
+#include "Engine/Automation/Methods/UiMethods.h"
 
 namespace Engine {
 
@@ -41,6 +42,9 @@ namespace Engine {
 		RegisterReplayMethodTypes(registry);
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 15): physics2d.raycast and physics2d.overlap.
 		RegisterPhysics2DMethodTypes(registry);
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 8): ui.tree, after the scene types it uses; phase 2's domains append
+		// in landing order.
+		RegisterUiMethodTypes(registry);
 	}
 
 	void RegisterSharedMethods(MethodRegistry& methods, AutomationHost host)
@@ -63,6 +67,8 @@ namespace Engine {
 		RegisterReplayMethods(methods);
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 15).
 		RegisterPhysics2DMethods(methods);
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 8).
+		RegisterUiMethods(methods);
 	}
 
 }

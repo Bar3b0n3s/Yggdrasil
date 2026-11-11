@@ -4,6 +4,7 @@
 #include "Editor/EditorPanelContext.h"
 #include "Editor/Icons.h"
 #include "Editor/Ui/EditorStyle.h"
+#include "Editor/Ui/UiCreateMenu.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
@@ -237,6 +238,9 @@ namespace Engine {
 					queue("entity.duplicate", Json{ { "entities", Json::array({ id.ToString() }) }, { "target", target } });
 				if (ImGui::MenuItem("Create child"))
 					queue("entity.create", Json{ { "name", "Entity" }, { "parent", id.ToString() }, { "target", target } });
+				// M22 (decision 32): ui.createWidget builds in the edit scene only, so not while the play scene is shown.
+				if (const std::optional<Json> widget = DrawUiCreateMenu("Create UI child", id, session == nullptr))
+					queue("ui.createWidget", *widget);
 				ImGui::Separator();
 				bool active = entity.IsActiveSelf();
 				if (ImGui::Checkbox("Active", &active))
@@ -329,6 +333,13 @@ namespace Engine {
 		ImGui::Selectable("Drop here to make a root", false);
 		ImGui::PopStyleColor();
 		drop({}, std::nullopt);
+		// M22 (decision 32): the background's context menu creates UI at the root, below a new canvas for any kind but Canvas.
+		if (ImGui::BeginPopupContextWindow("HierarchyBackground", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems))
+		{
+			if (const std::optional<Json> widget = DrawUiCreateMenu("Create UI", UUID{}, session == nullptr && !editor.IsReadOnly()))
+				queue("ui.createWidget", *widget);
+			ImGui::EndPopup();
+		}
 		return {};
 	}
 

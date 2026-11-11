@@ -51,5 +51,25 @@
 		"CaseTimeoutTicks": 600,
 		"SuiteTickLimit": 36000,
 		"CoverageGates": false
+	},
+	"SortingLayers": {
+		"Layers": ["Default"]
+	},
+	"Physics2D": {
+		"Gravity": [0, -9.81]
+	},
+	"Localization": {
+		"Locale": ""
+	},
+	"Ui": {
+		"Navigation": true,
+		"Submit": ["Key.Enter", "Key.Space", "Gamepad.South"],
+		"Cancel": ["Key.Escape", "Gamepad.East"],
+		"Up": ["Key.Up", "Gamepad.DPadUp"],
+		"Down": ["Key.Down", "Gamepad.DPadDown"],
+		"Left": ["Key.Left", "Gamepad.DPadLeft"],
+		"Right": ["Key.Right", "Gamepad.DPadRight"],
+		"Next": ["Key.Tab"],
+		"StickNavigation": true
 	}
 }

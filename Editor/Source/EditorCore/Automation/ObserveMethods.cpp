@@ -612,7 +612,9 @@ namespace Engine {
 
 		// A section list: the entries of `candidates` (offsets relative to `base`) down to the deepest heading level whose
 		// list stays within `budget` bytes (DocsSectionListBytes for a first page, DocsTocBytes for toc); when even the top
-		// level does not fit, its leading entries that do.
+		// level does not fit, its leading entries that do, and when the deepest level that fits lists one entry alone (a
+		// document's title), the next level's leading entries that fit, so the list still navigates (M22's landing: the
+		// merged ScriptAPI.md's second level outgrew a first page's budget).
 		[[nodiscard]] static std::vector<DocsSection> MakeSectionList(std::span<const TextSection> candidates, size_t base, size_t budget)
 		{
 			std::vector<uint32_t> levels;
@@ -642,8 +644,9 @@ namespace Engine {
 				}
 				if (!fits)
 				{
-					// Only the top level can leave nothing chosen: its leading entries that fit.
-					if (chosen.empty())
+					// Only the top level can leave nothing chosen: its leading entries that fit. A lone entry (a title) is
+					// followed by the next level's leading entries, in document order.
+					if (chosen.size() <= 1)
 						chosen = std::move(list);
 					break;
 				}
@@ -810,7 +813,7 @@ namespace Engine {
 			.Field("totalBytes", &DocsGetResult::TotalBytes, "The size of the topic's (or the section's) text.")
 			.Field("nextOffset", &DocsGetResult::NextOffset, "The offset of the next page; 0 when content reaches the end of the text.")
 			.Field("sections", &DocsGetResult::Sections,
-				std::format("The sections of the text: with the first page of a text that needs several pages, every heading level whose list fits in {} bytes; with toc, every level whose list fits in {} bytes.",
+				std::format("The sections of the text: with the first page of a text that needs several pages, every heading level whose list fits in {} bytes; with toc, every level whose list fits in {} bytes; a lone title is followed by the next level's leading sections that fit.",
 					DocsSectionListBytes, DocsTocBytes));
 	}
 

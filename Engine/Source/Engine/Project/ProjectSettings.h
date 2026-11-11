@@ -225,6 +225,38 @@ namespace Engine {
 		glm::vec2 Gravity = glm::vec2(0.0f, -9.81f);
 	};
 
+	// Registry struct "LocalizationSettings" (§6.1 "Localization", §11.5; M22, Docs/Decisions/0033-m22-contract.md decision 11).
+	// Locale is the locale Loc.Get reads string tables in, fixed for each script VM's life (a play session's and an edit
+	// evaluation's): empty, or a locale tag of a string table's form (1 to 35 ASCII letters, digits and '-', starting with a
+	// letter: Asset/StringTableData.h, which Project cannot include). Empty reads every table in its fallback locale.
+	struct LocalizationSettings
+	{
+		std::string Locale;
+	};
+
+	// Registry struct "UiSettings" (§6.1 "Ui", §5.7 UiInput; M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 30): the
+	// keyboard and gamepad navigation of the game's UI. Navigation false: focus moves only by the pointer and Ui.SetFocus,
+	// and none of the bindings below, nor the stick, is read. Each list holds control names in an InputAction's Bindings
+	// form ("Key.Enter", "Gamepad.South"; a gamepad control counts on any connected gamepad), keys and gamepad buttons only
+	// (no mouse button or axis), unique, at most 16: a command is given when one of its controls is pressed in the tick's
+	// step view. Next pressed with Key.LeftShift or Key.RightShift down is Previous. StickNavigation lets the left stick of a
+	// connected gamepad step the four directions (Scene/UiInteraction.h's UiStickDirection). A control name that does not
+	// parse (InputBinding::Parse) or names a mouse control or an axis fails a play session's start with Validation located
+	// at /Ui/<list>/<index>, as an unknown action binding fails it at /Input/Actions. Registered by stream A with its
+	// canonical fixtures, after Localization (ADR 0028's phase-2 ledger: M22's sections after Testing in landing order).
+	struct UiSettings
+	{
+		bool Navigation = true;
+		std::vector<std::string> Submit = { "Key.Enter", "Key.Space", "Gamepad.South" };
+		std::vector<std::string> Cancel = { "Key.Escape", "Gamepad.East" };
+		std::vector<std::string> Up = { "Key.Up", "Gamepad.DPadUp" };
+		std::vector<std::string> Down = { "Key.Down", "Gamepad.DPadDown" };
+		std::vector<std::string> Left = { "Key.Left", "Gamepad.DPadLeft" };
+		std::vector<std::string> Right = { "Key.Right", "Gamepad.DPadRight" };
+		std::vector<std::string> Next = { "Key.Tab" };
+		bool StickNavigation = true;
+	};
+
 	// Registry struct "ProjectSettings": the whole .eproj below its "Format"/"Version" header (§6.1). Name is the game's
 	// display name (exported games use it for their user-data folder, §14.1); StartScene is the project-relative scene the
 	// game starts with (empty: none yet).
@@ -243,14 +275,18 @@ namespace Engine {
 		// M21 (Docs/Decisions/0032-m21-contract.md decisions 4 and 9): the sections "SortingLayers" and "Physics2D".
 		SortingLayersSettings SortingLayers;
 		Physics2DSettings Physics2D;
+		// M22 (Docs/Decisions/0033-m22-contract.md decisions 11 and 30): the sections "Localization" and "Ui", after M21's
+		// (ADR 0028's phase-2 ledger: landing order).
+		LocalizationSettings Localization;
+		UiSettings Ui;
 	};
 
 	// Registers the enums and structs above (InputActionType, TestPauseOnError, TestIsolation, TestMode, WindowSettings,
 	// SimulationSettings, PhysicsSettings, InputAction, InputSettings, RenderingSettings, ScriptingSettings,
 	// ExportSettings, TestSuiteOverrides, TestSuite, TestingSettings, SortingLayersSettings, Physics2DSettings,
-	// ProjectSettings) with their field metadata, the type-level validators of the rules in the comments above and, for each
-	// validated type, the Generate hook that turns random field values into valid settings (FieldBuilder::Generate). Call
-	// once per registry, before Freeze.
+	// LocalizationSettings, UiSettings, ProjectSettings) with their field metadata, the type-level validators of the rules
+	// in the comments above and, for each validated type, the Generate hook that turns random field values into valid
+	// settings (FieldBuilder::Generate). Call once per registry, before Freeze.
 	void RegisterProjectSettingsTypes(TypeRegistry& registry);
 
 }

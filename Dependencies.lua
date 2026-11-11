@@ -79,6 +79,10 @@ IncludeDir["stb"] = RepositoryRoot .. "/Vendor/stb"
 IncludeDir["MikkTSpace"] = RepositoryRoot .. "/Vendor/MikkTSpace"
 IncludeDir["nfd"] = RepositoryRoot .. "/Vendor/nativefiledialog-extended/src/include"
 IncludeDir["doctest"] = RepositoryRoot .. "/Vendor/doctest"
+-- M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 41): text shaping and the bidirectional algorithm.
+IncludeDir["HarfBuzz"] = RepositoryRoot .. "/Vendor/HarfBuzz/src"
+IncludeDir["SheenBidi"] = RepositoryRoot .. "/Vendor/SheenBidi/Headers"
+-- M23 (Docs/Decisions/0034-m23-contract.md decisions 13 and 14): texture compression and the OpenEXR reader.
 IncludeDir["CMP_Core"] = RepositoryRoot .. "/Vendor/CMP_Core/cmp_core/source"
 IncludeDir["tinyexr"] = RepositoryRoot .. "/Vendor/tinyexr"
 
@@ -440,6 +444,29 @@ function UseImGui()
 	filter {}
 end
 
+-- HarfBuzz and SheenBidi (Vendor/HarfBuzz/VENDOR.md, Vendor/SheenBidi/VENDOR.md; M22, C22.3,
+-- Docs/Decisions/0033-m22-contract.md decision 41): text shaping (and the font importer's shaping glyphs and subset) and
+-- the Unicode bidirectional algorithm. No consumer defines: HarfBuzz's two defines are private to its own translation unit
+-- and SheenBidi defines none. Both are built with the precise floating-point model (checked by
+-- Scripts/CheckBuildConfig.py). Every executable links them: the Runtime's UI text is measured with them.
+function UseHarfBuzz()
+	externalincludedirs { IncludeDir.HarfBuzz }
+
+	filter { LinkingKinds }
+		links { "HarfBuzz" }
+
+	filter {}
+end
+
+function UseSheenBidi()
+	externalincludedirs { IncludeDir.SheenBidi }
+
+	filter { LinkingKinds }
+		links { "SheenBidi" }
+
+	filter {}
+end
+
 -- Compressonator CMP_Core (Vendor/CMP_Core/VENDOR.md): the BC1, BC4, BC5, BC6H and BC7 block codecs of texture
 -- compression (M23, Docs/Decisions/0034-m23-contract.md decision 13). No defines: cmp_core.h's two macros, CMP_CDECL and
 -- CMP_DEFAULTNULL, keep their defaults. Engine takes the include directory: its Asset/TextureCompression.cpp alone
@@ -482,8 +509,10 @@ function UseRuntimeDependencies()
 	UseSpdlog()
 	UseMiniaudio()
 	UseMikkTSpace()
-	UseCMPCore()
 	UseLuau(false)
+	UseHarfBuzz()
+	UseSheenBidi()
+	UseCMPCore()
 end
 
 -- The Runtime executable (Docs/Architecture.md §2.2, §14.3): RuntimeMain.cpp linked with the RuntimeCore and Engine

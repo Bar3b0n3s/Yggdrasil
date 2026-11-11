@@ -1,0 +1,139 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Main",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"AudioListener": 1,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiToggle": 1,
+		"UiTextInput": 1
+	},
+	"Entities": [
+		{
+			"ID": "e000000000000001",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Primary": true
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000002",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 10, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Intensity": 3
+				}
+			}
+		},
+		{
+			"ID": "e000000000000003",
+			"Name": "Hud",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {}
+			}
+		},
+		{
+			"ID": "e000000000000004",
+			"Name": "Sound",
+			"Parent": "e000000000000003",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [0, 0],
+					"Size": [120, 40]
+				},
+				"UiToggle": {
+					"Graphic": "e000000000000005"
+				}
+			}
+		},
+		{
+			"ID": "e000000000000005",
+			"Name": "Check",
+			"Parent": "e000000000000003",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [0, 0],
+					"Size": [120, 40]
+				}
+			}
+		},
+		{
+			"ID": "e000000000000006",
+			"Name": "Name",
+			"Parent": "e000000000000003",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [0, 0],
+					"Size": [120, 40]
+				},
+				"UiTextInput": {
+					"Placeholder": "e000000000000005"
+				}
+			}
+		}
+	]
+}

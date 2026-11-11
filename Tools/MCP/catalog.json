@@ -53,7 +53,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material, a sound effect, a sprite sheet or a tilemap (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -62,14 +62,14 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap", "StringTable"]
 					},
 					"path": {
-						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap; none for a folder); missing parent folders are created with it.",
+						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap, .stringtable; none for a folder); missing parent folders are created with it.",
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's, a SpriteSheet's or a Tilemap's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, or a tilemap's CellSize, ChunkSize, Palette and Chunks; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -118,7 +118,7 @@
 		{
 			"name": "asset_get_properties",
 			"method": "asset.getProperties",
-			"description": "Returns every property of a native asset (a material, a sound effect, a sprite sheet or a tilemap) by registry name.",
+			"description": "Returns every property of a native asset (a material, a sound effect, a sprite sheet, a tilemap or a string table) by registry name.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetGetPropertiesParams",
@@ -126,7 +126,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet, a tilemap or a string table).",
 						"type": "string"
 					},
 					"ifRevision": {
@@ -192,7 +192,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "Skeleton", "AnimationClip"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -258,7 +258,7 @@
 		{
 			"name": "asset_set_properties",
 			"method": "asset.setProperties",
-			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet or a tilemap; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
+			"description": "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet, a tilemap or a string table; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetSetPropertiesParams",
@@ -266,7 +266,7 @@
 				"type": "object",
 				"properties": {
 					"asset": {
-						"description": "The native asset (a material, a sound effect, a sprite sheet or a tilemap).",
+						"description": "The native asset (a material, a sound effect, a sprite sheet, a tilemap or a string table).",
 						"type": "string"
 					},
 					"values": {
@@ -1982,7 +1982,7 @@
 		{
 			"name": "project_upgrade",
 			"method": "project.upgrade",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay and sprite sheet under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay or sprite sheet fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet, tilemap and string table under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet, tilemap or string table fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "NoParams",
@@ -2739,6 +2739,119 @@
 			},
 			"mutates": true,
 			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "ui_create_widget",
+			"method": "ui.createWidget",
+			"description": "Builds a UI widget (a canvas, panel, image, text, button, toggle, slider, scroll view or text input) with its child entities and components in the edit scene, as one undoable command; the editor's Create UI menu submits it.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "UiCreateWidgetParams",
+				"description": "The params of ui.createWidget.",
+				"type": "object",
+				"properties": {
+					"kind": {
+						"description": "The widget to build.",
+						"enum": ["Canvas", "Panel", "Image", "Text", "Button", "Toggle", "Slider", "ScrollView", "TextInput"]
+					},
+					"parent": {
+						"description": "The parent entity (16 hex digits, a unique id prefix of at least 6, or a path); a kind other than Canvas below a parent without a UiCanvas at or above it goes below a new canvas created there. Omitted: a Canvas is a root, any other kind goes below a new root canvas.",
+						"type": "string"
+					},
+					"index": {
+						"description": "The created root's position among the parent's children (among the scene's roots without a parent); omitted: last.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"name": {
+						"description": "The widget root's name; omitted: the kind's name.",
+						"type": "string"
+					},
+					"text": {
+						"description": "The label of a Text, Button or Toggle, or a TextInput's placeholder; omitted: the kind's name (\"Enter text\" for a TextInput).",
+						"type": "string"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"required": ["kind"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "ui_tree",
+			"method": "ui.tree",
+			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "UiTreeParams",
+				"description": "The params of ui.tree.",
+				"type": "object",
+				"properties": {
+					"canvas": {
+						"description": "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.",
+						"type": "string"
+					},
+					"depth": {
+						"description": "The most levels listed below each canvas; 0: unlimited.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"format": {
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"enum": ["Text", "Json"]
+					},
+					"width": {
+						"description": "The scene resolution's width to lay out at, with height; omitted: the play session's own, or for the edit scene its game view's at the project's window size (a PixelPerfectCamera's reference resolution under one).",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 16384
+					},
+					"height": {
+						"description": "The scene resolution's height to lay out at, with width.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 16384
+					},
+					"target": {
+						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
+						"enum": ["Edit", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
 			"timeoutSeconds": 60
 		},
 		{

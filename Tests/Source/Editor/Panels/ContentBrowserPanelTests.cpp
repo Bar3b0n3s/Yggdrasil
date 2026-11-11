@@ -299,6 +299,37 @@ namespace Engine {
 			REQUIRE(ui.Frame(draw));
 		}
 
+		TEST_CASE("ContentBrowserPanel: creating a string table queues an empty table in the locale en")
+		{
+			// M22, R-UI-L10N (Docs/Decisions/0033-m22-contract.md decision 10): the Create popup's entry after M21's tilemap (the
+			// create list in landing order), asset.create {type: StringTable} without values.
+			Test::PanelInteractionFixture fixture("ContentCreateStringTable", false);
+			auto& context = fixture.GetContext();
+			ContentBrowserPanel panel;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&panel, &context]()
+			{
+				return panel.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			CreateContentAsset(ui, draw, context.Editor, 10, "String table", "Menu");
+			CHECK_FALSE(context.Editor.GetAssets().Resolve("Assets/Menu.stringtable"));
+			context.Actions.Pump();
+			context.Editor.GetAssets().WaitIdle();
+			context.Actions.Pump();
+			const auto asset = context.Editor.GetAssets().Resolve("Assets/Menu.stringtable");
+			REQUIRE(asset);
+			CHECK(context.Editor.GetAssets().GetAssetType(*asset) == AssetType::StringTable);
+			const auto properties = fixture.GetAutomation().Call("asset.getProperties", Json{ { "asset", asset->ToString() } });
+			REQUIRE(properties);
+			CHECK((*properties)["values"]["Locales"] == Json::array({ "en" }));
+			CHECK((*properties)["values"]["Entries"] == Json::array());
+			const auto history = context.Editor.GetHistory().GetEntries(10);
+			REQUIRE(history.size() == 1);
+			CHECK(history.front().Origin == CommandOrigin::User);
+			REQUIRE(ui.Frame(draw));
+		}
+
 		TEST_CASE("ContentBrowserPanel: registered thumbnails enter the real ImGui draw list without rendering in Draw")
 		{
 			Test::PanelInteractionFixture fixture("ContentTexture", false);

@@ -2,6 +2,7 @@
 #include "Editor/Panels/InspectorPanel.h"
 
 #include "Editor/Drawers/ReflectedDrawers.h"
+#include "Editor/Drawers/UiRectDrawer.h"
 #include "Editor/EditorPanelContext.h"
 #include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
@@ -1166,6 +1167,15 @@ namespace Engine {
 			}
 			if (expanded)
 			{
+				// M22 (decision 34, §5.4's drawer exception): UiRect's anchor presets above its reflected fields.
+				if (component->GetName() == "UiRect")
+				{
+					if (std::optional<UiRectPresetAction> preset = DrawUiRectAnchorPresets(editor, *scene, selection, sceneTarget))
+					{
+						CancelEdit(context);
+						queue(preset->Method, preset->Params);
+					}
+				}
 				const void* object = ops->GetConst(first);
 				ResolveContext resolve{ .Registry = &editor.GetTypeRegistry(), .Owner = object, .OwnerType = component, .Key = {} };
 				std::vector<const FieldInfo*> fields;

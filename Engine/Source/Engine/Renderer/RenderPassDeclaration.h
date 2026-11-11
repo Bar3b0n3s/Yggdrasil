@@ -26,11 +26,11 @@
 // deformed vertices); PointShadows in Shadows, after SpotShadows; LightClusters at the end of Ambient, after the depth
 // pyramid it can bound clusters with and before the forward passes read the clusters; Sprites and Lights2D in the Sprites
 // stage (Sprites, then Lights2D: M21's C21.2 records the accumulated light before the lit sprites that sample it); Ui after
-// Text in SceneOverlay. Phase 3's (Particles, Exposure, Lut, Taa, Ssr and terrain) take the stages their
-// contracts name. A declaration with no stats row creates pipelines its users record under their own rows (the
-// QuadBatcher), or is a startup-only computation (the DFG LUT); one with no pipeline records with another declaration's
-// pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the Upscale
-// pipelines).
+// Text in SceneOverlay (declared by M22's contract, C22.1). Phase 3's (Particles, Exposure, Lut, Taa, Ssr and terrain)
+// take the stages their contracts name. A declaration with no stats row creates pipelines its users record under their own
+// rows (the QuadBatcher), or is a startup-only computation (the DFG LUT); one with no pipeline records with another
+// declaration's pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the
+// Upscale pipelines, Ui the QuadBatcher's and the Text pipelines).
 
 namespace Engine {
 
@@ -94,6 +94,7 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> FxaaTargets = { "LdrColorFxaa" };
 		inline constexpr std::array<std::string_view, 1> TextPrograms = { "Text" };
 		inline constexpr std::array<std::string_view, 1> TextRows = { "Text" };
+		inline constexpr std::array<std::string_view, 1> UiRows = { "Ui" };
 		inline constexpr std::array<std::string_view, 1> UpscalePrograms = { "Upscale" };
 		inline constexpr std::array<std::string_view, 1> UpscaleRows = { "Upscale" };
 		inline constexpr std::array<std::string_view, 2> UpscaleTargets = { "OutputColor", "OutputDepth" };
@@ -110,10 +111,11 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 63 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
-	// output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites records with
-	// the QuadBatcher's), and M23's LightClusters 1 and Skinning 1. M23's C23.1 adds PointShadows and LightClusters at the
-	// places phase 2's ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform.
+	// The pass list, in stats order (see the file comment). 64 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
+	// output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites records
+	// with the QuadBatcher's), the QuadBatcher's LdrDepth 1 (M22, C22.3, Docs/Decisions/0033-m22-contract.md decision 57;
+	// M22's Ui adds none of its own), and M23's LightClusters 1 and Skinning 1. M23's C23.1 adds PointShadows and
+	// LightClusters at the places phase 2's ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform.
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27): the skinned and morphed meshes' vertices, deformed by
@@ -141,15 +143,17 @@ namespace Engine {
 		// The Overdraw data view's additive pass, for the three cull modes.
 		{ .Name = "Overdraw", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::OverdrawRows, .Targets = Detail::OverdrawTargets },
 		// QuadBatcher.h: its users record under their own rows (M21's Sprites and Lights2D in this stage, M22's Ui in
-		// SceneOverlay); Hdr and Ldr, and M21's HdrLit and Normals (C21.2, Docs/Decisions/0032-m21-contract.md decision 22).
-		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 4, .Programs = Detail::QuadPrograms },
+		// SceneOverlay); Hdr and Ldr, M21's HdrLit and Normals (C21.2, Docs/Decisions/0032-m21-contract.md decision 22) and
+		// M22's LdrDepth (C22.3, Docs/Decisions/0033-m22-contract.md decision 57).
+		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 5, .Programs = Detail::QuadPrograms },
 		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): the snapshot's sprites, in its draw order, with the
 		// QuadBatcher's Hdr pipeline into SceneColor, depth-tested against SceneDepth (lit ones with its HdrLit pipeline, C21.2).
 		{ .Name = "Sprites", .Stage = RenderStage::Sprites, .StatsRows = Detail::SpritesRows },
 		// M21 (C21.2, decision 22): with a lit sprite or tilemap in a Lit view, the lit items' normals (the QuadBatcher's
 		// Normals pipeline) into Lights2DNormals, then every 2D light added into Lights2DLight at the scene resolution, recorded
 		// before the lit items that sample it; its row counts the normals' and the lights' draws. Its one pipeline is the
-		// Lights2D program's (Renderer/Lights2DPass.h).
+		// Lights2D program's (Renderer/Lights2DPass.h); with the QuadBatcher's HdrLit and Normals, 61 startup pipelines on M21's
+		// tree (62 with M22's LdrDepth).
 		{ .Name = "Lights2D", .Stage = RenderStage::Sprites, .PipelineCount = 1, .Programs = Detail::Lights2DPrograms, .StatsRows = Detail::Lights2DRows, .Targets = Detail::Lights2DTargets },
 		{ .Name = "Bloom", .Stage = RenderStage::HdrPost, .PipelineCount = 3, .Programs = Detail::BloomPrograms, .StatsRows = Detail::BloomRows, .Targets = Detail::BloomTargets },
 		// The tonemap pass and the data views' composite, which replaces it under the same row.
@@ -157,6 +161,10 @@ namespace Engine {
 		{ .Name = "Fxaa", .Stage = RenderStage::LdrPost, .PipelineCount = 1, .Programs = Detail::FxaaPrograms, .StatsRows = Detail::FxaaRows, .Targets = Detail::FxaaTargets },
 		// Game Text at the scene resolution (TextRenderer's two pipelines, which Labels shares).
 		{ .Name = "Text", .Stage = RenderStage::SceneOverlay, .PipelineCount = 2, .Programs = Detail::TextPrograms, .StatsRows = Detail::TextRows },
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the UI draw list at the scene resolution, after game Text,
+		// with the QuadBatcher's Ldr pipeline (C22.3: and its LdrDepth for World canvases) and the Text pipelines (UiPass.h), so
+		// it declares none of its own.
+		{ .Name = "Ui", .Stage = RenderStage::SceneOverlay, .StatsRows = Detail::UiRows },
 		{ .Name = "Upscale", .Stage = RenderStage::Output, .PipelineCount = 2, .Programs = Detail::UpscalePrograms, .StatsRows = Detail::UpscaleRows, .Targets = Detail::UpscaleTargets },
 		{ .Name = "Selection", .Stage = RenderStage::EditorOverlay, .PipelineCount = 8, .Programs = Detail::SelectionPrograms, .StatsRows = Detail::SelectionRows, .Targets = Detail::SelectionTargets },
 		{ .Name = "Wireframe", .Stage = RenderStage::EditorOverlay, .StatsRows = Detail::WireframeRows },

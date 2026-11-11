@@ -332,10 +332,11 @@ namespace Engine {
 
 			// Every copy an import made under Assets/, wherever its scaffold put it (the golden imports' M8 destinations, M21's
 			// sprite textures, the 2D lights' texture and normal map and the tilemap sheet's texture in directories of their own,
-			// Docs/Decisions/0032-m21-contract.md decisions 17 and 32, GoldenTextured.jsonl's textures with Compression Auto and
-			// None, AssetFormats.jsonl's uncompressed environment, SpriteSheets.jsonl's texture and every later scaffold's): each
-			// file whose name is a source's (the sources' names are unique) holds that source's bytes, so a copy edited or
-			// imported from another file fails here.
+			// Docs/Decisions/0032-m21-contract.md decisions 17 and 32, M22's UiGolden.jsonl texture, UiScriptsGolden.jsonl's three
+			// Noto fonts and its copy of Inter and UiFallback.jsonl's fonts, Docs/Decisions/0033-m22-contract.md decisions 14 and
+			// 55, GoldenTextured.jsonl's textures with Compression Auto and None, AssetFormats.jsonl's uncompressed environment,
+			// SpriteSheets.jsonl's texture and every later scaffold's): each file whose name is a source's (the sources' names are
+			// unique) holds that source's bytes, so a copy edited or imported from another file fails here.
 			std::map<std::string, std::string> sourceByName;
 			for (const std::string& relative : mirrored)
 			{
@@ -364,7 +365,8 @@ namespace Engine {
 			}
 			// The copies outside Assets/Formats that the scaffolds are known to make: the walk reaches them.
 			for (const std::string_view copy : { "Models/Golden/Textured.gltf", "Textures/Golden/Rgba.png", "Textures/GoldenTextured/None/Normal.png",
-					 "Textures/Uncompressed/Rgba.png", "Textures/SpriteSheets/Rgba.png", "Environments/Uncompressed/Gradient.exr" })
+					 "Textures/Uncompressed/Rgba.png", "Textures/SpriteSheets/Rgba.png", "Environments/Uncompressed/Gradient.exr", "Textures/GoldenUi/Rgba.png",
+					 "Fonts/GoldenUiScripts/NotoSansJP-Regular.otf" })
 			{
 				CAPTURE(std::string(copy));
 				CHECK(FileSystem::Exists(GetFeatureTestPath("Assets/" + std::string(copy))));
@@ -402,14 +404,18 @@ namespace Engine {
 
 		TEST_CASE("GoldenScene: the component, physics, audio and format scenes load strictly and re-save byte for byte")
 		{
-			// The scenes of stream B's scaffolds (Formats, Components, Physics and Audio .jsonl; ADR 0022 decision 9), opened
-			// read-only on the CPU like the golden scenes: they load without a diagnostic, reference only assets the project
-			// or the engine has, and re-save to exactly their committed bytes (the round trip of Architecture §6), so a
-			// scaffold change that writes a non-canonical or unloadable scene fails here before the feature stage. Script fields
-			// (Formats.scene's SheetHolder, ADR 0029 decision 22) resolve against the field schemas of the scripts the scene
-			// attaches, as in a play copy or an export.
-			constexpr std::array<std::string_view, 7> Scenes = { "Components", "Components/TonemapAces", "Components/TonemapPbrNeutral",
-				"Components/TonemapLinear", "Physics", "Audio", "Formats" };
+			// The scenes of stream B's scaffolds (Formats, Components, Physics and Audio .jsonl; ADR 0022 decision 9)
+			// and M22's Components/Ui.scene (Ui.jsonl; Docs/Decisions/0033-m22-contract.md decision 14),
+			// Components/UiWidgets.scene (UiWidgets.jsonl, decision 36), Components/UiTextInput.scene (UiTextInput.jsonl,
+			// decision 55) and Components/UiWorld.scene (UiWorld.jsonl, decision 55), opened read-only on the CPU like the golden
+			// scenes: they load without a diagnostic, reference only assets the project or the engine has, and re-save
+			// to exactly their committed bytes (the round trip of Architecture §6), so a scaffold change that writes a
+			// non-canonical or unloadable scene fails here before the feature stage. Script fields (Formats.scene's
+			// SheetHolder, ADR 0029 decision 22) resolve against the field schemas of the scripts the scene attaches,
+			// as in a play copy or an export.
+			constexpr std::array<std::string_view, 11> Scenes = { "Components", "Components/TonemapAces", "Components/TonemapPbrNeutral",
+				"Components/TonemapLinear", "Components/Ui", "Components/UiWidgets", "Components/UiTextInput", "Components/UiWorld", "Physics",
+				"Audio", "Formats" };
 			Test::AssetTestFixture assets({ .EngineResources = true });
 			VirtualFileSystem& vfs = assets.GetVfs();
 			REQUIRE(vfs.Unmount("project").has_value());

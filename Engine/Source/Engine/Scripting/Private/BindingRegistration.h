@@ -114,8 +114,6 @@ namespace Engine {
 		[[nodiscard]] Status RegisterComponents(ScriptApiRegistry& api);
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 13): the SpriteRenderer and SpriteAnimator proxies' methods.
 		[[nodiscard]] Status RegisterSprites(ScriptApiRegistry& api);
-		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the Animator and SkinnedMesh proxies' methods.
-		[[nodiscard]] Status RegisterAnimation(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterScene(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterInput(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterTime(ScriptApiRegistry& api);
@@ -133,6 +131,12 @@ namespace Engine {
 		[[nodiscard]] Status RegisterLog(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterApplication(ScriptApiRegistry& api);
 		[[nodiscard]] Status RegisterTest(ScriptApiRegistry& api);
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 11): the Loc module.
+		[[nodiscard]] Status RegisterLoc(ScriptApiRegistry& api);
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the Ui module and its UiElementRect alias.
+		[[nodiscard]] Status RegisterUi(ScriptApiRegistry& api);
+		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the Animator and SkinnedMesh proxies' methods.
+		[[nodiscard]] Status RegisterAnimation(ScriptApiRegistry& api);
 
 	}
 

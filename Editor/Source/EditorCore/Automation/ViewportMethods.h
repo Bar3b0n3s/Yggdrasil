@@ -61,6 +61,7 @@ namespace Engine {
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): the scene view's 2D mode, the toolbar's 2D toggle. Turning
 		// it on makes the scene camera EditorCamera::Make2D's; turning it off keeps the camera.
 		bool Mode2D = false;
+		bool UiPreview = false; // M22 (decision 33): EditorViewportOptions::UiPreview
 	};
 	struct ViewportSetOptionsResult
 	{
@@ -72,6 +73,7 @@ namespace Engine {
 		std::string DebugView{};                // canonical RenderDebugView name
 		std::vector<uint32_t> GameResolution{}; // [width, height]; [0, 0] is free resolution
 		bool Mode2D = false;                    // M21: the scene view's 2D mode
+		bool UiPreview = false;                 // M22 (decision 33): EditorViewportOptions::UiPreview
 	};
 
 	namespace Automation {

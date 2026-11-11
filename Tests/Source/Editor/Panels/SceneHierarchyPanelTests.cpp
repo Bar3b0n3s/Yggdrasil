@@ -1,11 +1,15 @@
 #include "TestsPCH.h"
 #include "Editor/Panels/SceneHierarchyPanel.h"
 
+#include "Editor/AssetDesignInteraction.h"
 #include "Editor/PanelInteractionFixture.h"
 #include "Editor/WorkspaceTestUi.h"
+#include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Scene/Components/UiButtonComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
@@ -507,6 +511,70 @@ namespace Engine {
 			REQUIRE(automation.Call("scene.new", Json{ { "path", "Assets/Scenes/Other.scene" } }));
 			REQUIRE(ui.Frame(draw));
 			CHECK_FALSE(text.contains("Dismiss"));
+		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 32): the row's "Create UI child" and the background's "Create UI"
+		// submit ui.createWidget, a widget without a canvas above it going below a new canvas.
+		TEST_CASE("SceneHierarchyPanel: the Create UI menus build a widget below the clicked entity or at the root in one undo step")
+		{
+			Test::PanelInteractionFixture fixture("HierarchyCreateUi");
+			auto& context = fixture.GetContext();
+			Scene& scene = context.Editor.GetScene();
+			UUID player;
+			{
+				SceneEdit edit(context.Editor, "Create player");
+				player = scene.CreateEntity("Player").GetUUID();
+				REQUIRE(edit.Commit().has_value());
+			}
+			SceneHierarchyPanel panel;
+			Test::AssetDesignInteraction ui;
+			const std::function<Status()> draw = [&panel, &context]()
+			{
+				return panel.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			const auto rightClick = [&ui, &draw](ImVec2 position)
+			{
+				ImGui::GetIO().AddMousePosEvent(position.x, position.y);
+				REQUIRE(ui.Frame(draw));
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+				REQUIRE(ui.Frame(draw));
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+				REQUIRE(ui.Frame(draw));
+			};
+
+			// The row's menu: a button below the player, which has no canvas, so below a new canvas there.
+			ImGuiWindow* window = ui.Window("Panel interaction");
+			rightClick(ui.Locate(draw, window, HierarchyRowId(player, "##Entity")).GetCenter());
+			ui.Click(draw, ui.Popup(), "Create UI child");
+			ui.Click(draw, ui.Popup(), "Button");
+			const size_t history = context.Editor.GetHistory().GetUndoCount();
+			context.Actions.Pump();
+			CHECK(context.Editor.GetHistory().GetUndoCount() == history + 1);
+			const ConstEntity playerEntity = scene.FindEntityByID(player);
+			REQUIRE(playerEntity.GetChildren().size() == 1);
+			const ConstEntity canvas = scene.FindEntityByID(playerEntity.GetChildren().front());
+			CHECK(canvas.GetName() == "Canvas");
+			CHECK(canvas.HasComponent<UiCanvasComponent>());
+			REQUIRE(canvas.GetChildren().size() == 1);
+			const ConstEntity button = scene.FindEntityByID(canvas.GetChildren().front());
+			CHECK(button.GetName() == "Button");
+			CHECK(button.HasComponent<UiButtonComponent>());
+			CHECK(button.GetChildren().size() == 1);
+
+			// The background's menu: a canvas at the root.
+			REQUIRE(ui.Frame(draw));
+			rightClick(ImVec2(window->Pos.x + 500.0f, window->Pos.y + 1200.0f));
+			ui.Click(draw, ui.Popup(), "Create UI");
+			ui.Click(draw, ui.Popup(), "Canvas");
+			context.Actions.Pump();
+			REQUIRE(scene.GetRootEntities().size() == 2);
+			const ConstEntity root = scene.FindEntityByID(scene.GetRootEntities().back());
+			CHECK(root.GetName() == "Canvas");
+			CHECK(root.HasComponent<UiCanvasComponent>());
+			CHECK(root.GetChildren().empty());
+			REQUIRE(fixture.GetAutomation().Call("edit.undo", Json::object()));
+			CHECK(scene.GetRootEntities().size() == 1);
 		}
 	}
 

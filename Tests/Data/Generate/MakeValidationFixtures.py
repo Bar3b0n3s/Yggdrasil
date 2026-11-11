@@ -72,7 +72,9 @@ COMPONENT_ORDER = [
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
     "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
-    "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "Animator", "SkinnedMesh",
+    "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
+    "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
+    "Animator", "SkinnedMesh",
     "ValidatorTarget", "ValidatorFollower",
 ]
 
@@ -314,11 +316,21 @@ def default_project(name: str) -> dict[str, Any]:
                     "CoverageGates": False},
         "SortingLayers": {"Layers": ["Default"]},
         "Physics2D": {"Gravity": [0, -9.81]},
+        "Localization": {"Locale": ""},
+        "Ui": {"Navigation": True, "Submit": ["Key.Enter", "Key.Space", "Gamepad.South"],
+               "Cancel": ["Key.Escape", "Gamepad.East"], "Up": ["Key.Up", "Gamepad.DPadUp"],
+               "Down": ["Key.Down", "Gamepad.DPadDown"], "Left": ["Key.Left", "Gamepad.DPadLeft"],
+               "Right": ["Key.Right", "Gamepad.DPadRight"], "Next": ["Key.Tab"], "StickNavigation": True},
     }
 
 
 def transform(x: float = 0, y: float = 0, z: float = 0, scale: list[float] | None = None) -> dict[str, Any]:
     return {"Translation": [x, y, z], "Rotation": [0, 0, 0, 1], "Scale": scale or [1, 1, 1]}
+
+
+def ui_rect() -> dict[str, Any]:
+    """A UiRect of 120 x 40 canvas units at its parent's top-left corner (M22)."""
+    return {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [0, 0], "Size": [120, 40]}
 
 
 def entity(identifier: str, name: str, components: dict[str, Any], parent: str | None = None) -> dict[str, Any]:
@@ -845,6 +857,37 @@ return Script.Define("Jumper", Jumper)
     item = fixture("PHYSICS_LIMIT_EXCEEDED.2D", ["PHYSICS_LIMIT_EXCEEDED"])
     item.entities.append(body_2d("e000000000000003", "Pebble", 0, "Dynamic", {"CircleCollider2D": {"Radius": 0.25}}))
     item.expand.append({"Path": MAIN_SCENE, "Entity": "e000000000000003", "Count": 16385})
+
+    # M22 (Docs/Decisions/0033-m22-contract.md decision 13). A UI element whose parent holds no UiCanvas: layout never
+    # reaches it.
+    item = fixture("UI_ELEMENT_WITHOUT_CANVAS")
+    item.entities.append(entity("e000000000000003", "Hud", {"Transform": transform()}))
+    item.entities.append(entity("e000000000000004", "Score", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiText": {"Text": "Score"}}, parent="e000000000000003"))
+
+    # A UiImage below a canvas that names frame 3 of Plain.spritesheet's three frames (a sheet without a texture).
+    item = fixture("UI_IMAGE_FRAME_OUT_OF_RANGE")
+    item.copy_asset("SpriteSheets/Plain.spritesheet", "Project/Assets/Ui/Plain.spritesheet")
+    item.add_json("Project/Assets/Ui/Plain.spritesheet.meta", meta("3a7e000000000009", "SpriteSheet", "SpriteSheet"))
+    item.entities.append(entity("e000000000000003", "Hud", {"Transform": transform(), "UiCanvas": {}}))
+    item.entities.append(entity("e000000000000004", "Button", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiImage": {"Sheet": "3a7e000000000009", "Frame": 3}},
+        parent="e000000000000003"))
+
+    # M22 (decision 35). A toggle whose Graphic is its sibling, an element of the same canvas that is not below it: the
+    # toggle ignores it, so the check mark always shows.
+    item = fixture("UI_WIDGET_PART_INVALID")
+    item.entities.append(entity("e000000000000003", "Hud", {"Transform": transform(), "UiCanvas": {}}))
+    item.entities.append(entity("e000000000000004", "Sound", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiToggle": {"Graphic": "e000000000000005"}},
+        parent="e000000000000003"))
+    item.entities.append(entity("e000000000000005", "Check", {"Transform": transform(), "UiRect": ui_rect()},
+                                parent="e000000000000003"))
+    # C22.3 (decision 53). A text input whose Placeholder is that same sibling: the input ignores it, so the hint never
+    # hides.
+    item.entities.append(entity("e000000000000006", "Name", {
+        "Transform": transform(), "UiRect": ui_rect(), "UiTextInput": {"Placeholder": "e000000000000005"}},
+        parent="e000000000000003"))
 
     # Five shadow-casting point lights, one more than a view shadows (Docs/Decisions/0034-m23-contract.md decision 18).
     item = fixture("RENDER_POINT_SHADOW_BUDGET")

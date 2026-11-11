@@ -56,7 +56,8 @@ namespace Engine {
 				.Wireframe = options.Wireframe,
 				.DebugView = std::string(RenderDebugViewToString(viewport.GetDebugView())),
 				.GameResolution = { resolution.x, resolution.y },
-				.Mode2D = options.Mode2D };
+				.Mode2D = options.Mode2D,
+				.UiPreview = options.UiPreview };
 		}
 
 	}
@@ -209,6 +210,8 @@ namespace Engine {
 			}
 			options.Mode2D = params.Mode2D;
 		}
+		if (context.HasParam("uiPreview"))
+			options.UiPreview = params.UiPreview;
 		// Validate every member before changing anything.
 		std::optional<RenderDebugView> debugView;
 		if (context.HasParam("debugView"))
@@ -274,7 +277,9 @@ namespace Engine {
 			.Field("wireframe", &ViewportSetOptionsParams::Wireframe, "Show mesh wireframes.")
 			.Field("debugView", &ViewportSetOptionsParams::DebugView, "The scene view's debug view: a RenderDebugView name, any ASCII case.")
 			.Field("gameResolution", &ViewportSetOptionsParams::GameResolution, "The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution.")
-			.Field("mode2D", &ViewportSetOptionsParams::Mode2D, "The scene view's 2D mode: turning it on makes the scene camera orthographic, looking down -Z at its target's X and Y; it then pans and zooms only, and its gizmos move in X and Y, rotate about Z and scale in X and Y. Turning it off keeps the camera.");
+			.Field("mode2D", &ViewportSetOptionsParams::Mode2D, "The scene view's 2D mode: turning it on makes the scene camera orthographic, looking down -Z at its target's X and Y; it then pans and zooms only, and its gizmos move in X and Y, rotate about Z and scale in X and Y. Turning it off keeps the camera.")
+			.Field("uiPreview", &ViewportSetOptionsParams::UiPreview,
+				"Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.");
 		registry.Struct<ViewportSetOptionsResult>("ViewportSetOptionsResult", "All current scene and game viewport options.")
 			.Field("grid", &ViewportSetOptionsResult::Grid, "Whether the scene grid is shown.")
 			.Field("gizmos", &ViewportSetOptionsResult::Gizmos, "Whether transform gizmos are enabled.")
@@ -283,7 +288,9 @@ namespace Engine {
 			.Field("wireframe", &ViewportSetOptionsResult::Wireframe, "Whether mesh wireframes are shown.")
 			.Field("debugView", &ViewportSetOptionsResult::DebugView, "The scene view's debug view (canonical name).")
 			.Field("gameResolution", &ViewportSetOptionsResult::GameResolution, "The Game view's resolution [width, height]; [0, 0] is free resolution.")
-			.Field("mode2D", &ViewportSetOptionsResult::Mode2D, "Whether the scene view is in its 2D mode.");
+			.Field("mode2D", &ViewportSetOptionsResult::Mode2D, "Whether the scene view is in its 2D mode.")
+			.Field("uiPreview", &ViewportSetOptionsResult::UiPreview,
+				"Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.");
 	}
 
 	void RegisterViewportMethods(MethodRegistry& methods)

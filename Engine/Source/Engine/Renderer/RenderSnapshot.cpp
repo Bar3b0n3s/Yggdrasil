@@ -94,7 +94,7 @@ namespace Engine {
 	}
 
 	RenderSnapshot::RenderSnapshot(std::pmr::memory_resource* resource)
-		: Meshes(Utils::CheckMemoryResource(resource)), Lights(Meshes.get_allocator().resource()), Texts(Meshes.get_allocator().resource()), DebugDraw(Meshes.get_allocator().resource()), AnnotationDraw(Meshes.get_allocator().resource()), PickTable(Meshes.get_allocator().resource()), Icons(Meshes.get_allocator().resource()), Sprites(Meshes.get_allocator().resource()), Tilemaps(Meshes.get_allocator().resource()), Lights2D(Meshes.get_allocator().resource())
+		: Meshes(Utils::CheckMemoryResource(resource)), Lights(Meshes.get_allocator().resource()), Texts(Meshes.get_allocator().resource()), DebugDraw(Meshes.get_allocator().resource()), AnnotationDraw(Meshes.get_allocator().resource()), PickTable(Meshes.get_allocator().resource()), Icons(Meshes.get_allocator().resource()), Sprites(Meshes.get_allocator().resource()), Tilemaps(Meshes.get_allocator().resource()), Lights2D(Meshes.get_allocator().resource()), Ui(Meshes.get_allocator().resource())
 	{
 		// Meshes is declared first, so every later container takes its checked resource.
 	}

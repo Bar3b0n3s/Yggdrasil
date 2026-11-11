@@ -574,8 +574,8 @@ namespace Engine {
 				.Function("Entity", Utils::FieldConstructor<FieldType::EntityRef>, "() -> FieldDescriptor", "Declare an Entity reference with a null default.", pure)
 				.Function("Asset", Utils::FieldConstructor<FieldType::AssetRef>, "(type: string) -> FieldDescriptor",
 					"Declare an asset reference restricted to the named AssetType (Scene, Prefab, Mesh, Material, Texture, Environment, AudioClip for "
-					"imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, Skeleton or AnimationClip), with a null default; any "
-					"other name fails the import.",
+					"imported audio and .sfx sound effects, Script, Font, Replay, SpriteSheet, Tilemap, StringTable, Skeleton or AnimationClip), with a null "
+					"default; any other name fails the import.",
 					pure)
 				.Function("Enum", Utils::FieldConstructor<FieldType::Enum>, "(values: {string}, default: string?) -> FieldDescriptor", "Declare ordered unique string choices; the omitted default is the first choice.", pure)
 				.Function("Array", Utils::FieldConstructor<FieldType::Array>, "(element: FieldDescriptor) -> FieldDescriptor", "Declare an empty array whose element keeps its complete nested field schema.", pure);
@@ -593,6 +593,25 @@ namespace Engine {
 				"Called when a 2D collision begins, with the other entity and the contact in the XY plane.");
 			for (const char* name : { "OnCollisionExit2D", "OnTriggerEnter2D", "OnTriggerExit2D" })
 				behaviour.Callback(name, "(self: ScriptInstance, other: Entity) -> ()", "Called when the corresponding 2D collision or trigger transition occurs.");
+			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27): the UI events, which bubble from the element to its
+			// ancestors (ScriptEngine::DispatchUiEvents); phase 2's callbacks append in landing order.
+			behaviour.Callback("OnUiClick", "(self: ScriptInstance, element: Entity) -> boolean?",
+				"Called when a UI button is clicked or submitted, at its entity, then bubbling to its ancestors; return true to stop it.");
+			behaviour.Callback("OnUiValueChanged", "(self: ScriptInstance, element: Entity, value: boolean | number) -> boolean?",
+				"Called when interaction changes a UI toggle's IsOn (a boolean) or a UI slider's Value (a number); bubbles like OnUiClick.");
+			behaviour.Callback("OnUiFocus", "(self: ScriptInstance, element: Entity, focused: boolean) -> boolean?",
+				"Called when a UI element gains (true) or loses (false) keyboard and gamepad focus; bubbles like OnUiClick.");
+			behaviour.Callback("OnUiHover", "(self: ScriptInstance, element: Entity, hovered: boolean) -> boolean?",
+				"Called when the pointer enters (true) or leaves (false) an interactable UI widget; bubbles like OnUiClick.");
+			behaviour.Callback("OnUiCancel", "(self: ScriptInstance, element: Entity) -> boolean?",
+				"Called when Cancel is pressed, at the focused UI element (or the last canvas when none is focused); bubbles like OnUiClick.");
+			behaviour.Callback("OnUiScroll", "(self: ScriptInstance, element: Entity, position: vector) -> boolean?",
+				"Called when interaction scrolls a UI scroll view, with its new ScrollPosition (x, y, 0); bubbles like OnUiClick.");
+			// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 47): the text input's callbacks.
+			behaviour.Callback("OnUiTextChanged", "(self: ScriptInstance, element: Entity, text: string) -> boolean?",
+				"Called when typing or an editing key changes a UI text input's Text, with its new text; bubbles like OnUiClick.");
+			behaviour.Callback("OnUiSubmit", "(self: ScriptInstance, element: Entity, text: string) -> boolean?",
+				"Called when Enter (or Submit) is pressed while a UI text input has focus, with its text; bubbles like OnUiClick.");
 			// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the AnimationSystem phase's events, appended in landing order.
 			behaviour.Callback("OnAnimationEvent", "(self: ScriptInstance, event: AnimationEvent) -> ()",
 				"Called in the fixed step for each event an Animator layer's time passes on this entity, after every Animator of the tick was posed, in "

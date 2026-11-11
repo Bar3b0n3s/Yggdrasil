@@ -65,6 +65,9 @@ namespace Engine {
 			static constexpr std::string_view Reserved[] = { "Entity", "Fields", "OnCreate", "OnStart", "OnFixedUpdate",
 				"OnUpdate", "OnLateUpdate", "OnDestroy", "OnEnable", "OnDisable", "OnCollisionEnter", "OnCollisionExit",
 				"OnTriggerEnter", "OnTriggerExit", "OnHotReload", "OnCollisionEnter2D", "OnCollisionExit2D", "OnTriggerEnter2D", "OnTriggerExit2D",
+				// M22 (Docs/Decisions/0033-m22-contract.md decision 27): the UI callbacks, appended in landing order.
+				"OnUiClick", "OnUiValueChanged", "OnUiFocus", "OnUiHover", "OnUiCancel", "OnUiScroll", "OnUiTextChanged", "OnUiSubmit",
+				// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the animation events, appended in landing order.
 				"OnAnimationEvent" };
 			return name.starts_with("__") || std::find(std::begin(Reserved), std::end(Reserved), name) != std::end(Reserved);
 		}

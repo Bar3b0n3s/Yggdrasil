@@ -27,6 +27,8 @@
 #include "Engine/Scene/Private/TilemapDrawing.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scene/UiExtraction.h"
+#include "Engine/Scene/UiLayout.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -269,9 +271,10 @@ namespace Engine {
 				data.Position = view.Position;
 				data.ProjectionKind = RenderProjection::Orthographic;
 				data.OrthographicSize = view.OrthographicSize;
-				data.ViewportWidth = view.Output.SceneWidth;
-				data.ViewportHeight = view.Output.SceneHeight;
-				output = view.Output;
+				// M22's landing: the output stage's settings from the one function the play session's UI takes them from too.
+				output = GetCameraOutputSettings(entity);
+				data.ViewportWidth = output.SceneWidth;
+				data.ViewportHeight = output.SceneHeight;
 			}
 			data.View = MakeEntityViewMatrix(world, data.Position);
 			data.NearClip = camera.NearClip;
@@ -380,6 +383,22 @@ namespace Engine {
 			}
 		}
 		return primary;
+	}
+
+	RenderOutputSettings GetCameraOutputSettings(ConstEntity camera)
+	{
+		ENGINE_CORE_ASSERT(camera.IsValid(), "GetCameraOutputSettings needs a valid entity");
+		const PixelPerfectCameraComponent* pixelPerfect = camera.TryGetComponent<PixelPerfectCameraComponent>();
+		if (pixelPerfect == nullptr)
+			return RenderOutputSettings{};
+		// The view's Output depends on the component alone (PixelPerfectCamera.h), so the origin stands for any position.
+		return ComputePixelPerfectView(*pixelPerfect, glm::vec3(0.0f)).Output;
+	}
+
+	RenderOutputMapping ComputeGameViewOutputMapping(const Scene& scene, glm::uvec2 viewSize)
+	{
+		const ConstEntity camera = FindPrimaryCamera(scene);
+		return ComputeRenderOutputMapping(viewSize.x, viewSize.y, camera.IsValid() ? GetCameraOutputSettings(camera) : RenderOutputSettings{});
 	}
 
 	glm::mat4 ComputeRenderedWorldMatrix(ConstEntity entity, float alpha)
@@ -608,6 +627,14 @@ namespace Engine {
 		snapshot.Post = post.value_or(PostProcessSettings{});
 		Utils::SortSpritesForDrawing(snapshot.Sprites);
 		Utils::PlaceTilemapsForDrawing(snapshot.Tilemaps, tilemapPositions, std::move(spriteKeys));
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI, laid out at the scene resolution of the
+		// snapshot's Output (the view's size by default), for the game view and a camera's view. Its widgets take their theme's
+		// tints from the session's interaction state (C22.2, decision 25), null outside a play session. C22.3 (decision 51):
+		// World canvases draw in every view that draws the world, so the editor's scene view (Explicit) draws them and no
+		// Screen canvas, each at the request's alpha, as the meshes (the milestone review).
+		const RenderOutputMapping mapping = ComputeRenderOutputMapping(request.Width, request.Height, snapshot.Output);
+		AppendUiDrawItems(scene, ComputeUiLayout(scene, glm::uvec2(mapping.SceneWidth, mapping.SceneHeight)), snapshot.Ui, request.UiInteraction,
+			request.Camera == RenderCameraSource::Explicit, request.Alpha);
 		// Moved, so the containers keep `resource` (a copy would allocate from the default resource).
 		return Result<RenderSnapshot>(std::move(snapshot));
 	}

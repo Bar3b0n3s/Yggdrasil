@@ -3,6 +3,7 @@
 
 #include "Editor/EditorPanelContext.h"
 #include "Editor/Ui/EditorStyle.h"
+#include "Editor/Ui/UiPreview.h"
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "Editor/Viewport/GizmoOverlay.h"
 #include "EditorCore/EditorActions.h"
@@ -234,6 +235,7 @@ namespace Engine {
 			ImGui::Checkbox("Colliders", &options.Colliders);
 			ImGui::Checkbox("Icons", &options.Icons);
 			ImGui::Checkbox("Wireframe", &options.Wireframe);
+			DrawUiPreviewOption(options); // M22 (decision 33)
 			state.SetOptions(options);
 			ImGui::Separator();
 			ExplicitRenderCamera camera = state.GetCamera();
@@ -249,7 +251,8 @@ namespace Engine {
 			ImGui::EndPopup();
 		}
 		nextTool(buttonWidth("Frame"));
-		ImGui::BeginDisabled(draggingAtStart || context.Editor.GetSelection().empty());
+		// M22 (decision 33): the UI preview keeps the scene camera, the gizmo and mesh picking off while it shows the game frame.
+		ImGui::BeginDisabled(draggingAtStart || context.Editor.GetSelection().empty() || IsUiPreviewShown(context.Editor));
 		if (Utils::EditorToolbarButton("Frame", "Frame the selected objects (F)"))
 			record(FrameSelection(context));
 		ImGui::EndDisabled();
@@ -275,7 +278,6 @@ namespace Engine {
 		}
 		const ImVec2 available = ImGui::GetContentRegionAvail();
 		const ImVec2 minimum = ImGui::GetCursorScreenPos();
-		const ImVec2 maximum(minimum.x + available.x, minimum.y + available.y);
 		// Without a scene the view shows its placeholder: an empty image has no picking image to click.
 		const bool hasScene = context.Editor.HasScene() || playing;
 		const bool hasRegion = std::isfinite(available.x) && std::isfinite(available.y) && available.x > 0.0f && available.y > 0.0f;
@@ -287,14 +289,21 @@ namespace Engine {
 			rectangle.Size = { available.x, available.y };
 			rectangle.Focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 		}
+		std::optional<UiPreviewFrame> previewFrame;
 		if (imageShown)
 		{
 			rectangle.ImageSize = { image.Width, image.Height };
-			// Drawn before the gizmo, which draws over it; the image's input item follows the gizmo (below).
-			ImGui::GetWindowDrawList()->AddImage(image.Texture, minimum, maximum);
-			rectangle.Hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) && ImGui::IsMouseHoveringRect(minimum, maximum);
+			previewFrame = FitUiPreviewImage(context.Editor, rectangle); // M22 (decision 33): the letterboxed game frame
+			// The image fills the rectangle. Drawn before the gizmo, which draws over it; the image's input item follows the
+			// gizmo (below).
+			const ImVec2 imageMin(rectangle.Min.x, rectangle.Min.y);
+			const ImVec2 imageMax(rectangle.Min.x + rectangle.Size.x, rectangle.Min.y + rectangle.Size.y);
+			ImGui::GetWindowDrawList()->AddImage(image.Texture, imageMin, imageMax);
+			rectangle.Hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)
+				&& ImGui::IsMouseHoveringRect(imageMin, imageMax);
 		}
-		// A changed selection must not redirect an already active gesture to a different set of entities.
+		// A changed selection must not redirect an already active gesture to a different set of entities. The UI preview
+		// draws no gizmo: an empty rectangle draws none and ends a drag.
 		bool gizmoOwnsPointer = false;
 		if (draggingAtStart && (m_DragInPlay != playing || !std::ranges::equal(m_DragSelection, context.Editor.GetSelection())))
 		{
@@ -303,8 +312,10 @@ namespace Engine {
 		}
 		else
 		{
-			// An armed tile brush hides the gizmo, so its handles never stand over a cell the brush would paint.
-			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, m_TilemapBrush.IsArmed() ? EditorViewportRect{} : rectangle, m_GizmoSettings, gizmoOwnsPointer));
+			// An armed tile brush hides the gizmo, so its handles never stand over a cell the brush would paint; the UI preview
+			// (M22, decision 33) draws none either.
+			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, m_TilemapBrush.IsArmed() || previewFrame.has_value() ? EditorViewportRect{} : rectangle,
+				m_GizmoSettings, gizmoOwnsPointer));
 		}
 		if (context.Gizmos.IsDragging() && !draggingAtStart)
 		{
@@ -327,7 +338,9 @@ namespace Engine {
 			const ImGuiID imageId = ImGui::GetID("##SceneImage");
 			const bool pressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsMouseClicked(ImGuiMouseButton_Right)
 				|| ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
-			if (gizmoOwnsPointer || (!pressed && ImGui::GetActiveID() != imageId))
+			if (previewFrame.has_value()) // M22 (decision 34): the UI authoring overlay's item owns the preview's presses
+				record(m_UiOverlay.Draw(context, *previewFrame, rectangle.ImageSize, imageActive));
+			else if (gizmoOwnsPointer || (!pressed && ImGui::GetActiveID() != imageId))
 			{
 				ImGui::Dummy(available);
 				// The wheel zooms the camera; it must never also scroll the window.
@@ -367,14 +380,14 @@ namespace Engine {
 			|| ImGui::GetDragDropPayload() != nullptr || draggingAtStart || context.Gizmos.IsDragging()
 			|| (gizmoShown && (ImGuizmo::IsUsingAny() || ImGuizmo::IsOver())) || gizmoOwnsPointer;
 		// An armed tile brush takes the image's left and right strokes (M21, decision 26); each finished stroke is one
-		// tilemap.paint.
-		Result<std::optional<Json>> stroke = m_TilemapBrush.Update(rectangle, image, { .ImageShown = imageShown, .Captured = inputCaptured, .LeftPressed = leftPressed, .RightPressed = rightPressed });
+		// tilemap.paint. The UI preview's presses are the UI authoring overlay's (M22, decision 34), never a stroke.
+		Result<std::optional<Json>> stroke = m_TilemapBrush.Update(rectangle, image, { .ImageShown = imageShown, .Captured = inputCaptured || previewFrame.has_value(), .LeftPressed = leftPressed, .RightPressed = rightPressed });
 		if (!stroke)
 			record(std::unexpected(std::move(stroke).error()));
 		else if (stroke->has_value())
 			record(QueueAction(context, "tilemap.paint", **stroke));
 		const bool brushStroking = m_TilemapBrush.IsStroking();
-		if (imageShown && !inputCaptured)
+		if (imageShown && !inputCaptured && !previewFrame.has_value())
 		{
 			// Buttons navigate only while they hold the image item they pressed; the wheel zooms the hovered view.
 			const bool fly = imageActive && !brushStroking && ImGui::IsMouseDown(ImGuiMouseButton_Right);

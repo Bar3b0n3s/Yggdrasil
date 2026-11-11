@@ -12,6 +12,7 @@
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/SourceFormats.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
@@ -124,6 +125,9 @@ namespace Engine {
 "Palette": [{"Sheet": "5b5e000000000002", "Frame": 0, "Solid": true}, {"Sheet": "5b5e000000000003", "Frame": 4, "Solid": false}],
 "Chunks": [{"X": -1, "Y": 0, "Tiles": [0, 1, 0, 0]}, {"X": 0, "Y": 0, "Tiles": [1, 1, 2, 0]}]})";
 
+		constexpr std::string_view StringTableExample = R"({"Format": "StringTable", "Version": 1, "Locales": ["en", "fr", "pt-BR"],
+"Entries": [{"Key": "Menu.Start", "Values": {"en": "Start", "fr": "Commencer", "pt-BR": "Iniciar"}}, {"Key": "Menu.Quit", "Values": {"en": "Quit"}}]})";
+
 		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 3, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
 "Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.1.0", "Config": "Editor",
 "Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
@@ -146,7 +150,7 @@ namespace Engine {
 
 		constexpr std::string_view BatchRequestExample = R"({"method": "entity.create", "params": {"name": "Ball", "components": {"Transform": {"Translation": [0, 2, 0]}}}})";
 
-		constexpr std::array<AuthoredFormat, 12> AuthoredFormats = {
+		constexpr std::array<AuthoredFormat, 13> AuthoredFormats = {
 			AuthoredFormat{ "AssetMeta", ".meta", AssetMetadata::CurrentVersion,
 				"The sidecar of every asset file (§6.4): its handle, type, importer, import settings and sub-assets; or, for a file a glTF references, a dependency meta naming its owner.",
 				AssetMetaExample },
@@ -187,6 +191,12 @@ namespace Engine {
 				"corner, each with a pivot and 9-slice borders) and named clips that show frames, by their index in `Frames`, for a number of "
 				"fixed-step ticks. A null `Texture` draws the frames as opaque white. The tables below list every field, its range and the limits.",
 				SpriteSheetExample, "SpriteSheet" },
+			AuthoredFormat{ "StringTable", ".stringtable", StringTableFormatVersion,
+				"A string table (§6.10): locale tags, the first of them the fallback, and entries that give each key a string per locale, read by "
+				"`Loc.Get` in the project's `Localization.Locale` (the table's locale equal to it ignoring ASCII case, else its language's, the "
+				"part before its first `-`, else the fallback; an entry without a string for that locale gives the fallback's). Lookups are "
+				"byte-wise and deterministic. The tables below list every field, its rules and the limits.",
+				StringTableExample, "StringTable" },
 			AuthoredFormat{ "Tilemap", ".tilemap", TilemapFormatVersion,
 				"A tilemap (§6.9): a palette of sprite sheet frames, each Solid or not for the TilemapCollider, and cells in chunks of `ChunkSize` x "
 				"`ChunkSize` (a power of two), sorted by (Y, X), none empty. Cell (x, y), x right and y up in the entity's local plane, spans "
@@ -1178,10 +1188,11 @@ namespace Engine {
 			const StructInfo* soundEffect = types.FindStruct("SoundEffect");
 			const StructInfo* spriteSheet = types.FindStruct("SpriteSheet");
 			const StructInfo* tilemap = types.FindStruct("Tilemap");
-			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr || tilemap == nullptr)
+			const StructInfo* stringTable = types.FindStruct("StringTable");
+			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr || tilemap == nullptr || stringTable == nullptr)
 			{
 				return MakeError(ErrorCode::InvalidArgument,
-					"the type registry lacks ProjectSettings, Material, SoundEffect, SpriteSheet or Tilemap, which the file format schemas use");
+					"the type registry lacks ProjectSettings, Material, SoundEffect, SpriteSheet, Tilemap or StringTable, which the file format schemas use");
 			}
 
 			std::map<std::string, Json> schemas;
@@ -1202,6 +1213,7 @@ namespace Engine {
 			schemas.emplace("SpriteSheet",
 				StructDocumentSchema(*spriteSheet, SpriteSheetFormatName, SpriteSheetFormatVersion, "A sprite sheet file (§6.9)."));
 			schemas.emplace("Tilemap", StructDocumentSchema(*tilemap, TilemapFormatName, TilemapFormatVersion, "A tilemap file (§6.9)."));
+			schemas.emplace("StringTable", StructDocumentSchema(*stringTable, StringTableFormatName, StringTableFormatVersion, "A string table file (§6.10)."));
 			return schemas;
 		}
 

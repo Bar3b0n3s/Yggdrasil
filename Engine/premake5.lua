@@ -111,9 +111,11 @@ project "Engine"
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseNativeFileDialog()
+	UseLuau(false)
+	UseHarfBuzz()
+	UseSheenBidi()
 	UseCMPCore()
 	UseTinyExr()
-	UseLuau(false)
 
 	if UseShadersProject then
 		dependson { "Shaders" }

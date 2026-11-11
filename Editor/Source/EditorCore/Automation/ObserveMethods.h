@@ -59,7 +59,8 @@ namespace Engine {
 	// line break when one falls inside it, with `nextOffset` (0 at the end) and, on a page that starts at 0, the section
 	// list. Every page is returned inline. `toc` returns no text, only the section list of the topic (or the subsections
 	// of `section`) with every section's offset and size, down to the deepest heading level whose list fits in
-	// DocsTocBytes, and the text's totalBytes.
+	// DocsTocBytes, and the text's totalBytes. A section list whose deepest fitting level is a lone entry (a document's
+	// title) also takes the next level's leading entries that fit (M22's landing).
 	struct DocsGetParams
 	{
 		std::string Topic{};

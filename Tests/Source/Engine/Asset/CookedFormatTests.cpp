@@ -89,6 +89,7 @@ namespace Engine {
 				CHECK(std::to_underlying(view->Header.Type) == value);
 			}
 			CHECK(value > std::to_underlying(AssetType::Tilemap));
+			CHECK(value > std::to_underlying(AssetType::StringTable));
 			CHECK(value > std::to_underlying(AssetType::AnimationClip));
 			Buffer artifact = WriteCookedArtifact(AssetType::Texture, 1, 1, payload);
 			constexpr size_t TypeOffset = 6; // the little-endian uint16 after the magic and the format version

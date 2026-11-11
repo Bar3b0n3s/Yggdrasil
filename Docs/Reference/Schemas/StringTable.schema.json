@@ -1,0 +1,52 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "StringTable",
+	"description": "A string table file (§6.10).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["StringTable"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Locales": {
+			"description": "1 to 64 locale tags (1 to 35 ASCII letters, digits and '-', starting with a letter, such as en, fr or pt-BR), unique ignoring ASCII case; the first is the fallback locale.",
+			"type": "array",
+			"items": {
+				"type": "string"
+			}
+		},
+		"Entries": {
+			"description": "At most 65536 entries, in authored order (sorted by Key once cooked).",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/StringTableEntry"
+			}
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false,
+	"$defs": {
+		"StringTableEntry": {
+			"description": "One key and its strings by locale.",
+			"type": "object",
+			"properties": {
+				"Key": {
+					"description": "The entry's identity, which Loc.Get looks up: 1 to 256 bytes of text without control characters, unique in the table.",
+					"type": "string"
+				},
+				"Values": {
+					"description": "The entry's strings by locale (each key one of the table's Locales, written sorted): at most 16384 bytes of UTF-8 each, line feeds and tabs their only control characters; the fallback locale's string is required, the others optional.",
+					"type": "object",
+					"additionalProperties": {
+						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}

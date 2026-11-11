@@ -174,7 +174,7 @@ Coverage in every run mode (Roadmap rule 5, §15.6): gates 1 and 1b (every 2D fi
 | 1904 | `Replays2D.jsonl` | `Assets/Tests/Replays/Sprites2D.replay` and `Physics2D.replay` (below the `Testing.Replays` glob, never `Replays.jsonl`), each with input events that change the outcome, identical in all four runs and failing without its input; recorded as M20's are, `input.record` around a `play.step` of the planned input, so the scaffold patches no `Testing.Suites` (W21.1's review) |
 | 1905–1919 | spare (W21.1) | |
 | 1920–1939 | C21.2 | Lights2D, the Tilemap and its replay |
-| 1990–1999 | the combined 2D/UI test | only if M21 lands after M22 (the ledger) |
+| 1990–1999 | the combined 2D/UI test | only if M21 lands after M22 (the ledger). Not taken: M21 landed first, so M22 added the combined test at its landing with seeds of its own range, 2090 and 2091 (`Docs/Decisions/0033-m22-contract.md`, "Landing"); these seeds stay free |
 
 `Suites.jsonl`'s one patch line binds the new suites; `Scaffold.py --check` runs at E1's end.
 

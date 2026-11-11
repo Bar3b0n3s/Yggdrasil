@@ -110,11 +110,12 @@ namespace Engine {
 			// M17's order (§8.3) with Text moved to the SceneOverlay stage, the output stage's Upscale after it, the labels
 			// after the other editor overlays and the letterbox repaint last; M23's Skinning after Prepare (C23.3), PointShadows
 			// after SpotShadows and LightClusters after the GTAO denoise; M21's Sprites, then Lights2D (C21.2), in the Sprites
-			// stage, between the forward passes and Bloom (ADR 0028's phase-2 ledger); a frozen contract of stats.get. M22's Ui
-			// joins it at its place after Text on phase 2's merged tree.
-			constexpr std::array<std::string_view, 30> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
+			// stage, between the forward passes and Bloom, and M22's Ui after Text in M18's reserved slot
+			// (Docs/Decisions/0033-m22-contract.md decision 7): ADR 0028's phase-2 ledger's 31 rows, a frozen contract of
+			// stats.get.
+			constexpr std::array<std::string_view, 31> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
 				"DepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters", "ForwardOpaque", "Skybox",
-				"ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Bloom", "Tonemap", "FXAA", "Text", "Upscale", "SelectionMask",
+				"ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Bloom", "Tonemap", "FXAA", "Text", "Ui", "Upscale", "SelectionMask",
 				"SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
@@ -147,6 +148,8 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Wireframe") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Labels") == 0);
 			CHECK(GetDeclaredPipelineCountOf("Letterbox") == 0);
+			// M22: the Ui pass records with the QuadBatcher's Ldr and (C22.3) LdrDepth pipelines and the Text pipelines.
+			CHECK(GetDeclaredPipelineCountOf("Ui") == 0);
 			// M23: the point shadows draw with the Shadows declaration's caster pipelines.
 			CHECK(GetDeclaredPipelineCountOf("PointShadows") == 0);
 		}
@@ -159,14 +162,15 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Skinning") == SkinningPass::PipelineCount);
 			CHECK(SkinningPass::PipelineCount == 1);
 			CHECK(SceneRendererPipelines::MeshPipelineCount == 24);
-			// 63 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines (60 on M23's branch).
-			CHECK(GetDeclaredPipelineCount() == 63);
+			// 64 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines and M22's LdrDepth (60 on M23's branch).
+			CHECK(GetDeclaredPipelineCount() == 64);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
-		// program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines on M21's branch, 63 with M23's
+		// program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines on M21's tree, 62 since M22 landed
+		// with the QuadBatcher's LdrDepth (Docs/Decisions/0033-m22-contract.md decision 57, "Landing"), 64 with M23's
 		// LightClusters and Skinning on phase 2's merged tree.
-		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher four")
+		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher five")
 		{
 			const auto lights = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
 			{
@@ -183,9 +187,9 @@ namespace Engine {
 			// It follows Sprites, which follows the QuadBatcher.
 			REQUIRE(lights != ScenePassDeclarations.begin());
 			CHECK((lights - 1)->Name == "Sprites");
-			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 4);
-			CHECK(QuadBatcher::PipelineCount == 4);
-			CHECK(GetDeclaredPipelineCount() == 63);
+			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
+			CHECK(QuadBatcher::PipelineCount == 5);
+			CHECK(GetDeclaredPipelineCount() == 64);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -210,10 +214,10 @@ namespace Engine {
 
 		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines")
 		{
-			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines. M21's
-			// Lights2D pass and the QuadBatcher's HdrLit and Normals pipelines (Docs/Decisions/0032-m21-contract.md decision 22)
-			// and M23's LightClusters and Skinning passes (Docs/Decisions/0034-m23-contract.md decisions 5 and 27) make it 63.
-			static_assert(GetDeclaredPipelineCount() == 63);
+			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines.
+			// M17's 54, M18's 4, M21's 3 (Lights2D, the QuadBatcher's HdrLit and Normals), M22's 1 (the QuadBatcher's LdrDepth)
+			// and M23's 2 (the LightClusters and Skinning passes, Docs/Decisions/0034-m23-contract.md decisions 5 and 27).
+			static_assert(GetDeclaredPipelineCount() == 64);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

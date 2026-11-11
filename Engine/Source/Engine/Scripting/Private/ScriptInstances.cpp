@@ -8,6 +8,7 @@
 #include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Reflection/ValidationContext.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/LuaHelpers.h"
 #include "Engine/Scripting/Private/BindingRegistration.h"
@@ -455,6 +456,103 @@ namespace Engine {
 		}
 		const uint32_t slot = instances.empty() ? 0 : instances.front().Slot;
 		Publish(std::move(error), { .Entity = diagnostic.Entity, .Case = CurrentOwner.Case, .Slot = slot }, false, true);
+	}
+
+	bool ScriptEngine::State::InvokeUi(InstanceKey key, const UiEvent& event)
+	{
+		// Invoke's eligibility, for a started instance only (decision 27: started, enabled instances receive UI events).
+		if (Engine.IsStopped() || Engine.IsReadOnly())
+			return false;
+		const auto found = Instances.find(key);
+		if (found == Instances.end() || found->second.FaultDisabled || found->second.Table == LUA_NOREF || found->second.DestroyPrepared
+			|| !found->second.Active || !found->second.Created || !found->second.Started)
+			return false;
+		const Entity entity = Engine.GetHost().GetScene().FindEntityByID(key.Entity);
+		if (!entity || !entity.IsActive())
+			return false;
+		const std::string_view callback = GetUiEventCallbackName(event.Kind);
+		const int tableReference = found->second.Table;
+		// As Invoke: instance work, whose tasks belong to the instance; the active case receives errors as attribution only.
+		const ScriptTaskOwner owner{ .Entity = key.Entity, .Case = {}, .Slot = key.Slot };
+		const bool outerSignal = std::exchange(TestSignalRaised, false);
+		std::optional<ScriptError> callbackFailure;
+		bool stop = false;
+		const auto operation = [this, tableReference, callback, &event, &callbackFailure, &stop](ScriptCall& call) -> int
+		{
+			lua_getref(call.State, tableReference);
+			const int self = lua_gettop(call.State);
+			const std::string name(callback);
+			lua_getfield(call.State, self, name.c_str());
+			if (lua_isnil(call.State, -1))
+				return 0;
+			if (!lua_isfunction(call.State, -1))
+				return Lua::RaiseError(call, "A lifecycle callback must be a function or nil");
+			const Status counted = Engine.GetApi().RecordCallback(call, "Behaviour", callback, Engine.GetRunMode());
+			if (!counted)
+				return Lua::RaiseError(call, counted.error());
+			lua_pushvalue(call.State, self);
+			// The element is the event's target, which a callback earlier in the walk may have destroyed: its identity still
+			// reads (the pending-destruction read rule) until the flush.
+			Lua::Push(call, ScriptEntityIdentity{ event.Target, Engine.GetHost().GetSceneGeneration() });
+			int arguments = 2;
+			switch (event.Kind)
+			{
+				case UiEventKind::Click:
+				case UiEventKind::Cancel:
+					break;
+				case UiEventKind::ValueChanged:
+					if (event.HasNumber)
+						Lua::Push(call, event.Number);
+					else
+						Lua::Push(call, event.Flag);
+					++arguments;
+					break;
+				case UiEventKind::Focus:
+				case UiEventKind::Hover:
+					Lua::Push(call, event.Flag);
+					++arguments;
+					break;
+				case UiEventKind::Scroll:
+					Lua::Push(call, glm::vec3(event.Vector, 0.0f));
+					++arguments;
+					break;
+				case UiEventKind::TextChanged:
+				case UiEventKind::Submit:
+				{
+					// C22.3 (Docs/Decisions/0033-m22-contract.md decision 47): the input's Text as it is now, which an earlier
+					// callback of the walk may have changed (read while the input is pending destruction too; empty when it
+					// no longer holds a UiTextInput).
+					const ConstEntity input = std::as_const(Engine.GetHost().GetScene()).FindReadableEntityByID(event.Target);
+					const UiTextInputComponent* textInput = input.IsReadable() ? input.TryGetComponent<UiTextInputComponent>() : nullptr;
+					Lua::PushString(call, textInput != nullptr ? std::string_view(textInput->Text) : std::string_view{});
+					++arguments;
+					break;
+				}
+			}
+			const auto result = Lua::ProtectedCall(call, arguments, 1);
+			if (!result)
+				return Lua::RaiseError(call, result.error());
+			callbackFailure = result->Failure;
+			// Only the boolean true stops the event; nil, false and any other value let it bubble on.
+			if (!result->Failure)
+				stop = lua_isboolean(call.State, -1) && lua_toboolean(call.State, -1) != 0;
+			return 0;
+		};
+		const auto result = RunNative(operation, ScriptExecutionOrigin::Gameplay, owner, callback);
+		// As Invoke: a Fail or Skip raised by the callback ends the running case and is never an instance fault.
+		const bool testSignal = std::exchange(TestSignalRaised, outerSignal);
+		const bool safetyFailure = (!result && result.error().GetCode() == ErrorCode::Timeout)
+			|| (result && result->Failure && (result->Failure->Kind == ScriptErrorKind::Timeout || result->Failure->Kind == ScriptErrorKind::Memory))
+			|| (callbackFailure && (callbackFailure->Kind == ScriptErrorKind::Timeout || callbackFailure->Kind == ScriptErrorKind::Memory));
+		if (testSignal && !safetyFailure)
+			return false;
+		if (!result)
+			Publish(result.error(), key, callback);
+		else if (result->Failure)
+			Publish(*result->Failure, owner);
+		else if (callbackFailure)
+			Publish(*callbackFailure, owner);
+		return result && !result->Failure && !callbackFailure && stop;
 	}
 
 	void ScriptEngine::State::DeliverPendingEvents()

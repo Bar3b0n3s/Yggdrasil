@@ -1010,9 +1010,9 @@ class CheckBuildConfigWiringTests(unittest.TestCase):
                                       self.root / "Log", time.monotonic() + 600.0)
         self.assertIsNotNone(use.plan, use.reason)
         linked = {entry.project: entry.entry for entry in use.plan.linked}
-        self.assertEqual(set(linked), {"CMP_Core", "GLFW", "ImGui", "ImGuizmo", "JoltPhysics", "Luau", "LuauAnalysis",
-                                       "MikkTSpace", "NVRHI", "miniaudio", "nfd", "ogg", "opus", "opusfile", "spdlog",
-                                       "tinyexr"})
+        self.assertEqual(set(linked), {"CMP_Core", "GLFW", "HarfBuzz", "ImGui", "ImGuizmo", "JoltPhysics", "Luau",
+                                       "LuauAnalysis", "MikkTSpace", "NVRHI", "SheenBidi", "miniaudio", "nfd", "ogg",
+                                       "opus", "opusfile", "spdlog", "tinyexr"})
 
         code, report = self.check()
         self.assertEqual(code, 0, report["findings"])
@@ -1068,8 +1068,9 @@ class VendorCacheWorkspaceTests(unittest.TestCase):
         inside = self.generate(self.temporary_directory(paths.BIN_INT_ROOT))
         outside = self.generate(self.temporary_directory())
         self.assertEqual({name for name, _ in inside},
-                         {"CMP_Core", "GLFW", "ImGui", "ImGuizmo", "JoltPhysics", "Luau", "LuauAnalysis", "MikkTSpace",
-                          "NVRHI", "miniaudio", "nfd", "ogg", "opus", "opusfile", "spdlog", "tinyexr"})
+                         {"CMP_Core", "GLFW", "HarfBuzz", "ImGui", "ImGuizmo", "JoltPhysics", "Luau", "LuauAnalysis",
+                          "MikkTSpace", "NVRHI", "SheenBidi", "miniaudio", "nfd", "ogg", "opus", "opusfile", "spdlog",
+                          "tinyexr"})
         self.assertEqual(inside, outside)
         self.assertEqual(len(set(inside.values())), len(inside))
 

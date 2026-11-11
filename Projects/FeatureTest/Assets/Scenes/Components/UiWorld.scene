@@ -1,0 +1,390 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "UiWorld",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"Script": 2,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiImage": 1,
+		"UiText": 1,
+		"UiButton": 1,
+		"UiSlider": 1
+	},
+	"Entities": [
+		{
+			"ID": "5c7aee6e0f6a0b72",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 0.6, 5.5],
+					"Rotation": [-0.052049253, 0.10438521, 0.005470597, 0.99315894],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.08, 0.09, 0.12]
+				}
+			}
+		},
+		{
+			"ID": "82410b221db78af7",
+			"Name": "Board",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, 0],
+					"Rotation": [0, -0.087155744, 0, 0.9961947],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "dc715c98ce1771ae",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": null,
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "World",
+					"WorldWidth": 800,
+					"WorldHeight": 480,
+					"PixelsPerUnit": 200
+				}
+			}
+		},
+		{
+			"ID": "a67836a0553733ea",
+			"Name": "Panel",
+			"Parent": "82410b221db78af7",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.12, 0.14, 0.2, 0.95],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": false
+				}
+			}
+		},
+		{
+			"ID": "9d8873be788579a9",
+			"Name": "Title",
+			"Parent": "82410b221db78af7",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 24],
+					"Size": [720, 64],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "World canvas",
+					"Font": null,
+					"Size": 48,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": false
+				}
+			}
+		},
+		{
+			"ID": "29a3e52dbc3b11a3",
+			"Name": "Press",
+			"Parent": "82410b221db78af7",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 120],
+					"Size": [320, 112],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.25, 0.55, 0.35, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "a89b6cbb27ba6d6b",
+			"Name": "PressLabel",
+			"Parent": "29a3e52dbc3b11a3",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Press",
+					"Font": null,
+					"Size": 48,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Center",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "bfdf11cec8ec5c4a",
+			"Name": "Level",
+			"Parent": "82410b221db78af7",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 320],
+					"Size": [720, 64],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.2, 0.2, 0.25, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiSlider": {
+					"Interactable": true,
+					"Focusable": false,
+					"Value": 0,
+					"Min": 0,
+					"Max": 10,
+					"WholeNumbers": true,
+					"Step": 0,
+					"Direction": "Horizontal",
+					"Fill": "fb2462d3282069e5",
+					"Handle": "92da7f17455a93cb"
+				}
+			}
+		},
+		{
+			"ID": "fb2462d3282069e5",
+			"Name": "LevelFill",
+			"Parent": "bfdf11cec8ec5c4a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.6, 0.9, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "92da7f17455a93cb",
+			"Name": "LevelHandle",
+			"Parent": "bfdf11cec8ec5c4a",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [24, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.95, 0.95, 0.95, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "0951320c86ebe0ec",
+			"Name": "Hud",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": null,
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
+				}
+			}
+		},
+		{
+			"ID": "0f646c7b9027c566",
+			"Name": "HudLabel",
+			"Parent": "0951320c86ebe0ec",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [1, 0],
+					"AnchorMax": [1, 0],
+					"Pivot": [1, 0],
+					"Position": [-24, 24],
+					"Size": [200, 48],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "HUD",
+					"Font": null,
+					"Size": 32,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Right",
+					"VerticalAlignment": "Middle",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		}
+	]
+}

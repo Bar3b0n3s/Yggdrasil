@@ -21,6 +21,7 @@
 #include "EditorCore/Automation/ShaderMethods.h"
 #include "EditorCore/Automation/TestMethods.h"
 #include "EditorCore/Automation/TilemapMethods.h"
+#include "EditorCore/Automation/UiAuthoringMethods.h"
 #include "EditorCore/Automation/ViewportMethods.h"
 #include "EditorCore/Automation/ViewportPickMethods.h"
 #include "EditorCore/Project/ProjectValidator.h"
@@ -63,6 +64,8 @@ namespace Engine {
 		RegisterProfilerMethodTypes(registry);
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 26): tilemap.paint.
 		RegisterTilemapMethodTypes(registry);
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 32): ui.createWidget; phase 2 appends in landing order.
+		RegisterUiAuthoringMethodTypes(registry);
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the editor's animation preview.
 		RegisterAnimationMethodTypes(registry);
 	}
@@ -89,6 +92,7 @@ namespace Engine {
 		RegisterShaderMethods(methods);
 		RegisterProfilerMethods(methods);
 		RegisterTilemapMethods(methods);
+		RegisterUiAuthoringMethods(methods); // M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 32
 		RegisterAnimationMethods(methods);
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);

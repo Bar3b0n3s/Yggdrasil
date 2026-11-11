@@ -13,6 +13,7 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SkeletonData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Assert.h"
@@ -105,6 +106,11 @@ namespace Engine {
 			return LoadCookedTilemap(cooked);
 		}
 
+		static Result<AssetRef<StringTableData>> LoadStringTable(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedStringTable(cooked);
+		}
+
 		static Result<AssetRef<SkeletonData>> LoadSkeleton(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
 		{
 			return LoadCookedSkeleton(cooked);
@@ -184,6 +190,8 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<SpriteSheetData, &Utils::LoadSpriteSheet>>());
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 23).
 		registry.Register(CreateScope<PayloadLoader<TilemapData, &Utils::LoadTilemap>>());
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10).
+		registry.Register(CreateScope<PayloadLoader<StringTableData, &Utils::LoadStringTable>>());
 		// M23 (C23.3; Docs/Decisions/0034-m23-contract.md decision 24).
 		registry.Register(CreateScope<PayloadLoader<SkeletonData, &Utils::LoadSkeleton>>());
 		registry.Register(CreateScope<PayloadLoader<AnimationClipData, &Utils::LoadAnimationClip>>());
@@ -206,6 +214,7 @@ namespace Engine {
 			case AssetType::Replay:        return ReplayData::FormatVersion;
 			case AssetType::SpriteSheet:   return SpriteSheetData::FormatVersion;
 			case AssetType::Tilemap:       return TilemapData::FormatVersion;
+			case AssetType::StringTable:   return StringTableData::FormatVersion;
 			case AssetType::Skeleton:      return SkeletonData::FormatVersion;
 			case AssetType::AnimationClip: return AnimationClipData::FormatVersion;
 		}

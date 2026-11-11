@@ -46,6 +46,7 @@ namespace Engine {
 
 	class ConstEntity;
 	class Scene;
+	struct UiInteractionState;
 
 	// The camera a view renders through.
 	enum class RenderCameraSource : uint8_t
@@ -86,6 +87,11 @@ namespace Engine {
 		// copies as it copies Quality; a sprite's sorting layer is its name's index here (SpriteItem::SortingLayer), 0 for a
 		// name it lacks (SPRITE_UNKNOWN_SORTING_LAYER). Empty: every sprite is in layer 0.
 		std::vector<std::string> SortingLayers{};
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 25): the play session's UI interaction state, whose widget
+		// states pick the UI's tints (AppendUiDrawItems, Scene/UiExtraction.h); a borrowed pointer valid for the call. The
+		// session sets it for its game view and its views between ticks (PlaySession's RenderExtraction phase and
+		// ExtractView); null (every other host, the edit scene) draws every widget Normal, or Disabled when not interactable.
+		const UiInteractionState* UiInteraction = nullptr;
 	};
 
 	// The scene's primary camera: the first entity in canonical order (§5.1) that is effectively enabled (no
@@ -96,6 +102,21 @@ namespace Engine {
 	// The rendered world matrix of `entity` (valid, asserted) at `alpha` in [0, 1] (asserted): the interpolation rule of the
 	// file comment, over the entity's WorldTransformComponent as it is (callers refresh it first). Pure.
 	[[nodiscard]] glm::mat4 ComputeRenderedWorldMatrix(ConstEntity entity, float alpha);
+
+	// M22's landing (Docs/Decisions/0033-m22-contract.md decisions 3 and 24, "Landing"; ADR 0028's phase-2 ledger): the
+	// output-stage settings render extraction gives a view through `camera` (a valid entity, asserted): its
+	// PixelPerfectCamera's (ComputePixelPerfectView's Output, which the camera's position does not change) when the entity
+	// holds a PixelPerfectCameraComponent, else the defaults (the scene resolution is the view's size). It is the one place
+	// a camera's scene resolution is decided: ExtractRenderSnapshot sets RenderSnapshot::Output from it for the Primary and
+	// Entity sources, and the play session's UiLayout and FrameUiLayout phases, UiInput's pointer mapping, ui.tree and the
+	// editor's UI preview take the primary camera's through ComputeGameViewOutputMapping, so the layout the session
+	// hit-tests is the one the game view draws. Pure.
+	[[nodiscard]] RenderOutputSettings GetCameraOutputSettings(ConstEntity camera);
+
+	// The output mapping of the scene's game view (RenderCameraSource::Primary) in a `viewSize` view (each >= 1, asserted):
+	// ComputeRenderOutputMapping with the primary camera's GetCameraOutputSettings, or the defaults (the identity) without
+	// a primary camera. Its SceneWidth x SceneHeight is the scene resolution the game view lays its UI out at. Pure.
+	[[nodiscard]] RenderOutputMapping ComputeGameViewOutputMapping(const Scene& scene, glm::uvec2 viewSize);
 
 	// The snapshot of one view of `scene` (§8.2):
 	//   - Camera: per request.Camera. Primary without a primary camera is not an error: HasCamera is false and the renderer
@@ -135,6 +156,14 @@ namespace Engine {
 	//     Explicit cameras ignore it. Without one, Output keeps its defaults.
 	// M9 additions: copy Flags, Quality, Annotations and SelectedEntities (sort/unique/filter unknown ids), assign mesh
 	// PickIds/PickTable in canonical entity order before GPU culling, and copy all five directional shadow fields.
+	// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): Ui, every effectively enabled canvas laid out at the scene
+	// resolution of the snapshot's Output (ComputeUiLayout, Scene/UiLayout.h; the view's size by default) and its visible
+	// elements' draw items appended in draw order (AppendUiDrawItems, Scene/UiExtraction.h), for the Primary and Entity camera
+	// sources (the game view and a camera's view; a view without a primary camera draws its UI too, as it draws its screen
+	// texts). The editor's scene view (Explicit) draws no Screen canvas. C22.3 (decision 51, stream W): World canvases
+	// (UiCanvasComponent::RenderMode) draw in every view that draws the world, the editor's scene view included
+	// (AppendUiDrawItems' worldOnly for the Explicit source), at their render pose at request.Alpha, as the meshes (the
+	// milestone review); Screen canvases still draw in the Primary and Entity views only.
 	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.
 	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no

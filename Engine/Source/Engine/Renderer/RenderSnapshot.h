@@ -5,6 +5,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Renderer/DebugDrawList.h"
+#include "Engine/Renderer/UiDrawList.h"
 
 #include <glm/glm.hpp>
 
@@ -17,9 +18,9 @@
 
 // The render snapshot (Architecture §8.2): everything the renderer needs to draw one view, as plain data. Scene's render
 // extraction (Scene/RenderExtraction.h) builds it from the ECS, so the renderer never sees the scene and is tested with
-// synthetic snapshots. This header is one of the two Renderer headers Scene may include (§3 rule 3): it includes nothing
-// beyond Core, Asset, glm and the standard library, and in particular no NVRHI (the SnapshotHeaders rule of
-// Scripts/ModuleRules.json, checked by Lint.py).
+// synthetic snapshots. This header is one of the Renderer headers Scene may include (§3 rule 3, with DebugDrawList.h and
+// M22's UiDrawList.h, both of which it includes): it includes nothing beyond Core, Asset, glm and the standard library, and
+// in particular no NVRHI (the SnapshotHeaders rule of Scripts/ModuleRules.json, checked by Lint.py).
 //
 // Conventions (§5.2, §8.3): right-handed, +Y up, metres; cameras and lights look down their local -Z; colours are linear;
 // angles are degrees; depth is reverse-Z (perspective projections have an infinite far plane, orthographic ones the finite
@@ -36,22 +37,25 @@
 // paths; its C23.3 (decision 27) the mesh draw item's deformation (JointPalette, MorphWeights). The M21 contract (C21.1,
 // Docs/Decisions/0032-m21-contract.md decision 4) added the sprites (SpriteItem, Sprites) after Output, as ADR 0028's
 // phase-2 ledger places phase 2's members, and C21.2 (decisions 21, 22 and 24) the tilemaps and the 2D lights after them
-// (TilemapItem, Tilemaps, Light2DItem, Lights2D) and a sprite's normal map. Additions are frozen-header changes reviewed by
-// their contract owner; no member here changes meaning. A plain value type: copyable, movable, thread-compatible.
+// (TilemapItem, Tilemaps, Light2DItem, Lights2D) and a sprite's normal map. The M22 contract (C22.1,
+// Docs/Decisions/0033-m22-contract.md decision 7) added the UI draw list (Ui, Renderer/UiDrawList.h) after M21's members, in
+// landing order. Additions are frozen-header changes reviewed by their contract owner; no member here changes meaning. A
+// plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
-// Icons, M21's Sprites, Tilemaps and Lights2D, and the commands of DebugDraw and AnnotationDraw) are std::pmr containers.
-// A snapshot built with RenderSnapshot(resource) allocates them from that memory resource, which must outlive the
-// snapshot; a default-constructed one, and every copy (std::pmr's copy construction), allocates from
-// std::pmr::get_default_resource(), the global heap unless a host changed it. Assignment keeps the target's resource.
-// SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh item's
-// Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list) keep the default allocator.
+// Icons, M21's Sprites, Tilemaps and Lights2D, the commands of DebugDraw and AnnotationDraw, and M22's Ui items and
+// annotations) are std::pmr containers. A snapshot built with RenderSnapshot(resource) allocates them from that memory
+// resource, which must outlive the snapshot; a default-constructed one, and every copy (std::pmr's copy construction),
+// allocates from std::pmr::get_default_resource(), the global heap unless a host changed it. Assignment keeps the target's
+// resource. SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh
+// item's Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list) keep the default allocator.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
 // by the largest integer factor that fits the view, with point sampling, centred in a letterbox. Picking, CPU rays,
 // captures and UI hit testing map view pixels to scene pixels with RenderOutputMapping (ComputeRenderOutputMapping and the
-// Map* functions below). UI is laid out and hit-tested in scene pixels.
+// Map* functions below). UI is laid out and hit-tested in scene pixels (M22: the Ui member, drawn at the scene resolution
+// before the upscale).
 
 namespace Engine {
 
@@ -529,6 +533,12 @@ namespace Engine {
 		// M21 (C21.2, decision 22): every effectively enabled Light2D, in canonical entity order, the order the Lights2D pass
 		// adds them in.
 		std::pmr::vector<Light2DItem> Lights2D{};
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI (UiDrawList.h): every effectively enabled
+		// canvas laid out at the scene resolution of Output (the view's size by default), its visible elements' images and
+		// texts in draw order, and a capture's UI annotations; empty without a canvas, and in the editor's scene view, which
+		// draws no Screen canvas, but for C22.3's World canvases (ExtractRenderSnapshot). The Ui pass draws it after game
+		// Text in the SceneOverlay stage; the data views (AO, ShadowCascades, Overdraw) show none, as they show no Text.
+		UiDrawList Ui{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

@@ -27,6 +27,7 @@ namespace Engine {
 	class Random;
 	class Scene;
 	class TypeRegistry;
+	class UiSystem;
 
 	struct ScriptFrameState
 	{
@@ -128,6 +129,16 @@ namespace Engine {
 		// gameplay entry is running (one-shot evaluations never report one). Called on every protected entry and exit, so
 		// implementations must be cheap; hosts without a phase marker keep the default, which ignores it.
 		virtual void OnScriptPhase(std::string_view /*script*/, std::string_view /*callback*/) {}
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the play session's UI (Scene/UiSystem.h), which the
+		// Ui script module reads and focuses through; a play session's host returns PlaySession::GetUi, and every other host
+		// (the edit evaluation, test fixtures without a session) keeps the default, null, for which the module reports no
+		// focus, hover or press and no rectangle, and refuses Ui.SetFocus.
+		[[nodiscard]] virtual UiSystem* GetUi() { return nullptr; }
+		// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 46; stream T): the committed characters latched into
+		// `phase`'s view (UTF-8; PlayInput::GetText, the text latch), which Input.GetText reads in that phase; valid until the
+		// session's next latch. A play session's host returns its PlayInput's, and every other host (the edit evaluation,
+		// test fixtures without a session) keeps the default, empty, so Input.GetText reads no text there.
+		[[nodiscard]] virtual std::string_view GetText(InputPhase /*phase*/) const { return {}; }
 	};
 
 }

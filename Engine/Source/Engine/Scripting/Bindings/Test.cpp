@@ -380,6 +380,31 @@ namespace Engine {
 			return Inject(call, { { "type", "gamepadButton" }, { "gamepad", index }, { "button", button }, { "state", EventState(call, 3) } });
 		}
 
+		// The pointer move, the wheel and typed text a recording suite needs for a slider drag, a scroll list and a text
+		// field (Docs/Decisions/0033-m22-contract.md decision 52), in input.inject's service forms. Each argument is
+		// validated here, before the host, as InjectMouse's position is.
+		static int InjectMouseMove(ScriptCall& call)
+		{
+			const auto position = Lua::Check<glm::vec2>(call, 1);
+			return Inject(call, { { "type", "mouseMove" }, { "position", { position.x, position.y } } });
+		}
+
+		static int InjectScroll(ScriptCall& call)
+		{
+			const auto delta = Lua::Check<glm::vec2>(call, 1);
+			return Inject(call, { { "type", "scroll" }, { "delta", { delta.x, delta.y } } });
+		}
+
+		static int InjectText(ScriptCall& call)
+		{
+			std::string text = Lua::Check<std::string>(call, 1);
+			if (text.empty())
+				return Lua::RaiseError(call, "Test.InjectText needs at least one character");
+			if (!IsValidUtf8(text))
+				return Lua::RaiseError(call, std::format("Test.InjectText's text is not valid UTF-8 (at byte {})", FindInvalidUtf8(text)));
+			return Inject(call, { { "type", "text" }, { "text", std::move(text) } });
+		}
+
 		static int Screenshot(ScriptCall& call)
 		{
 			IScriptTestHost& host = Host(call);
@@ -631,6 +656,9 @@ namespace Engine {
 				.Function("InjectMouse", Utils::InjectMouse, "(button: MouseButton, state: InputEventState, position: vector?) -> ()", "Queue a mouse button and optional finite XY position.", mouse)
 				.Function("InjectGamepad", Utils::InjectGamepad, "((index: number, button: GamepadButton, state: InputEventState) -> ()) & ((index: number, axis: GamepadAxis, value: number) -> ())",
 					"Queue a gamepad button state, or an engine-convention axis value when the third argument is a number.", gamepad)
+				.Function("InjectMouseMove", Utils::InjectMouseMove, "(position: vector) -> ()", "Queue a mouse move to a finite XY position in view coordinates for the next unapplied input tick.", mutation)
+				.Function("InjectScroll", Utils::InjectScroll, "(delta: vector) -> ()", "Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next unapplied input tick.", mutation)
+				.Function("InjectText", Utils::InjectText, "(text: string) -> ()", "Queue committed text (non-empty UTF-8) for the next unapplied input tick, as typed characters.", mutation)
 				.Function("Screenshot", Utils::Screenshot, "(name: string) -> ()",
 					std::format("Capture a screenshot through the owning host; a suite takes at most {} screenshots, and a later call raises an error without capturing.", MaxScriptTestScreenshotsPerSuite), mutation)
 				.Function("ReloadScript", Utils::ReloadScript, "(asset: AssetRef) -> ()", "Synchronously reload a script in an editor test.", editor)

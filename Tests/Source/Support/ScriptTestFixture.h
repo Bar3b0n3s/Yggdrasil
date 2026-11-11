@@ -37,6 +37,8 @@ namespace Engine {
 			// fixture. Script compilation's load-time VMs get ClockSeconds alone, their only clock when it is set.
 			std::function<double()> ClockSeconds{};
 			std::function<double()> CpuClockSeconds{};
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 11): the engine's locale (ScriptEngineSpecification::Locale).
+			std::string Locale{};
 		};
 
 		// Real compiler/extraction, immutable memory assets, and one runtime engine. Host requests are observed rather
@@ -93,6 +95,7 @@ namespace Engine {
 			void OnScriptError(const ScriptError& error, bool fatal) override;
 			void OnExternalMutation(std::string_view reason) override;
 			[[nodiscard]] bool IsReloadDeferred() const override { return ReloadDeferred; }
+			[[nodiscard]] UiSystem* GetUi() override { return Ui; }
 
 			ScriptFrameState Frame{};
 			ScriptEnvironment Environment{ .IsEditor = true, .Platform = "Test", .Version = "1" };
@@ -103,6 +106,9 @@ namespace Engine {
 			PhysicsSystem* Physics = nullptr;
 			Physics2DSystem* Physics2D = nullptr; // M21
 			AudioSystem* Audio = nullptr;
+			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the UI the Ui module reads (IScriptHost::GetUi); null
+			// as in an edit evaluation.
+			UiSystem* Ui = nullptr;
 			Json Parameters = Json::object();
 			std::map<std::string, ScriptActionState> Actions{};
 			CursorMode Cursor = CursorMode::Normal;

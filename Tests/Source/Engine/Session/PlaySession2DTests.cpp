@@ -84,6 +84,8 @@ namespace Engine {
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::TextLatch, // M22's phases, at the ledger's places (they run in Simulate too)
+				PlaySessionPhase::UiInput,
 				PlaySessionPhase::SpriteAnimation,
 				PlaySessionPhase::AnimationSystem,
 				PlaySessionPhase::PreStepTransformUpdate,
@@ -95,9 +97,11 @@ namespace Engine {
 				PlaySessionPhase::Physics2DPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
+				PlaySessionPhase::UiLayout,
 				PlaySessionPhase::LatchFrame,
 				PlaySessionPhase::FrameDestroyFlush,
 				PlaySessionPhase::FrameTransformUpdate,
+				PlaySessionPhase::FrameUiLayout,
 				PlaySessionPhase::RenderExtraction,
 			};
 			CHECK(observer.Phases == expected);

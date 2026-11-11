@@ -20,7 +20,8 @@ from engine_mcp import server  # noqa: E402
 # (Docs/Decisions/0027-m17-contract.md, friction F11), M19's input_read_replay (Docs/Decisions/0030-m19-contract.md
 # decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
 # (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
-# decision 26) and M23's animation_preview (Docs/Decisions/0034-m23-contract.md decision 32).
+# decision 26), M22's ui_tree and ui_create_widget (Docs/Decisions/0033-m22-contract.md decisions 8 and 32) and M23's
+# animation_preview (Docs/Decisions/0034-m23-contract.md decision 32).
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate", "project_export", "project_upgrade",
@@ -35,7 +36,9 @@ PROXIED_TOOLS = {
     "script_read",
     "script_write", "script_check", "script_errors", "script_eval", "test_run",
     "native_build", "native_get_components", "native_load", "native_read", "native_set_components", "native_status",
-    "native_write", "tilemap_paint", "animation_preview",
+    "native_write", "tilemap_paint",
+    "ui_tree", "ui_create_widget",
+    "animation_preview",
 }
 MAX_SCHEMA_BYTES = 4096
 

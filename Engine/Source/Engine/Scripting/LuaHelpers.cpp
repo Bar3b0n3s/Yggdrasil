@@ -1612,7 +1612,8 @@ namespace Engine {
 		}
 		void PushString(ScriptCall& call, std::string_view value)
 		{
-			lua_pushlstring(call.State, value.data(), value.size());
+			// lua_pushlstring refuses a null pointer (api_check), which an empty view holds when default-constructed.
+			lua_pushlstring(call.State, value.empty() ? "" : value.data(), value.size());
 		}
 		int RaiseError(ScriptCall& call, std::string_view message)
 		{

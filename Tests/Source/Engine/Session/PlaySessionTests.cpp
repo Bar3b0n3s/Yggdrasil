@@ -2,20 +2,32 @@
 
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Asset/DocumentData.h"
+#include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiButtonComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Session/ReplayRecorder.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/ScriptTestFixture.h"
 
+#include <algorithm>
 #include <iterator>
 #include <limits>
 #include <string>
@@ -58,6 +70,21 @@ namespace Engine {
 
 			std::vector<bool> Pressed;
 			std::vector<bool> Released;
+		};
+
+		// M22 C22.3: takes the UI events of every tick at StartFlush, right after the UiInput phase raised them.
+		class UiEventTaker final : public IPlaySessionObserver
+		{
+		public:
+			void OnPhase(PlaySession& session, PlaySessionPhase phase, uint64_t /*tick*/) override
+			{
+				if (phase != PlaySessionPhase::StartFlush)
+					return;
+				for (const UiEvent& event : session.GetUi().TakeEvents())
+					Events.push_back(event);
+			}
+
+			std::vector<UiEvent> Events;
 		};
 
 		// Destroys "/Board" in the first fixed update (a script's Destroy, M13) and counts the entities marked for destruction
@@ -107,6 +134,73 @@ namespace Engine {
 			specification.Seed = 42;
 			specification.Observer = observer;
 			return specification;
+		}
+
+		// M22 C22.2: a canvas holding the buttons "A" at (0, 0) and "B" at (0, 30), each 100 x 20 scene pixels with an image.
+		void PopulateUiScene(Scene& scene)
+		{
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			for (const auto& [name, y] : { std::pair<std::string_view, float>{ "A", 0.0f }, std::pair<std::string_view, float>{ "B", 30.0f } })
+			{
+				Entity button = scene.CreateEntity(name, canvas);
+				button.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+					.AnchorMax = glm::vec2(0.0f),
+					.Pivot = glm::vec2(0.0f),
+					.Position = glm::vec2(0.0f, y),
+					.Size = glm::vec2(100.0f, 20.0f) });
+				button.AddComponent<UiImageComponent>(UiImageComponent{});
+				button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			}
+		}
+
+		// A tap of `key` for `tick`, as a host or play.step queues it.
+		void QueueKeyTap(PlaySession& session, uint64_t tick, Key key)
+		{
+			REQUIRE(session.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::KeyInput, .State = PlayInputEventState::Tap, .KeyCode = key }).has_value());
+		}
+
+		void QueuePointer(PlaySession& session, uint64_t tick, glm::vec2 position)
+		{
+			REQUIRE(session.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::MouseMove, .Position = position }).has_value());
+		}
+
+		// A left click at `position` (view coordinates): pressed at `tick`, released at the next.
+		void QueueClick(PlaySession& session, uint64_t tick, glm::vec2 position)
+		{
+			const PlayInputEvent click{ .Type = PlayInputEventType::MouseButtonInput,
+				.State = PlayInputEventState::Tap,
+				.Button = MouseButton::Left,
+				.HasPosition = true,
+				.Position = position };
+			REQUIRE(session.GetInput().Queue(tick, click).has_value());
+		}
+
+		// M22's milestone review: a World canvas of `pixels` x `pixels` canvas pixels at 4 per world unit, centred on its entity
+		// at `position` and facing +Z, whose element "Button" (a UiButton with an image) covers it.
+		Entity AddWorldButtonCanvas(Scene& scene, std::string_view name, glm::vec3 position, uint32_t pixels)
+		{
+			Entity canvas = scene.CreateEntity(name);
+			canvas.GetComponent<TransformComponent>().Translation = position;
+			canvas.AddComponent<UiCanvasComponent>(
+				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = pixels, .WorldHeight = pixels, .PixelsPerUnit = 4.0f });
+			Entity button = scene.CreateEntity("Button", canvas);
+			button.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(1.0f), .Size = glm::vec2(0.0f) });
+			button.AddComponent<UiImageComponent>(UiImageComponent{});
+			button.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			return canvas;
+		}
+
+		// The Click events of `events`, by target.
+		std::vector<UUID> GetClicks(const std::vector<UiEvent>& events)
+		{
+			std::vector<UUID> clicks;
+			for (const UiEvent& event : events)
+			{
+				if (event.Kind == UiEventKind::Click)
+					clicks.push_back(event.Target);
+			}
+			return clicks;
 		}
 
 		// A small edit scene: a root with a child and a moved root.
@@ -226,13 +320,17 @@ namespace Engine {
 			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
 
 			(*session)->Tick();
-			// §5.7: the fixed step (0 to 9, M21's SpriteAnimation 4b and M23's AnimationSystem 4c after the gameplay code,
-			// TransformSystem::Update before PhysicsSystem::PreStep, M21's 2D phases 7a to 7c after the 3D post-step), then the
-			// frame phase.
+			// §5.7: the fixed step (0 to 10, TextLatch and UiInput after ApplyInput, UiEvents after StartFlush, M21's
+			// SpriteAnimation 4b and M23's AnimationSystem 4c after the gameplay code, TransformSystem::Update before
+			// PhysicsSystem::PreStep, M21's 2D phases 7a to 7c after the 3D post-step, UiLayout last), then the frame phase
+			// (FrameUiLayout after FrameTransformUpdate).
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::TextLatch,
+				PlaySessionPhase::UiInput,
 				PlaySessionPhase::StartFlush,
+				PlaySessionPhase::UiEvents,
 				PlaySessionPhase::FixedUpdate,
 				PlaySessionPhase::Tasks,
 				PlaySessionPhase::SpriteAnimation,
@@ -246,12 +344,14 @@ namespace Engine {
 				PlaySessionPhase::Physics2DPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
+				PlaySessionPhase::UiLayout,
 				PlaySessionPhase::LatchFrame,
 				PlaySessionPhase::FrameStartFlush,
 				PlaySessionPhase::Update,
 				PlaySessionPhase::LateUpdate,
 				PlaySessionPhase::FrameDestroyFlush,
 				PlaySessionPhase::FrameTransformUpdate,
+				PlaySessionPhase::FrameUiLayout,
 				PlaySessionPhase::AudioUpdate,
 				PlaySessionPhase::RenderExtraction,
 			};
@@ -260,10 +360,10 @@ namespace Engine {
 			// FixedStep alone runs the fixed step only; FrameUpdate alone the frame phase only.
 			observer.Phases.clear();
 			(*session)->FixedStep();
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 16));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin(), expected.begin() + 20));
 			observer.Phases.clear();
 			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 });
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 16, expected.end()));
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>(expected.begin() + 20, expected.end()));
 		}
 
 		TEST_CASE("PlaySession: Simulate mode skips the script and audio phases")
@@ -278,6 +378,8 @@ namespace Engine {
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
+				PlaySessionPhase::TextLatch,
+				PlaySessionPhase::UiInput,
 				PlaySessionPhase::SpriteAnimation,
 				PlaySessionPhase::AnimationSystem,
 				PlaySessionPhase::PreStepTransformUpdate,
@@ -289,12 +391,906 @@ namespace Engine {
 				PlaySessionPhase::Physics2DPostStep,
 				PlaySessionPhase::DestroyFlush,
 				PlaySessionPhase::PostStepTransformUpdate,
+				PlaySessionPhase::UiLayout,
 				PlaySessionPhase::LatchFrame,
 				PlaySessionPhase::FrameDestroyFlush,
 				PlaySessionPhase::FrameTransformUpdate,
+				PlaySessionPhase::FrameUiLayout,
 				PlaySessionPhase::RenderExtraction,
 			};
 			CHECK(observer.Phases == expected);
+		}
+
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3; stream A, which also adds the two phases to the documented
+		// sequence above): ADR 0028's phase-2 ledger fixes their positions. The step's layout is at the session's view size.
+		TEST_CASE("PlaySession: UiLayout ends the fixed step and FrameUiLayout follows FrameTransformUpdate, in Play and Simulate")
+		{
+			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
+			{
+				CAPTURE(mode == PlayMode::Play);
+				Test::SceneTestFixture fixture;
+				Entity canvas = fixture.GetScene().CreateEntity("Canvas");
+				canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+				Entity title = fixture.GetScene().CreateEntity("Title", canvas);
+				title.AddComponent<UiRectComponent>(UiRectComponent{});
+				RecordingObserver observer;
+				PlaySessionSpecification specification = MakeSpecification(fixture, &observer);
+				specification.Mode = mode;
+				specification.ViewWidth = 320;
+				specification.ViewHeight = 180;
+				Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, fixture.GetScene());
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				(*session)->Tick();
+				const auto postStep = std::find(observer.Phases.begin(), observer.Phases.end(), PlaySessionPhase::PostStepTransformUpdate);
+				REQUIRE(postStep != observer.Phases.end());
+				REQUIRE(std::next(postStep) != observer.Phases.end());
+				CHECK(*std::next(postStep) == PlaySessionPhase::UiLayout);
+				CHECK(*std::next(postStep, 2) == PlaySessionPhase::LatchFrame);
+				const auto frameTransforms = std::find(observer.Phases.begin(), observer.Phases.end(), PlaySessionPhase::FrameTransformUpdate);
+				REQUIRE(frameTransforms != observer.Phases.end());
+				REQUIRE(std::next(frameTransforms) != observer.Phases.end());
+				CHECK(*std::next(frameTransforms) == PlaySessionPhase::FrameUiLayout);
+				const UiSystem& ui = (*session)->GetUi();
+				CHECK(ui.IsFrameLayoutCurrent());
+				CHECK(ui.GetStepLayout().SceneSize == glm::uvec2(320, 180));
+				CHECK(ui.GetLayout().Nodes.size() == 1);
+			}
+		}
+
+		// M22 (C22.1, decision 3; stream A; the C22.1 review): the current layout describes the current scene from the
+		// session's start, and right after a Scene.Load replaces the scene at the end of a frame, before the next step, so
+		// ui.tree and W22.2's UiInput never read an empty table or a replaced scene's rectangles.
+		TEST_CASE("PlaySession: the current UI layout is the scene's from the start and the loaded scene's right after a Scene.Load")
+		{
+			Test::ScriptTestFixture fixture;
+			const UiRectComponent topLeft{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Size = glm::vec2(10.0f) };
+			Entity menu = fixture.GetScene().CreateEntity("Menu");
+			menu.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			fixture.GetScene().CreateEntity("Start", menu).AddComponent<UiRectComponent>(topLeft);
+			// The loaded scene's element is elsewhere, so its rectangle tells the two layouts apart whatever the ids.
+			Test::SceneTestFixture levelFixture;
+			Entity hud = levelFixture.GetScene().CreateEntity("Hud");
+			hud.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			UiRectComponent scoreRect = topLeft;
+			scoreRect.Position = glm::vec2(20.0f, 30.0f);
+			levelFixture.GetScene().CreateEntity("Score", hud).AddComponent<UiRectComponent>(scoreRect);
+			Result<Json> levelDocument = SceneSerializer::ToJson(levelFixture.GetScene());
+			REQUIRE_MESSAGE(levelDocument.has_value(), levelDocument.error().ToString());
+			auto level = CreateRef<SceneData>();
+			level->Document = CreateRef<const Json>(std::move(*levelDocument));
+			fixture.GetAssetManager().Publish(AssetHandle(0x7100a1), level, "Assets/Scenes/Level.scene");
+
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 47;
+			specification.ViewWidth = 320;
+			specification.ViewHeight = 180;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			session.SetExtractionEnabled(false);
+
+			// Laid out when the session starts, before its first step.
+			const UiLayoutTable& started = session.GetUi().GetLayout();
+			CHECK(started.SceneSize == glm::uvec2(320, 180));
+			REQUIRE(started.Nodes.size() == 1);
+			CHECK(started.Nodes[0].Entity == session.GetScene().FindEntityByPath("/Menu/Start").GetUUID());
+			CHECK(started.Nodes[0].Min == glm::vec2(0.0f));
+
+			// Scene.Load replaces the scene at the end of the frame, which lays the new scene out before the next step.
+			const auto requested = session.GetScripts()->Evaluate("Scene.Load(Assets.Load(\"Assets/Scenes/Level.scene\"))\nreturn true", {});
+			REQUIRE_MESSAGE(requested.has_value(), requested.error().ToString());
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 1.0, .FrameIndex = 0 });
+			REQUIRE(session.GetSceneGeneration() == 2);
+			CHECK_FALSE(session.GetUi().IsFrameLayoutCurrent());
+			const UiLayoutTable& loaded = session.GetUi().GetLayout();
+			REQUIRE(loaded.Nodes.size() == 1);
+			CHECK(loaded.Nodes[0].Entity == session.GetScene().FindEntityByPath("/Hud/Score").GetUUID());
+			CHECK(loaded.Nodes[0].Min == glm::vec2(20.0f, 30.0f));
+			REQUIRE(loaded.Canvases.size() == 1);
+			CHECK(loaded.Canvases[0].Canvas == session.GetScene().FindEntityByPath("/Hud").GetUUID());
+		}
+
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 24; stream A): a scene replacement drops the replaced scene's
+		// focus, hover and queued UI events (UiSystem::ResetInteraction), so the loaded scene starts without a ui block and no
+		// event of the old scene reaches the new one's callbacks.
+		TEST_CASE("PlaySession: a Scene.Load drops the replaced scene's UI focus, hover and queued events")
+		{
+			Test::ScriptTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			Test::SceneTestFixture levelFixture;
+			static_cast<void>(levelFixture.GetScene().CreateEntity("Level"));
+			Result<Json> levelDocument = SceneSerializer::ToJson(levelFixture.GetScene());
+			REQUIRE_MESSAGE(levelDocument.has_value(), levelDocument.error().ToString());
+			auto level = CreateRef<SceneData>();
+			level->Document = CreateRef<const Json>(std::move(*levelDocument));
+			fixture.GetAssetManager().Publish(AssetHandle(0x7100a2), level, "Assets/Scenes/Level.scene");
+
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 48;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			session.SetExtractionEnabled(false);
+
+			// The pointer over A hovers it, and a script focuses B: the session holds interaction state and a queued event.
+			QueuePointer(session, 0, glm::vec2(10.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Hovered == session.GetScene().FindEntityByPath("/Canvas/A").GetUUID());
+			REQUIRE(session.GetUi().SetFocus(session.GetScene(), session.GetScene().FindEntityByPath("/Canvas/B").GetUUID()).has_value());
+			REQUIRE(session.GetUi().GetQueuedEventCount() > 0);
+
+			const auto requested = session.GetScripts()->Evaluate("Scene.Load(Assets.Load(\"Assets/Scenes/Level.scene\"))\nreturn true", {});
+			REQUIRE_MESSAGE(requested.has_value(), requested.error().ToString());
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 1.0, .FrameIndex = 1 });
+			REQUIRE(session.GetSceneGeneration() == 2);
+			CHECK(session.GetUi().GetInteraction().IsEmpty());
+			CHECK(session.GetUi().GetQueuedEventCount() == 0);
+		}
+
+		// C22.2 (Docs/Decisions/0033-m22-contract.md decisions 24 and 27; ADR 0028's phase-2 execution order): UiInput after
+		// ApplyInput (C22.3's TextLatch goes between them) and UiEvents after StartFlush; Simulate runs UiInput, whose writes
+		// are simulation, but no script phase, and drops the UI events. Streams A (UiInput) and B (UiEvents); the cases "step
+		// order matches the documented sequence" and "Simulate mode skips the script and audio phases" list them too.
+		TEST_CASE("PlaySession: UiInput follows ApplyInput and UiEvents follows StartFlush, and Simulate drops the UI events")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			RecordingObserver observer;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture, &observer), fixture.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			(*session)->FixedStep();
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::TextLatch, PlaySessionPhase::UiInput, PlaySessionPhase::StartFlush, PlaySessionPhase::UiEvents, PlaySessionPhase::FixedUpdate, PlaySessionPhase::Tasks, PlaySessionPhase::SpriteAnimation, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::Physics2DPreStep, PlaySessionPhase::Physics2DStep, PlaySessionPhase::Physics2DPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
+
+			RecordingObserver simulateObserver;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &simulateObserver);
+			specification.Mode = PlayMode::Simulate;
+			Result<Scope<PlaySession>> simulate = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(simulate.has_value(), simulate.error().ToString());
+			QueuePointer(**simulate, 0, glm::vec2(10.0f));
+			(*simulate)->FixedStep();
+			CHECK(simulateObserver.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::TextLatch, PlaySessionPhase::UiInput, PlaySessionPhase::SpriteAnimation, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::Physics2DPreStep, PlaySessionPhase::Physics2DStep, PlaySessionPhase::Physics2DPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
+			CHECK((*simulate)->GetUi().GetInteraction().Hovered == (*simulate)->GetScene().FindEntityByPath("/Canvas/A").GetUUID());
+			CHECK((*simulate)->GetUi().GetQueuedEventCount() == 0);
+		}
+
+		// Roadmap M22's acceptance "scenes without UI keep their hash" (decision 29): hovering writes nothing to the scene, so
+		// two sessions differ only by the ui block while one hovers, and hash alike again once its state is empty (the
+		// UiEvents phase empties the queue every tick).
+		TEST_CASE("PlaySession: the state hash holds the ui block only while the UI interaction state or event queue is not empty")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			Result<Scope<PlaySession>> hovering = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> away = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(hovering.has_value(), hovering.error().ToString());
+			REQUIRE_MESSAGE(away.has_value(), away.error().ToString());
+			CHECK((*hovering)->ComputeStateHash() == (*away)->ComputeStateHash());
+
+			QueuePointer(**hovering, 0, glm::vec2(10.0f));
+			QueuePointer(**away, 0, glm::vec2(500.0f));
+			(*hovering)->Tick();
+			(*away)->Tick();
+			REQUIRE_FALSE((*hovering)->GetUi().GetInteraction().IsEmpty());
+			CHECK((*away)->GetUi().GetInteraction().IsEmpty());
+			CHECK((*hovering)->ComputeStateHash() != (*away)->ComputeStateHash());
+
+			QueuePointer(**hovering, 1, glm::vec2(500.0f));
+			(*hovering)->Tick();
+			(*away)->Tick();
+			CHECK((*hovering)->GetUi().GetInteraction().IsEmpty());
+			CHECK((*hovering)->ComputeStateHash() == (*away)->ComputeStateHash());
+		}
+
+		// M22's landing (Docs/Decisions/0033-m22-contract.md decisions 3 and 24, "Landing"): under M21's PixelPerfectCamera the
+		// game view draws the UI at the camera's reference resolution and upscales it, so the session's UI phases lay the UI out
+		// at that resolution and UiInput maps the pointer's view coordinates through the same output mapping
+		// (ComputeGameViewOutputMapping, the one place both take it from): a 200 x 120 reference resolution in a 640 x 360 view
+		// is upscaled 3 times with 20-pixel bars at the left and right, so the view point (170, 120) shows scene pixel (50, 40),
+		// which lies on button B ((0, 30) to (100, 50)).
+		TEST_CASE("PlaySession: under a PixelPerfectCamera the UI is laid out at its reference resolution and the pointer maps through its upscale")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+			PlaySessionSpecification specification = MakeSpecification(fixture);
+			specification.ViewWidth = 640;
+			specification.ViewHeight = 360;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID b = session.GetScene().FindEntityByPath("/Canvas/B").GetUUID();
+
+			QueuePointer(session, 0, glm::vec2(170.0f, 120.0f));
+			session.Tick();
+			// The layout the session hit-tests is at the reference resolution, the one the game view drew.
+			CHECK(session.GetUi().GetLayout().SceneSize == glm::uvec2(200, 120));
+			const RenderSnapshot& drawn = session.GetLastExtraction();
+			CHECK(drawn.Output.SceneWidth == 200);
+			CHECK(drawn.Output.SceneHeight == 120);
+			const auto image = std::ranges::find_if(drawn.Ui.Items, [b](const UiDrawItem& item)
+			{
+				return item.Entity == b && item.Kind == UiDrawKind::Image;
+			});
+			REQUIRE(image != drawn.Ui.Items.end());
+			CHECK(image->Min == glm::vec2(0.0f, 30.0f));
+			CHECK(image->Max == glm::vec2(100.0f, 50.0f));
+			// The pointer at view (170, 120) is over B in the scene pixels the image shows there.
+			CHECK(session.GetUi().GetInteraction().Hovered == b);
+			CHECK(session.GetUi().GetInteraction().PointerOverUi);
+			// A view point in the left letterbox bar lies outside the scene image, over nothing.
+			QueuePointer(session, 1, glm::vec2(10.0f, 100.0f));
+			session.Tick();
+			CHECK_FALSE(session.GetUi().GetInteraction().Hovered.IsValid());
+		}
+
+		// The milestone review (decisions 24 and 50, the lead's decision 2): a pointer outside the scene image, in a
+		// PixelPerfectCamera's letterbox, reaches no UI, as viewport.pick takes nothing there: neither a Screen canvas's element
+		// whose rectangle reaches past the image's edge nor a World canvas that the pointer's ray meets beyond the view's edge,
+		// where neither draws. The 200 x 120 reference resolution in the 640 x 360 view is upscaled 3 times between 20-pixel
+		// bars; "Bleed" covers scene pixels [-10, 30) x [90, 110), and the World canvas "Board" (16 x 16 units, x -16 to 0,
+		// 5 units in front of the camera, whose view spans x -6.25 to 6.25) reaches past the image's left edge. A click inside
+		// the image on each still clicks it.
+		TEST_CASE("PlaySession: under a PixelPerfectCamera a click in the letterbox reaches no UI, though an element or a World canvas reaches past the image")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity bleed = scene.CreateEntity("Bleed", scene.FindEntityByPath("/Canvas"));
+			bleed.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(-10.0f, 90.0f),
+				.Size = glm::vec2(40.0f, 20.0f) });
+			bleed.AddComponent<UiImageComponent>(UiImageComponent{});
+			bleed.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+			static_cast<void>(AddWorldButtonCanvas(scene, "Board", glm::vec3(-8.0f, 0.0f, -5.0f), 64));
+			UiEventTaker events;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &events);
+			specification.ViewWidth = 640;
+			specification.ViewHeight = 360;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID bleedId = session.GetScene().FindEntityByPath("/Canvas/Bleed").GetUUID();
+			const UUID boardButton = session.GetScene().FindEntityByPath("/Board/Button").GetUUID();
+
+			// Ticks 0 and 2: view (10, 300), scene (-3.3, 100), on Bleed's rectangle; view (10, 210), scene (-3.3, 70), whose ray
+			// meets the Board at x -6.46. Ticks 4 and 6: view (50, 300), scene (10, 100), on Bleed; view (170, 210), scene
+			// (50, 70), whose ray meets the Board at x -3.1.
+			QueueClick(session, 0, glm::vec2(10.0f, 300.0f));
+			QueueClick(session, 2, glm::vec2(10.0f, 210.0f));
+			QueueClick(session, 4, glm::vec2(50.0f, 300.0f));
+			QueueClick(session, 6, glm::vec2(170.0f, 210.0f));
+			for (const uint64_t bar : { uint64_t{ 0 }, uint64_t{ 2 } })
+			{
+				while (session.GetTick() <= bar)
+					session.Tick();
+				INFO("tick " << bar);
+				CHECK_FALSE(session.GetUi().GetInteraction().Hovered.IsValid());
+				CHECK_FALSE(session.GetUi().GetInteraction().Pressed.IsValid());
+				CHECK_FALSE(session.GetUi().GetInteraction().PointerOverUi);
+			}
+			while (session.GetTick() < 8)
+				session.Tick();
+			CHECK(GetClicks(events.Events) == std::vector<UUID>{ bleedId, boardButton });
+		}
+
+		// The milestone review (decision 50, the lead's decision 10): a World canvas takes a click through a PixelPerfectCamera's
+		// ray, the orthographic projection the camera draws with whatever its Camera says (its own projection is perspective
+		// here). "Sign", 2 x 2 units at (4, 2, -50), is at scene pixel (164, 28) of the 200 x 120 reference resolution, view
+		// (512, 84) of the 640 x 360 view; the Camera's perspective ray through that view point would pass it at x 31.
+		TEST_CASE("PlaySession: under a PixelPerfectCamera a click on a World canvas's button through the camera clicks it")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
+			static_cast<void>(AddWorldButtonCanvas(scene, "Sign", glm::vec3(4.0f, 2.0f, -50.0f), 8));
+			UiEventTaker events;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &events);
+			specification.ViewWidth = 640;
+			specification.ViewHeight = 360;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID button = session.GetScene().FindEntityByPath("/Sign/Button").GetUUID();
+			QueueClick(session, 0, glm::vec2(512.0f, 84.0f));
+			session.Tick();
+			CHECK(session.GetUi().GetInteraction().Hovered == button);
+			CHECK(session.GetUi().GetInteraction().Pressed == button);
+			CHECK(session.GetUi().GetInteraction().PointerOverUi);
+			session.Tick();
+			CHECK(GetClicks(events.Events) == std::vector<UUID>{ button });
+		}
+
+		// The milestone review (decision 28, the lead's decision 4): a focus that Ui.SetFocus sets outside the session's phases
+		// (script.eval {context: Play} between two ticks) on a menu enabled after the last layout is kept at the next UiInput:
+		// the stale-state step checks a focus the stored layout does not hold against the scene as it is, the layout SetFocus
+		// checked it against, so the focus neither receives Focus (false) nor is lost.
+		TEST_CASE("PlaySession: a focus a script sets between two ticks on a menu it has just shown is kept at the next tick")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity pause = scene.CreateEntity("Pause");
+			pause.AddComponent<UiCanvasComponent>(UiCanvasComponent{ .SortOrder = 1 });
+			Entity resume = scene.CreateEntity("Resume", pause);
+			resume.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			resume.AddComponent<UiImageComponent>(UiImageComponent{});
+			resume.AddComponent<UiButtonComponent>(UiButtonComponent{});
+			pause.SetActive(false);
+			UiEventTaker events;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture, &events), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			QueuePointer(session, 0, glm::vec2(500.0f));
+			session.Tick();
+			const UUID resumeId = session.GetScene().FindEntityByPath("/Pause/Resume").GetUUID();
+			REQUIRE(FindUiLayoutNode(session.GetUi().GetLayout(), resumeId) == nullptr);
+
+			const auto shown = session.GetScripts()->Evaluate(R"(
+local pause = Scene.FindByName("Pause")
+pause:SetActive(true)
+Ui.SetFocus(Scene.FindByName("Resume"))
+return Ui.GetFocus() == Scene.FindByName("Resume")
+)",
+				{});
+			REQUIRE_MESSAGE(shown.has_value(), (shown ? "" : shown.error().ToString()));
+			CHECK(shown->Value.Get() == Json(true));
+			REQUIRE(session.GetUi().GetInteraction().Focused == resumeId);
+
+			session.Tick();
+			CHECK(session.GetUi().GetInteraction().Focused == resumeId);
+			CHECK(events.Events == std::vector<UiEvent>{ UiEvent{ .Kind = UiEventKind::Focus, .Target = resumeId, .Flag = true } });
+			session.Tick();
+			CHECK(session.GetUi().GetInteraction().Focused == resumeId);
+		}
+
+		// The milestone review (decision 24, the lead's decision 6: an accepted limit, Backlog §6): UI input, events and
+		// callbacks run in the fixed step, for determinism, so while the time scale is 0 live play runs frames but no tick, and
+		// a click reaches no widget; it is processed once the scale lets ticks run again. A pause menu keeps the time scale and
+		// pauses gameplay with a flag its behaviours check. The frames are driven as a live host drives them, through a
+		// FixedStepScheduler advanced at the session's time scale.
+		TEST_CASE("PlaySession: with a time scale of 0 live play runs no tick, so a click fires nothing until the scale returns")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			UiEventTaker events;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture, &events), fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID a = session.GetScene().FindEntityByPath("/Canvas/A").GetUUID();
+			FixedStepScheduler scheduler(FrameLoopConfig{ .FixedHz = 60 });
+			uint64_t frameIndex = 0;
+			const auto frame = [&session, &scheduler, &frameIndex]()
+			{
+				constexpr double Delta = 1.0 / 60.0;
+				const FrameSteps steps = scheduler.Advance(Delta, session.GetTimeScale());
+				for (uint32_t step = 0; step < steps.StepCount; ++step)
+					session.FixedStep();
+				session.FrameUpdate(FrameTime{ .DeltaTime = Delta * session.GetTimeScale(), .UnscaledDeltaTime = Delta, .Alpha = steps.Alpha, .FrameIndex = frameIndex++ });
+			};
+
+			REQUIRE(session.SetTimeScale(0.0).has_value());
+			QueueClick(session, 0, glm::vec2(10.0f));
+			for (int count = 0; count < 30; ++count)
+				frame();
+			CHECK(session.GetTick() == 0);
+			CHECK(session.GetUi().GetInteraction().IsEmpty());
+			CHECK(events.Events.empty());
+
+			REQUIRE(session.SetTimeScale(1.0).has_value());
+			for (int count = 0; count < 30 && session.GetTick() < 2; ++count)
+				frame();
+			REQUIRE(session.GetTick() >= 2);
+			CHECK(GetClicks(events.Events) == std::vector<UUID>{ a });
+		}
+
+		// Decision 25 (the review of W22.2's tests major, the lead's decision 3): the session passes its interaction state to
+		// the extraction of its game view (the RenderExtraction phase) and to ExtractView (what viewport.screenshot of the play
+		// scene captures), so a widget the pointer hovers or presses, or that has focus, takes its canvas's tint for that state
+		// in both, while the others keep Normal.
+		TEST_CASE("PlaySession: the game view and ExtractView tint the widgets by the session's interaction state")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			const UiTheme theme{ .Normal = glm::vec4(0.9f, 0.9f, 0.9f, 1.0f),
+				.Hovered = glm::vec4(0.5f, 1.0f, 1.0f, 1.0f),
+				.Pressed = glm::vec4(1.0f, 0.5f, 1.0f, 1.0f),
+				.Focused = glm::vec4(1.0f, 1.0f, 0.5f, 1.0f) };
+			scene.FindEntityByPath("/Canvas").GetComponent<UiCanvasComponent>().Theme = theme;
+			const glm::vec4 color(0.8f, 0.6f, 0.4f, 1.0f);
+			for (const std::string_view path : { "/Canvas/A", "/Canvas/B" })
+				scene.FindEntityByPath(path).GetComponent<UiImageComponent>().Color = color;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID a = session.GetScene().FindEntityByPath("/Canvas/A").GetUUID();
+			const UUID b = session.GetScene().FindEntityByPath("/Canvas/B").GetUUID();
+			const auto imageColor = [](const RenderSnapshot& snapshot, UUID entity)
+			{
+				const auto found = std::ranges::find_if(snapshot.Ui.Items, [entity](const UiDrawItem& item)
+				{
+					return item.Entity == entity && item.Kind == UiDrawKind::Image;
+				});
+				REQUIRE(found != snapshot.Ui.Items.end());
+				return found->Color;
+			};
+			// The tints of A and B in the game view of the last frame and in an ExtractView of the play scene.
+			const auto checkTints = [&session, &imageColor, a, b, color](glm::vec4 tintA, glm::vec4 tintB)
+			{
+				CHECK(imageColor(session.GetLastExtraction(), a) == color * tintA);
+				CHECK(imageColor(session.GetLastExtraction(), b) == color * tintB);
+				RenderExtractionRequest request;
+				request.Camera = RenderCameraSource::Primary;
+				request.Width = 320;
+				request.Height = 180;
+				const Result<RenderSnapshot> view = session.ExtractView(request);
+				REQUIRE_MESSAGE(view.has_value(), view.error().ToString());
+				CHECK(imageColor(*view, a) == color * tintA);
+				CHECK(imageColor(*view, b) == color * tintB);
+			};
+			const auto mouse = [&session](uint64_t tick, PlayInputEventState state, glm::vec2 position)
+			{
+				REQUIRE(session.GetInput()
+						.Queue(tick,
+							PlayInputEvent{ .Type = PlayInputEventType::MouseButtonInput,
+								.State = state,
+								.Button = MouseButton::Left,
+								.HasPosition = true,
+								.Position = position })
+						.has_value());
+			};
+
+			// The pointer away from the UI: Normal. Over A: Hovered. A held press on A: Pressed (over its focus and hover).
+			// Released away from it: A keeps the focus the press gave it, Focused, and B stays Normal throughout.
+			QueuePointer(session, 0, glm::vec2(500.0f));
+			session.Tick();
+			checkTints(theme.Normal, theme.Normal);
+			QueuePointer(session, 1, glm::vec2(10.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Hovered == a);
+			checkTints(theme.Hovered, theme.Normal);
+			mouse(2, PlayInputEventState::Down, glm::vec2(10.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Pressed == a);
+			checkTints(theme.Pressed, theme.Normal);
+			mouse(3, PlayInputEventState::Up, glm::vec2(500.0f));
+			session.Tick();
+			REQUIRE(session.GetUi().GetInteraction().Focused == a);
+			REQUIRE_FALSE(session.GetUi().GetInteraction().Hovered.IsValid());
+			checkTints(theme.Focused, theme.Normal);
+		}
+
+		// Roadmap M22's acceptance "scenes without UI keep their hash" (decision 24 step 1, the C22.2 review's major): in a
+		// scene without a canvas, UiInput reads no input, so a held gamepad stick (with the pointer pressed and moved) leaves
+		// the interaction state empty and the ui block absent at every tick: the session hashes as one without that input.
+		// Live: it holds on the contract tree, where no session runs UiInput yet, and keeps holding once stream A adds it.
+		TEST_CASE("PlaySession: a scene without a canvas keeps its state hash while a gamepad stick is held")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateScene(fixture.GetScene());
+			Result<Scope<PlaySession>> held = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> idle = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(held.has_value(), held.error().ToString());
+			REQUIRE_MESSAGE(idle.has_value(), idle.error().ToString());
+			REQUIRE((*held)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::GamepadAxisInput, .Value = 0.75f, .Gamepad = 0, .Axis = GamepadAxis::LeftY }).has_value());
+			REQUIRE((*held)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::MouseButtonInput, .Button = MouseButton::Left, .HasPosition = true, .Position = glm::vec2(0.0f) }).has_value());
+			QueuePointer(**held, 1, glm::vec2(10.0f));
+			for (int tick = 0; tick < 3; ++tick)
+			{
+				(*held)->Tick();
+				(*idle)->Tick();
+				CHECK((*held)->GetUi().GetInteraction().IsEmpty());
+				CHECK((*held)->GetUi().GetQueuedEventCount() == 0);
+				CHECK((*held)->ComputeStateHash() == (*idle)->ComputeStateHash());
+			}
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 46; stream T): the text latch between ApplyInput and UiInput, in
+		// Play and Simulate, and the step view holds the tick's text. Relative order only (the lead's decision 7 of the review
+		// of C22.3): the full phase lists differ with the phases M21 and M23 insert, whichever lands first, so this case
+		// holds on every merged tree; the documented-sequence cases, which stream T extends, pin the whole lists.
+		TEST_CASE("PlaySession: TextLatch follows ApplyInput and precedes UiInput, in Play and Simulate")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			const auto indexOf = [](const std::vector<PlaySessionPhase>& phases, PlaySessionPhase phase)
+			{
+				return std::ranges::find(phases, phase) - phases.begin();
+			};
+			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
+			{
+				CAPTURE(mode == PlayMode::Play);
+				RecordingObserver observer;
+				PlaySessionSpecification specification = MakeSpecification(fixture, &observer);
+				specification.Mode = mode;
+				Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, fixture.GetScene());
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				REQUIRE((*session)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "ok" }).has_value());
+				(*session)->FixedStep();
+				const auto latch = indexOf(observer.Phases, PlaySessionPhase::TextLatch);
+				REQUIRE(latch < std::ssize(observer.Phases));
+				CHECK(std::ranges::count(observer.Phases, PlaySessionPhase::TextLatch) == 1);
+				CHECK(latch == indexOf(observer.Phases, PlaySessionPhase::ApplyInput) + 1);
+				CHECK(indexOf(observer.Phases, PlaySessionPhase::UiInput) == latch + 1);
+				CHECK((*session)->GetInput().GetText(InputPhase::Step) == "ok");
+			}
+		}
+
+		// C22.3's guard (decision 54, the lead's lesson from C22.2's and C21.2's reviews): a scene without a text input or a
+		// World canvas keeps its state hash exactly whatever is typed (typing reaches no component while no text input has
+		// focus, and the editing keys and Enter change nothing), and its UI interaction ignores where the primary camera looks
+		// (no pointer ray is cast without a World canvas). It holds on the contract tree, where no session latches text or
+		// casts a ray, and guards streams T and W.
+		TEST_CASE("PlaySession: a scene with Screen UI and no text input or World canvas keeps its state hash while text is typed")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateUiScene(fixture.GetScene());
+			fixture.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Result<Scope<PlaySession>> typing = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> turning = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			Result<Scope<PlaySession>> idle = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(typing.has_value(), typing.error().ToString());
+			REQUIRE_MESSAGE(turning.has_value(), turning.error().ToString());
+			REQUIRE_MESSAGE(idle.has_value(), idle.error().ToString());
+			// All three hover button A; one types and presses the editing keys, one turns its camera.
+			for (PlaySession* session : { typing->get(), turning->get(), idle->get() })
+				QueuePointer(*session, 0, glm::vec2(10.0f));
+			REQUIRE((*typing)->GetInput().Queue(0, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "abc \xD7\x90" }).has_value());
+			for (const Key key : { Key::Backspace, Key::Delete, Key::Left, Key::Right, Key::Home, Key::End, Key::Enter })
+				QueueKeyTap(**typing, 1, key);
+			REQUIRE((*typing)->GetInput().Queue(2, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "d" }).has_value());
+			for (int tick = 0; tick < 4; ++tick)
+			{
+				(*turning)->GetScene().FindEntityByPath("/Camera").Patch<TransformComponent>([tick](TransformComponent& transform)
+				{
+					transform.Rotation = glm::angleAxis(0.25f * static_cast<float>(tick + 1), glm::vec3(0.0f, 1.0f, 0.0f));
+				});
+				(*typing)->Tick();
+				(*turning)->Tick();
+				(*idle)->Tick();
+				CHECK((*typing)->GetUi().GetInteraction() == (*idle)->GetUi().GetInteraction());
+				CHECK((*turning)->GetUi().GetInteraction() == (*idle)->GetUi().GetInteraction());
+				CHECK((*typing)->ComputeStateHash() == (*idle)->ComputeStateHash());
+			}
+		}
+
+		// C22.3 (Docs/Decisions/0033-m22-contract.md decisions 46 and 47; stream T): the session gives UiInput the text latch's
+		// characters, the fixed editing keys (KeypadEnter as Enter) and the commands a gamepad pressed, so a focused text input
+		// is typed into and edited, a keyboard binding (Up, Space as Submit) neither navigates nor submits while it has focus,
+		// and a gamepad's Submit and direction do.
+		TEST_CASE("PlaySession: a focused text input takes the typed text and the editing keys, and only gamepad commands leave it")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity field = scene.CreateEntity("Field", scene.FindEntityByPath("/Canvas"));
+			field.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			field.AddComponent<UiImageComponent>(UiImageComponent{});
+			field.AddComponent<UiTextInputComponent>(UiTextInputComponent{});
+			UiEventTaker events;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture, &events), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			PlayInput& input = session.GetInput();
+			// Tick 0: a click focuses the field. Tick 1: "ab", "c", then Left. Tick 3: Backspace and the keypad's Enter.
+			// Tick 5: the keyboard's Up and Space. Tick 7: the gamepad's South (Submit). Tick 9: its DPadUp.
+			REQUIRE(input
+					.Queue(0, PlayInputEvent{ .Type = PlayInputEventType::MouseButtonInput, .State = PlayInputEventState::Tap, .Button = MouseButton::Left, .HasPosition = true, .Position = glm::vec2(10.0f, 70.0f) })
+					.has_value());
+			REQUIRE(input.Queue(1, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "ab" }).has_value());
+			REQUIRE(input.Queue(1, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "c" }).has_value());
+			QueueKeyTap(session, 1, Key::Left);
+			QueueKeyTap(session, 3, Key::Backspace);
+			QueueKeyTap(session, 3, Key::KeypadEnter);
+			QueueKeyTap(session, 5, Key::Up);
+			QueueKeyTap(session, 5, Key::Space);
+			for (const auto& [tick, button] : { std::pair{ uint64_t{ 7 }, GamepadButton::South }, std::pair{ uint64_t{ 9 }, GamepadButton::DPadUp } })
+			{
+				REQUIRE(input
+						.Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::GamepadButtonInput, .State = PlayInputEventState::Tap, .Gamepad = 0, .GamepadButtonCode = button })
+						.has_value());
+			}
+
+			for (int tick = 0; tick < 7; ++tick)
+				session.Tick();
+			// "abc" with the caret moved left, then Backspace removed "b"; the keyboard's Up and Space left the focus alone.
+			const UiTextInputComponent& typed = session.GetScene().FindEntityByPath("/Canvas/Field").GetComponent<UiTextInputComponent>();
+			CHECK(typed.Text == "ac");
+			CHECK(typed.Caret == 1u);
+			const UUID fieldId = field.GetUUID();
+			CHECK(session.GetUi().GetInteraction().Focused == fieldId);
+			for (int tick = 7; tick < 11; ++tick)
+				session.Tick();
+			const UUID b = session.GetScene().FindEntityByPath("/Canvas/B").GetUUID();
+			CHECK(session.GetUi().GetInteraction().Focused == b);
+			CHECK(events.Events
+				== std::vector<UiEvent>{ UiEvent{ .Kind = UiEventKind::Hover, .Target = fieldId, .Flag = true },
+					UiEvent{ .Kind = UiEventKind::Focus, .Target = fieldId, .Flag = true }, UiEvent{ .Kind = UiEventKind::TextChanged, .Target = fieldId },
+					UiEvent{ .Kind = UiEventKind::TextChanged, .Target = fieldId }, UiEvent{ .Kind = UiEventKind::Submit, .Target = fieldId },
+					UiEvent{ .Kind = UiEventKind::Submit, .Target = fieldId }, UiEvent{ .Kind = UiEventKind::Focus, .Target = fieldId, .Flag = false },
+					UiEvent{ .Kind = UiEventKind::Focus, .Target = b, .Flag = true } });
+		}
+
+		// The milestone review (decision 47, the lead's decision 7): while a text input has focus, the keys it edits with
+		// (Backspace, Delete, Left, Right, Home and End) do not fire Cancel, Next or Previous when the Ui settings bind them to
+		// those commands, so Backspace bound to Cancel ("back") only deletes and Home bound to Next only moves the caret; a key
+		// it does not edit with (Escape, Tab) still fires its command.
+		TEST_CASE("PlaySession: a key a focused text input edits with fires no Cancel, Next or Previous bound to it")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity field = scene.CreateEntity("Field", scene.FindEntityByPath("/Canvas"));
+			field.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			field.AddComponent<UiImageComponent>(UiImageComponent{});
+			field.AddComponent<UiTextInputComponent>(UiTextInputComponent{});
+			UiEventTaker events;
+			PlaySessionSpecification specification = MakeSpecification(fixture, &events);
+			specification.Project.Ui.Cancel = { "Key.Escape", "Key.Backspace", "Gamepad.East" };
+			specification.Project.Ui.Next = { "Key.Tab", "Key.Home" };
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			const UUID fieldId = session.GetScene().FindEntityByPath("/Canvas/Field").GetUUID();
+			// Tick 0: a click focuses the field. Tick 1: "ab". Tick 3: Backspace. Tick 5: Home. Tick 7: Escape. Tick 9: Tab.
+			QueueClick(session, 0, glm::vec2(10.0f, 70.0f));
+			REQUIRE(session.GetInput().Queue(1, PlayInputEvent{ .Type = PlayInputEventType::Text, .Text = "ab" }).has_value());
+			QueueKeyTap(session, 3, Key::Backspace);
+			QueueKeyTap(session, 5, Key::Home);
+			QueueKeyTap(session, 7, Key::Escape);
+			QueueKeyTap(session, 9, Key::Tab);
+
+			while (session.GetTick() < 7)
+				session.Tick();
+			const UiTextInputComponent& typed = session.GetScene().FindEntityByPath("/Canvas/Field").GetComponent<UiTextInputComponent>();
+			CHECK(typed.Text == "a");
+			CHECK(typed.Caret == 0u);
+			CHECK(session.GetUi().GetInteraction().Focused == fieldId);
+			while (session.GetTick() < 11)
+				session.Tick();
+			CHECK(session.GetUi().GetInteraction().Focused != fieldId);
+			std::vector<UiEvent> received;
+			std::ranges::copy_if(events.Events, std::back_inserter(received), [](const UiEvent& event)
+			{
+				return event.Kind != UiEventKind::Hover;
+			});
+			REQUIRE(received.size() == 6);
+			CHECK(received[0] == UiEvent{ .Kind = UiEventKind::Focus, .Target = fieldId, .Flag = true });
+			CHECK(received[1] == UiEvent{ .Kind = UiEventKind::TextChanged, .Target = fieldId });
+			CHECK(received[2] == UiEvent{ .Kind = UiEventKind::TextChanged, .Target = fieldId });
+			CHECK(received[3] == UiEvent{ .Kind = UiEventKind::Cancel, .Target = fieldId });
+			CHECK(received[4] == UiEvent{ .Kind = UiEventKind::Focus, .Target = fieldId, .Flag = false });
+			CHECK(received[5].Kind == UiEventKind::Focus);
+			CHECK(received[5].Flag);
+		}
+
+		// Roadmap M22's "every widget works by keyboard and gamepad", for the text input (decision 47, amended by W22.3's
+		// review): a gamepad alone focuses a text input (by navigation), submits it and leaves it; it types nothing into it,
+		// since characters come only from a text source (the keyboard's committed characters) and there is no on-screen
+		// keyboard (an accepted limit, Backlog §6).
+		TEST_CASE("PlaySession: a gamepad focuses, submits and leaves a text input, and types nothing into it")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			Entity canvas = scene.FindEntityByPath("/Canvas");
+			const UUID b = scene.FindEntityByPath("/Canvas/B").GetUUID();
+			canvas.GetComponent<UiCanvasComponent>().DefaultFocus = b;
+			Entity field = scene.CreateEntity("Field", canvas);
+			field.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			field.AddComponent<UiImageComponent>(UiImageComponent{});
+			field.AddComponent<UiTextInputComponent>(UiTextInputComponent{});
+			const UUID fieldId = field.GetUUID();
+			UiEventTaker events;
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture, &events), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			// Gamepad 0's taps, two ticks apart: DPadDown focuses the DefaultFocus B, DPadDown moves to the field, South submits
+			// it, every other face button presses nothing into it, and DPadUp leaves it for B.
+			const std::vector<std::pair<uint64_t, GamepadButton>> taps = { { 0, GamepadButton::DPadDown }, { 2, GamepadButton::DPadDown },
+				{ 4, GamepadButton::South }, { 6, GamepadButton::West }, { 6, GamepadButton::North }, { 8, GamepadButton::DPadUp } };
+			for (const auto& [tick, button] : taps)
+			{
+				const PlayInputEvent tap{
+					.Type = PlayInputEventType::GamepadButtonInput,
+					.State = PlayInputEventState::Tap,
+					.Gamepad = 0,
+					.GamepadButtonCode = button,
+				};
+				REQUIRE(session.GetInput().Queue(tick, tap).has_value());
+			}
+			const std::vector<std::pair<uint64_t, UUID>> focus = { { 0, b }, { 2, fieldId }, { 4, fieldId }, { 6, fieldId }, { 8, b } };
+			for (const auto& [tick, focused] : focus)
+			{
+				while (session.GetTick() <= tick)
+					session.Tick();
+				INFO("tick " << tick);
+				CHECK(session.GetUi().GetInteraction().Focused == focused);
+			}
+			CHECK(session.GetScene().FindEntityByPath("/Canvas/Field").GetComponent<UiTextInputComponent>().Text.empty());
+			std::vector<UiEvent> received;
+			std::ranges::copy_if(events.Events, std::back_inserter(received), [](const UiEvent& event)
+			{
+				return event.Kind != UiEventKind::Hover;
+			});
+			const auto focusEvent = [](UUID target, bool focused)
+			{
+				return UiEvent{ .Kind = UiEventKind::Focus, .Target = target, .Flag = focused };
+			};
+			CHECK(received
+				== std::vector<UiEvent>{ focusEvent(b, true), focusEvent(b, false), focusEvent(fieldId, true),
+					UiEvent{ .Kind = UiEventKind::Submit, .Target = fieldId }, focusEvent(fieldId, false), focusEvent(b, true) });
+		}
+
+		// Decision 30: the Ui settings name the controls of each command and can turn navigation off; a binding that does not
+		// name a key or a gamepad button fails the session's start at its location, as an action's binding does. Next with a
+		// Shift key down is Previous, and a gamepad command counts on any connected gamepad (gamepad 1 here). Navigation
+		// starts from the canvas's DefaultFocus (decision 23). Taps are two ticks apart, so each press is a new edge.
+		TEST_CASE("PlaySession: the Ui settings' bindings drive navigation, and a binding that is not a key or gamepad button fails the start")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			PopulateUiScene(scene);
+			const UUID a = scene.FindEntityByPath("/Canvas/A").GetUUID();
+			const UUID b = scene.FindEntityByPath("/Canvas/B").GetUUID();
+			Entity canvas = scene.FindEntityByPath("/Canvas");
+			canvas.GetComponent<UiCanvasComponent>().DefaultFocus = a;
+			// A toggle "C" below B, at (0, 60), whose IsOn shows a gamepad's Submit.
+			Entity toggle = scene.CreateEntity("C", canvas);
+			toggle.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f),
+				.AnchorMax = glm::vec2(0.0f),
+				.Pivot = glm::vec2(0.0f),
+				.Position = glm::vec2(0.0f, 60.0f),
+				.Size = glm::vec2(100.0f, 20.0f) });
+			toggle.AddComponent<UiImageComponent>(UiImageComponent{});
+			toggle.AddComponent<UiToggleComponent>(UiToggleComponent{});
+			const UUID c = toggle.GetUUID();
+			PlaySessionSpecification specification = MakeSpecification(fixture);
+			specification.Project.Ui.Next = { "Key.N" };
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			PlaySession& play = **session;
+			const auto gamepadTap = [&play](uint64_t tick, GamepadButton button)
+			{
+				REQUIRE(play.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::GamepadButtonInput, .State = PlayInputEventState::Tap, .Gamepad = 1, .GamepadButtonCode = button }).has_value());
+			};
+			const auto key = [&play](uint64_t tick, Key code, PlayInputEventState state)
+			{
+				REQUIRE(play.GetInput().Queue(tick, PlayInputEvent{ .Type = PlayInputEventType::KeyInput, .State = state, .KeyCode = code }).has_value());
+			};
+			// The focus after each tick: N focuses the DefaultFocus, Tab is no longer Next, N moves on, Shift+N (Previous)
+			// moves back, gamepad 1's DPadDown moves down twice and its South flips the toggle.
+			QueueKeyTap(play, 0, Key::N);
+			QueueKeyTap(play, 2, Key::Tab);
+			QueueKeyTap(play, 4, Key::N);
+			key(6, Key::LeftShift, PlayInputEventState::Down);
+			QueueKeyTap(play, 6, Key::N);
+			key(7, Key::LeftShift, PlayInputEventState::Up);
+			gamepadTap(8, GamepadButton::DPadDown);
+			gamepadTap(10, GamepadButton::DPadDown);
+			gamepadTap(12, GamepadButton::South);
+			const std::vector<std::pair<uint64_t, UUID>> focus = { { 0, a }, { 2, a }, { 4, b }, { 6, a }, { 8, b }, { 10, c }, { 12, c } };
+			for (const auto& [tick, focused] : focus)
+			{
+				while (play.GetTick() <= tick)
+					play.Tick();
+				INFO("tick " << tick);
+				CHECK(play.GetUi().GetInteraction().Focused == focused);
+			}
+			CHECK(play.GetScene().FindEntityByPath("/Canvas/C").GetComponent<UiToggleComponent>().IsOn);
+
+			specification.Project.Ui.Navigation = false;
+			Result<Scope<PlaySession>> off = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(off.has_value(), off.error().ToString());
+			QueueKeyTap(**off, 0, Key::N);
+			(*off)->Tick();
+			CHECK_FALSE((*off)->GetUi().GetInteraction().Focused.IsValid());
+
+			for (const std::string_view binding : { "Mouse.Left", "Gamepad.LeftX", "Key.Nope" })
+			{
+				INFO(std::string(binding));
+				PlaySessionSpecification refused = MakeSpecification(fixture);
+				refused.Project.Ui.Submit = { "Key.Enter", std::string(binding) };
+				const Result<Scope<PlaySession>> failed = PlaySession::CreateFromScene(refused, scene);
+				REQUIRE_FALSE(failed.has_value());
+				CHECK(failed.error().GetCode() == ErrorCode::Validation);
+				REQUIRE_FALSE(failed.error().GetIssues().empty());
+				CHECK(failed.error().GetIssues()[0].JsonPointer == "/Ui/Submit/1");
+			}
+		}
+
+		// W-CLOCK (M22, C22.1, decision 12; stream K): the session previews device input in the frame view only in live play.
+		TEST_CASE("PlaySession: the frame preview is on in live play and off in lockstep")
+		{
+			Test::SceneTestFixture fixture;
+			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			PlaySession& play = **session;
+			play.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 });
+			CHECK(play.GetInput().IsFramePreviewEnabled());
+			play.SetLockstep(true);
+			play.Tick();
+			CHECK_FALSE(play.GetInput().IsFramePreviewEnabled());
+		}
+
+		// W-CLOCK (decision 12; stream K): a recording replays with the frame views its ticks gave, so while it records the
+		// session latches the frame view of the applied ticks only; live play's frame without a step sees the device press.
+		TEST_CASE("PlaySession: the frame preview is off while recording, and live play previews device input before its tick")
+		{
+			Test::ScriptTestFixture fixture;
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 47;
+			const FrameTime frame{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 0.5, .FrameIndex = 0 };
+			const Event space = KeyEvent{ .KeyCode = Key::Space, .Action = ButtonAction::Pressed, .Modifiers = KeyModifiers::None, .Handled = false };
+
+			Result<Scope<PlaySession>> live = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(live.has_value(), live.error().ToString());
+			(*live)->SetExtractionEnabled(false);
+			(*live)->GetInput().QueueDeviceEvent(space);
+			(*live)->FrameUpdate(frame);
+			CHECK((*live)->GetInput().IsFramePreviewEnabled());
+			CHECK((*live)->GetInput().GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+			CHECK_FALSE((*live)->GetInput().GetDevices().IsKeyDown(InputPhase::Step, Key::Space));
+
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(specification, fixture.GetScene());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& recording = **created;
+			recording.SetExtractionEnabled(false);
+			ReplayHeader header{};
+			header.Scene = { AssetHandle(0x7100b1), "Assets/Scenes/Preview.scene" };
+			header.Seed = specification.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			const Status began = recording.GetRecorder()->Begin(header, recording);
+			REQUIRE_MESSAGE(began.has_value(), began.error().ToString());
+			recording.GetInput().QueueDeviceEvent(space);
+			recording.FrameUpdate(frame);
+			CHECK_FALSE(recording.GetInput().IsFramePreviewEnabled());
+			CHECK_FALSE(recording.GetInput().GetDevices().IsKeyDown(InputPhase::Frame, Key::Space));
+			// The tick applies the press, and its frame phase reports it.
+			recording.Tick();
+			CHECK(recording.GetInput().GetDevices().WasKeyPressed(InputPhase::Frame, Key::Space));
+			CHECK(recording.GetInput().GetDevices().WasKeyPressed(InputPhase::Step, Key::Space));
+
+			// Once the recording ends, the session previews again.
+			recording.GetRecorder()->Cancel();
+			recording.FrameUpdate(frame);
+			CHECK(recording.GetInput().IsFramePreviewEnabled());
 		}
 
 		TEST_CASE("PlaySession: entity cap raises an error, never crashes")
@@ -644,6 +1640,14 @@ namespace Engine {
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::InterpolationSnapshot) == "InterpolationSnapshot");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::PreStepTransformUpdate) == "PreStepTransformUpdate");
 			CHECK(PlaySessionPhaseToString(PlaySessionPhase::RenderExtraction) == "RenderExtraction");
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 3): the UI's layout phases.
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiLayout) == "UiLayout");
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::FrameUiLayout) == "FrameUiLayout");
+			// M22 C22.2 (decisions 24 and 27): the UI's interaction phases.
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiInput) == "UiInput");
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::UiEvents) == "UiEvents");
+			// M22 C22.3 (decision 46): the text latch.
+			CHECK(PlaySessionPhaseToString(PlaySessionPhase::TextLatch) == "TextLatch");
 		}
 
 		TEST_CASE("PlaySession: scripts measure screen coordinates in the session's view, never the host's window")

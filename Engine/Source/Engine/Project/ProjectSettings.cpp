@@ -8,7 +8,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <bit>
+#include <utility>
 
 namespace Engine {
 
@@ -157,6 +159,98 @@ namespace Engine {
 			settings.Version = std::format("{}.{}.{}", major, minor, patch);
 			if (FindExportCompanyProblem(settings.Company).has_value())
 				settings.Company.clear();
+		}
+
+		// A string table's locale tag (Asset/StringTableData.h's rule, which Project cannot include; ProjectSettingsTests checks
+		// that they agree): 1 to MaxLocaleBytes bytes of ASCII letters, digits and '-', starting with a letter.
+		static constexpr size_t MaxLocaleBytes = 35;
+
+		static bool IsAsciiLetter(char character)
+		{
+			return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z');
+		}
+
+		static bool IsLocaleTag(std::string_view locale)
+		{
+			if (locale.empty() || locale.size() > MaxLocaleBytes || !IsAsciiLetter(locale.front()))
+				return false;
+			return std::all_of(locale.begin(), locale.end(), [](char character)
+			{
+				return IsAsciiLetter(character) || (character >= '0' && character <= '9') || character == '-';
+			});
+		}
+
+		static void ValidateLocalization(const LocalizationSettings& localization, ValidationContext& context)
+		{
+			if (!localization.Locale.empty() && !IsLocaleTag(localization.Locale))
+			{
+				context.Error("Locale",
+					std::format("must be empty or a locale tag of 1 to {} ASCII letters, digits and '-' starting with a letter, such as fr or pt-BR (got '{}')",
+						MaxLocaleBytes, localization.Locale));
+			}
+		}
+
+		// Random text becomes a tag: its letters, digits and '-' only, starting with a letter, cut to MaxLocaleBytes bytes; an
+		// empty result stays empty (no locale).
+		static void GenerateLocalization(LocalizationSettings& localization, Random& /*random*/)
+		{
+			std::string tag;
+			for (const char character : localization.Locale)
+			{
+				if ((tag.empty() && IsAsciiLetter(character)) || (!tag.empty() && (IsAsciiLetter(character) || (character >= '0' && character <= '9') || character == '-')))
+					tag += character;
+			}
+			tag.resize(std::min(tag.size(), MaxLocaleBytes));
+			localization.Locale = std::move(tag);
+		}
+
+		// The most control names one Ui command lists (§6.1 Ui; Docs/Decisions/0033-m22-contract.md decision 30).
+		static constexpr size_t MaxUiBindings = 16;
+
+		// The Ui settings' binding lists with their keys, in field order.
+		static std::array<std::pair<std::string_view, const std::vector<std::string>*>, 7> GetUiBindingLists(const UiSettings& ui)
+		{
+			return { std::pair{ std::string_view("Submit"), &ui.Submit }, std::pair{ std::string_view("Cancel"), &ui.Cancel },
+				std::pair{ std::string_view("Up"), &ui.Up }, std::pair{ std::string_view("Down"), &ui.Down },
+				std::pair{ std::string_view("Left"), &ui.Left }, std::pair{ std::string_view("Right"), &ui.Right },
+				std::pair{ std::string_view("Next"), &ui.Next } };
+		}
+
+		// Each list holds at most MaxUiBindings names, none empty or repeated. The names themselves are parsed when a play
+		// session starts (InputBinding::Parse, which Project cannot include), as an action's bindings are.
+		static void ValidateUi(const UiSettings& ui, ValidationContext& context)
+		{
+			for (const auto& [key, bindings] : GetUiBindingLists(ui))
+			{
+				if (bindings->size() > MaxUiBindings)
+					context.Error(std::string(key), std::format("lists at most {} controls (got {})", MaxUiBindings, bindings->size()));
+				context.PushKey(std::string(key));
+				for (size_t index = 0; index < bindings->size(); ++index)
+				{
+					const std::string& binding = (*bindings)[index];
+					const auto previous = bindings->begin() + static_cast<std::ptrdiff_t>(index);
+					if (binding.empty())
+						context.Error(std::to_string(index), "a control name must not be empty, such as 'Key.Enter' or 'Gamepad.South'");
+					else if (std::find(bindings->begin(), previous, binding) != previous)
+						context.Error(std::to_string(index), std::format("the control '{}' is listed twice", binding));
+				}
+				context.PopKey();
+			}
+		}
+
+		// Random lists become valid: empty and repeated names dropped, at most MaxUiBindings kept.
+		static void GenerateUi(UiSettings& ui, Random& /*random*/)
+		{
+			for (std::vector<std::string>* bindings : { &ui.Submit, &ui.Cancel, &ui.Up, &ui.Down, &ui.Left, &ui.Right, &ui.Next })
+			{
+				std::vector<std::string> kept;
+				for (std::string& binding : *bindings)
+				{
+					if (kept.size() < MaxUiBindings && !binding.empty() && std::find(kept.begin(), kept.end(), binding) == kept.end())
+						kept.push_back(std::move(binding));
+				}
+				*bindings = std::move(kept);
+			}
 		}
 
 		static void ValidateOverrides(const TestSuiteOverrides& overrides, ValidationContext& context)
@@ -446,6 +540,27 @@ namespace Engine {
 				"Gravity of the 2D world along X and Y in metres per second squared; each component at most 1e12 in magnitude.",
 				{ .Min = -Utils::MaxProjectGravity, .Max = Utils::MaxProjectGravity, .Unit = "m/s^2" });
 
+		registry.Struct<LocalizationSettings>("LocalizationSettings", "The project's localization (§6.1 Localization).")
+			.Field("Locale", &LocalizationSettings::Locale,
+				"The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; "
+				"empty reads every table's first.")
+			.Validate(&Utils::ValidateLocalization)
+			.Generate(&Utils::GenerateLocalization);
+
+		registry.Struct<UiSettings>("UiSettings", "The keyboard and gamepad navigation of the game's UI (§6.1 Ui).")
+			.Field("Navigation", &UiSettings::Navigation,
+				"Whether keyboard and gamepad navigation moves focus and activates widgets; false leaves focus to the pointer and Ui.SetFocus.")
+			.Field("Submit", &UiSettings::Submit, "The key and gamepad button controls of Submit, as an input action's bindings.")
+			.Field("Cancel", &UiSettings::Cancel, "The key and gamepad button controls of Cancel, as an input action's bindings.")
+			.Field("Up", &UiSettings::Up, "The key and gamepad button controls of Up, as an input action's bindings.")
+			.Field("Down", &UiSettings::Down, "The key and gamepad button controls of Down, as an input action's bindings.")
+			.Field("Left", &UiSettings::Left, "The key and gamepad button controls of Left, as an input action's bindings.")
+			.Field("Right", &UiSettings::Right, "The key and gamepad button controls of Right, as an input action's bindings.")
+			.Field("Next", &UiSettings::Next, "The key and gamepad button controls of Next, as an input action's bindings.")
+			.Field("StickNavigation", &UiSettings::StickNavigation, "Whether a connected gamepad's left stick moves focus.")
+			.Validate(&Utils::ValidateUi)
+			.Generate(&Utils::GenerateUi);
+
 		registry.Struct<ProjectSettings>("ProjectSettings", "The settings of a project: the .eproj file below its header.")
 			.Field("Name", &ProjectSettings::Name, "Display name of the game; exported games name their user-data folder after it.")
 			.Field("StartScene", &ProjectSettings::StartScene, "Project-relative scene the game starts with; empty while none is chosen.")
@@ -459,7 +574,10 @@ namespace Engine {
 			.Field("Testing", &ProjectSettings::Testing, "Test suites and replays.")
 			.Field("SortingLayers", &ProjectSettings::SortingLayers, "The sorting layers of sprites.")
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 9): after SortingLayers, in the phase-2 ledger's order.
-			.Field("Physics2D", &ProjectSettings::Physics2D, "The 2D physics world's gravity.");
+			.Field("Physics2D", &ProjectSettings::Physics2D, "The 2D physics world's gravity.")
+			// M22 (Docs/Decisions/0033-m22-contract.md decisions 11 and 30): after M21's sections, in landing order.
+			.Field("Localization", &ProjectSettings::Localization, "Localized strings (M22).")
+			.Field("Ui", &ProjectSettings::Ui, "The game UI's navigation (M22).");
 	}
 
 }

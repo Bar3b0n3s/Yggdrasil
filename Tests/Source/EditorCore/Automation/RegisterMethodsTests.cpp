@@ -23,7 +23,8 @@ namespace Engine {
 	// (ADR 0015 decision 15), M19's input.readReplay and native.* (ADR 0030 decisions 14 and 32), M18's shaders.reload and
 	// profiler.capture (ADR 0029 decisions 3 and 11), M20's scene.list, scene.activate and scene.close
 	// (Docs/Decisions/0031-m20-contract.md decision 14), M21's physics2d.raycast, physics2d.overlap and physics2d.bodyInfo
-	// (Docs/Decisions/0032-m21-contract.md decisions 15 and 27) and tilemap.paint (decision 26), and M23's animation.preview
+	// (Docs/Decisions/0032-m21-contract.md decisions 15 and 27) and tilemap.paint (decision 26), M22's ui.tree
+	// (Docs/Decisions/0033-m22-contract.md decision 8) and ui.createWidget (decision 32), and M23's animation.preview
 	// (Docs/Decisions/0034-m23-contract.md decision 32), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
@@ -38,9 +39,8 @@ namespace Engine {
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
 			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
-			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "test.list", "test.run", "tilemap.paint", "viewport.camera",
-			"viewport.frame",
-			"viewport.pick", "viewport.screenshot", "viewport.setOptions" };
+			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "test.list", "test.run", "tilemap.paint", "ui.createWidget",
+			"ui.tree", "viewport.camera", "viewport.frame", "viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
 	}
 
@@ -123,7 +123,8 @@ namespace Engine {
 				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
 				"scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
-				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "tilemap.paint",
+				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "tilemap.paint", "ui.createWidget",
+				"ui.tree",
 				"viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
@@ -134,7 +135,7 @@ namespace Engine {
 				"native.write", "physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
-				"session.info", "stats.get", "tilemap.paint", "viewport.pick" };
+				"session.info", "stats.get", "tilemap.paint", "ui.createWidget", "ui.tree", "viewport.pick" };
 			for (const MethodDescriptor* method : methods.GetMethods())
 			{
 				const MethodSpecification& specification = method->Specification;
@@ -290,8 +291,9 @@ namespace Engine {
 			// M16's project_upgrade (friction S3-09), M17's asset_get_properties (friction F11), M19's input_read_replay
 			// (ADR 0030 decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
 			// (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
-			// decision 26) and M23's animation_preview (Docs/Decisions/0034-m23-contract.md decision 32).
-			CHECK(catalog["Tools"].size() == 67);
+			// decision 26), M22's ui_tree (Docs/Decisions/0033-m22-contract.md decision 8) and ui_create_widget (decision 32), and
+			// M23's animation_preview (Docs/Decisions/0034-m23-contract.md decision 32).
+			CHECK(catalog["Tools"].size() == 69);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

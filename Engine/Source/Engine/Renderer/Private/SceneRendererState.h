@@ -376,7 +376,10 @@ namespace Engine {
 		PassBindingCache TonemapBindings{};
 		PassBindingCache FxaaBindings{};
 		PassBindingCache DebugBindings{};
-		PassBindingCache TextBindings{};
+		PassBindingCache TextBindings{}; // also the Ui pass's glyph runs (the same atlases and ViewConstants as game Text)
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the Ui pass's quad sets (UiPass.h, QuadBatcher::Record:
+		// one per texture and sampler), released with the others (ClearBindings, ReleaseUnusedBindings).
+		PassBindingCache UiQuadBindings{};
 		PassBindingCache ShadowBindings{};
 		PassBindingCache DepthBindings{};
 		PassBindingCache GtaoBindings{};
@@ -623,7 +626,7 @@ namespace Engine {
 		void RecordTonemapStage(Detail::SceneRendererFrame& frame);
 		// FXAA, never with frame.PixelArt or a debug view.
 		void RecordLdrPostStage(Detail::SceneRendererFrame& frame);
-		// Game Text (world, then screen) at the scene resolution into the scene LDR target; M22 appends Ui after it.
+		// Game Text (world, then screen), then M22's Ui (UiPass.h), at the scene resolution into the scene LDR target.
 		void RecordSceneOverlayStage(Detail::SceneRendererFrame& frame);
 		// The upscale when frame.Output is not the identity (UpscalePass); sets frame's ViewColor, ViewOverlayFramebuffer and
 		// ViewOverlayConstants either way.

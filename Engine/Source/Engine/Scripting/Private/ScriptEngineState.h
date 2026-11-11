@@ -166,6 +166,10 @@ namespace Engine {
 		void DeliverPhysics(const PhysicsEvent& event, bool is2D);
 		// OnPhysicsDiagnostic's and OnPhysics2DDiagnostic's script error, its callback `callback`.
 		void PublishPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic, std::string_view callback);
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27): the event's callback (GetUiEventCallbackName) on the
+		// instance when it is started and enabled and its behaviour defines it, with the event's target and value. True when
+		// the callback returned true (the boolean), which stops the event's bubbling after the instance's entity.
+		[[nodiscard]] bool InvokeUi(InstanceKey key, const UiEvent& event);
 		// Delivers the physics callbacks (of both worlds) and animation events held for started instances: an entity's
 		// instances together, in slot order, at the turn of its first in (ExecutionOrder, canonical entity, slot) order
 		// (decision 17's entity callbacks), and dispatch order per instance; an instance removed or faulted by a callback

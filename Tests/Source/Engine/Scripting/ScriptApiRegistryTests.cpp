@@ -49,6 +49,8 @@ namespace Engine {
 		void RunApplicationBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunTestBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunBehaviourCallbacksCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunLocBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunUiBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 	}
 
@@ -167,7 +169,9 @@ namespace Engine {
 				&Test::RunLogBindingsCoverage,
 				&Test::RunApplicationBindingsCoverage,
 				&Test::RunTestBindingsCoverage,
-				&Test::RunBehaviourCallbacksCoverage
+				&Test::RunBehaviourCallbacksCoverage,
+				&Test::RunLocBindingsCoverage,
+				&Test::RunUiBindingsCoverage
 			};
 			Test::ScriptTestFixture catalog;
 			REQUIRE(catalog.Start());
@@ -786,7 +790,9 @@ return true
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			for (const char* name : { "Script", "Field", "Scene", "Input", "Time", "Physics", "Physics2D", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log", "Application", "Test" })
+			for (const char* name :
+				{ "Script", "Field", "Scene", "Input", "Time", "Physics", "Physics2D", "Audio", "Assets", "Task", "Random", "Math", "Debug", "Log",
+					"Application", "Test", "Loc", "Ui" })
 				CHECK(std::ranges::any_of(fixture.GetApi().GetModules(), [name](const auto& group)
 				{
 					return group.Name == name;
@@ -800,8 +806,9 @@ return true
 				if (group.Name == "Behaviour")
 				{
 					// The 13 callbacks before M21, then M21's four 2D physics callbacks (Docs/Decisions/0032-m21-contract.md decision 13),
-					// then M23's OnAnimationEvent (Docs/Decisions/0034-m23-contract.md decision 31).
-					REQUIRE(group.Members.size() == 18);
+					// then M22's six UI callbacks and C22.3's OnUiTextChanged and OnUiSubmit (Docs/Decisions/0033-m22-contract.md
+					// decisions 27 and 47), then M23's OnAnimationEvent (Docs/Decisions/0034-m23-contract.md decision 31).
+					REQUIRE(group.Members.size() == 26);
 					for (const auto& member : group.Members)
 					{
 						CHECK(member.Kind == ScriptApiMemberKind::Callback);

@@ -1,0 +1,13 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "6c73c151722797ea",
+	"Type": "Texture",
+	"Importer": "Texture",
+	"ImporterVersion": 1,
+	"Settings": {
+		"Usage": "Color",
+		"GenerateMips": false
+	},
+	"SubAssets": []
+}

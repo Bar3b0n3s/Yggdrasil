@@ -1,0 +1,28 @@
+{
+	"Format": "StringTable",
+	"Version": 1,
+	"Locales": ["en-US", "de", "ja"],
+	"Entries": [
+		{
+			"Key": "Dialogue.Greeting",
+			"Values": {
+				"de": "Guten Tag!\nWillkommen.",
+				"en-US": "Hello!\nWelcome.",
+				"ja": "こんにちは！"
+			}
+		},
+		{
+			"Key": "Hud.Score",
+			"Values": {
+				"de": "Punkte:\t{score}",
+				"en-US": "Score:\t{score}"
+			}
+		},
+		{
+			"Key": "Hud.Empty",
+			"Values": {
+				"en-US": ""
+			}
+		}
+	]
+}

@@ -1,0 +1,76 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "b6d231296dd6a35b",
+	"Type": "Font",
+	"Importer": "Font",
+	"ImporterVersion": 5,
+	"Settings": {
+		"PixelSize": 48,
+		"Spread": 8,
+		"Ranges": [
+			{
+				"First": 12289,
+				"Last": 12290
+			},
+			{
+				"First": 12353,
+				"Last": 12438
+			},
+			{
+				"First": 12449,
+				"Last": 12540
+			},
+			{
+				"First": 19990,
+				"Last": 19990
+			},
+			{
+				"First": 20140,
+				"Last": 20140
+			},
+			{
+				"First": 23383,
+				"Last": 23383
+			},
+			{
+				"First": 24180,
+				"Last": 24180
+			},
+			{
+				"First": 26085,
+				"Last": 26085
+			},
+			{
+				"First": 26376,
+				"Last": 26376
+			},
+			{
+				"First": 26412,
+				"Last": 26412
+			},
+			{
+				"First": 26481,
+				"Last": 26481
+			},
+			{
+				"First": 28450,
+				"Last": 28450
+			},
+			{
+				"First": 30028,
+				"Last": 30028
+			},
+			{
+				"First": 35486,
+				"Last": 35486
+			},
+			{
+				"First": 65281,
+				"Last": 65281
+			}
+		],
+		"Fallbacks": []
+	},
+	"SubAssets": []
+}

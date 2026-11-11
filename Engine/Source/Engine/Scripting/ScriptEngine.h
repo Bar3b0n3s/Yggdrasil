@@ -8,6 +8,7 @@
 #include "Engine/Scene/AnimationSystem.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/UiInteraction.h"
 #include "Engine/Scripting/Sandbox.h"
 #include "Engine/Scripting/ScriptHost.h"
 #include "Engine/Scripting/ScriptTestHost.h"
@@ -51,6 +52,10 @@ namespace Engine {
 		// captures valid for the engine lifetime. Never used as simulation time.
 		std::function<double()> ClockSeconds{};
 		std::function<double()> CpuClockSeconds{};
+		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 11): the locale Loc.Get reads string tables in and
+		// Loc.GetLocale returns, fixed for the VM's life: the project's Localization.Locale (a play session's and an edit
+		// evaluation's VM alike); empty reads every table in its fallback locale.
+		std::string Locale{};
 	};
 
 	// One behaviour instance. M20 (S-MULTI; Docs/Decisions/0031-m20-contract.md decision 17): an instance is identified by
@@ -147,6 +152,20 @@ namespace Engine {
 		// diagnostics, turned into script errors as OnPhysicsDiagnostic turns the 3D ones.
 		void OnPhysics2DEvent(const PhysicsEvent& event) override;
 		void OnPhysics2DDiagnostic(const PhysicsDiagnostic& diagnostic) override;
+		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27; stream B): the UiEvents phase. Each event, in order,
+		// bubbles by the class comment's rule from its target: the target, then each ancestor it had when its walk started,
+		// in turn (so a callback that reparents an entity neither lengthens nor loops the walk); at each entity every
+		// started, enabled instance whose behaviour defines the event's callback (GetUiEventCallbackName: OnUiClick,
+		// OnUiValueChanged, OnUiFocus, OnUiHover, OnUiCancel, OnUiScroll, and C22.3's OnUiTextChanged and OnUiSubmit)
+		// receives it in slot order, with the target as `element` and the event's value (OnUiValueChanged: a boolean for a
+		// toggle, a number for a slider; OnUiFocus and OnUiHover: a boolean; OnUiScroll: a vector (x, y, 0); OnUiTextChanged
+		// and OnUiSubmit: the target's UiTextInput Text as it is when the callback runs, empty without one); after an entity
+		// where any of those callbacks returned the boolean true (no other value), the event goes no further. An event whose
+		// target the scene no longer holds, or holds pending destruction, when its turn comes is dropped: nothing receives
+		// it. During an event's walk, an ancestor that a callback of that event destroyed (so pending destruction when the
+		// walk reaches it) is passed over, its instances receiving nothing, and the walk goes on to the next ancestor. A
+		// callback's fault disables only its instance (§11.7), and the event goes on to the next receiver.
+		void DispatchUiEvents(std::span<const UiEvent> events);
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): an AnimationSystem phase's event reaches
 		// OnAnimationEvent(self, event) on every slot of the event's entity, in slot order (decision 17), as physics callbacks
 		// do: a started instance at once, an unstarted one holding it (with its held physics callbacks, in arrival order)
@@ -203,6 +222,8 @@ namespace Engine {
 		[[nodiscard]] IScriptHost& GetHost() const;
 		[[nodiscard]] ScriptApiRegistry& GetApi() const;
 		[[nodiscard]] const ScriptingSettings& GetSettings() const;
+		// M22 (C22.1): ScriptEngineSpecification::Locale.
+		[[nodiscard]] std::string_view GetLocale() const;
 		[[nodiscard]] RunModes GetRunMode() const;
 		[[nodiscard]] bool IsTestMode() const;
 		[[nodiscard]] bool IsReadOnly() const;

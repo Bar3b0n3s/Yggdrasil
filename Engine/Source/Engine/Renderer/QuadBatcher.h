@@ -38,7 +38,11 @@
 //     derivatives of the quad's position and texture coordinates, and +Z the unit normal of the quad's plane facing the
 //     viewer, so a quad mirrored by its flips mirrors its normals' X or Y and keeps them facing the lights above its
 //     plane), else (0, 0, 1) and 0; elsewhere it writes nothing.
-//   The four pipelines are created at Create (PipelineCount); HdrLit and Normals bind a second texture (QuadBatchInputs::Light
+//   - LdrDepth (M22, C22.3; Docs/Decisions/0033-m22-contract.md decision 57, the ledger amendment granted on main in
+//     1707cf47, appended after M21's targets): Ldr's target, blending and sRGB encoding, depth-tested GreaterOrEqual
+//     against SceneDepth without depth writes (the SceneOverlay stage's World canvases, drawn in the world through a
+//     camera's view-projection).
+//   The five pipelines are created at Create (PipelineCount); HdrLit and Normals bind a second texture (QuadBatchInputs::Light
 //   and QuadDraw::NormalMap), so they have a binding layout of their own.
 // Colour textures are sampled through their sRGB views, so the shader sees linear values; an 8-bit sRGB texel drawn with a
 // white colour reaches an Ldr target, or an Hdr one through the 2D colour path (RenderOutputSettings::PixelArt), unchanged.
@@ -85,7 +89,9 @@ namespace Engine {
 		Ldr,
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the lit sprites' and tiles' pipelines.
 		HdrLit,
-		Normals
+		Normals,
+		// M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 57): the World canvases' depth-tested LDR pipeline.
+		LdrDepth
 	};
 
 	// One textured quad. Corners are in the batch's space; TexCoordMin lands on the top-left corner and TexCoordMax on the
@@ -169,8 +175,9 @@ namespace Engine {
 	class QuadBatcher
 	{
 	public:
-		// Hdr, Ldr, and M21's HdrLit and Normals (Docs/Decisions/0032-m21-contract.md decision 22), in QuadBatchTarget's order.
-		static constexpr uint32_t PipelineCount = 4;
+		// Hdr, Ldr, M21's HdrLit and Normals (Docs/Decisions/0032-m21-contract.md decision 22) and M22's LdrDepth
+		// (Docs/Decisions/0033-m22-contract.md decision 57), in QuadBatchTarget's order.
+		static constexpr uint32_t PipelineCount = 5;
 		// The vertex buffer's capacity in quads (2^20 vertices, 36 MiB of vertex data): the most one batch of a Record draws.
 		// A Record of more draws them in further batches (the file comment).
 		static constexpr uint32_t MaxQuadsPerRecord = 1U << 18;
@@ -189,12 +196,12 @@ namespace Engine {
 		QuadBatcher(const QuadBatcher&) = delete;
 		QuadBatcher& operator=(const QuadBatcher&) = delete;
 
-		// Creates the four pipelines (checked against their reflection), the two samplers, the white texture and the index
+		// Creates the five pipelines (checked against their reflection), the two samplers, the white texture and the index
 		// buffer. `device` is a documented back-reference that outlives the batcher. Errors: those of PipelineFactory and the
 		// GraphicsDevice wrappers (Gpu: an out-of-memory creation, §8.14 item 7).
 		[[nodiscard]] static Result<Scope<QuadBatcher>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
-		// The layout descriptions of the four pipelines, in QuadBatchTarget's order, for "Shaders: LayoutsMatchReflection".
+		// The layout descriptions of the five pipelines, in QuadBatchTarget's order, for "Shaders: LayoutsMatchReflection".
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		// The framebuffer a batch of `target` records into (see the file comment).
 		[[nodiscard]] static nvrhi::FramebufferInfo GetFramebufferInfo(QuadBatchTarget target);

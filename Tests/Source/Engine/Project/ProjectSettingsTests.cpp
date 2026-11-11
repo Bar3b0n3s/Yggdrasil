@@ -2,6 +2,7 @@
 
 #include "Engine/Project/ProjectSettings.h"
 
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Physics/PhysicsLayers.h"
@@ -13,6 +14,11 @@
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <format>
+#include <iterator>
+#include <span>
 
 namespace Engine {
 
@@ -111,7 +117,7 @@ namespace Engine {
 		TEST_CASE("ProjectSettings: every settings struct and enum is registered")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			const std::array<std::string_view, 14> structs = {
+			const std::array<std::string_view, 15> structs = {
 				"ProjectSettings",
 				"WindowSettings",
 				"SimulationSettings",
@@ -126,6 +132,7 @@ namespace Engine {
 				"TestSuiteOverrides",
 				"SortingLayersSettings",
 				"Physics2DSettings",
+				"LocalizationSettings",
 			};
 			for (const std::string_view name : structs)
 			{
@@ -226,6 +233,93 @@ namespace Engine {
 			REQUIRE_FALSE(loaded.has_value());
 			CHECK(loaded.error().GetCode() == ErrorCode::Validation);
 			CHECK(loaded.error().ToString().contains("/Export/Company"));
+		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 11): Localization.Locale is empty or a string table's locale tag,
+		// refused with a Validation error located at /Localization/Locale otherwise.
+		TEST_CASE("ProjectSettings: Localization.Locale is empty or a locale tag, located at /Localization/Locale")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const StructInfo* type = registry->FindStruct<ProjectSettings>();
+			REQUIRE(type != nullptr);
+			const auto issues = [&](std::string locale)
+			{
+				ProjectSettings settings;
+				settings.Localization.Locale = std::move(locale);
+				ResolveContext resolve;
+				resolve.Registry = registry.get();
+				ValidationContext context;
+				type->Validate(&settings, resolve, context);
+				std::vector<std::string> pointers;
+				for (const ValidationIssue& issue : context.GetIssues())
+					pointers.push_back(issue.JsonPointer);
+				return pointers;
+			};
+			// Project cannot include Asset, so the rule is written twice: a non-empty locale passes exactly when a string table
+			// accepts it as a locale tag.
+			const auto tableAccepts = [](std::string_view locale)
+			{
+				StringTableData table;
+				table.Locales = { std::string(locale) };
+				return ValidateStringTable(table).has_value();
+			};
+			for (const std::string_view valid : { "", "fr", "pt-BR", "zh-Hant-TW", "x", "abcdefghijklmnopqrstuvwxyz012345678" })
+			{
+				CAPTURE(valid);
+				CHECK(issues(std::string(valid)).empty());
+				CHECK((valid.empty() || tableAccepts(valid)));
+			}
+			for (const std::string_view invalid : { "-fr", "1en", "fr_CA", "f r", "pt-BR\n", "abcdefghijklmnopqrstuvwxyz0123456789" })
+			{
+				CAPTURE(invalid);
+				CHECK(issues(std::string(invalid)) == std::vector<std::string>{ "/Localization/Locale" });
+				CHECK_FALSE(tableAccepts(invalid));
+			}
+		}
+
+		// M22 C22.2 (Docs/Decisions/0033-m22-contract.md decision 30): the Ui section, registered right after Localization
+		// (ADR 0028's phase-2 ledger appends M21's sections after M22's or before them, in landing order, so only the relative
+		// order is checked); each binding list holds at most 16 unique, non-empty names, located at /Ui/<list>/<index> (the
+		// names themselves are checked against the key and gamepad tables when a play session starts, as an action's bindings
+		// are).
+		TEST_CASE("ProjectSettings: the Ui section's binding lists hold at most 16 unique names, located at /Ui")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const StructInfo* type = registry->FindStruct<ProjectSettings>();
+			REQUIRE(type != nullptr);
+			REQUIRE(registry->FindStruct("UiSettings") != nullptr);
+			REQUIRE(type->FindField("Ui") != nullptr);
+			const std::span<const Scope<FieldInfo>> fields = type->GetFields();
+			const auto localization = std::ranges::find_if(fields, [](const Scope<FieldInfo>& field)
+			{
+				return field->GetName() == "Localization";
+			});
+			REQUIRE(localization != fields.end());
+			REQUIRE(std::next(localization) != fields.end());
+			CHECK((*std::next(localization))->GetName() == "Ui");
+			const auto issues = [&](const UiSettings& ui)
+			{
+				ProjectSettings settings;
+				settings.Ui = ui;
+				ResolveContext resolve;
+				resolve.Registry = registry.get();
+				ValidationContext context;
+				type->Validate(&settings, resolve, context);
+				std::vector<std::string> pointers;
+				for (const ValidationIssue& issue : context.GetIssues())
+					pointers.push_back(issue.JsonPointer);
+				return pointers;
+			};
+			CHECK(issues(UiSettings{}).empty());
+			CHECK(issues(UiSettings{ .Submit = { "Key.Enter", "Key.Enter" } }) == std::vector<std::string>{ "/Ui/Submit/1" });
+			CHECK(issues(UiSettings{ .Cancel = { "" } }) == std::vector<std::string>{ "/Ui/Cancel/0" });
+			UiSettings many;
+			many.Next.clear();
+			for (int key = 0; key < 17; ++key)
+				many.Next.push_back(std::format("Key.F{}", key + 1));
+			CHECK(issues(many) == std::vector<std::string>{ "/Ui/Next" });
+			many.Next.pop_back();
+			CHECK(issues(many).empty());
 		}
 
 		TEST_CASE("ProjectSettings: physics layers are 1 to 16 unique names starting with Default, and collisions pair declared layers")

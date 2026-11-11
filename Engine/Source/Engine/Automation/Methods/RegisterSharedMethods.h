@@ -30,7 +30,8 @@ namespace Engine {
 	// (RegisterSceneMethodTypes, RegisterEntityMethodTypes) and the observe reads (RegisterObserveMethodTypes); then
 	// physics (RegisterPhysicsMethodTypes, M11), audio.stats (RegisterAudioMethodTypes, M12), scene.raycast
 	// (RegisterRaycastMethodTypes), stats.get (RegisterStatsMethodTypes), the shared script methods
-	// (RegisterSharedScriptMethodTypes) and input.record/input.replay (RegisterReplayMethodTypes).
+	// (RegisterSharedScriptMethodTypes), input.record/input.replay (RegisterReplayMethodTypes) and M22's ui.tree
+	// (RegisterUiMethodTypes).
 	// RegisterAutomationSharedTypes must have run on the registry first (the editor's RegisterAutomationCommonTypes runs it;
 	// the Runtime calls it itself).
 	void RegisterSharedMethodTypes(TypeRegistry& registry);

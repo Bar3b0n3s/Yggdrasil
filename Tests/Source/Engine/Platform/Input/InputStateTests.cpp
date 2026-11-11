@@ -142,6 +142,40 @@ namespace Engine {
 			}
 		}
 
+		// M22 W-CLOCK (Docs/Decisions/0033-m22-contract.md decision 12): a play session latches the frame view of a frame that
+		// runs no step on a copy that holds input its ticks have not applied yet.
+		TEST_CASE("InputState: SetFrameView takes another state's frame view and leaves the live state and step side unchanged")
+		{
+			InputState input;
+			input.Inject(KeyDown(Key::A));
+			input.Inject(MouseScrollEvent{ .Offset = glm::vec2(0.0f, 2.0f) });
+			input.LatchStep();
+			input.Inject(KeyUp(Key::A)); // pending for the next step
+
+			InputState preview = input;
+			preview.Inject(KeyDown(Key::B));
+			preview.LatchFrame();
+			input.SetFrameView(preview);
+			CHECK(input.IsKeyDown(InputPhase::Frame, Key::B));
+			CHECK(input.WasKeyPressed(InputPhase::Frame, Key::B));
+			CHECK(input.WasKeyPressed(InputPhase::Frame, Key::A));
+			CHECK(input.WasKeyReleased(InputPhase::Frame, Key::A));
+			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.0f, 2.0f));
+			// The step view and the edges pending for the next step are this state's own.
+			CHECK(input.IsKeyDown(InputPhase::Step, Key::A));
+			CHECK_FALSE(input.IsKeyDown(InputPhase::Step, Key::B));
+			input.LatchStep();
+			CHECK(input.WasKeyReleased(InputPhase::Step, Key::A));
+			CHECK_FALSE(input.IsKeyDown(InputPhase::Step, Key::B));
+
+			// The frame changes the replaced view stood for are dropped: the next frame latch reports only the live state.
+			input.LatchFrame();
+			CHECK_FALSE(input.IsKeyDown(InputPhase::Frame, Key::A));
+			CHECK_FALSE(input.IsKeyDown(InputPhase::Frame, Key::B));
+			CHECK_FALSE(input.WasKeyReleased(InputPhase::Frame, Key::A));
+			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.0f));
+		}
+
 		TEST_CASE("InputState: stick Y is up-positive and Invert flips it")
 		{
 			// GLFW reports a stick pushed up as -1 on its Y axis.

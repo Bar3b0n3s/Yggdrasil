@@ -103,6 +103,12 @@
 		"doctest": [
 			"Vendor/doctest"
 		],
+		"HarfBuzz": [
+			"Vendor/HarfBuzz/src"
+		],
+		"SheenBidi": [
+			"Vendor/SheenBidi/Headers"
+		],
 		"CMP_Core": [
 			"Vendor/CMP_Core/cmp_core/source"
 		],
@@ -302,11 +308,15 @@
 				"Asset",
 				"ShaderShared"
 			],
+			"Notes": "M22 (C22.3, Docs/Decisions/0033-m22-contract.md decisions 41 and 43): HarfBuzz and SheenBidi are private to the text-measurement layer (shaping and bidirectional runs), so no public Renderer header exposes their types.",
 			"ThirdParty": {
 				"Public": [
 					"NVRHI"
 				],
-				"Private": []
+				"Private": [
+					"HarfBuzz",
+					"SheenBidi"
+				]
 			}
 		},
 		{
@@ -360,7 +370,8 @@
 			"Notes": "M23 (Docs/Decisions/0034-m23-contract.md decision 22): Animation, beside Scene at layer 3, for the AnimationSystem phase, the Animator's runtime pose and the skinned items of render extraction; Animation never includes Scene.",
 			"Headers": [
 				"Engine/Source/Engine/Renderer/RenderSnapshot.h",
-				"Engine/Source/Engine/Renderer/DebugDrawList.h"
+				"Engine/Source/Engine/Renderer/DebugDrawList.h",
+				"Engine/Source/Engine/Renderer/UiDrawList.h"
 			],
 			"ThirdParty": {
 				"Public": [
@@ -416,13 +427,14 @@
 			"Layer": 5,
 			"Includes": [],
 			"MaxLayer": 4,
-			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), stb_truetype.h (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C; Docs/Decisions/0030-m19-contract.md decision 23) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md). M23 (Docs/Decisions/0034-m23-contract.md decision 14): tinyexr, which only the environment importer includes (OpenEXR; its ZIP and PXR24 inflate is stb_image's zlib, Graphics' implementation).",
+			"Notes": "The importers' third-party code, all private (section 3 rule 3): cgltf (GltfImporter, CgltfImplementation.cpp), stb_image and stb_image_resize2 (TextureImporter; stb_image's implementation is Graphics', Docs/Decisions/0009-m5-decisions.md decision 11), stb_truetype.h (FontImporter, compiled with STBTT_STATIC in its own translation unit, Appendix C; Docs/Decisions/0030-m19-contract.md decision 23) and MikkTSpace, which only the glTF importer's tangent generator includes (Docs/Decisions/0010-m6-decisions.md); HarfBuzz for the font importer's shaping glyphs and its shaping subset (M22, C22.3, Docs/Decisions/0033-m22-contract.md decision 44). M23 (Docs/Decisions/0034-m23-contract.md decision 14): tinyexr, which only the environment importer includes (OpenEXR; its ZIP and PXR24 inflate is stb_image's zlib, Graphics' implementation).",
 			"ThirdParty": {
 				"Public": [],
 				"Private": [
 					"cgltf",
 					"stb",
 					"MikkTSpace",
+					"HarfBuzz",
 					"tinyexr"
 				]
 			},
@@ -472,10 +484,11 @@
 		]
 	],
 	"SnapshotHeaders": {
-		"Notes": "Renderer/RenderSnapshot.h and Renderer/DebugDrawList.h, the only Renderer headers Scene may include, include nothing beyond Core, Asset, glm and the standard library, directly or transitively; in particular no NVRHI (section 3 rule 3). Transitively, the third-party headers that Core and Asset public headers may include are accepted.",
+		"Notes": "Renderer/RenderSnapshot.h, Renderer/DebugDrawList.h and Renderer/UiDrawList.h (M22, Docs/Decisions/0033-m22-contract.md decision 7), the only Renderer headers Scene may include, include nothing beyond Core, Asset, glm and the standard library, directly or transitively; in particular no NVRHI (section 3 rule 3). Transitively, the third-party headers that Core and Asset public headers may include are accepted.",
 		"Files": [
 			"Engine/Source/Engine/Renderer/RenderSnapshot.h",
-			"Engine/Source/Engine/Renderer/DebugDrawList.h"
+			"Engine/Source/Engine/Renderer/DebugDrawList.h",
+			"Engine/Source/Engine/Renderer/UiDrawList.h"
 		],
 		"AllowedModules": [
 			"Core",
@@ -776,7 +789,8 @@
 			".meta",
 			".replay",
 			".spritesheet",
-			".tilemap"
+			".tilemap",
+			".stringtable"
 		],
 		"LineDelimitedExtensions": [
 			".jsonl"

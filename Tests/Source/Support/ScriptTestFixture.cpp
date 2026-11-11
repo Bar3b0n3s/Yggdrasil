@@ -77,6 +77,7 @@ namespace Engine {
 											   .ReadOnly = m_Specification.ReadOnly,
 											   .ClockSeconds = m_Specification.ClockSeconds,
 											   .CpuClockSeconds = m_Specification.CpuClockSeconds,
+											   .Locale = m_Specification.Locale,
 										   }));
 			ENGINE_TRY(engine->InitializeInstances());
 			engine->StartPending();

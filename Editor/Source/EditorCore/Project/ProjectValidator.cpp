@@ -43,6 +43,13 @@
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiImageComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiTextInputComponent.h"
+#include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Migrations.h"
@@ -85,6 +92,11 @@ namespace Engine {
 		constexpr std::string_view ScriptFieldMismatchCode = "SCRIPT_FIELD_TYPE_MISMATCH";
 		constexpr std::string_view InputUnknownActionCode = "INPUT_UNKNOWN_ACTION";
 		constexpr std::string_view TestSuiteInvalidCode = "TEST_SUITE_INVALID";
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 13): the UI checks of CheckUi.
+		constexpr std::string_view UiElementWithoutCanvasCode = "UI_ELEMENT_WITHOUT_CANVAS";
+		constexpr std::string_view UiImageFrameOutOfRangeCode = "UI_IMAGE_FRAME_OUT_OF_RANGE";
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 35): CheckUi's widget parts.
+		constexpr std::string_view UiWidgetPartInvalidCode = "UI_WIDGET_PART_INVALID";
 
 		constexpr std::array ValidatorCodes = {
 			SceneNoPrimaryCameraCode,
@@ -152,6 +164,10 @@ namespace Engine {
 			TilemapFrameOutOfRangeCode,
 			// M21's milestone review (Scene/SpriteValidation.h), at the end of M21's block.
 			SpriteFrameOutsideTextureCode,
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 13), appended in landing order after M21's (ADR 0028's phase-2 ledger).
+			UiElementWithoutCanvasCode,
+			UiImageFrameOutOfRangeCode,
+			UiWidgetPartInvalidCode,
 			// M23 (Renderer/PointShadowMaps.h, Docs/Decisions/0034-m23-contract.md decision 18).
 			RenderPointShadowBudgetCode,
 			// M23 (Scene/AnimationValidation.h, Docs/Decisions/0034-m23-contract.md decision 30).
@@ -343,6 +359,16 @@ namespace Engine {
 				"sample the texture's edge texels there.",
 				"Keep the frame's X + Width within the texture's width and Y + Height within its height, reimport the texture at the size the "
 				"frames expect, or name another frame." },
+			ValidationCodeInfo{ UiElementWithoutCanvasCode, "Warning", false,
+				"A UI element (an entity with UiRect) has no UiCanvas on an ancestor, so it is never laid out or drawn.",
+				"Move it below a canvas, or add a UiCanvas to its root." },
+			ValidationCodeInfo{ UiImageFrameOutOfRangeCode, "Warning", false,
+				"A UiImage's Frame is not an index of its sprite sheet's Frames, so it draws nothing.",
+				"Set Frame below the sheet's frame count, or add the frame to the sheet." },
+			ValidationCodeInfo{ UiWidgetPartInvalidCode, "Warning", false,
+				"A UiToggle's Graphic, a UiSlider's Fill or Handle, a UiScrollView's Content, or a UiTextInput's TextElement or Placeholder "
+				"names an entity that is not a UI element below the widget in its canvas, so the widget ignores it.",
+				"Name an element below the widget, or clear the reference." },
 			ValidationCodeInfo{ RenderPointShadowBudgetCode, "Warning", false,
 				"More than four shadow-casting point lights are enabled in the scene; the least important ones are lit without shadows.",
 				"Turn off CastShadows on less important point lights, or keep fewer of them in view at once." },
@@ -1299,6 +1325,108 @@ namespace Engine {
 			return {};
 		}
 
+		// Whether an ancestor of `entity` holds a UiCanvas (a canvas's elements are the UiRects below it, UiLayout.h). Bounded by
+		// the entity count, so a scratch scene's parent chain always ends.
+		static bool HasUiCanvasAncestor(const Scene& scene, ConstEntity entity)
+		{
+			ConstEntity ancestor = entity.GetParent();
+			for (size_t steps = 0; ancestor.IsValid() && steps < scene.GetEntityCount(); ++steps)
+			{
+				if (ancestor.HasComponent<UiCanvasComponent>())
+					return true;
+				ancestor = ancestor.GetParent();
+			}
+			return false;
+		}
+
+		// Whether `part` is a UI element below `widget` in the widget's canvas, the only part a widget's layout rule applies to
+		// (Scene/UiLayout.h, C22.2 decision 26): it has a UiRect, and `widget` is an ancestor with no UiCanvas between them (a
+		// canvas there starts a tree of its own). Bounded by the entity count, so a scratch scene's parent chain always ends.
+		static bool IsUiWidgetPart(const Scene& scene, ConstEntity widget, ConstEntity part)
+		{
+			if (!part.HasComponent<UiRectComponent>())
+				return false;
+			ConstEntity ancestor = part.GetParent();
+			for (size_t steps = 0; ancestor.IsValid() && steps < scene.GetEntityCount(); ++steps)
+			{
+				if (ancestor.GetUUID() == widget.GetUUID())
+					return true;
+				if (ancestor.HasComponent<UiCanvasComponent>())
+					return false;
+				ancestor = ancestor.GetParent();
+			}
+			return false;
+		}
+
+		// The UI checks (M22, Docs/Decisions/0033-m22-contract.md decisions 13 and 35), in canonical order:
+		// UI_ELEMENT_WITHOUT_CANVAS on every entity with a UiRect and no UiCanvas on an ancestor, which layout leaves out
+		// (Scene/UiLayout.h); UI_WIDGET_PART_INVALID on every UiToggle Graphic, UiSlider Fill or Handle, UiScrollView Content and
+		// UiTextInput TextElement or Placeholder (C22.3, decision 53) that names an entity of the scene that is not a UI element
+		// below its widget in its canvas, which the widget ignores (a null part is no part, and one the scene lacks is
+		// ENTITY_DANGLING_REFERENCE's); and UI_IMAGE_FRAME_OUT_OF_RANGE on every UiImage whose Frame is not an index of its
+		// sheet's Frames, which the Ui pass skips (Renderer/UiPass.h). A null sheet draws a plain rectangle and has no frames to
+		// check; a sheet that is missing or fails to load is ASSET_MISSING's or ASSET_IMPORT_FAILED's. None is fixable: only
+		// the author knows where an element, a part or a frame belongs.
+		static void CheckUi(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const Scene& scene = *checked.Target;
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			scene.ForEachCanonical([&](ConstEntity entity)
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = entity.GetUUID().ToString();
+				if (entity.HasComponent<UiRectComponent>() && !HasUiCanvasAncestor(scene, entity))
+				{
+					site.Component = "UiRect";
+					diagnostics.push_back(MakeDiagnostic(UiElementWithoutCanvasCode, DiagnosticSeverity::Warning,
+						std::format("'{}' has a UiRect but no UiCanvas on an ancestor, so it is never laid out or drawn", scene.GetEntityPath(entity)),
+						site, "move it below an entity with a UiCanvas (entity.reparent), or add a UiCanvas to its root", false));
+				}
+				const auto checkPart = [&scene, &entity, &site, &diagnostics](std::string_view component, std::string_view field, UUID part)
+				{
+					const ConstEntity target = part.IsValid() ? scene.FindEntityByID(part) : ConstEntity();
+					if (!target.IsValid() || IsUiWidgetPart(scene, entity, target))
+						return;
+					DiagnosticSite partSite = site;
+					partSite.Component = component;
+					partSite.Field = field;
+					diagnostics.push_back(MakeDiagnostic(UiWidgetPartInvalidCode, DiagnosticSeverity::Warning,
+						std::format("{}.{} of '{}' names '{}', which is not a UI element below it in its canvas, so the widget ignores it",
+							component, field, scene.GetEntityPath(entity), scene.GetEntityPath(target)),
+						partSite,
+						"name a UI element below the widget (an entity with a UiRect, with no UiCanvas in between), or clear the reference", false));
+				};
+				if (const UiToggleComponent* toggle = entity.TryGetComponent<UiToggleComponent>())
+					checkPart("UiToggle", "Graphic", toggle->Graphic);
+				if (const UiSliderComponent* slider = entity.TryGetComponent<UiSliderComponent>())
+				{
+					checkPart("UiSlider", "Fill", slider->Fill);
+					checkPart("UiSlider", "Handle", slider->Handle);
+				}
+				if (const UiScrollViewComponent* scrollView = entity.TryGetComponent<UiScrollViewComponent>())
+					checkPart("UiScrollView", "Content", scrollView->Content);
+				if (const UiTextInputComponent* textInput = entity.TryGetComponent<UiTextInputComponent>())
+				{
+					checkPart("UiTextInput", "TextElement", textInput->TextElement);
+					checkPart("UiTextInput", "Placeholder", textInput->Placeholder);
+				}
+				const UiImageComponent* image = entity.TryGetComponent<UiImageComponent>();
+				if (image == nullptr || !image->Sheet.IsValid() || assets == nullptr)
+					return;
+				const Result<AssetRef<Asset>> loaded = assets->Load(image->Sheet.GetHandle());
+				const AssetRef<SpriteSheetData> sheet = loaded ? AssetCast<SpriteSheetData>(*loaded) : AssetRef<SpriteSheetData>();
+				if (!sheet || image->Frame < sheet->Frames.size())
+					return;
+				site.Component = "UiImage";
+				site.Field = "Frame";
+				diagnostics.push_back(MakeDiagnostic(UiImageFrameOutOfRangeCode, DiagnosticSeverity::Warning,
+					std::format("'{}' draws frame {} of '{}', which has {} frame(s), so it draws nothing", scene.GetEntityPath(entity), image->Frame,
+						assets->GetReferencePath(image->Sheet.GetHandle()), sheet->Frames.size()),
+					site, "set UiImage.Frame below the sheet's frame count, or add the frame to the sheet (asset.setProperties)", false));
+			});
+		}
+
 		static Status CheckScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			CheckCameras(checked, diagnostics);
@@ -1310,6 +1438,7 @@ namespace Engine {
 			CheckAnimation(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
 			CheckSprites(editor, checked, diagnostics);
+			CheckUi(editor, checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

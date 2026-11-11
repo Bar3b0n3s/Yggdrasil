@@ -20,6 +20,7 @@ namespace Engine {
 		RegisterScriptingComponents(registry);
 		RegisterRendering2DComponents(registry);
 		RegisterPhysics2DComponents(registry);
+		RegisterUiComponents(registry);
 		RegisterAnimationComponents(registry);
 
 		// The startup check of §5.4: every listed type is registered, in list order and nothing else, so the registration

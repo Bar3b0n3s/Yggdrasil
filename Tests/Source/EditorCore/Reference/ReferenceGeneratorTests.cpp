@@ -8,6 +8,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
@@ -139,12 +140,12 @@ namespace Engine {
 					 "ScriptAPI.md", "Validation.md", "Schemas/AssetMeta.schema.json", "Schemas/BatchRequest.schema.json",
 					 "Schemas/GameManifest.schema.json", "Schemas/Material.schema.json", "Schemas/Prefab.schema.json", "Schemas/Project.schema.json",
 					 "Schemas/Provenance.schema.json", "Schemas/Replay.schema.json", "Schemas/Scene.schema.json", "Schemas/SoundEffect.schema.json",
-					 "Schemas/SpriteSheet.schema.json", "Schemas/Tilemap.schema.json" })
+					 "Schemas/SpriteSheet.schema.json", "Schemas/StringTable.schema.json", "Schemas/Tilemap.schema.json" })
 			{
 				CAPTURE(path);
 				CHECK(FindFile(*files, path) != nullptr);
 			}
-			CHECK(files->size() == 21);
+			CHECK(files->size() == 22);
 			for (const GeneratedReferenceFile& file : *files)
 			{
 				CAPTURE(file.Path);
@@ -317,12 +318,12 @@ namespace Engine {
 		}
 
 		// The schemas describe the files authors and agents write: every .eproj, .scene, .prefab, .material, .sfx, .meta,
-		// .replay, .spritesheet and .tilemap under Projects/FeatureTest and Tests/Data validates against its format's schema,
-		// except the deliberately invalid or other-version fixtures: Scenes/Invalid/, Formats/ (v0.scene, NewerVersion.scene),
-		// Validation/, CoverageGaps/ and Lint/. The project's Automation/Provenance.json files and every line of its batch
-		// scaffolds (Scaffold/*.jsonl) validate against the Provenance and BatchRequest schemas too; Automation/BuildLog.jsonl,
-		// the transcript of the project's recorded upgrade (Docs/Decisions/0034-m23-contract.md decision 21), is the editor's
-		// record of requests and responses, not a batch.
+		// .replay, .spritesheet, .tilemap and .stringtable under Projects/FeatureTest and Tests/Data validates against its format's
+		// schema, except the deliberately invalid or other-version fixtures: Scenes/Invalid/, Formats/ (v0.scene,
+		// NewerVersion.scene), Validation/, CoverageGaps/ and Lint/. The project's Automation/Provenance.json files and every line
+		// of its batch scaffolds (Scaffold/*.jsonl) validate against the Provenance and BatchRequest schemas too;
+		// Automation/BuildLog.jsonl, the transcript of the project's recorded upgrade (Docs/Decisions/0034-m23-contract.md
+		// decision 21), is the editor's record of requests and responses, not a batch.
 		TEST_CASE("ReferenceGenerator: every authored file validates against its generated format schema")
 		{
 			Test::EditorTestFixture fixture("ReferenceSchemas");
@@ -331,10 +332,11 @@ namespace Engine {
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
 			const std::map<std::string, std::string> formats = { { ".eproj", "Project" }, { ".scene", "Scene" }, { ".prefab", "Prefab" },
 				{ ".material", "Material" }, { ".sfx", "SoundEffect" }, { ".meta", "AssetMeta" }, { ".replay", "Replay" }, { ".spritesheet", "SpriteSheet" },
-				{ ".tilemap", "Tilemap" } };
+				{ ".tilemap", "Tilemap" }, { ".stringtable", "StringTable" } };
 			std::map<std::string, Json> schemas;
 			for (const std::string_view format :
-				{ "Project", "Scene", "Prefab", "Material", "SoundEffect", "AssetMeta", "Replay", "Provenance", "BatchRequest", "SpriteSheet", "Tilemap" })
+				{ "Project", "Scene", "Prefab", "Material", "SoundEffect", "AssetMeta", "Replay", "Provenance", "BatchRequest", "SpriteSheet", "Tilemap",
+					"StringTable" })
 				schemas.emplace(std::string(format), ParseSchema(*files, format));
 
 			// (label, text, format) of every document to validate.
@@ -411,7 +413,7 @@ namespace Engine {
 				++checked;
 			}
 			CHECK(checked >= 100);
-			for (const std::string_view format : { "Project", "Scene", "Prefab", "Material", "AssetMeta", "Provenance", "BatchRequest", "SpriteSheet" })
+			for (const std::string_view format : { "Project", "Scene", "Prefab", "Material", "AssetMeta", "Provenance", "BatchRequest", "SpriteSheet", "StringTable" })
 			{
 				CAPTURE(format);
 				CHECK(checkedFormats.contains(std::string(format)));
@@ -559,6 +561,48 @@ namespace Engine {
 			REQUIRE(instance.has_value());
 			const Status valid = JsonSchema::Validate(schema, *instance);
 			CHECK_MESSAGE(valid.has_value(), (valid ? std::string() : valid.error().ToString()));
+		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10): FileFormats.md documents the .stringtable format with the fields
+		// of the table and of its entries, and its schema and section state the limits a builder must respect.
+		TEST_CASE("ReferenceGenerator: the StringTable section lists every field of the table and its entries, and the limits")
+		{
+			Test::EditorTestFixture fixture("ReferenceStringTable");
+			const ReferenceRegistries registries(fixture);
+			const auto files = GenerateReferences(registries.GetSources());
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			const std::string& formats = FindFile(*files, "FileFormats.md")->Content;
+			CHECK(formats.find("| StringTable | `.stringtable` | 1 | [Schemas/StringTable.schema.json](Schemas/StringTable.schema.json) |") != std::string::npos);
+			CHECK(formats.find("| StringTable | `.stringtable` | StringTable | 1 | none | yes |") != std::string::npos);
+			const size_t begin = formats.find("### StringTable (`.stringtable`)");
+			const size_t end = formats.find("## Source formats");
+			REQUIRE(begin != std::string::npos);
+			REQUIRE(end != std::string::npos);
+			REQUIRE(begin < end);
+			const std::string section = formats.substr(begin, end - begin);
+			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
+			for (const std::string_view name : { "StringTable", "StringTableEntry" })
+			{
+				CAPTURE(name);
+				const StructInfo* type = types.FindStruct(name);
+				REQUIRE(type != nullptr);
+				CHECK(section.find(std::format("#### Fields of {}\n", name)) != std::string::npos);
+				for (const auto& field : type->GetFields())
+				{
+					CAPTURE(field->GetName());
+					CHECK(section.find(std::format("| `{}` |", field->GetName())) != std::string::npos);
+				}
+			}
+
+			const Json schema = ParseSchema(*files, "StringTable");
+			const std::string schemaText = schema.dump();
+			for (const std::string& text : { std::format("1 to {} locale tags", MaxStringTableLocales), std::format("At most {} entries", MaxStringTableEntries),
+					 std::format("1 to {} bytes of text", MaxStringTableKeyBytes), std::format("at most {} bytes of UTF-8", MaxStringTableValueBytes) })
+			{
+				CAPTURE(text);
+				CHECK(section.find(text) != std::string::npos);
+				CHECK(schemaText.find(text) != std::string::npos);
+			}
 		}
 
 		// A schema rejects what its format's reader rejects, as far as the supported keywords can say it.

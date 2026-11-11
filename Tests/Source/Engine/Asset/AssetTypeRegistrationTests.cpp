@@ -4,6 +4,7 @@
 
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -141,6 +142,32 @@ namespace Engine {
 			REQUIRE(chunk != nullptr);
 			CHECK(chunk == registry.FindStruct("TilemapChunk"));
 			CHECK(names(*chunk) == std::vector<std::string>{ "X", "Y", "Tiles" });
+		}
+
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 10): the string table's structs follow their C++ members; the rules
+		// across fields run as the table's Validate hook, with a Generate hook beside it.
+		TEST_CASE("AssetTypeRegistration: the string table structs follow their members and the table carries its rules as hooks")
+		{
+			TypeRegistry registry;
+			RegisterAssetTypes(registry);
+			registry.Freeze();
+			const StructInfo* table = registry.FindStruct<StringTableData>();
+			REQUIRE(table != nullptr);
+			CHECK(table == registry.FindStruct("StringTable"));
+			std::vector<std::string> fields;
+			for (const Scope<FieldInfo>& field : table->GetFields())
+				fields.push_back(field->GetName());
+			CHECK(fields == std::vector<std::string>{ "Locales", "Entries" });
+			CHECK(table->HasValidators());
+			CHECK(table->HasGenerators());
+			const StructInfo* entry = registry.FindStruct<StringTableEntry>();
+			REQUIRE(entry != nullptr);
+			CHECK(entry == registry.FindStruct("StringTableEntry"));
+			fields.clear();
+			for (const Scope<FieldInfo>& field : entry->GetFields())
+				fields.push_back(field->GetName());
+			CHECK(fields == std::vector<std::string>{ "Key", "Values" });
+			CHECK(entry->FindField("Values")->GetKind() == FieldType::Map);
 		}
 	}
 

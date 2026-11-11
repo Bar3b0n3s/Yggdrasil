@@ -617,7 +617,12 @@ namespace Engine {
 	// (VirtualFieldValueMatches), so a setter that ignores its input, drops the parent or mixes degrees and radians fails;
 	// a read-only one refuses the write, which changes nothing. Then `iterations` seeded random values of the whole
 	// component, every stored writable field drawn within its metadata, are written as the merge patch from the current
-	// value and read back exactly.
+	// value and read back exactly. A drawn value an RFC 7386 patch cannot express (a null reference, which a patch reads as
+	// a removal) is drawn again, at most RoundTripDrawsPerValue times per value in all: a component with several
+	// reference fields (M22 C22.3's UiTextInput has two EntityRefs, each null a quarter of the time) needs more draws, and
+	// every component still writes all `iterations` values.
+	static constexpr int RoundTripDrawsPerValue = 4;
+
 	static void CheckAutomationRoundTrips(const TypeRegistry& registry, int iterations)
 	{
 		const Test::FixtureSchemaSource schemas = Test::FixtureSchemaSource::CreateStandard();
@@ -679,7 +684,7 @@ namespace Engine {
 			owner.Schemas = &schemas;
 			const Json defaults = component->MakeDefaultJson();
 			int writtenValues = 0;
-			for (int iteration = 0; iteration < iterations; ++iteration)
+			for (int iteration = 0; iteration < iterations * RoundTripDrawsPerValue && writtenValues < iterations; ++iteration)
 			{
 				CAPTURE(iteration);
 				const Json target = generator.RandomJson(component->GetSelfField(), owner);
@@ -695,9 +700,8 @@ namespace Engine {
 				CHECK(WriteCanonical(*read) == WriteCanonical(target));
 				++writtenValues;
 			}
-			// A value an RFC 7386 patch cannot express, or that a strict write refuses, is rare; most of the values reach the
-			// component.
-			CHECK(writtenValues * 2 > iterations);
+			// Every component writes all of its values within the draws (a strict write that refuses one fails above).
+			CHECK(writtenValues == iterations);
 		}
 		CHECK(components > 0);
 		// Transform's EulerAngles, WorldPosition and WorldRotation at least.

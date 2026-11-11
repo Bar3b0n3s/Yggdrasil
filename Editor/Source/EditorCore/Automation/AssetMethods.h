@@ -130,7 +130,8 @@ namespace Engine {
 		std::vector<AssetDiagnosticInfo> Diagnostics{};
 	};
 
-	// Registry enum "AssetCreateType" (§13.5 asset.create {type: Material|Scene|Prefab|SoundEffect|Folder|SpriteSheet|Tilemap}).
+	// Registry enum "AssetCreateType" (§13.5 asset.create {type: Material|Scene|Prefab|SoundEffect|Folder|SpriteSheet|Tilemap|
+	// StringTable}).
 	enum class AssetCreateType : uint8_t
 	{
 		Material,
@@ -139,14 +140,15 @@ namespace Engine {
 		SoundEffect, // M12: a .sfx sound effect (§6.6)
 		Folder,
 		SpriteSheet, // M18: a .spritesheet sprite sheet (§6.9; Docs/Decisions/0029-m18-contract.md decision 18)
-		Tilemap      // M21: a .tilemap tilemap (§6.9; Docs/Decisions/0032-m21-contract.md decision 23)
+		Tilemap,     // M21: a .tilemap tilemap (§6.9; Docs/Decisions/0032-m21-contract.md decision 23)
+		StringTable  // M22: a .stringtable string table (§6; Docs/Decisions/0033-m22-contract.md decision 10)
 	};
 
 	// asset.create {type, path, values?}: creates a native asset at project-relative `path` (below Assets/, with the type's
-	// extension: .material, .scene, .prefab, .sfx, .spritesheet) with its .meta, or a folder. `values` is a partial object
-	// of registry PascalCase keys over the defaults: MaterialData's ("Material") for a Material, and, from M12, the sound
-	// effect's ("SoundEffect", Audio/SoundSynth.h, written with SoundEffectToText) for a SoundEffect, which must then pass
-	// ValidateSoundEffect (at least one layer; every violation Validation located under /values, such as
+	// extension: .material, .scene, .prefab, .sfx, .spritesheet, .stringtable) with its .meta, or a folder. `values` is a
+	// partial object of registry PascalCase keys over the defaults: MaterialData's ("Material") for a Material, and, from
+	// M12, the sound effect's ("SoundEffect", Audio/SoundSynth.h, written with SoundEffectToText) for a SoundEffect, which
+	// must then pass ValidateSoundEffect (at least one layer; every violation Validation located under /values, such as
 	// /values/Layers/0/Notes/2, as for a material); for the other types it must be absent. A Scene is an empty scene
 	// named after the file stem; a Prefab holds one root entity named after the file stem. The new asset's id and type are
 	// its importer's main type (a SoundEffect is an AudioClip, §7.4). One AssetEditCommand, which also creates the missing
@@ -165,6 +167,10 @@ namespace Engine {
 	// located under /values, such as /values/Chunks/0/Tiles/3). A palette entry's Sheet takes every asset reference of §7.1,
 	// rewritten to the handle of the SpriteSheet it names (InvalidArgument at /values/Palette/<i>/Sheet for an asset of another
 	// type); its frames are not checked against the sheet (project.validate's TILEMAP_FRAME_OUT_OF_RANGE). Its type is Tilemap.
+	// M22 (additive; Docs/Decisions/0033-m22-contract.md decision 10): a StringTable (.stringtable) takes `values` of the
+	// "StringTable" registry struct (Asset/StringTableData.h, written with StringTableToText) over the defaults (the locale
+	// "en" and no entries; absent values make that empty table), which must pass ValidateStringTable (every violation
+	// Validation located under /values, such as /values/Entries/1/Key). Its type is StringTable.
 	struct AssetCreateParams
 	{
 		AssetCreateType Type = AssetCreateType::Material;
@@ -182,7 +188,8 @@ namespace Engine {
 
 	// asset.getProperties {asset}: the properties of a native asset (§13.5: materials; sound effects from M12, the .sfx
 	// document's fields after its header; sprite sheets from M18, the .spritesheet document's fields after its header;
-	// tilemaps from M21, the .tilemap document's fields after its header) as its registry JSON (PascalCase, every field).
+	// tilemaps from M21, the .tilemap document's fields after its header; string tables from M22, the .stringtable
+	// document's fields after its header) as its registry JSON (PascalCase, every field).
 	struct AssetGetPropertiesParams
 	{
 		std::string Asset{};
@@ -199,8 +206,9 @@ namespace Engine {
 	// asset.create's checks (ValidateSpriteSheet, and every frame inside its texture when the texture loads); an array in the
 	// patch (Frames, Clips) replaces the whole array, as RFC 7386 says. A tilemap's result passes ValidateTilemap, its palette's
 	// Sheets taking every asset reference as asset.create's do; its Palette and Chunks are replaced whole (painting cells is
-	// tilemap.paint's). A play session in lockstep (a recording or replay included) or a test run sees the change only after
-	// it ends: the asset reload is deferred like a script reload (§7.5 race rule 4).
+	// tilemap.paint's). A string table's result passes asset.create's check (ValidateStringTable); its Locales and Entries are
+	// arrays, each replaced whole. A play session in lockstep (a recording or replay included) or a test run sees the change
+	// only after it ends: the asset reload is deferred like a script reload (§7.5 race rule 4).
 	struct AssetSetPropertiesParams
 	{
 		std::string Asset{};
@@ -307,17 +315,18 @@ namespace Engine {
 		// rewrite and of EditorContext::CreatePrefabUpdateCommand (the new version stays imported; nothing else changed).
 		[[nodiscard]] Result<Scope<PendingOperation>> AssetReimport(EditorMethodContext& context, const AssetReimportParams& params);
 		// asset.create. Errors: InvalidArgument for a path outside Assets/, a wrong extension, values given for a type that
-		// takes none, a Material's, SoundEffect's, SpriteSheet's or Tilemap's values that are not an object or that set "Format"
-		// or "Version", and a tilemap palette Sheet that names no SpriteSheet; NotFound for a Sheet reference that names
-		// nothing; AlreadyExists (for a Folder, only when a file is at its path); Validation for invalid values (located under
-		// /values; a SoundEffect without layers and a SpriteSheet frame outside its texture included).
+		// takes none, a Material's, SoundEffect's, SpriteSheet's, Tilemap's or StringTable's values that are not an object or
+		// that set "Format" or "Version", and a tilemap palette Sheet that names no SpriteSheet; NotFound for a Sheet reference
+		// that names nothing; AlreadyExists (for a Folder, only when a file is at its path); Validation for invalid values
+		// (located under /values; a SoundEffect without layers, a SpriteSheet frame outside its texture and a StringTable's
+		// repeated key included).
 		[[nodiscard]] Result<AssetCreateResult> AssetCreate(EditorMethodContext& context, const AssetCreateParams& params);
 		// asset.getProperties. Errors: as asset.info; InvalidArgument for an asset that is not native (with the hint
 		// "use asset.getImportSettings").
 		[[nodiscard]] Result<AssetGetPropertiesResult> AssetGetProperties(EditorMethodContext& context, const AssetGetPropertiesParams& params);
 		// asset.setProperties. Errors: as asset.getProperties; InvalidArgument for values that are not an object or that set
 		// "Format" or "Version", and asset.create's for a tilemap palette's Sheet references; Validation (located under /values)
-		// for an invalid result, a material's, a sound effect's, a sprite sheet's or a tilemap's.
+		// for an invalid result, a material's, a sound effect's, a sprite sheet's, a tilemap's or a string table's.
 		[[nodiscard]] Result<AssetSetPropertiesResult> AssetSetProperties(EditorMethodContext& context, const AssetSetPropertiesParams& params);
 		// asset.getImportSettings. Errors: as asset.info; InvalidArgument for a sub-asset or built-in.
 		[[nodiscard]] Result<AssetGetImportSettingsResult> AssetGetImportSettings(EditorMethodContext& context,

@@ -17,7 +17,6 @@ namespace Engine {
 			ENGINE_TRY(ScriptBindings::RegisterEntity(api));
 			ENGINE_TRY(ScriptBindings::RegisterComponents(api));
 			ENGINE_TRY(ScriptBindings::RegisterSprites(api));
-			ENGINE_TRY(ScriptBindings::RegisterAnimation(api));
 			ENGINE_TRY(ScriptBindings::RegisterScene(api));
 			ENGINE_TRY(ScriptBindings::RegisterInput(api));
 			ENGINE_TRY(ScriptBindings::RegisterTime(api));
@@ -34,6 +33,13 @@ namespace Engine {
 			ENGINE_TRY(ScriptBindings::RegisterLog(api));
 			ENGINE_TRY(ScriptBindings::RegisterApplication(api));
 			ENGINE_TRY(ScriptBindings::RegisterTest(api));
+			// M22 (Docs/Decisions/0033-m22-contract.md decision 11); phase 2's modules append in landing order.
+			ENGINE_TRY(ScriptBindings::RegisterLoc(api));
+			// M22 (decision 28): the Ui module, after Loc.
+			ENGINE_TRY(ScriptBindings::RegisterUi(api));
+			// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the Animator and SkinnedMesh proxies' methods, after M21's
+			// and M22's registrations (landing order).
+			ENGINE_TRY(ScriptBindings::RegisterAnimation(api));
 			return {};
 		}
 

@@ -44,9 +44,11 @@ project "EditorCore"
 	UseSpdlog()
 	UseMiniaudio()
 	UseMikkTSpace()
+	UseLuau(true)
+	UseHarfBuzz()
+	UseSheenBidi()
 	UseCMPCore()
 	UseTinyExr()
-	UseLuau(true)
 
 project "Editor"
 	kind "ConsoleApp"
@@ -94,6 +96,8 @@ project "Editor"
 	UseMiniaudio()
 	UseMikkTSpace()
 	UseNativeFileDialog()
+	UseLuau(true)
+	UseHarfBuzz()
+	UseSheenBidi()
 	UseCMPCore()
 	UseTinyExr()
-	UseLuau(true)

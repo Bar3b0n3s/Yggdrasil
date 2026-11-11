@@ -9,9 +9,10 @@ namespace Engine {
 	// Registers the Asset module's reflected types (Architecture §5.4): the enum "AlphaMode" and the struct "Material"
 	// (MaterialData.h, RegisterMaterialTypes), then M18's sprite sheet structs "SpriteRect", "SpriteBorders", "SpriteFrame",
 	// "SpriteClipFrame", "SpriteClip" and "SpriteSheet" (SpriteSheetData.h, RegisterSpriteSheetTypes), then M21's tilemap
-	// structs "TilemapTile", "TilemapChunk" and "Tilemap" (TilemapData.h, RegisterTilemapTypes). Every EngineContext calls it
-	// in its Services step, after the built-in components and the project settings types, so materials, sprite sheets and
-	// tilemaps read and write in the editor and in exported games alike; the registry suite's registry
+	// structs "TilemapTile", "TilemapChunk" and "Tilemap" (TilemapData.h, RegisterTilemapTypes), then M22's string table
+	// structs "StringTableEntry" and "StringTable" (StringTableData.h, RegisterStringTableTypes). Every EngineContext calls it
+	// in its Services step, after the built-in components and the project settings types, so materials, sprite sheets,
+	// tilemaps and string tables read and write in the editor and in exported games alike; the registry suite's registry
 	// (Test::CreateBuiltinRegistry) includes it, so every Asset type gets the §5.4 suite.
 	void RegisterAssetTypes(TypeRegistry& registry);
 
