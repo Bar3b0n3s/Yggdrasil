@@ -93,7 +93,7 @@
 					"ClipChildren": true
 				},
 				"UiImage": {
-					"Sheet": "aa3013b7e31d75ca",
+					"Sheet": "5f6d935758e2bfd1",
 					"Frame": 2,
 					"Color": [1, 0.8, 0.6, 0.9],
 					"Type": "Sliced",
@@ -140,7 +140,7 @@
 					"ClipChildren": false
 				},
 				"UiImage": {
-					"Sheet": "aa3013b7e31d75ca",
+					"Sheet": "5f6d935758e2bfd1",
 					"Frame": 0,
 					"Color": [1, 1, 1, 1],
 					"Type": "Simple",

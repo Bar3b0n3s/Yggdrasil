@@ -386,6 +386,58 @@ namespace Engine {
 			}
 		}
 
+		// ADR 0028's phase-2 ledger ("Texture compression"): sprite, tile and UI art takes Compression None, so every texture
+		// M21's and M22's scaffolds import into their sprite, 2D-light, tile and UI directories names it in its import settings
+		// (Docs/Decisions/0032-m21-contract.md decision 31, Docs/Decisions/0033-m22-contract.md decision 7), applied by M23's
+		// landing (Docs/Decisions/0034-m23-contract.md, "Landing"). A sprite sheet's creation sets its texture to None too, but
+		// only after the import has cooked it with Auto, so the scaffolds import the texture uncompressed from the start.
+		// Reads the committed scaffolds, without a GPU.
+		TEST_CASE("FeatureTest: the scaffolds import M21's and M22's sprite, tile and UI textures with Compression None")
+		{
+			const std::map<std::string, size_t, std::less<>> expected = { { "Assets/Textures/GoldenUi", 1 },
+				{ "Assets/Textures/Lights2D", 2 }, { "Assets/Textures/Lights2DGolden", 1 }, { "Assets/Textures/Sprites2D", 1 },
+				{ "Assets/Textures/Sprites2DGolden", 1 }, { "Assets/Textures/Tilemaps", 1 } };
+			const std::filesystem::path scaffolds = Test::GetRepositoryRoot() / "Projects" / "FeatureTest" / "Scaffold";
+			const Result<std::vector<std::filesystem::path>> files = FileSystem::ListDirectory(scaffolds, false);
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			std::map<std::string, size_t, std::less<>> imports;
+			for (const std::filesystem::path& file : *files)
+			{
+				if (FileSystem::PathToUtf8(file.extension()) != ".jsonl")
+					continue;
+				const Result<std::string> text = FileSystem::ReadText(file);
+				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				size_t start = 0;
+				while (start < text->size())
+				{
+					const size_t end = std::min(text->find('\n', start), text->size());
+					const std::string_view line = std::string_view(*text).substr(start, end - start);
+					start = end + 1;
+					if (line.empty())
+						continue;
+					Result<Json> request = JsonReader::Parse(line);
+					REQUIRE_MESSAGE(request.has_value(), request.error().ToString());
+					const JsonReader reader(*request);
+					if (reader.ReadMember<std::string>("method") != std::string("asset.import"))
+						continue;
+					const auto params = reader.GetMember("params");
+					REQUIRE(params.has_value());
+					const auto destination = params->ReadMember<std::string>("destDir");
+					if (!destination.has_value() || !expected.contains(*destination))
+						continue;
+					CAPTURE(FileSystem::PathToUtf8(file.filename()));
+					CAPTURE(std::string(line));
+					++imports[*destination];
+					const auto compression = params->GetMember("settings").and_then([](const JsonReader& settings)
+					{
+						return settings.ReadMember<std::string>("Compression");
+					});
+					CHECK(compression == std::string("None"));
+				}
+			}
+			CHECK(imports == expected);
+		}
+
 		// Roadmap M14 acceptance (ADR 0022 decision 9): the committed FinalStateHash of Assets/Tests/Replays/Determinism.replay
 		// is reproduced by strict replay verification; the unit suite runs this in Debug and Release, without a GPU.
 		TEST_CASE("FeatureTest: Determinism.replay matches its committed hash in both editor configurations")

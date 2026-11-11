@@ -46,13 +46,14 @@ namespace Engine {
 	// and AudioClip, Script and Replay. Both asset managers call the same registry and cooked loaders.
 	void RegisterBuiltinLoaders(AssetLoaderRegistry& registry);
 
-	// The payload format version (CookedHeader::FormatVersion) that this build's built-in loader of `type` reads: the
-	// FormatVersion of its data type (SceneData, PrefabData, MeshData, MaterialData, TextureData, EnvironmentData,
-	// AudioClipData, ScriptData, FontData, ReplayData, SpriteSheetData), which each loader requires exactly. nullopt for None
-	// and a value outside AssetType. The cooked caches treat an artifact at any other version as an entry to rebuild, never as
-	// current (AssetCache::Find and ReadArtifact, Architecture §7.5), so a payload format change rebuilds the entries of an
-	// importer whose own version and cache key it leaves unchanged (M23, Docs/Decisions/0034-m23-contract.md decision 20).
-	// Pure and thread-safe.
+	// The payload format version (CookedHeader::FormatVersion) that this build's built-in loader of `type` reads and its
+	// importer writes: the FormatVersion of its data type (SceneData, PrefabData, MeshData, MaterialData, TextureData,
+	// EnvironmentData, AudioClipData, ScriptData, FontData, ReplayData, SpriteSheetData, TilemapData, StringTableData,
+	// SkeletonData, AnimationClipData), which each loader requires exactly, but for M22's font loader, which still reads
+	// FontData format 1 (Docs/Decisions/0033-m22-contract.md decision 44). nullopt for None and a value outside AssetType.
+	// The cooked caches treat an artifact at any other version as an entry to rebuild, never as current (AssetCache::Find
+	// and ReadArtifact, Architecture §7.5), so a payload format change rebuilds the entries of an importer whose own version
+	// and cache key it leaves unchanged (M23, Docs/Decisions/0034-m23-contract.md decision 20). Pure and thread-safe.
 	[[nodiscard]] std::optional<uint16_t> GetCookedFormatVersion(AssetType type);
 
 }

@@ -69,14 +69,17 @@ namespace Engine {
 					}
 				}
 
-				void test_case_end(const doctest::CurrentTestCaseStats& /*stats*/) override
+				void test_case_end(const doctest::CurrentTestCaseStats& stats) override
 				{
 					{
 						TrackerState& state = Utils::GetTrackerState();
 						std::scoped_lock lock(state.Mutex);
 						state.Running.reset();
 					}
-					CrashHandler::SetBreadcrumb(CrashBreadcrumb::TestCase, {});
+					// A crashed case keeps its breadcrumb: doctest's fatal-condition handler ends the case and then the
+					// process with std::exit, whose report (the crash handler's exit watch) names the case that crashed.
+					if ((stats.failure_flags & doctest::TestCaseFailureReason::Crash) == 0)
+						CrashHandler::SetBreadcrumb(CrashBreadcrumb::TestCase, {});
 				}
 			};
 

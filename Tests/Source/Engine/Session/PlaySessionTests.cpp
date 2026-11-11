@@ -536,7 +536,8 @@ namespace Engine {
 		// C22.2 (Docs/Decisions/0033-m22-contract.md decisions 24 and 27; ADR 0028's phase-2 execution order): UiInput after
 		// ApplyInput (C22.3's TextLatch goes between them) and UiEvents after StartFlush; Simulate runs UiInput, whose writes
 		// are simulation, but no script phase, and drops the UI events. Streams A (UiInput) and B (UiEvents); the cases "step
-		// order matches the documented sequence" and "Simulate mode skips the script and audio phases" list them too.
+		// order matches the documented sequence" and "Simulate mode skips the script and audio phases" list them too, and M23's
+		// AnimationSystem after M21's SpriteAnimation on phase 2's merged tree (Docs/Decisions/0034-m23-contract.md, "Landing").
 		TEST_CASE("PlaySession: UiInput follows ApplyInput and UiEvents follows StartFlush, and Simulate drops the UI events")
 		{
 			Test::SceneTestFixture fixture;
@@ -545,7 +546,7 @@ namespace Engine {
 			Result<Scope<PlaySession>> session = PlaySession::CreateFromScene(MakeSpecification(fixture, &observer), fixture.GetScene());
 			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
 			(*session)->FixedStep();
-			CHECK(observer.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::TextLatch, PlaySessionPhase::UiInput, PlaySessionPhase::StartFlush, PlaySessionPhase::UiEvents, PlaySessionPhase::FixedUpdate, PlaySessionPhase::Tasks, PlaySessionPhase::SpriteAnimation, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::Physics2DPreStep, PlaySessionPhase::Physics2DStep, PlaySessionPhase::Physics2DPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
+			CHECK(observer.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::TextLatch, PlaySessionPhase::UiInput, PlaySessionPhase::StartFlush, PlaySessionPhase::UiEvents, PlaySessionPhase::FixedUpdate, PlaySessionPhase::Tasks, PlaySessionPhase::SpriteAnimation, PlaySessionPhase::AnimationSystem, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::Physics2DPreStep, PlaySessionPhase::Physics2DStep, PlaySessionPhase::Physics2DPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
 
 			RecordingObserver simulateObserver;
 			PlaySessionSpecification specification = MakeSpecification(fixture, &simulateObserver);
@@ -554,7 +555,7 @@ namespace Engine {
 			REQUIRE_MESSAGE(simulate.has_value(), simulate.error().ToString());
 			QueuePointer(**simulate, 0, glm::vec2(10.0f));
 			(*simulate)->FixedStep();
-			CHECK(simulateObserver.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::TextLatch, PlaySessionPhase::UiInput, PlaySessionPhase::SpriteAnimation, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::Physics2DPreStep, PlaySessionPhase::Physics2DStep, PlaySessionPhase::Physics2DPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
+			CHECK(simulateObserver.Phases == std::vector<PlaySessionPhase>{ PlaySessionPhase::InterpolationSnapshot, PlaySessionPhase::ApplyInput, PlaySessionPhase::TextLatch, PlaySessionPhase::UiInput, PlaySessionPhase::SpriteAnimation, PlaySessionPhase::AnimationSystem, PlaySessionPhase::PreStepTransformUpdate, PlaySessionPhase::PhysicsPreStep, PlaySessionPhase::PhysicsStep, PlaySessionPhase::PhysicsPostStep, PlaySessionPhase::Physics2DPreStep, PlaySessionPhase::Physics2DStep, PlaySessionPhase::Physics2DPostStep, PlaySessionPhase::DestroyFlush, PlaySessionPhase::PostStepTransformUpdate, PlaySessionPhase::UiLayout });
 			CHECK((*simulate)->GetUi().GetInteraction().Hovered == (*simulate)->GetScene().FindEntityByPath("/Canvas/A").GetUUID());
 			CHECK((*simulate)->GetUi().GetQueuedEventCount() == 0);
 		}

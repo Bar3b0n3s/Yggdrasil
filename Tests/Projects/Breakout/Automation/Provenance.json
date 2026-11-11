@@ -108,11 +108,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Ball.material",
-			"XXH64": "6c118add8fab89a9",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "5c082ac4d0683e5d",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/Ball.material.meta",
@@ -124,11 +124,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickBlue.material",
-			"XXH64": "ba9f1bb7028b9ac9",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "83e327ec41c404f4",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/BrickBlue.material.meta",
@@ -140,11 +140,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickGreen.material",
-			"XXH64": "2c92a72bfa36cd7f",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "f68e6fc79f393991",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/BrickGreen.material.meta",
@@ -156,11 +156,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickOrange.material",
-			"XXH64": "0775697052fdb5eb",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "4f164c3a44f08b93",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/BrickOrange.material.meta",
@@ -172,11 +172,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickRed.material",
-			"XXH64": "4c627907dbb118ff",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "03e2b9e6fdfc5501",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/BrickRed.material.meta",
@@ -188,11 +188,11 @@
 		},
 		{
 			"Path": "Assets/Materials/BrickYellow.material",
-			"XXH64": "831f2d6d67677d53",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "a134e0e20ce52286",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/BrickYellow.material.meta",
@@ -204,11 +204,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Paddle.material",
-			"XXH64": "f3ce7d47e05c57f3",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "d16864ac14ce8d55",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/Paddle.material.meta",
@@ -220,11 +220,11 @@
 		},
 		{
 			"Path": "Assets/Materials/Wall.material",
-			"XXH64": "d08b63619896350a",
-			"Method": "edit.batch",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 23
+			"XXH64": "f78d65ea842304aa",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 445
 		},
 		{
 			"Path": "Assets/Materials/Wall.material.meta",

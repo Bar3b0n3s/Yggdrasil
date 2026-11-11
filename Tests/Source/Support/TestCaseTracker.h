@@ -10,10 +10,11 @@
 // Which doctest test case is running, for the support code that reacts on other threads: the ExpectLog listener (log
 // entries from any thread), the recording assert handler (asserts on any thread) and the timeout watchdog. A doctest
 // listener registered in TestCaseTracker.cpp keeps it current in every doctest run of the Tests binary, together with
-// the crash handler's TestCase breadcrumb, which every crash report names, and, in a process that is not a child, one
-// flushed Trace line per started case in the log, FormatTestCaseLogLine's, which Scripts/Test.py's TEST_CASE_LOG_PATTERN
-// reads (the log file names each line's thread, not its process). A death-test child runs no doctest, so no test case is
-// ever running there.
+// the crash handler's TestCase breadcrumb, which every crash report names (a case that crashed keeps it: doctest ends
+// the case before its fatal-condition handler's std::exit, which the exit watch reports), and, in a process that is not
+// a child, one flushed Trace line per started case in the log, FormatTestCaseLogLine's, which Scripts/Test.py's
+// TEST_CASE_LOG_PATTERN reads (the log file names each line's thread, not its process). A death-test child runs no
+// doctest, so no test case is ever running there.
 
 namespace Engine {
 

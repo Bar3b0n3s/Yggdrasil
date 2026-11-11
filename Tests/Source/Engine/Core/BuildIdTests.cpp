@@ -1,6 +1,8 @@
 #include "TestsPCH.h"
 #include "Engine/Core/BuildId.h"
 
+#include "Engine/Asset/ReplayData.h"
+
 #include <string>
 #include <string_view>
 
@@ -42,6 +44,16 @@ namespace Engine {
 			const Result<BuildId> ownParsed = ParseBuildId(FormatBuildId(own));
 			REQUIRE(ownParsed.has_value());
 			CHECK(*ownParsed == own);
+		}
+
+		// The reservation ledgers own the version (Docs/Decisions/0028-backlog-program.md): the last lander of each phase
+		// bumps its minor version, 0.3.0 at M23's landing, phase 2's last (Docs/Decisions/0034-m23-contract.md decision 17).
+		// Replay headers keep their own constant, so the bump rewrites no replay.
+		TEST_CASE("BuildId: the engine version is phase 2's, and replay headers keep their own")
+		{
+			CHECK(EngineVersionString == "0.3.0");
+			CHECK(GetBuildId().Version == "0.3.0");
+			CHECK(ReplayEngineVersionString == "0.1.0");
 		}
 	}
 

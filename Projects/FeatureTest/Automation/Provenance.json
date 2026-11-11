@@ -35,6 +35,70 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Fonts/GoldenUiScripts/Inter-Regular.otf",
+			"XXH64": "38e610539efec6b5",
+			"Method": "asset.import",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Fonts/GoldenUiScripts/Inter-Regular.otf.meta",
+			"XXH64": "697115431c2235c0",
+			"Method": "asset.import",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansArabic-Regular.ttf",
+			"XXH64": "6e5d0a216abd24ba",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansArabic-Regular.ttf.meta",
+			"XXH64": "98af890d612be3dc",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansHebrew-Regular.ttf",
+			"XXH64": "93e220f9d5cf71c7",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansHebrew-Regular.ttf.meta",
+			"XXH64": "110874f9cab10c7e",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansJP-Regular.otf",
+			"XXH64": "502ba55328063af0",
+			"Method": "asset.import",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Fonts/GoldenUiScripts/NotoSansJP-Regular.otf.meta",
+			"XXH64": "832f67d4851fba5b",
+			"Method": "asset.import",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Formats/Audio/Blip.sfx",
 			"XXH64": "2593dcec2af50301",
 			"Method": "asset.create",
@@ -188,7 +252,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Glyphs.ttf.meta",
-			"XXH64": "b9366683d1f7b4fb",
+			"XXH64": "3cc7d97e6308f2a5",
 			"Method": "asset.import",
 			"RequestId": 10,
 			"Client": "batch",
@@ -204,7 +268,7 @@
 		},
 		{
 			"Path": "Assets/Formats/Fonts/Inter-Regular.otf.meta",
-			"XXH64": "5a0586840534a3d3",
+			"XXH64": "18a88fad899eb1f4",
 			"Method": "asset.import",
 			"RequestId": 11,
 			"Client": "batch",
@@ -447,6 +511,22 @@
 			"XXH64": "dabc8a4d967989aa",
 			"Method": "asset.import",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Localization/Menu.stringtable",
+			"XXH64": "7845d9d7a60e3df0",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Localization/Menu.stringtable.meta",
+			"XXH64": "a4f17cbd3db878c3",
+			"Method": "asset.create",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1891,6 +1971,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Combined2DUiGolden/Combined2DUi.scene",
+			"XXH64": "561804a66b56514f",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Combined2DUiGolden/Combined2DUi.scene.meta",
+			"XXH64": "874d4a5ff69f6cd6",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Components.scene",
 			"XXH64": "931ac1ec514db42a",
 			"Method": "scene.save",
@@ -2015,6 +2111,86 @@
 			"XXH64": "3797263b9f016f58",
 			"Method": "edit.batch",
 			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/Ui.scene",
+			"XXH64": "9fe8f36153df54f5",
+			"Method": "scene.save",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/Ui.scene.meta",
+			"XXH64": "83ed4174058c7e6a",
+			"Method": "edit.batch",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiFallback.scene",
+			"XXH64": "0de86793abd2ac09",
+			"Method": "scene.save",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiFallback.scene.meta",
+			"XXH64": "a49610ca5162db39",
+			"Method": "edit.batch",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiTextInput.scene",
+			"XXH64": "a899be7f4058603b",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiTextInput.scene.meta",
+			"XXH64": "fe697de3ab4ce378",
+			"Method": "edit.batch",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiWidgets.scene",
+			"XXH64": "1e94969b7743d8fb",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiWidgets.scene.meta",
+			"XXH64": "f32dbda30b27a991",
+			"Method": "edit.batch",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiWorld.scene",
+			"XXH64": "4b1b748f9cfa5bd5",
+			"Method": "scene.save",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Components/UiWorld.scene.meta",
+			"XXH64": "9bb0b957271d837a",
+			"Method": "edit.batch",
+			"RequestId": 8,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2399,6 +2575,102 @@
 			"XXH64": "9fb7d17d3de89a4d",
 			"Method": "edit.batch",
 			"RequestId": 18,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUi/Ui.scene",
+			"XXH64": "019a5a8bba0edc45",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUi/Ui.scene.meta",
+			"XXH64": "81ac38771509bdf4",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiScripts/UiArabic.scene",
+			"XXH64": "58000e34b24b34ea",
+			"Method": "scene.save",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiScripts/UiArabic.scene.meta",
+			"XXH64": "19c6296a33911631",
+			"Method": "edit.batch",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiScripts/UiCjk.scene",
+			"XXH64": "d8a5efcb769a2e3f",
+			"Method": "scene.save",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiScripts/UiCjk.scene.meta",
+			"XXH64": "6ddaab7a5301c4da",
+			"Method": "edit.batch",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiScripts/UiHebrew.scene",
+			"XXH64": "ccbaae0f7696187a",
+			"Method": "scene.save",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiScripts/UiHebrew.scene.meta",
+			"XXH64": "d185a81e1e98bc1a",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiWidgets/UiWidgets.scene",
+			"XXH64": "010dfad0fb9a6104",
+			"Method": "scene.save",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiWidgets/UiWidgets.scene.meta",
+			"XXH64": "8e7ca1d8c6d024a7",
+			"Method": "project.refreshAssets",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiWorld/UiWorld.scene",
+			"XXH64": "aa5b1fc7beac7299",
+			"Method": "scene.save",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiWorld/UiWorld.scene.meta",
+			"XXH64": "24a541dac72d8aca",
+			"Method": "project.refreshAssets",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2819,6 +3091,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scripts/Combined2DUiGolden/Stepper.luau",
+			"XXH64": "a24c67a91d3e3dea",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Combined2DUiGolden/Stepper.luau.meta",
+			"XXH64": "0a5e57d4bffe0c30",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scripts/Determinism/Pusher.luau",
 			"XXH64": "aeb99071bf8ba3c7",
 			"Method": "script.write",
@@ -3231,6 +3519,70 @@
 			"XXH64": "634e4ae20d6ef667",
 			"Method": "script.write",
 			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiTextInput/TextRecorder.luau",
+			"XXH64": "ada63f020663367c",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiTextInput/TextRecorder.luau.meta",
+			"XXH64": "cf58108a68c2ed61",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiWidgets/UiRecorder.luau",
+			"XXH64": "7c214077cd2e8fa7",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiWidgets/UiRecorder.luau.meta",
+			"XXH64": "5b35ccef051c82d3",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiWorld/WorldPointer.luau",
+			"XXH64": "f4bf2b00c114bcca",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiWorld/WorldPointer.luau.meta",
+			"XXH64": "6476eae85556699e",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiWorld/WorldRecorder.luau",
+			"XXH64": "be8b11ab59c4d185",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/UiWorld/WorldRecorder.luau.meta",
+			"XXH64": "fe7dcca0326b5372",
+			"Method": "script.write",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4115,6 +4467,70 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/Ui.test.luau",
+			"XXH64": "2067c12628979121",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Ui.test.luau.meta",
+			"XXH64": "2f1792cb2f7df9a1",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/UiTextInput.test.luau",
+			"XXH64": "f1457ffbdc300221",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/UiTextInput.test.luau.meta",
+			"XXH64": "2830e302f0149d32",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/UiWidgets.test.luau",
+			"XXH64": "e4c223c4fcc9ea57",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/UiWidgets.test.luau.meta",
+			"XXH64": "d6236f9c58a91a1c",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/UiWorld.test.luau",
+			"XXH64": "d96d54f351fc8e5f",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/UiWorld.test.luau.meta",
+			"XXH64": "9d7b43a40762ea94",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Audio/Audio.test.luau",
 			"XXH64": "47b5598329ece648",
 			"Method": "script.write",
@@ -4303,6 +4719,22 @@
 			"XXH64": "745fc538da54e85e",
 			"Method": "script.write",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Localization/Localization.test.luau",
+			"XXH64": "cc143b795c4da836",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Localization/Localization.test.luau.meta",
+			"XXH64": "49b80b53f39b9699",
+			"Method": "script.write",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4515,8 +4947,40 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Record/TextInput.test.luau",
+			"XXH64": "9418a247dfab3e3b",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Record/TextInput.test.luau.meta",
+			"XXH64": "4dc31bf9862f0fef",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Record/UiWorld.test.luau",
+			"XXH64": "32054e7a398afb02",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Record/UiWorld.test.luau.meta",
+			"XXH64": "79d64a35a6bf303a",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/Animation.replay",
-			"XXH64": "936afcd793a3e0e6",
+			"XXH64": "1e820df2c4c889d1",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -4525,6 +4989,22 @@
 		{
 			"Path": "Assets/Tests/Replays/Animation.replay.meta",
 			"XXH64": "48caaea1cb10b18e",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Combined2DUi.replay",
+			"XXH64": "0768bf62c3cd226b",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Combined2DUi.replay.meta",
+			"XXH64": "41071146e733b768",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -4627,6 +5107,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/TextInput.replay",
+			"XXH64": "8ce9bc4660bd550d",
+			"Method": "test.run",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/TextInput.replay.meta",
+			"XXH64": "149eaf4de881daaf",
+			"Method": "test.run",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/Tilemap.replay",
 			"XXH64": "2ecb7e57ab22d01d",
 			"Method": "input.record",
@@ -4639,6 +5135,38 @@
 			"XXH64": "e224ea1e9f2cb414",
 			"Method": "input.record",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Ui.replay",
+			"XXH64": "79bd3f7d5fb19afb",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Ui.replay.meta",
+			"XXH64": "21b6f63297011d54",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/UiWorld.replay",
+			"XXH64": "8a49c49d9ba3641a",
+			"Method": "test.run",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/UiWorld.replay.meta",
+			"XXH64": "cab47d7ba4a804d7",
+			"Method": "test.run",
+			"RequestId": 13,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4703,6 +5231,70 @@
 			"XXH64": "37b139a8880493d9",
 			"Method": "script.write",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiFallback/UiFallback.test.luau",
+			"XXH64": "31382f53a22b42f3",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiFallback/UiFallback.test.luau.meta",
+			"XXH64": "dc521cad1d29869f",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiTextInput/UiTextInput.test.luau",
+			"XXH64": "1ade5ded927ec717",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiTextInput/UiTextInput.test.luau.meta",
+			"XXH64": "d8e54a3cb4b5a0be",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiWidgets/UiWidgets.test.luau",
+			"XXH64": "c0d300b5bf326261",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiWidgets/UiWidgets.test.luau.meta",
+			"XXH64": "deb045fb5daf0fe4",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiWorld/UiWorld.test.luau",
+			"XXH64": "63627b4739e82203",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiWorld/UiWorld.test.luau.meta",
+			"XXH64": "53d060d8560a1797",
+			"Method": "script.write",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4847,6 +5439,38 @@
 			"XXH64": "2448ab42a808e70f",
 			"Method": "asset.import",
 			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenUi/Rgba.png",
+			"XXH64": "2a4bed42f9a31ba0",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenUi/Rgba.png.meta",
+			"XXH64": "6abeda129b20fb87",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenUi/Ui.spritesheet",
+			"XXH64": "ea997daef390e8d4",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenUi/Ui.spritesheet.meta",
+			"XXH64": "07a0bd198d8beafd",
+			"Method": "asset.create",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5075,8 +5699,56 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Ui/FallbackFonts/Inter-Regular.otf",
+			"XXH64": "38e610539efec6b5",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/FallbackFonts/Inter-Regular.otf.meta",
+			"XXH64": "5e830e01d5b94f73",
+			"Method": "asset.import",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/FallbackFonts/NotoSansHebrew-Regular.ttf",
+			"XXH64": "93e220f9d5cf71c7",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/FallbackFonts/NotoSansHebrew-Regular.ttf.meta",
+			"XXH64": "53e827aa5d4c64f1",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
+			"XXH64": "38e610539efec6b5",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Ui/Fonts/Inter-Regular.otf.meta",
+			"XXH64": "48d9dac09d1ad495",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "524d78c2ac9d44e8",
+			"XXH64": "31a3ebb397baf859",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

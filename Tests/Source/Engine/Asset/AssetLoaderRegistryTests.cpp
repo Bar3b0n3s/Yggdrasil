@@ -52,13 +52,17 @@ namespace Engine {
 				REQUIRE(version.has_value());
 				REQUIRE(loaders.Find(type) != nullptr);
 				// The loader refuses the versions around it as UnsupportedVersion and never refuses its own as such (an empty
-				// payload fails as its reader's Parse or Validation instead).
+				// payload fails as its reader's Parse or Validation instead), but for a previous version it still reads: M22's
+				// font loader reads format 1 beside its format 2 (FontData.h; Docs/Decisions/0033-m22-contract.md decision 44),
+				// which the caches still recook, since it is not the version GetCookedFormatVersion names.
 				const std::byte payload[1] = {};
 				for (const uint16_t other : { static_cast<uint16_t>(*version - 1), static_cast<uint16_t>(*version + 1) })
 				{
+					CAPTURE(other);
 					const Result<AssetRef<Asset>> refused = loaders.Load(WriteCookedArtifact(type, other, 1, payload), { .Registry = registry.get(), .Handle = AssetHandle(0x301) });
 					REQUIRE_FALSE(refused.has_value());
-					CHECK(refused.error().GetCode() == ErrorCode::UnsupportedVersion);
+					const bool readsPrevious = type == AssetType::Font && other == *version - 1;
+					CHECK((refused.error().GetCode() == ErrorCode::UnsupportedVersion) != readsPrevious);
 				}
 				const Result<AssetRef<Asset>> own = loaders.Load(WriteCookedArtifact(type, *version, 1, payload), { .Registry = registry.get(), .Handle = AssetHandle(0x301) });
 				CHECK((own.has_value() || own.error().GetCode() != ErrorCode::UnsupportedVersion));

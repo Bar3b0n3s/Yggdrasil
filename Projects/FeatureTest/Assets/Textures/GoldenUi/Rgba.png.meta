@@ -4,10 +4,11 @@
 	"Handle": "6c73c151722797ea",
 	"Type": "Texture",
 	"Importer": "Texture",
-	"ImporterVersion": 1,
+	"ImporterVersion": 2,
 	"Settings": {
 		"Usage": "Color",
-		"GenerateMips": false
+		"GenerateMips": false,
+		"Compression": "None"
 	},
 	"SubAssets": []
 }
