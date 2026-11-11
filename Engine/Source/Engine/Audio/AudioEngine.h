@@ -79,11 +79,11 @@
 //     as ma_sound_init_copy does); none decodes on the fly. ma_resource_manager_register_encoded_data is not used:
 //     registered encoded data stays encoded and every voice would run its own decoder over it.
 //   - Encoded with Stream: an AudioVfs memory file under the resource name, played with MA_SOUND_FLAG_STREAM, once the bytes
-//     pass CheckStreamedAudio's container checks (Audio/AudioDecoder.h: an Ogg Opus file is one logical stream, as the
-//     import and the decode at registration require; M23's milestone review). The resource
-//     manager decodes streams to f32 at the clip's own rate and channels (decodedFormat ma_format_f32, decodedSampleRate
-//     and decodedChannels 0), the format DecodeEncodedAudio produces, so streamed and decoded playback of one clip are
-//     sample-identical.
+//     pass CheckStreamedAudio's container checks (Audio/AudioDecoder.h: an Ogg file's pages, an Ogg Vorbis file's headers
+//     and an Ogg Opus file's single logical stream, as the import and the decode at registration require; M23's milestone
+//     review). The resource manager decodes streams to f32 at the clip's own rate and channels (decodedFormat
+//     ma_format_f32, decodedSampleRate and decodedChannels 0), the format DecodeEncodedAudio produces, so streamed and
+//     decoded playback of one clip are sample-identical.
 // The engine keeps a registration's data (the shared Bytes, or the PCM it decoded) until the registration is removed and
 // its last voice has ended.
 //

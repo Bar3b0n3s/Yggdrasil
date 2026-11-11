@@ -16,6 +16,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <optional>
 #include <string>
@@ -1212,6 +1214,58 @@ namespace Engine {
 			const AudioClipHandle clip = RegisterEncodedClip(*engine, "0000000000000002", single, true);
 			PlayTestVoice(*engine, { .Clip = clip });
 			CHECK(PullLevels(*engine, 9600).Peak > 0.0f);
+		}
+
+		// M23's milestone review (Docs/Decisions/0034-m23-contract.md, the lead's item 19): a streamed Ogg Vorbis clip passes
+		// the header checks the import and the decode at registration make (CheckStreamedAudio), so a cooked clip whose comment
+		// or setup header stb_vorbis would overflow or over-allocate on (the damaged headers of the AudioDecoder case "Ogg
+		// Vorbis headers stb_vorbis would overflow or over-allocate on are Parse errors", here with their pages' CRCs
+		// rewritten) is refused at registration with Parse, before a voice opens the stream, and nothing is registered; the
+		// undamaged file still streams.
+		TEST_CASE("AudioEngine: a streamed Ogg Vorbis clip whose headers stb_vorbis cannot read safely is refused at registration")
+		{
+			// Tone.ogg's page 1 holds the 66-byte comment header (one comment, its count at byte 40) and then the setup header,
+			// whose codebook 0 has the sync pattern 42 43 56, one dimension and 64 entries (least significant byte first).
+			const Buffer original = ReadFixture("Assets/Audio/Tone.ogg");
+			const std::vector<Test::OggTestPage> pages = Test::SplitOggPages(original);
+			REQUIRE(pages.size() > 2);
+			const Buffer& headers = pages[1].Body;
+			REQUIRE(headers.size() > 66 + 16);
+			REQUIRE(std::memcmp(headers.data(), "\x03vorbis", 7) == 0);
+			REQUIRE(std::to_integer<int>(headers[40]) == 1);
+			REQUIRE(std::memcmp(headers.data() + 66, "\x05vorbis", 7) == 0);
+			REQUIRE(std::memcmp(headers.data() + 66 + 8, "\x42\x43\x56\x01\x00\x40\x00\x00", 8) == 0);
+			const auto damage = [&pages](size_t offset, std::initializer_list<uint8_t> values)
+			{
+				std::vector<Test::OggTestPage> damaged = pages;
+				for (const uint8_t value : values)
+					damaged[1].Body[offset++] = std::byte{ value };
+				return Test::JoinOggPages(damaged);
+			};
+			// A comment count whose list stb_vorbis sizes as 8 x 0x20000001 bytes, in int: a heap overflow.
+			const Buffer comments = damage(40, { 0x01, 0x00, 0x00, 0x20 });
+			// Codebook 0 of 65535 dimensions and 2^20 entries, beyond the values whose tables stb_vorbis sizes in int.
+			const Buffer codebook = damage(66 + 11, { 0xFF, 0xFF, 0x00, 0x00, 0x10 });
+
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const std::pair<std::string_view, const Buffer*> variants[] = { { "comment header", &comments }, { "setup header", &codebook } };
+			for (const auto& [what, bytes] : variants)
+			{
+				CAPTURE(std::string(what));
+				const Result<EncodedAudioInfo> probed = ProbeEncodedAudio(*bytes);
+				REQUIRE_FALSE(probed.has_value());
+				CHECK(probed.error().GetCode() == ErrorCode::Parse);
+				const Result<AudioClipHandle> clip = engine->RegisterClip(
+					{ .Name = "0000000000000001", .Format = AudioClipFormat::Encoded, .Bytes = CreateRef<const Buffer>(*bytes), .Stream = true });
+				REQUIRE_FALSE(clip.has_value());
+				CHECK(clip.error().GetCode() == ErrorCode::Parse);
+				CHECK(engine->GetStats().RegisteredClips == 0);
+			}
+			// The undamaged file streams and plays.
+			const AudioClipHandle clip = RegisterEncodedClip(*engine, "0000000000000002", Test::JoinOggPages(pages), true);
+			PlayTestVoice(*engine, { .Clip = clip });
+			CHECK(PullLevels(*engine, 4800).Peak > 0.1f);
 		}
 
 		TEST_CASE("AudioEngine: the voices report their settings, owner and start order")

@@ -76,13 +76,15 @@ namespace Engine {
 	[[nodiscard]] Result<DecodedAudio> DecodeEncodedAudio(std::span<const std::byte> bytes);
 
 	// The container checks of ProbeEncodedAudio that need no decoding, for a clip that streams (AudioEngine.h "Clips":
-	// miniaudio's resource manager opens a stream's bytes only when a voice plays them, through the same decoders): for
-	// Ogg Opus bytes, the one-logical-stream and channel-mapping-family checks, since opusfile reads chained and
-	// multiplexed files and miniaudio's decoder sizes its buffers for the first link's channel count while the libopus
-	// backend writes each link's own (M23's milestone review, Docs/Decisions/0034-m23-contract.md). Other bytes pass: their
-	// decoders check them when a voice opens the stream. Pure and cheap (it reads the pages, decodes nothing). Errors: as
-	// ProbeEncodedAudio's for an Ogg Opus file that is not one logical stream (Parse) or uses another channel mapping family
-	// (Validation).
+	// miniaudio's resource manager opens a stream's bytes only when a voice plays them, through the same decoders), with the
+	// format detected as the probe detects it (M23's milestone review, Docs/Decisions/0034-m23-contract.md): for Ogg Vorbis
+	// and Ogg Opus bytes, the pages (a truncated file is refused), then for Vorbis the header checks that keep stb_vorbis
+	// from overflowing or over-allocating on a comment or setup header, and for Opus the one-logical-stream and
+	// channel-mapping-family checks, since opusfile reads chained and multiplexed files and miniaudio's decoder sizes its
+	// buffers for the first link's channel count while the libopus backend writes each link's own. WAV, FLAC and MP3 bytes,
+	// and bytes of no supported format, pass: their decoders check them when a voice opens the stream. Pure and cheap (it
+	// reads the pages and headers, decodes nothing). Errors: as ProbeEncodedAudio's for those Ogg checks (Parse; Validation
+	// for an Ogg Opus channel mapping family other than 0 or 1).
 	[[nodiscard]] Status CheckStreamedAudio(std::span<const std::byte> bytes);
 
 	// "Wav", "Flac", "Mp3", "Vorbis", "Opus"; "Unknown" outside the enum (asserted).

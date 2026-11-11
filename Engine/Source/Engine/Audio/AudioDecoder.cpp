@@ -579,15 +579,22 @@ namespace Engine {
 			return {};
 		}
 
+		// The container checks of an Ogg file of `format` before any decoder reads it, pages and headers only: its pages
+		// (ReadOggPages), then CheckVorbisHeaders for Vorbis or CheckOpusStream for Opus; nothing for the other formats. Decode
+		// and CheckStreamedAudio run them alike.
+		static Status CheckOggContainer(std::span<const std::byte> bytes, EncodedAudioFormat format)
+		{
+			if (format != EncodedAudioFormat::Vorbis && format != EncodedAudioFormat::Opus)
+				return {};
+			ENGINE_TRY_ASSIGN(const std::vector<OggPage> pages, ReadOggPages(bytes));
+			return format == EncodedAudioFormat::Vorbis ? CheckVorbisHeaders(pages) : CheckOpusStream(pages);
+		}
+
 		// The checks of ProbeEncodedAudio and DecodeEncodedAudio; keeps the samples when `samples` is set.
 		static Result<EncodedAudioInfo> Decode(std::span<const std::byte> bytes, std::vector<float>* samples)
 		{
 			ENGINE_TRY_ASSIGN(const EncodedAudioFormat format, DetectFormat(bytes));
-			if (format == EncodedAudioFormat::Vorbis || format == EncodedAudioFormat::Opus)
-			{
-				ENGINE_TRY_ASSIGN(const std::vector<OggPage> pages, ReadOggPages(bytes));
-				ENGINE_TRY(format == EncodedAudioFormat::Vorbis ? CheckVorbisHeaders(pages) : CheckOpusStream(pages));
-			}
+			ENGINE_TRY(CheckOggContainer(bytes, format));
 
 			// Declared before the decoder, which keeps its vtable's address until it is uninitialized.
 			MiniaudioOpusBackend opus;
@@ -684,10 +691,11 @@ namespace Engine {
 
 	Status CheckStreamedAudio(std::span<const std::byte> bytes)
 	{
-		if (!Utils::HasPrefix(bytes, 0, "OggS") || !Utils::HasPrefix(Utils::GetFirstOggPacket(bytes), 0, "OpusHead"))
+		// Bytes Decode would refuse as no supported format pass here: their stream fails when a voice opens it.
+		const Result<EncodedAudioFormat> format = Utils::DetectFormat(bytes);
+		if (!format.has_value())
 			return {};
-		ENGINE_TRY_ASSIGN(const std::vector<OggPage> pages, Utils::ReadOggPages(bytes));
-		return Utils::CheckOpusStream(pages);
+		return Utils::CheckOggContainer(bytes, *format);
 	}
 
 	std::string_view EncodedAudioFormatToString(EncodedAudioFormat format)
