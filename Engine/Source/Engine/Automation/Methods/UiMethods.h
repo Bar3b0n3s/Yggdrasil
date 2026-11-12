@@ -64,7 +64,18 @@ namespace Engine {
 		// WorldHeight)); false for a Screen canvas's, in scene pixels. Stream T: a UiTextInput's element reports its input's
 		// Text as Text and "TextInput" as Widget, and the outline's short form UiTextInput("<text>").
 		bool WorldCanvas = false;
+		// M25's friction F02 (Docs/Decisions/0036-m25-tetris-pixel-art.md; registered after WorldCanvas): the box of the text
+		// the element draws (its UiText's; a text input's Text in its TextElement's), where the Ui pass lays it out in its
+		// rectangle (PlanUiPass): from its lines' leftmost pen start to their rightmost advance end, and from the block's top to
+		// its bottom, in the pixels of Rect; all 0 for an element that draws no text (no UiText, an empty one, or a hidden
+		// element). TextOverflows: that box reaches beyond Rect by more than UiTextOverflowTolerance on a side.
+		UiPixelRect TextBounds{};
+		bool TextOverflows = false;
 	};
+
+	// M25's F02: how far a text's box may reach beyond its rectangle before ui.tree reports it as overflowing, in pixels: the
+	// rounding of the alignment's arithmetic, never a visible overhang.
+	inline constexpr float UiTextOverflowTolerance = 0.01f;
 
 	// ui.tree {canvas?, depth?, format?, width?, height?, target?}: the UI of the target scene laid out in scene pixels: every
 	// canvas, or the one `canvas` names (an EntityRef to an entity with a UiCanvas), with its elements at most `depth` levels
@@ -77,8 +88,9 @@ namespace Engine {
 	// UiCanvas(sort <n>, scale <s>)" and per element a line with box-drawing indentation, its name, its first 8 hex digits, its
 	// short component forms ("UiImage(<sheet path>#<frame>)", "UiText(\"<text>\")", "UiLayout(<kind> <direction>)"; C22.2's
 	// widgets "UiButton", "UiToggle(on|off)", "UiSlider(<value as read>)" and "UiScrollView(<x>,<y>)", the scroll position as
-	// read), its rectangle "(x,y wxh)", and "clipped" or "hidden" when it is, then (C22.2) "disabled" for a widget that is not
-	// interactable and "focused", "hovered" and "pressed" by the play session's state.
+	// read), its rectangle "(x,y wxh)", and "clipped" or "hidden" when it is, then (M25's F02) "overflows" when its text's box
+	// reaches beyond its rectangle (UiTreeEntry::TextOverflows), then (C22.2) "disabled" for a widget that is not interactable and
+	// "focused", "hovered" and "pressed" by the play session's state.
 	struct UiTreeParams
 	{
 		std::string Canvas{};

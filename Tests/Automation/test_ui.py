@@ -72,6 +72,40 @@ class UiTreeTests(AutomationTestCase):
             client.call("ui.tree", {"canvas": "/Hud/Panel"})
         self.assert_engine_error(not_canvas.exception, engine_client.INVALID_PARAMS)
 
+    def test_ui_tree_reports_each_text_box_and_whether_it_overflows(self) -> None:
+        # M25's friction F02 (Docs/Decisions/0036-m25-tetris-pixel-art.md): each text's laid-out box in scene
+        # pixels, so an agent checks that every text lies inside its rectangle; the outline marks a text that
+        # overflows.
+        client, _ = self.open_editor_with_scene()
+        fits_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [10, 10], "Size": [100, 20]}
+        wide_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [10, 40], "Size": [20, 20]}
+        client.call("edit.batch", {"label": "Texts", "ops": [
+            {"method": "entity.create", "params": {"name": "Hud", "components": {"UiCanvas": {}}}},
+            {"method": "entity.create", "params": {"name": "Fits", "parent": {"$ref": "0.entity.id"}, "components": {
+                "UiRect": fits_rect, "UiText": {"Text": "Score", "Size": 10, "Alignment": "Right", "Wrap": False}}}},
+            {"method": "entity.create", "params": {"name": "Wide", "parent": {"$ref": "0.entity.id"}, "components": {
+                "UiRect": wide_rect, "UiText": {"Text": "A label far wider than its box", "Size": 10, "Wrap": False}}}},
+        ]})
+        listed = client.call("ui.tree", {"format": "Json", "width": 200, "height": 100})
+        elements = {element["name"]: element for element in listed["elements"]}
+        fits = elements["Fits"]
+        bounds = fits["textBounds"]
+        self.assertFalse(fits["textOverflows"])
+        self.assertGreater(bounds["width"], 0)
+        self.assertAlmostEqual(bounds["x"] + bounds["width"], 110, places=3)
+        self.assertGreaterEqual(bounds["x"], 10)
+        self.assertEqual(bounds["y"], 10)
+        wide = elements["Wide"]
+        self.assertTrue(wide["textOverflows"])
+        self.assertEqual(wide["textBounds"]["x"], 10)
+        self.assertGreater(wide["textBounds"]["width"], 20)
+        self.assertEqual(elements["Hud"]["textBounds"], {"x": 0, "y": 0, "width": 0, "height": 0})
+        outline = client.call("ui.tree", {"width": 200, "height": 100})["text"]
+        wide_line = next(line for line in outline.splitlines() if "Wide" in line)
+        self.assertTrue(wide_line.endswith("overflows"), wide_line)
+        fits_line = next(line for line in outline.splitlines() if "Fits" in line)
+        self.assertNotIn("overflows", fits_line)
+
     def test_ui_tree_works_in_the_runtime(self) -> None:
         if not self.require_gpu():
             return

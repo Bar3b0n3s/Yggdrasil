@@ -3,12 +3,16 @@
 #include "Engine/Automation/Methods/UiMethods.h"
 
 #include "EditorCore/EditorContext.h"
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/FontData.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Support/AutomationTestClient.h"
 
 #include <nlohmann/json.hpp>
 
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -390,6 +394,85 @@ namespace Engine {
 			CHECK(elements[1]["worldCanvas"] == Json(true));
 			CHECK(elements[1]["rect"] == Json{ { "x", 10 }, { "y", 20 }, { "width", 30 }, { "height", 40 } });
 			CHECK(elements[1]["visible"] == Json(true));
+		}
+
+		// M25's friction F02 (Docs/Decisions/0036-m25-tetris-pixel-art.md): each text's box where the Ui pass lays it out in
+		// its rectangle, in scene pixels, and whether it reaches beyond the rectangle; the outline marks a text that does.
+		TEST_CASE("UiMethods: ui.tree reports each text's laid-out box and whether it overflows its rectangle")
+		{
+			// The Default font measures the texts: the fixture mounts the engine's resources.
+			Test::AutomationFixture setup("UiTreeTextBounds", true, std::nullopt, true);
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[
+				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{"ScaleFactor":2}}}},
+				{"method":"entity.create","params":{"name":"Fits","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[5,5],"Size":[50,10]},
+					"UiText":{"Text":"Score","Size":5,"Alignment":"Right","VerticalAlignment":"Middle","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"Wide","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[5,20],"Size":[10,10]},
+					"UiText":{"Text":"A label far wider than its box","Size":5,"Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"Tall","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[5,35],"Size":[50,4]},
+					"UiText":{"Text":"Score","Size":8,"VerticalAlignment":"Bottom"}}}},
+				{"method":"entity.create","params":{"name":"Panel","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[60,5],"Size":[20,20]},"UiImage":{}}}},
+				{"method":"entity.create","params":{"name":"Hidden","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[300,0],"Size":[20,10]},"UiText":{"Text":"Off"}}}}]})"))
+					.has_value());
+			// The Default font's line box: (Ascent - Descent) em at the text's size in scene pixels (the canvas scales by 2).
+			const Result<AssetRef<Asset>> loaded = setup.GetEditor().GetAssets().Load(BuiltinAssetHandles::DefaultFont);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<FontData> font = AssetCast<FontData>(*loaded);
+			REQUIRE(font != nullptr);
+			const auto lineHeight = [&font](float size)
+			{
+				return (font->Ascent - font->Descent) * size;
+			};
+
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			std::map<std::string, Json> elements;
+			for (const Json& element : (*listed)["elements"])
+				elements[JsonReader(element["name"]).ReadString().value_or(std::string())] = element;
+			const auto box = [&elements](const std::string& name, std::string_view member)
+			{
+				return JsonReader(elements[name]["textBounds"][std::string(member)]).ReadFloat().value_or(-1.0f);
+			};
+
+			// Right-aligned and centred in (10,10 100x20) at 10 pixels per em: its right edge on the rectangle's, its line box
+			// centred, inside.
+			CHECK(elements["Fits"]["textOverflows"] == Json(false));
+			CHECK(box("Fits", "x") + box("Fits", "width") == doctest::Approx(110.0f).epsilon(1e-5));
+			CHECK(box("Fits", "x") > 10.0f);
+			CHECK(box("Fits", "height") == doctest::Approx(lineHeight(10.0f)));
+			CHECK(box("Fits", "y") == doctest::Approx(10.0f + (20.0f - lineHeight(10.0f)) / 2.0f));
+			// Left-aligned without wrapping in (10,40 20x20): wider than its rectangle.
+			CHECK(elements["Wide"]["textOverflows"] == Json(true));
+			CHECK(box("Wide", "x") == 10.0f);
+			CHECK(box("Wide", "y") == 40.0f);
+			CHECK(box("Wide", "width") > 20.0f);
+			// Bottom-aligned in (10,70 100x8) at 16 pixels per em: the line box rises above the rectangle's top.
+			CHECK(elements["Tall"]["textOverflows"] == Json(true));
+			CHECK(box("Tall", "y") + box("Tall", "height") == doctest::Approx(78.0f));
+			CHECK(box("Tall", "y") < 70.0f);
+			// An element without text, a canvas and a hidden text report no box.
+			const Json none{ { "x", 0 }, { "y", 0 }, { "width", 0 }, { "height", 0 } };
+			const std::vector<std::string> withoutText = { "Hud", "Panel", "Hidden" };
+			for (const std::string& name : withoutText)
+			{
+				CAPTURE(name);
+				CHECK(elements[name]["textBounds"] == none);
+				CHECK(elements[name]["textOverflows"] == Json(false));
+			}
+
+			// The outline marks the two that overflow, after their rectangles.
+			Result<Json> text = setup.Call("ui.tree", Json{ { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			for (const std::string& line : SplitUiOutline(JsonReader((*text)["text"]).ReadString().value_or(std::string())))
+			{
+				CAPTURE(line);
+				const bool overflowing = line.contains("Wide  ") || line.contains("Tall  ");
+				CHECK(line.ends_with("  overflows") == overflowing);
+			}
 		}
 	}
 

@@ -2846,7 +2846,7 @@ Example: Add a Play button to the canvas.
 
 ### ui.tree
 
-Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.
+Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.
 
 - Flags: tool `ui_tree`, runtime, batch, scene target
 - Timeout: 60 s
@@ -2855,7 +2855,7 @@ Shows the scene's UI laid out in scene pixels: every canvas and element with its
 |---|---|---|---|---|
 | `canvas` | `String` |  | `""` | An entity with a UiCanvas whose UI alone is listed; omitted: every canvas. |
 | `depth` | `UInt32` |  | `0` | The most levels listed below each canvas; 0: unlimited. |
-| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline (widgets as UiButton, UiToggle(on\|off), UiSlider(\<value>), UiScrollView(\<x>,\<y>) and UiTextInput("\<text>"), marked disabled, focused, hovered or pressed); Json: a flat list of entries. |
+| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline (widgets as UiButton, UiToggle(on\|off), UiSlider(\<value>), UiScrollView(\<x>,\<y>) and UiTextInput("\<text>"), a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries. |
 | `width` | `UInt32` |  | `0` | The scene resolution's width to lay out at, with height; omitted: the play session's own, or for the edit scene its game view's at the project's window size (a PixelPerfectCamera's reference resolution under one). |
 | `height` | `UInt32` |  | `0` | The scene resolution's height to lay out at, with width. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to read; omitted: the play scene while playing, else the edit scene. |

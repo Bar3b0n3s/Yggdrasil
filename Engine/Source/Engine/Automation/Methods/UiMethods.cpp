@@ -2,12 +2,17 @@
 #include "Engine/Automation/Methods/UiMethods.h"
 
 #include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/FontData.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/ComponentInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Renderer/TextMeasurement.h"
+#include "Engine/Renderer/UiDrawList.h"
+#include "Engine/Renderer/UiPass.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiLayoutComponent.h"
@@ -19,6 +24,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/UiExtraction.h"
 #include "Engine/Scene/UiInteraction.h"
 #include "Engine/Scene/UiLayout.h"
 #include "Engine/Scene/UiSystem.h"
@@ -28,7 +34,9 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <format>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -40,7 +48,8 @@
 // The ui domain (UiMethods.h; Docs/Decisions/0033-m22-contract.md decisions 8 and 31). ui.tree lays the target scene out with
 // ComputeUiLayout, or reads the play session's current layout (UiSystem::GetLayout), and reports it in the table's draw order:
 // each canvas, then its elements (canonical order, a parent before its children), with each element's widget and, in the play
-// scene, the session's interaction state (UiSystem::GetInteraction).
+// scene, the session's interaction state (UiSystem::GetInteraction). M25's friction F02: each element's text box, measured from
+// the table's draw items (AppendUiDrawItems) as the Ui pass lays them out (MeasureUiTreeText).
 
 namespace Engine {
 
@@ -214,6 +223,161 @@ namespace Engine {
 				FormatUiOutlineNumber(rect.Height));
 		}
 
+		// M25's F02 (Docs/Decisions/0036-m25-tetris-pixel-art.md): a text's box in its element's pixels, and whether it reaches
+		// beyond the element's rectangle by more than UiTextOverflowTolerance.
+		struct UiTreeTextBox
+		{
+			UiPixelRect Bounds{};
+			bool Overflows = false;
+		};
+
+		// The horizontal alignment a text draw item lays its lines out with (the Ui pass's rule: Start left, Center centred, End
+		// right).
+		static RenderTextAlignment ToUiTreeTextAlignment(UiDrawAlignment alignment)
+		{
+			switch (alignment)
+			{
+				case UiDrawAlignment::Start:  return RenderTextAlignment::Left;
+				case UiDrawAlignment::Center: return RenderTextAlignment::Center;
+				case UiDrawAlignment::End:    return RenderTextAlignment::Right;
+			}
+			return RenderTextAlignment::Left;
+		}
+
+		// The share of its rectangle's height a text block leaves above it (the Ui pass's rule: Start none, Center half, End all).
+		static float GetUiTreeVerticalShare(UiDrawAlignment alignment)
+		{
+			switch (alignment)
+			{
+				case UiDrawAlignment::Start:  return 0.0f;
+				case UiDrawAlignment::Center: return 0.5f;
+				case UiDrawAlignment::End:    return 1.0f;
+			}
+			return 0.0f;
+		}
+
+		// The font `handle` names when it loads as a font; null otherwise.
+		static AssetRef<FontData> LoadUiTreeFont(AssetManager& assets, AssetHandle handle)
+		{
+			const Result<AssetRef<Asset>> loaded = assets.Load(handle);
+			return loaded.has_value() ? AssetCast<FontData>(*loaded) : AssetRef<FontData>{};
+		}
+
+		// The fonts a text of the font `handle` lays out with, as the Ui pass resolves its chain (BuildUiFontChain,
+		// Renderer/UiPass.h), without reporting anything, since ui.tree only reads: the font itself (null, missing or failed:
+		// the Default font, which the font placeholder is), then its fallbacks depth first in their order, each once, at most
+		// MaxUiFontChainLength fonts, a fallback that does not load left out. Empty when not even the Default font loads.
+		static std::vector<AssetRef<FontData>> ResolveUiTreeFontChain(AssetManager& assets, AssetHandle handle)
+		{
+			std::vector<AssetRef<FontData>> fonts;
+			AssetRef<FontData> own = handle.IsValid() ? LoadUiTreeFont(assets, handle) : AssetRef<FontData>{};
+			AssetHandle ownHandle = handle;
+			if (own == nullptr)
+			{
+				own = LoadUiTreeFont(assets, BuiltinAssetHandles::DefaultFont);
+				ownHandle = BuiltinAssetHandles::DefaultFont;
+			}
+			if (own == nullptr)
+				return fonts;
+			std::vector<AssetHandle> handles = { ownHandle };
+			fonts.push_back(own);
+			// `pending` holds the fonts whose fallbacks are being walked, innermost last, each with the index of its next one.
+			std::vector<std::pair<AssetRef<FontData>, size_t>> pending = { { own, 0 } };
+			while (!pending.empty() && fonts.size() < MaxUiFontChainLength)
+			{
+				auto& [current, next] = pending.back();
+				if (next >= current->Fallbacks.size())
+				{
+					pending.pop_back();
+					continue;
+				}
+				const AssetHandle fallback = current->Fallbacks[next++];
+				if (!fallback.IsValid() || std::ranges::find(handles, fallback) != handles.end())
+					continue;
+				AssetRef<FontData> fallbackFont = LoadUiTreeFont(assets, fallback);
+				if (fallbackFont == nullptr)
+					continue;
+				handles.push_back(fallback);
+				fonts.push_back(fallbackFont);
+				pending.emplace_back(std::move(fallbackFont), 0);
+			}
+			return fonts;
+		}
+
+		// The box of the text draw item `item` where the Ui pass lays it out (PlanUiPass, Renderer/UiPass.h): measured with its
+		// font's chain (ResolveUiTreeFontChain) at its FontSize and LineSpacing, wrapped at and aligned within its rectangle's width,
+		// the block aligned vertically in its rectangle; a focused text input's block as tall as a line at least and moved the
+		// least that keeps its caret inside the rectangle when it does not wrap (C22.3's caret rule). The box runs from the
+		// lines' leftmost pen start to their rightmost advance end, and from the block's top to its bottom. nullopt for an item
+		// that lays out no line (an empty text, or no font).
+		static std::optional<UiTreeTextBox> MeasureUiTreeText(const UiDrawItem& item, AssetManager& assets)
+		{
+			if (item.Text.empty() || !(item.FontSize > 0.0f) || !(item.LineSpacing > 0.0f) || !std::isfinite(item.FontSize) || !std::isfinite(item.LineSpacing))
+				return std::nullopt;
+			const std::vector<AssetRef<FontData>> chain = ResolveUiTreeFontChain(assets, item.Font);
+			if (chain.empty())
+				return std::nullopt;
+			std::vector<const FontData*> fonts;
+			fonts.reserve(chain.size());
+			for (const AssetRef<FontData>& font : chain)
+				fonts.push_back(font.get());
+			const float width = item.Max.x - item.Min.x;
+			const float height = item.Max.y - item.Min.y;
+			const TextMeasureOptions options{ .Size = item.FontSize,
+				.LineSpacing = item.LineSpacing,
+				.Wrap = item.Wrap ? TextWrap::Word : TextWrap::None,
+				.MaxWidth = width,
+				.Alignment = ToUiTreeTextAlignment(item.HorizontalAlignment) };
+			const TextMeasurement measured = MeasureText(fonts, item.Text, options);
+			if (measured.Lines.empty())
+				return std::nullopt;
+			const float blockHeight = item.HasCaret ? std::max(measured.Size.y, measured.LineHeight) : measured.Size.y;
+			glm::vec2 topLeft(item.Min.x, item.Min.y + (height - blockHeight) * GetUiTreeVerticalShare(item.VerticalAlignment));
+			if (item.HasCaret && !item.Wrap)
+			{
+				const TextCaret caret = FindTextCaret(measured, item.CaretByte);
+				const float caretWidth = std::max(1.0f, std::floor(item.FontSize / 16.0f + 0.5f));
+				const float caretLeft = topLeft.x + caret.Top.x;
+				if (caretWidth > width || caretLeft < item.Min.x)
+					topLeft.x += item.Min.x - caretLeft;
+				else if (caretLeft + caretWidth > item.Max.x)
+					topLeft.x += item.Max.x - (caretLeft + caretWidth);
+			}
+			float left = measured.Lines.front().Left;
+			float right = measured.Lines.front().Left + measured.Lines.front().Width;
+			for (const TextMeasuredLine& line : measured.Lines)
+			{
+				left = std::min(left, line.Left);
+				right = std::max(right, line.Left + line.Width);
+			}
+			const glm::vec2 min(topLeft.x + left, topLeft.y);
+			const glm::vec2 max(topLeft.x + right, topLeft.y + measured.Size.y);
+			const bool overflows = min.x < item.Min.x - UiTextOverflowTolerance || min.y < item.Min.y - UiTextOverflowTolerance
+				|| max.x > item.Max.x + UiTextOverflowTolerance || max.y > item.Max.y + UiTextOverflowTolerance;
+			return UiTreeTextBox{ .Bounds = MakeUiPixelRect(min, max), .Overflows = overflows };
+		}
+
+		// The text boxes of the elements of `table` (a layout of `scene`) that draw text, by entity: the draw items
+		// AppendUiDrawItems makes of the layout, with the play session's `interaction` (null for the edit scene), which places a
+		// focused text input's caret, each text item measured by MeasureUiTreeText; none without an asset manager.
+		static std::map<UUID, UiTreeTextBox> MeasureUiTreeTexts(const Scene& scene, const UiLayoutTable& table, const UiInteractionState* interaction,
+			AssetManager* assets)
+		{
+			std::map<UUID, UiTreeTextBox> boxes;
+			if (assets == nullptr)
+				return boxes;
+			UiDrawList list;
+			AppendUiDrawItems(scene, table, list, interaction);
+			for (const UiDrawItem& item : list.Items)
+			{
+				if (item.Kind != UiDrawKind::Text)
+					continue;
+				if (const std::optional<UiTreeTextBox> box = MeasureUiTreeText(item, *assets))
+					boxes.insert_or_assign(item.Entity, *box);
+			}
+			return boxes;
+		}
+
 		// The scene resolution ui.tree lays out at, and the layout: `requested` when given (both components non-zero), else
 		// the play session's current layout for its own scene (laid out afresh at its view's scene resolution before the
 		// session's first layout, which Activate makes), else the scene resolution of the game view at the project's window size
@@ -263,7 +427,18 @@ namespace Engine {
 			uint32_t DepthLimit = 0; // 0: unlimited
 			UiTreeResult* Result = nullptr;
 			bool Text = false;
+			// M25's F02: the box of each element that draws text, by its entity (MeasureUiTreeTexts).
+			const std::map<UUID, UiTreeTextBox>* TextBoxes = nullptr;
 		};
+
+		// The text box of the element `element` (M25's F02), or null when it draws no text.
+		static const UiTreeTextBox* FindUiTreeTextBox(const UiTreeWriter& writer, UUID element)
+		{
+			if (writer.TextBoxes == nullptr)
+				return nullptr;
+			const auto found = writer.TextBoxes->find(element);
+			return found != writer.TextBoxes->end() ? &found->second : nullptr;
+		}
 
 		// An element's interaction (UiTreeEntry's members, decision 31).
 		struct UiTreeInteraction
@@ -365,6 +540,7 @@ namespace Engine {
 				const ConstEntity entity = scene.FindEntityByID(node.Entity);
 				const UiPixelRect rect = MakeUiPixelRect(node.Min, node.Max);
 				const UiTreeInteraction interaction = ReadUiTreeInteraction(writer, node.Entity);
+				const UiTreeTextBox* textBox = FindUiTreeTextBox(writer, node.Entity);
 				if (writer.Text)
 				{
 					const uint32_t depth = std::max<uint32_t>(node.Depth, 1);
@@ -383,6 +559,8 @@ namespace Engine {
 						line += "  clipped";
 					if (!node.Visible)
 						line += "  hidden";
+					if (textBox != nullptr && textBox->Overflows)
+						line += "  overflows";
 					if (const std::string markers = FormatUiOutlineInteraction(interaction); !markers.empty())
 						line += std::format("  {}", markers);
 					result.Text += line + "\n";
@@ -414,6 +592,11 @@ namespace Engine {
 				entry.Pressed = interaction.Pressed;
 				entry.Widget = std::string(UiWidgetTypeToString(interaction.Widget));
 				entry.WorldCanvas = world;
+				if (textBox != nullptr)
+				{
+					entry.TextBounds = textBox->Bounds;
+					entry.TextOverflows = textBox->Overflows;
+				}
 				result.Elements.push_back(std::move(entry));
 			}
 		}
@@ -457,12 +640,14 @@ namespace Engine {
 			const PlaySession* session = context.GetPlaySession();
 			const bool played = session != nullptr && &session->GetScene() == scene;
 			const UiInteractionState* interaction = played ? &session->GetUi().GetInteraction() : nullptr;
+			const std::map<UUID, Utils::UiTreeTextBox> textBoxes = Utils::MeasureUiTreeTexts(*scene, table, interaction, context.GetAssets());
 			const Utils::UiTreeWriter writer{ .Target = scene,
 				.Assets = context.GetAssets(),
 				.Interaction = interaction,
 				.DepthLimit = params.Depth,
 				.Result = &result,
-				.Text = params.Format == SceneTreeFormat::Text };
+				.Text = params.Format == SceneTreeFormat::Text,
+				.TextBoxes = &textBoxes };
 			size_t elementCount = 0;
 			for (const UiCanvasLayout& canvas : table.Canvases)
 			{
@@ -514,14 +699,20 @@ namespace Engine {
 			.Field("hovered", &UiTreeEntry::Hovered, "Whether the element is the widget under the pointer in the play session; false in the edit scene.")
 			.Field("pressed", &UiTreeEntry::Pressed, "Whether the held pointer presses the element in the play session; false in the edit scene.")
 			.Field("widget", &UiTreeEntry::Widget, "The element's widget: Button, Toggle, Slider, ScrollView or TextInput; empty for none.")
-			.Field("worldCanvas", &UiTreeEntry::WorldCanvas, "True for a World canvas and its elements, whose rect and clip are in the canvas's own pixels.");
+			.Field("worldCanvas", &UiTreeEntry::WorldCanvas, "True for a World canvas and its elements, whose rect and clip are in the canvas's own pixels.")
+			.Field("textBounds", &UiTreeEntry::TextBounds,
+				"The box of the text the element draws, where it is laid out in rect: from its lines' leftmost pen start to their rightmost "
+				"advance end, and from the block's top to its bottom, in rect's pixels; all 0 when it draws none (no UiText, an empty text, or "
+				"hidden).")
+			.Field("textOverflows", &UiTreeEntry::TextOverflows, "Whether textBounds reaches beyond rect on a side (by more than 0.01 pixel).");
 
 		registry.Struct<UiTreeParams>("UiTreeParams", "The params of ui.tree.")
 			.Field("canvas", &UiTreeParams::Canvas, "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.")
 			.Field("depth", &UiTreeParams::Depth, "The most levels listed below each canvas; 0: unlimited.")
 			.Field("format", &UiTreeParams::Format,
 				"Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and "
-				"UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.")
+				"UiTextInput(\"<text>\"), a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, "
+				"hovered or pressed); Json: a flat list of entries.")
 			.Field("width", &UiTreeParams::Width,
 				"The scene resolution's width to lay out at, with height; omitted: the play session's own, or for the edit scene its game "
 				"view's at the project's window size (a PixelPerfectCamera's reference resolution under one).",
@@ -545,8 +736,9 @@ namespace Engine {
 			{
 				.Name = "ui.tree",
 				.Description = "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, "
-							   "components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline "
-							   "or a flat JSON list, optionally for one canvas and to a depth.",
+							   "components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play "
+							   "scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas "
+							   "and to a depth.",
 				.ExposeAsTool = true,
 				.SupportsSceneTarget = true,
 				.AvailableInRuntime = true,
