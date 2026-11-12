@@ -89,6 +89,8 @@ namespace Engine {
 			size_t Pipeline = 0;
 			uint32_t FirstVertex = 0;
 			uint32_t VertexCount = 0;
+			// The atlas's font's FontData::Spread, the Text program's push constants (TextConstants).
+			float Spread = 8.0f;
 			// The draw's scissor in the framebuffer's pixels, inside its extent; nullopt: the whole extent (Record's batches).
 			std::optional<nvrhi::Rect> Scissor{};
 		};
@@ -105,6 +107,9 @@ namespace Engine {
 	namespace Utils {
 
 		constexpr std::string_view TextProgram = "Text";
+		// The push constants' slot (TextConstants): NVRHI counts push constants among the constant buffers' slots, which b0
+		// (ViewConstants) takes.
+		constexpr uint32_t TextPushConstantsSlot = 1;
 		// Indices of the two pipelines (GetLayoutDescriptions' order).
 		constexpr size_t TextTestedPipeline = 0;
 		constexpr size_t TextOnTopPipeline = 1;
@@ -127,6 +132,7 @@ namespace Engine {
 			layout.registerSpaceIsDescriptorSet = true;
 			layout.bindings = {
 				nvrhi::BindingLayoutItem::ConstantBuffer(0),
+				nvrhi::BindingLayoutItem::PushConstants(Utils::TextPushConstantsSlot, sizeof(TextConstants)),
 				nvrhi::BindingLayoutItem::Texture_SRV(0),
 				nvrhi::BindingLayoutItem::Sampler(0),
 			};
@@ -319,9 +325,10 @@ namespace Engine {
 		// The font `handle` resolves to (null: the Default font) with its atlas mirror, uploading the atlas when this version
 		// has none yet; each handle is resolved once per Record.
 		[[nodiscard]] const ResolvedFont& ResolveFont(AssetManager& assets, AssetHandle handle);
-		// Batches the vertices added to Staging since `firstVertex`: they extend the last batch when it has the same atlas,
-		// pipeline and scissor, and start a new one otherwise.
-		void AddBatch(nvrhi::ITexture* atlas, size_t pipeline, size_t firstVertex, const std::optional<nvrhi::Rect>& scissor = std::nullopt);
+		// Batches the vertices added to Staging since `firstVertex`, drawn from the atlas of a font whose FontData::Spread is
+		// `spread`: they extend the last batch when it has the same atlas, spread, pipeline and scissor, and start a new one
+		// otherwise.
+		void AddBatch(nvrhi::ITexture* atlas, float spread, size_t pipeline, size_t firstVertex, const std::optional<nvrhi::Rect>& scissor = std::nullopt);
 		// Uploads Staging (not empty) and draws Batches into `framebuffer`, its whole extent the viewport and each batch clipped
 		// to its scissor, with ViewConstants `viewConstants` and binding sets from `bindings`, inside the debug marker `marker`,
 		// adding the draw calls and triangles to `counters`. Everything that can fail comes before the first command. Errors:
@@ -390,17 +397,23 @@ namespace Engine {
 		return resolved;
 	}
 
-	void TextRenderer::State::AddBatch(nvrhi::ITexture* atlas, size_t pipeline, size_t firstVertex, const std::optional<nvrhi::Rect>& scissor)
+	void TextRenderer::State::AddBatch(nvrhi::ITexture* atlas, float spread, size_t pipeline, size_t firstVertex, const std::optional<nvrhi::Rect>& scissor)
 	{
 		const uint32_t count = static_cast<uint32_t>(Staging.size() - firstVertex);
 		if (count == 0)
 			return;
-		if (!Batches.empty() && Batches.back().Atlas == atlas && Batches.back().Pipeline == pipeline && Batches.back().Scissor == scissor)
+		if (!Batches.empty() && Batches.back().Atlas == atlas && Batches.back().Spread == spread && Batches.back().Pipeline == pipeline
+			&& Batches.back().Scissor == scissor)
 		{
 			Batches.back().VertexCount += count;
 			return;
 		}
-		Batches.push_back({ .Atlas = atlas, .Pipeline = pipeline, .FirstVertex = static_cast<uint32_t>(firstVertex), .VertexCount = count, .Scissor = scissor });
+		Batches.push_back({ .Atlas = atlas,
+			.Pipeline = pipeline,
+			.FirstVertex = static_cast<uint32_t>(firstVertex),
+			.VertexCount = count,
+			.Spread = spread,
+			.Scissor = scissor });
 	}
 
 	Status TextRenderer::State::Submit(nvrhi::ICommandList& commandList, PassBindingCache& bindings, nvrhi::IFramebuffer& framebuffer, nvrhi::IBuffer& viewConstants,
@@ -433,6 +446,7 @@ namespace Engine {
 			nvrhi::BindingSetDesc desc;
 			desc.bindings = {
 				nvrhi::BindingSetItem::ConstantBuffer(0, &viewConstants),
+				nvrhi::BindingSetItem::PushConstants(Utils::TextPushConstantsSlot, sizeof(TextConstants)),
 				nvrhi::BindingSetItem::Texture_SRV(0, batch.Atlas),
 				nvrhi::BindingSetItem::Sampler(0, Sampler),
 			};
@@ -455,12 +469,16 @@ namespace Engine {
 			const TextBatch& batch = Batches[index];
 			nvrhi::IGraphicsPipeline* pipeline = Pipelines[batch.Pipeline].Pipeline;
 			const nvrhi::Rect scissor = batch.Scissor.value_or(extent);
-			if (index == 0 || graphics.pipeline != pipeline || graphics.bindings[0] != sets[index] || graphics.viewport.scissorRects[0] != scissor)
+			const bool spreadChanged = index > 0 && Batches[index - 1].Spread != batch.Spread;
+			if (index == 0 || spreadChanged || graphics.pipeline != pipeline || graphics.bindings[0] != sets[index] || graphics.viewport.scissorRects[0] != scissor)
 			{
 				graphics.pipeline = pipeline;
 				graphics.bindings[0] = sets[index];
 				graphics.viewport.scissorRects[0] = scissor;
 				commandList.setGraphicsState(graphics);
+				// Push constants follow the graphics state they are set after (NVRHI).
+				const TextConstants constants{ .Spread = batch.Spread };
+				commandList.setPushConstants(&constants, sizeof(constants));
 			}
 			nvrhi::DrawArguments arguments;
 			arguments.vertexCount = batch.VertexCount;
@@ -600,7 +618,7 @@ namespace Engine {
 				continue;
 			}
 			// The colour is per vertex, so consecutive runs of one atlas, one pipeline and one scissor draw together.
-			state.AddBatch(font.Atlas, world ? Utils::TextTestedPipeline : Utils::TextOnTopPipeline, firstVertex, scissor);
+			state.AddBatch(font.Atlas, font.Font->Spread, world ? Utils::TextTestedPipeline : Utils::TextOnTopPipeline, firstVertex, scissor);
 			++drawn;
 		}
 
@@ -666,7 +684,7 @@ namespace Engine {
 				state.Staging.resize(firstVertex);
 				return false;
 			}
-			state.AddBatch(font.Atlas, pipeline, firstVertex);
+			state.AddBatch(font.Atlas, font.Font->Spread, pipeline, firstVertex);
 			return true;
 		};
 
