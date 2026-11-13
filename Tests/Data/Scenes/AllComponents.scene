@@ -13,7 +13,7 @@
 		"PointLight": 2,
 		"SpotLight": 1,
 		"Environment": 1,
-		"PostProcess": 1,
+		"PostProcess": 2,
 		"Text": 1,
 		"RigidBody": 1,
 		"BoxCollider": 1,
@@ -48,14 +48,26 @@
 				},
 				"PostProcess": {
 					"ExposureEV": -0.5,
+					"ExposureMode": "Auto",
+					"AutoExposureMinEV": -4,
+					"AutoExposureMaxEV": 10,
+					"AutoExposureSpeedUp": 2,
+					"AutoExposureSpeedDown": 0.5,
 					"Tonemap": "ACES",
+					"Lut": null,
+					"LutIntensity": 0.75,
 					"SsaoEnabled": false,
 					"SsaoRadius": 0.75,
 					"SsaoIntensity": 1.25,
 					"SsaoQuality": "High",
+					"SsrEnabled": true,
+					"SsrIntensity": 0.5,
+					"SsrMaxDistance": 25,
+					"SsrThickness": 0.1,
+					"SsrMaxRoughness": 0.4,
 					"BloomEnabled": false,
 					"BloomIntensity": 0.08,
-					"FxaaEnabled": false
+					"AntiAliasing": "None"
 				}
 			}
 		},

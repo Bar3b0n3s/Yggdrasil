@@ -27,7 +27,10 @@ inline constexpr uint32_t TonemapperLinear = 3;
 	// TonemapConstants::Flags bits (Renderer/TonemapPass.h's steps 1, 4 and 5). M26 (C26.1, Docs/Decisions/0037-m26-contract.md
 	// decision 15): AutoExposure multiplies the exposure by the adapted exposure the Exposure pass wrote (t8, stream X-A), and
 	// Lut grades the tonemapped value through the 3D LUT (t9, sampled with s0, LutIntensity its share, stream X-B), in the
-	// order exposure, curve, LUT, encode, dither; neither bit is set until its stream, so no image changes.
+	// order exposure, curve, LUT, encode, dither. TonemapPass::Record sets AutoExposure when its inputs carry an adapted
+	// exposure and Lut when they carry a LUT (SceneRenderer's Tonemap stage passes them for ExposureMode Auto and a
+	// PostProcessSettings::Lut, outside pixel-art mode); PostProcess version 2's defaults (Manual, no LUT) set neither, so
+	// they render as version 1 did.
 #if defined(ENGINE_SHADER)
 	static const uint TonemapFlagBloom = 1;        // composite the bloom chain's mip 0 (t1)
 	static const uint TonemapFlagEncodeSrgb = 2;   // apply the sRGB OETF

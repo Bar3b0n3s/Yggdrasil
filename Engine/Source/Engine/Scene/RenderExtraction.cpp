@@ -9,11 +9,15 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
+#include "Engine/Scene/Components/ReflectionProbeComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -21,6 +25,7 @@
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/PixelPerfectCamera.h"
 #include "Engine/Scene/Private/AnimationTargets.h"
 #include "Engine/Scene/Private/SpriteDrawing.h"
@@ -144,6 +149,40 @@ namespace Engine {
 			item.MorphWeights = Detail::MergeAnimatedMorphWeights(skinned.MorphWeights, animated);
 		}
 
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7; stream P-B): appends one emitter's live particles
+		// (its runtime state's, in emission order) to snapshot.Particles and its item to snapshot.ParticleEmitters, even when
+		// none is alive. A particle is drawn at `alpha` between its PreviousPosition and its Position (its Position at 1), in
+		// world space, through `emitterWorld` (the emitter's rendered world matrix) for a Local emitter; its size is its
+		// StartSize times SizeOverLife and its colour ColorOverLife, both at its age over its lifetime as of its last step
+		// (clamped to [0, 1]; extraction does not know the fixed step, so the curves are not interpolated between steps).
+		static void AppendParticleItems(const ParticleEmitterComponent& emitter, const ParticleStateComponent& state, const glm::mat4& emitterWorld,
+			float alpha, UUID entity, RenderSnapshot& snapshot)
+		{
+			const auto first = static_cast<uint32_t>(snapshot.Particles.size());
+			const bool local = emitter.SimulationSpace == ParticleSimulationSpace::Local;
+			for (const Particle& particle : state.State.Particles)
+			{
+				glm::vec3 position = alpha >= 1.0f ? particle.Position : particle.PreviousPosition + (particle.Position - particle.PreviousPosition) * alpha;
+				if (local)
+					position = glm::vec3(emitterWorld * glm::vec4(position, 1.0f));
+				// A NaN ratio (a zero age over a zero lifetime, which the fields' range excludes) takes the curves' start.
+				const float ratio = particle.Age / particle.Lifetime;
+				const float normalizedAge = ratio >= 1.0f ? 1.0f : (ratio > 0.0f ? ratio : 0.0f);
+				snapshot.Particles.push_back(ParticleItem{
+					.Position = position,
+					.Size = particle.StartSize * EvaluateParticleSize(emitter, normalizedAge),
+					.Color = EvaluateParticleColor(emitter, normalizedAge),
+				});
+			}
+			snapshot.ParticleEmitters.push_back(ParticleEmitterItem{
+				.Texture = emitter.Texture.GetHandle(),
+				.Blend = emitter.Blend == ParticleBlend::Additive ? RenderParticleBlend::Additive : RenderParticleBlend::Alpha,
+				.First = first,
+				.Count = static_cast<uint32_t>(snapshot.Particles.size()) - first,
+				.Entity = entity,
+			});
+		}
+
 		static RenderProjection ToRenderProjection(ProjectionType projection)
 		{
 			return projection == ProjectionType::Orthographic ? RenderProjection::Orthographic : RenderProjection::Perspective;
@@ -170,6 +209,56 @@ namespace Engine {
 				case SsaoQuality::High:   return RenderSsaoQuality::High;
 			}
 			return RenderSsaoQuality::Medium;
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 12): PostProcess version 2's enums.
+		static RenderExposureMode ToRenderExposureMode(ExposureMode mode)
+		{
+			switch (mode)
+			{
+				case ExposureMode::Manual: return RenderExposureMode::Manual;
+				case ExposureMode::Auto:   return RenderExposureMode::Auto;
+			}
+			return RenderExposureMode::Manual;
+		}
+
+		static RenderAntiAliasing ToRenderAntiAliasing(AntiAliasing antiAliasing)
+		{
+			switch (antiAliasing)
+			{
+				case AntiAliasing::None: return RenderAntiAliasing::None;
+				case AntiAliasing::Fxaa: return RenderAntiAliasing::Fxaa;
+				case AntiAliasing::Taa:  return RenderAntiAliasing::Taa;
+			}
+			return RenderAntiAliasing::Fxaa;
+		}
+
+		// The snapshot's post-processing of a PostProcess component: every member of version 2, its enums mapped.
+		static PostProcessSettings MakePostProcessSettings(const PostProcessComponent& component)
+		{
+			return PostProcessSettings{
+				.ExposureEV = component.ExposureEV,
+				.ExposureMode = ToRenderExposureMode(component.ExposureMode),
+				.AutoExposureMinEV = component.AutoExposureMinEV,
+				.AutoExposureMaxEV = component.AutoExposureMaxEV,
+				.AutoExposureSpeedUp = component.AutoExposureSpeedUp,
+				.AutoExposureSpeedDown = component.AutoExposureSpeedDown,
+				.Tonemap = ToRenderTonemapper(component.Tonemap),
+				.Lut = component.Lut.GetHandle(),
+				.LutIntensity = component.LutIntensity,
+				.SsaoEnabled = component.SsaoEnabled,
+				.SsaoRadius = component.SsaoRadius,
+				.SsaoIntensity = component.SsaoIntensity,
+				.SsaoQuality = ToRenderSsaoQuality(component.SsaoQuality),
+				.SsrEnabled = component.SsrEnabled,
+				.SsrIntensity = component.SsrIntensity,
+				.SsrMaxDistance = component.SsrMaxDistance,
+				.SsrThickness = component.SsrThickness,
+				.SsrMaxRoughness = component.SsrMaxRoughness,
+				.BloomEnabled = component.BloomEnabled,
+				.BloomIntensity = component.BloomIntensity,
+				.AntiAliasing = ToRenderAntiAliasing(component.AntiAliasing),
+			};
 		}
 
 		static RenderTextSpace ToRenderTextSpace(TextSpace space)
@@ -313,6 +402,36 @@ namespace Engine {
 			light.Direction = GetLightDirection(world);
 			light.Entity = entity;
 			snapshot.Lights.push_back(light);
+		}
+
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the irradiance volume and the
+		// reflection probe of `entity` (`id`) whose Data is set, at the rendered world matrix `getWorld` gives.
+		template<typename GetWorld>
+		static void AddProbeItems(ConstEntity entity, UUID id, const GetWorld& getWorld, RenderSnapshot& snapshot)
+		{
+			if (const IrradianceVolumeComponent* volume = entity.TryGetComponent<IrradianceVolumeComponent>(); volume != nullptr && volume->Data.IsValid())
+			{
+				snapshot.IrradianceVolumes.push_back(IrradianceVolumeItem{
+					.World = getWorld(),
+					.Size = volume->Size,
+					.Data = volume->Data.GetHandle(),
+					.Intensity = volume->Intensity,
+					.BlendDistance = volume->BlendDistance,
+					.Entity = id,
+				});
+			}
+			if (const ReflectionProbeComponent* probe = entity.TryGetComponent<ReflectionProbeComponent>(); probe != nullptr && probe->Data.IsValid())
+			{
+				snapshot.ReflectionProbes.push_back(ReflectionProbeItem{
+					.World = getWorld(),
+					.Size = probe->Size,
+					.Data = probe->Data.GetHandle(),
+					.BoxProjection = probe->BoxProjection,
+					.Intensity = probe->Intensity,
+					.BlendDistance = probe->BlendDistance,
+					.Entity = id,
+				});
+			}
 		}
 
 		// The camera of `request` in `snapshot`. Errors: those of ExtractRenderSnapshot for Entity and Explicit requests.
@@ -581,21 +700,7 @@ namespace Engine {
 				};
 			}
 			if (const PostProcessComponent* component = entity.TryGetComponent<PostProcessComponent>(); component != nullptr && !post.has_value())
-			{
-				post = PostProcessSettings{
-					.ExposureEV = component->ExposureEV,
-					.Tonemap = Utils::ToRenderTonemapper(component->Tonemap),
-					.SsaoEnabled = component->SsaoEnabled,
-					.SsaoRadius = component->SsaoRadius,
-					.SsaoIntensity = component->SsaoIntensity,
-					.SsaoQuality = Utils::ToRenderSsaoQuality(component->SsaoQuality),
-					.BloomEnabled = component->BloomEnabled,
-					.BloomIntensity = component->BloomIntensity,
-					// M26 (C26.1, decision 12): version 1's FxaaEnabled as PostProcess version 2's AntiAliasing until stream X-A
-					// registers version 2 and copies its members.
-					.AntiAliasing = component->FxaaEnabled ? RenderAntiAliasing::Fxaa : RenderAntiAliasing::None,
-				};
-			}
+				post = Utils::MakePostProcessSettings(*component);
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): listed in canonical order, sorted into draw order below.
 			if (const SpriteRendererComponent* sprite = entity.TryGetComponent<SpriteRendererComponent>())
 			{
@@ -624,6 +729,20 @@ namespace Engine {
 				snapshot.Tilemaps.push_back(Utils::MakeTilemapItem(*tilemap, getWorld(), id, request.SortingLayers));
 				tilemapPositions.push_back(position);
 			}
+			// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): an emitter with a runtime state (a play scene's,
+			// once its first Particles phase made it; an edit scene holds none, so its views draw no particles), in canonical
+			// order. Only a Local emitter's particles need its rendered matrix.
+			if (const ParticleEmitterComponent* emitter = entity.TryGetComponent<ParticleEmitterComponent>(); emitter != nullptr)
+			{
+				if (const ParticleStateComponent* particles = entity.TryGetComponent<ParticleStateComponent>(); particles != nullptr)
+				{
+					const bool local = emitter->SimulationSpace == ParticleSimulationSpace::Local;
+					Utils::AppendParticleItems(*emitter, *particles, local ? getWorld() : glm::mat4(1.0f), request.Alpha, id, snapshot);
+				}
+			}
+			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16): the baked probes, in canonical order, in
+			// every view (an edit scene's included: baked lighting shows while editing).
+			Utils::AddProbeItems(entity, id, getWorld, snapshot);
 		});
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});

@@ -1,6 +1,7 @@
 """Terrain through automation (Docs/Decisions/0037-m26-contract.md decisions 20 and 23; Roadmap M26's terrain with
-sculpt and paint tools): terrain.importHeightmap converts a 16-bit PNG or RAW heightmap, and terrain.edit, the terrain
-tools' one action, sculpts and paints with a stroke whose bytes equal the editor's and which one undo restores."""
+sculpt and paint tools): asset.create makes a flat heightfield, terrain.importHeightmap converts a 16-bit PNG or RAW
+heightmap, and terrain.edit, the terrain tools' one action, sculpts and paints with a stroke whose bytes equal the
+editor's and which one undo restores."""
 
 from __future__ import annotations
 
@@ -9,9 +10,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from harness import AutomationTestCase, engine_client
+from harness import AutomationTestCase, engine_client, read_json
 
-SKIP_IMPORT = "contract stub: terrain.importHeightmap (ADR 0037 decision 20, stream T-A)"
 SKIP_EDIT = "contract stub: terrain.edit (ADR 0037 decision 23, stream T-E)"
 
 
@@ -28,20 +28,59 @@ def import_heightmap(client: engine_client.EngineClient, root: Path, name: str, 
                        {"source": f"Heightmaps/{name}.raw", "path": f"Assets/Terrain/{name}.heightfield"})
 
 
+def heightfield_source(side: int, samples: bytes) -> bytes:
+    """A .heightfield source: the "EHFD" header with version 1, then the resolution and the samples."""
+    return b"EHFD" + struct.pack("<II", 1, side) + samples
+
+
 def terrain_of(client: engine_client.EngineClient, path: str = "/Terrain") -> dict[str, Any]:
     """The Terrain component of the entity at `path`."""
-    return client.call("entity.get", {"entity": path})["components"]["Terrain"]
+    entity = client.call("entity.get", {"entity": path, "components": ["Terrain"]})["entity"]
+    return entity["components"]["Terrain"]
 
 
 class TerrainTests(AutomationTestCase):
-    @unittest.skip(SKIP_IMPORT)
-    def test_a_raw_heightmap_imports_as_a_heightfield(self) -> None:
-        # Decision 20: a square RAW of 16-bit samples, at most 1025 a side, becomes a .heightfield bit for bit.
+    def test_asset_create_makes_a_flat_heightfield_that_takes_no_values(self) -> None:
+        # Decision 20: asset.create {type: "Heightfield"}, the content browser's create entry, writes a flat 129 x 129
+        # heightfield; its samples come from terrain.importHeightmap and terrain.edit, so it takes no values. One undo
+        # removes it.
         client, root = self.open_editor_with_scene()
-        result = import_heightmap(client, root, "Ramp", ramp_raw(33))
-        self.assertEqual(result["resolution"], 33)
-        self.assertEqual(result["asset"]["type"], "Heightfield")
-        self.assertTrue((root / "Assets" / "Terrain" / "Ramp.heightfield").is_file())
+        created = client.call("asset.create", {"type": "Heightfield", "path": "Assets/Terrain/Ground.heightfield"})
+        self.assertEqual(created["asset"]["type"], "Heightfield")
+        ground = root / "Assets" / "Terrain" / "Ground.heightfield"
+        self.assertEqual(ground.read_bytes(), heightfield_source(129, bytes(129 * 129 * 2)))
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("asset.create", {"type": "Heightfield", "path": "Assets/Terrain/Hill.heightfield",
+                                         "values": {"Resolution": 33}})
+        self.assert_engine_error(refused.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
+        self.assertEqual(refused.exception.data["location"]["pointer"], "/values")
+        self.assertFalse((root / "Assets" / "Terrain" / "Hill.heightfield").exists())
+        client.call("edit.undo")
+        self.assertFalse(ground.exists())
+
+    def test_a_raw_heightmap_imports_as_a_heightfield(self) -> None:
+        # Decision 20: a square RAW of 16-bit samples, at most 1025 a side, becomes a .heightfield bit for bit. Its
+        # source here is a native absolute path outside the project, which terrain.importHeightmap reads read-only, as
+        # asset.import reads one (decision 31, Architecture §13.2), and the files it writes are recorded in provenance
+        # under the request that carries the source, as asset.import's are.
+        client, root = self.open_editor_with_scene()
+        downloads = self.directory / "Downloads"
+        downloads.mkdir()
+        source = downloads / "Ramp.raw"
+        source.write_bytes(ramp_raw(33))
+        response = client.request("terrain.importHeightmap",
+                                  {"source": str(source), "path": "Assets/Terrain/Ramp.heightfield"}, transcript_line=7)
+        self.assertIn("result", response, response)
+        self.assertEqual(response["result"]["resolution"], 33)
+        self.assertEqual(response["result"]["asset"]["type"], "Heightfield")
+        self.assertEqual((root / "Assets" / "Terrain" / "Ramp.heightfield").read_bytes(),
+                         heightfield_source(33, ramp_raw(33)))
+        self.assertEqual(source.read_bytes(), ramp_raw(33))
+        entries = {entry["Path"]: entry for entry in read_json(root / "Automation" / "Provenance.json")["Entries"]}
+        for path in ("Assets/Terrain/Ramp.heightfield", "Assets/Terrain/Ramp.heightfield.meta"):
+            entry = entries[path]
+            self.assertEqual((entry["Method"], entry["RequestId"], entry["TranscriptLine"]),
+                             ("terrain.importHeightmap", response["id"], 7), path)
         with self.assertRaises(engine_client.EngineError) as refused:
             import_heightmap(client, root, "Odd", ramp_raw(33)[:-2])
         self.assert_engine_error(refused.exception, engine_client.INVALID_PARAMS, "InvalidArgument")

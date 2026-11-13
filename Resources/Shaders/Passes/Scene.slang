@@ -10,7 +10,8 @@
 //     perceptual roughness clamped to at least 0.045 and widened by geometric specular anti-aliasing, the lights of the
 //     view's light list that reach the pixel's light cluster (Common/LightLoop.slang, M23; Common/Lighting.slang's artist
 //     units) and image-based lighting: the environment's SH9 irradiance and prefiltered specular cube (split sum), or the
-//     constant ambient AmbientColor treated as a uniform environment without a map (Shared/EnvironmentConstants.h), with
+//     constant ambient AmbientColor treated as a uniform environment without a map (Shared/EnvironmentConstants.h), replaced
+//     inside their boxes by the view's baked irradiance volumes and reflection probes (M26, Common/Probes.slang), with
 //     multi-bounce, specular and horizon occlusion from the material's occlusion; plus emission. Blend materials output the
 //     base colour's alpha for the transparent pass's blending.
 // Permutation ALPHA_MASK = 1 is the Mask materials' variant: both entry points drop the fragments below AlphaCutoff by
@@ -41,6 +42,7 @@
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/ProbeConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ViewConstants.h"
 #include "Common/Shadows.slang"
@@ -70,6 +72,11 @@ Texture2D<float2> SceneNormals : register(t9, space0);
 StructuredBuffer<InstanceRecord> Instances : register(t10, space0);
 StructuredBuffer<uint> LightClusterMasks : register(t11, space0); // M23: the cluster masks (Renderer/LightClusterPass.h)
 TextureCubeArray<float> PointShadowMaps : register(t12, space0); // M23 (R-PLS): ShadowConstants::Points' cubes
+// M26 (R-GI-PROBE): the view's probes (Common/Probes.slang): their constants, the volumes' SH9 coefficients and the
+// reflection probes' prefiltered specular cubes.
+ConstantBuffer<ProbeConstants> Probes : register(b4, space0);
+StructuredBuffer<float4> IrradianceProbes : register(t13, space0);
+TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -89,6 +96,8 @@ const uint DebugView = 0;
 
 // The forward passes' light loop over the declarations above (M23, Docs/Decisions/0034-m23-contract.md decision 4).
 #include "Common/LightLoop.slang"
+// The probes' indirect term over the declarations above (M26, Docs/Decisions/0037-m26-contract.md decision 16).
+#include "Common/Probes.slang"
 
 struct VertexInput
 {
@@ -401,6 +410,10 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 		const float3 lookup = RotateEnvironmentDirection(reflection, Env.RotationSin, Env.RotationCos);
 		prefiltered = EnvSpecular.SampleLevel(LinearClamp, lookup, roughness * Env.SpecularMaxLod).rgb * Env.Intensity;
 	}
+	// M26 (R-GI-PROBE): the probes' indirect term (Common/Probes.slang), after the light loop: inside their boxes the irradiance
+	// volumes replace the diffuse term's irradiance and the reflection probes the specular term's prefiltered radiance.
+	irradiance = ShadeProbeIrradiance(input.WorldPosition, normal, irradiance);
+	prefiltered = ShadeProbeSpecular(input.WorldPosition, reflection, roughness, prefiltered);
 	const float3 multiScatter = singleScatter * energyCompensation;
 	const float occlusion = min(surface.Occlusion, SampleGtao(AmbientOcclusion, LinearViewDepth, SceneNormals, uint2(input.Position.xy)));
 	radiance += irradiance * diffuseColor * saturate(float3(1.0) - multiScatter) * MultiBounceAmbientOcclusion(occlusion, diffuseColor);

@@ -357,8 +357,9 @@ namespace Engine {
 	// The scene's PostProcessComponent (§5.3), or its defaults when the scene has none. M8 applies the exposure, the
 	// tonemapper (with the blue-noise dither), bloom and FXAA; the Ssao members take effect with GTAO (M9). M26 (C26.1,
 	// decision 12): PostProcess version 2's members, whose defaults render as version 1 did (the manual ExposureEV, no LUT,
-	// SSR off, FXAA): render extraction copies them from the component (version 1's FxaaEnabled as Fxaa or None until stream
-	// X-A registers version 2), and each takes effect with its stream (X-A the exposure, X-B the LUT, X-C TAA, X-D SSR).
+	// SSR off, FXAA): render extraction copies every member from the component (a version 1 component loads through its
+	// migration, FxaaEnabled as Fxaa or None), and each takes effect with its stream (X-A the exposure, X-B the LUT, X-C TAA,
+	// X-D SSR).
 	struct PostProcessSettings
 	{
 		float ExposureEV = 0.0f; // multiplier 2^ExposureEV; with Auto, the compensation added to the adapted exposure

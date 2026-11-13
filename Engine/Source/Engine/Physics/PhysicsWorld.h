@@ -27,7 +27,9 @@
 // Content errors carry a PHYSICS_* code at the start of their message (Physics/PhysicsDiagnostics.h). Settings Jolt would
 // assert on are made safe instead (BodyDescription), and two bodies whose shapes both hold a triangle mesh never meet:
 // Jolt has no mesh-versus-mesh collision and asserts on such a pair, which a mesh sensor and a Kinematic mesh body could
-// otherwise form (sensors detect kinematic bodies), so the world's filters drop it before the narrow phase.
+// otherwise form (sensors detect kinematic bodies), so the world's filters drop it before the narrow phase. M26 (ADR 0037
+// decision 21): a terrain's height field counts as a mesh here, since Jolt collides it with convex shapes only, so it never
+// meets a mesh or another height field either.
 //
 // Determinism (§9.1): with JPH_CROSS_PLATFORM_DETERMINISTIC, the precise floating-point model and the same calls in the
 // same order, the world's state after Step is identical in every configuration and for every worker thread count

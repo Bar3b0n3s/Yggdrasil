@@ -55,10 +55,11 @@ namespace Engine {
 		TransformComponent Local{};
 	};
 
-	// The asset version of a mesh a body's shape was built from (§7.5 hot reload: a new version rebuilds the shape).
-	struct PhysicsMeshInput
+	// The asset version of a mesh, or of an M26 terrain's heightfield, a body's shape was built from (§7.5 hot reload: a new
+	// version rebuilds the shape; ADR 0037 decision 21: so does an edit or a reimport of a heightfield).
+	struct PhysicsAssetInput
 	{
-		AssetHandle Mesh{};
+		AssetHandle Asset{};
 		uint64_t Version = 0;
 	};
 
@@ -81,12 +82,12 @@ namespace Engine {
 		glm::mat4 PlacedMatrix = glm::mat4(1.0f);
 		// What the body was built from, compared at each rebuild to choose between nothing, PhysicsWorld::SetShape and a new
 		// body: the plan, the settings (BodyDescription without its shape, pose and velocities), the shape description and
-		// the transforms and mesh versions baked into it.
+		// the transforms and the mesh and heightfield versions baked into it.
 		PhysicsBodyPlan Plan{};
 		BodyDescription Settings{};
 		BodyShapeDescription ShapeDescription{};
 		std::vector<PhysicsShapeInput> ShapeInputs{};
-		std::vector<PhysicsMeshInput> MeshInputs{};
+		std::vector<PhysicsAssetInput> AssetInputs{};
 	};
 
 	// One created character (§9.6).
@@ -259,7 +260,7 @@ namespace Engine {
 		void RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken);
 		[[nodiscard]] std::set<UUID> FindShapeChanges(bool hierarchyChanged) const;
 		[[nodiscard]] std::vector<PhysicsShapeInput> CaptureShapeInputs(const PhysicsBodyPlan& plan) const;
-		[[nodiscard]] std::vector<PhysicsMeshInput> CaptureMeshInputs(const PhysicsBodyPlan& plan) const;
+		[[nodiscard]] std::vector<PhysicsAssetInput> CaptureAssetInputs(const PhysicsBodyPlan& plan) const;
 		[[nodiscard]] bool CreateBody(const PhysicsBodyPlan& plan, std::optional<std::pair<glm::vec3, glm::vec3>> velocities);
 		void AssignPlan(PhysicsBodyEntry& entry, const PhysicsBodyPlan& plan);
 		void RemoveBody(uint32_t handle, std::set<UUID>& woken);

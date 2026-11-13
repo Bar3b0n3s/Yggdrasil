@@ -40,6 +40,12 @@ namespace Engine {
 			// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the Animator and SkinnedMesh proxies' methods, after M21's
 			// and M22's registrations (landing order).
 			ENGINE_TRY(ScriptBindings::RegisterAnimation(api));
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the ParticleEmitter proxy's methods, after the earlier
+			// milestones' registrations (landing order).
+			ENGINE_TRY(ScriptBindings::RegisterParticles(api));
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the Terrain proxy's methods, after the earlier milestones'
+			// registrations (landing order).
+			ENGINE_TRY(ScriptBindings::RegisterTerrain(api));
 			return {};
 		}
 

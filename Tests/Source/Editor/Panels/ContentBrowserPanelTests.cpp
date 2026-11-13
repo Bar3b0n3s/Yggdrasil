@@ -15,6 +15,7 @@
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "EditorCore/Viewport/GizmoController.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -27,6 +28,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <atomic>
 #include <string>
 #include <utility>
@@ -324,6 +326,44 @@ namespace Engine {
 			REQUIRE(properties);
 			CHECK((*properties)["values"]["Locales"] == Json::array({ "en" }));
 			CHECK((*properties)["values"]["Entries"] == Json::array());
+			const auto history = context.Editor.GetHistory().GetEntries(10);
+			REQUIRE(history.size() == 1);
+			CHECK(history.front().Origin == CommandOrigin::User);
+			REQUIRE(ui.Frame(draw));
+		}
+
+		TEST_CASE("ContentBrowserPanel: creating a heightfield queues a flat 129 x 129 heightfield")
+		{
+			// M26, C-TERR (Docs/Decisions/0037-m26-contract.md decision 20): the Create popup's entry after M22's string table (the
+			// create list in landing order), asset.create {type: Heightfield}.
+			Test::PanelInteractionFixture fixture("ContentCreateHeightfield", false);
+			auto& context = fixture.GetContext();
+			ContentBrowserPanel panel;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&panel, &context]()
+			{
+				return panel.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			CreateContentAsset(ui, draw, context.Editor, 11, "Heightfield", "Ground");
+			CHECK_FALSE(context.Editor.GetAssets().Resolve("Assets/Ground.heightfield"));
+			context.Actions.Pump();
+			context.Editor.GetAssets().WaitIdle();
+			context.Actions.Pump();
+			const auto asset = context.Editor.GetAssets().Resolve("Assets/Ground.heightfield");
+			REQUIRE(asset);
+			CHECK(context.Editor.GetAssets().GetAssetType(*asset) == AssetType::Heightfield);
+			const Result<VfsPath> sourcePath = VfsPath::Parse("project://Assets/Ground.heightfield");
+			REQUIRE(sourcePath.has_value());
+			const Result<Buffer> source = context.Editor.GetVfs().ReadFile(*sourcePath);
+			REQUIRE(source.has_value());
+			const Result<HeightfieldData> heightfield = ReadHeightfieldSource(*source);
+			REQUIRE_MESSAGE(heightfield.has_value(), heightfield.error().ToString());
+			CHECK(heightfield->Resolution == 129);
+			CHECK(std::ranges::all_of(heightfield->Heights, [](uint16_t sample)
+			{
+				return sample == 0;
+			}));
 			const auto history = context.Editor.GetHistory().GetEntries(10);
 			REQUIRE(history.size() == 1);
 			CHECK(history.front().Origin == CommandOrigin::User);

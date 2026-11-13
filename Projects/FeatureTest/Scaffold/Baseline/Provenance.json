@@ -900,11 +900,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/AlphaModes.scene",
-			"XXH64": "422a81229dbdecf0",
+			"XXH64": "c8a680ba890aceca",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/AlphaModes.scene.meta",
@@ -916,11 +916,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Bloom.scene",
-			"XXH64": "ea63ed40aa3cb539",
-			"Method": "scene.save",
-			"RequestId": 55,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "dd1e3cb3a5302102",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Bloom.scene.meta",
@@ -932,11 +932,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/DebugDraw.scene",
-			"XXH64": "87188662739de170",
-			"Method": "scene.save",
-			"RequestId": 71,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "5bdd09082801eb3b",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/DebugDraw.scene.meta",
@@ -948,11 +948,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/GltfFixture.scene",
-			"XXH64": "afac257b2d1d7142",
+			"XXH64": "4b87b0c457aee314",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/GltfFixture.scene.meta",
@@ -964,11 +964,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/IblOnly.scene",
-			"XXH64": "445d10273d988436",
-			"Method": "scene.save",
-			"RequestId": 33,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "7f82f69dd8fea042",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/IblOnly.scene.meta",
@@ -980,11 +980,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/MaterialGrid.scene",
-			"XXH64": "bb9de17e66b56bce",
-			"Method": "scene.save",
-			"RequestId": 25,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "06b1b0047351f83e",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/MaterialGrid.scene.meta",
@@ -996,11 +996,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Text.scene",
-			"XXH64": "b9263796b036a398",
-			"Method": "scene.save",
-			"RequestId": 76,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "7da6e5f7cd7533cc",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Text.scene.meta",
@@ -1012,11 +1012,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Tonemappers.scene",
-			"XXH64": "8b1018e0a5c26692",
-			"Method": "scene.save",
-			"RequestId": 47,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "1b07b9cdbfed5e8a",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Tonemappers.scene.meta",

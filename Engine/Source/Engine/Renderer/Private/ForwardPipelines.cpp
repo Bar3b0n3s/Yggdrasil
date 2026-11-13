@@ -9,6 +9,7 @@
 #include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
+#include "Shared/ProbeConstants.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
 
@@ -54,6 +55,7 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ShadowConstantsRegister),
 										nvrhi::BindingLayoutItem::ConstantBuffer(EnvironmentConstantsRegister),
 										nvrhi::BindingLayoutItem::ConstantBuffer(LightClusterConstantsRegister),
+										nvrhi::BindingLayoutItem::ConstantBuffer(ProbeConstantsRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(LightsRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ShadowCascadesRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ShadowAtlasRegister),
@@ -65,6 +67,8 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(LightClusterMasksRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(PointShadowMapsRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(IrradianceProbesRegister),
+										nvrhi::BindingLayoutItem::Texture_SRV(ReflectionProbeCubesRegister),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(ShadowCompareRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
@@ -117,6 +121,7 @@ namespace Engine {
 					{ .Set = 0, .Register = EnvironmentConstantsRegister, .ByteSize = sizeof(EnvironmentConstants) },
 					{ .Set = 0, .Register = ShadowConstantsRegister, .ByteSize = sizeof(ShadowConstants) },
 					{ .Set = 0, .Register = LightClusterConstantsRegister, .ByteSize = sizeof(LightClusterConstants) },
+					{ .Set = 0, .Register = ProbeConstantsRegister, .ByteSize = sizeof(ProbeConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
 				},
 			};

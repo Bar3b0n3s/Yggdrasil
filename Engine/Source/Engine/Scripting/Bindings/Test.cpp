@@ -11,6 +11,7 @@
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/ParticleSystem.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
@@ -28,6 +29,7 @@
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -522,6 +524,24 @@ namespace Engine {
 			return 1;
 		}
 
+		// Test.GetParticleDigest(entity): the seeded particle hash of the entity's ParticleEmitter (FindParticleDigest, M26;
+		// Docs/Decisions/0037-m26-contract.md decisions 5 and 26), what a suite compares across the Editor, Release and Dist
+		// runs; nil before its first Particles phase or without a ParticleEmitter.
+		static int GetParticleDigest(ScriptCall& call)
+		{
+			const auto identity = Lua::Check<ScriptEntityIdentity>(call, 1);
+			IScriptHost& host = call.Engine->GetHost();
+			Checked(call, ScriptProxy::ValidateEntityForRead(host, identity));
+			const std::optional<uint64_t> digest = FindParticleDigest(host.GetScene().FindReadableEntityByID(identity.ID));
+			if (!digest.has_value())
+			{
+				Lua::PushNil(call);
+				return 1;
+			}
+			Lua::PushString(call, std::format("{:016x}", *digest));
+			return 1;
+		}
+
 		static int GetScriptErrors(ScriptCall& call)
 		{
 			uint64_t since = 0;
@@ -672,6 +692,11 @@ namespace Engine {
 					"Returns the digest of an Animator entity's pose sampled in the last fixed step (the XXH64 of its joint model matrices and morph "
 					"weights) as 16 hexadecimal digits, or nil without a pose; the same in every configuration, so a suite compares it across runs; "
 					"test suites only.",
+					pure)
+				.Function("GetParticleDigest", Utils::GetParticleDigest, "(entity: Entity) -> string?",
+					"Returns the seeded particle hash of a ParticleEmitter entity (the XXH64 of its live particles, random stream and emission "
+					"state) as 16 hexadecimal digits, or nil before its first Particles phase or without a ParticleEmitter; the same in every "
+					"configuration, so a suite compares it across runs; test suites only.",
 					pure);
 			return {};
 		}

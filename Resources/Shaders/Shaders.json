@@ -103,6 +103,20 @@
 			]
 		},
 		{
+			"Name": "Exposure",
+			"File": "Passes/Exposure.slang",
+			"Entries": [
+				{
+					"Name": "CSHistogram",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSAdapt",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "Fxaa",
 			"File": "Passes/Fxaa.slang",
 			"Entries": [

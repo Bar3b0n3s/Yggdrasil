@@ -30,25 +30,28 @@
 // with the vertex buffer's capacity and is written through the recording command list the first time a capacity is used,
 // so creating the batcher records no command list.
 //
-// Two binding layouts: Hdr, Ldr and M22's LdrDepth bind the texture and the sampler; M21's HdrLit and Normals (decision
-// 22) also bind a second texture, HdrLit's light accumulation or the Normals batch's normal map (the white texture without
-// one, with the push constants' HasNormalMap 0; NormalMapTwoChannel 1 for a map that stores x and y only, M23's milestone
-// review).
+// Two binding layouts: Hdr, Ldr, M22's LdrDepth and M26's HdrAdditive bind the texture and the sampler; M21's HdrLit and
+// Normals (decision 22) also bind a second texture, HdrLit's light accumulation or the Normals batch's normal map (the white
+// texture without one, with the push constants' HasNormalMap 0; NormalMapTwoChannel 1 for a map that stores x and y only,
+// M23's milestone review).
 
 namespace Engine {
 
 	namespace Utils {
 
 		constexpr std::string_view QuadProgram = "Quad";
-		// Indices of the five pipelines (QuadBatchTarget's values and GetLayoutDescriptions' order).
+		// Indices of the six pipelines (QuadBatchTarget's values and GetLayoutDescriptions' order).
 		constexpr size_t QuadHdrPipeline = 0;
 		constexpr size_t QuadLdrPipeline = 1;
 		constexpr size_t QuadHdrLitPipeline = 2;
 		constexpr size_t QuadNormalsPipeline = 3;
-		constexpr size_t QuadLdrDepthPipeline = 4; // M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 57)
+		constexpr size_t QuadLdrDepthPipeline = 4;    // M22 (C22.3, Docs/Decisions/0033-m22-contract.md decision 57)
+		constexpr size_t QuadHdrAdditivePipeline = 5; // M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 7)
 		static_assert(static_cast<size_t>(QuadBatchTarget::Hdr) == QuadHdrPipeline && static_cast<size_t>(QuadBatchTarget::Ldr) == QuadLdrPipeline
 			&& static_cast<size_t>(QuadBatchTarget::HdrLit) == QuadHdrLitPipeline && static_cast<size_t>(QuadBatchTarget::Normals) == QuadNormalsPipeline
-			&& static_cast<size_t>(QuadBatchTarget::LdrDepth) == QuadLdrDepthPipeline);
+			&& static_cast<size_t>(QuadBatchTarget::LdrDepth) == QuadLdrDepthPipeline
+			&& static_cast<size_t>(QuadBatchTarget::HdrAdditive) == QuadHdrAdditivePipeline);
+		static_assert(QuadHdrAdditivePipeline + 1 == QuadBatcher::PipelineCount);
 		// The first capacity of the vertex and index buffers, in quads; it doubles until a record fits, up to
 		// QuadBatcher::MaxQuadsPerRecord.
 		constexpr uint32_t InitialQuadCapacity = 1024;
@@ -83,12 +86,13 @@ namespace Engine {
 			};
 		}
 
-		// LdrDepth shades as Ldr does (its fragment entry); only its depth state differs.
+		// LdrDepth shades as Ldr does (its fragment entry); only its depth state differs. M26's HdrAdditive shades as Hdr does;
+		// only its blend state differs.
 		static std::vector<PipelineLayoutDescription> MakeQuadDescriptions()
 		{
 			return { MakeQuadDescription("QuadHdr", "PSHdr", false), MakeQuadDescription("QuadLdr", "PSLdr", false),
 				MakeQuadDescription("QuadHdrLit", "PSHdrLit", true), MakeQuadDescription("QuadNormals", "PSNormals", true),
-				MakeQuadDescription("QuadLdrDepth", "PSLdr", false) };
+				MakeQuadDescription("QuadLdrDepth", "PSLdr", false), MakeQuadDescription("QuadHdrAdditive", "PSHdr", false) };
 		}
 
 		static std::vector<nvrhi::VertexAttributeDesc> MakeQuadVertexAttributes()
@@ -105,9 +109,9 @@ namespace Engine {
 			};
 		}
 
-		// A quad pipeline: double-sided quads with straight alpha (as TextRenderer; the Normals one without blending), no depth
-		// writes; the Hdr, HdrLit, Normals and LdrDepth ones test against SceneDepth (reverse-Z, GreaterOrEqual), the Ldr one
-		// draws on top.
+		// A quad pipeline: double-sided quads with straight alpha (as TextRenderer; the Normals one without blending, M26's
+		// HdrAdditive adding the colour times its alpha and keeping the target's alpha), no depth writes; the Hdr, HdrLit,
+		// Normals, LdrDepth and HdrAdditive ones test against SceneDepth (reverse-Z, GreaterOrEqual), the Ldr one draws on top.
 		static GraphicsPipelineSpecification MakeQuadSpecification(PipelineLayoutDescription layout, QuadBatchTarget target,
 			const std::vector<nvrhi::BindingLayoutHandle>& sharedLayouts)
 		{
@@ -116,7 +120,18 @@ namespace Engine {
 			specification.SharedBindingLayouts = sharedLayouts;
 			specification.VertexAttributes = MakeQuadVertexAttributes();
 			specification.Primitive = nvrhi::PrimitiveType::TriangleList;
-			if (target != QuadBatchTarget::Normals)
+			if (target == QuadBatchTarget::HdrAdditive)
+			{
+				nvrhi::BlendState::RenderTarget& blend = specification.RenderState.blendState.targets[0];
+				blend.enableBlend()
+					.setSrcBlend(nvrhi::BlendFactor::SrcAlpha)
+					.setDestBlend(nvrhi::BlendFactor::One)
+					.setBlendOp(nvrhi::BlendOp::Add)
+					.setSrcBlendAlpha(nvrhi::BlendFactor::Zero)
+					.setDestBlendAlpha(nvrhi::BlendFactor::One)
+					.setBlendOpAlpha(nvrhi::BlendOp::Add);
+			}
+			else if (target != QuadBatchTarget::Normals)
 			{
 				nvrhi::BlendState::RenderTarget& blend = specification.RenderState.blendState.targets[0];
 				blend.enableBlend()
@@ -319,8 +334,8 @@ namespace Engine {
 		State& state = *batcher->m_State;
 		state.Device = &device;
 		std::vector<PipelineLayoutDescription> descriptions = Utils::MakeQuadDescriptions();
-		// Hdr, Ldr and LdrDepth share one binding layout, so one binding set per texture and sampler serves them; HdrLit and
-		// Normals share the lit one.
+		// Hdr, Ldr, LdrDepth and HdrAdditive share one binding layout, so one binding set per texture and sampler serves them;
+		// HdrLit and Normals share the lit one.
 		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> sharedLayouts,
 			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadHdrPipeline]), "while creating the quad pipelines"));
 		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> litLayouts,
@@ -384,9 +399,10 @@ namespace Engine {
 		switch (target)
 		{
 			case QuadBatchTarget::Hdr:
-			case QuadBatchTarget::HdrLit:  return GetSceneColorFramebufferInfo();
-			case QuadBatchTarget::Ldr:     return GetOverlayFramebufferInfo();
-			case QuadBatchTarget::Normals: return GetLights2DNormalsFramebufferInfo();
+			case QuadBatchTarget::HdrLit:
+			case QuadBatchTarget::HdrAdditive: return GetSceneColorFramebufferInfo();
+			case QuadBatchTarget::Ldr:         return GetOverlayFramebufferInfo();
+			case QuadBatchTarget::Normals:     return GetLights2DNormalsFramebufferInfo();
 			// LdrDepth draws into Ldr's target, the scene overlay's framebuffer with SceneDepth.
 			case QuadBatchTarget::LdrDepth: return GetOverlayFramebufferInfo();
 		}

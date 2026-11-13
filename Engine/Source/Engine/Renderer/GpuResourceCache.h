@@ -168,8 +168,8 @@ namespace Engine {
 		size_t MaterialCount = 0;
 		size_t EnvironmentCount = 0;
 		// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decisions 15, 16 and 22): the live mirrors of M26's types, so the
-		// cache tests can show CollectStale, TrimUnused and a scene unload releasing them; each is 0 until its Get's stream
-		// (Q-B, X-B, T-C) keeps mirrors and counts them in GetStats.
+		// cache tests can show CollectStale, TrimUnused and a scene unload releasing them. HeightfieldCount stays 0 until
+		// stream T-C (W26.2) keeps heightfield mirrors.
 		size_t IrradianceVolumeCount = 0;
 		size_t LutCount = 0;
 		size_t HeightfieldCount = 0;
@@ -243,17 +243,17 @@ namespace Engine {
 		// fails grades nothing, a heightfield that fails draws no terrain) or uploaded, each failure reported once per (handle,
 		// version) through AssetManager::ReportDiagnostic with GetOrPlaceholder's codes. The pointer stays valid until the next
 		// call that uploads, CollectStale, Clear, ReleaseGpuObjects or TrimUnused, which release these mirrors with the others
-		// (the placement rule's place 3, so a device loss drops them and the next Get uploads them again). GetIrradianceVolume
-		// is stream Q-B's, GetLut stream X-B's and GetHeightfield stream T-C's; until then each returns nullptr.
+		// (the placement rule's place 3, so a device loss drops them and the next Get uploads them again). GetHeightfield is
+		// stream T-C's (W26.2) and returns nullptr until it lands.
 		[[nodiscard]] const GpuIrradianceVolume* GetIrradianceVolume(AssetHandle handle);
 		[[nodiscard]] const GpuLut* GetLut(AssetHandle handle);
 		[[nodiscard]] const GpuHeightfield* GetHeightfield(AssetHandle handle);
 
-		// Releases mirrors (meshes, textures, materials, environments) whose version is older than their asset's current
-		// version, and those not used through Get since the previous CollectStale when `releaseUnused` is true (scene unload:
-		// "GpuResourceCache: live counts return to baseline after unloading a scene", M8). Every host that renders calls it
-		// once per frame, and with `releaseUnused` after the first frame of a newly opened scene (SceneRenderer.h, "Stale
-		// mirrors").
+		// Releases mirrors (meshes, textures, materials, environments, irradiance volumes, LUTs) whose version is older than
+		// their asset's current version, and those not used through Get since the previous CollectStale when `releaseUnused`
+		// is true (scene unload: "GpuResourceCache: live counts return to baseline after unloading a scene", M8). Every host
+		// that renders calls it once per frame, and with `releaseUnused` after the first frame of a newly opened scene
+		// (SceneRenderer.h, "Stale mirrors").
 		void CollectStale(bool releaseUnused = false);
 
 		// Releases every mirror, placeholders included.

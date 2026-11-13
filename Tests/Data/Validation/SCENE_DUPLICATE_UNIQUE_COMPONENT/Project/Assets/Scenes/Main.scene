@@ -7,7 +7,7 @@
 		"Transform": 1,
 		"Camera": 1,
 		"DirectionalLight": 1,
-		"PostProcess": 1,
+		"PostProcess": 2,
 		"AudioListener": 1
 	},
 	"Entities": [

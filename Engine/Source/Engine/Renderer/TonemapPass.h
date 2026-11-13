@@ -16,10 +16,16 @@
 // LdrColor (RGBA8_UNORM, display-encoded values):
 //   1. bloom (§8.3 pass 10): lerp(radiance, bloom, BloomIntensity) with the bloom chain's mip 0 sampled bilinearly at full
 //      resolution, when TonemapPassInputs::Bloom is set;
-//   2. exposure: times ViewConstants::Exposure (2^ExposureEV);
+//   2. exposure: times ViewConstants::Exposure (2^ExposureEV), and with TonemapPassInputs::AdaptedExposure (M26) also times
+//      the Exposure pass's adapted exposure (ExposureState::Multiplier, Renderer/ExposurePass.h), ExposureEV then being the
+//      compensation;
 //   3. the tonemapper, on c = max(exposed radiance, 0) per channel, giving display-linear values in [0, 1] (the formulas
 //      below, which Common/Tonemapping.slang and Tests/Source/Support/RenderReference.h both implement from this text; the
-//      GPU test "TonemapPass: every tonemapper matches its CPU reference at 1,024 points" compares them);
+//      GPU test "TonemapPass: every tonemapper matches its CPU reference at 1,024 points" compares them); then, M26
+//      (Docs/Decisions/0037-m26-contract.md decision 15), the grading LUT when TonemapPassInputs::Lut is set
+//      (TonemapFlagLut): the display-linear value encoded with the sRGB OETF addresses the 3D table (TonemapConstants'
+//      LutScale and LutOffset fold its domain and texel centres; outside the domain it clamps), sampled trilinearly from t9,
+//      its output decoded with the sRGB EOTF and blended with the ungraded value by LutIntensity;
 //   4. the sRGB OETF in the shader (Common/Color.slang), unless EncodeSrgb is false (the data debug views);
 //   5. blue-noise triangular dither of +-1 LSB before the 8-bit quantization (no sky banding), from the 64x64 R8 blue-noise
 //      texture tiled over the image by pixel coordinate (no temporal variation, §8.3), when Dither is set and BlueNoise is

@@ -2,9 +2,11 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Core/UUID.h"
 
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 // The Particles frame phase's system (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decisions 5 and 6; ADR 0028's
 // phase-3 ledger: the presentation phase PlaySessionPhase::Particles, after AudioUpdate and before RenderExtraction).
@@ -29,7 +31,7 @@
 // Scripts reach the emitters through QueueParticleEmit and ClearParticles (ParticleEmitter:Emit and Clear), whose effects
 // show at the next Particles phase; Test.GetParticleDigest reads FindParticleDigest. Main thread only (the ECS, §4.11).
 //
-// Frozen by the M26 contract C26.1; stream P-A implements it.
+// Frozen by the M26 contract C26.1; implemented by stream P-A.
 
 namespace Engine {
 
@@ -45,7 +47,7 @@ namespace Engine {
 	// What the last Step did (for the session's stats and the tests).
 	struct ParticleSystemStats
 	{
-		uint32_t Emitters = 0;  // emitters stepped
+		uint32_t Emitters = 0;  // emitters stepped: the effectively enabled emitters the phase visited, whether a tick passed or not
 		uint32_t Particles = 0; // live particles after the step
 		uint32_t Steps = 0;     // emitter steps taken (emitters times ticks)
 		uint32_t Capped = 0;    // emits dropped at MaxParticles during the step
@@ -65,6 +67,7 @@ namespace Engine {
 	private:
 		float m_FixedDelta = 0.0f;
 		ParticleSystemStats m_Stats{};
+		std::vector<UUID> m_Emitters{}; // the step's emitters in canonical order, kept to reuse its capacity
 	};
 
 	// ParticleEmitter:Emit: queues `count` particles (1 to MaxParticlesPerEmitter) for the emitter's next Particles phase,

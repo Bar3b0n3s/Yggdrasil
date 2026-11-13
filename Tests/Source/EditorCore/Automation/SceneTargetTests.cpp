@@ -59,6 +59,8 @@ namespace Engine {
 				{ "entity.get", SceneRelation::Target },
 				{ "entity.reparent", SceneRelation::Target },
 				{ "entity.update", SceneRelation::Target },
+				// M26: bakes the target scene's probes (Docs/Decisions/0037-m26-contract.md decision 8).
+				{ "lighting.bake", SceneRelation::Target },
 				// M19's native component reads and writes (Docs/Decisions/0031-m20-contract.md, "Merge with M19").
 				{ "native.getComponents", SceneRelation::Target },
 				{ "native.setComponents", SceneRelation::Target },
@@ -78,6 +80,7 @@ namespace Engine {
 				{ "scene.tree", SceneRelation::Target },
 				{ "script.errors", SceneRelation::Target },   // entity paths are read from the addressed scene
 				{ "script.eval", SceneRelation::Target },     // context "edit" evaluates over the addressed scene
+				{ "terrain.edit", SceneRelation::Target },    // M26: the addressed scene's Terrain (Docs/Decisions/0037-m26-contract.md decision 23)
 				{ "ui.tree", SceneRelation::Target },         // M22: the addressed scene's UI (Docs/Decisions/0033-m22-contract.md decision 8)
 				{ "ui.createWidget", SceneRelation::Target }, // M22 C22.2: builds in the addressed scene (decision 32)
 				{ "viewport.screenshot", SceneRelation::Target },
@@ -151,6 +154,7 @@ namespace Engine {
 				{ "session.hello", SceneRelation::None },
 				{ "shaders.reload", SceneRelation::None }, // M18: the scene renderer's pipelines
 				{ "stats.get", SceneRelation::None },
+				{ "terrain.importHeightmap", SceneRelation::None }, // M26: a Heightfield asset's source (ADR 0037 decision 20)
 				{ "test.list", SceneRelation::None },
 				{ "tilemap.paint", SceneRelation::None }, // M21: a Tilemap asset's cells (ADR 0032 decision 26)
 				{ "viewport.camera", SceneRelation::None },

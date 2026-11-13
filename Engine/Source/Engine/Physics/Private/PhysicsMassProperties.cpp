@@ -69,8 +69,8 @@ namespace Engine {
 				return MakeError(ErrorCode::Validation, "{}: a Dynamic body needs at least one degree of freedom", PhysicsAllDofsLockedCode);
 			if (hasMesh)
 			{
-				return MakeError(ErrorCode::Validation, "{}: a Dynamic body cannot use a triangle mesh; use a convex hull or a Kinematic body",
-					PhysicsNonconvexDynamicCode);
+				return MakeError(ErrorCode::Validation,
+					"{}: a Dynamic body cannot use a triangle mesh or a height field; use a convex hull or a Kinematic body", PhysicsNonconvexDynamicCode);
 			}
 			if (!std::isfinite(mass) || mass <= 0.0f || mass > MaxPhysicsMass)
 				return MakeError(ErrorCode::InvalidArgument, "a Dynamic body's Mass must be above 0 and at most {} kg (got {})", MaxPhysicsMass, mass);

@@ -50,7 +50,8 @@ namespace Engine {
 	namespace Automation {
 
 		// lighting.bake: BakeLighting on the target scene. Errors: those of BakeLighting (InvalidState for an unsaved scene, the
-		// play scene or an editor without a renderer, with their hints; Gpu, Io and ImportFailed from the bake).
+		// play scene or an editor without a renderer, with their hints; Validation for a probe out of its ranges, before anything
+		// renders; Gpu, Io and ImportFailed from the bake).
 		[[nodiscard]] Result<LightingBakeMethodResult> LightingBakeMethod(EditorMethodContext& context, const LightingBakeParams& params);
 
 	}

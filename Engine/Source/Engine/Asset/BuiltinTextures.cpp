@@ -71,6 +71,12 @@ namespace Engine {
 		constexpr Texel SpriteBevelShaded = { 128, 128, 128, 255 };
 		constexpr Texel SpriteBevelFace = { 204, 204, 204, 255 };
 
+		// The particle texture (M26, BuiltinTexture::Particle): its side, and the denominator of its squared distance in doubled
+		// texel coordinates ((2 * ParticleSize / 2)^2: a texel centre on the disc's rim has (2x + 1 - 32)^2 + (2y + 1 - 32)^2 =
+		// 1024).
+		constexpr uint32_t ParticleSize = 32;
+		constexpr int64_t ParticleRimSquared = static_cast<int64_t>(ParticleSize) * ParticleSize;
+
 	}
 
 	namespace Utils {
@@ -247,6 +253,23 @@ namespace Engine {
 			return SpriteOpaque;
 		}
 
+		// The alpha of the particle texture's texel (x, y) (BuiltinTexture::Particle's comment): round(255 (1 - d^2)^2) inside the
+		// disc and 0 outside it, with d^2 = s / 1024 and s = (2x + 1 - 32)^2 + (2y + 1 - 32)^2, so the value is
+		// round(255 (1024 - s)^2 / 2^20): integer arithmetic, rounded half up (no value lies halfway: 255 (1024 - s)^2 is a
+		// square times an odd number, never an odd multiple of 2^19).
+		static uint8_t GetParticleAlpha(uint32_t x, uint32_t y)
+		{
+			const int64_t dx = static_cast<int64_t>(2 * x + 1) - static_cast<int64_t>(ParticleSize);
+			const int64_t dy = static_cast<int64_t>(2 * y + 1) - static_cast<int64_t>(ParticleSize);
+			const int64_t squared = dx * dx + dy * dy;
+			if (squared >= ParticleRimSquared)
+				return 0;
+			const int64_t inside = ParticleRimSquared - squared;
+			const int64_t numerator = 255 * inside * inside;
+			const int64_t denominator = ParticleRimSquared * ParticleRimSquared;
+			return static_cast<uint8_t>((2 * numerator + denominator) / (2 * denominator));
+		}
+
 		[[maybe_unused]] static bool IsSpriteTexture(BuiltinTexture texture)
 		{
 			return texture == BuiltinTexture::SpriteSquare || texture == BuiltinTexture::SpriteRounded || texture == BuiltinTexture::SpriteBevel
@@ -315,8 +338,21 @@ namespace Engine {
 
 	TextureData GenerateBuiltinParticleTexture()
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		TextureData generated;
+		generated.Format = TextureFormat::RGBA8Srgb;
+		generated.Width = ParticleSize;
+		generated.Height = ParticleSize;
+		std::vector<Texel> texels;
+		texels.reserve(static_cast<size_t>(ParticleSize) * ParticleSize);
+		for (uint32_t y = 0; y < ParticleSize; ++y)
+		{
+			// White everywhere, so a linear sampler blends no dark fringe into the soft edge.
+			for (uint32_t x = 0; x < ParticleSize; ++x)
+				texels.push_back(Texel{ .R = 255, .G = 255, .B = 255, .A = Utils::GetParticleAlpha(x, y) });
+		}
+		// One level, as the sprite textures: the particles' quads sample without mips.
+		Utils::AppendLevel(generated, ParticleSize, ParticleSize, texels);
+		return generated;
 	}
 
 	TextureData GenerateBuiltinTexture(BuiltinTexture texture)

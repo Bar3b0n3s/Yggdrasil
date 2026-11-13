@@ -2,7 +2,9 @@
 #include "Engine/Scene/PhysicsComposition.h"
 
 #include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TerrainGeometry.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
@@ -14,6 +16,8 @@
 #include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/TerrainColliderComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
@@ -95,6 +99,10 @@ namespace Engine {
 				colliders.push_back(PhysicsColliderPlan{ .Entity = id, .Type = PhysicsColliderType::Capsule, .IsTrigger = capsule->IsTrigger });
 			if (const MeshColliderComponent* mesh = entity.TryGetComponent<MeshColliderComponent>())
 				colliders.push_back(PhysicsColliderPlan{ .Entity = id, .Type = PhysicsColliderType::Mesh, .IsTrigger = mesh->IsTrigger });
+			// M26 (decision 21): a TerrainCollider is solid, and makes nothing while its Terrain has no Heightfield.
+			const TerrainComponent* terrain = entity.TryGetComponent<TerrainComponent>();
+			if (entity.HasComponent<TerrainColliderComponent>() && terrain != nullptr && terrain->Heightfield.IsValid())
+				colliders.push_back(PhysicsColliderPlan{ .Entity = id, .Type = PhysicsColliderType::Terrain, .IsTrigger = false });
 		}
 
 		// "'Name' (<uuid>)", how diagnostics name an entity.
@@ -191,9 +199,19 @@ namespace Engine {
 
 			for (const PhysicsColliderPlan& collider : plan.Colliders)
 			{
+				const ConstEntity entity = scene.FindEntityByID(collider.Entity);
+				if (collider.Type == PhysicsColliderType::Terrain)
+				{
+					// M26 (decision 21): a height field is never convex.
+					diagnostics.push_back(MakeDiagnostic(PhysicsNonconvexDynamicCode, DiagnosticSeverity::Error, collider.Entity, "TerrainCollider", "",
+						std::format("the TerrainCollider of {} is a height field, which the Dynamic body of {} cannot use; the body is not created",
+							DescribeEntity(entity), DescribeEntity(owner)),
+						"make the RigidBody Static or Kinematic, or move the terrain out from under the Dynamic body"));
+					plan.IsCreatable = false;
+					continue;
+				}
 				if (collider.Type != PhysicsColliderType::Mesh)
 					continue;
-				const ConstEntity entity = scene.FindEntityByID(collider.Entity);
 				if (entity.GetComponent<MeshColliderComponent>().Convex)
 					continue;
 				diagnostics.push_back(MakeDiagnostic(PhysicsNonconvexDynamicCode, DiagnosticSeverity::Error, collider.Entity, "MeshCollider", "Convex",
@@ -331,7 +349,8 @@ namespace Engine {
 			return decomposed;
 		}
 
-		// The collider's frame within the entity: its Offset, then its Rotation (spheres have none; meshes are in entity space).
+		// The collider's frame within the entity: its Offset, then its Rotation (spheres have none; meshes and terrains are in
+		// entity space).
 		static glm::mat4 GetColliderLocalMatrix(ConstEntity entity, PhysicsColliderType type)
 		{
 			glm::vec3 offset(0.0f);
@@ -356,6 +375,7 @@ namespace Engine {
 					break;
 				}
 				case PhysicsColliderType::Mesh:
+				case PhysicsColliderType::Terrain:
 					break;
 			}
 			glm::mat4 matrix = glm::mat4_cast(rotation);
@@ -390,6 +410,49 @@ namespace Engine {
 			if (convex)
 				return ConvexHullShapeGeometry{ .Points = GetMeshPositions(mesh) };
 			return MeshShapeGeometry{ .Vertices = GetMeshPositions(mesh), .Indices = mesh.Indices };
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 21): the height field of `entity`'s TerrainCollider, from its
+		// Terrain's Heightfield laid out by Asset/TerrainGeometry.h, the rule the drawing and the queries share: each sample's
+		// local height (GetTerrainSamplePosition) and cells of Size / (Resolution - 1). PHYSICS_INVALID_SHAPE located at the
+		// entity without an asset manager or when the heightfield does not load as one; the composition makes no terrain
+		// collider without a Heightfield.
+		static Result<HeightFieldShapeGeometry> MakeTerrainGeometry(ConstEntity entity, AssetManager* assets)
+		{
+			const TerrainComponent& terrain = entity.GetComponent<TerrainComponent>();
+			const AssetHandle handle = terrain.Heightfield.GetHandle();
+			if (assets == nullptr)
+			{
+				return MakeShapeError(entity.GetUUID(),
+					std::format("the TerrainCollider of {} cannot load its Terrain's heightfield {} without an asset manager", DescribeEntity(entity), handle));
+			}
+			const Result<AssetRef<Asset>> loaded = assets->Load(handle);
+			if (!loaded)
+			{
+				return MakeShapeError(entity.GetUUID(),
+					std::format("the TerrainCollider of {} has no height field: its Terrain's heightfield {} does not load: {}", DescribeEntity(entity),
+						assets->GetReferencePath(handle), loaded.error().GetMessageText()));
+			}
+			const AssetRef<HeightfieldData> heightfield = AssetCast<HeightfieldData>(*loaded);
+			if (heightfield == nullptr || !ValidateHeightfieldData(*heightfield).has_value())
+			{
+				return MakeShapeError(entity.GetUUID(),
+					std::format("the TerrainCollider of {} has no height field: its Terrain's heightfield {} is not a heightfield", DescribeEntity(entity),
+						assets->GetReferencePath(handle)));
+			}
+
+			const TerrainExtent extent{ .Size = terrain.Size, .HeightScale = terrain.HeightScale };
+			const uint32_t resolution = heightfield->Resolution;
+			HeightFieldShapeGeometry field;
+			field.SampleCount = resolution;
+			field.CellSize = terrain.Size / static_cast<float>(resolution - 1);
+			field.Heights.reserve(static_cast<size_t>(resolution) * resolution);
+			for (uint32_t z = 0; z < resolution; ++z)
+			{
+				for (uint32_t x = 0; x < resolution; ++x)
+					field.Heights.push_back(GetTerrainSamplePosition(*heightfield, extent, x, z).y);
+			}
+			return field;
 		}
 
 	}
@@ -531,6 +594,12 @@ namespace Engine {
 						plan.Origin = PhysicsBodyOrigin::ImplicitStatic;
 						plan.MotionType = PhysicsMotionType::Static;
 						plan.Layer = 0;
+						// M26 (decision 21): the body its own TerrainCollider is in takes that collider's layer.
+						if (Utils::HoldsOwnTerrainCollider(colliders, id))
+						{
+							plan.Layer = Utils::ResolveLayer(layers, entity, "TerrainCollider", entity.GetComponent<TerrainColliderComponent>().Layer,
+								composition.Diagnostics);
+						}
 						solidPlans.emplace(id, composition.Bodies.size());
 						composition.Bodies.push_back(std::move(plan));
 					}
@@ -666,6 +735,14 @@ namespace Engine {
 					{
 						shape.Geometry = Utils::MakeMeshGeometry(*assets->GetOrPlaceholder<MeshData>(mesh), convex);
 					}
+					break;
+				}
+				case PhysicsColliderType::Terrain:
+				{
+					Result<HeightFieldShapeGeometry> field = Utils::MakeTerrainGeometry(entity, assets);
+					if (!field)
+						return std::unexpected(std::move(field).error());
+					shape.Geometry = std::move(*field);
 					break;
 				}
 			}

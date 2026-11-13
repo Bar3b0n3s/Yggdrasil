@@ -19,9 +19,10 @@ namespace Engine {
 	// have no layer, friction and restitution live on the body) and ADR 0014 decision 10 (implicit bodies take the nearest
 	// ancestor RigidBody's layer, else layer 0), recorded in Docs/Decisions/0037-m26-contract.md decision 21: a terrain is
 	// nearly always a root-level static body of its own whose layer (a ground layer) and material matter, and without these
-	// fields every terrain would need a Static RigidBody only to carry them. Its body is a body of the physics block of the
-	// state hash like any other (its body origin appended last, so existing scenes' entries are unchanged, ADR 0028's
-	// phase-3 ledger); a scene without a TerrainCollider makes no such body and hashes as before.
+	// fields every terrain would need a Static RigidBody only to carry them. Its body is an ordinary implicit-static or rigid
+	// body of the physics block of the state hash, with no body origin of its own (none is added to the origins'
+	// enumeration), so existing scenes' entries and every existing hash are unchanged; a scene without a TerrainCollider
+	// makes no such body and hashes as before.
 	struct TerrainColliderComponent
 	{
 		std::string Layer = "Default"; // a project physics layer (PhysicsSettings.Layers)

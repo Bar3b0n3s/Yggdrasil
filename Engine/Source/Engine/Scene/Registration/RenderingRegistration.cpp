@@ -8,6 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <optional>
 #include <utility>
 
 // The Rendering category (Docs/Decisions/0006-m3-decisions.md, decision 9): mesh drawing, cameras, lights, the scene's
@@ -27,8 +28,17 @@ namespace Engine {
 		// The largest spot cone angle, measured from the light's axis (a half angle), in degrees: below 90, so the cone
 		// stays a cone and its shadow frustum (§8.7) a valid perspective projection.
 		constexpr double MaxSpotConeAngle = 89.0;
-		// The exposure compensation range of PostProcess, in EV (stops): 2^EV stays far inside the float range.
+		// The exposure compensation range of PostProcess, in EV (stops): 2^EV stays far inside the float range. M26: also the
+		// range of the adapted exposure's bounds (AutoExposureMinEV and AutoExposureMaxEV).
 		constexpr double MaxExposureEV = 16.0;
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 27): the automatic exposure's adaptation speeds, in EV per second.
+		constexpr float MinExposureSpeed = 0.01f;
+		constexpr double MaxExposureSpeed = 100.0;
+		// M26: the screen-space reflections' ray length and assumed surface thickness, in metres.
+		constexpr float MinSsrMaxDistance = 0.1f;
+		constexpr double MaxSsrMaxDistance = 1000.0;
+		constexpr float MinSsrThickness = 0.001f;
+		constexpr double MaxSsrThickness = 10.0;
 		// The smallest SSAO radius, in metres.
 		constexpr float MinSsaoRadius = 0.01f;
 		// The text size range, in pixels per em at the 1080p reference height: the largest is about 93 screen heights per em on
@@ -94,6 +104,47 @@ namespace Engine {
 			return {};
 		}
 
+		// Automatic exposure adapts within [AutoExposureMinEV, AutoExposureMaxEV] (Renderer/AutoExposure.h), so the range is not
+		// inverted (equal bounds fix the adapted exposure).
+		static void ValidatePostProcess(const PostProcessComponent& post, ValidationContext& context)
+		{
+			if (post.AutoExposureMaxEV < post.AutoExposureMinEV)
+				context.Error("AutoExposureMaxEV", "must not be less than AutoExposureMinEV");
+		}
+
+		static void MakePostProcessValid(PostProcessComponent& post, Random& /*random*/)
+		{
+			if (post.AutoExposureMaxEV < post.AutoExposureMinEV)
+				std::swap(post.AutoExposureMinEV, post.AutoExposureMaxEV);
+		}
+
+		// The PostProcess component from version 1 to 2 (M26, R-AEX, R-LUT, R-TAA, R-SSR; Docs/Decisions/0037-m26-contract.md
+		// decision 12): FxaaEnabled becomes AntiAliasing in its place, "Fxaa" for true and "None" for false, and every other
+		// member is kept; the members version 2 adds (the exposure mode and range, the LUT, SSR) are left to their defaults,
+		// which render as version 1 did. A component without FxaaEnabled keeps every member (its AntiAliasing then takes its
+		// default, Fxaa, as version 1's absent FxaaEnabled took true). Migrations.cpp's follow-up migrates the component's prefab
+		// overrides through this function too. Errors: Validation (located within the component) for a component that is not
+		// an object or a FxaaEnabled that is not a boolean.
+		static Status MigratePostProcessV1(Json& component)
+		{
+			const JsonReader reader(component);
+			ENGINE_TRY(reader.ExpectType(JsonType::Object));
+			const std::optional<JsonReader> fxaa = reader.FindMember("FxaaEnabled");
+			if (!fxaa)
+				return {};
+			ENGINE_TRY_ASSIGN(const bool enabled, fxaa->ReadBool());
+			Json migrated = Json::object();
+			for (auto member = component.begin(); member != component.end(); ++member)
+			{
+				if (member.key() == "FxaaEnabled")
+					migrated["AntiAliasing"] = enabled ? "Fxaa" : "None";
+				else
+					migrated[member.key()] = *member;
+			}
+			component = std::move(migrated);
+			return {};
+		}
+
 	}
 
 	void RegisterRenderingComponents(TypeRegistry& registry)
@@ -116,6 +167,17 @@ namespace Engine {
 			.Entry(SsaoQuality::Low, "Low", "Fewest samples: fastest, noisiest.")
 			.Entry(SsaoQuality::Medium, "Medium", "Balanced sample count (the default).")
 			.Entry(SsaoQuality::High, "High", "Most samples: smoothest, slowest.");
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decisions 12 and 27): PostProcess version 2's enums.
+		registry.Enum<ExposureMode>("ExposureMode", "How the image is exposed.")
+			.Entry(ExposureMode::Manual, "Manual", "The image is multiplied by 2^ExposureEV.")
+			.Entry(ExposureMode::Auto, "Auto",
+				"A histogram of the image's luminance adapts the exposure towards middle grey, ExposureEV added as compensation.");
+
+		registry.Enum<AntiAliasing>("AntiAliasing", "How edges are anti-aliased.")
+			.Entry(AntiAliasing::None, "None", "No anti-aliasing.")
+			.Entry(AntiAliasing::Fxaa, "Fxaa", "FXAA on the final image (the default).")
+			.Entry(AntiAliasing::Taa, "Taa", "Temporal anti-aliasing: the jittered image resolved against its history (off in pixel-art mode).");
 
 		registry.Enum<TextSpace>("TextSpace", "Where a text element is placed.")
 			.Entry(TextSpace::Screen, "Screen", "On the screen, positioned by Anchor, Pivot and Offset.")
@@ -219,13 +281,31 @@ namespace Engine {
 				"The linear ambient colour used when no environment map is assigned.", Utils::ColorRange());
 
 		RegisterComponent<PostProcessComponent>(registry, "PostProcess",
-			"The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).")
+			"The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing "
+			"(one per scene).")
 			.Category("Rendering")
-			.Version(1)
+			.Version(2)
+			.Migration(1, &Utils::MigratePostProcessV1)
 			.Flags(ComponentFlags::UniquePerScene)
 			.Field("ExposureEV", &PostProcessComponent::ExposureEV, "The exposure compensation in stops: the image is multiplied by 2^EV.",
 				{ .Min = -Utils::MaxExposureEV, .Max = Utils::MaxExposureEV, .Unit = "EV" })
+			.Field("ExposureMode", &PostProcessComponent::ExposureMode, "Manual exposure, or automatic exposure from the image's luminance histogram.")
+			.Field("AutoExposureMinEV", &PostProcessComponent::AutoExposureMinEV,
+				"The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+				{ .Min = -Utils::MaxExposureEV, .Max = Utils::MaxExposureEV, .Unit = "EV" })
+			.Field("AutoExposureMaxEV", &PostProcessComponent::AutoExposureMaxEV,
+				"The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+				{ .Min = -Utils::MaxExposureEV, .Max = Utils::MaxExposureEV, .Unit = "EV" })
+			.Field("AutoExposureSpeedUp", &PostProcessComponent::AutoExposureSpeedUp,
+				"How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+				{ .Min = Utils::MinExposureSpeed, .Max = Utils::MaxExposureSpeed, .Unit = "EV/s" })
+			.Field("AutoExposureSpeedDown", &PostProcessComponent::AutoExposureSpeedDown,
+				"How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+				{ .Min = Utils::MinExposureSpeed, .Max = Utils::MaxExposureSpeed, .Unit = "EV/s" })
 			.Field("Tonemap", &PostProcessComponent::Tonemap, "The tone mapping curve.")
+			.Field("Lut", &PostProcessComponent::Lut, "The colour-grading LUT applied after the tone mapping curve; null grades nothing.")
+			.Field("LutIntensity", &PostProcessComponent::LutIntensity, "How much of the graded colour replaces the ungraded one, from 0 to 1.",
+				{ .Min = 0.0, .Max = 1.0 })
 			.Field("SsaoEnabled", &PostProcessComponent::SsaoEnabled,
 				"Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the "
 				"Environment's FallbackColor ambient without a map), never direct lights.")
@@ -236,10 +316,22 @@ namespace Engine {
 			.Field("SsaoIntensity", &PostProcessComponent::SsaoIntensity,
 				"The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights.", { .Min = 0.0 })
 			.Field("SsaoQuality", &PostProcessComponent::SsaoQuality, "The ambient occlusion sample count.")
+			.Field("SsrEnabled", &PostProcessComponent::SsrEnabled,
+				"Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses.")
+			.Field("SsrIntensity", &PostProcessComponent::SsrIntensity, "How strongly screen-space reflections replace the probes' reflection, from 0 to 1.",
+				{ .Min = 0.0, .Max = 1.0 })
+			.Field("SsrMaxDistance", &PostProcessComponent::SsrMaxDistance, "How far a reflected ray travels, in metres.",
+				{ .Min = Utils::MinSsrMaxDistance, .Max = Utils::MaxSsrMaxDistance, .Unit = "m" })
+			.Field("SsrThickness", &PostProcessComponent::SsrThickness, "How thick a surface is assumed behind its depth when a ray passes it, in metres.",
+				{ .Min = Utils::MinSsrThickness, .Max = Utils::MaxSsrThickness, .Unit = "m" })
+			.Field("SsrMaxRoughness", &PostProcessComponent::SsrMaxRoughness, "The perceptual roughness above which only the probes reflect.",
+				{ .Min = 0.0, .Max = 1.0 })
 			.Field("BloomEnabled", &PostProcessComponent::BloomEnabled, "Whether bright areas bloom.")
 			.Field("BloomIntensity", &PostProcessComponent::BloomIntensity, "How much of the bloom is blended into the image.",
 				{ .Min = 0.0, .Max = 1.0 })
-			.Field("FxaaEnabled", &PostProcessComponent::FxaaEnabled, "Whether FXAA anti-aliasing is applied.");
+			.Field("AntiAliasing", &PostProcessComponent::AntiAliasing, "How edges are anti-aliased: none, FXAA (the default) or TAA.")
+			.Validate(&Utils::ValidatePostProcess)
+			.Generate(&Utils::MakePostProcessValid);
 
 		RegisterComponent<TextComponent>(registry, "Text", "Draws a text string on the screen or in the world.")
 			.Category("Rendering")

@@ -5,8 +5,11 @@ export type AlphaMode = "Opaque" | "Mask" | "Blend"
 -- What an Animator does with its skeleton's root motion.
 export type AnimatorRootMotion = "None" | "Apply" | "Extract"
 
+-- How edges are anti-aliased.
+export type AntiAliasing = "None" | "Fxaa" | "Taa"
+
 -- What asset.create makes.
-export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet" | "Tilemap" | "StringTable"
+export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | "Folder" | "SpriteSheet" | "Tilemap" | "StringTable" | "Heightfield"
 
 -- Where an asset is in its life (§7.2).
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
@@ -55,6 +58,9 @@ export type ExportPhase = "Validate" | "Cook" | "WritePaks" | "NativeBuild" | "C
 
 -- Why an export put an asset into its paks (the first reason its walk found).
 export type ExportReachReason = "StartScene" | "BuildScene" | "Testing" | "Dependency" | "LiteralLoad" | "Required" | "ComputedLoad"
+
+-- How the image is exposed.
+export type ExposureMode = "Manual" | "Auto"
 
 -- The underlying reflected value kind.
 export type FieldType = "Bool" | "Int32" | "UInt32" | "Float" | "Vec2" | "Vec3" | "Vec4" | "Quat" | "Color3" | "Color4" | "Bool3" | "String" | "EntityRef" | "AssetRef" | "Enum" | "Array" | "Struct" | "Map" | "Variant"
@@ -166,6 +172,9 @@ export type Space = "Local" | "World"
 
 -- The sample count of screen-space ambient occlusion (GTAO).
 export type SsaoQuality = "Low" | "Medium" | "High"
+
+-- What a terrain stroke does.
+export type TerrainTool = "Raise" | "Lower" | "Smooth" | "Flatten" | "Paint"
 
 -- How much state the cases of a test suite share.
 export type TestIsolation = "Suite" | "Case"
@@ -814,6 +823,8 @@ declare extern type ParticleEmitter with
 	BoxHalfExtents: vector
 	-- Particles emitted at once at the start of each cycle, at most MaxParticles. [All modes; Runtime|Test; pure/read; setter mutates]
 	Burst: number
+	-- Kill every live particle and drop the queued emits; the emission cycle and the random stream go on. [All modes; Runtime|Test; mutates]
+	Clear: (self: ParticleEmitter) -> ()
 	-- At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque. [All modes; Runtime|Test; pure/read; setter mutates]
 	ColorOverLife: {{Time: number, Color: Color}}
 	-- The Cone shape's half angle from the local -Z axis, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -822,6 +833,10 @@ declare extern type ParticleEmitter with
 	Drag: number
 	-- The length of one emission cycle, in seconds; Burst is emitted at each cycle's start. [All modes; Runtime|Test; pure/read; setter mutates]
 	Duration: number
+	-- Queue count particles (1 to 4096) for the next Particles phase, whether the emitter is Playing, looping or finished; an emitter without particles yet starts at that phase. A count outside its range raises an error. Particles are presentation, so the simulated state does not change. [All modes; Runtime|Test; mutates]
+	Emit: (self: ParticleEmitter, count: number) -> ()
+	-- Read the live particles after the last Particles phase (0 before the first). Particles are presentation state the frame phase advances, so the count depends on frame pacing: it raises an error in a fixed-step callback (OnFixedUpdate, a task, a physics, animation or UI event) and is read in OnUpdate, OnLateUpdate or a test case; never let it drive gameplay. [All modes; Runtime|Test; pure/read]
+	GetParticleCount: (self: ParticleEmitter) -> number
 	-- The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum). [All modes; Runtime|Test; pure/read; setter mutates]
 	Lifetime: vector
 	-- Whether emission repeats every Duration seconds; otherwise it stops after one cycle. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -888,16 +903,30 @@ declare extern type PolygonCollider2D with
 	Points: {vector}
 end
 
--- The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).
+-- The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).
 declare extern type PostProcess with
+	-- How edges are anti-aliased: none, FXAA (the default) or TAA. [All modes; Runtime|Test; pure/read; setter mutates]
+	AntiAliasing: AntiAliasing
+	-- The darkest and brightest exposure automatic exposure may adapt to, in stops. [All modes; Runtime|Test; pure/read; setter mutates]
+	AutoExposureMaxEV: number
+	-- The darkest and brightest exposure automatic exposure may adapt to, in stops. [All modes; Runtime|Test; pure/read; setter mutates]
+	AutoExposureMinEV: number
+	-- How many stops per second automatic exposure adapts towards a brighter or a darker exposure. [All modes; Runtime|Test; pure/read; setter mutates]
+	AutoExposureSpeedDown: number
+	-- How many stops per second automatic exposure adapts towards a brighter or a darker exposure. [All modes; Runtime|Test; pure/read; setter mutates]
+	AutoExposureSpeedUp: number
 	-- Whether bright areas bloom. [All modes; Runtime|Test; pure/read; setter mutates]
 	BloomEnabled: boolean
 	-- How much of the bloom is blended into the image. [All modes; Runtime|Test; pure/read; setter mutates]
 	BloomIntensity: number
 	-- The exposure compensation in stops: the image is multiplied by 2^EV. [All modes; Runtime|Test; pure/read; setter mutates]
 	ExposureEV: number
-	-- Whether FXAA anti-aliasing is applied. [All modes; Runtime|Test; pure/read; setter mutates]
-	FxaaEnabled: boolean
+	-- Manual exposure, or automatic exposure from the image's luminance histogram. [All modes; Runtime|Test; pure/read; setter mutates]
+	ExposureMode: ExposureMode
+	-- The colour-grading LUT applied after the tone mapping curve; null grades nothing. [All modes; Runtime|Test; pure/read; setter mutates]
+	Lut: AssetRef?
+	-- How much of the graded colour replaces the ungraded one, from 0 to 1. [All modes; Runtime|Test; pure/read; setter mutates]
+	LutIntensity: number
 	-- Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights. [All modes; Runtime|Test; pure/read; setter mutates]
 	SsaoEnabled: boolean
 	-- The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -906,6 +935,16 @@ declare extern type PostProcess with
 	SsaoQuality: SsaoQuality
 	-- The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them. [All modes; Runtime|Test; pure/read; setter mutates]
 	SsaoRadius: number
+	-- Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses. [All modes; Runtime|Test; pure/read; setter mutates]
+	SsrEnabled: boolean
+	-- How strongly screen-space reflections replace the probes' reflection, from 0 to 1. [All modes; Runtime|Test; pure/read; setter mutates]
+	SsrIntensity: number
+	-- How far a reflected ray travels, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	SsrMaxDistance: number
+	-- The perceptual roughness above which only the probes reflect. [All modes; Runtime|Test; pure/read; setter mutates]
+	SsrMaxRoughness: number
+	-- How thick a surface is assumed behind its depth when a ray passes it, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	SsrThickness: number
 	-- The tone mapping curve. [All modes; Runtime|Test; pure/read; setter mutates]
 	Tonemap: Tonemapper
 end
@@ -1214,6 +1253,10 @@ declare extern type Terrain with
 	LodBias: number
 	-- Whether shadows fall on the terrain. [All modes; Runtime|Test; pure/read; setter mutates]
 	ReceiveShadows: boolean
+	-- Read the world-space height of the terrain's surface under the world point position (its XZ in the terrain's local space, the surface there, back to world space); nil outside the terrain or without a loaded heightfield. [All modes; Runtime|Test; pure/read]
+	SampleHeight: (self: Terrain, position: vector) -> number?
+	-- Read the world-space unit normal of the terrain's surface under the world point position; nil where SampleHeight is nil. [All modes; Runtime|Test; pure/read]
+	SampleNormal: (self: Terrain, position: vector) -> vector?
 	-- The terrain's extent along its local X and Z axes from the entity's origin, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	Size: vector
 	-- The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1844,6 +1887,8 @@ declare Test: {
 	GetExtractedPosition: (entity: Entity) -> vector?,
 	-- Read the last completed render extraction. [All modes; Test; pure/read]
 	GetLastExtraction: () -> TestExtraction,
+	-- Returns the seeded particle hash of a ParticleEmitter entity (the XXH64 of its live particles, random stream and emission state) as 16 hexadecimal digits, or nil before its first Particles phase or without a ParticleEmitter; the same in every configuration, so a suite compares it across runs; test suites only. [All modes; Test; pure/read]
+	GetParticleDigest: (entity: Entity) -> string?,
 	-- Returns the digest of an Animator entity's pose sampled in the last fixed step (the XXH64 of its joint model matrices and morph weights) as 16 hexadecimal digits, or nil without a pose; the same in every configuration, so a suite compares it across runs; test suites only. [All modes; Test; pure/read]
 	GetPoseDigest: (entity: Entity) -> string?,
 	-- Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. [All modes; Test; pure/read]

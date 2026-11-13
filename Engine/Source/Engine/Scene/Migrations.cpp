@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/PrefabInstantiator.h"
@@ -203,14 +204,13 @@ namespace Engine {
 			return {};
 		}
 
-		// The prefab overrides that target the Script component, in the upgrade that migrates it from version 1
-		// (Docs/Decisions/0031-m20-contract.md decision 17), whatever the version of the Prefab component holding them: a
-		// Field override of Script, Fields or ExecutionOrder names slot 0's member ("Scripts/0/<member>", decision 19), and an
-		// AddComponent override's value, a whole version 1 component, migrates as the component does. Overrides of other
-		// shapes stay as they are for the reader to report. Errors: the component migration's, located at the value.
-		static Status MigrateScriptOverrides(Json& document, const ComponentInfo& script, const ComponentInfo& prefab)
+		// Calls `visit(prefabOverride, valuePointer)` for every override object of every Prefab component (`prefab`) in
+		// `document` whose Component is `component`'s name, in document order, where valuePointer is the JSON pointer of the
+		// override's "Value". Entities, components and overrides of other shapes are skipped for the reader to report. Errors:
+		// the first `visit` returns.
+		template<typename Visit>
+		static Status ForEachComponentOverride(Json& document, const ComponentInfo& component, const ComponentInfo& prefab, Visit&& visit)
 		{
-			constexpr std::array<std::string_view, 3> SlotMembers = { "Script", "Fields", "ExecutionOrder" };
 			const auto entities = document.find("Entities");
 			if (entities == document.end() || !entities->is_array())
 				return {};
@@ -220,11 +220,11 @@ namespace Engine {
 				const auto components = entity.is_object() ? entity.find("Components") : entity.end();
 				if (!entity.is_object() || components == entity.end() || !components->is_object())
 					continue;
-				const auto component = components->find(prefab.GetName());
-				if (component == components->end() || !component->is_object())
+				const auto instance = components->find(prefab.GetName());
+				if (instance == components->end() || !instance->is_object())
 					continue;
-				const auto overrides = component->find("Overrides");
-				if (overrides == component->end() || !overrides->is_array())
+				const auto overrides = instance->find("Overrides");
+				if (overrides == instance->end() || !overrides->is_array())
 					continue;
 				for (size_t entry = 0; entry < overrides->size(); ++entry)
 				{
@@ -232,51 +232,118 @@ namespace Engine {
 					if (!prefabOverride.is_object())
 						continue;
 					const auto target = prefabOverride.find("Component");
-					if (target == prefabOverride.end() || *target != Json(script.GetName()))
+					if (target == prefabOverride.end() || *target != Json(component.GetName()))
 						continue;
-					// An absent Kind reads as Field, its default.
-					const auto kind = prefabOverride.find("Kind");
-					if (kind == prefabOverride.end() || *kind == Json("Field"))
-					{
-						const auto field = prefabOverride.find("Field");
-						const auto member = std::ranges::find_if(SlotMembers, [&field, &prefabOverride](std::string_view name)
-						{
-							return field != prefabOverride.end() && *field == Json(std::string(name));
-						});
-						if (member != SlotMembers.end())
-							*field = PrefabInstantiator::MakeScriptSlotField(0, *member);
-					}
-					else if (*kind == Json("AddComponent"))
-					{
-						const auto value = prefabOverride.find("Value");
-						if (value == prefabOverride.end() || !value->is_object())
-							continue;
-						if (Status migrated = script.Migrate(1, *value); !migrated)
-						{
-							const std::string componentPointer =
-								JsonReader::AppendPointer(JsonReader::AppendPointer(JsonReader::AppendPointer("/Entities", index), "Components"), prefab.GetName());
-							const std::string valuePointer =
-								JsonReader::AppendPointer(JsonReader::AppendPointer(JsonReader::AppendPointer(componentPointer, "Overrides"), entry), "Value");
-							return std::unexpected(PrefixPointers(migrated.error(), valuePointer));
-						}
-					}
+					const std::string componentPointer =
+						JsonReader::AppendPointer(JsonReader::AppendPointer(JsonReader::AppendPointer("/Entities", index), "Components"), prefab.GetName());
+					const std::string valuePointer =
+						JsonReader::AppendPointer(JsonReader::AppendPointer(JsonReader::AppendPointer(componentPointer, "Overrides"), entry), "Value");
+					ENGINE_TRY(visit(prefabOverride, valuePointer));
 				}
 			}
 			return {};
 		}
 
+		// Whether `prefabOverride` is a Field override (an absent Kind reads as Field, its default).
+		static bool IsFieldOverride(const Json& prefabOverride)
+		{
+			const auto kind = prefabOverride.find("Kind");
+			return kind == prefabOverride.end() || *kind == Json("Field");
+		}
+
+		// Migrates an AddComponent override's value, a whole component of `fromVersion`, as the component migrates. An
+		// override of another kind, or whose value is not an object, is left for the reader to report. Errors: the component
+		// migration's, located at the value.
+		static Status MigrateAddComponentOverride(Json& prefabOverride, const std::string& valuePointer, const ComponentInfo& component,
+			uint32_t fromVersion)
+		{
+			const auto kind = prefabOverride.find("Kind");
+			if (kind == prefabOverride.end() || *kind != Json("AddComponent"))
+				return {};
+			const auto value = prefabOverride.find("Value");
+			if (value == prefabOverride.end() || !value->is_object())
+				return {};
+			if (Status migrated = component.Migrate(fromVersion, *value); !migrated)
+				return std::unexpected(PrefixPointers(migrated.error(), valuePointer));
+			return {};
+		}
+
+		// The prefab overrides that target the Script component, in the upgrade that migrates it from version 1
+		// (Docs/Decisions/0031-m20-contract.md decision 17), whatever the version of the Prefab component holding them: a
+		// Field override of Script, Fields or ExecutionOrder names slot 0's member ("Scripts/0/<member>", decision 19), and an
+		// AddComponent override's value, a whole version 1 component, migrates as the component does. Overrides of other
+		// shapes stay as they are for the reader to report. Errors: the component migration's, located at the value.
+		static Status MigrateScriptOverrides(Json& document, const ComponentInfo& script, const ComponentInfo& prefab)
+		{
+			constexpr std::array<std::string_view, 3> SlotMembers = { "Script", "Fields", "ExecutionOrder" };
+			return ForEachComponentOverride(document, script, prefab, [&script, &SlotMembers](Json& prefabOverride, const std::string& valuePointer) -> Status
+			{
+				if (!IsFieldOverride(prefabOverride))
+					return MigrateAddComponentOverride(prefabOverride, valuePointer, script, 1);
+				const auto field = prefabOverride.find("Field");
+				const auto member = std::ranges::find_if(SlotMembers, [&field, &prefabOverride](std::string_view name)
+				{
+					return field != prefabOverride.end() && *field == Json(std::string(name));
+				});
+				if (member != SlotMembers.end())
+					*field = PrefabInstantiator::MakeScriptSlotField(0, *member);
+				return {};
+			});
+		}
+
+		// The prefab overrides that target the PostProcess component, in the upgrade that migrates it from version 1 (M26,
+		// Docs/Decisions/0037-m26-contract.md decision 12), whatever the version of the Prefab component holding them, as the
+		// Script overrides follow theirs: a Field override migrates as a component holding only that field does (the
+		// component's own migration, so FxaaEnabled becomes AntiAliasing with its value mapped and every other field stays),
+		// and an AddComponent override's value, a whole version 1 component, migrates as the component does. A Field override
+		// whose one-field component does not migrate (a FxaaEnabled that is not a boolean) or does not stay one field stays as
+		// it is for the reader to report, like overrides of other shapes. Errors: an AddComponent value's migration, located
+		// at the value.
+		static Status MigratePostProcessOverrides(Json& document, const ComponentInfo& postProcess, const ComponentInfo& prefab)
+		{
+			return ForEachComponentOverride(document, postProcess, prefab, [&postProcess](Json& prefabOverride, const std::string& valuePointer) -> Status
+			{
+				if (!IsFieldOverride(prefabOverride))
+					return MigrateAddComponentOverride(prefabOverride, valuePointer, postProcess, 1);
+				const auto field = prefabOverride.find("Field");
+				const auto value = prefabOverride.find("Value");
+				if (field == prefabOverride.end() || value == prefabOverride.end())
+					return {};
+				const Result<std::string> name = JsonReader(*field).ReadString();
+				if (!name)
+					return {};
+				Json alone = Json::object();
+				alone[*name] = *value;
+				if (!postProcess.Migrate(1, alone) || alone.size() != 1)
+					return {};
+				*field = alone.begin().key();
+				*value = alone.begin().value();
+				return {};
+			});
+		}
+
+		// Whether `steps` migrate `component` (which may be null: not registered) from version 1.
+		static bool MigratesFromVersion1(std::span<const ComponentMigrationStep> steps, const ComponentInfo* component)
+		{
+			return component != nullptr && std::ranges::any_of(steps, [component](const ComponentMigrationStep& step)
+			{
+				return step.Component == component && step.FromVersion == 1;
+			});
+		}
+
 		// Runs the document-level follow-ups of `steps`: MigrateScriptOverrides when the Script component migrates from
-		// version 1.
+		// version 1, and MigratePostProcessOverrides when the PostProcess component does.
 		static Status ApplyMigrationFollowUps(Json& document, std::span<const ComponentMigrationStep> steps, const TypeRegistry& registry)
 		{
-			const ComponentInfo* script = registry.FindComponent<ScriptComponent>();
 			const ComponentInfo* prefab = registry.FindComponent<PrefabInstanceComponent>();
-			const bool scriptFromVersion1 = std::ranges::any_of(steps, [script](const ComponentMigrationStep& step)
-			{
-				return step.Component == script && step.FromVersion == 1;
-			});
-			if (scriptFromVersion1 && prefab != nullptr)
+			if (prefab == nullptr)
+				return {};
+			const ComponentInfo* script = registry.FindComponent<ScriptComponent>();
+			if (MigratesFromVersion1(steps, script))
 				ENGINE_TRY(MigrateScriptOverrides(document, *script, *prefab));
+			const ComponentInfo* postProcess = registry.FindComponent<PostProcessComponent>();
+			if (MigratesFromVersion1(steps, postProcess))
+				ENGINE_TRY(MigratePostProcessOverrides(document, *postProcess, *prefab));
 			return {};
 		}
 

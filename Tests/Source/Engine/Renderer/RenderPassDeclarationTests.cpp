@@ -155,6 +155,9 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Ui") == 0);
 			// M23: the point shadows draw with the Shadows declaration's caster pipelines.
 			CHECK(GetDeclaredPipelineCountOf("PointShadows") == 0);
+			// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 7): the particles record with the QuadBatcher's Hdr and
+			// HdrAdditive pipelines.
+			CHECK(GetDeclaredPipelineCountOf("Particles") == 0);
 		}
 
 		// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decisions 13 and 14): the six passes at phase 3's ledger's places, in
@@ -205,15 +208,18 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Skinning") == SkinningPass::PipelineCount);
 			CHECK(SkinningPass::PipelineCount == 1);
 			CHECK(SceneRendererPipelines::MeshPipelineCount == 24);
-			// 64 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines and M22's LdrDepth (60 on M23's branch).
-			CHECK(GetDeclaredPipelineCount() == 64);
+			// 64 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines and M22's LdrDepth (60 on M23's branch);
+			// 65 with M26's QuadBatcher HdrAdditive (Docs/Decisions/0037-m26-contract.md decision 7) and 67 with its Exposure pass
+			// (decision 13).
+			CHECK(GetDeclaredPipelineCount() == 67);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
 		// program and the QuadBatcher its HdrLit and Normals pipelines: 61 startup pipelines on M21's tree, 62 since M22 landed
 		// with the QuadBatcher's LdrDepth (Docs/Decisions/0033-m22-contract.md decision 57, "Landing"), 64 with M23's
-		// LightClusters and Skinning on phase 2's merged tree.
-		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher five")
+		// LightClusters and Skinning on phase 2's merged tree, 65 with M26's HdrAdditive for the additive particles
+		// (Docs/Decisions/0037-m26-contract.md decision 7), the QuadBatcher's sixth, and 67 with M26's Exposure pass (decision 13).
+		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher six")
 		{
 			const auto lights = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
 			{
@@ -230,9 +236,9 @@ namespace Engine {
 			// It follows Sprites, which follows the QuadBatcher.
 			REQUIRE(lights != ScenePassDeclarations.begin());
 			CHECK((lights - 1)->Name == "Sprites");
-			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
-			CHECK(QuadBatcher::PipelineCount == 5);
-			CHECK(GetDeclaredPipelineCount() == 64);
+			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 6);
+			CHECK(QuadBatcher::PipelineCount == 6);
+			CHECK(GetDeclaredPipelineCount() == 67);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -258,9 +264,10 @@ namespace Engine {
 		TEST_CASE("Pipelines: Create makes exactly the declared startup pipelines")
 		{
 			// M18 acceptance (C18.1): the startup count is the declarations' sum, and Create goes through CreatePipelines.
-			// M17's 54, M18's 4, M21's 3 (Lights2D, the QuadBatcher's HdrLit and Normals), M22's 1 (the QuadBatcher's LdrDepth)
-			// and M23's 2 (the LightClusters and Skinning passes, Docs/Decisions/0034-m23-contract.md decisions 5 and 27).
-			static_assert(GetDeclaredPipelineCount() == 64);
+			// M17's 54, M18's 4, M21's 3 (Lights2D, the QuadBatcher's HdrLit and Normals), M22's 1 (the QuadBatcher's LdrDepth),
+			// M23's 2 (the LightClusters and Skinning passes, Docs/Decisions/0034-m23-contract.md decisions 5 and 27) and M26's 3
+			// (the QuadBatcher's HdrAdditive, Docs/Decisions/0037-m26-contract.md decision 7, and the Exposure pass's 2, decision 13).
+			static_assert(GetDeclaredPipelineCount() == 67);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

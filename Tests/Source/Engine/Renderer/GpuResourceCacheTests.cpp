@@ -9,6 +9,8 @@
 #include "Engine/Asset/BuiltinTextures.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/FontData.h"
+#include "Engine/Asset/IrradianceVolumeData.h"
+#include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureCompression.h"
@@ -1077,6 +1079,92 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B).
+		TEST_CASE("GpuResourceCache: an irradiance volume mirrors its probes' coefficients, and a null, unloadable or inconsistent one is null"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			// 2 x 2 x 3 probes whose coefficient k of probe i is (i, k, i + k).
+			IrradianceVolumeData volume;
+			volume.CountX = 2;
+			volume.CountY = 2;
+			volume.CountZ = 3;
+			volume.Size = glm::vec3(4.0f, 2.0f, 6.0f);
+			for (uint32_t probe = 0; probe < 12; ++probe)
+			{
+				IrradianceProbe coefficients;
+				for (uint32_t index = 0; index < 9; ++index)
+					coefficients.SH9[index] = glm::vec3(static_cast<float>(probe), static_cast<float>(index), static_cast<float>(probe + index));
+				volume.Probes.push_back(coefficients);
+			}
+			IrradianceVolumeData inconsistent = volume;
+			inconsistent.Probes.pop_back();
+			assets.Publish(AssetHandle(0x9301), CreateRef<IrradianceVolumeData>(std::move(volume)));
+			assets.Publish(AssetHandle(0x9302), CreateRef<IrradianceVolumeData>(std::move(inconsistent)));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				const GpuIrradianceVolume* mirrored = cache.GetIrradianceVolume(AssetHandle(0x9301));
+				REQUIRE(mirrored != nullptr);
+				CHECK(mirrored->CountX == 2);
+				CHECK(mirrored->CountY == 2);
+				CHECK(mirrored->CountZ == 3);
+				REQUIRE(mirrored->Probes != nullptr);
+				const uint64_t byteSize = 12 * 9 * sizeof(glm::vec4);
+				CHECK(mirrored->Probes->getDesc().byteSize == byteSize);
+				CHECK(mirrored->Probes->getDesc().structStride == sizeof(glm::vec4));
+				const Result<std::vector<std::byte>> bytes = Test::ReadBufferBytes(gpu.GetDevice(), *mirrored->Probes, byteSize);
+				REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+				std::vector<glm::vec4> read(12 * 9);
+				std::memcpy(read.data(), bytes->data(), byteSize);
+				for (uint32_t probe = 0; probe < 12; ++probe)
+				{
+					for (uint32_t index = 0; index < 9; ++index)
+					{
+						CAPTURE(probe);
+						CAPTURE(index);
+						CHECK(read[probe * 9 + index]
+							== glm::vec4(static_cast<float>(probe), static_cast<float>(index), static_cast<float>(probe + index), 0.0f));
+					}
+				}
+				CHECK(cache.GetIrradianceVolume(AssetHandle(0x9301)) == mirrored);
+				CHECK(cache.GetStats().IrradianceVolumeCount == 1);
+				CHECK(cache.GetIrradianceVolume(AssetHandle()) == nullptr);
+				// An unknown handle, an asset of another type and a volume whose probes disagree with its counts: each reported
+				// once (GpuResourceCache.h), with GetOrPlaceholder's codes.
+				{
+					Test::ExpectLog missing(LogLevel::Error, "ASSET_MISSING");
+					CHECK(cache.GetIrradianceVolume(AssetHandle(0x9399)) == nullptr);
+					CHECK(cache.GetIrradianceVolume(AssetHandle(0x9399)) == nullptr);
+					CHECK(missing.GetMatchCount() == 1);
+				}
+				{
+					Test::ExpectLog mismatch(LogLevel::Error, "ASSET_TYPE_MISMATCH");
+					CHECK(cache.GetIrradianceVolume(BuiltinAssetHandles::CubeMesh) == nullptr);
+				}
+				{
+					Test::ExpectLog failed(LogLevel::Error, "ASSET_UPLOAD_FAILED");
+					CHECK(cache.GetIrradianceVolume(AssetHandle(0x9302)) == nullptr);
+					CHECK(cache.GetIrradianceVolume(AssetHandle(0x9302)) == nullptr);
+					CHECK(failed.GetMatchCount() == 1);
+				}
+				// Collected like the other mirrors: unused for a period, it is released; a device loss drops it, and the next
+				// Get uploads it again.
+				cache.CollectStale();
+				CHECK(cache.GetIrradianceVolume(AssetHandle(0x9301)) != nullptr);
+				cache.CollectStale(true);
+				cache.CollectStale(true);
+				CHECK(cache.GetStats().IrradianceVolumeCount == 0);
+				CHECK(cache.GetIrradianceVolume(AssetHandle(0x9301)) != nullptr);
+				cache.ReleaseGpuObjects();
+				CHECK(cache.GetStats().IrradianceVolumeCount == 0);
+				CHECK(cache.GetIrradianceVolume(AssetHandle(0x9301)) != nullptr);
+				CHECK(cache.GetStats().IrradianceVolumeCount == 1);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
 		TEST_CASE("GpuResourceCache: a device loss drops every mirror, and the next Get uploads it again"
 			* doctest::test_suite(Test::GpuSuite))
 		{
@@ -1587,6 +1675,94 @@ namespace Engine {
 				});
 				REQUIRE(found != diagnostics.end());
 				CHECK(found->Message.contains("4 GiB"));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M26 (C26.1, R-LUT; Docs/Decisions/0037-m26-contract.md decision 15, stream X-B): GetLut keeps a LUT as GetEnvironment
+		// keeps an environment: a Size^3 RGBA16_FLOAT 3D texture with the table's domain per (handle, version), no placeholder,
+		// each failure reported once, released by CollectStale, TrimUnused and the recreation protocol's Release.
+		TEST_CASE("GpuResourceCache: a LUT's mirror is its table as a 3D texture per version, and a null or unloadable LUT has none"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			const AssetHandle handle(0x9401);
+			LutData lut = GenerateBuiltinLut(BuiltinLut::Identity);
+			lut.DomainMin = glm::vec3(0.0f, -1.0f, 0.25f);
+			lut.DomainMax = glm::vec3(2.0f, 1.0f, 0.75f);
+			assets.Publish(handle, CreateRef<LutData>(lut));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				CHECK(cache.GetLut(AssetHandle()) == nullptr);
+				const GpuLut* mirror = cache.GetLut(handle);
+				REQUIRE(mirror != nullptr);
+				REQUIRE(mirror->Texture != nullptr);
+				const nvrhi::TextureDesc& desc = mirror->Texture->getDesc();
+				CHECK(desc.dimension == nvrhi::TextureDimension::Texture3D);
+				CHECK(desc.width == 33);
+				CHECK(desc.height == 33);
+				CHECK(desc.depth == 33);
+				CHECK(desc.mipLevels == 1);
+				CHECK(desc.format == nvrhi::Format::RGBA16_FLOAT);
+				CHECK(mirror->Size == 33);
+				CHECK(mirror->DomainMin == lut.DomainMin);
+				CHECK(mirror->DomainMax == lut.DomainMax);
+				CHECK(mirror->Version == assets.GetVersion(handle));
+				CHECK(cache.GetLut(handle) == mirror);
+				CHECK(cache.GetStats().LutCount == 1);
+				// The built-in identity LUT, procedural, is served like any LUT.
+				const GpuLut* identity = cache.GetLut(BuiltinAssetHandles::IdentityLut);
+				REQUIRE(identity != nullptr);
+				CHECK(identity->Size == 33);
+				CHECK(identity->DomainMin == glm::vec3(0.0f));
+				CHECK(identity->DomainMax == glm::vec3(1.0f));
+				CHECK(cache.GetStats().LutCount == 2);
+
+				// A new version is a new mirror; the replaced one is stale.
+				LutData small = lut;
+				small.Size = 2;
+				small.Values = { glm::vec3(0.0f), glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f),
+					glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.0f, 1.0f), glm::vec3(0.0f, 1.0f, 1.0f), glm::vec3(1.0f) };
+				assets.Publish(handle, CreateRef<LutData>(small));
+				const GpuLut* replaced = cache.GetLut(handle);
+				REQUIRE(replaced != nullptr);
+				CHECK(replaced->Size == 2);
+				CHECK(replaced->Texture->getDesc().depth == 2);
+				CHECK(cache.GetStats().LutCount == 3);
+				cache.CollectStale();
+				CHECK(cache.GetStats().LutCount == 2);
+
+				// An unknown handle and an asset of another type: no mirror, each reported once (GpuResourceCache.h).
+				{
+					Test::ExpectLog missing(LogLevel::Error, "ASSET_MISSING");
+					CHECK(cache.GetLut(AssetHandle(0x9499)) == nullptr);
+					CHECK(cache.GetLut(AssetHandle(0x9499)) == nullptr);
+					CHECK(missing.GetMatchCount() == 1);
+				}
+				CHECK(std::ranges::count_if(assets.GetDiagnostics(), [](const AssetDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == AssetMissingCode && diagnostic.Asset == AssetHandle(0x9499);
+				}) == 1);
+				{
+					Test::ExpectLog mismatch(LogLevel::Error, "ASSET_TYPE_MISMATCH");
+					CHECK(cache.GetLut(BuiltinAssetHandles::CubeMesh) == nullptr);
+				}
+
+				// Unused mirrors go at a scene unload's collection; the recreation protocol's Release drops every one, and the
+				// next GetLut uploads it again.
+				CHECK(cache.GetLut(handle) != nullptr);
+				cache.CollectStale(true);
+				cache.CollectStale(true);
+				CHECK(cache.GetStats().LutCount == 0);
+				CHECK(cache.GetLut(handle) != nullptr);
+				cache.ReleaseGpuObjects();
+				CHECK(cache.GetStats().LutCount == 0);
+				const GpuLut* again = cache.GetLut(handle);
+				REQUIRE(again != nullptr);
+				CHECK(again->Texture != nullptr);
+				CHECK(cache.GetStats().LutCount == 1);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

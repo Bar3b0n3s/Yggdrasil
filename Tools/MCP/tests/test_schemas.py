@@ -20,8 +20,9 @@ from engine_mcp import server  # noqa: E402
 # (Docs/Decisions/0027-m17-contract.md, friction F11), M19's input_read_replay (Docs/Decisions/0030-m19-contract.md
 # decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
 # (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
-# decision 26), M22's ui_tree and ui_create_widget (Docs/Decisions/0033-m22-contract.md decisions 8 and 32) and M23's
-# animation_preview (Docs/Decisions/0034-m23-contract.md decision 32).
+# decision 26), M22's ui_tree and ui_create_widget (Docs/Decisions/0033-m22-contract.md decisions 8 and 32), M23's
+# animation_preview (Docs/Decisions/0034-m23-contract.md decision 32) and M26's lighting_bake, terrain_edit and
+# terrain_import_heightmap (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23).
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate", "project_export", "project_upgrade",
@@ -39,6 +40,8 @@ PROXIED_TOOLS = {
     "native_write", "tilemap_paint",
     "ui_tree", "ui_create_widget",
     "animation_preview",
+    "lighting_bake",
+    "terrain_edit", "terrain_import_heightmap",
 }
 MAX_SCHEMA_BYTES = 4096
 

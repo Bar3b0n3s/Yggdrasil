@@ -11,10 +11,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <span>
 
 // Irradiance volumes (M26, C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 8, stream Q-A): the format version
-// 1, its source file, its validation and its fuzz target. The artifact wrappers and the loader's registration are the
-// contract's (live); the rest is skipped until stream Q-A implements it.
+// 1, its source file, its validation and its fuzz target.
 
 namespace Engine {
 
@@ -74,7 +74,7 @@ namespace Engine {
 			ENGINE_CHECK_DEATH("Asset/IrradianceProbeIndexPastItsCount", "Probe (0, 2, 0)");
 		}
 
-		TEST_CASE("IrradianceVolumeData: a payload and a source file round-trip the probes byte for byte" * doctest::skip(true))
+		TEST_CASE("IrradianceVolumeData: a payload and a source file round-trip the probes byte for byte")
 		{
 			const IrradianceVolumeData volume = MakeVolume();
 			REQUIRE(ValidateIrradianceVolumeData(volume).has_value());
@@ -97,7 +97,7 @@ namespace Engine {
 			CHECK(fromSource->Probes == volume.Probes);
 		}
 
-		TEST_CASE("IrradianceVolumeData: counts, sizes and coefficients outside the format's rules are refused" * doctest::skip(true))
+		TEST_CASE("IrradianceVolumeData: counts, sizes and coefficients outside the format's rules are refused")
 		{
 			IrradianceVolumeData volume = MakeVolume();
 			volume.CountX = MaxIrradianceProbesPerAxis + 1;
@@ -118,7 +118,54 @@ namespace Engine {
 			CHECK(ReadIrradianceVolumeSource(source).error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
-		TEST_CASE("IrradianceVolumeData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite) * doctest::skip(true))
+		// The readers' own refusals (W26.1's review): a count above the limit, refused before anything is allocated however
+		// large; a payload shorter or longer than its probes; a grid of one probe along an axis, which the reader reads and
+		// the format's rules refuse; and a source whose magic is not "EIRV" or that is shorter than its header.
+		TEST_CASE("IrradianceVolumeData: a count past its limit, a truncated payload, trailing bytes and another magic are refused")
+		{
+			const Buffer payload = SerializeIrradianceVolumePayload(MakeVolume());
+			// The payload: CountX, CountY and CountZ (uint32 each), Size (3 x f32), then 2 x 2 x 3 probes of 9 x f32x3.
+			constexpr size_t HeaderBytes = 24;
+			constexpr size_t ProbeBytes = 9 * 3 * sizeof(float);
+			REQUIRE(payload.size() == HeaderBytes + 12 * ProbeBytes);
+			const auto withCountX = [&payload](uint32_t count)
+			{
+				Buffer changed = payload;
+				for (size_t index = 0; index < 4; ++index)
+					changed[index] = static_cast<std::byte>((count >> (8 * index)) & 0xFFU);
+				return changed;
+			};
+			for (const uint32_t count : { MaxIrradianceProbesPerAxis + 1, 0xFFFFFFFFU })
+			{
+				CAPTURE(count);
+				const Result<IrradianceVolumeData> large = DeserializeIrradianceVolumePayload(withCountX(count));
+				REQUIRE_FALSE(large.has_value());
+				CHECK(large.error().GetCode() == ErrorCode::Parse);
+			}
+			Buffer truncated = payload;
+			truncated.pop_back();
+			CHECK(DeserializeIrradianceVolumePayload(truncated).error().GetCode() == ErrorCode::Parse);
+			CHECK(DeserializeIrradianceVolumePayload(std::span(payload).first(HeaderBytes - 1)).error().GetCode() == ErrorCode::Parse);
+			Buffer trailing = payload;
+			trailing.push_back(std::byte{ 0 });
+			CHECK(DeserializeIrradianceVolumePayload(trailing).error().GetCode() == ErrorCode::Parse);
+			// One probe along x: the 1 x 2 x 3 grid's six probes are all there, and the format's minimum of two refuses it.
+			Buffer single = withCountX(1);
+			single.resize(HeaderBytes + 6 * ProbeBytes);
+			CHECK(DeserializeIrradianceVolumePayload(single).error().GetCode() == ErrorCode::Validation);
+
+			Buffer magic = WriteIrradianceVolumeSource(MakeVolume());
+			magic[0] = std::byte{ 'X' };
+			CHECK(ReadIrradianceVolumeSource(magic).error().GetCode() == ErrorCode::Parse);
+			const Buffer source = WriteIrradianceVolumeSource(MakeVolume());
+			CHECK(ReadIrradianceVolumeSource(std::span(source).first(3)).error().GetCode() == ErrorCode::Parse);
+			// The source's payload follows the same rules.
+			Buffer sourceTrailing = source;
+			sourceTrailing.push_back(std::byte{ 0 });
+			CHECK(ReadIrradianceVolumeSource(sourceTrailing).error().GetCode() == ErrorCode::Parse);
+		}
+
+		TEST_CASE("IrradianceVolumeData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = SerializeIrradianceVolumePayload(MakeVolume());
 			REQUIRE(DeserializeIrradianceVolumePayload(payload).has_value());

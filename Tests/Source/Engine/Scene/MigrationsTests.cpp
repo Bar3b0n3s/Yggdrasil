@@ -157,7 +157,7 @@ namespace Engine {
 		// version 2's one migration: the AntiAliasing enum replaces FxaaEnabled (false becomes None, true Fxaa) and the exposure,
 		// LUT and SSR fields arrive with the defaults that render as version 1 did (the manual ExposureEV, no LUT, SSR off); a
 		// version 1 component loads through it and saves as the upgraded fixture.
-		TEST_CASE("Migrations: PostProcessV1 fixture upgrades to version 2" * doctest::skip(true))
+		TEST_CASE("Migrations: PostProcessV1 fixture upgrades to version 2")
 		{
 			const Result<std::string> legacy = Test::ReadTestDataText("Formats/Scene/PostProcessV1.scene");
 			const Result<std::string> golden = Test::ReadTestDataText("Formats/Scene/PostProcessV1.upgraded.scene");
@@ -182,7 +182,7 @@ namespace Engine {
 		// AddComponent override's value migrates as the component does. Otherwise an instance's FXAA override would be
 		// dropped as stale and the instance render with FXAA. (Two PostProcess components in one document only exercise the
 		// migration, which never checks UniquePerScene.)
-		TEST_CASE("Migrations: prefab overrides of a version 1 PostProcess follow it to version 2" * doctest::skip(true))
+		TEST_CASE("Migrations: prefab overrides of a version 1 PostProcess follow it to version 2")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			Json document = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Looks", "Seed": 0,
@@ -224,6 +224,40 @@ namespace Engine {
 			CHECK_FALSE(added.contains("FxaaEnabled"));
 			CHECK(memberOf(added, "AntiAliasing") == Json("None"));
 			CHECK(memberOf(added, "BloomIntensity") == Json(0.04));
+		}
+
+		// M26 (stream X-A): a version 1 PostProcess whose FxaaEnabled is not a boolean has no AntiAliasing to become, so the
+		// upgrade refuses it at the field and leaves the document unchanged; a component without FxaaEnabled keeps its members
+		// (its AntiAliasing takes the default, Fxaa, as version 1's absent FxaaEnabled took true), and a Field override whose
+		// value cannot migrate stays for the reader to report.
+		TEST_CASE("Migrations: a version 1 PostProcess FxaaEnabled that is not a boolean is refused at the field")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			Json malformed = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Looks", "Seed": 0, "ComponentVersions": { "PostProcess": 1 },
+				"Entities": [ { "ID": "5e00000000000001", "Name": "Look", "Parent": null, "Active": true, "Tags": [],
+				                "Components": { "PostProcess": { "ExposureEV": 1, "FxaaEnabled": "yes" } } } ] })");
+			const Json before = malformed;
+			LoadReport report;
+			const Status refused = Migrations::UpgradeDocument(malformed, DocumentKind::Scene, *registry, report);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(refused.error().GetLocation().JsonPointer == "/Entities/0/Components/PostProcess/FxaaEnabled");
+			CHECK(malformed == before);
+
+			Json absent = ParseJson(R"({ "Format": "Scene", "Version": 1, "Name": "Looks", "Seed": 0,
+				"ComponentVersions": { "Prefab": 2, "PrefabLink": 1, "PostProcess": 1 },
+				"Entities": [ { "ID": "5e00000000000001", "Name": "Look", "Parent": null, "Active": true, "Tags": [],
+				                "Components": {
+				                  "Prefab": { "Prefab": "11d04163305d2e9f", "Overrides": [
+				                    { "Path": ["55425a047af78945"], "Kind": "Field", "Component": "PostProcess", "Field": "FxaaEnabled", "Value": 3 } ] },
+				                  "PrefabLink": { "PrefabEntityID": "55425a047af78945", "InstanceRoot": "5e00000000000001", "OuterPrefabEntityID": null },
+				                  "PostProcess": { "ExposureEV": 1, "BloomEnabled": false } } } ] })");
+			const Status upgraded = Migrations::UpgradeDocument(absent, DocumentKind::Scene, *registry, report);
+			REQUIRE_MESSAGE(upgraded.has_value(), (upgraded ? std::string() : upgraded.error().ToString()));
+			CHECK(absent["Entities"][0]["Components"]["PostProcess"] == ParseJson(R"({ "ExposureEV": 1, "BloomEnabled": false })"));
+			Json& kept = absent["Entities"][0]["Components"]["Prefab"]["Overrides"][0];
+			CHECK(kept["Field"] == Json("FxaaEnabled"));
+			CHECK(kept["Value"] == Json(3));
 		}
 
 		// The Script overrides follow only the upgrade of the Script component itself: a document whose Script component is

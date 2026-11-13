@@ -48,7 +48,7 @@ local fields: { Authored } = {
 	authored("PostProcess", "PostProcess", "SsaoQuality", "High"),
 	authored("PostProcess", "PostProcess", "BloomEnabled", false),
 	authored("PostProcess", "PostProcess", "BloomIntensity", 0.1),
-	authored("PostProcess", "PostProcess", "FxaaEnabled", false),
+	authored("PostProcess", "PostProcess", "AntiAliasing", "None"),
 	authored("Ground", "RigidBody", "Type", "Static"),
 	authored("Ground", "RigidBody", "Friction", 0.8),
 	authored("Ground", "RigidBody", "Restitution", 0.1),

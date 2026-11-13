@@ -38,6 +38,13 @@
 // palette (the runtime AnimationPoseComponent's skin matrices taken into the item's space at the rendered poses) and its
 // morph weights, the pose's channel for the entity's path overriding the component's (RenderSnapshot.h's MeshDrawItem).
 //
+// Particles (M26, Docs/Decisions/0037-m26-contract.md decision 7): every effectively enabled ParticleEmitter whose entity
+// holds its runtime ParticleStateComponent (a play scene's, from its first Particles phase on; edit scenes hold none, so
+// their views draw no particles) gives one ParticleEmitterItem, even without a live particle, and its live particles in
+// emission order: each at Alpha between its PreviousPosition and its Position (Position at Alpha 1), through the emitter's
+// rendered world matrix for a Local emitter, its size its StartSize times SizeOverLife and its colour ColorOverLife at its
+// age over its lifetime (ParticleSimulation.h's EvaluateParticleSize and EvaluateParticleColor).
+//
 // Pure function of the scene's components and the request: no asset access, no clock, no randomness; vectors in canonical
 // order (§5.1), so a deterministic scene gives an identical snapshot in every configuration. Only IEEE-exact operations and
 // Core/DetMath (Scene is on the simulation path's lint scope, §4.12). Main thread, like the scene (§4.11).
@@ -149,6 +156,13 @@ namespace Engine {
 	//   - Lights2D (M21, C21.2; decision 22, stream L): every effectively enabled entity with a Light2DComponent, in canonical
 	//     order, Position its rendered world matrix's translation, with Type, Color, Intensity, Radius, Falloff and Height as
 	//     they are (RenderSnapshot::Lights2D).
+	//   - ParticleEmitters and Particles (M26, Docs/Decisions/0037-m26-contract.md decision 7): every effectively enabled
+	//     entity with a ParticleEmitterComponent and its runtime ParticleStateComponent, in canonical order, by the rule of
+	//     the file comment's Particles paragraph; an edit scene holds no particle state, so its views draw none.
+	//   - IrradianceVolumes and ReflectionProbes (M26, decision 16): every effectively enabled entity's IrradianceVolume and
+	//     ReflectionProbe whose Data is set, in canonical order, at its rendered world matrix, with Size, Data, Intensity and
+	//     BlendDistance (and a reflection probe's BoxProjection) as they are, in every view and every scene, edit scenes
+	//     included, so baked lighting shows while editing; whether the data loads is the renderer's concern.
 	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
 	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
 	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's

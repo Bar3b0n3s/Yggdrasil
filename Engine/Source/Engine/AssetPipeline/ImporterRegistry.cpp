@@ -5,6 +5,9 @@
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/AssetPipeline/Importers/FontImporter.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
+#include "Engine/AssetPipeline/Importers/HeightfieldImporter.h"
+#include "Engine/AssetPipeline/Importers/IrradianceVolumeImporter.h"
+#include "Engine/AssetPipeline/Importers/LutImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/AssetPipeline/Importers/ReplayImporter.h"
@@ -122,13 +125,19 @@ namespace Engine {
 		registry.Register(CreateScope<TilemapImporter>());
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 10).
 		registry.Register(CreateScope<StringTableImporter>());
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 8): lighting.bake's irradiance volumes.
+		registry.Register(CreateScope<IrradianceVolumeImporter>());
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 15).
+		registry.Register(CreateScope<LutImporter>());
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 20).
+		registry.Register(CreateScope<HeightfieldImporter>());
 	}
 
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)
 	{
-		// In the order of RegisterBuiltinImporters; the material, scene, prefab, script, replay, sprite sheet, tilemap and string
-		// table importers have no settings (the sprite sheet, tilemap and string table structs are the Asset module's,
-		// RegisterAssetTypes).
+		// In the order of RegisterBuiltinImporters; the material, scene, prefab, script, replay, sprite sheet, tilemap, string
+		// table, irradiance volume, LUT and heightfield importers have no settings (the sprite sheet, tilemap and string table
+		// structs are the Asset module's, RegisterAssetTypes).
 		TextureImporter::RegisterTypes(registry);
 		GltfImporter::RegisterTypes(registry);
 		FontImporter::RegisterTypes(registry);

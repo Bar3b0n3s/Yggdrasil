@@ -20,6 +20,7 @@
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/DebugRenderer.h"
 #include "Engine/Renderer/EditorOverlay.h"
+#include "Engine/Renderer/ExposurePass.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Light2DShading.h"
@@ -29,6 +30,7 @@
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/LightingInputs.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
+#include "Engine/Renderer/Private/ProbeShading.h"
 #include "Engine/Renderer/Private/SceneRendererState.h"
 #include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderPrepare.h"
@@ -75,10 +77,11 @@
 // Per renderer (one view): the targets (SceneDepth, SceneNormals, SceneColor, the two LDR targets, the bloom chain) and
 // their framebuffers, rebuilt by Resize; the ViewConstants and EnvironmentConstants buffers and the Lights structured
 // buffer, written by every Render through the command list (keepInitialState buffers, so NVRHI orders each write after
-// the reads of earlier submissions); one PassBindingCache for the view's own set-0 sets and one per shared pass, each
-// keeping exactly what the last Render used, and the material sets (Private/MaterialBindingCache.h), which also keep the
-// sets of the materials the last Render culled (R-MATSET). A Render with a new generation of the pipeline set clears them
-// all first.
+// the reads of earlier submissions), and M26's probe resources (Private/ProbeShading.h: the ProbeConstants buffer, written
+// by every Render, and the copies of the probes' mirrors, made when the view's probes change); one PassBindingCache for the
+// view's own set-0 sets and one per shared pass, each keeping exactly what the last Render used, and the material sets
+// (Private/MaterialBindingCache.h), which also keep the sets of the materials the last Render culled (R-MATSET). A Render
+// with a new generation of the pipeline set clears them all first.
 //
 // Render follows SceneRenderer.h's pass list as stage functions (Docs/Decisions/0029-m18-contract.md decision 1), one per
 // RenderStage, handing over through Detail::SceneRendererFrame. The Prepare stage resolves every draw before recording:
@@ -117,7 +120,8 @@ namespace Engine {
 		== SceneRendererPipelines::MeshPipelineCount + SkyboxPass::PipelineCount + BloomPass::PipelineCount + TonemapPass::PipelineCount
 			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
-			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount);
+			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount
+			+ ExposurePass::PipelineCount);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
 	static_assert(SceneRendererPipelines::DebugViewPipelineCount == Utils::ForwardVariantCount);
 	// The Scene program's specialization constant takes RenderDebugView's values (Shared/DrawConstants.h).
@@ -527,6 +531,9 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(created.EmptyCascades, Utils::CreateSceneNeutralTexture(device, ShadowDepthFormat, true, 0.0f));
 		ENGINE_TRY_ASSIGN(created.EmptyAtlas, Utils::CreateSceneNeutralTexture(device, ShadowDepthFormat, false, 0.0f));
 		ENGINE_TRY_ASSIGN(created.EmptyPointShadows, Utils::CreateEmptyPointShadowMaps(device));
+		// M26 (C26.1, R-GI-PROBE; stream Q-B): the forward set's neutral probe resources.
+		ENGINE_TRY_ASSIGN(created.EmptyIrradianceProbes, Utils::CreateEmptyIrradianceProbes(device));
+		ENGINE_TRY_ASSIGN(created.EmptyReflectionProbeCubes, Utils::CreateEmptyReflectionProbeCubes(device));
 		ENGINE_TRY_ASSIGN(created.WhiteAo, Utils::CreateSceneNeutralTexture(device, AmbientOcclusionFormat, false, 1.0f));
 		ENGINE_TRY_ASSIGN(created.FarDepth, Utils::CreateSceneNeutralTexture(device, ViewDepthFormat, false, 65504.0f));
 		ENGINE_TRY_ASSIGN(created.ShadowCompare, device.CreateSampler(nvrhi::SamplerDesc().setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Clamp).setReductionType(nvrhi::SamplerReductionType::Comparison)));
@@ -547,11 +554,13 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(created.Quads, QuadBatcher::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Upscale, UpscalePass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Lights2D, Lights2DPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.Exposure, ExposurePass::Create(device, pipelines));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
 			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
-			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount();
+			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount()
+			+ created.Exposure->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -588,6 +597,7 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, QuadBatcher::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, UpscalePass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, Lights2DPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, ExposurePass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -715,6 +725,7 @@ namespace Engine {
 		DataViewBindings.Clear();
 		SpriteBindings.Clear();
 		Lights2DBindings.Clear();
+		ExposureBindings.Clear();
 	}
 
 	void SceneRenderer::State::ClearBindings()
@@ -724,6 +735,7 @@ namespace Engine {
 		SkinningBindings.Clear();
 		UpscaleBindings.Clear();
 		UiQuadBindings.Clear();
+		ParticleBindings.Clear();
 		Materials.Clear();
 	}
 
@@ -745,8 +757,10 @@ namespace Engine {
 		LightClusterBindings.ReleaseUnused();
 		SpriteBindings.ReleaseUnused();
 		Lights2DBindings.ReleaseUnused();
+		ExposureBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 		UiQuadBindings.ReleaseUnused();
+		ParticleBindings.ReleaseUnused();
 
 		Materials.ReleaseUnused();
 	}
@@ -1355,6 +1369,8 @@ namespace Engine {
 			commandList.writeBuffer(LightBuffer, Lights.data(), Lights.size() * sizeof(ShaderLight));
 		if (!Instances.empty())
 			commandList.writeBuffer(InstanceBuffer, Instances.data(), Instances.size() * sizeof(InstanceRecord));
+		// M26 (C26.1, R-GI-PROBE; stream Q-B): the probes' constants, and their mirrors' copies when the view's probes changed.
+		Utils::RecordProbeUploads(commandList, ProbeResources, frame.Probes);
 		const glm::vec3 clearColor = frame.Camera.ClearColor;
 		commandList.clearTextureFloat(Targets.SceneColor, nvrhi::AllSubresources, nvrhi::Color(clearColor.r, clearColor.g, clearColor.b, 1.0f));
 		commandList.clearDepthStencilTexture(Targets.SceneDepth, nvrhi::AllSubresources, true, 0.0f, false, 0);
@@ -1586,6 +1602,23 @@ namespace Engine {
 		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
 		frame.EnvironmentSpecular = environment != nullptr ? environment->Specular : Pipelines->BlackCube;
 		frame.EnvironmentSkybox = environment != nullptr ? environment->Skybox : nvrhi::TextureHandle();
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the view's probes, in the views
+		// that light with the environment, never in a bake's captures (RenderQualitySettings::Probes false: one bounce).
+		frame.Probes = Utils::PrepareProbeShading(*Cache, snapshot, camera, hasCamera && frame.IsLit && !frame.Wireframe && snapshot.Quality.Probes);
+		frame.KeepFirstError(Utils::EnsureProbeViewResources(*Device, ProbeResources, frame.Probes));
+		if ((frame.Probes.DroppedVolumes > 0 || frame.Probes.DroppedReflectionProbes > 0) && !ProbeLimitLogged)
+		{
+			ProbeLimitLogged = true;
+			ENGINE_CORE_WARN("{} irradiance volume(s) beyond the view's {} and {} reflection probe(s) beyond its {} are not shaded (logged once per view)",
+				frame.Probes.DroppedVolumes, MaxViewIrradianceVolumes, frame.Probes.DroppedReflectionProbes, MaxViewReflectionProbes);
+		}
+		if (frame.Probes.MismatchedReflectionProbes > 0 && !ProbeFormatLogged)
+		{
+			ProbeFormatLogged = true;
+			ENGINE_CORE_WARN("{} reflection probe(s) whose Environment's specular cube differs in format or size from the view's first probe's are not "
+							 "shaded; import every probe's Environment with the same Compression (logged once per view)",
+				frame.Probes.MismatchedReflectionProbes);
+		}
 		if (tonemapped && Assets->GetAssetType(BuiltinAssetHandles::BlueNoiseTexture) == AssetType::Texture)
 		{
 			const GpuTexture& noise = Cache->GetTexture(BuiltinAssetHandles::BlueNoiseTexture);
@@ -1959,8 +1992,12 @@ namespace Engine {
 		RenderRecordingContext& recording = *frame.Recording;
 		// M23 (stream C): the forward set binds the cluster grid and masks (RecordLightClusters); without them (their creation
 		// error is the render's) the forward passes are skipped.
-		if (frame.HasCamera && !frame.IsDataView && !frame.Wireframe && LightClusterConstantsBuffer != nullptr && LightClusterBuffer != nullptr)
+		if (frame.HasCamera && !frame.IsDataView && !frame.Wireframe && LightClusterConstantsBuffer != nullptr && LightClusterBuffer != nullptr
+			&& ProbeResources.Constants != nullptr)
 		{
+			// M26 (stream Q-B): the probes' resources (Private/ProbeShading.h), or the neutral ones without probes of a kind.
+			const bool hasVolumes = !frame.Probes.Volumes.empty();
+			const bool hasReflections = !frame.Probes.Cubes.empty();
 			nvrhi::BindingSetDesc desc;
 			desc.bindings = {
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, ViewConstantsBuffer),
@@ -1978,6 +2015,9 @@ namespace Engine {
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightClusterMasksRegister, LightClusterBuffer),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::PointShadowMapsRegister, !frame.Points.Lights.empty() ? Targets.PointShadowMaps : Pipelines->EmptyPointShadows),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::ProbeConstantsRegister, ProbeResources.Constants),
+				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::IrradianceProbesRegister, hasVolumes ? ProbeResources.Coefficients : Pipelines->EmptyIrradianceProbes),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::ReflectionProbeCubesRegister, hasReflections ? ProbeResources.Cubes : Pipelines->EmptyReflectionProbeCubes),
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::ShadowCompareRegister, Pipelines->ShadowCompare),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
@@ -2043,6 +2083,13 @@ namespace Engine {
 	}
 
 	void SceneRenderer::State::RecordSpritesStage(Detail::SceneRendererFrame& frame)
+	{
+		RecordSpritesAndTilemaps(frame);
+		// M26 (C26.1, decision 7): the particles after the sprites, the tilemaps and the 2D lights.
+		RecordParticles(frame);
+	}
+
+	void SceneRenderer::State::RecordSpritesAndTilemaps(Detail::SceneRendererFrame& frame)
 	{
 		const RenderSnapshot& snapshot = *frame.Snapshot;
 		// Sprites and tilemaps draw in the Lit view only (decision 4): the data views, the material views and the wireframe
@@ -2187,6 +2234,46 @@ namespace Engine {
 		SpriteQuadLit.clear();
 		ReleaseOutsizedSpriteQuads();
 		ReleaseUnusedTilemaps();
+	}
+
+	void SceneRenderer::State::RecordParticles(Detail::SceneRendererFrame& frame)
+	{
+		const RenderSnapshot& snapshot = *frame.Snapshot;
+		// Particles draw in the Lit view only, as sprites do: the data views, the material views, the Overdraw view and the
+		// wireframe show none.
+		if (snapshot.Particles.empty() || !frame.HasCamera || !frame.IsLit || frame.Wireframe)
+			return;
+		ENGINE_CORE_ASSERT(Pipelines->Quads != nullptr, "the pipeline set has no QuadBatcher");
+		if (Pipelines->Quads == nullptr)
+		{
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no QuadBatcher; the particles are not drawn"));
+			return;
+		}
+		const glm::mat4 viewProjection = frame.Camera.Projection * frame.Camera.View;
+		frame.KeepFirstError(PlanParticlePass(snapshot.ParticleEmitters, snapshot.Particles, frame.Camera.View, viewProjection, ParticlePlan));
+		if (!ParticlePlan.Quads.empty())
+		{
+			nvrhi::ICommandList& commandList = *frame.CommandList;
+			frame.Recording->BeginPass("Particles", &commandList);
+			RenderPassCounters counters;
+			const Result<uint32_t> drawn = RecordParticlePass(commandList, ParticleBindings,
+				{ .Plan = &ParticlePlan,
+					.Quads = Pipelines->Quads.get(),
+					.Resources = Cache,
+					.Framebuffer = Targets.ForwardFramebuffer,
+					.ViewProjection = viewProjection,
+					.Sampler = frame.PixelArt ? QuadSampler::Point : QuadSampler::Linear },
+				ParticleQuads, counters);
+			frame.Recording->EndPass(counters);
+			if (!drawn)
+				frame.KeepFirstError(std::unexpected(drawn.error()));
+		}
+		// An outsized render keeps no memory after it (as the Sprites stage's quad vectors, M21's milestone review).
+		constexpr size_t Kept = QuadBatcher::MaxQuadsPerRecord;
+		if (ParticlePlan.Quads.capacity() > Kept)
+			std::vector<ParticlePassQuad>().swap(ParticlePlan.Quads);
+		if (ParticleQuads.capacity() > Kept)
+			std::vector<QuadDraw>().swap(ParticleQuads);
 	}
 
 	void SceneRenderer::State::AddSpriteQuad(const QuadDraw& quad, bool lit)
@@ -2520,17 +2607,65 @@ namespace Engine {
 		frame.Bloom = nullptr;
 		frame.BloomIntensity = std::isfinite(post.BloomIntensity) ? std::clamp(post.BloomIntensity, 0.0f, 1.0f) : 0.0f;
 		// The debug views and the 2D colour path (decision 7: a bloom of any intensity changes texels) draw no bloom.
-		if (!frame.IsLit || frame.Wireframe || frame.PixelArt || !post.BloomEnabled || frame.BloomIntensity <= 0.0f)
+		if (frame.IsLit && !frame.Wireframe && !frame.PixelArt && post.BloomEnabled && frame.BloomIntensity > 0.0f)
+		{
+			nvrhi::ICommandList& commandList = *frame.CommandList;
+			frame.Recording->BeginPass("Bloom", &commandList);
+			RenderPassCounters counters;
+			auto result = Pipelines->Bloom->RecordCounted(commandList, BloomBindings, { .SceneColor = Targets.SceneColor, .Chain = Targets.Bloom }, counters);
+			if (result)
+				frame.Bloom = *result;
+			else
+				frame.KeepFirstError(std::unexpected(std::move(result).error()));
+			frame.Recording->EndPass(counters);
+		}
+		RecordExposure(frame);
+	}
+
+	Status SceneRenderer::State::EnsureExposureBuffers()
+	{
+		if (ExposureHistogramBuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(ExposureHistogramBuffer, Device->CreateBuffer(ExposurePass::GetHistogramDesc()));
+		}
+		if (ExposureStateBuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(ExposureStateBuffer, Device->CreateBuffer(ExposurePass::GetStateDesc()));
+		}
+		return {};
+	}
+
+	void SceneRenderer::State::RecordExposure(Detail::SceneRendererFrame& frame)
+	{
+		const PostProcessSettings& post = frame.Snapshot->Post;
+		frame.AdaptedExposure = nullptr;
+		// ExposureMode Auto acts as Manual in the debug views, the wireframe (no lit image to meter) and the 2D colour path
+		// (decision 10: pixel-art mode keeps exposure 1), as bloom does.
+		if (!frame.IsLit || frame.Wireframe || frame.PixelArt || post.ExposureMode != RenderExposureMode::Auto)
+		{
+			ExposureValid = false;
 			return;
+		}
+		if (const Status ensured = EnsureExposureBuffers(); !ensured)
+		{
+			frame.KeepFirstError(ensured);
+			ExposureValid = false;
+			return;
+		}
 		nvrhi::ICommandList& commandList = *frame.CommandList;
-		frame.Recording->BeginPass("Bloom", &commandList);
+		frame.Recording->BeginPass("Exposure", &commandList);
 		RenderPassCounters counters;
-		auto result = Pipelines->Bloom->RecordCounted(commandList, BloomBindings, { .SceneColor = Targets.SceneColor, .Chain = Targets.Bloom }, counters);
-		if (result)
-			frame.Bloom = *result;
-		else
-			frame.KeepFirstError(std::unexpected(std::move(result).error()));
+		// The temporal-state section (decision 10): a reset history converges at once, as does a view whose state buffer
+		// holds no adapted exposure of its previous render.
+		const Status recorded = Pipelines->Exposure->Record(commandList, ExposureBindings,
+			{ .SceneColor = Targets.SceneColor, .Bloom = frame.Bloom, .BloomIntensity = frame.Bloom != nullptr ? frame.BloomIntensity : 0.0f, .Histogram = ExposureHistogramBuffer, .State = ExposureStateBuffer, .MinEV = post.AutoExposureMinEV, .MaxEV = post.AutoExposureMaxEV, .SpeedUp = post.AutoExposureSpeedUp, .SpeedDown = post.AutoExposureSpeedDown, .DeltaTime = frame.Camera.DeltaTime, .Reset = !ExposureValid || !frame.Camera.PreviousViewProjection.has_value() },
+			counters);
 		frame.Recording->EndPass(counters);
+		ExposureValid = recorded.has_value();
+		if (recorded)
+			frame.AdaptedExposure = ExposureStateBuffer;
+		else
+			frame.KeepFirstError(recorded);
 	}
 
 	void SceneRenderer::State::RecordTonemapStage(Detail::SceneRendererFrame& frame)
@@ -2583,7 +2718,19 @@ namespace Engine {
 			const TonemapSettings settings{ .Tonemapper = tonemapped ? post.Tonemap : RenderTonemapper::Linear,
 				.Dither = tonemapped && frame.BlueNoise != nullptr,
 				.EncodeSrgb = frame.IsLit || frame.DebugView == RenderDebugView::Albedo || frame.DebugView == RenderDebugView::Emissive };
-			encoded = Pipelines->Tonemap->Record(commandList, TonemapBindings, { .ViewConstants = ViewConstantsBuffer, .SceneColor = Targets.SceneColor, .Bloom = frame.Bloom, .BloomIntensity = frame.Bloom != nullptr ? frame.BloomIntensity : 0.0f, .BlueNoise = frame.BlueNoise, .LdrColor = Targets.Ldr[0], .Settings = settings });
+			// M26 (Docs/Decisions/0037-m26-contract.md decisions 10 and 15, stream X-B): Post's grading LUT, where the tonemapper
+			// follows Post; never on the 2D colour path, which delivers a sprite's texels unchanged. A LUT that does not load or
+			// upload grades nothing (GpuResourceCache::GetLut reports why).
+			const GpuLut* lut = tonemapped && post.Lut.IsValid() ? Cache->GetLut(post.Lut) : nullptr;
+			TonemapPassInputs inputs{ .ViewConstants = ViewConstantsBuffer, .SceneColor = Targets.SceneColor, .Bloom = frame.Bloom, .BloomIntensity = frame.Bloom != nullptr ? frame.BloomIntensity : 0.0f, .BlueNoise = frame.BlueNoise, .LdrColor = Targets.Ldr[0], .Settings = settings, .AdaptedExposure = frame.AdaptedExposure };
+			if (lut != nullptr)
+			{
+				inputs.Lut = lut->Texture;
+				inputs.LutDomainMin = lut->DomainMin;
+				inputs.LutDomainMax = lut->DomainMax;
+				inputs.LutIntensity = post.LutIntensity;
+			}
+			encoded = Pipelines->Tonemap->Record(commandList, TonemapBindings, inputs);
 		}
 		recording.EndPass({ .Dispatches = encoded ? 1U : 0U });
 		frame.KeepFirstError(std::move(encoded));

@@ -9,10 +9,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 // Heightfields (M26, C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decisions 20 and 21, stream T-A): the format version
-// 1, its source file and the fuzz target. The artifact wrappers, the loader's registration and
-// the flat heightfield are the contract's (live); the rest is skipped until stream T-A implements it.
+// 1, its source file and the fuzz target.
 
 namespace Engine {
 
@@ -56,7 +56,7 @@ namespace Engine {
 			CHECK(flat.Heights.back() == 300);
 		}
 
-		TEST_CASE("HeightfieldData: a payload and a source file round-trip the samples byte for byte" * doctest::skip(true))
+		TEST_CASE("HeightfieldData: a payload and a source file round-trip the samples byte for byte")
 		{
 			const HeightfieldData ramp = MakeRamp();
 			REQUIRE(ValidateHeightfieldData(ramp).has_value());
@@ -79,7 +79,7 @@ namespace Engine {
 			CHECK(ValidateHeightfieldData(tooLarge).error().GetCode() == ErrorCode::Validation);
 		}
 
-		TEST_CASE("HeightfieldData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite) * doctest::skip(true))
+		TEST_CASE("HeightfieldData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = SerializeHeightfieldPayload(MakeRamp());
 			REQUIRE(DeserializeHeightfieldPayload(payload).has_value());
@@ -95,6 +95,56 @@ namespace Engine {
 			});
 			if (Test::IsFuzzSample(run.Range))
 				CHECK(run.Counts.Rejected > 0);
+		}
+
+		// The readers never trust what they read: a source names its format and version first, and a payload holds exactly its
+		// resolution's samples (decision 20).
+		TEST_CASE("HeightfieldData: another magic or version, a resolution out of range, a truncated payload and trailing bytes are refused")
+		{
+			const Buffer payload = SerializeHeightfieldPayload(MakeRamp());
+			const Buffer source = WriteHeightfieldSource(MakeRamp());
+			REQUIRE(source.size() == 8 + payload.size());
+			CHECK(source[0] == std::byte{ 'E' });
+			CHECK(source[3] == std::byte{ 'D' });
+			CHECK(source[4] == std::byte{ 1 });
+
+			Buffer magic = source;
+			magic[0] = std::byte{ 'X' };
+			CHECK(ReadHeightfieldSource(magic).error().GetCode() == ErrorCode::Parse);
+			CHECK(ReadHeightfieldSource(std::span(source).first(3)).error().GetCode() == ErrorCode::Parse);
+			Buffer newer = source;
+			newer[4] = std::byte{ 2 };
+			CHECK(ReadHeightfieldSource(newer).error().GetCode() == ErrorCode::UnsupportedVersion);
+			CHECK(ReadHeightfieldSource(std::span(source).first(6)).error().GetCode() == ErrorCode::Parse);
+
+			Buffer truncated = payload;
+			truncated.pop_back();
+			CHECK(DeserializeHeightfieldPayload(truncated).error().GetCode() == ErrorCode::Parse);
+			Buffer trailing = payload;
+			trailing.push_back(std::byte{ 0 });
+			CHECK(DeserializeHeightfieldPayload(trailing).error().GetCode() == ErrorCode::Parse);
+			for (const uint32_t resolution : { 0u, 2u, MaxHeightfieldResolution + 1, 0xFFFFFFFFu })
+			{
+				CAPTURE(resolution);
+				Buffer sized = payload;
+				for (size_t index = 0; index < 4; ++index)
+					sized[index] = static_cast<std::byte>((resolution >> (8 * index)) & 0xFFU);
+				CHECK(DeserializeHeightfieldPayload(sized).error().GetCode() == ErrorCode::Parse);
+			}
+
+			HeightfieldData short3 = MakeFlatHeightfield(3);
+			short3.Heights.pop_back();
+			CHECK(ValidateHeightfieldData(short3).error().GetCode() == ErrorCode::Validation);
+			HeightfieldData small;
+			small.Resolution = MinHeightfieldResolution - 1;
+			small.Heights.assign(4, 0);
+			CHECK(ValidateHeightfieldData(small).error().GetCode() == ErrorCode::Validation);
+			CHECK(ValidateHeightfieldData(MakeFlatHeightfield(MaxHeightfieldResolution)).has_value());
+
+			// A cooked artifact reads back to the same samples.
+			const Result<AssetRef<HeightfieldData>> cooked = LoadCookedHeightfield(CookHeightfield(MakeRamp(), 1));
+			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+			CHECK((*cooked)->Heights == MakeRamp().Heights);
 		}
 	}
 

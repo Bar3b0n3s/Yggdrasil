@@ -193,6 +193,16 @@
 			"Generator": ""
 		},
 		{
+			"Handle": "000000000000018b",
+			"Path": "engine://Textures/Particle",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
 			"Handle": "00000000000001c1",
 			"Path": "engine://Fonts/Default",
 			"Type": "Font",
@@ -328,6 +338,16 @@
 			"Handle": "000000000000024b",
 			"Path": "engine://Audio/Silence",
 			"Type": "AudioClip",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
+			"Handle": "0000000000000281",
+			"Path": "engine://Luts/Identity",
+			"Type": "Lut",
 			"Source": "Procedural",
 			"File": "",
 			"Importer": "",

@@ -13,6 +13,7 @@
 #include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/AssetReference.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SpriteSheetData.h"
@@ -723,9 +724,25 @@ namespace Engine {
 					return StringTableToText(table, registry);
 				}
 				case AssetCreateType::Folder:
+				case AssetCreateType::Heightfield:
 					break;
 			}
 			return MakeError(ErrorCode::Unsupported, "assets of this type have no content to create");
+		}
+
+		// The samples a side of the flat heightfield asset.create makes (Docs/Decisions/0037-m26-contract.md decision 20): four
+		// of the terrain's 32-cell chunks a side.
+		constexpr uint32_t CreatedHeightfieldResolution = 129;
+
+		// The bytes of a new native asset of `type` at `path`: a heightfield's binary source (MakeFlatHeightfield of
+		// CreatedHeightfieldResolution samples a side, M26), or the text of MakeNativeAssetText. Errors: those of
+		// MakeNativeAssetText.
+		Result<Buffer> MakeNativeAssetBytes(EditorContext& editor, AssetCreateType type, const VfsPath& path, const VariantValue& values)
+		{
+			if (type == AssetCreateType::Heightfield)
+				return WriteHeightfieldSource(MakeFlatHeightfield(CreatedHeightfieldResolution));
+			ENGINE_TRY_ASSIGN(const std::string text, MakeNativeAssetText(editor, type, path, values));
+			return TextToBuffer(text);
 		}
 
 		// The file extension asset.create requires for `type` (empty for a folder).
@@ -741,6 +758,7 @@ namespace Engine {
 				case AssetCreateType::SpriteSheet: return ".spritesheet";
 				case AssetCreateType::Tilemap:     return ".tilemap";
 				case AssetCreateType::StringTable: return ".stringtable";
+				case AssetCreateType::Heightfield: return ".heightfield";
 			}
 			return {};
 		}
@@ -1378,7 +1396,8 @@ namespace Engine {
 			if (!takesValues && context.HasParam("values") && !params.Values.Get().is_null())
 			{
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/values",
-					"only a Material, a SoundEffect, a SpriteSheet, a Tilemap or a StringTable takes values", "leave values out for scenes, prefabs and folders"));
+					"only a Material, a SoundEffect, a SpriteSheet, a Tilemap or a StringTable takes values",
+					"leave values out for scenes, prefabs, heightfields and folders"));
 			}
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", GetCreateExtension(params.Type)));
 			ENGINE_TRY(Utils::RefreshAssets(editor));
@@ -1420,7 +1439,7 @@ namespace Engine {
 				else if (params.Type == AssetCreateType::Material)
 					ENGINE_TRY(ResolveMaterialTextures(context, values, "/values"));
 				const std::optional<AssetHandle> sheetTexture = params.Type == AssetCreateType::SpriteSheet ? FindSpriteSheetTexture(values) : std::nullopt;
-				ENGINE_TRY_ASSIGN(const std::string text, MakeNativeAssetText(editor, params.Type, path, VariantValue(std::move(values))));
+				ENGINE_TRY_ASSIGN(Buffer bytes, MakeNativeAssetBytes(editor, params.Type, path, VariantValue(std::move(values))));
 				std::optional<FileWrite> uncompressed;
 				if (sheetTexture.has_value())
 				{
@@ -1430,7 +1449,7 @@ namespace Engine {
 				const std::string metaText = SerializeAssetMetadata(metadata);
 				ENGINE_TRY_ASSIGN(const VfsPath metaPath, GetMetaPath(path));
 				Utils::AddMissingDirectoryEdits(vfs, path.GetParent(), edits);
-				edits.push_back(AssetFileEdit{ .Path = path, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(text) });
+				edits.push_back(AssetFileEdit{ .Path = path, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = std::move(bytes) });
 				edits.push_back(AssetFileEdit{ .Path = metaPath, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(metaText) });
 				if (uncompressed.has_value())
 				{
@@ -1635,7 +1654,10 @@ namespace Engine {
 			.Entry(AssetCreateType::Tilemap, "Tilemap",
 				"A .tilemap tilemap: a palette of sprite sheet frames and cells in chunks; without values an empty map of unit cells in 16-cell chunks.")
 			.Entry(AssetCreateType::StringTable, "StringTable",
-				"A .stringtable string table: keyed strings in several locales, read by Loc.Get; without values the locale en and no entries.");
+				"A .stringtable string table: keyed strings in several locales, read by Loc.Get; without values the locale en and no entries.")
+			.Entry(AssetCreateType::Heightfield, "Heightfield",
+				"A .heightfield heightfield for a Terrain: a flat square of 129 x 129 samples at height 0; takes no values (terrain.importHeightmap converts "
+				"a heightmap, terrain.edit sculpts it).");
 
 		registry.Struct<AssetDiagnosticInfo>("AssetDiagnosticInfo", "A diagnostic of an asset.")
 			.Field("severity", &AssetDiagnosticInfo::Severity, "How serious it is.")
@@ -1884,12 +1906,16 @@ namespace Engine {
 		startEntry["Values"]["en"] = "Start";
 		startEntry["Values"]["fr"] = "Commencer";
 		tableExample["values"]["Entries"] = Json::array({ startEntry });
+		Json heightfieldExample = Json::object();
+		heightfieldExample["type"] = "Heightfield";
+		heightfieldExample["path"] = "Assets/Terrain/Ground.heightfield";
 		methods.Add(
 			{
 				.Name = "asset.create",
 				.Description = "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty "
-							   "scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A "
-							   "folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+							   "scene, a one-entity prefab, a flat heightfield or a folder below Assets/, with its .meta and any missing parent folders, as one "
+							   "undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an "
+							   "empty folder.",
 				.RequiredParams = { "type", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,
@@ -1898,7 +1924,8 @@ namespace Engine {
 				.Examples = { { .Description = "Create a red material.", .Params = createExample },
 					{ .Description = "Create a two-note coin pickup sound.", .Params = soundExample },
 					{ .Description = "Create a sprite sheet with two 16 x 16 frames of a texture and a looping clip over them.", .Params = sheetExample },
-					{ .Description = "Create a string table with an English and a French string for one key.", .Params = tableExample } },
+					{ .Description = "Create a string table with an English and a French string for one key.", .Params = tableExample },
+					{ .Description = "Create a flat heightfield for a Terrain.", .Params = heightfieldExample } },
 			},
 			&Automation::AssetCreate);
 

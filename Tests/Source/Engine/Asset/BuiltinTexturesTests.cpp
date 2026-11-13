@@ -28,6 +28,8 @@ namespace Engine {
 			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteRounded) == "SpriteRounded");
 			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteBevel) == "SpriteBevel");
 			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteCircle) == "SpriteCircle");
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 7): engine://Textures/Particle.
+			CHECK(BuiltinTextureToString(BuiltinTexture::Particle) == "Particle");
 		}
 
 		// Docs/Decisions/0032-m21-contract.md decision 7 (stream B): the procedural sprite textures, white shapes a sprite tints.
@@ -69,6 +71,54 @@ namespace Engine {
 			CHECK(texel(circle, 0, 0) == Clear);
 			CHECK(texel(circle, 8, 8) == Opaque);
 			CHECK(texel(circle, 0, 8) == Opaque);
+		}
+
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7, stream P-B): the particles' default texture, a white
+		// soft disc whose alpha falls as (1 - d^2)^2 from the centre to the rim, where d is the texel centre's distance from the
+		// texture's centre over its half side.
+		TEST_CASE("BuiltinTextures: the particle texture is a 32x32 white soft disc of one level, identical on every run")
+		{
+			const TextureData texture = GenerateBuiltinParticleTexture();
+			REQUIRE(ValidateTextureData(texture).has_value());
+			CHECK(texture.Format == TextureFormat::RGBA8Srgb);
+			CHECK(texture.Width == 32);
+			CHECK(texture.Height == 32);
+			REQUIRE(texture.Mips.size() == 1);
+			CHECK(std::ranges::equal(texture.Pixels, GenerateBuiltinParticleTexture().Pixels));
+			CHECK(std::ranges::equal(texture.Pixels, GenerateBuiltinTexture(BuiltinTexture::Particle).Pixels));
+			const std::span<const std::byte> pixels = GetMipPixels(texture, 0);
+			REQUIRE(pixels.size() == 32 * 32 * 4);
+			const auto alpha = [&pixels](uint32_t x, uint32_t y)
+			{
+				return std::to_integer<int>(pixels[(static_cast<size_t>(y) * 32 + x) * 4 + 3]);
+			};
+			for (uint32_t y = 0; y < 32; ++y)
+			{
+				for (uint32_t x = 0; x < 32; ++x)
+				{
+					CAPTURE(x);
+					CAPTURE(y);
+					const size_t offset = (static_cast<size_t>(y) * 32 + x) * 4;
+					CHECK(pixels[offset] == std::byte{ 255 });
+					CHECK(pixels[offset + 1] == std::byte{ 255 });
+					CHECK(pixels[offset + 2] == std::byte{ 255 });
+					// The definition in doubles: (1 - d^2) is a multiple of 2^-10 and its square of 2^-20, both exact, and no
+					// value lies halfway between two bytes, so rounding the double gives the generator's byte.
+					const double dx = (static_cast<double>(x) + 0.5 - 16.0) / 16.0;
+					const double dy = (static_cast<double>(y) + 0.5 - 16.0) / 16.0;
+					const double falloff = std::max(0.0, 1.0 - (dx * dx + dy * dy));
+					CHECK(alpha(x, y) == static_cast<int>(std::round(255.0 * falloff * falloff)));
+					// Symmetric about both axes.
+					CHECK(alpha(x, y) == alpha(31 - x, y));
+					CHECK(alpha(x, y) == alpha(x, 31 - y));
+				}
+			}
+			// The four centre texels are nearly opaque, the edge midpoints barely visible and the corners clear.
+			CHECK(alpha(15, 15) == 254);
+			CHECK(alpha(16, 16) == 254);
+			CHECK(alpha(0, 15) == 1);
+			CHECK(alpha(0, 0) == 0);
+			CHECK(alpha(31, 31) == 0);
 		}
 
 		TEST_CASE("BuiltinTextures: textures have their documented sizes, formats and texels")
@@ -113,12 +163,14 @@ namespace Engine {
 		TEST_CASE("BuiltinTextures: the generated texels match the hashes recorded in every configuration")
 		{
 			// Integer arithmetic and a fixed table only, so the recorded hashes hold in every configuration and on every platform.
-			// M21's sprite textures (Docs/Decisions/0032-m21-contract.md decision 7) follow the M6 textures.
-			constexpr std::array<BuiltinTexture, 9> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
+			// M21's sprite textures (Docs/Decisions/0032-m21-contract.md decision 7) follow the M6 textures, and M26's particle
+			// texture (Docs/Decisions/0037-m26-contract.md decision 7) follows them.
+			constexpr std::array<BuiltinTexture, 10> Textures = { BuiltinTexture::White, BuiltinTexture::Black, BuiltinTexture::FlatNormal,
 				BuiltinTexture::Checker, BuiltinTexture::Missing, BuiltinTexture::SpriteSquare, BuiltinTexture::SpriteRounded, BuiltinTexture::SpriteBevel,
-				BuiltinTexture::SpriteCircle };
-			constexpr std::array<uint64_t, 9> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
-				0xc4e010a786d84db6ull, 0x959a5dac370947e5ull, 0x9ea922e57a320e17ull, 0xc0165963ae845894ull, 0xbb5ce8d25334fb6dull, 0x3737bbbc5466cf4eull };
+				BuiltinTexture::SpriteCircle, BuiltinTexture::Particle };
+			constexpr std::array<uint64_t, 10> RecordedHashes = { 0x2e54fae2959dbb84ull, 0x088910b435c92dc1ull, 0xee5a85739c397f1cull,
+				0xc4e010a786d84db6ull, 0x959a5dac370947e5ull, 0x9ea922e57a320e17ull, 0xc0165963ae845894ull, 0xbb5ce8d25334fb6dull, 0x3737bbbc5466cf4eull,
+				0x6b032256171593caull };
 			for (size_t index = 0; index < Textures.size(); ++index)
 			{
 				CAPTURE(std::string(BuiltinTextureToString(Textures[index])));

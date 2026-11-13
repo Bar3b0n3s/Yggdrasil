@@ -3,8 +3,10 @@
 #include "Engine/Scene/EntityBounds.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Asset/TerrainGeometry.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
@@ -12,12 +14,14 @@
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/GlmApprox.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
@@ -319,6 +323,47 @@ namespace Engine {
 			Entity missing = scene.GetScene().CreateEntity("Missing");
 			missing.AddComponent<TilemapRendererComponent>(TilemapRendererComponent{ .Tilemap = TypedAssetHandle<AssetType::Tilemap>(AssetHandle(0x89600000ull)) });
 			CHECK_FALSE(ComputeEntityWorldBounds(missing, assets).has_value());
+		}
+
+		// M26 (C-TERR, Docs/Decisions/0037-m26-contract.md decision 21, stream T-B): a terrain is bounded by its Size along X
+		// and Z and its lowest and highest samples' heights along Y (Asset/TerrainGeometry.h), at its entity's world matrix.
+		TEST_CASE("EntityBounds: a terrain's bounds span its size and its samples' heights")
+		{
+			Test::SceneTestFixture scene;
+			Test::InMemoryAssetManager assets;
+			const AssetHandle heightfieldHandle = UUID(8960);
+			Ref<HeightfieldData> heightfield = CreateRef<HeightfieldData>(MakeFlatHeightfield(5, 13107));
+			heightfield->Heights[7] = 26214; // 2/5 of the scale, the highest
+			heightfield->Heights[19] = 6553; // 1/10 of the scale, the lowest
+			assets.Publish(heightfieldHandle, heightfield, "Assets/Terrain/Bounds.heightfield");
+			Entity entity = scene.GetScene().CreateEntity("Terrain");
+			entity.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(-4.0f, 1.0f, 2.0f);
+				transform.Scale = glm::vec3(2.0f, 0.5f, 1.0f);
+			});
+			TerrainComponent terrain;
+			terrain.Heightfield.SetHandle(heightfieldHandle);
+			terrain.Size = glm::vec2(8.0f, 6.0f);
+			terrain.HeightScale = 10.0f;
+			entity.AddComponent<TerrainComponent>(terrain);
+			const TerrainExtent extent{ .Size = terrain.Size, .HeightScale = terrain.HeightScale };
+			const float lowest = GetTerrainSamplePosition(*heightfield, extent, 4, 3).y;
+			const float highest = GetTerrainSamplePosition(*heightfield, extent, 2, 1).y;
+			const std::optional<Aabb> bounds = ComputeEntityWorldBounds(entity, assets);
+			REQUIRE(bounds.has_value());
+			CHECK(Test::ApproxEqual(bounds->Min, glm::vec3(-4.0f, 1.0f + 0.5f * lowest, 2.0f)));
+			CHECK(Test::ApproxEqual(bounds->Max, glm::vec3(12.0f, 1.0f + 0.5f * highest, 8.0f)));
+
+			// No heightfield, or one that does not load, adds nothing.
+			Entity bare = scene.GetScene().CreateEntity("Bare");
+			bare.AddComponent<TerrainComponent>();
+			CHECK_FALSE(ComputeEntityWorldBounds(bare, assets).has_value());
+			Entity broken = scene.GetScene().CreateEntity("Broken");
+			TerrainComponent unloaded;
+			unloaded.Heightfield.SetHandle(AssetHandle(0x89700000ull));
+			broken.AddComponent<TerrainComponent>(unloaded);
+			CHECK_FALSE(ComputeEntityWorldBounds(broken, assets).has_value());
 		}
 	}
 

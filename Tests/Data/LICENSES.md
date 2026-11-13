@@ -62,6 +62,17 @@ geometry is a unit cube and unit quads computed in the script.
 
 `Truncated.png` is deliberately cut short, so the texture importer's failure path has a fixture.
 
+## Generated heightmap fixtures (`Assets/Heightmaps/`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Assets/Heightmaps/**` (today `Ramp16.png`) |
+| Origin | First-party: written by `Tests/Data/Generate/MakeHeightmapFixtures.py` with the Python standard library only (a 16-bit greyscale PNG with stored deflate blocks). No third-party image or tool output is included. |
+| License | First-party: the same terms as the repository's code; no third-party rights |
+| Reproduce | `python Tests/Data/Generate/MakeHeightmapFixtures.py` writes them; `--check` verifies that the committed files are byte-identical to a fresh generation |
+
+`Ramp16.png` is a 17 x 17 ramp whose sample (x, z) is x * 4000 + z (Docs/Decisions/0037-m26-contract.md decision 20).
+
 ## Hand-written asset fixtures (`Assets/Materials/`, `Assets/Scenes/`, `Assets/Prefabs/`, `Assets/SpriteSheets/`, `Assets/Tilemaps/`, `Assets/StringTables/`)
 
 | | |
@@ -135,6 +146,18 @@ scanline blocks of each compression the environment importer reads: NONE, RLE, Z
 review). `Glyphs.ttf` is
 a TrueType font with quadratic outlines for `.notdef`, space, `A`, `O` and `V` (`.notdef`, `A` and `O` with counters), a
 format 4 Unicode character map and a legacy `kern` table that kerns `A` and `V`.
+
+## Generated LUT fixtures (`Assets/Luts/`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Assets/Luts/Warm.cube` |
+| Origin | First-party: written by `Tests/Data/Generate/MakeLutFixtures.py` from the Adobe/IRIDAS `.cube` format, with the Python standard library only. The table's entries are exact rational functions of the grid coordinates computed in the script; no third-party LUT or tool output is included. |
+| License | First-party: the same terms as the repository's code; no third-party rights |
+| Reproduce | `python Tests/Data/Generate/MakeLutFixtures.py` writes them; `--check` verifies that the committed files are byte-identical to a fresh generation |
+
+`Warm.cube` is a 9 x 9 x 9 warm grade (red lifted, blue lowered) over the domain [0, 1], with a title, a comment and both
+domain lines (M26, Docs/Decisions/0037-m26-contract.md decision 15).
 
 ## Recorded soak samples (`Hardening/`)
 

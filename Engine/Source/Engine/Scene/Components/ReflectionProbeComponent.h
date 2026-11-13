@@ -19,7 +19,7 @@ namespace Engine {
 	// decisions 4, 8 and 9): a baked reflection of the probe's surroundings that glossy surfaces inside its box reflect.
 	// Requires Transform.
 	//   - The bake: lighting.bake renders the scene around the entity's position into a cube of Resolution texels a face,
-	//     writes it as an equirectangular Radiance HDR image, `Assets/Lighting/<Scene>/<Entity>.hdr`, and imports it as an
+	//     writes it as an equirectangular Radiance HDR image, `Assets/Lighting/<scene path>/<Entity>.hdr`, and imports it as an
 	//     Environment asset (EnvironmentImporter's prefiltered specular cube; a reflection probe has no asset type of its
 	//     own, decision 3), which Data then references. An Environment imported any other way works too; null (not baked:
 	//     PROBE_NOT_BAKED) reflects nothing.

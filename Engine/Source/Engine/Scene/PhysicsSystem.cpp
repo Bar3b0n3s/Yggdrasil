@@ -18,6 +18,8 @@
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/TerrainColliderComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
@@ -42,9 +44,12 @@
 //     whenever the scene's revision moved, tell PreStep that the composition may have changed: it composes again
 //     (ComposePhysicsBodies) and diffs the plans against the created bodies by (owner, origin). Everything a body's shape
 //     was built from that changes without a signal (local transforms, written directly by runtime systems and scripts, and
-//     mesh versions) is compared bit for bit every PreStep (PhysicsShapeInput, PhysicsMeshInput), and the entities it was
-//     built from are compared again when the hierarchy changed. A body is described again only when one of these changed,
-//     so a moving body whose shape inputs stay the same is never touched.
+//     the versions of meshes and M26's heightfields) is compared bit for bit every PreStep (PhysicsShapeInput,
+//     PhysicsAssetInput), and the entities it was built from are compared again when the hierarchy changed. A body is
+//     described again only when one of these changed, so a moving body whose shape inputs stay the same is never touched.
+//     M26 (Docs/Decisions/0037-m26-contract.md decision 21): a TerrainCollider and its Terrain signal like the collider
+//     components; its own entity's implicit static body, when it holds the TerrainCollider, takes its friction and
+//     restitution (MakeBodySettings), as the composition gives that body its layer.
 //   - Pairs. Records are keyed by sub-shape contact (PhysicsSubShapeKey) and grouped into pairs of owners
 //     (PhysicsPairKey). A pair's reference count is its number of contacts; enters and exits are its transitions from and
 //     to zero over a step. Jolt reports OnContactRemoved when a pair of bodies falls asleep, although they still touch;
@@ -314,6 +319,13 @@ namespace Engine {
 				settings.AllowSleeping = body.AllowSleeping;
 				settings.EnhancedInternalEdgeRemoval = body.EnhancedInternalEdgeRemoval;
 			}
+			else if (plan.Origin == PhysicsBodyOrigin::ImplicitStatic && HoldsOwnTerrainCollider(plan.Colliders, plan.Owner))
+			{
+				// M26 (decision 21): a terrain's own implicit static body has the TerrainCollider's material.
+				const TerrainColliderComponent& terrain = owner.GetComponent<TerrainColliderComponent>();
+				settings.Friction = terrain.Friction;
+				settings.Restitution = terrain.Restitution;
+			}
 			return settings;
 		}
 
@@ -499,6 +511,8 @@ namespace Engine {
 		Utils::ConnectComponentSignals<MeshColliderComponent, &State::OnComponentChanged>(registry, *this);
 		Utils::ConnectComponentSignals<CharacterControllerComponent, &State::OnComponentChanged>(registry, *this);
 		Utils::ConnectComponentSignals<MeshRendererComponent, &State::OnComponentChanged>(registry, *this);
+		Utils::ConnectComponentSignals<TerrainColliderComponent, &State::OnComponentChanged>(registry, *this);
+		Utils::ConnectComponentSignals<TerrainComponent, &State::OnComponentChanged>(registry, *this);
 		registry.on_construct<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_destroy<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_construct<PendingDestroyTag>().connect<&State::OnEntityLeavingPlay>(*this);
@@ -515,6 +529,8 @@ namespace Engine {
 		Utils::DisconnectComponentSignals<MeshColliderComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<CharacterControllerComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<MeshRendererComponent>(registry, *this);
+		Utils::DisconnectComponentSignals<TerrainColliderComponent>(registry, *this);
+		Utils::DisconnectComponentSignals<TerrainComponent>(registry, *this);
 		registry.on_construct<DisabledTag>().disconnect(this);
 		registry.on_destroy<DisabledTag>().disconnect(this);
 		registry.on_construct<PendingDestroyTag>().disconnect(this);
@@ -962,12 +978,12 @@ namespace Engine {
 					return local == nullptr || !sameParts(input, *local);
 				});
 			}
-			const bool meshChanged = Specification.Assets != nullptr
-				&& std::any_of(entry.MeshInputs.begin(), entry.MeshInputs.end(), [this](const PhysicsMeshInput& input)
+			const bool assetChanged = Specification.Assets != nullptr
+				&& std::any_of(entry.AssetInputs.begin(), entry.AssetInputs.end(), [this](const PhysicsAssetInput& input)
 			{
-				return Specification.Assets->GetVersion(input.Mesh) != input.Version;
+				return Specification.Assets->GetVersion(input.Asset) != input.Version;
 			});
-			if (changed || meshChanged)
+			if (changed || assetChanged)
 				owners.insert(entry.Owner);
 		}
 		return owners;
@@ -1075,21 +1091,34 @@ namespace Engine {
 		return inputs;
 	}
 
-	std::vector<PhysicsMeshInput> PhysicsSystem::State::CaptureMeshInputs(const PhysicsBodyPlan& plan) const
+	std::vector<PhysicsAssetInput> PhysicsSystem::State::CaptureAssetInputs(const PhysicsBodyPlan& plan) const
 	{
-		std::vector<PhysicsMeshInput> inputs;
+		std::vector<PhysicsAssetInput> inputs;
 		if (Specification.Assets == nullptr)
 			return inputs;
 		const Scene& scene = *Specification.RuntimeScene;
 		for (const PhysicsColliderPlan& collider : plan.Colliders)
 		{
 			const ConstEntity entity = scene.FindEntityByID(collider.Entity);
-			if (collider.Type != PhysicsColliderType::Mesh || !entity.IsValid())
+			if (!entity.IsValid())
 				continue;
-			AssetHandle mesh = entity.GetComponent<MeshColliderComponent>().Mesh.GetHandle();
-			if (const MeshRendererComponent* renderer = entity.TryGetComponent<MeshRendererComponent>(); !mesh.IsValid() && renderer != nullptr)
-				mesh = renderer->Mesh.GetHandle();
-			inputs.push_back(PhysicsMeshInput{ .Mesh = mesh, .Version = Specification.Assets->GetVersion(mesh) });
+			AssetHandle asset;
+			if (collider.Type == PhysicsColliderType::Mesh)
+			{
+				asset = entity.GetComponent<MeshColliderComponent>().Mesh.GetHandle();
+				if (const MeshRendererComponent* renderer = entity.TryGetComponent<MeshRendererComponent>(); !asset.IsValid() && renderer != nullptr)
+					asset = renderer->Mesh.GetHandle();
+			}
+			else if (collider.Type == PhysicsColliderType::Terrain)
+			{
+				// M26 (decision 21): an edit or a reimport of the heightfield rebuilds the terrain's shape.
+				asset = entity.GetComponent<TerrainComponent>().Heightfield.GetHandle();
+			}
+			else
+			{
+				continue;
+			}
+			inputs.push_back(PhysicsAssetInput{ .Asset = asset, .Version = Specification.Assets->GetVersion(asset) });
 		}
 		return inputs;
 	}
@@ -1112,7 +1141,7 @@ namespace Engine {
 		}
 
 		entry.ShapeInputs = CaptureShapeInputs(plan);
-		entry.MeshInputs = CaptureMeshInputs(plan);
+		entry.AssetInputs = CaptureAssetInputs(plan);
 	}
 
 	void PhysicsSystem::State::RemoveBody(uint32_t handle, std::set<UUID>& woken)

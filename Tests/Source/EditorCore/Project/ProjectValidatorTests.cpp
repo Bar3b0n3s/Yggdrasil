@@ -38,9 +38,11 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/SpriteValidation.h"
+#include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/AutomationTestClient.h"
@@ -1306,9 +1308,9 @@ end
 			// M4's 14 codes, M6's 11 (the asset codes but the runtime-only ASSET_UPLOAD_FAILED, and PREFAB_MISSING_ASSET), M8's
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7,
 			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
-			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, and M23's
-			// RENDER_POINT_SHADOW_BUDGET and two animation codes.
-			CHECK(codes.size() == 50 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, M23's
+			// RENDER_POINT_SHADOW_BUDGET and two animation codes, and M26's PROBE_NOT_BAKED and two terrain codes.
+			CHECK(codes.size() == 53 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1348,7 +1350,14 @@ end
 			CHECK(position("UI_WIDGET_PART_INVALID") + 1 == position(RenderPointShadowBudgetCode));
 			CHECK(position(RenderPointShadowBudgetCode) + 1 == position(AnimationNoAnimatorCode));
 			CHECK(position(AnimationNoAnimatorCode) + 1 == position(AnimationSkeletonMismatchCode));
-			CHECK(codes.back() == AnimationSkeletonMismatchCode);
+			// Phase 3's blocks follow M23's in landing order, M26's last (ADR 0028's phase-3 ledger;
+			// Docs/Decisions/0037-m26-contract.md decision 9): M26's block is checked by its relative order and its own chain
+			// only, since M24's codes come between at M26's merge. It starts with PROBE_NOT_BAKED, and the terrain codes follow
+			// it and end the list.
+			CHECK(position(AnimationSkeletonMismatchCode) < position(ProbeNotBakedCode));
+			CHECK(position(ProbeNotBakedCode) + 1 == position(TerrainNoHeightfieldCode));
+			CHECK(position(TerrainNoHeightfieldCode) + 1 == position(TerrainSplatNotRawCode));
+			CHECK(codes.back() == TerrainSplatNotRawCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

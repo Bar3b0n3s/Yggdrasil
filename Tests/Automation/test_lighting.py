@@ -8,20 +8,19 @@ import unittest
 
 from harness import AutomationTestCase, engine_client
 
-SKIP_BAKE = "contract stub: lighting.bake (ADR 0037 decision 8, stream Q-A)"
-
 
 def probe_data(client: engine_client.EngineClient, path: str, component: str) -> str | None:
     """The Data field of the probe `component` of the entity at `path`."""
-    return client.call("entity.get", {"entity": path})["components"][component]["Data"]
+    entity = client.call("entity.get", {"entity": path, "components": [component]})["entity"]
+    return entity["components"][component]["Data"]
 
 
 class LightingBakeTests(AutomationTestCase):
-    @unittest.skip(SKIP_BAKE)
     def test_two_bakes_write_byte_identical_probe_files(self) -> None:
-        # Decision 8: a bake renders the probes' surroundings, writes Assets/Lighting/<scene>/<entity id>.irradiance and
-        # .hdr, imports them and sets each probe's Data in one undo step; a second bake of the unchanged scene changes
-        # no file and no component, so it records no undo step.
+        # Decision 8: a bake renders the probes' surroundings, writes Assets/Lighting/<the scene's path below
+        # Assets/, without its extension>/<entity id>.irradiance and .hdr (decision 31), imports them and sets each
+        # probe's Data in one undo step; a second bake of the unchanged scene changes no file and no component, so it
+        # records no undo step.
         if not self.require_gpu():
             return
         client, root = self.open_editor_with_scene(renderer="vulkan")
@@ -35,7 +34,7 @@ class LightingBakeTests(AutomationTestCase):
         self.assertEqual(len(first["irradianceVolumes"]), 1)
         self.assertEqual(len(first["reflectionProbes"]), 1)
         volume = first["irradianceVolumes"][0]
-        self.assertTrue(volume["path"].startswith("Assets/Lighting/Main/"))
+        self.assertTrue(volume["path"].startswith("Assets/Lighting/Scenes/Main/"), volume["path"])
         self.assertTrue(volume["path"].endswith(".irradiance"))
         self.assertTrue(first["reflectionProbes"][0]["path"].endswith(".hdr"))
         baked = {probe["path"]: (root / probe["path"]).read_bytes()
@@ -53,17 +52,24 @@ class LightingBakeTests(AutomationTestCase):
         client.call("edit.undo")
         self.assertIsNone(probe_data(client, "/Volume", "IrradianceVolume"))
 
-    @unittest.skip(SKIP_BAKE)
-    def test_an_unsaved_scene_cannot_be_baked(self) -> None:
-        # Decision 8: the bake's folder is named after the scene's file, so a scene never saved is refused with a hint.
-        # A rendering editor, so the refusal is the unsaved scene's and not the one of an editor without a renderer.
+    def test_a_playing_editor_cannot_bake(self) -> None:
+        # Decision 8: the probes are baked from the edit scene and stored in it, so a playing editor is refused with a
+        # hint, and nothing is written. A rendering editor, so the refusal is the play session's and not the one of an
+        # editor without a renderer. (A scene never saved, the other refusal, cannot be reached through automation:
+        # scene.new writes its file; the C++ case "LightingBake: an unsaved scene and an editor without a renderer are
+        # refused, writing nothing" covers it in process.)
         if not self.require_gpu():
             return
-        client, _ = self.open_editor_with_scene(renderer="vulkan")
-        client.call("scene.new")
+        client, root = self.open_editor_with_scene(renderer="vulkan")
+        client.call("entity.create", {"name": "Volume", "components": {"IrradianceVolume": {"Size": [4, 2, 4]}}})
+        client.call("scene.save")
+        client.call("play.start", {"lockstep": True})
         with self.assertRaises(engine_client.EngineError) as refused:
             client.call("lighting.bake")
         self.assert_engine_error(refused.exception, engine_client.INVALID_STATE, "InvalidState")
+        self.assertFalse((root / "Assets" / "Lighting").exists())
+        client.call("play.stop")
+        self.assertIsNone(probe_data(client, "/Volume", "IrradianceVolume"))
 
 
 if __name__ == "__main__":

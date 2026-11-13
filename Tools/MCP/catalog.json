@@ -53,7 +53,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab, a flat heightfield or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -62,7 +62,7 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap", "StringTable"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap", "StringTable", "Heightfield"]
 					},
 					"path": {
 						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap, .stringtable; none for a folder); missing parent folders are created with it.",
@@ -1165,6 +1165,42 @@
 				"required": ["path"]
 			},
 			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 600
+		},
+		{
+			"name": "lighting_bake",
+			"method": "lighting.bake",
+			"description": "Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "LightingBakeParams",
+				"description": "The params of lighting.bake.",
+				"type": "object",
+				"properties": {
+					"irradianceVolumes": {
+						"description": "Whether to bake the scene's IrradianceVolumes (default true).",
+						"type": "boolean"
+					},
+					"reflectionProbes": {
+						"description": "Whether to bake the scene's ReflectionProbes (default true).",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": true,
 			"supportsDryRun": false,
 			"timeoutSeconds": 600
 		},
@@ -2618,6 +2654,117 @@
 			},
 			"mutates": true,
 			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "terrain_edit",
+			"method": "terrain.edit",
+			"description": "Sculpts (Raise, Lower, Smooth, Flatten) or paints (Paint) an edit scene's Terrain with one brush stroke, exactly as the editor's terrain tools do: rewrites the heightfield's or splat map's source and records one undo step.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TerrainEditParams",
+				"description": "The params of terrain.edit.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity whose Terrain to edit: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"tool": {
+						"description": "The stroke's tool.",
+						"enum": ["Raise", "Lower", "Smooth", "Flatten", "Paint"]
+					},
+					"points": {
+						"description": "The brush's centres in world space, 1 to 4,096 in stroke order; their height above the terrain is ignored.",
+						"type": "array",
+						"items": {
+							"type": "array",
+							"prefixItems": [
+								{
+									"type": "number"
+								},
+								{
+									"type": "number"
+								},
+								{
+									"type": "number"
+								}
+							],
+							"minItems": 3,
+							"maxItems": 3
+						}
+					},
+					"radius": {
+						"description": "The brush's radius in metres in the terrain's local space.",
+						"type": "number",
+						"minimum": 0.001,
+						"maximum": 1000
+					},
+					"strength": {
+						"description": "The stroke's strength, from 0 to 1.",
+						"type": "number",
+						"minimum": 0,
+						"maximum": 1
+					},
+					"height": {
+						"description": "Flatten's target height above the terrain's origin, in metres.",
+						"type": "number",
+						"minimum": 0
+					},
+					"layer": {
+						"description": "Paint's layer, 0 to 3 (the splat map's red, green, blue or alpha).",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 3
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity", "points"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "terrain_import_heightmap",
+			"method": "terrain.importHeightmap",
+			"description": "Converts a 16-bit PNG or RAW heightmap (at most 1025 x 1025 samples) into a .heightfield asset that a Terrain can use.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TerrainImportHeightmapParams",
+				"description": "The params of terrain.importHeightmap.",
+				"type": "object",
+				"properties": {
+					"source": {
+						"description": "The heightmap: a 16-bit .png, or a .raw or .r16 of little-endian 16-bit samples.",
+						"type": "string"
+					},
+					"path": {
+						"description": "The .heightfield to write, project-relative below Assets/.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["source", "path"]
+			},
+			"mutates": true,
+			"supportsDryRun": false,
 			"timeoutSeconds": 60
 		},
 		{

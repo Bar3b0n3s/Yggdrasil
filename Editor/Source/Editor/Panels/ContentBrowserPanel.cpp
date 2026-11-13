@@ -658,12 +658,14 @@ namespace Engine {
 			// Indices 5 to 7 are the script templates (script.create); the others are asset.create types. M18's sprite sheet is
 			// appended last, so the earlier entries keep their indices (Docs/Decisions/0029-m18-contract.md decision 18), then
 			// M21's tilemap (Docs/Decisions/0032-m21-contract.md decision 23) and M22's string table
-			// (Docs/Decisions/0033-m22-contract.md decision 10) in landing order (ADR 0028's phase-2 create-list rule).
+			// (Docs/Decisions/0033-m22-contract.md decision 10) in landing order (ADR 0028's phase-2 create-list rule), then M26's
+			// heightfield (Docs/Decisions/0037-m26-contract.md decision 20; the phase-3 ledger's create-list rule).
 			constexpr const char* Labels[] = { "Folder", "Scene", "Material", "Prefab", "Sound effect", "Behaviour script", "Module script", "Test script", "Sprite sheet",
-				"Tilemap", "String table" };
-			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet", "Tilemap", "StringTable" };
+				"Tilemap", "String table", "Heightfield" };
+			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet", "Tilemap", "StringTable",
+				"Heightfield" };
 			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau", ".spritesheet", ".tilemap",
-				".stringtable" };
+				".stringtable", ".heightfield" };
 			constexpr int FirstScriptTemplate = 5;
 			constexpr int LastScriptTemplate = 7;
 			ImGui::TextDisabled("In %s", m_ActionDirectory.c_str());

@@ -22,8 +22,9 @@
 //     bloom, exposure and the tonemap), no particles, sprites, UI or overlays, and every temporal input reset, then reads the
 //     six images back as linear RGBA32F texels, row 0 first, through SceneRenderer::GetSceneColorTexture.
 //   - Deterministic for a device class, as the environment bake is (no temporal noise, no atomics deciding a sum or an
-//     order): two captures of one snapshot give equal texels, and the CPU steps below are pure with IEEE-exact operations and
-//     sqrt only, so two bakes of one scene write byte-identical files (the acceptance "two probe bakes are byte-identical").
+//     order): two captures of one snapshot give equal texels, and the CPU steps below are pure with IEEE-exact operations,
+//     sqrt and DetMath only, so two bakes of one scene write byte-identical files (the acceptance "two probe bakes are
+//     byte-identical").
 //
 // Frozen by the M26 contract C26.1; stream Q-A implements it.
 
@@ -53,8 +54,9 @@ namespace Engine {
 
 	// The irradiance probe of `capture`: its radiance projected onto the real SH basis with each texel's exact solid angle,
 	// convolved with the clamped cosine, divided by pi and windowed (EnvironmentData's convention, so a capture of uniform
-	// radiance L gives coefficients that evaluate to L in every direction: the furnace). Pure; IEEE-exact operations and sqrt
-	// only, in a fixed order (faces, then rows, then columns), so it is identical in every configuration.
+	// radiance L gives coefficients that evaluate to L in every direction: the furnace). Pure; IEEE-exact operations, sqrt and
+	// DetMath only (each texel's solid angle through DetMath::ATan2), in a fixed order (faces, then rows, then columns), so it
+	// is identical in every configuration.
 	[[nodiscard]] std::array<glm::vec3, 9> ProjectCubeToIrradianceSH9(const ProbeCubeCapture& capture);
 
 	// The reflection probe's image of `capture`: 4 FaceSize x 2 FaceSize texels, each the bilinear sample of the cube in its
@@ -65,10 +67,11 @@ namespace Engine {
 	// `.hdr` lighting.bake writes for a reflection probe, which EnvironmentImporter imports. Pure.
 	[[nodiscard]] Buffer WriteRadianceHdr(const ProbeEquirectImage& image);
 
-	// The GPU capture (see the file comment). Owns one SceneRenderer of the largest face it was asked for and the readback
-	// staging textures; registered with the device's recreation registry through its renderer (a SceneRenderer, the placement
-	// rule's place 2) and its staging (released and created again with it), so a capture after a device loss's recovery gives
-	// the texels it gave before. Main thread only; not copyable or movable.
+	// The GPU capture (see the file comment). Owns one SceneRenderer, resized to each capture's face size (its previous size's
+	// targets released first, as ViewportCapture's), and the readback staging; registered with the device's recreation
+	// registry through its renderer (a SceneRenderer, the placement rule's place 2) and as "ProbeCapture" for its command list
+	// and staging (released and created again with it; its TrimUnused hook releases the renderer's targets between captures),
+	// so a capture after a device loss's recovery gives the texels it gave before. Main thread only; not copyable or movable.
 	class ProbeCapture
 	{
 	public:

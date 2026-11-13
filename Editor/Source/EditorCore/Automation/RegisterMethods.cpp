@@ -10,6 +10,7 @@
 #include "EditorCore/Automation/EditorMethods.h"
 #include "EditorCore/Automation/EntityMethods.h"
 #include "EditorCore/Automation/ExportMethods.h"
+#include "EditorCore/Automation/LightingMethods.h"
 #include "EditorCore/Automation/NativeMethods.h"
 #include "EditorCore/Automation/ObserveMethods.h"
 #include "EditorCore/Automation/PrefabMethods.h"
@@ -19,6 +20,7 @@
 #include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/Automation/ScriptMethods.h"
 #include "EditorCore/Automation/ShaderMethods.h"
+#include "EditorCore/Automation/TerrainMethods.h"
 #include "EditorCore/Automation/TestMethods.h"
 #include "EditorCore/Automation/TilemapMethods.h"
 #include "EditorCore/Automation/UiAuthoringMethods.h"
@@ -68,6 +70,10 @@ namespace Engine {
 		RegisterUiAuthoringMethodTypes(registry);
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the editor's animation preview.
 		RegisterAnimationMethodTypes(registry);
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 8): lighting.bake; phase 3 appends in landing order (M24's first).
+		RegisterLightingMethodTypes(registry);
+		// M26 (Docs/Decisions/0037-m26-contract.md decisions 20 and 23): terrain.importHeightmap and terrain.edit.
+		RegisterTerrainMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -94,6 +100,8 @@ namespace Engine {
 		RegisterTilemapMethods(methods);
 		RegisterUiAuthoringMethods(methods); // M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 32
 		RegisterAnimationMethods(methods);
+		RegisterLightingMethods(methods); // M26, Docs/Decisions/0037-m26-contract.md decision 8
+		RegisterTerrainMethods(methods);  // M26, Docs/Decisions/0037-m26-contract.md decisions 20 and 23
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

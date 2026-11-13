@@ -127,7 +127,7 @@
 		{
 			"name": "asset.create",
 			"domain": "asset",
-			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab, a flat heightfield or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -144,7 +144,7 @@
 				"properties": {
 					"type": {
 						"description": "What to create.",
-						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap", "StringTable"]
+						"enum": ["Material", "Scene", "Prefab", "SoundEffect", "Folder", "SpriteSheet", "Tilemap", "StringTable", "Heightfield"]
 					},
 					"path": {
 						"description": "The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap, .stringtable; none for a folder); missing parent folders are created with it.",
@@ -314,6 +314,13 @@
 								}
 							]
 						}
+					}
+				},
+				{
+					"description": "Create a flat heightfield for a Terrain.",
+					"params": {
+						"type": "Heightfield",
+						"path": "Assets/Terrain/Ground.heightfield"
 					}
 				}
 			]
@@ -3904,7 +3911,7 @@
 						"additionalProperties": false
 					},
 					"PostProcess": {
-						"description": "The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).",
+						"description": "The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).",
 						"type": "object",
 						"properties": {
 							"ExposureEV": {
@@ -3913,9 +3920,49 @@
 								"minimum": -16,
 								"maximum": 16
 							},
+							"ExposureMode": {
+								"description": "Manual exposure, or automatic exposure from the image's luminance histogram.",
+								"enum": ["Manual", "Auto"]
+							},
+							"AutoExposureMinEV": {
+								"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+								"type": "number",
+								"minimum": -16,
+								"maximum": 16
+							},
+							"AutoExposureMaxEV": {
+								"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+								"type": "number",
+								"minimum": -16,
+								"maximum": 16
+							},
+							"AutoExposureSpeedUp": {
+								"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
+							"AutoExposureSpeedDown": {
+								"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
 							"Tonemap": {
 								"description": "The tone mapping curve.",
 								"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
+							},
+							"Lut": {
+								"description": "The colour-grading LUT applied after the tone mapping curve; null grades nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Lut"
+							},
+							"LutIntensity": {
+								"description": "How much of the graded colour replaces the ungraded one, from 0 to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
 							},
 							"SsaoEnabled": {
 								"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
@@ -3935,6 +3982,34 @@
 								"description": "The ambient occlusion sample count.",
 								"enum": ["Low", "Medium", "High"]
 							},
+							"SsrEnabled": {
+								"description": "Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses.",
+								"type": "boolean"
+							},
+							"SsrIntensity": {
+								"description": "How strongly screen-space reflections replace the probes' reflection, from 0 to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"SsrMaxDistance": {
+								"description": "How far a reflected ray travels, in metres.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 1000
+							},
+							"SsrThickness": {
+								"description": "How thick a surface is assumed behind its depth when a ray passes it, in metres.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 10
+							},
+							"SsrMaxRoughness": {
+								"description": "The perceptual roughness above which only the probes reflect.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
 							"BloomEnabled": {
 								"description": "Whether bright areas bloom.",
 								"type": "boolean"
@@ -3945,9 +4020,9 @@
 								"minimum": 0,
 								"maximum": 1
 							},
-							"FxaaEnabled": {
-								"description": "Whether FXAA anti-aliasing is applied.",
-								"type": "boolean"
+							"AntiAliasing": {
+								"description": "How edges are anti-aliased: none, FXAA (the default) or TAA.",
+								"enum": ["None", "Fxaa", "Taa"]
 							}
 						},
 						"additionalProperties": false
@@ -7770,7 +7845,7 @@
 						"additionalProperties": false
 					},
 					"PostProcess": {
-						"description": "The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).",
+						"description": "The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).",
 						"type": "object",
 						"properties": {
 							"ExposureEV": {
@@ -7779,9 +7854,49 @@
 								"minimum": -16,
 								"maximum": 16
 							},
+							"ExposureMode": {
+								"description": "Manual exposure, or automatic exposure from the image's luminance histogram.",
+								"enum": ["Manual", "Auto"]
+							},
+							"AutoExposureMinEV": {
+								"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+								"type": "number",
+								"minimum": -16,
+								"maximum": 16
+							},
+							"AutoExposureMaxEV": {
+								"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+								"type": "number",
+								"minimum": -16,
+								"maximum": 16
+							},
+							"AutoExposureSpeedUp": {
+								"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
+							"AutoExposureSpeedDown": {
+								"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
 							"Tonemap": {
 								"description": "The tone mapping curve.",
 								"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
+							},
+							"Lut": {
+								"description": "The colour-grading LUT applied after the tone mapping curve; null grades nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Lut"
+							},
+							"LutIntensity": {
+								"description": "How much of the graded colour replaces the ungraded one, from 0 to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
 							},
 							"SsaoEnabled": {
 								"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
@@ -7801,6 +7916,34 @@
 								"description": "The ambient occlusion sample count.",
 								"enum": ["Low", "Medium", "High"]
 							},
+							"SsrEnabled": {
+								"description": "Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses.",
+								"type": "boolean"
+							},
+							"SsrIntensity": {
+								"description": "How strongly screen-space reflections replace the probes' reflection, from 0 to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"SsrMaxDistance": {
+								"description": "How far a reflected ray travels, in metres.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 1000
+							},
+							"SsrThickness": {
+								"description": "How thick a surface is assumed behind its depth when a ray passes it, in metres.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 10
+							},
+							"SsrMaxRoughness": {
+								"description": "The perceptual roughness above which only the probes reflect.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
 							"BloomEnabled": {
 								"description": "Whether bright areas bloom.",
 								"type": "boolean"
@@ -7811,9 +7954,9 @@
 								"minimum": 0,
 								"maximum": 1
 							},
-							"FxaaEnabled": {
-								"description": "Whether FXAA anti-aliasing is applied.",
-								"type": "boolean"
+							"AntiAliasing": {
+								"description": "How edges are anti-aliased: none, FXAA (the default) or TAA.",
+								"enum": ["None", "Fxaa", "Taa"]
 							}
 						},
 						"additionalProperties": false
@@ -11253,6 +11396,154 @@
 						"verify": true,
 						"strictHash": true,
 						"withoutInput": true
+					}
+				}
+			]
+		},
+		{
+			"name": "lighting.bake",
+			"domain": "lighting",
+			"description": "Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 600,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "LightingBakeParams",
+				"description": "The params of lighting.bake.",
+				"type": "object",
+				"properties": {
+					"irradianceVolumes": {
+						"description": "Whether to bake the scene's IrradianceVolumes (default true).",
+						"type": "boolean"
+					},
+					"reflectionProbes": {
+						"description": "Whether to bake the scene's ReflectionProbes (default true).",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "LightingBakeMethodResult",
+				"description": "The probes lighting.bake baked, in canonical entity order.",
+				"type": "object",
+				"properties": {
+					"irradianceVolumes": {
+						"description": "The baked IrradianceVolumes.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/LightingBakeProbe"
+						}
+					},
+					"reflectionProbes": {
+						"description": "The baked ReflectionProbes.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/LightingBakeProbe"
+						}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"LightingBakeProbe": {
+						"description": "One probe lighting.bake baked.",
+						"type": "object",
+						"properties": {
+							"entity": {
+								"description": "The probe's entity.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"path": {
+								"description": "The written source file, project-relative: Assets/Lighting/<the scene's path below Assets/ without .scene>/<entity id>.irradiance or .hdr.",
+								"type": "string"
+							},
+							"asset": {
+								"description": "The baked asset, which the probe's Data now references.",
+								"$ref": "#/$defs/AssetSummary"
+							},
+							"changed": {
+								"description": "Whether the file's bytes changed (false when a rebake found the same light).",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Bake every probe of the active scene.",
+					"params": {}
+				},
+				{
+					"description": "Bake only the reflection probes.",
+					"params": {
+						"irradianceVolumes": false
 					}
 				}
 			]
@@ -15284,7 +15575,7 @@
 						"additionalProperties": false
 					},
 					"PostProcess": {
-						"description": "The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).",
+						"description": "The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).",
 						"type": "object",
 						"properties": {
 							"ExposureEV": {
@@ -15293,9 +15584,49 @@
 								"minimum": -16,
 								"maximum": 16
 							},
+							"ExposureMode": {
+								"description": "Manual exposure, or automatic exposure from the image's luminance histogram.",
+								"enum": ["Manual", "Auto"]
+							},
+							"AutoExposureMinEV": {
+								"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+								"type": "number",
+								"minimum": -16,
+								"maximum": 16
+							},
+							"AutoExposureMaxEV": {
+								"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+								"type": "number",
+								"minimum": -16,
+								"maximum": 16
+							},
+							"AutoExposureSpeedUp": {
+								"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
+							"AutoExposureSpeedDown": {
+								"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 100
+							},
 							"Tonemap": {
 								"description": "The tone mapping curve.",
 								"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
+							},
+							"Lut": {
+								"description": "The colour-grading LUT applied after the tone mapping curve; null grades nothing.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "Lut"
+							},
+							"LutIntensity": {
+								"description": "How much of the graded colour replaces the ungraded one, from 0 to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
 							},
 							"SsaoEnabled": {
 								"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
@@ -15315,6 +15646,34 @@
 								"description": "The ambient occlusion sample count.",
 								"enum": ["Low", "Medium", "High"]
 							},
+							"SsrEnabled": {
+								"description": "Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses.",
+								"type": "boolean"
+							},
+							"SsrIntensity": {
+								"description": "How strongly screen-space reflections replace the probes' reflection, from 0 to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"SsrMaxDistance": {
+								"description": "How far a reflected ray travels, in metres.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 1000
+							},
+							"SsrThickness": {
+								"description": "How thick a surface is assumed behind its depth when a ray passes it, in metres.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 10
+							},
+							"SsrMaxRoughness": {
+								"description": "The perceptual roughness above which only the probes reflect.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
 							"BloomEnabled": {
 								"description": "Whether bright areas bloom.",
 								"type": "boolean"
@@ -15325,9 +15684,9 @@
 								"minimum": 0,
 								"maximum": 1
 							},
-							"FxaaEnabled": {
-								"description": "Whether FXAA anti-aliasing is applied.",
-								"type": "boolean"
+							"AntiAliasing": {
+								"description": "How edges are anti-aliased: none, FXAA (the default) or TAA.",
+								"enum": ["None", "Fxaa", "Taa"]
 							}
 						},
 						"additionalProperties": false
@@ -23872,6 +24231,256 @@
 				{
 					"description": "Inspect current host and renderer observations.",
 					"params": {}
+				}
+			]
+		},
+		{
+			"name": "terrain.edit",
+			"domain": "terrain",
+			"description": "Sculpts (Raise, Lower, Smooth, Flatten) or paints (Paint) an edit scene's Terrain with one brush stroke, exactly as the editor's terrain tools do: rewrites the heightfield's or splat map's source and records one undo step.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity", "points"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TerrainEditParams",
+				"description": "The params of terrain.edit.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity whose Terrain to edit: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"tool": {
+						"description": "The stroke's tool.",
+						"enum": ["Raise", "Lower", "Smooth", "Flatten", "Paint"]
+					},
+					"points": {
+						"description": "The brush's centres in world space, 1 to 4,096 in stroke order; their height above the terrain is ignored.",
+						"type": "array",
+						"items": {
+							"type": "array",
+							"prefixItems": [
+								{
+									"type": "number"
+								},
+								{
+									"type": "number"
+								},
+								{
+									"type": "number"
+								}
+							],
+							"minItems": 3,
+							"maxItems": 3
+						}
+					},
+					"radius": {
+						"description": "The brush's radius in metres in the terrain's local space.",
+						"type": "number",
+						"minimum": 0.001,
+						"maximum": 1000
+					},
+					"strength": {
+						"description": "The stroke's strength, from 0 to 1.",
+						"type": "number",
+						"minimum": 0,
+						"maximum": 1
+					},
+					"height": {
+						"description": "Flatten's target height above the terrain's origin, in metres.",
+						"type": "number",
+						"minimum": 0
+					},
+					"layer": {
+						"description": "Paint's layer, 0 to 3 (the splat map's red, green, blue or alpha).",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 3
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity", "points"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TerrainEditMethodResult",
+				"description": "What terrain.edit wrote.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The edited terrain's entity.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"path": {
+						"description": "The rewritten source, project-relative: the heightfield's, or the splat map's PNG.",
+						"type": "string"
+					},
+					"createdSplatMap": {
+						"description": "Whether the paint made and assigned the terrain's splat map.",
+						"type": "boolean"
+					},
+					"changed": {
+						"description": "The samples or texels whose value changed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Raise a hill at the terrain's middle.",
+					"params": {
+						"entity": "/Terrain",
+						"tool": "Raise",
+						"points": [
+							[32, 0, 32]
+						],
+						"radius": 8,
+						"strength": 0.5
+					}
+				}
+			]
+		},
+		{
+			"name": "terrain.importHeightmap",
+			"domain": "terrain",
+			"description": "Converts a 16-bit PNG or RAW heightmap (at most 1025 x 1025 samples) into a .heightfield asset that a Terrain can use.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["source", "path"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TerrainImportHeightmapParams",
+				"description": "The params of terrain.importHeightmap.",
+				"type": "object",
+				"properties": {
+					"source": {
+						"description": "The heightmap: a 16-bit .png, or a .raw or .r16 of little-endian 16-bit samples.",
+						"type": "string"
+					},
+					"path": {
+						"description": "The .heightfield to write, project-relative below Assets/.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["source", "path"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "TerrainImportHeightmapResult",
+				"description": "The heightfield terrain.importHeightmap wrote.",
+				"type": "object",
+				"properties": {
+					"asset": {
+						"description": "The imported heightfield.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"resolution": {
+						"description": "Its samples along each side.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Import a heightmap beside the scenes.",
+					"params": {
+						"source": "Heightmaps/Valley.png",
+						"path": "Assets/Terrain/Valley.heightfield"
+					}
 				}
 			]
 		},

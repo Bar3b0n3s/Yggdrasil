@@ -242,6 +242,11 @@ return true
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the pose of the last AnimationSystem phase (none here).
 				{ "Animator.GetJointTransform", "assert(holders.Animator.Animator:GetJointTransform(\"Hips\") == nil)" },
 				{ "Animator.GetRootMotion", "assert(holders.Animator.Animator:GetRootMotion() == vector.zero)" },
+				// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the particles of the last Particles phase (none here).
+				{ "ParticleEmitter.GetParticleCount", "assert(holders.ParticleEmitter.ParticleEmitter:GetParticleCount() == 0)" },
+				// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the surface of a terrain without a loaded heightfield.
+				{ "Terrain.SampleHeight", "assert(holders.Terrain.Terrain:SampleHeight(vector.zero) == nil)" },
+				{ "Terrain.SampleNormal", "assert(holders.Terrain.Terrain:SampleNormal(vector.zero) == nil)" },
 			};
 			const std::set<std::string_view> identityReads = { "Entity.ID", "Entity.IsValid", "Entity.__eq" };
 			// Reads of a system's state of the entity, which is leaving with it (decision 4, "Unchanged").
@@ -305,6 +310,9 @@ return true
 				{ "Animator.Play", "holders.Animator.Animator:Play(1, nil)" },
 				{ "Animator.SetWeight", "holders.Animator.Animator:SetWeight(1, 0.5)" },
 				{ "SkinnedMesh.SetMorphWeight", "holders.SkinnedMesh.SkinnedMesh:SetMorphWeight(\"Smile\", 0.5)" },
+				// M26 (Docs/Decisions/0037-m26-contract.md decision 26).
+				{ "ParticleEmitter.Emit", "holders.ParticleEmitter.ParticleEmitter:Emit(1)" },
+				{ "ParticleEmitter.Clear", "holders.ParticleEmitter.ParticleEmitter:Clear()" },
 			};
 
 			Test::ScriptTestFixture fixture({ .ConfigureApi = RegisterIdentityProbe });

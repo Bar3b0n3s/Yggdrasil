@@ -131,7 +131,7 @@ namespace Engine {
 	};
 
 	// Registry enum "AssetCreateType" (§13.5 asset.create {type: Material|Scene|Prefab|SoundEffect|Folder|SpriteSheet|Tilemap|
-	// StringTable}).
+	// StringTable|Heightfield}).
 	enum class AssetCreateType : uint8_t
 	{
 		Material,
@@ -141,7 +141,8 @@ namespace Engine {
 		Folder,
 		SpriteSheet, // M18: a .spritesheet sprite sheet (§6.9; Docs/Decisions/0029-m18-contract.md decision 18)
 		Tilemap,     // M21: a .tilemap tilemap (§6.9; Docs/Decisions/0032-m21-contract.md decision 23)
-		StringTable  // M22: a .stringtable string table (§6; Docs/Decisions/0033-m22-contract.md decision 10)
+		StringTable, // M22: a .stringtable string table (§6; Docs/Decisions/0033-m22-contract.md decision 10)
+		Heightfield  // M26: a .heightfield heightfield (§6, §6.8; Docs/Decisions/0037-m26-contract.md decision 20)
 	};
 
 	// asset.create {type, path, values?}: creates a native asset at project-relative `path` (below Assets/, with the type's
@@ -171,6 +172,10 @@ namespace Engine {
 	// "StringTable" registry struct (Asset/StringTableData.h, written with StringTableToText) over the defaults (the locale
 	// "en" and no entries; absent values make that empty table), which must pass ValidateStringTable (every violation
 	// Validation located under /values, such as /values/Entries/1/Key). Its type is StringTable.
+	// M26 (additive; Docs/Decisions/0037-m26-contract.md decision 20): a Heightfield (.heightfield) is a flat heightfield of
+	// 129 x 129 samples at height 0 (MakeFlatHeightfield, written with WriteHeightfieldSource: a binary source, not JSON) and
+	// takes no values; terrain.importHeightmap converts a heightmap instead, and terrain.edit sculpts it. Its type is
+	// Heightfield.
 	struct AssetCreateParams
 	{
 		AssetCreateType Type = AssetCreateType::Material;

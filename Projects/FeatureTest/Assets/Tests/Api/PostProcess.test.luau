@@ -1,9 +1,10 @@
 --!strict
--- The PostProcess proxy: every field read and written, every tone mapper and SSAO quality included.
+-- The PostProcess proxy: version 1's fields read and written, every tone mapper, SSAO quality and anti-aliasing mode included.
 local Support = require("./Support")
 
 local TONEMAPPERS: { Tonemapper } = { "ACES", "PbrNeutral", "Linear", "AgX" }
 local QUALITIES: { SsaoQuality } = { "Low", "High", "Medium" }
+local ANTI_ALIASING: { AntiAliasing } = { "Taa", "Fxaa", "None" }
 
 return Test.Suite("Api.PostProcess", function()
 	Test.Case("every field reads and writes through the proxy", function()
@@ -20,7 +21,9 @@ return Test.Suite("Api.PostProcess", function()
 		end
 		Support.RoundTrip(post, "BloomEnabled", false)
 		Support.RoundTrip(post, "BloomIntensity", 0.1, 1e-6)
-		Support.RoundTrip(post, "FxaaEnabled", false)
+		for _, mode in ANTI_ALIASING do
+			Support.RoundTrip(post, "AntiAliasing", mode)
+		end
 		Test.Expect(not pcall(function()
 			post.ExposureEV = 20
 		end), "an exposure beyond 16 EV is refused")

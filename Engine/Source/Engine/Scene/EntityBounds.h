@@ -33,8 +33,12 @@ namespace Engine {
 	// at its entity's world matrix), a missing or failed texture with its placeholder's quad, while a missing or failed sheet
 	// or an out-of-range Frame adds nothing (SpriteRendererComponent.h states the one rule). M21 (C21.2, decision 24, stream
 	// T1): a TilemapRenderer counts with the world AABB of every tile it draws, each tile's quad as a sprite's at its cell
-	// (TilemapRendererComponent.h), a missing or failed Tilemap adding nothing. nullopt when no included entity has a
-	// MeshRenderer with a mesh, a SpriteRenderer with a quad or a TilemapRenderer with a tile.
+	// (TilemapRendererComponent.h), a missing or failed Tilemap adding nothing. M26 (C-TERR, Docs/Decisions/0037-m26-contract.md
+	// decision 21, stream T-B): a Terrain counts with the world AABB of its local box from its origin to (Size.x, Size.y)
+	// along X and Z and between its lowest and highest samples' heights along Y (Asset/TerrainGeometry.h), at its entity's
+	// world matrix, a missing or failed Heightfield adding nothing (TERRAIN_NO_HEIGHTFIELD). nullopt when no included entity
+	// has a MeshRenderer with a mesh, a SpriteRenderer with a quad, a TilemapRenderer with a tile or a Terrain with a
+	// heightfield.
 	// `entity` is readable (Entity::IsReadable): an entity pending destruction and its subtree, also pending, still have
 	// their bounds until the flush (Entity:GetWorldBounds; M20, decision 4 of Docs/Decisions/0031-m20-contract.md).
 	// Main thread (the scene and the manager).

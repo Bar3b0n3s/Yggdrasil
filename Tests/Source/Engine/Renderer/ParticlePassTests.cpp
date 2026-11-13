@@ -1,0 +1,537 @@
+#include "TestsPCH.h"
+
+#include "Engine/Renderer/ParticlePass.h"
+
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/TextureData.h"
+#include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/Image.h"
+#include "Engine/Graphics/Readback.h"
+#include "Engine/Graphics/RenderTargetPool.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Support/DeviceLossTest.h"
+#include "Support/GlmApprox.h"
+#include "Support/HeadlessGpuFixture.h"
+
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <array>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <limits>
+#include <span>
+#include <utility>
+#include <vector>
+
+// The Particles pass (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7, stream P-B): the plan's quads facing
+// the camera, sorted and culled on the CPU, and the pass drawn by the SceneRenderer in the Sprites stage, its loss test
+// through the shared helper (decision 29). The gpu suite runs every GPU case under API 1.4 and again capped at 1.3.
+
+namespace Engine {
+
+	namespace {
+
+		// 8 x 8 opaque white texels, which a particle's Color tints, and 8 x 8 texels of distinct sRGB values, texel (x, y)
+		// (32 x, 32 y, 255 - 16 x, 255). The tests' own textures, so the cases do not depend on the built-in one.
+		constexpr uint32_t ParticleTexels = 8;
+		const AssetHandle WhiteParticleTextureHandle = UUID(8960);
+		const AssetHandle PatternParticleTextureHandle = UUID(8961);
+
+		Ref<TextureData> MakeParticleTexture(bool pattern)
+		{
+			Ref<TextureData> texture = CreateRef<TextureData>();
+			texture->Format = TextureFormat::RGBA8Srgb;
+			texture->Width = ParticleTexels;
+			texture->Height = ParticleTexels;
+			texture->Mips = { TextureMip{ .Width = ParticleTexels, .Height = ParticleTexels, .Offset = 0, .Size = ParticleTexels * ParticleTexels * 4 } };
+			for (uint32_t y = 0; y < ParticleTexels; ++y)
+			{
+				for (uint32_t x = 0; x < ParticleTexels; ++x)
+				{
+					texture->Pixels.push_back(static_cast<std::byte>(pattern ? 32 * x : 255));
+					texture->Pixels.push_back(static_cast<std::byte>(pattern ? 32 * y : 255));
+					texture->Pixels.push_back(static_cast<std::byte>(pattern ? 255 - 16 * x : 255));
+					texture->Pixels.push_back(std::byte{ 255 });
+				}
+			}
+			return texture;
+		}
+
+		// A 64 x 64 view of a 16 x 16 pixel-art scene (scale 4, the 2D colour path: exact output bytes): an orthographic camera
+		// at z = 10 looking down -Z whose view is 8 units high, so a unit is 2 scene pixels (8 view pixels) and world (x, y)
+		// lands on scene pixel ((x + 4) * 2, (4 - y) * 2). No mesh: SceneDepth stays cleared to the far plane.
+		RenderSnapshot MakeParticleSnapshot(const Test::SceneRendererIntegrationFixture& setup)
+		{
+			RenderSnapshot snapshot = setup.Snapshot(RenderProjection::Orthographic);
+			snapshot.Meshes.clear();
+			snapshot.PickTable.clear();
+			snapshot.Output = RenderOutputSettings{ .SceneWidth = 16, .SceneHeight = 16, .PixelArt = true };
+			snapshot.Camera.View = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f));
+			snapshot.Camera.Position = glm::vec3(0.0f, 0.0f, 10.0f);
+			snapshot.Camera.OrthographicSize = 4.0f;
+			snapshot.Camera.ViewportWidth = 16;
+			snapshot.Camera.ViewportHeight = 16;
+			snapshot.Camera.Projection = ComputeReverseZProjection(RenderProjection::Orthographic, 60.0f, 4.0f, 0.1f, 20.0f, 16, 16);
+			return snapshot;
+		}
+
+		// Appends an emitter of `particles` to `snapshot`.
+		void AddEmitter(RenderSnapshot& snapshot, AssetHandle texture, RenderParticleBlend blend, std::span<const ParticleItem> particles, UUID entity)
+		{
+			snapshot.ParticleEmitters.push_back(ParticleEmitterItem{ .Texture = texture,
+				.Blend = blend,
+				.First = static_cast<uint32_t>(snapshot.Particles.size()),
+				.Count = static_cast<uint32_t>(particles.size()),
+				.Entity = entity });
+			snapshot.Particles.insert(snapshot.Particles.end(), particles.begin(), particles.end());
+		}
+
+		glm::u8vec4 ParticlePixel(const Image& image, uint32_t x, uint32_t y)
+		{
+			const std::span<const std::byte> row = image.GetRow(y);
+			const size_t offset = 4 * static_cast<size_t>(x);
+			return glm::u8vec4(std::to_integer<uint8_t>(row[offset]), std::to_integer<uint8_t>(row[offset + 1]), std::to_integer<uint8_t>(row[offset + 2]),
+				std::to_integer<uint8_t>(row[offset + 3]));
+		}
+
+		// The triangles the last render recorded under the Particles row (0 when it recorded no row).
+		uint32_t ParticleTriangles(Test::SceneRendererIntegrationFixture& setup)
+		{
+			const RenderStats stats = setup.Renderer().GetRenderStats();
+			const RenderPassStats* pass = Test::SceneRendererIntegrationFixture::FindPass(stats, "Particles");
+			return pass != nullptr ? pass->Triangles : 0u;
+		}
+
+		// A camera looking at the origin from (0, 0, 10): view z is the world z minus 10.
+		glm::mat4 MakeFrontView()
+		{
+			return glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -10.0f));
+		}
+
+		glm::mat4 MakeFrontViewProjection()
+		{
+			return ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 4.0f, 0.1f, 100.0f, 64, 64) * MakeFrontView();
+		}
+
+	}
+
+	TEST_SUITE("Renderer")
+	{
+		TEST_CASE("ParticlePass: a particle's quad is a square of its size facing the camera, centred on its position")
+		{
+			const glm::mat4 view = glm::lookAt(glm::vec3(3.0f, 4.0f, 5.0f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+			const glm::mat4 viewProjection = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 4.0f, 0.1f, 100.0f, 64, 64) * view;
+			const std::vector<ParticleItem> particles = { { .Position = glm::vec3(0.5f, 0.25f, -0.5f), .Size = 0.5f, .Color = glm::vec4(1.0f, 0.5f, 0.25f, 0.75f) } };
+			const std::vector<ParticleEmitterItem> emitters = { { .First = 0, .Count = 1, .Entity = UUID(31) } };
+			ParticlePassPlan plan;
+			const Status planned = PlanParticlePass(emitters, particles, view, viewProjection, plan);
+			REQUIRE_MESSAGE(planned.has_value(), planned.error().ToString());
+			REQUIRE(plan.Quads.size() == 1);
+			REQUIRE(plan.Runs.size() == 1);
+			// A null texture is the built-in particle texture; the run keeps the emitter's blend and entity.
+			CHECK(plan.Runs[0] == ParticlePassRun{ .Texture = BuiltinAssetHandles::ParticleTexture, .Blend = RenderParticleBlend::Alpha, .First = 0, .Count = 1, .Entity = UUID(31) });
+			const ParticlePassQuad& quad = plan.Quads[0];
+			CHECK(quad.Color == particles[0].Color);
+			// In view space the corners are the centre's, offset by half the size along x (right) and y (up), at its depth:
+			// top-left, top-right, bottom-right, bottom-left.
+			const glm::vec3 centre = glm::vec3(view * glm::vec4(particles[0].Position, 1.0f));
+			const std::array<glm::vec2, 4> offsets = { glm::vec2(-0.25f, 0.25f), glm::vec2(0.25f, 0.25f), glm::vec2(0.25f, -0.25f), glm::vec2(-0.25f, -0.25f) };
+			for (size_t corner = 0; corner < 4; ++corner)
+			{
+				CAPTURE(corner);
+				const glm::vec3 viewCorner = glm::vec3(view * glm::vec4(quad.Corners[corner], 1.0f));
+				CHECK(Test::ApproxEqual(viewCorner, centre + glm::vec3(offsets[corner], 0.0f), 1e-5f));
+			}
+			CHECK(plan.Culled == 0);
+			CHECK(plan.Skipped == 0);
+		}
+
+		TEST_CASE("ParticlePass: an Alpha emitter's quads go back to front, ties in particle order, and an Additive emitter's keep their order")
+		{
+			// Each particle is told apart by its colour's red channel, its index.
+			const auto particle = [](float x, float z, uint32_t index)
+			{
+				return ParticleItem{ .Position = glm::vec3(x, 0.0f, z), .Size = 0.5f, .Color = glm::vec4(static_cast<float>(index), 0.0f, 0.0f, 1.0f) };
+			};
+			const std::vector<ParticleItem> particles = { particle(0.0f, 0.0f, 0), particle(-1.0f, -2.0f, 1), particle(1.0f, 1.0f, 2), particle(1.0f, -2.0f, 3),
+				particle(0.0f, 1.0f, 4), particle(0.0f, -2.0f, 5), particle(0.0f, 0.0f, 6) };
+			const std::vector<ParticleEmitterItem> emitters = {
+				{ .Texture = WhiteParticleTextureHandle, .Blend = RenderParticleBlend::Alpha, .First = 0, .Count = 4, .Entity = UUID(1) },
+				{ .Texture = WhiteParticleTextureHandle, .Blend = RenderParticleBlend::Additive, .First = 4, .Count = 3, .Entity = UUID(2) },
+			};
+			ParticlePassPlan plan;
+			const Status planned = PlanParticlePass(emitters, particles, MakeFrontView(), MakeFrontViewProjection(), plan);
+			REQUIRE_MESSAGE(planned.has_value(), planned.error().ToString());
+			REQUIRE(plan.Quads.size() == 7);
+			std::vector<uint32_t> order;
+			for (const ParticlePassQuad& quad : plan.Quads)
+				order.push_back(static_cast<uint32_t>(quad.Color.r));
+			// The two farthest (z = -2) in particle order, then z = 0, then the nearest; the additive ones as given.
+			CHECK(order == std::vector<uint32_t>{ 1, 3, 0, 2, 4, 5, 6 });
+			REQUIRE(plan.Runs.size() == 2);
+			CHECK(plan.Runs[0] == ParticlePassRun{ .Texture = WhiteParticleTextureHandle, .Blend = RenderParticleBlend::Alpha, .First = 0, .Count = 4, .Entity = UUID(1) });
+			CHECK(plan.Runs[1] == ParticlePassRun{ .Texture = WhiteParticleTextureHandle, .Blend = RenderParticleBlend::Additive, .First = 4, .Count = 3, .Entity = UUID(2) });
+
+			// A plan is a pure function of its inputs, and planning again replaces the previous plan.
+			ParticlePassPlan again = plan;
+			const Status replanned = PlanParticlePass(emitters, particles, MakeFrontView(), MakeFrontViewProjection(), again);
+			REQUIRE(replanned.has_value());
+			CHECK(again == plan);
+		}
+
+		TEST_CASE("ParticlePass: particles outside the view are culled, and non-finite or empty ones skipped, neither an error")
+		{
+			constexpr float Infinity = std::numeric_limits<float>::infinity();
+			const std::vector<ParticleItem> particles = {
+				{ .Position = glm::vec3(0.0f), .Size = 0.5f },                               // drawn
+				{ .Position = glm::vec3(100.0f, 0.0f, 0.0f), .Size = 0.5f },                 // beside the view: culled
+				{ .Position = glm::vec3(0.0f, 0.0f, 20.0f), .Size = 0.5f },                  // behind the camera: culled
+				{ .Position = glm::vec3(std::nanf(""), 0.0f, 0.0f), .Size = 0.5f },          // skipped
+				{ .Position = glm::vec3(0.0f), .Size = 0.0f },                               // skipped
+				{ .Position = glm::vec3(0.0f), .Size = -1.0f },                              // skipped
+				{ .Position = glm::vec3(0.0f), .Size = Infinity },                           // skipped
+				{ .Position = glm::vec3(0.0f), .Size = 0.5f, .Color = glm::vec4(Infinity) }, // skipped
+				{ .Position = glm::vec3(3.0e38f, 0.0f, 0.0f), .Size = 1.0e38f },             // a corner overflows: skipped
+			};
+			// The second emitter draws nothing, so it has no run.
+			const std::vector<ParticleEmitterItem> emitters = { { .First = 0, .Count = 8, .Entity = UUID(1) }, { .First = 8, .Count = 1, .Entity = UUID(2) } };
+			ParticlePassPlan plan;
+			const Status planned = PlanParticlePass(emitters, particles, MakeFrontView(), MakeFrontViewProjection(), plan);
+			REQUIRE_MESSAGE(planned.has_value(), planned.error().ToString());
+			CHECK(plan.Quads.size() == 1);
+			REQUIRE(plan.Runs.size() == 1);
+			CHECK(plan.Runs[0].Entity == UUID(1));
+			CHECK(plan.Runs[0].Count == 1);
+			CHECK(plan.Culled == 2);
+			CHECK(plan.Skipped == 6);
+
+			// A view whose axes are not finite or have no length plans nothing.
+			const Status degenerate = PlanParticlePass(emitters, particles, glm::mat4(0.0f), MakeFrontViewProjection(), plan);
+			REQUIRE(degenerate.has_value());
+			CHECK(plan == ParticlePassPlan{});
+		}
+
+		TEST_CASE("ParticlePass: an emitter whose range lies outside the snapshot's particles is skipped with InvalidArgument")
+		{
+			const std::vector<ParticleItem> particles(3, ParticleItem{ .Position = glm::vec3(0.0f), .Size = 0.5f });
+			const std::vector<ParticleEmitterItem> emitters = {
+				{ .First = 1, .Count = 5, .Entity = UUID(1) },
+				{ .First = std::numeric_limits<uint32_t>::max(), .Count = 2, .Entity = UUID(2) },
+				{ .First = 0, .Count = 3, .Entity = UUID(3) },
+			};
+			ParticlePassPlan plan;
+			const Status planned = PlanParticlePass(emitters, particles, MakeFrontView(), MakeFrontViewProjection(), plan);
+			REQUIRE_FALSE(planned.has_value());
+			CHECK(planned.error().GetCode() == ErrorCode::InvalidArgument);
+			REQUIRE(plan.Runs.size() == 1);
+			CHECK(plan.Runs[0].Entity == UUID(3));
+			CHECK(plan.Quads.size() == 3);
+		}
+
+		TEST_CASE("Particles: an emitter's particles draw as squares of their size and colour facing the camera" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
+			RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+			// A red square 2 units wide at the origin (scene pixels [6, 10), view pixels [24, 40)) and a green one 1 unit wide
+			// centred at (-2.5, 2.5) (scene pixels [2, 4), view pixels [8, 16)).
+			const std::vector<ParticleItem> particles = {
+				{ .Position = glm::vec3(0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) },
+				{ .Position = glm::vec3(-2.5f, 2.5f, 0.0f), .Size = 1.0f, .Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) },
+			};
+			AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, particles, UUID(70));
+			const Image image = setup.Render(snapshot);
+			for (uint32_t y = 0; y < 64; ++y)
+			{
+				for (uint32_t x = 0; x < 64; ++x)
+				{
+					const bool red = x >= 24 && x < 40 && y >= 24 && y < 40;
+					const bool green = x >= 8 && x < 16 && y >= 8 && y < 16;
+					const glm::u8vec4 expected = red ? glm::u8vec4(255, 0, 0, 255) : (green ? glm::u8vec4(0, 255, 0, 255) : glm::u8vec4(0, 0, 0, 255));
+					if (ParticlePixel(image, x, y) != expected)
+					{
+						CAPTURE(x);
+						CAPTURE(y);
+						CHECK(ParticlePixel(image, x, y) == expected);
+					}
+				}
+			}
+			// The Particles row: two quads in one draw (one texture).
+			const RenderStats stats = setup.Renderer().GetRenderStats();
+			const RenderPassStats* pass = Test::SceneRendererIntegrationFixture::FindPass(stats, "Particles");
+			REQUIRE(pass != nullptr);
+			CHECK(pass->Triangles == 4);
+			CHECK(pass->DrawCalls == 1);
+		}
+
+		TEST_CASE("Particles: alpha particles blend back to front within an emitter, and additive particles add in any order" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
+			RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+			// Alpha: a near red square over x [-3, -1] listed before a far green one over [-2.5, -0.5]; drawn back to front, red
+			// covers the overlap (scene pixels [3, 6)). Additive: two squares of red at alpha 0.5 over x [0.5, 2.5] and [1.5, 3.5]
+			// add 0.5 each, 1 in their overlap (scene pixels [11, 13)).
+			const std::vector<ParticleItem> blended = {
+				{ .Position = glm::vec3(-2.0f, 0.0f, 2.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) },
+				{ .Position = glm::vec3(-1.5f, 0.0f, -2.0f), .Size = 2.0f, .Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) },
+			};
+			std::vector<ParticleItem> added = {
+				{ .Position = glm::vec3(1.5f, 0.0f, 0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 0.5f) },
+				{ .Position = glm::vec3(2.5f, 0.0f, 1.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 0.5f) },
+			};
+			AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, blended, UUID(71));
+			AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Additive, added, UUID(72));
+			const Image image = setup.Render(snapshot);
+			// Row 32 is scene row 8, inside every square.
+			CHECK(ParticlePixel(image, 9, 32) == glm::u8vec4(255, 0, 0, 255));  // scene pixel 2: red alone
+			CHECK(ParticlePixel(image, 18, 32) == glm::u8vec4(255, 0, 0, 255)); // scene pixel 4: the near red over the far green
+			CHECK(ParticlePixel(image, 26, 32) == glm::u8vec4(0, 255, 0, 255)); // scene pixel 6: green alone
+			CHECK(ParticlePixel(image, 46, 32) == glm::u8vec4(255, 0, 0, 255)); // scene pixel 11: 0.5 + 0.5
+			// Scene pixel 9: 0.5 alone, the sRGB encoding of 0.5 (187.5).
+			const glm::u8vec4 half = ParticlePixel(image, 37, 32);
+			CHECK(half.r >= 187);
+			CHECK(half.r <= 188);
+			CHECK(half.g == 0);
+			CHECK(half.b == 0);
+
+			// Additive particles draw the same image in the other order.
+			std::swap(added[0], added[1]);
+			RenderSnapshot reordered = MakeParticleSnapshot(setup);
+			reordered.FrameIndex = snapshot.FrameIndex + 1;
+			AddEmitter(reordered, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, blended, UUID(71));
+			AddEmitter(reordered, WhiteParticleTextureHandle, RenderParticleBlend::Additive, added, UUID(72));
+			CHECK(setup.Render(reordered).Pixels == image.Pixels);
+		}
+
+		TEST_CASE("Particles: particles are depth-tested against the opaque scene without writing depth" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
+			// The fixture's opaque 2 x 2 quad at z = -3, over scene pixels [6, 10).
+			RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+			snapshot.Meshes = setup.Snapshot().Meshes;
+			snapshot.PickTable = setup.Snapshot().PickTable;
+			const Image meshOnly = setup.Render(snapshot);
+
+			// A particle behind the quad is hidden.
+			const std::vector<ParticleItem> behind = { { .Position = glm::vec3(0.0f, 0.0f, -5.0f), .Size = 1.0f, .Color = glm::vec4(0.0f, 1.0f, 0.0f, 1.0f) } };
+			RenderSnapshot hidden = snapshot;
+			hidden.FrameIndex += 1;
+			AddEmitter(hidden, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, behind, UUID(73));
+			CHECK(setup.Render(hidden).Pixels == meshOnly.Pixels);
+
+			// One in front of it draws; and of two additive particles over one another, the nearer listed first, the farther
+			// still adds where the nearer drew, since particles write no depth (centred at (2.5, 2.5): view pixels [48, 56) x
+			// [8, 16)).
+			const std::vector<ParticleItem> front = { { .Position = glm::vec3(0.0f, 0.0f, 0.0f), .Size = 1.0f, .Color = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f) } };
+			const std::vector<ParticleItem> stacked = {
+				{ .Position = glm::vec3(2.5f, 2.5f, 4.0f), .Size = 1.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 0.5f) },
+				{ .Position = glm::vec3(2.5f, 2.5f, 2.0f), .Size = 1.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 0.5f) },
+			};
+			RenderSnapshot visible = snapshot;
+			visible.FrameIndex += 2;
+			AddEmitter(visible, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, front, UUID(74));
+			AddEmitter(visible, WhiteParticleTextureHandle, RenderParticleBlend::Additive, stacked, UUID(75));
+			const Image image = setup.Render(visible);
+			CHECK(ParticlePixel(image, 32, 32) == glm::u8vec4(0, 0, 255, 255));
+			CHECK(ParticlePixel(image, 50, 10) == glm::u8vec4(255, 0, 0, 255));
+		}
+
+		// Particles draw in the Lit view only, as sprites do (decision 7): the data views, the material views, the Overdraw view
+		// and the Lit view's wireframe show none, and the Particles row is not recorded.
+		TEST_CASE("Particles: data views, material views and the wireframe draw no particles" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
+			RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+			const std::vector<ParticleItem> particles = { { .Position = glm::vec3(0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) } };
+			AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, particles, UUID(76));
+			const glm::u8vec4 red(255, 0, 0, 255);
+			REQUIRE(ParticlePixel(setup.Render(snapshot), 32, 32) == red);
+			REQUIRE(ParticleTriangles(setup) == 2);
+			for (uint32_t view = 1; view < RenderDebugViewCount; ++view)
+			{
+				const auto debugView = static_cast<RenderDebugView>(view);
+				CAPTURE(RenderDebugViewToString(debugView));
+				snapshot.DebugView = debugView;
+				snapshot.FrameIndex += 1;
+				CHECK(ParticlePixel(setup.Render(snapshot), 32, 32) != red);
+				CHECK(ParticleTriangles(setup) == 0);
+			}
+			snapshot.DebugView = RenderDebugView::Lit;
+			snapshot.Flags = snapshot.Flags | RenderViewFlags::Wireframe;
+			snapshot.FrameIndex += 1;
+			CHECK(ParticlePixel(setup.Render(snapshot), 32, 32) != red);
+			CHECK(ParticleTriangles(setup) == 0);
+		}
+
+		TEST_CASE("Particles: an emitter without a texture draws the built-in particle texture, a soft white disc" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+			// A white particle over the whole scene (8 units): each scene pixel shows two texels' worth of the 32 x 32 disc.
+			const std::vector<ParticleItem> particles = { { .Position = glm::vec3(0.0f), .Size = 8.0f, .Color = glm::vec4(1.0f) } };
+			AddEmitter(snapshot, AssetHandle(), RenderParticleBlend::Alpha, particles, UUID(77));
+			const Image image = setup.Render(snapshot);
+			for (uint32_t y = 0; y < 64; ++y)
+			{
+				for (uint32_t x = 0; x < 64; ++x)
+				{
+					// White blended over black by the texel's alpha: grey levels only (never the Missing placeholder's magenta).
+					const glm::u8vec4 pixel = ParticlePixel(image, x, y);
+					if (pixel.r != pixel.g || pixel.g != pixel.b)
+					{
+						CAPTURE(x);
+						CAPTURE(y);
+						CHECK(pixel.r == pixel.g);
+						CHECK(pixel.g == pixel.b);
+					}
+				}
+			}
+			// Opaque at the centre, clear in the corners (outside the disc) and soft between.
+			CHECK(ParticlePixel(image, 32, 32).r >= 250);
+			CHECK(ParticlePixel(image, 1, 1) == glm::u8vec4(0, 0, 0, 255));
+			CHECK(ParticlePixel(image, 62, 62) == glm::u8vec4(0, 0, 0, 255));
+			const uint8_t soft = ParticlePixel(image, 13, 33).r; // scene pixel (3, 8), at about half the radius
+			CHECK(soft > 50);
+			CHECK(soft < 250);
+		}
+
+		TEST_CASE("Particles: in pixel-art mode a particle's texture is point-sampled, its top-left texel at the quad's top-left corner" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(PatternParticleTextureHandle, MakeParticleTexture(true));
+			RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+			// The 8 x 8 texels over the 16 x 16 scene pixels: each texel two scene pixels, eight view pixels a side. A bilinear
+			// sample between texel centres would blend neighbours; the Point sampler shows each texel exactly.
+			const std::vector<ParticleItem> particles = { { .Position = glm::vec3(0.0f), .Size = 8.0f, .Color = glm::vec4(1.0f) } };
+			AddEmitter(snapshot, PatternParticleTextureHandle, RenderParticleBlend::Alpha, particles, UUID(78));
+			const Image image = setup.Render(snapshot);
+			for (uint32_t y = 0; y < 64; ++y)
+			{
+				for (uint32_t x = 0; x < 64; ++x)
+				{
+					const uint32_t texelX = x / 8;
+					const uint32_t texelY = y / 8;
+					const glm::u8vec4 expected(32 * texelX, 32 * texelY, 255 - 16 * texelX, 255);
+					if (ParticlePixel(image, x, y) != expected)
+					{
+						CAPTURE(x);
+						CAPTURE(y);
+						CHECK(ParticlePixel(image, x, y) == expected);
+					}
+				}
+			}
+		}
+
+		// Snapshot data no extraction produces is a partial error (Architecture §8.2): the emitter is skipped, the others drawn.
+		TEST_CASE("Particles: an emitter whose particle range lies outside the snapshot's is skipped with an InvalidArgument error" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
+			GraphicsDevice& device = gpu.GetDevice();
+			RenderSnapshot drawn = MakeParticleSnapshot(setup);
+			const std::vector<ParticleItem> particles = { { .Position = glm::vec3(0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) } };
+			AddEmitter(drawn, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, particles, UUID(79));
+			const Image expected = setup.Render(drawn);
+			REQUIRE(ParticlePixel(expected, 32, 32) == glm::u8vec4(255, 0, 0, 255));
+
+			RenderSnapshot snapshot = drawn;
+			snapshot.FrameIndex += 1;
+			snapshot.ParticleEmitters.push_back(ParticleEmitterItem{ .Texture = WhiteParticleTextureHandle, .First = 0, .Count = 2, .Entity = UUID(80) });
+			Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+			REQUIRE(list.has_value());
+			(*list)->open();
+			const Status rendered = setup.Renderer().Render(**list, snapshot);
+			(*list)->close();
+			setup.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(**list));
+			REQUIRE_FALSE(rendered.has_value());
+			CHECK(rendered.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(setup.Read().Pixels == expected.Pixels);
+		}
+
+		// Decision 29 (the recreation protocol): the pass owns no GPU object; its pipelines are the QuadBatcher's
+		// (SceneRendererPipelines), its textures the cache's mirrors (the built-in particle texture's included) and its binding
+		// sets the renderer's, so a recovered renderer draws the same particles.
+		TEST_CASE("Particles: a renderer drawing particles recovers from a device loss with the same image" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
+			GraphicsDevice& device = gpu.GetDevice();
+			// The built-in disc over the left half (alpha) and an additive red square on the right.
+			const std::vector<ParticleItem> disc = { { .Position = glm::vec3(-2.0f, 0.0f, 0.0f), .Size = 4.0f, .Color = glm::vec4(1.0f) } };
+			const std::vector<ParticleItem> glow = { { .Position = glm::vec3(2.0f, 0.0f, 0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 0.5f) },
+				{ .Position = glm::vec3(2.0f, 0.0f, 0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 0.5f) } };
+			uint64_t frame = 50;
+			Test::DeviceLossTest test;
+			test.Owners = { "GpuResourceCache", "SceneRendererPipelines", "SceneRenderer" };
+			// One use renders the snapshot into each of the renderer's frames in flight, so its profiler holds the timer queries
+			// of every frame slot (each slot's are created at its first frame) before the loss as after the recovery.
+			test.Use = [&device, &setup, &frame, &disc, &glow]() -> Result<std::vector<std::byte>>
+			{
+				std::vector<std::byte> pixels;
+				for (uint32_t slot = 0; slot < device.GetFramesInFlight(); ++slot)
+				{
+					RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+					AddEmitter(snapshot, AssetHandle(), RenderParticleBlend::Alpha, disc, UUID(81));
+					AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Additive, glow, UUID(82));
+					snapshot.FrameIndex = ++frame;
+					ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle list, device.CreateCommandList());
+					list->open();
+					const Status rendered = setup.Renderer().Render(*list, snapshot);
+					list->close();
+					setup.Renderer().OnSubmitted(snapshot.FrameIndex, device.ExecuteCommandList(*list));
+					ENGINE_TRY(rendered);
+					nvrhi::ITexture* image = setup.Renderer().GetFinalTexture();
+					if (image == nullptr)
+						return MakeError(ErrorCode::InvalidState, "the renderer has no final texture");
+					Readback readback(device);
+					ENGINE_TRY_ASSIGN(Image read, readback.ReadTexture(*image));
+					pixels = std::move(read.Pixels);
+				}
+				return pixels;
+			};
+			// The fixture creates its renderer's targets at the 64 x 64 view size, which the pixel-art snapshot's 16 x 16 scene
+			// leaves free in the pool until EndFrame releases them, DefaultKeepFrames frames later, while the recovery creates
+			// the targets of the last scene resolution only: the renderer reaches that steady state first, so the live counts
+			// before the loss are the ones the recovery reproduces.
+			for (uint32_t warmUp = 0; warmUp <= RenderTargetPool::DefaultKeepFrames; ++warmUp)
+			{
+				const Result<std::vector<std::byte>> steady = test.Use();
+				REQUIRE_MESSAGE(steady.has_value(), steady.error().ToString());
+			}
+			const Result<Test::DeviceLossReport> report = Test::RunDeviceLossTest(gpu, test);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			// Both emitters drew: the disc's centre (scene pixel (4, 8)) is near white, the glow's (scene pixel (12, 8)) red.
+			REQUIRE(report->Before.size() == 64 * 64 * 4);
+			const auto byte = [&report](uint32_t x, uint32_t y, size_t channel)
+			{
+				return std::to_integer<int>(report->Before[(static_cast<size_t>(y) * 64 + x) * 4 + channel]);
+			};
+			CHECK(byte(17, 33, 1) >= 240);
+			CHECK(byte(49, 33, 0) == 255);
+			CHECK(byte(49, 33, 1) == 0);
+		}
+	}
+
+}

@@ -32,7 +32,10 @@ namespace Engine {
 		// untouched for the serializer to preserve), then what those component migrations change elsewhere in the
 		// document: the prefab overrides that target a Script component migrated from version 1 follow it, whatever the
 		// Prefab component's version (Docs/Decisions/0031-m20-contract.md decision 17: a Field override of Script, Fields
-		// or ExecutionOrder names slot 0's member, an AddComponent override's value migrates as the component does). Sets
+		// or ExecutionOrder names slot 0's member, an AddComponent override's value migrates as the component does), and so
+		// do those that target a PostProcess component migrated from version 1 (M26, Docs/Decisions/0037-m26-contract.md
+		// decision 12: a Field override migrates as a component of that one field does, so one of FxaaEnabled becomes one of
+		// AntiAliasing with its value mapped, and an AddComponent override's value migrates as the component does). Sets
 		// "Version" and the migrated "ComponentVersions" entries, and
 		// report.FileVersion and report.Migrated. Errors: UnsupportedVersion naming both versions when the document, or a
 		// component's entry, is newer than this build supports; Validation (located) when "Version" is missing, below

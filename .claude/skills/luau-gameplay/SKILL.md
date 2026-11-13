@@ -64,7 +64,7 @@ Examples in this file and every other document are type-checked by the unit suit
 
 ## Timing and tasks
 
-Put deterministic gameplay in `OnFixedUpdate`; input edges and `Time.GetDeltaTime()` reflect the current phase. Use simulation ticks/time and seeded `Random`, including a separate `Random.New(seed)` when independent state is intended. `Time.GetRealTime()` is unsuitable for replayed gameplay.
+Put deterministic gameplay in `OnFixedUpdate`; input edges and `Time.GetDeltaTime()` reflect the current phase. Use simulation ticks/time and seeded `Random`, including a separate `Random.New(seed)` when independent state is intended. `Time.GetRealTime()` is unsuitable for replayed gameplay. Particles are presentation that advances in the frame phase: `ParticleEmitter:GetParticleCount()` raises in `OnFixedUpdate`, tasks and fixed-step events, so read it only in `OnUpdate` or `OnLateUpdate` (or a test case) and never let it decide gameplay.
 
 **Randomness.** `Random.*` and `math.random` draw from the session stream, which the session seed (the project's `Simulation.Seed` XOR the scene's `Seed`, or `play.start`'s `seed`) starts and the state hash covers. `Random.New(seed)` returns an independent `RandomGenerator`:
 - Create it in a callback (`OnStart`) or a function a callback calls: `Random` is unavailable at a module's top level, which fails the import.

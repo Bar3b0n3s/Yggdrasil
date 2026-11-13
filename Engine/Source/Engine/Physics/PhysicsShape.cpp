@@ -13,6 +13,7 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/ScaleHelpers.h>
@@ -290,12 +291,73 @@ namespace Engine {
 			return CreateColliderShape(settings, index);
 		}
 
+		// The sample counts a side a height field takes (HeightFieldShapeGeometry): Jolt's fewest, two blocks of its block
+		// size 2 once the count is rounded up to it, and ADR 0028's phase-3 ledger's most, 1025.
+		constexpr uint32_t MinHeightFieldSamples = 3;
+		constexpr uint32_t MaxHeightFieldSamples = 1025;
+		// The bits Jolt keeps of each sample within its block's range (HeightFieldShapeSettings::mBitsPerSample): its most, so a
+		// body rests within a small fraction of a millimetre of the surface the heights describe (the rest-height acceptance,
+		// Docs/Decisions/0037-m26-contract.md decision 21 and its risk 5). Jolt first quantizes every height to 16 bits over
+		// the field's whole range, half a step of which is the largest error left: 0.12 mm for a terrain 16 m high.
+		constexpr uint32_t HeightFieldBitsPerSample = JPH::HeightFieldShapeConstants::cMaxBitsPerSample;
+
 		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 21): a terrain's height field as a Jolt
-		// HeightFieldShape, scaled by `scale`. A contract stub of M26's C26.1, implemented by stream T-B.
-		[[nodiscard]] static JoltShapeResult CreateHeightField(const HeightFieldShapeGeometry& /*heightField*/, const glm::vec3& /*scale*/, size_t /*index*/)
+		// HeightFieldShape, scaled by `scale`. The scale's magnitude is baked into the field (the cell sizes along X and Z, the
+		// heights along Y); a negative component mirrors the field through a ScaledShape of the scale's signs, which Jolt's
+		// height field functions turn inside out as they do a mirrored mesh, so the field keeps its triangulation and faces the
+		// way the entity's transform turns it.
+		[[nodiscard]] static JoltShapeResult CreateHeightField(const HeightFieldShapeGeometry& heightField, const glm::vec3& scale, size_t index)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "M26 terrain contract (Docs/Decisions/0037-m26-contract.md decision 21, stream T-B)");
+			const uint32_t count = heightField.SampleCount;
+			if (count < MinHeightFieldSamples || count > MaxHeightFieldSamples)
+				return MakeInvalidCollider(index, "a height field needs {} to {} samples a side (got {})", MinHeightFieldSamples, MaxHeightFieldSamples, count);
+			const size_t samples = static_cast<size_t>(count) * count;
+			if (heightField.Heights.size() != samples)
+				return MakeInvalidCollider(index, "a height field of {} samples a side needs {} heights (got {})", count, samples, heightField.Heights.size());
+			const glm::vec2& cellSize = heightField.CellSize;
+			if (!std::isfinite(cellSize.x) || !std::isfinite(cellSize.y) || !(cellSize.x > 0.0f) || !(cellSize.y > 0.0f))
+				return MakeInvalidCollider(index, "a height field needs finite, positive cell sizes (got ({}, {}))", cellSize.x, cellSize.y);
+
+			const glm::vec3 magnitude = Abs(scale);
+			float lowest = heightField.Heights.front();
+			float highest = lowest;
+			for (size_t sample = 0; sample < samples; ++sample)
+			{
+				const float height = heightField.Heights[sample];
+				if (!std::isfinite(height) || !std::isfinite(height * magnitude.y))
+					return MakeInvalidCollider(index, "height {} of the height field ({}) scaled by {} is not finite", sample, height, magnitude.y);
+				lowest = std::min(lowest, height);
+				highest = std::max(highest, height);
+			}
+			// The field in body space before the signs: a cell of `cell.x` by `cell.z` metres, heights times `cell.y`.
+			const glm::vec3 cell(cellSize.x * magnitude.x, magnitude.y, cellSize.y * magnitude.z);
+			const float cells = static_cast<float>(count - 1);
+			const glm::vec3 extent(cell.x * cells, (highest - lowest) * cell.y, cell.z * cells);
+			if (!Detail::IsFinite(cell) || !Detail::IsFinite(extent))
+			{
+				return MakeInvalidCollider(index, "the height field's cells ({}, {}) scaled by {} are not finite", cellSize.x, cellSize.y,
+					FormatVector(scale));
+			}
+			// Flat, it may span no height, as a triangle mesh: its largest extent is its size.
+			ENGINE_TRY(CheckColliderSize(GetLargestAxis(extent), index, "height field"));
+			ENGINE_TRY(CheckColliderMaxSize(GetLargestAxis(extent), index, "height field"));
+			ENGINE_TRY(CheckColliderRange(glm::vec3(extent.x, std::max(std::abs(lowest), std::abs(highest)) * cell.y, extent.z), index, "height field"));
+
+			// Static and Kinematic bodies only, as a mesh (the caller marks it); no materials (a body's friction and restitution
+			// apply), Jolt's block size of 2 and the finest quantization.
+			JPH::HeightFieldShapeSettings settings(heightField.Heights.data(), JPH::Vec3::sZero(), Detail::ToJolt(cell), count);
+			settings.SetEmbedded();
+			settings.mBitsPerSample = HeightFieldBitsPerSample;
+			JoltShapeResult created = CreateColliderShape(settings, index);
+			if (!created.has_value())
+				return created;
+
+			const glm::vec3 signs(scale.x < 0.0f ? -1.0f : 1.0f, scale.y < 0.0f ? -1.0f : 1.0f, scale.z < 0.0f ? -1.0f : 1.0f);
+			if (signs == glm::vec3(1.0f))
+				return created;
+			JPH::ScaledShapeSettings mirrored(created->GetPtr(), Detail::ToJolt(signs));
+			mirrored.SetEmbedded();
+			return CreateColliderShape(mirrored, index);
 		}
 
 		[[nodiscard]] static std::string_view GetGeometryName(const PhysicsShapeGeometry& geometry)

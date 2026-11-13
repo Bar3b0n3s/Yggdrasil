@@ -24,23 +24,24 @@ namespace Engine {
 	// profiler.capture (ADR 0029 decisions 3 and 11), M20's scene.list, scene.activate and scene.close
 	// (Docs/Decisions/0031-m20-contract.md decision 14), M21's physics2d.raycast, physics2d.overlap and physics2d.bodyInfo
 	// (Docs/Decisions/0032-m21-contract.md decisions 15 and 27) and tilemap.paint (decision 26), M22's ui.tree
-	// (Docs/Decisions/0033-m22-contract.md decision 8) and ui.createWidget (decision 32), and M23's animation.preview
-	// (Docs/Decisions/0034-m23-contract.md decision 32), test hooks excluded.
+	// (Docs/Decisions/0033-m22-contract.md decision 8) and ui.createWidget (decision 32), M23's animation.preview
+	// (Docs/Decisions/0034-m23-contract.md decision 32), and M26's lighting.bake, terrain.edit and terrain.importHeightmap
+	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-			"entity.reparent", "entity.update", "events.read", "input.inject", "input.readReplay", "input.record", "input.replay", "log.read",
+			"entity.reparent", "entity.update", "events.read", "input.inject", "input.readReplay", "input.record", "input.replay", "lighting.bake", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
 			"physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
 			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
-			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "test.list", "test.run", "tilemap.paint", "ui.createWidget",
-			"ui.tree", "viewport.camera", "viewport.frame", "viewport.pick", "viewport.screenshot", "viewport.setOptions" };
+			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "terrain.edit", "terrain.importHeightmap", "test.list", "test.run",
+			"tilemap.paint", "ui.createWidget", "ui.tree", "viewport.camera", "viewport.frame", "viewport.pick", "viewport.screenshot", "viewport.setOptions" };
 		return ExpectedNames;
 	}
 
@@ -119,13 +120,12 @@ namespace Engine {
 			const std::vector<std::string> tools = { "animation.preview", "asset.create", "asset.delete", "asset.getProperties", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
-				"input.readReplay", "input.record", "input.replay", "log.read", "native.build", "native.getComponents", "native.load", "native.read",
+				"input.readReplay", "input.record", "input.replay", "lighting.bake", "log.read", "native.build", "native.getComponents", "native.load", "native.read",
 				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
 				"scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
-				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "test.run", "tilemap.paint", "ui.createWidget",
-				"ui.tree",
-				"viewport.screenshot" };
+				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "terrain.edit", "terrain.importHeightmap",
+				"test.run", "tilemap.paint", "ui.createWidget", "ui.tree", "viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -291,9 +291,10 @@ namespace Engine {
 			// M16's project_upgrade (friction S3-09), M17's asset_get_properties (friction F11), M19's input_read_replay
 			// (ADR 0030 decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
 			// (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
-			// decision 26), M22's ui_tree (Docs/Decisions/0033-m22-contract.md decision 8) and ui_create_widget (decision 32), and
-			// M23's animation_preview (Docs/Decisions/0034-m23-contract.md decision 32).
-			CHECK(catalog["Tools"].size() == 69);
+			// decision 26), M22's ui_tree (Docs/Decisions/0033-m22-contract.md decision 8) and ui_create_widget (decision 32),
+			// M23's animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), and M26's lighting_bake, terrain_edit and
+			// terrain_import_heightmap (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23).
+			CHECK(catalog["Tools"].size() == 72);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

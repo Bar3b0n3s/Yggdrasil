@@ -3,6 +3,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Error.h"
+#include "Engine/Core/UUID.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
@@ -11,10 +12,12 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -68,10 +71,22 @@ namespace Engine {
 				case PhysicsColliderType::Sphere:  return "SphereCollider";
 				case PhysicsColliderType::Capsule: return "CapsuleCollider";
 				case PhysicsColliderType::Mesh:    return "MeshCollider";
+				case PhysicsColliderType::Terrain: return "TerrainCollider";
 			}
 
 			ENGINE_CORE_ASSERT(false, "Unknown PhysicsColliderType {}", std::to_underlying(type));
 			return "BoxCollider";
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 21): whether `colliders` hold `entity`'s own TerrainCollider. A body
+		// whose owner is `entity`, of origin ImplicitStatic, that holds it takes the TerrainCollider's Layer (the composition),
+		// Friction and Restitution (the session) instead of layer 0 and the default material.
+		[[nodiscard]] inline bool HoldsOwnTerrainCollider(std::span<const PhysicsColliderPlan> colliders, UUID entity)
+		{
+			return std::any_of(colliders.begin(), colliders.end(), [entity](const PhysicsColliderPlan& collider)
+			{
+				return collider.Type == PhysicsColliderType::Terrain && collider.Entity == entity;
+			});
 		}
 
 		// RigidBody.Type -> PhysicsMotionType (§9.2: Type -> EMotionType).

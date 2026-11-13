@@ -3,14 +3,28 @@
 
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/BinaryReader.h"
+#include "Engine/Core/BinaryWriter.h"
 
+#include <algorithm>
 #include <utility>
 
-// The heightfield's formats (HeightfieldData.h). The artifact wrappers and the flat heightfield are the contract's; the
-// payload, the validation and the source reader and writer are contract stubs of M26's C26.1, implemented by stream T-A
-// (Docs/Decisions/0037-m26-contract.md decision 20): until then no heightfield serializes or reads.
+// The heightfield's formats (HeightfieldData.h; Docs/Decisions/0037-m26-contract.md decision 20): the artifact wrappers and
+// the flat heightfield are the contract's, the payload, the validation and the source reader and writer stream T-A's.
 
 namespace Engine {
+
+	namespace Utils {
+
+		// The source header's size: the magic and the uint32 version.
+		constexpr size_t HeightfieldSourceHeaderBytes = HeightfieldSourceMagic.size() + sizeof(uint32_t);
+
+		[[nodiscard]] static constexpr bool IsHeightfieldResolutionInRange(uint32_t resolution)
+		{
+			return resolution >= MinHeightfieldResolution && resolution <= MaxHeightfieldResolution;
+		}
+
+	}
 
 	HeightfieldData MakeFlatHeightfield(uint32_t resolution, uint16_t height)
 	{
@@ -22,34 +36,84 @@ namespace Engine {
 		return heightfield;
 	}
 
-	Status ValidateHeightfieldData(const HeightfieldData& /*heightfield*/)
+	Status ValidateHeightfieldData(const HeightfieldData& heightfield)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M26 terrain contract (Docs/Decisions/0037-m26-contract.md decision 20, stream T-A)");
-	}
-
-	Buffer SerializeHeightfieldPayload(const HeightfieldData& /*heightfield*/)
-	{
-		ENGINE_CONTRACT_STUB();
+		if (!Utils::IsHeightfieldResolutionInRange(heightfield.Resolution))
+		{
+			return MakeError(ErrorCode::Validation, "the heightfield is {} samples a side, outside [{}, {}]", heightfield.Resolution, MinHeightfieldResolution,
+				MaxHeightfieldResolution);
+		}
+		const size_t expected = static_cast<size_t>(heightfield.Resolution) * heightfield.Resolution;
+		if (heightfield.Heights.size() != expected)
+		{
+			return MakeError(ErrorCode::Validation, "the heightfield holds {} samples; {} samples a side need {}", heightfield.Heights.size(),
+				heightfield.Resolution, expected);
+		}
 		return {};
 	}
 
-	Result<HeightfieldData> DeserializeHeightfieldPayload(std::span<const std::byte> /*payload*/)
+	Buffer SerializeHeightfieldPayload(const HeightfieldData& heightfield)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M26 terrain contract (Docs/Decisions/0037-m26-contract.md decision 20, stream T-A)");
+		ENGINE_CORE_ASSERT(ValidateHeightfieldData(heightfield).has_value(), "SerializeHeightfieldPayload needs a heightfield that passes ValidateHeightfieldData");
+
+		BinaryWriter writer;
+		writer.WriteU32(heightfield.Resolution);
+		writer.WriteArray(std::span<const uint16_t>(heightfield.Heights));
+		return writer.TakeBuffer();
 	}
 
-	Buffer WriteHeightfieldSource(const HeightfieldData& /*heightfield*/)
+	Result<HeightfieldData> DeserializeHeightfieldPayload(std::span<const std::byte> payload)
 	{
-		ENGINE_CONTRACT_STUB();
-		return {};
+		BinaryReader reader(payload);
+		ENGINE_TRY_ASSIGN(const uint32_t resolution, reader.ReadU32());
+		if (!Utils::IsHeightfieldResolutionInRange(resolution))
+		{
+			return MakeError(ErrorCode::Parse, "heightfield payload: the resolution {} is outside [{}, {}]", resolution, MinHeightfieldResolution,
+				MaxHeightfieldResolution);
+		}
+		// At most 1025^2 samples of 2 bytes: the product cannot overflow, and it is checked against the bytes left before the
+		// samples are allocated.
+		const uint64_t sampleCount = static_cast<uint64_t>(resolution) * resolution;
+		if (sampleCount * sizeof(uint16_t) > reader.GetRemaining())
+		{
+			return MakeError(ErrorCode::Parse, "heightfield payload: {} samples a side need {} bytes, but {} follow at offset {}", resolution,
+				sampleCount * sizeof(uint16_t), reader.GetRemaining(), reader.GetPosition());
+		}
+		HeightfieldData heightfield;
+		heightfield.Resolution = resolution;
+		ENGINE_TRY_ASSIGN(heightfield.Heights, reader.ReadArray<uint16_t>(static_cast<size_t>(sampleCount)));
+		if (!reader.IsAtEnd())
+			return MakeError(ErrorCode::Parse, "heightfield payload has {} trailing bytes after offset {}", reader.GetRemaining(), reader.GetPosition());
+		ENGINE_TRY(WithContext(ValidateHeightfieldData(heightfield), "in a heightfield payload"));
+		return heightfield;
 	}
 
-	Result<HeightfieldData> ReadHeightfieldSource(std::span<const std::byte> /*source*/)
+	Buffer WriteHeightfieldSource(const HeightfieldData& heightfield)
 	{
-		ENGINE_CONTRACT_STUB();
-		return MakeError(ErrorCode::Unsupported, "M26 terrain contract (Docs/Decisions/0037-m26-contract.md decision 20, stream T-A)");
+		const Buffer payload = SerializeHeightfieldPayload(heightfield);
+		BinaryWriter writer;
+		writer.WriteBytes(std::as_bytes(std::span(HeightfieldSourceMagic)));
+		writer.WriteU32(HeightfieldData::FormatVersion);
+		writer.WriteBytes(payload);
+		return writer.TakeBuffer();
+	}
+
+	Result<HeightfieldData> ReadHeightfieldSource(std::span<const std::byte> source)
+	{
+		BinaryReader reader(source);
+		const Result<std::span<const std::byte>> magic = reader.ReadBytes(HeightfieldSourceMagic.size());
+		if (!magic.has_value() || !std::ranges::equal(*magic, std::as_bytes(std::span(HeightfieldSourceMagic))))
+		{
+			return MakeError(ErrorCode::Parse, "not a heightfield source: it does not start with the magic \"EHFD\" ({} bytes)", source.size());
+		}
+		ENGINE_TRY_ASSIGN(const uint32_t version, WithContext(reader.ReadU32(), "in the heightfield source's header"));
+		if (version != HeightfieldData::FormatVersion)
+		{
+			return std::unexpected(Error(ErrorCode::UnsupportedVersion,
+				std::format("heightfield source version {}; this build reads version {}", version, HeightfieldData::FormatVersion))
+					.WithHint("write the heightfield again with this engine (terrain.importHeightmap or asset.create)"));
+		}
+		return DeserializeHeightfieldPayload(source.subspan(Utils::HeightfieldSourceHeaderBytes));
 	}
 
 	Buffer CookHeightfield(const HeightfieldData& heightfield, uint32_t importerVersion)

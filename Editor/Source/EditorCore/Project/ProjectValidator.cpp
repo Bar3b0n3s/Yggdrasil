@@ -57,9 +57,11 @@
 #include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
+#include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/SpriteValidation.h"
+#include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
 
 #include <nlohmann/json.hpp>
@@ -173,6 +175,13 @@ namespace Engine {
 			// M23 (Scene/AnimationValidation.h, Docs/Decisions/0034-m23-contract.md decision 30).
 			AnimationNoAnimatorCode,
 			AnimationSkeletonMismatchCode,
+			// M26 (Scene/ProbeValidation.h, Docs/Decisions/0037-m26-contract.md decision 9), appended in landing order after
+			// main's (ADR 0028's phase-3 ledger: after M24's at M26's merge).
+			ProbeNotBakedCode,
+			// M26 (Scene/TerrainValidation.h, Docs/Decisions/0037-m26-contract.md decision 9), appended in landing order after
+			// M24's (ADR 0028's phase-3 ledger).
+			TerrainNoHeightfieldCode,
+			TerrainSplatNotRawCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -378,6 +387,16 @@ namespace Engine {
 			ValidationCodeInfo{ AnimationSkeletonMismatchCode, "Warning", false,
 				"A SkinnedMesh's mesh skin addresses more joints than its Animator's Skeleton holds; it draws its bind pose.",
 				"Set the Animator's Skeleton to the skin the mesh was imported with." },
+			ValidationCodeInfo{ ProbeNotBakedCode, "Warning", false,
+				"An IrradianceVolume or ReflectionProbe has no Data, or its Data does not load; it lights nothing.",
+				"Bake the scene's lighting with lighting.bake (the editor's Bake Lighting) and save the scene." },
+			ValidationCodeInfo{ TerrainNoHeightfieldCode, "Warning", false,
+				"A Terrain has no Heightfield, or its Heightfield does not load; it draws nothing, and its TerrainCollider makes no body.",
+				"Assign a heightfield (asset.create {type: \"Heightfield\"} or terrain.importHeightmap)." },
+			ValidationCodeInfo{ TerrainSplatNotRawCode, "Warning", false,
+				"A Terrain's SplatMap is not imported as a data texture (Usage Linear and Compression None): its weights are decoded as sRGB "
+				"colour or blurred by block compression, and terrain.edit cannot paint it.",
+				"Set the splat map's Usage to Linear and its Compression to None with asset.setImportSettings." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1145,6 +1164,43 @@ namespace Engine {
 			}
 		}
 
+		// The probe checks of §13.7 (M26, Scene/ProbeValidation.h): PROBE_NOT_BAKED on each IrradianceVolume and ReflectionProbe
+		// without data that loads through the editor's asset manager. Not fixable: baking renders (lighting.bake).
+		static void CheckProbes(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			if (assets == nullptr)
+				return;
+			for (ProbeSceneIssue& issue : FindProbeSceneIssues(*checked.Target, *assets))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
+		// The terrain checks of §13.7 (M26, Scene/TerrainValidation.h): TERRAIN_NO_HEIGHTFIELD and TERRAIN_SPLAT_NOT_RAW on each
+		// Terrain they name, its heightfield loaded and its splat map's .meta read through the editor's asset manager. Neither is
+		// fixable.
+		static void CheckTerrain(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			if (assets == nullptr)
+				return;
+			for (TerrainSceneIssue& issue : FindTerrainSceneIssues(*checked.Target, *assets))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static Status CheckRenderScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const auto render = EvaluateRenderSceneValidation(*checked.Target, *editor.GetEngine().GetAssetManager());
@@ -1436,9 +1492,11 @@ namespace Engine {
 			ENGINE_TRY(CheckSceneScripts(editor, checked, diagnostics));
 			CheckPhysics(editor, checked, diagnostics);
 			CheckAnimation(editor, checked, diagnostics);
+			CheckProbes(editor, checked, diagnostics);
 			CheckLightLimit(checked, diagnostics);
 			CheckSprites(editor, checked, diagnostics);
 			CheckUi(editor, checked, diagnostics);
+			CheckTerrain(editor, checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

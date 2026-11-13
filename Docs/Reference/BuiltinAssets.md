@@ -33,6 +33,12 @@ The assets the engine ships, which every project references by engine path, such
 |---|---|---|---|
 | `engine://Fonts/Default` | Font | `00000000000001c1` | the file `Fonts/Inter-Regular.ttf` through the Font importer |
 
+## Luts
+
+| Path | Type | Id | Made from |
+|---|---|---|---|
+| `engine://Luts/Identity` | Lut | `0000000000000281` | procedural: generated in code |
+
 ## Materials
 
 | Path | Type | Id | Made from |
@@ -61,6 +67,7 @@ The assets the engine ships, which every project references by engine path, such
 | `engine://Textures/Checker` | Texture | `0000000000000184` | procedural: generated in code |
 | `engine://Textures/FlatNormal` | Texture | `0000000000000183` | procedural: generated in code |
 | `engine://Textures/Missing` | Texture | `0000000000000185` | procedural: generated in code |
+| `engine://Textures/Particle` | Texture | `000000000000018b` | procedural: generated in code |
 | `engine://Textures/SpriteBevel` | Texture | `0000000000000189` | procedural: generated in code |
 | `engine://Textures/SpriteCircle` | Texture | `000000000000018a` | procedural: generated in code |
 | `engine://Textures/SpriteRounded` | Texture | `0000000000000188` | procedural: generated in code |

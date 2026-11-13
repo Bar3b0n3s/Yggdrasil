@@ -2,14 +2,17 @@
 #include "Engine/Scene/EntityBounds.h"
 
 #include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/MeshDeform.h"
+#include "Engine/Asset/TerrainGeometry.h"
 #include "Engine/Asset/TilemapDrawOrder.h"
 #include "Engine/Scene/AnimationSystem.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Private/AnimationTargets.h"
 #include "Engine/Scene/Private/SpriteDrawing.h"
@@ -17,10 +20,13 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -134,6 +140,35 @@ namespace Engine {
 			return found;
 		}
 
+		// M26 (C-TERR; Docs/Decisions/0037-m26-contract.md decision 21, stream T-B): extends `bounds` by the world box of
+		// `entity`'s Terrain, its local box from its origin to (Size.x, the highest sample's height, Size.y) above the lowest
+		// sample's height (Asset/TerrainGeometry.h) carried by its world matrix, when it has a Terrain whose heightfield loads.
+		// Returns whether it did.
+		static bool AddTerrainBounds(ConstEntity entity, AssetManager& assets, Aabb& bounds)
+		{
+			const TerrainComponent* terrain = entity.TryGetComponent<TerrainComponent>();
+			if (terrain == nullptr || !terrain->Heightfield.IsValid())
+				return false;
+			// A heightfield that does not load draws nothing and has no bounds (TERRAIN_NO_HEIGHTFIELD).
+			const Result<AssetRef<Asset>> loaded = assets.Load(terrain->Heightfield.GetHandle());
+			const AssetRef<HeightfieldData> heightfield = loaded.has_value() ? AssetCast<HeightfieldData>(*loaded) : nullptr;
+			if (heightfield == nullptr || !ValidateHeightfieldData(*heightfield).has_value())
+				return false;
+			const auto [lowest, highest] = std::minmax_element(heightfield->Heights.begin(), heightfield->Heights.end());
+			const auto sampleAt = [&heightfield](std::vector<uint16_t>::const_iterator sample)
+			{
+				const auto index = static_cast<uint32_t>(sample - heightfield->Heights.begin());
+				return std::pair{ index % heightfield->Resolution, index / heightfield->Resolution };
+			};
+			const TerrainExtent extent{ .Size = terrain->Size, .HeightScale = terrain->HeightScale };
+			const auto [lowX, lowZ] = sampleAt(lowest);
+			const auto [highX, highZ] = sampleAt(highest);
+			const Aabb local{ .Min = glm::vec3(0.0f, GetTerrainSamplePosition(*heightfield, extent, lowX, lowZ).y, 0.0f),
+				.Max = glm::vec3(terrain->Size.x, GetTerrainSamplePosition(*heightfield, extent, highX, highZ).y, terrain->Size.y) };
+			bounds.Extend(local.Transformed(TransformSystem::ComputeWorldMatrix(entity)));
+			return true;
+		}
+
 	}
 
 	std::optional<Aabb> ComputeEntityWorldBounds(ConstEntity entity, AssetManager& assets, const EntityBoundsOptions& options)
@@ -153,6 +188,7 @@ namespace Engine {
 			found = Utils::AddMeshBounds(current, assets, bounds) || found;
 			found = Utils::AddSpriteBounds(current, assets, bounds) || found;
 			found = Utils::AddTilemapBounds(current, assets, bounds) || found;
+			found = Utils::AddTerrainBounds(current, assets, bounds) || found;
 			if (!options.IncludeDescendants)
 				break;
 			for (const UUID child : current.GetChildren())

@@ -42,10 +42,13 @@
 // Handle, UiScrollView Content or UiTextInput TextElement or Placeholder that is not a UI element below its widget in its
 // canvas (decisions 35 and 53). M23 adds RENDER_POINT_SHADOW_BUDGET (Renderer/PointShadowMaps.h) when more than
 // MaxPointShadowLights point lights of a scene cast shadows (Docs/Decisions/0034-m23-contract.md decision 18), then
-// ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH (Scene/AnimationValidation.h, decision 30). GetCodes lists every
-// code in §13.7 order, later milestones' codes appended in landing order. A code is never removed or reused: one that
-// nothing reports any more stays in GetCodes and is listed by GetRetiredCodes (M23: GltfImporter version 2 imports COLOR_0,
-// so ASSET_VERTEX_COLORS_IGNORED is retired; decision 18).
+// ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH (Scene/AnimationValidation.h, decision 30). M26 adds PROBE_NOT_BAKED
+// on an IrradianceVolume or ReflectionProbe whose Data is null or does not load (Scene/ProbeValidation.h), then
+// TERRAIN_NO_HEIGHTFIELD on a Terrain whose Heightfield is null or does not load and TERRAIN_SPLAT_NOT_RAW on a Terrain whose
+// SplatMap is not imported as a data texture (Scene/TerrainValidation.h; Docs/Decisions/0037-m26-contract.md decision 9).
+// GetCodes lists every code in §13.7 order, later milestones' codes appended in landing order. A code is never removed or
+// reused: one that nothing reports any more stays in GetCodes and is listed by GetRetiredCodes (M23: GltfImporter version 2
+// imports COLOR_0, so ASSET_VERTEX_COLORS_IGNORED is retired; decision 18).
 
 namespace Engine {
 

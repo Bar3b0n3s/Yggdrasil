@@ -35,16 +35,17 @@
 //          own or a gathered one) changed, was added or removed; the hierarchy changed above or below a collider (a
 //          reparent moves colliders into or out of a compound); the world scale of the owner or of a gathered collider's
 //          entity changed (scale is baked into shapes); the MeshRenderer.Mesh of an entity whose MeshCollider has no Mesh
-//          changed; a collider's mesh got a new asset version (a hot reload, §7.5); an entity became effectively enabled;
-//          or a gathered collider moved relative to its body. A rebuild caused by colliders alone (their components,
-//          the hierarchy, scales, meshes, moves) that leaves the body's motion type and sensor flag as they were replaces
-//          its shape in place (PhysicsWorld::SetShape: handle, pose, velocities and Jolt's contact bookkeeping kept); any
-//          other rebuild (a RigidBody or CharacterController change) destroys the body and creates it again with its
-//          current linear and angular velocity. The RigidBody's Initial* velocities apply only to a Dynamic body created
-//          for an owner that had none (session start, a new component or entity, a re-enabled entity); a Kinematic body
-//          follows its Transform. An entity that became disabled or is pending
-//          destruction keeps the body it has until FlushDestroyed (step 8), which closes its pairs, and gets none
-//          created; PreStep never removes it.
+//          changed; a collider's mesh got a new asset version (a hot reload, §7.5); a TerrainCollider's Terrain changed or
+//          its Heightfield got a new asset version (M26: terrain.edit, a reimport; Docs/Decisions/0037-m26-contract.md
+//          decision 21); an entity became effectively enabled; or a gathered collider moved relative to its body. A
+//          rebuild caused by colliders alone (their components, the hierarchy, scales, meshes, moves) that leaves the
+//          body's motion type and sensor flag as they were replaces its shape in place (PhysicsWorld::SetShape: handle,
+//          pose, velocities and Jolt's contact bookkeeping kept); any other rebuild (a RigidBody or CharacterController
+//          change) destroys the body and creates it again with its current linear and angular velocity. The RigidBody's
+//          Initial* velocities apply only to a Dynamic body created for an owner that had none (session start, a new
+//          component or entity, a re-enabled entity); a Kinematic body follows its Transform. An entity that became
+//          disabled or is pending destruction keeps the body it has until FlushDestroyed (step 8), which closes its
+//          pairs, and gets none created; PreStep never removes it.
 //       2. Pairs across rebuilds. Active pairs are keyed by the two owners' UUIDs and their kind (collision or trigger),
 //          never by body handle. When PreStep destroys a body (a rebuild, or a removal: the RigidBody or the last collider
 //          removed, a body refused after an edit), each active pair of that owner loses its sub-shape counts and becomes
@@ -142,8 +143,8 @@ namespace Engine {
 		std::vector<std::vector<std::string>> Collisions = { { std::string(DefaultPhysicsLayerName), std::string(DefaultPhysicsLayerName) } };
 		// Simulation.FixedHz (>= 1): the collision steps of each world step.
 		uint32_t FixedHz = 60;
-		// The session's asset manager, outliving the system: MeshCollider meshes. Null makes every mesh collider a
-		// PHYSICS_INVALID_SHAPE diagnostic.
+		// The session's asset manager, outliving the system: MeshCollider meshes and (M26) the heightfields of
+		// TerrainColliders' Terrains. Null makes every mesh and terrain collider a PHYSICS_INVALID_SHAPE diagnostic.
 		AssetManager* Assets = nullptr;
 		// The world's capacities (§9.1 defaults; tests lower them).
 		PhysicsWorldLimits Limits{};

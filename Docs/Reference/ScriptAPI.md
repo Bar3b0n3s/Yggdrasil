@@ -1146,6 +1146,14 @@ Read the last completed render extraction.
 
 All modes; Test; pure/read.
 
+### Test.GetParticleDigest
+
+`(entity: Entity) -> string?`
+
+Returns the seeded particle hash of a ParticleEmitter entity (the XXH64 of its live particles, random stream and emission state) as 16 hexadecimal digits, or nil before its first Particles phase or without a ParticleEmitter; the same in every configuration, so a suite compares it across runs; test suites only.
+
+All modes; Test; pure/read.
+
 ### Test.GetPoseDigest
 
 `(entity: Entity) -> string?`
@@ -3174,6 +3182,14 @@ Particles emitted at once at the start of each cycle, at most MaxParticles.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### ParticleEmitter.Clear
+
+`(self: ParticleEmitter) -> ()`
+
+Kill every live particle and drop the queued emits; the emission cycle and the random stream go on.
+
+All modes; Runtime|Test; mutates.
+
 ### ParticleEmitter.ColorOverLife
 
 `{{Time: number, Color: Color}}`
@@ -3205,6 +3221,22 @@ All modes; Runtime|Test; pure/read; setter mutates.
 The length of one emission cycle, in seconds; Burst is emitted at each cycle's start.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleEmitter.Emit
+
+`(self: ParticleEmitter, count: number) -> ()`
+
+Queue count particles (1 to 4096) for the next Particles phase, whether the emitter is Playing, looping or finished; an emitter without particles yet starts at that phase. A count outside its range raises an error. Particles are presentation, so the simulated state does not change.
+
+All modes; Runtime|Test; mutates.
+
+### ParticleEmitter.GetParticleCount
+
+`(self: ParticleEmitter) -> number`
+
+Read the live particles after the last Particles phase (0 before the first). Particles are presentation state the frame phase advances, so the count depends on frame pacing: it raises an error in a fixed-step callback (OnFixedUpdate, a task, a physics, animation or UI event) and is read in OnUpdate, OnLateUpdate or a test case; never let it drive gameplay.
+
+All modes; Runtime|Test; pure/read.
 
 ### ParticleEmitter.Lifetime
 
@@ -3428,7 +3460,47 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 ## PostProcess
 
-The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).
+The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).
+
+### PostProcess.AntiAliasing
+
+`AntiAliasing`
+
+How edges are anti-aliased: none, FXAA (the default) or TAA.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.AutoExposureMaxEV
+
+`number`
+
+The darkest and brightest exposure automatic exposure may adapt to, in stops.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.AutoExposureMinEV
+
+`number`
+
+The darkest and brightest exposure automatic exposure may adapt to, in stops.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.AutoExposureSpeedDown
+
+`number`
+
+How many stops per second automatic exposure adapts towards a brighter or a darker exposure.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.AutoExposureSpeedUp
+
+`number`
+
+How many stops per second automatic exposure adapts towards a brighter or a darker exposure.
+
+All modes; Runtime|Test; pure/read; setter mutates.
 
 ### PostProcess.BloomEnabled
 
@@ -3454,11 +3526,27 @@ The exposure compensation in stops: the image is multiplied by 2^EV.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
-### PostProcess.FxaaEnabled
+### PostProcess.ExposureMode
 
-`boolean`
+`ExposureMode`
 
-Whether FXAA anti-aliasing is applied.
+Manual exposure, or automatic exposure from the image's luminance histogram.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.Lut
+
+`AssetRef?`
+
+The colour-grading LUT applied after the tone mapping curve; null grades nothing.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.LutIntensity
+
+`number`
+
+How much of the graded colour replaces the ungraded one, from 0 to 1.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3491,6 +3579,46 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `number`
 
 The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.SsrEnabled
+
+`boolean`
+
+Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.SsrIntensity
+
+`number`
+
+How strongly screen-space reflections replace the probes' reflection, from 0 to 1.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.SsrMaxDistance
+
+`number`
+
+How far a reflected ray travels, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.SsrMaxRoughness
+
+`number`
+
+The perceptual roughness above which only the probes reflect.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### PostProcess.SsrThickness
+
+`number`
+
+How thick a surface is assumed behind its depth when a ray passes it, in metres.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -4546,6 +4674,22 @@ Whether shadows fall on the terrain.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### Terrain.SampleHeight
+
+`(self: Terrain, position: vector) -> number?`
+
+Read the world-space height of the terrain's surface under the world point position (its XZ in the terrain's local space, the surface there, back to world space); nil outside the terrain or without a loaded heightfield.
+
+All modes; Runtime|Test; pure/read.
+
+### Terrain.SampleNormal
+
+`(self: Terrain, position: vector) -> vector?`
+
+Read the world-space unit normal of the terrain's surface under the world point position; nil where SampleHeight is nil.
+
+All modes; Runtime|Test; pure/read.
+
 ### Terrain.Size
 
 `vector`
@@ -5586,6 +5730,16 @@ What an Animator does with its skeleton's root motion.
 
 - `Extract`: The root motion is held out of the pose and only reported by Animator:GetRootMotion, for a script to apply.
 
+## AntiAliasing
+
+How edges are anti-aliased.
+
+- `None`: No anti-aliasing.
+
+- `Fxaa`: FXAA on the final image (the default).
+
+- `Taa`: Temporal anti-aliasing: the jittered image resolved against its history (off in pixel-art mode).
+
 ## AssetCreateType
 
 What asset.create makes.
@@ -5605,6 +5759,8 @@ What asset.create makes.
 - `Tilemap`: A .tilemap tilemap: a palette of sprite sheet frames and cells in chunks; without values an empty map of unit cells in 16-cell chunks.
 
 - `StringTable`: A .stringtable string table: keyed strings in several locales, read by Loc.Get; without values the locale en and no entries.
+
+- `Heightfield`: A .heightfield heightfield for a Terrain: a flat square of 129 x 129 samples at height 0; takes no values (terrain.importHeightmap converts a heightmap, terrain.edit sculpts it).
 
 ## AssetState
 
@@ -5845,6 +6001,14 @@ Why an export put an asset into its paks (the first reason its walk found).
 - `Required`: Engine.pak: the exported game asks for this built-in by handle, so every export holds it.
 
 - `ComputedLoad`: Engine.pak: kept with every built-in, because a packaged script (from) computes an Assets.Load reference (at line).
+
+## ExposureMode
+
+How the image is exposed.
+
+- `Manual`: The image is multiplied by 2^ExposureEV.
+
+- `Auto`: A histogram of the image's luminance adapts the exposure towards middle grey, ExposureEV added as compensation.
 
 ## FieldType
 
@@ -6529,6 +6693,20 @@ The sample count of screen-space ambient occlusion (GTAO).
 - `Medium`: Balanced sample count (the default).
 
 - `High`: Most samples: smoothest, slowest.
+
+## TerrainTool
+
+What a terrain stroke does.
+
+- `Raise`: Raises the surface under the brush by Strength times the falloff, in metres.
+
+- `Lower`: Lowers the surface under the brush by Strength times the falloff, in metres.
+
+- `Smooth`: Moves each sample under the brush towards the mean of its neighbours.
+
+- `Flatten`: Moves the surface under the brush towards Height.
+
+- `Paint`: Paints Layer's weight into the splat map under the brush, keeping the weights normalized.
 
 ## TestIsolation
 

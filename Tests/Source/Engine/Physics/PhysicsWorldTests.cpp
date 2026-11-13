@@ -15,6 +15,7 @@
 #include <format>
 #include <limits>
 #include <tuple>
+#include <vector>
 
 // The physics world (Architecture §9.1, §9.3; §9.7: free fall vs analytic, rest height (0.48 with slop), restitution
 // bounce, layer matrix, CCD prevents tunnelling at 200 m/s, and the world-level half of the determinism tests: a 200-body
@@ -1128,6 +1129,26 @@ namespace Engine {
 			CHECK_FALSE(world->IsSleeping(box));
 			StepWorld(*world, 30);
 			CHECK(world->GetPose(box).Position.x < -0.1f);
+		}
+
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 21, stream T-B): Jolt collides a height field with
+		// convex shapes only and asserts on any other pair, so the world drops the pairs of bodies whose shapes both hold a mesh
+		// or a height field before the narrow phase (PhysicsCollisionGroups), as a mesh sensor and a Kinematic height field, or
+		// two Kinematic height fields one of which is a sensor, could otherwise form.
+		TEST_CASE("PhysicsWorld: a height field never meets a triangle mesh or another height field")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			const HeightFieldShapeGeometry field{ .Heights = std::vector<float>(25, 0.5f), .SampleCount = 5, .CellSize = glm::vec2(1.0f) };
+			REQUIRE(world->CreateBody({ .Shape = CreateShape(field), .MotionType = PhysicsMotionType::Kinematic }).has_value());
+			REQUIRE(world->CreateBody({ .Shape = CreateShape(field), .MotionType = PhysicsMotionType::Kinematic, .IsSensor = true, .CollideKinematicVsNonDynamic = true })
+					.has_value());
+			MeshShapeGeometry mesh;
+			mesh.Vertices = { glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(4.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 4.0f) };
+			mesh.Indices = { 0, 1, 2 };
+			REQUIRE(world->CreateBody({ .Shape = CreateShape(mesh), .MotionType = PhysicsMotionType::Kinematic, .IsSensor = true, .CollideKinematicVsNonDynamic = true })
+					.has_value());
+			StepWorld(*world, 3);
+			CHECK(world->DrainContactEvents().empty());
 		}
 	}
 

@@ -74,12 +74,12 @@ COMPONENT_ORDER = [
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
-    "Animator", "SkinnedMesh",
+    "Animator", "SkinnedMesh", "ParticleEmitter", "IrradianceVolume", "ReflectionProbe", "Terrain", "TerrainCollider",
     "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
-COMPONENT_VERSIONS = {"Prefab": 2, "PointLight": 2, "Script": 2}
+COMPONENT_VERSIONS = {"Prefab": 2, "PointLight": 2, "Script": 2, "PostProcess": 2}
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Canonical JSON (the JsonWriter form of Architecture §6: tabs, LF, scalar arrays on one line, final newline)
@@ -361,6 +361,12 @@ def meta(handle: str, kind: str, importer: str, settings: dict[str, Any] | None 
 
 
 TEXTURE_SETTINGS = {"Usage": "Color", "GenerateMips": True}
+
+
+def heightfield(resolution: int) -> bytes:
+    """A flat `.heightfield` source of `resolution` x `resolution` samples (Asset/HeightfieldData.h): the magic "EHFD",
+    the uint32 version 1, then the payload, the uint32 resolution and the uint16 samples, little-endian."""
+    return b"EHFD" + struct.pack("<II", 1, resolution) + bytes(2 * resolution * resolution)
 
 
 def sprite_sheet(frames: list[tuple[str, int, int]], clips: list[tuple[str, list[tuple[int, int]]]],
@@ -920,6 +926,31 @@ return Script.Define("Jumper", Jumper)
         "Animator": {"Skeleton": hash64(bone_handle, "skin:0:Bone"), "Layers": [], "Playing": True,
                      "RootMotion": "None"}}))
     item.entities.append(entity("e000000000000032", "Body", skinned_body, parent="e000000000000031"))
+
+    # The probe check (Docs/Decisions/0037-m26-contract.md decision 9): an irradiance volume and a reflection probe that
+    # were never baked (no Data); both report the code.
+    item = fixture("PROBE_NOT_BAKED")
+    item.entities.append(entity("e000000000000040", "Volume", {
+        "Transform": transform(), "IrradianceVolume": {"Data": None}}))
+    item.entities.append(entity("e000000000000041", "Mirror", {
+        "Transform": transform(0, 2, 0), "ReflectionProbe": {"Data": None}}))
+
+    # The terrain checks (Docs/Decisions/0037-m26-contract.md decision 9): a Terrain without a heightfield, and a
+    # Terrain on a flat heightfield whose splat map is imported with the Texture importer's default settings (Usage
+    # Color), so its weights would be decoded as sRGB colour.
+    item = fixture("TERRAIN_NO_HEIGHTFIELD")
+    item.entities.append(entity("e000000000000040", "Ground", {
+        "Transform": transform(), "Terrain": {"Heightfield": None}}))
+
+    item = fixture("TERRAIN_SPLAT_NOT_RAW")
+    item.add("Project/Assets/Terrain/Flat.heightfield", heightfield(3))
+    item.add_json("Project/Assets/Terrain/Flat.heightfield.meta",
+                  meta("3a7e000000000013", "Heightfield", "Heightfield"))
+    item.add("Project/Assets/Terrain/Splat.png", checker_png(64))
+    item.add_json("Project/Assets/Terrain/Splat.png.meta",
+                  meta("3a7e000000000014", "Texture", "Texture", TEXTURE_SETTINGS))
+    item.entities.append(entity("e000000000000041", "Ground", {
+        "Transform": transform(), "Terrain": {"Heightfield": "3a7e000000000013", "SplatMap": "3a7e000000000014"}}))
 
     return fixtures
 

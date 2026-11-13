@@ -9,6 +9,7 @@
 #include "Editor/Panels/DiagnosticsPanel.h"
 #include "Editor/Panels/GameViewportPanel.h"
 #include "Editor/Panels/InspectorPanel.h"
+#include "Editor/Panels/LightingBakeAction.h"
 #include "Editor/Panels/NativePanel.h"
 #include "Editor/Panels/ProjectSettingsPanel.h"
 #include "Editor/Panels/SceneHierarchyPanel.h"
@@ -612,6 +613,9 @@ namespace Engine {
 					queue("shaders.reload", Json::object());
 				if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
 					ImGui::SetTooltip("Swap in the shaders CompileShaders.py or a build of the Shaders project rewrote, without a restart");
+				// M26 (Docs/Decisions/0037-m26-contract.md decision 8): the Bake Lighting action, lighting.bake's editor surface.
+				if (DrawLightingBakeMenuItem(editor))
+					queue(LightingBakeActionMethod, Json::object(), true);
 				ImGui::EndMenu();
 			}
 			ImGui::EndMainMenuBar();

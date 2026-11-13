@@ -77,7 +77,8 @@ namespace Engine {
 		// terrain.importHeightmap: ConvertHeightmap of `source` (its kind by extension: .png, or .raw and .r16), written as
 		// `path` and imported. Errors: NotFound at /source for a missing file; InvalidArgument at /source for another extension
 		// and ConvertHeightmap's InvalidArgument and Parse, at /path for a path outside Assets/ or not ending in .heightfield;
-		// Io for the write; ImportFailed for the import.
+		// AlreadyExists at /path when the path is registered as an asset of another type (a hand-edited .meta), nothing
+		// written; Io for the write; ImportFailed for the import.
 		[[nodiscard]] Result<TerrainImportHeightmapResult> TerrainImportHeightmapMethod(EditorMethodContext& context,
 			const TerrainImportHeightmapParams& params);
 

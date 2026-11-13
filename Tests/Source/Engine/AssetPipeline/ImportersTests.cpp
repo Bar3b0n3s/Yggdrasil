@@ -1,5 +1,7 @@
 #include "TestsPCH.h"
 
+#include "Engine/Asset/HeightfieldData.h"
+#include "Engine/Asset/IrradianceVolumeData.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
@@ -94,6 +96,22 @@ namespace Engine {
 			const auto replayText = ReplayToText(replay);
 			REQUIRE(replayText.has_value());
 			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.replay"), AsBytes(*replayText)).has_value());
+			// M26 (Docs/Decisions/0037-m26-contract.md decisions 8 and 20): the binary sources lighting.bake and the terrain
+			// methods write, which have no file fixture (FormatFixturesTests' native importers): a 5 x 5 heightfield whose
+			// samples all differ and a 2 x 2 x 2 irradiance volume whose coefficients all differ.
+			HeightfieldData heightfield = MakeFlatHeightfield(5);
+			for (size_t index = 0; index < heightfield.Heights.size(); ++index)
+				heightfield.Heights[index] = static_cast<uint16_t>(index * 2711);
+			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.heightfield"), WriteHeightfieldSource(heightfield)).has_value());
+			IrradianceVolumeData volume;
+			volume.Size = glm::vec3(4.0f, 2.0f, 3.0f);
+			volume.Probes.resize(static_cast<size_t>(volume.CountX) * volume.CountY * volume.CountZ);
+			for (size_t probe = 0; probe < volume.Probes.size(); ++probe)
+			{
+				for (size_t coefficient = 0; coefficient < volume.Probes[probe].SH9.size(); ++coefficient)
+					volume.Probes[probe].SH9[coefficient] = glm::vec3(static_cast<float>(probe), static_cast<float>(coefficient), 0.25f);
+			}
+			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.irradiance"), WriteIrradianceVolumeSource(volume)).has_value());
 
 			std::vector<VfsPath> sources;
 			for (const std::string_view root : { "project://Assets", "engine://Fonts", "engine://Audio" })

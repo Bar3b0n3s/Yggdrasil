@@ -541,7 +541,7 @@
 			"additionalProperties": false
 		},
 		"PostProcess": {
-			"description": "The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).",
+			"description": "The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).",
 			"type": "object",
 			"properties": {
 				"ExposureEV": {
@@ -550,9 +550,49 @@
 					"minimum": -16,
 					"maximum": 16
 				},
+				"ExposureMode": {
+					"description": "Manual exposure, or automatic exposure from the image's luminance histogram.",
+					"enum": ["Manual", "Auto"]
+				},
+				"AutoExposureMinEV": {
+					"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+					"type": "number",
+					"minimum": -16,
+					"maximum": 16
+				},
+				"AutoExposureMaxEV": {
+					"description": "The darkest and brightest exposure automatic exposure may adapt to, in stops.",
+					"type": "number",
+					"minimum": -16,
+					"maximum": 16
+				},
+				"AutoExposureSpeedUp": {
+					"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 100
+				},
+				"AutoExposureSpeedDown": {
+					"description": "How many stops per second automatic exposure adapts towards a brighter or a darker exposure.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 100
+				},
 				"Tonemap": {
 					"description": "The tone mapping curve.",
 					"enum": ["AgX", "ACES", "PbrNeutral", "Linear"]
+				},
+				"Lut": {
+					"description": "The colour-grading LUT applied after the tone mapping curve; null grades nothing.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "Lut"
+				},
+				"LutIntensity": {
+					"description": "How much of the graded colour replaces the ungraded one, from 0 to 1.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
 				},
 				"SsaoEnabled": {
 					"description": "Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights.",
@@ -572,6 +612,34 @@
 					"description": "The ambient occlusion sample count.",
 					"enum": ["Low", "Medium", "High"]
 				},
+				"SsrEnabled": {
+					"description": "Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses.",
+					"type": "boolean"
+				},
+				"SsrIntensity": {
+					"description": "How strongly screen-space reflections replace the probes' reflection, from 0 to 1.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"SsrMaxDistance": {
+					"description": "How far a reflected ray travels, in metres.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 1000
+				},
+				"SsrThickness": {
+					"description": "How thick a surface is assumed behind its depth when a ray passes it, in metres.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 10
+				},
+				"SsrMaxRoughness": {
+					"description": "The perceptual roughness above which only the probes reflect.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
 				"BloomEnabled": {
 					"description": "Whether bright areas bloom.",
 					"type": "boolean"
@@ -582,9 +650,9 @@
 					"minimum": 0,
 					"maximum": 1
 				},
-				"FxaaEnabled": {
-					"description": "Whether FXAA anti-aliasing is applied.",
-					"type": "boolean"
+				"AntiAliasing": {
+					"description": "How edges are anti-aliased: none, FXAA (the default) or TAA.",
+					"enum": ["None", "Fxaa", "Taa"]
 				}
 			},
 			"additionalProperties": false

@@ -16,7 +16,7 @@ namespace Engine {
 	//   - The box: Size metres centred on the entity, in its local axes (its scale applies); ProbeCountX, ProbeCountY and
 	//     ProbeCountZ probes along its axes, the grid's corners at the box's corners (Asset/IrradianceVolumeData.h).
 	//   - Data is the baked volume, which lighting.bake (EditorCore/Lighting/LightingBake.h) writes as
-	//     `Assets/Lighting/<Scene>/<Entity>.irradiance` and assigns here; null (not baked: PROBE_NOT_BAKED) lights nothing.
+	//     `Assets/Lighting/<scene path>/<Entity>.irradiance` and assigns here; null (not baked: PROBE_NOT_BAKED) lights nothing.
 	//   - Shading: the forward passes replace the Environment's SH9 diffuse with the volume's, trilinear between the eight
 	//     probes around the shaded point, times Intensity, fading back to the Environment's over BlendDistance metres inside
 	//     the box's faces (Common/Probes.slang, M23's light loop's indirect term, after the direct lights). Where boxes overlap,

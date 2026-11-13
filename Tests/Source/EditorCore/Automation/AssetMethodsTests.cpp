@@ -5,6 +5,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -1133,6 +1134,45 @@ namespace Engine {
 			const Json header = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "StringTable", "path": "Assets/Text/Bad.stringtable",
 				"values": {"Version": 1}})"));
 			CHECK(header["error"]["code"] == Json(-32602));
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 20): asset.create {type: Heightfield} writes a flat 129 x 129
+		// heightfield source that imports, with no dependency, as a Heightfield; it takes no values and undoes.
+		TEST_CASE("AssetMethods: a heightfield is created flat at 129 samples a side, takes no values and undoes")
+		{
+			Test::AutomationFixture setup("AssetHeightfield");
+			EditorContext& editor = setup.GetEditor();
+
+			const Json created = CallOrFail(setup, "asset.create", ParseAssetMethodJson(R"({"type": "Heightfield", "path": "Assets/Terrain/Ground.heightfield"})"));
+			CHECK(created["asset"]["type"] == Json("Heightfield"));
+			CHECK(created["path"] == Json("Assets/Terrain/Ground.heightfield"));
+			CHECK(created["undoIndex"] != Json(0));
+			const VfsPath file = VfsPath::Create("project", "Assets/Terrain/Ground.heightfield").value_or(VfsPath());
+			const Result<Buffer> source = editor.GetVfs().ReadFile(file);
+			REQUIRE_MESSAGE(source.has_value(), source.error().ToString());
+			CHECK(*source == WriteHeightfieldSource(MakeFlatHeightfield(129)));
+			const Json info = CallOrFail(setup, "asset.info", ParseAssetMethodJson(R"({"asset": "Assets/Terrain/Ground.heightfield"})"));
+			CHECK(info["importer"] == Json("Heightfield"));
+			CHECK(info["dependencies"].empty());
+			CHECK(info["diagnostics"].empty());
+			const std::optional<AssetHandle> handle = editor.GetAssets().Resolve("Assets/Terrain/Ground.heightfield");
+			REQUIRE(handle.has_value());
+			const Result<AssetRef<Asset>> loaded = editor.GetAssets().Load(*handle);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<HeightfieldData> heightfield = AssetCast<HeightfieldData>(*loaded);
+			REQUIRE(heightfield != nullptr);
+			CHECK(heightfield->Resolution == 129);
+
+			// A heightfield takes no values: its samples come from terrain.importHeightmap and terrain.edit.
+			const Json values = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Heightfield", "path": "Assets/Terrain/Hill.heightfield",
+				"values": {"Resolution": 33}})"));
+			CHECK(values["error"]["data"]["errorCode"] == Json("InvalidArgument"));
+			CHECK_FALSE(editor.GetVfs().Exists(VfsPath::Create("project", "Assets/Terrain/Hill.heightfield").value_or(VfsPath())));
+			const Json extension = setup.Request("asset.create", ParseAssetMethodJson(R"({"type": "Heightfield", "path": "Assets/Terrain/Hill.raw"})"));
+			CHECK(extension.contains("error"));
+
+			CallOrFail(setup, "edit.undo", Json::object());
+			CHECK_FALSE(editor.GetVfs().Exists(file));
 		}
 	}
 

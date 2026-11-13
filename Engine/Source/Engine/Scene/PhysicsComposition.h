@@ -43,13 +43,21 @@
 //     PreStep (§5.3 "Trigger colliders"). Only the entity's own trigger colliders belong to it.
 //   - Implicit bodies are on the layer of the nearest ancestor RigidBody, else on layer 0 ("Default"): collider
 //     components have no layer of their own (Docs/Decisions/0014-m11-decisions.md decision 10).
+//   - M26 (Docs/Decisions/0037-m26-contract.md decision 21): a TerrainCollider is a solid collider (PhysicsColliderType::
+//     Terrain) when its entity's Terrain has a Heightfield; without one it makes no collider, and so no body of its own (its
+//     TERRAIN_NO_HEIGHTFIELD warning is the project validator's). It joins bodies as any solid collider does: a Dynamic
+//     RigidBody refuses it (PHYSICS_NONCONVEX_DYNAMIC, a height field being no convex shape). The one departure from the
+//     layer rule above: the implicit static body its own entity owns and that holds it is on the TerrainCollider's Layer
+//     (and the session gives that body the TerrainCollider's Friction and Restitution); under a RigidBody or an ancestor's
+//     implicit body the three are unused.
 //   - Every body's collision group (PhysicsBodyPlan::CollisionGroup) is the UUID of the nearest entity at or above its
 //     owner that has a RigidBody or a CharacterController: the owner itself for RigidBody and Character bodies, the body
 //     or character a trigger is attached to for an implicit sensor body, none for implicit static bodies. Bodies of one
 //     group never collide (BodyDescription::CollisionGroup), so a trigger attached to a moving ball or the pickup radius
 //     of a character never reports its own body or character (§5.3 "a trigger attached to a moving ball ... just works").
 //   - A body's colliders are ordered: the owner's own, in BuiltinComponents order (BoxCollider, SphereCollider,
-//     CapsuleCollider, MeshCollider), then each gathered descendant in canonical order (§5.1), each in component order.
+//     CapsuleCollider, MeshCollider, then M26's TerrainCollider), then each gathered descendant in canonical order (§5.1),
+//     each in component order.
 //     A collider's index in that order is its sub-shape user data (§9.2 "Collider identity in compounds").
 //   - Bodies are listed in canonical order of their owners; an owner of both an implicit static and an implicit sensor body
 //     lists the static one first. This is the order the session creates them in (§9.2 "Bodies are created in canonical
@@ -57,7 +65,8 @@
 //
 // Determinism: a pure function of the scene and its arguments; canonical order throughout. Main thread (the scene).
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 10).
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 10); M26, which owns PhysicsComposition in
+// phase 3 (ADR 0028's phase-3 ledger), appends the TerrainCollider (stream T-B).
 
 namespace Engine {
 
@@ -79,7 +88,10 @@ namespace Engine {
 		Box,
 		Sphere,
 		Capsule,
-		Mesh
+		Mesh,
+		// M26 (C-TERR; Docs/Decisions/0037-m26-contract.md decision 21): a TerrainCollider, its entity's Terrain as a height
+		// field. Always solid.
+		Terrain
 	};
 
 	// One collider of a body.
@@ -178,10 +190,14 @@ namespace Engine {
 	// through `assets` (AssetManager::GetOrPlaceholder, so a missing mesh records ASSET_MISSING and uses the placeholder
 	// cube); null `assets` makes every mesh collider an error. With `meshShapes` (the session's cache), a mesh collider is
 	// instead a SharedShapeGeometry of meshShapes->GetOrCreate(*assets, mesh, Convex, its baked scale) with a Scale of 1,
-	// so no vertex is copied. Errors: Validation "PHYSICS_INVALID_SHAPE: ..." naming the collider entity for a mesh
-	// collider without a mesh (no Mesh and no MeshRenderer mesh, or no asset manager), for a relative transform that cannot
-	// be decomposed (TransformSystem::DecomposeMatrix fails) and for a cached mesh shape Jolt refuses. Other shapes Jolt
-	// refuses are found by PhysicsShape::Create on the result.
+	// so no vertex is copied. M26 (Docs/Decisions/0037-m26-contract.md decision 21): a terrain collider is a
+	// HeightFieldShapeGeometry of its Terrain's Heightfield, loaded through `assets` (AssetManager::Load), its heights the
+	// samples' local heights (Asset/TerrainGeometry.h's GetTerrainSamplePosition at the Terrain's Size and HeightScale) and
+	// its cells Size / (Resolution - 1), placed at its entity's origin like a mesh. Errors: Validation
+	// "PHYSICS_INVALID_SHAPE: ..." naming the collider entity for a mesh collider without a mesh (no Mesh and no MeshRenderer
+	// mesh, or no asset manager), for a terrain collider whose heightfield does not load as a heightfield (or without an
+	// asset manager), for a relative transform that cannot be decomposed (TransformSystem::DecomposeMatrix fails) and for a
+	// cached mesh shape Jolt refuses. Other shapes Jolt refuses are found by PhysicsShape::Create on the result.
 	[[nodiscard]] Result<BodyShapeDescription> DescribePhysicsBodyShape(const Scene& scene, const PhysicsBodyPlan& plan, AssetManager* assets,
 		PhysicsMeshShapeCache* meshShapes = nullptr);
 

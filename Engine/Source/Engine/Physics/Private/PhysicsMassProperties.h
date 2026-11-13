@@ -43,7 +43,7 @@ namespace Engine {
 		//     isotropic inertia, a thousandth of its trace, so its smallest moment is at least about a thousandth of its
 		//     largest. Only such shapes change; their spin about the long axis becomes slightly slower to change.
 		// Errors (PhysicsShape::CheckDynamicBody's): InvalidArgument for a mass that is not finite or outside
-		// (0, MaxPhysicsMass]; Validation PHYSICS_NONCONVEX_DYNAMIC for a shape holding a triangle mesh (`hasMesh`);
+		// (0, MaxPhysicsMass]; Validation PHYSICS_NONCONVEX_DYNAMIC for a shape holding a triangle mesh or a height field (`hasMesh`);
 		// Validation PHYSICS_ALL_DOFS_LOCKED for no degree of freedom, or for a body that cannot translate whose shape has no
 		// rotational inertia; Validation PHYSICS_INVALID_SHAPE for a shape without a positive finite mass (no volume) or
 		// whose inertia at `mass` is not finite or exceeds MaxBodyInertia.

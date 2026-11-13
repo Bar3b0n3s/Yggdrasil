@@ -2,7 +2,9 @@
 #include "Engine/Scene/ColliderDebugDraw.h"
 
 #include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TerrainGeometry.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
 #include "Engine/Physics/Physics2DWorld.h"
@@ -17,6 +19,7 @@
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsComposition.h"
@@ -33,6 +36,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdint>
 #include <numbers>
 #include <optional>
 #include <tuple>
@@ -273,6 +277,49 @@ namespace Engine {
 			return shape;
 		}
 
+		// M26 (C-TERR; Docs/Decisions/0037-m26-contract.md decision 21, stream T-B): a terrain collider's record, the outline of
+		// its height field: the four border rows and columns of samples (Asset/TerrainGeometry.h's placement, the one the body's
+		// shape is built from) joined in order, at the entity's drawn world matrix. 4 * (Resolution - 1) segments at most, so a
+		// terrain of 1025 samples a side draws 4,096 lines, where its triangle edges would be millions. nullopt without the
+		// Terrain, an asset manager or a heightfield that loads, as the body is refused then.
+		static std::optional<ColliderDebugShape> MakeTerrainShape(ConstEntity entity, ColliderDebugCategory category, UUID body, AssetManager* assets,
+			float alpha)
+		{
+			const TerrainComponent* terrain = entity.TryGetComponent<TerrainComponent>();
+			if (terrain == nullptr || !terrain->Heightfield.IsValid() || assets == nullptr)
+				return std::nullopt;
+			const Result<AssetRef<Asset>> loaded = assets->Load(terrain->Heightfield.GetHandle());
+			const AssetRef<HeightfieldData> heightfield = loaded.has_value() ? AssetCast<HeightfieldData>(*loaded) : nullptr;
+			if (heightfield == nullptr || !ValidateHeightfieldData(*heightfield).has_value())
+				return std::nullopt;
+			const std::optional<ColliderFrame> frame = ComputeColliderFrame(entity, glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), alpha);
+			if (!frame.has_value())
+				return std::nullopt;
+
+			const TerrainExtent extent{ .Size = terrain->Size, .HeightScale = terrain->HeightScale };
+			const uint32_t last = heightfield->Resolution - 1;
+			ColliderDebugShape shape = MakeShape(ColliderDebugShapeType::Lines, category, entity.GetUUID(), body);
+			SetFrame(shape, *frame);
+			shape.LineVertices.reserve(static_cast<size_t>(last) * 8);
+			const auto addSegment = [&shape, &frame, &heightfield, &extent](uint32_t x0, uint32_t z0, uint32_t x1, uint32_t z1)
+			{
+				shape.LineVertices.emplace_back(frame->Matrix * glm::vec4(GetTerrainSamplePosition(*heightfield, extent, x0, z0), 1.0f));
+				shape.LineVertices.emplace_back(frame->Matrix * glm::vec4(GetTerrainSamplePosition(*heightfield, extent, x1, z1), 1.0f));
+			};
+			// Along +X on the rows z = 0 and z = last, then along +Z on the columns x = 0 and x = last.
+			for (const uint32_t z : { 0u, last })
+			{
+				for (uint32_t x = 0; x < last; ++x)
+					addSegment(x, z, x + 1, z);
+			}
+			for (const uint32_t x : { 0u, last })
+			{
+				for (uint32_t z = 0; z < last; ++z)
+					addSegment(x, z, x, z + 1);
+			}
+			return shape;
+		}
+
 		// The record of one collider of a body; nullopt when its component is gone or its frame or mesh is unavailable.
 		static std::optional<ColliderDebugShape> MakeColliderShape(const Scene& scene, const PhysicsColliderPlan& collider, ColliderDebugCategory category,
 			UUID body, AssetManager* assets, const ColliderDebugDrawOptions& options)
@@ -327,6 +374,8 @@ namespace Engine {
 						return std::nullopt;
 					return MakeMeshShape(entity, *mesh, category, body, assets, options);
 				}
+				case PhysicsColliderType::Terrain:
+					return MakeTerrainShape(entity, category, body, assets, options.Alpha);
 			}
 
 			ENGINE_CORE_ASSERT(false, "Unknown PhysicsColliderType {}", std::to_underlying(collider.Type));

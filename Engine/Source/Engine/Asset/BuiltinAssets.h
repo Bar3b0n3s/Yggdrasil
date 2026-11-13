@@ -81,7 +81,7 @@ namespace Engine {
 
 		// M26 (C26.1, R-LUT; Docs/Decisions/0037-m26-contract.md decision 15; ADR 0028's phase-3 ledger): the built-in LUTs'
 		// block, 0x0281 to 0x02c0, the identity LUT first: engine://Luts/Identity (BuiltinLut::Identity, Asset/LutData.h),
-		// procedural. Its catalogue entries are stream X-B's.
+		// procedural: a Procedural entry of Resources/EngineAssets.json and of GetProceduralBuiltinEntries.
 		static constexpr AssetHandle IdentityLut{ 0x0281 };
 		// M12: engine://Audio/{Click, Blip, Coin, Jump, Hit, Explosion, PowerUp, LineClear, Win, Lose}, the sound-effect presets
 		// (§7.1, §10.3): File entries, Resources/Audio/<Name>.sfx through SoundEffectImporter.
@@ -187,8 +187,9 @@ namespace Engine {
 		std::vector<BuiltinAssetEntry> m_Entries; // sorted by handle
 	};
 
-	// The catalogue entries of the procedural built-ins, compiled in (the meshes, materials and textures above, and the silent
-	// clip, M12), sorted by handle. Both asset managers serve these without reading anything, so placeholders never fail.
+	// The catalogue entries of the procedural built-ins, compiled in (the meshes, materials and textures above, the silent
+	// clip, M12, and the identity LUT, M26), sorted by handle. Both asset managers serve these without reading anything, so
+	// placeholders never fail.
 	[[nodiscard]] std::span<const BuiltinAssetEntry> GetProceduralBuiltinEntries();
 
 	// M19 (Docs/Decisions/0030-m19-contract.md decision 20, B-PRUNE-ENG): the File and Generated built-ins the Runtime asks

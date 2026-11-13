@@ -19,7 +19,7 @@ Every component of the type registry, in canonical component order: the order of
 | `PointLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A light shining in every direction from the entity. |
 | `SpotLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A cone of light shining down the entity's local -Z axis. |
 | `Environment` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's image-based lighting and skybox (one per scene). |
-| `PostProcess` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene). |
+| `PostProcess` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene). |
 | `Text` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Draws a text string on the screen or in the world. |
 | `RigidBody` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Simulates the entity with Jolt physics. |
 | `BoxCollider` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | A box-shaped collider in the entity's space. |
@@ -387,10 +387,10 @@ Script members of `Environment`:
 
 ## PostProcess
 
-The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (one per scene).
+The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).
 
 - Category: Rendering
-- Version: 1
+- Version: 2
 - Flags: Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene
 - Requires: none
 - Excludes: none
@@ -398,27 +398,51 @@ The scene's exposure, tone mapping, ambient occlusion, bloom and anti-aliasing (
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `ExposureEV` | `Float` | `0` | -16 to 16 | EV |  | The exposure compensation in stops: the image is multiplied by 2^EV. |
+| `ExposureMode` | `ExposureMode` | `"Manual"` |  |  |  | Manual exposure, or automatic exposure from the image's luminance histogram. |
+| `AutoExposureMinEV` | `Float` | `-6` | -16 to 16 | EV |  | The darkest and brightest exposure automatic exposure may adapt to, in stops. |
+| `AutoExposureMaxEV` | `Float` | `12` | -16 to 16 | EV |  | The darkest and brightest exposure automatic exposure may adapt to, in stops. |
+| `AutoExposureSpeedUp` | `Float` | `3` | 0.01 to 100 | EV/s |  | How many stops per second automatic exposure adapts towards a brighter or a darker exposure. |
+| `AutoExposureSpeedDown` | `Float` | `1` | 0.01 to 100 | EV/s |  | How many stops per second automatic exposure adapts towards a brighter or a darker exposure. |
 | `Tonemap` | `Tonemapper` | `"AgX"` |  |  |  | The tone mapping curve. |
+| `Lut` | `AssetRef(Lut)` | `null` |  |  |  | The colour-grading LUT applied after the tone mapping curve; null grades nothing. |
+| `LutIntensity` | `Float` | `1` | 0 to 1 |  |  | How much of the graded colour replaces the ungraded one, from 0 to 1. |
 | `SsaoEnabled` | `Bool` | `true` |  |  |  | Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights. |
 | `SsaoRadius` | `Float` | `0.5` | >= 0.01 | m |  | The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them. |
 | `SsaoIntensity` | `Float` | `1` | >= 0 |  |  | The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights. |
 | `SsaoQuality` | `SsaoQuality` | `"Medium"` |  |  |  | The ambient occlusion sample count. |
+| `SsrEnabled` | `Bool` | `false` |  |  |  | Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses. |
+| `SsrIntensity` | `Float` | `1` | 0 to 1 |  |  | How strongly screen-space reflections replace the probes' reflection, from 0 to 1. |
+| `SsrMaxDistance` | `Float` | `50` | 0.1 to 1000 | m |  | How far a reflected ray travels, in metres. |
+| `SsrThickness` | `Float` | `0.2` | 0.001 to 10 | m |  | How thick a surface is assumed behind its depth when a ray passes it, in metres. |
+| `SsrMaxRoughness` | `Float` | `0.6` | 0 to 1 |  |  | The perceptual roughness above which only the probes reflect. |
 | `BloomEnabled` | `Bool` | `true` |  |  |  | Whether bright areas bloom. |
 | `BloomIntensity` | `Float` | `0.04` | 0 to 1 |  |  | How much of the bloom is blended into the image. |
-| `FxaaEnabled` | `Bool` | `true` |  |  |  | Whether FXAA anti-aliasing is applied. |
+| `AntiAliasing` | `AntiAliasing` | `"Fxaa"` |  |  |  | How edges are anti-aliased: none, FXAA (the default) or TAA. |
 
 Script members of `PostProcess`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
+| `AntiAliasing` | proxy field | `AntiAliasing` | read/write | All | How edges are anti-aliased: none, FXAA (the default) or TAA. |
+| `AutoExposureMaxEV` | proxy field | `number` | read/write | All | The darkest and brightest exposure automatic exposure may adapt to, in stops. |
+| `AutoExposureMinEV` | proxy field | `number` | read/write | All | The darkest and brightest exposure automatic exposure may adapt to, in stops. |
+| `AutoExposureSpeedDown` | proxy field | `number` | read/write | All | How many stops per second automatic exposure adapts towards a brighter or a darker exposure. |
+| `AutoExposureSpeedUp` | proxy field | `number` | read/write | All | How many stops per second automatic exposure adapts towards a brighter or a darker exposure. |
 | `BloomEnabled` | proxy field | `boolean` | read/write | All | Whether bright areas bloom. |
 | `BloomIntensity` | proxy field | `number` | read/write | All | How much of the bloom is blended into the image. |
 | `ExposureEV` | proxy field | `number` | read/write | All | The exposure compensation in stops: the image is multiplied by 2^EV. |
-| `FxaaEnabled` | proxy field | `boolean` | read/write | All | Whether FXAA anti-aliasing is applied. |
+| `ExposureMode` | proxy field | `ExposureMode` | read/write | All | Manual exposure, or automatic exposure from the image's luminance histogram. |
+| `Lut` | proxy field | `AssetRef?` | read/write | All | The colour-grading LUT applied after the tone mapping curve; null grades nothing. |
+| `LutIntensity` | proxy field | `number` | read/write | All | How much of the graded colour replaces the ungraded one, from 0 to 1. |
 | `SsaoEnabled` | proxy field | `boolean` | read/write | All | Whether screen-space ambient occlusion (GTAO) is applied. It darkens the environment's image-based light only (the Environment's FallbackColor ambient without a map), never direct lights. |
 | `SsaoIntensity` | proxy field | `number` | read/write | All | The strength of the ambient occlusion, which darkens the environment's image-based light only, never direct lights. |
 | `SsaoQuality` | proxy field | `SsaoQuality` | read/write | All | The ambient occlusion sample count. |
 | `SsaoRadius` | proxy field | `number` | read/write | All | The world-space radius within which ambient occlusion is sampled, in metres. An occluder further than this in front of a surface casts little occlusion on it: set it above the depth gap between the pieces and the surface behind them. |
+| `SsrEnabled` | proxy field | `boolean` | read/write | All | Whether glossy surfaces reflect what is on screen (screen-space reflections), falling back to the probes where a ray misses. |
+| `SsrIntensity` | proxy field | `number` | read/write | All | How strongly screen-space reflections replace the probes' reflection, from 0 to 1. |
+| `SsrMaxDistance` | proxy field | `number` | read/write | All | How far a reflected ray travels, in metres. |
+| `SsrMaxRoughness` | proxy field | `number` | read/write | All | The perceptual roughness above which only the probes reflect. |
+| `SsrThickness` | proxy field | `number` | read/write | All | How thick a surface is assumed behind its depth when a ray passes it, in metres. |
 | `Tonemap` | proxy field | `Tonemapper` | read/write | All | The tone mapping curve. |
 
 ## Text
@@ -1512,10 +1536,13 @@ Script members of `ParticleEmitter`:
 | `Blend` | proxy field | `ParticleBlend` | read/write | All | How particles are blended into the image. |
 | `BoxHalfExtents` | proxy field | `vector` | read/write | All | The Box shape's half extents, in metres. |
 | `Burst` | proxy field | `number` | read/write | All | Particles emitted at once at the start of each cycle, at most MaxParticles. |
+| `Clear` | method | `(self: ParticleEmitter) -> ()` |  | All | Kill every live particle and drop the queued emits; the emission cycle and the random stream go on. |
 | `ColorOverLife` | proxy field | `{{Time: number, Color: Color}}` | read/write | All | At most eight colour keys over a particle's life, in ascending Time, interpolated linearly; empty keeps particles white and opaque. |
 | `ConeAngle` | proxy field | `number` | read/write | All | The Cone shape's half angle from the local -Z axis, in degrees. |
 | `Drag` | proxy field | `number` | read/write | All | How quickly particles slow down, per second. |
 | `Duration` | proxy field | `number` | read/write | All | The length of one emission cycle, in seconds; Burst is emitted at each cycle's start. |
+| `Emit` | method | `(self: ParticleEmitter, count: number) -> ()` |  | All | Queue count particles (1 to 4096) for the next Particles phase, whether the emitter is Playing, looping or finished; an emitter without particles yet starts at that phase. A count outside its range raises an error. Particles are presentation, so the simulated state does not change. |
+| `GetParticleCount` | method | `(self: ParticleEmitter) -> number` |  | All | Read the live particles after the last Particles phase (0 before the first). Particles are presentation state the frame phase advances, so the count depends on frame pacing: it raises an error in a fixed-step callback (OnFixedUpdate, a task, a physics, animation or UI event) and is read in OnUpdate, OnLateUpdate or a test case; never let it drive gameplay. |
 | `Lifetime` | proxy field | `vector` | read/write | All | The range a new particle's lifetime is drawn from, in seconds: (minimum, maximum). |
 | `Loop` | proxy field | `boolean` | read/write | All | Whether emission repeats every Duration seconds; otherwise it stops after one cycle. |
 | `MaxParticles` | proxy field | `number` | read/write | All | The most particles alive at once; beyond it no new particle is emitted until one dies. |
@@ -1621,6 +1648,8 @@ Script members of `Terrain`:
 | `Layers` | proxy field | `{{BaseColorMap: AssetRef?, NormalMap: AssetRef?, Tint: Color, Tiling: number, Roughness: number, Metallic: number}}` | read/write | All | At most four material layers, weighed by the splat map's red, green, blue and alpha channels; empty draws one white layer. |
 | `LodBias` | proxy field | `number` | read/write | All | Scales the distances at which the terrain's chunks drop detail; above 1 keeps detail farther. |
 | `ReceiveShadows` | proxy field | `boolean` | read/write | All | Whether shadows fall on the terrain. |
+| `SampleHeight` | method | `(self: Terrain, position: vector) -> number?` |  | All | Read the world-space height of the terrain's surface under the world point position (its XZ in the terrain's local space, the surface there, back to world space); nil outside the terrain or without a loaded heightfield. |
+| `SampleNormal` | method | `(self: Terrain, position: vector) -> vector?` |  | All | Read the world-space unit normal of the terrain's surface under the world point position; nil where SampleHeight is nil. |
 | `Size` | proxy field | `vector` | read/write | All | The terrain's extent along its local X and Z axes from the entity's origin, in metres. |
 | `SplatMap` | proxy field | `AssetRef?` | read/write | All | The texture whose channels weigh the layers per point (a data texture, imported with Usage Linear and Compression None); null draws the first layer alone. |
 
@@ -1754,6 +1783,16 @@ What an Animator does with its skeleton's root motion.
 | `Apply` | The root motion moves the entity's Transform each fixed step; the mesh stays at the entity. |
 | `Extract` | The root motion is held out of the pose and only reported by Animator:GetRootMotion, for a script to apply. |
 
+### AntiAliasing
+
+How edges are anti-aliased.
+
+| Value | Description |
+|---|---|
+| `None` | No anti-aliasing. |
+| `Fxaa` | FXAA on the final image (the default). |
+| `Taa` | Temporal anti-aliasing: the jittered image resolved against its history (off in pixel-art mode). |
+
 ### Attenuation
 
 How a spatial sound's volume falls off with distance.
@@ -1793,6 +1832,15 @@ What a camera draws behind the scene's geometry.
 |---|---|
 | `Skybox` | The scene's Environment skybox (its fallback colour when none is shown). |
 | `Color` | The camera's ClearColor. |
+
+### ExposureMode
+
+How the image is exposed.
+
+| Value | Description |
+|---|---|
+| `Manual` | The image is multiplied by 2^ExposureEV. |
+| `Auto` | A histogram of the image's luminance adapts the exposure towards middle grey, ExposureEV added as compensation. |
 
 ### Light2DType
 

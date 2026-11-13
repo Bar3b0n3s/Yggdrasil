@@ -92,9 +92,12 @@ namespace Engine {
 	// collider's origin, each cell split along its diagonal from (x, z) to (x + 1, z + 1) as Asset/TerrainGeometry.h states.
 	// Every height finite, CellSize's components > 0. Static and Kinematic bodies only (PHYSICS_NONCONVEX_DYNAMIC, as a
 	// triangle mesh); a height field never collides with a triangle mesh or another height field (PhysicsWorld drops such
-	// pairs, as mesh pairs). Scale applies as for a mesh (non-uniform allowed). Stream T-B builds it (Jolt's
-	// HeightFieldShapeSettings, its quantization fine enough that a body rests within the rest-height acceptance's
-	// tolerance, decision 21); until then Create refuses it with Unsupported.
+	// pairs, as mesh pairs). Scale applies as for a mesh (non-uniform allowed, a negative component mirrors), and the scaled
+	// field passes the size and range checks a mesh does (on its largest extent, so a flat field is valid). Built as Jolt's
+	// HeightFieldShapeSettings with 16 bits per sample, its finest quantization, so a body rests within a fraction of a
+	// millimetre of the surface the heights describe (stream T-B; the rest-height acceptance, decision 21). Its bounds
+	// (GetLocalBounds, and a body's in the world) are Jolt's, which reach one cell past the field's far X and Z edges when
+	// SampleCount is odd: Jolt rounds the count up to its block size of 2 with samples that collide with nothing.
 	struct HeightFieldShapeGeometry
 	{
 		std::vector<float> Heights{};

@@ -3,6 +3,8 @@
 #include "Engine/Scene/ColliderDebugDraw.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/HeightfieldData.h"
+#include "Engine/Asset/TerrainGeometry.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Graphics/GraphicsDevice.h"
@@ -23,6 +25,8 @@
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PolygonCollider2DComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
+#include "Engine/Scene/Components/TerrainColliderComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Physics2DSystem.h"
@@ -372,6 +376,74 @@ namespace Engine {
 			CHECK(Test::ApproxEqual(fallback->Position, glm::vec3(-5.0f, 0.0f, 0.0f)));
 
 			// Without an asset manager no mesh loads, so no mesh collider draws.
+			CHECK(BuildColliderDebugDraw(scene, PhysicsLayerTable(), nullptr, nullptr).empty());
+		}
+
+		// M26 (C-TERR, Docs/Decisions/0037-m26-contract.md decision 21, stream T-B): a terrain collider draws the outline of its
+		// height field, its border samples (Asset/TerrainGeometry.h's placement) joined in order, in world space: the rows z = 0
+		// and z = last along +X, then the columns x = 0 and x = last along +Z.
+		TEST_CASE("ColliderDebugDraw: a terrain collider draws the outline of its height field")
+		{
+			Test::InMemoryAssetManager assets;
+			const AssetHandle handle = UUID(9100);
+			Ref<HeightfieldData> heightfield = CreateRef<HeightfieldData>(MakeFlatHeightfield(5));
+			for (uint32_t z = 0; z < 5; ++z)
+			{
+				for (uint32_t x = 0; x < 5; ++x)
+					heightfield->Heights[x + 5 * z] = static_cast<uint16_t>(x * 1000u + z * 500u);
+			}
+			assets.Publish(handle, heightfield, "Assets/Terrain/Outline.heightfield");
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity terrain = scene.CreateEntity("Terrain");
+			terrain.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+				transform.Scale = glm::vec3(2.0f, 1.0f, 0.5f);
+			});
+			TerrainComponent component;
+			component.Heightfield.SetHandle(handle);
+			component.Size = glm::vec2(8.0f, 4.0f);
+			component.HeightScale = 10.0f;
+			terrain.AddComponent<TerrainComponent>(component);
+			terrain.AddComponent<TerrainColliderComponent>();
+			// A terrain without a heightfield makes no body, so it draws nothing.
+			Entity bare = scene.CreateEntity("Bare");
+			bare.AddComponent<TerrainComponent>();
+			bare.AddComponent<TerrainColliderComponent>();
+
+			const std::vector<ColliderDebugShape> shapes = BuildColliderDebugDraw(scene, PhysicsLayerTable(), nullptr, &assets);
+			REQUIRE(shapes.size() == 1);
+			const ColliderDebugShape& shape = shapes[0];
+			CHECK(shape.Type == ColliderDebugShapeType::Lines);
+			CHECK(shape.Category == ColliderDebugCategory::Static);
+			CHECK(shape.Collider == terrain.GetUUID());
+			CHECK(shape.Body == terrain.GetUUID());
+			const TerrainExtent extent{ .Size = component.Size, .HeightScale = component.HeightScale };
+			const auto world = [&heightfield, &extent](uint32_t x, uint32_t z)
+			{
+				const glm::vec3 local = GetTerrainSamplePosition(*heightfield, extent, x, z);
+				return glm::vec3(1.0f, 2.0f, 3.0f) + local * glm::vec3(2.0f, 1.0f, 0.5f);
+			};
+			std::vector<glm::vec3> expected;
+			for (const uint32_t z : { 0u, 4u })
+			{
+				for (uint32_t x = 0; x < 4; ++x)
+					expected.insert(expected.end(), { world(x, z), world(x + 1, z) });
+			}
+			for (const uint32_t x : { 0u, 4u })
+			{
+				for (uint32_t z = 0; z < 4; ++z)
+					expected.insert(expected.end(), { world(x, z), world(x, z + 1) });
+			}
+			REQUIRE(shape.LineVertices.size() == expected.size());
+			for (size_t index = 0; index < expected.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(Test::ApproxEqual(shape.LineVertices[index], expected[index]));
+			}
+
+			// Without an asset manager no heightfield loads, so the terrain draws nothing.
 			CHECK(BuildColliderDebugDraw(scene, PhysicsLayerTable(), nullptr, nullptr).empty());
 		}
 

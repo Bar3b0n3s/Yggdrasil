@@ -61,6 +61,7 @@ namespace Engine {
 	class NativeModuleHost;
 	class PlaySession;
 	class Prefab;
+	class ProbeCapture;
 	class ProjectSettingsCommand;
 	class SceneEdit;
 	class TypeRegistry;
@@ -246,6 +247,13 @@ namespace Engine {
 		// and the editor's frame (EditorApp::OnUpdate) updates it.
 		[[nodiscard]] AnimationPreview& GetAnimationPreview() { return m_AnimationPreview; }
 		[[nodiscard]] const AnimationPreview& GetAnimationPreview() const { return m_AnimationPreview; }
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 8): lighting.bake's probe capture (Renderer/ProbeCapture.h), which an
+		// editor with a device creates at startup over its scene renderer's pipelines and cache, as its ViewportCapture, and
+		// injects here (EditorCore/Lighting/LightingBake.h's BakeLighting renders through it); null with --renderer none and in
+		// tests that inject none, where the bake is refused. A documented back-reference: the host clears it before it destroys
+		// the capture.
+		void SetProbeCapture(ProbeCapture* capture) { m_ProbeCapture = capture; }
+		[[nodiscard]] ProbeCapture* GetProbeCapture() const { return m_ProbeCapture; }
 
 		// Once per frame (EditorApp::OnUpdate) with a monotonic time in seconds (the frame clock's accumulated unscaled time,
 		// so headless editors on a ManualClock are deterministic); tests pass chosen times: drives asset hot reload
@@ -732,6 +740,7 @@ namespace Engine {
 		bool m_SceneChangedOnDisk = false;  // IsSceneChangedOnDisk
 		// M23: the animation preview; it holds no pointer, only the open scene and the entity it poses.
 		AnimationPreview m_AnimationPreview{};
+		ProbeCapture* m_ProbeCapture = nullptr; // SetProbeCapture's documented back-reference
 		Scope<LoadedProject> m_Project;
 		// The addressed scene's document (see the private open-scenes members above).
 		Scope<Scene> m_Scene;

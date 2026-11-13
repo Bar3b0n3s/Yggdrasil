@@ -11,7 +11,8 @@
 
 // The collision group rule of one PhysicsWorld (PhysicsWorld.h): bodies of the same non-zero BodyDescription::CollisionGroup
 // never collide or report each other, and two bodies whose shapes both hold a triangle mesh never meet (Jolt has no
-// mesh-versus-mesh collision and asserts on such a pair, which a mesh sensor and a Kinematic mesh body could form). Jolt asks
+// mesh-versus-mesh collision and asserts on such a pair, which a mesh sensor and a Kinematic mesh body could form; M26's
+// height fields count as meshes, since Jolt collides them with convex shapes only). Jolt asks
 // a body pair's GroupFilter when the broad phase finds the pair, before the narrow phase (Body::sFindCollidingPairsCanCollide
 // and the CCD cast), so a refused pair never reaches a collision function. Queries do not consult it.
 //

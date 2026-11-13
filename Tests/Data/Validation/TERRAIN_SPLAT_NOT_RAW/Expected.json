@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["TERRAIN_SPLAT_NOT_RAW"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

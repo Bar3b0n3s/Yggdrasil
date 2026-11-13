@@ -102,6 +102,7 @@ namespace Engine {
 				PlaySessionPhase::FrameDestroyFlush,
 				PlaySessionPhase::FrameTransformUpdate,
 				PlaySessionPhase::FrameUiLayout,
+				PlaySessionPhase::Particles, // M26's presentation phase (ADR 0028's phase-3 execution order)
 				PlaySessionPhase::RenderExtraction,
 			};
 			CHECK(observer.Phases == expected);

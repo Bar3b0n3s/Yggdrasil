@@ -4,6 +4,7 @@
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinMeshes.h"
 #include "Engine/Asset/BuiltinTextures.h"
+#include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Core/Assert.h"
@@ -31,7 +32,7 @@ namespace Engine {
 			AssetType Type = AssetType::None;
 		};
 
-		constexpr std::array<ProceduralEntry, 19> ProceduralEntries = { {
+		constexpr std::array<ProceduralEntry, 21> ProceduralEntries = { {
 			{ BuiltinAssetHandles::CubeMesh, "engine://Meshes/Cube", AssetType::Mesh },
 			{ BuiltinAssetHandles::SphereMesh, "engine://Meshes/Sphere", AssetType::Mesh },
 			{ BuiltinAssetHandles::PlaneMesh, "engine://Meshes/Plane", AssetType::Mesh },
@@ -50,7 +51,10 @@ namespace Engine {
 			{ BuiltinAssetHandles::SpriteRoundedTexture, "engine://Textures/SpriteRounded", AssetType::Texture },
 			{ BuiltinAssetHandles::SpriteBevelTexture, "engine://Textures/SpriteBevel", AssetType::Texture },
 			{ BuiltinAssetHandles::SpriteCircleTexture, "engine://Textures/SpriteCircle", AssetType::Texture },
+			{ BuiltinAssetHandles::ParticleTexture, "engine://Textures/Particle", AssetType::Texture },
 			{ BuiltinAssetHandles::SilentClip, "engine://Audio/Silence", AssetType::AudioClip },
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 15): the built-in LUTs' block, 0x0281 to 0x02c0.
+			{ BuiltinAssetHandles::IdentityLut, "engine://Luts/Identity", AssetType::Lut },
 		} };
 
 		// The generator of each procedural handle.
@@ -67,7 +71,7 @@ namespace Engine {
 			{ BuiltinAssetHandles::DefaultMaterial, BuiltinMaterial::Default },
 			{ BuiltinAssetHandles::ErrorMaterial, BuiltinMaterial::Error },
 		} };
-		constexpr std::array<std::pair<AssetHandle, BuiltinTexture>, 9> ProceduralTextures = { {
+		constexpr std::array<std::pair<AssetHandle, BuiltinTexture>, 10> ProceduralTextures = { {
 			{ BuiltinAssetHandles::WhiteTexture, BuiltinTexture::White },
 			{ BuiltinAssetHandles::BlackTexture, BuiltinTexture::Black },
 			{ BuiltinAssetHandles::FlatNormalTexture, BuiltinTexture::FlatNormal },
@@ -78,6 +82,13 @@ namespace Engine {
 			{ BuiltinAssetHandles::SpriteRoundedTexture, BuiltinTexture::SpriteRounded },
 			{ BuiltinAssetHandles::SpriteBevelTexture, BuiltinTexture::SpriteBevel },
 			{ BuiltinAssetHandles::SpriteCircleTexture, BuiltinTexture::SpriteCircle },
+			// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): the particles' default texture, never
+			// compressed.
+			{ BuiltinAssetHandles::ParticleTexture, BuiltinTexture::Particle },
+		} };
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 15): the built-in LUTs, generated in code (GenerateBuiltinLut).
+		constexpr std::array<std::pair<AssetHandle, BuiltinLut>, 1> ProceduralLuts = { {
+			{ BuiltinAssetHandles::IdentityLut, BuiltinLut::Identity },
 		} };
 
 		// The members of the catalogue and of its entries, in their canonical order.
@@ -413,6 +424,8 @@ namespace Engine {
 			return AssetRef<Asset>(CreateRef<MaterialData>(CreateBuiltinMaterial(*material)));
 		if (handle == BuiltinAssetHandles::SilentClip)
 			return AssetRef<Asset>(CreateRef<AudioClipData>(CreateSilentAudioClip()));
+		if (const std::optional<BuiltinLut> lut = Utils::FindProcedural(ProceduralLuts, handle))
+			return AssetRef<Asset>(CreateRef<LutData>(GenerateBuiltinLut(*lut)));
 		return MakeError(ErrorCode::NotFound, "{} is not a procedural built-in asset", handle);
 	}
 

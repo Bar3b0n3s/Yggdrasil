@@ -392,8 +392,9 @@ namespace Engine {
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the scene's animation (GetAnimation), created after the physics
 		// systems and replaced with them at a scene transition; never null once the session is created.
 		Scope<AnimationSystem> Animation{};
-		// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 6): the Particles phase's system (GetParticles); null until
-		// stream P-A creates it.
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 6): the Particles phase's system (GetParticles), created with the
+		// session and kept across a scene transition (its states are the scene's runtime components); never null once the
+		// session is created.
 		Scope<ParticleSystem> Particles{};
 		Scope<ScriptApiRegistry> OwnedApi{};
 		ScriptApiRegistry* Api = nullptr;
@@ -1047,6 +1048,10 @@ namespace Engine {
 			EnterPhase(session, PlaySessionPhase::AudioUpdate, tick);
 			UpdateAudio(frame.DeltaTime);
 		}
+		// M26 (decision 6): the particles, one fixed step per tick run since each emitter's last phase, in Play and Simulate,
+		// whether or not the game view is extracted; it writes nothing the state hash covers.
+		EnterPhase(session, PlaySessionPhase::Particles, tick);
+		Particles->Step(scene, tick);
 		EnterPhase(session, PlaySessionPhase::RenderExtraction, tick);
 		if (ExtractionEnabled)
 			ExtractGameView(alpha);
@@ -1430,6 +1435,8 @@ namespace Engine {
 		if (!animation)
 			return std::unexpected(std::move(animation).error().WithContext("while starting the play session"));
 		state.Animation = std::move(*animation);
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 6): the Particles phase's system, stepping at the fixed delta.
+		state.Particles = CreateScope<ParticleSystem>(static_cast<float>(state.FixedDelta));
 
 		if (specification.Audio != nullptr && specification.Mode == PlayMode::Play)
 		{

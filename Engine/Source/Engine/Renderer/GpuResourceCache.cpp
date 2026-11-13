@@ -5,6 +5,8 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/IrradianceVolumeData.h"
+#include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureCompression.h"
 #include "Engine/Asset/TextureData.h"
@@ -12,6 +14,8 @@
 #include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Shared/MaterialConstants.h"
+
+#include <glm/gtc/packing.hpp>
 
 #include <algorithm>
 #include <array>
@@ -41,7 +45,7 @@
 // into a new buffer. Every other constant depends on the material's version only, which is the key. Generations come from
 // one counter of the cache that only increases. Environments (M8)
 // have no placeholder (§7.2): an entry remembers a failed load or upload for its (handle, version), so the failure is
-// reported once and nothing is retried until the asset's version changes.
+// reported once and nothing is retried until the asset's version changes. LUTs (M26) are kept as environments are.
 
 namespace Engine {
 
@@ -336,6 +340,86 @@ namespace Engine {
 			mirror.SkyboxMipCount = environment.Skybox.MipCount;
 			mirror.SpecularMipCount = environment.Specular.MipCount;
 			mirror.IrradianceSH9 = environment.IrradianceSH9;
+			return mirror;
+		}
+
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16, stream Q-B): the GPU mirror of `volume`, its
+		// probes' coefficients as float4s (xyz the coefficient, w 0) in the asset's order, written by one command list executed
+		// at once (not the immediate list: the scene renderer resolves its probes inside the frame, as its meshes). A volume
+		// whose counts are outside the format's limits or disagree with its probes (one no loader made, since every loader
+		// validates it) is refused, so the shader never reads past the buffer.
+		static Result<GpuIrradianceVolume> UploadIrradianceVolume(const UploadContext& context, const IrradianceVolumeData& volume, const std::string& name)
+		{
+			const auto isCount = [](uint32_t count)
+			{
+				return count >= MinIrradianceProbesPerAxis && count <= MaxIrradianceProbesPerAxis;
+			};
+			const size_t probeCount = static_cast<size_t>(volume.CountX) * volume.CountY * volume.CountZ;
+			if (!isCount(volume.CountX) || !isCount(volume.CountY) || !isCount(volume.CountZ) || volume.Probes.size() != probeCount)
+			{
+				return MakeError(ErrorCode::InvalidArgument, "the irradiance volume '{}' of {} x {} x {} probes holds {} probes", name, volume.CountX, volume.CountY,
+					volume.CountZ, volume.Probes.size());
+			}
+			std::vector<glm::vec4> coefficients;
+			coefficients.reserve(probeCount * std::tuple_size_v<decltype(IrradianceProbe::SH9)>);
+			for (const IrradianceProbe& probe : volume.Probes)
+			{
+				for (const glm::vec3& coefficient : probe.SH9)
+					coefficients.emplace_back(coefficient, 0.0f);
+			}
+			GraphicsDevice& device = *context.Device;
+			nvrhi::BufferDesc desc;
+			desc.byteSize = coefficients.size() * sizeof(glm::vec4);
+			desc.structStride = sizeof(glm::vec4);
+			desc.initialState = nvrhi::ResourceStates::ShaderResource;
+			desc.keepInitialState = true;
+			desc.debugName = std::format("{} (probes)", name);
+			ENGINE_TRY_ASSIGN(nvrhi::BufferHandle buffer, device.CreateBuffer(desc));
+			ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
+				device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
+			CommandListRecording recording(device, *commandList);
+			commandList->writeBuffer(buffer, coefficients.data(), desc.byteSize);
+			recording.Execute();
+			return GpuIrradianceVolume{ .Probes = std::move(buffer), .CountX = volume.CountX, .CountY = volume.CountY, .CountZ = volume.CountZ };
+		}
+
+		// M26 (C26.1, R-LUT; Docs/Decisions/0037-m26-contract.md decision 15, stream X-B): the GPU mirror of `lut` (GpuLut): its
+		// entries as a Size^3 RGBA16_FLOAT 3D texture, x red, y green and z blue (the table's red-fastest order is the texture's
+		// row-major order), alpha 1. Each value is rounded to the nearest binary16 (glm's integer conversion, identical on every
+		// run and configuration), clamped first to binary16's finite range so trilinear filtering never meets an infinity.
+		static Result<GpuLut> UploadLut(const UploadContext& context, const LutData& lut, const std::string& name)
+		{
+			constexpr float MaxHalf = 65504.0f;
+			const uint16_t one = glm::packHalf1x16(1.0f);
+			std::vector<uint16_t> texels;
+			texels.reserve(lut.Values.size() * 4);
+			for (const glm::vec3& value : lut.Values)
+			{
+				for (glm::length_t channel = 0; channel < 3; ++channel)
+					texels.push_back(glm::packHalf1x16(std::clamp(value[channel], -MaxHalf, MaxHalf)));
+				texels.push_back(one);
+			}
+			nvrhi::TextureDesc desc;
+			desc.dimension = nvrhi::TextureDimension::Texture3D;
+			desc.width = lut.Size;
+			desc.height = lut.Size;
+			desc.depth = lut.Size;
+			desc.format = nvrhi::Format::RGBA16_FLOAT;
+			desc.isShaderResource = true;
+			desc.initialState = nvrhi::ResourceStates::ShaderResource;
+			desc.keepInitialState = true;
+			desc.debugName = name;
+			const std::array<TextureSubresourceData, 1> subresources = { { { .MipLevel = 0,
+				.ArraySlice = 0,
+				.Data = std::as_bytes(std::span<const uint16_t>(texels)),
+				.RowPitch = static_cast<size_t>(lut.Size) * 4 * sizeof(uint16_t),
+				.DepthPitch = static_cast<size_t>(lut.Size) * lut.Size * 4 * sizeof(uint16_t) } } };
+			ENGINE_TRY_ASSIGN(TextureUpload upload, context.Device->GetHostImageUpload().CreateTexture(desc, subresources));
+			GpuLut mirror;
+			mirror.Texture = std::move(upload.Texture);
+			mirror.Size = lut.Size;
+			mirror.DomainMin = lut.DomainMin;
+			mirror.DomainMax = lut.DomainMax;
 			return mirror;
 		}
 
@@ -711,8 +795,25 @@ namespace Engine {
 			bool IsUsed = false;
 		};
 
-		// Removes the entries of `entries` (materials or environments) whose version is no longer their asset's, and with
-		// `releaseUnused` those not used since the previous call, then starts the next period.
+		// M26 (C26.1, stream Q-B): one irradiance volume mirror, or the remembered failure of its (handle, version), as an
+		// environment's.
+		struct IrradianceVolumeEntry
+		{
+			GpuIrradianceVolume Value{};
+			bool IsValid = false; // the coefficients were uploaded
+			bool IsUsed = false;
+		};
+
+		// One LUT mirror (M26, stream X-B), or the remembered failure of its (handle, version), as an environment's.
+		struct LutEntry
+		{
+			GpuLut Value{};
+			bool IsValid = false; // the 3D texture was uploaded
+			bool IsUsed = false;
+		};
+
+		// Removes the entries of `entries` (materials, environments, irradiance volumes or LUTs) whose version is no longer
+		// their asset's, and with `releaseUnused` those not used since the previous call, then starts the next period.
 		template<typename Entry>
 		void CollectStaleEntries(std::map<MirrorKey, Entry>& entries, const AssetManager& assets, bool releaseUnused)
 		{
@@ -734,6 +835,8 @@ namespace Engine {
 		MirrorTable<TextureTraits> Textures;
 		std::map<MirrorKey, MaterialEntry> Materials; // node-based: a returned reference survives insertions
 		std::map<MirrorKey, EnvironmentEntry> Environments;
+		std::map<MirrorKey, IrradianceVolumeEntry> IrradianceVolumes; // M26 (stream Q-B)
+		std::map<MirrorKey, LutEntry> Luts;                           // M26, stream X-B
 		size_t UploadFailures = 0;
 		uint64_t NextGeneration = 1; // GpuMaterial::Generation: only increases
 		// M23 (decision 9): the shared default attribute stream of the meshes without one. Dropped with every mirror (Clear,
@@ -760,8 +863,9 @@ namespace Engine {
 		void WriteMaterialConstants(AssetHandle handle, const MaterialData& material, uint32_t flags, MaterialEntry& entry);
 		// Reports the failed constants buffer of material `handle` once (§8.14 item 7).
 		void ReportMaterialFailure(AssetHandle handle, MaterialEntry& entry);
-		// Reports why environment `handle` has no mirror (GpuResourceCache.h): once per (handle, version), as its entry is made.
-		void ReportEnvironmentFailure(AssetHandle handle, std::string code, std::string message, std::string hint);
+		// Reports why `handle` has no mirror, an environment's or an M26 type's (GpuResourceCache.h): once per (handle, version),
+		// as its entry is made.
+		void ReportMirrorFailure(AssetHandle handle, std::string code, std::string message, std::string hint);
 		// M23 (decision 9): drops the shared default attribute stream once no mesh mirror binds it, so a collection or a trim
 		// that released every mesh without a stream leaves none of the cache's buffers alive; the next such mesh creates it
 		// again.
@@ -844,7 +948,7 @@ namespace Engine {
 		Assets->ReportDiagnostic(std::move(diagnostic));
 	}
 
-	void GpuResourceCache::State::ReportEnvironmentFailure(AssetHandle handle, std::string code, std::string message, std::string hint)
+	void GpuResourceCache::State::ReportMirrorFailure(AssetHandle handle, std::string code, std::string message, std::string hint)
 	{
 		const std::string name = Utils::GetAssetName(*Assets, handle);
 		AssetDiagnostic diagnostic;
@@ -973,18 +1077,18 @@ namespace Engine {
 			const Error& error = loaded.error();
 			if (error.GetCode() == ErrorCode::NotFound)
 			{
-				state.ReportEnvironmentFailure(handle, std::string(AssetMissingCode),
+				state.ReportMirrorFailure(handle, std::string(AssetMissingCode),
 					std::format("environment {} is missing; the view is lit with its fallback colour", id), "restore the asset, or assign another one");
 			}
 			else if (error.GetCode() == ErrorCode::InvalidArgument)
 			{
-				state.ReportEnvironmentFailure(handle, std::string(AssetTypeMismatchCode),
+				state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
 					std::format("asset {} cannot be used as an Environment; the view is lit with its fallback colour", id),
 					"assign an asset of type Environment");
 			}
 			else
 			{
-				state.ReportEnvironmentFailure(handle, std::string(AssetImportFailedCode),
+				state.ReportMirrorFailure(handle, std::string(AssetImportFailedCode),
 					std::format("environment {} failed to load; the view is lit with its fallback colour: {}", id,
 						Error(error).WithHint(std::string()).ToString()),
 					error.GetHint());
@@ -1002,14 +1106,14 @@ namespace Engine {
 			else if (Utils::IsUploadFailure(*state.Device))
 			{
 				++state.UploadFailures;
-				state.ReportEnvironmentFailure(handle, std::string(AssetUploadFailedCode),
+				state.ReportMirrorFailure(handle, std::string(AssetUploadFailedCode),
 					std::format("cannot upload environment '{}' to the GPU: {}; the view is lit with its fallback colour", name, uploaded.error().ToString()),
 					"the upload is tried again when the asset changes; when the device is out of memory, use smaller environments");
 			}
 		}
 		else
 		{
-			state.ReportEnvironmentFailure(handle, std::string(AssetTypeMismatchCode),
+			state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
 				std::format("asset {} is a {}, not an Environment; the view is lit with its fallback colour", id,
 					AssetTypeToString(assets.GetAssetType(handle))),
 				"assign an asset of type Environment");
@@ -1025,6 +1129,8 @@ namespace Engine {
 		// versions a dry run published and then rolled back (AssetManager::RestoreSharedState).
 		CollectStaleEntries(m_State->Materials, *m_State->Assets, releaseUnused);
 		CollectStaleEntries(m_State->Environments, *m_State->Assets, releaseUnused);
+		CollectStaleEntries(m_State->IrradianceVolumes, *m_State->Assets, releaseUnused);
+		CollectStaleEntries(m_State->Luts, *m_State->Assets, releaseUnused);
 		m_State->Meshes.CollectStale(*m_State->Assets, releaseUnused);
 		m_State->Textures.CollectStale(*m_State->Assets, releaseUnused);
 		m_State->ReleaseUnboundDefaultAttributes();
@@ -1034,6 +1140,8 @@ namespace Engine {
 	{
 		m_State->Materials.clear();
 		m_State->Environments.clear();
+		m_State->IrradianceVolumes.clear();
+		m_State->Luts.clear();
 		m_State->Meshes.Clear();
 		m_State->Textures.Clear();
 		m_State->DefaultAttributes = {};
@@ -1061,6 +1169,14 @@ namespace Engine {
 		{
 			return IsTrimmable(assets, item.first, false);
 		});
+		std::erase_if(m_State->IrradianceVolumes, [&assets](const auto& item)
+		{
+			return IsTrimmable(assets, item.first, false);
+		});
+		std::erase_if(m_State->Luts, [&assets](const auto& item)
+		{
+			return IsTrimmable(assets, item.first, false);
+		});
 		m_State->Meshes.TrimUnused(assets);
 		m_State->Textures.TrimUnused(assets);
 		m_State->ReleaseUnboundDefaultAttributes();
@@ -1074,23 +1190,152 @@ namespace Engine {
 			.UploadFailures = m_State->UploadFailures,
 			.MaterialCount = m_State->Materials.size(),
 			.EnvironmentCount = m_State->Environments.size(),
+			.IrradianceVolumeCount = m_State->IrradianceVolumes.size(),
+			.LutCount = m_State->Luts.size(),
+			.HeightfieldCount = 0,
 		};
 	}
 
-	// M26 (C26.1): the mirrors of M26's asset types (GpuResourceCache.h), contract stubs of Docs/Decisions/0037-m26-contract.md
-	// decisions 15, 16 and 22, implemented by streams Q-B, X-B and T-C: until then no volume, LUT or heightfield is uploaded.
-	const GpuIrradianceVolume* GpuResourceCache::GetIrradianceVolume(AssetHandle /*handle*/)
+	// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): as GetEnvironment, an irradiance volume without a
+	// placeholder: a missing or failed one lights with the Environment.
+	const GpuIrradianceVolume* GpuResourceCache::GetIrradianceVolume(AssetHandle handle)
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		if (!handle.IsValid())
+			return nullptr;
+		State& state = *m_State;
+		AssetManager& assets = *state.Assets;
+		// Load first: it publishes the first version (GetVersion is 0 before it), and remembers a failure itself (§7.2).
+		const Result<AssetRef<Asset>> loaded = assets.Load(handle);
+		const MirrorKey key = { .Handle = handle, .Version = assets.GetVersion(handle) };
+		if (const auto found = state.IrradianceVolumes.find(key); found != state.IrradianceVolumes.end())
+		{
+			found->second.IsUsed = true;
+			return found->second.IsValid ? &found->second.Value : nullptr;
+		}
+
+		IrradianceVolumeEntry entry;
+		entry.IsUsed = true;
+		const std::string id = handle.ToString();
+		if (!loaded.has_value())
+		{
+			// GetOrPlaceholder's codes (AssetManager.h), so every manager reports alike.
+			const Error& error = loaded.error();
+			if (error.GetCode() == ErrorCode::NotFound)
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetMissingCode),
+					std::format("irradiance volume {} is missing; its probes light nothing", id), "bake the scene's lighting again, or assign another volume");
+			}
+			else if (error.GetCode() == ErrorCode::InvalidArgument)
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
+					std::format("asset {} cannot be used as an IrradianceVolume; its probes light nothing", id), "assign an asset of type IrradianceVolume");
+			}
+			else
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetImportFailedCode),
+					std::format("irradiance volume {} failed to load; its probes light nothing: {}", id, Error(error).WithHint(std::string()).ToString()),
+					error.GetHint());
+			}
+		}
+		else if (const AssetRef<IrradianceVolumeData> volume = AssetCast<IrradianceVolumeData>(*loaded))
+		{
+			const std::string name = Utils::GetAssetName(assets, handle);
+			Result<GpuIrradianceVolume> uploaded = Utils::UploadIrradianceVolume(state.GetContext(), *volume, name);
+			if (uploaded.has_value())
+			{
+				entry.Value = std::move(*uploaded);
+				entry.IsValid = true;
+			}
+			else if (Utils::IsUploadFailure(*state.Device))
+			{
+				++state.UploadFailures;
+				state.ReportMirrorFailure(handle, std::string(AssetUploadFailedCode),
+					std::format("cannot upload irradiance volume '{}' to the GPU: {}; its probes light nothing", name, uploaded.error().ToString()),
+					"the upload is tried again when the asset changes; when the device is out of memory, use fewer or smaller volumes");
+			}
+		}
+		else
+		{
+			state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
+				std::format("asset {} is a {}, not an IrradianceVolume; its probes light nothing", id, AssetTypeToString(assets.GetAssetType(handle))),
+				"assign an asset of type IrradianceVolume");
+		}
+		entry.Value.Version = key.Version;
+		IrradianceVolumeEntry& inserted = state.IrradianceVolumes.insert_or_assign(key, std::move(entry)).first->second;
+		return inserted.IsValid ? &inserted.Value : nullptr;
 	}
 
-	const GpuLut* GpuResourceCache::GetLut(AssetHandle /*handle*/)
+	const GpuLut* GpuResourceCache::GetLut(AssetHandle handle)
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		// M26 (stream X-B, decision 15): kept as GetEnvironment keeps environments; a LUT has no placeholder, so a failure
+		// grades nothing.
+		if (!handle.IsValid())
+			return nullptr;
+		State& state = *m_State;
+		AssetManager& assets = *state.Assets;
+		// Load first: it publishes the first version (GetVersion is 0 before it), and remembers a failure itself (§7.2).
+		const Result<AssetRef<Asset>> loaded = assets.Load(handle);
+		const MirrorKey key = { .Handle = handle, .Version = assets.GetVersion(handle) };
+		if (const auto found = state.Luts.find(key); found != state.Luts.end())
+		{
+			found->second.IsUsed = true;
+			return found->second.IsValid ? &found->second.Value : nullptr;
+		}
+
+		LutEntry entry;
+		entry.IsUsed = true;
+		const std::string id = handle.ToString();
+		if (!loaded.has_value())
+		{
+			// GetOrPlaceholder's codes (AssetManager.h), so every manager reports alike.
+			const Error& error = loaded.error();
+			if (error.GetCode() == ErrorCode::NotFound)
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetMissingCode), std::format("LUT {} is missing; the image is not graded", id),
+					"restore the asset, or assign another one");
+			}
+			else if (error.GetCode() == ErrorCode::InvalidArgument)
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
+					std::format("asset {} cannot be used as a LUT; the image is not graded", id), "assign an asset of type Lut");
+			}
+			else
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetImportFailedCode),
+					std::format("LUT {} failed to load; the image is not graded: {}", id, Error(error).WithHint(std::string()).ToString()),
+					error.GetHint());
+			}
+		}
+		else if (const AssetRef<LutData> lut = AssetCast<LutData>(*loaded))
+		{
+			const std::string name = Utils::GetAssetName(assets, handle);
+			Result<GpuLut> uploaded = Utils::UploadLut(state.GetContext(), *lut, name);
+			if (uploaded.has_value())
+			{
+				entry.Value = std::move(*uploaded);
+				entry.IsValid = true;
+			}
+			else if (Utils::IsUploadFailure(*state.Device))
+			{
+				++state.UploadFailures;
+				state.ReportMirrorFailure(handle, std::string(AssetUploadFailedCode),
+					std::format("cannot upload LUT '{}' to the GPU: {}; the image is not graded", name, uploaded.error().ToString()),
+					"the upload is tried again when the asset changes; when the device is out of memory, use a smaller LUT");
+			}
+		}
+		else
+		{
+			state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
+				std::format("asset {} is a {}, not a LUT; the image is not graded", id, AssetTypeToString(assets.GetAssetType(handle))),
+				"assign an asset of type Lut");
+		}
+		entry.Value.Version = key.Version;
+		LutEntry& inserted = state.Luts.insert_or_assign(key, std::move(entry)).first->second;
+		return inserted.IsValid ? &inserted.Value : nullptr;
 	}
 
+	// M26 (C26.1): the heightfields' mirror (GpuResourceCache.h), a contract stub of Docs/Decisions/0037-m26-contract.md
+	// decision 22, implemented by stream T-C (W26.2): until then no heightfield is uploaded.
 	const GpuHeightfield* GpuResourceCache::GetHeightfield(AssetHandle /*handle*/)
 	{
 		ENGINE_CONTRACT_STUB();

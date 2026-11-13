@@ -89,7 +89,8 @@ namespace Engine {
 		glm::vec3 HalfExtents = glm::vec3(0.5f);
 		float Radius = 0.5f;
 		float HalfHeight = 0.5f;
-		// Lines: world-space segment end points, two per segment (a mesh collider's triangle edges, each edge once).
+		// Lines: world-space segment end points, two per segment (a mesh collider's triangle edges, each edge once; M26: a
+		// terrain collider's outline).
 		std::vector<glm::vec3> LineVertices{};
 		// The collider entity (the CharacterController's entity for a capsule).
 		UUID Collider{};
@@ -120,6 +121,9 @@ namespace Engine {
 	// lists, in its order (bodies in canonical order of their owners, colliders in sub-shape order), plus one Capsule per
 	// character. Mesh colliders draw their mesh's triangle edges (the source mesh's, also for Convex ones), loaded through
 	// `assets` as DescribePhysicsBodyShape loads them; a mesh collider without a mesh (or with null `assets`) draws nothing.
+	// M26 (Docs/Decisions/0037-m26-contract.md decision 21): a terrain collider draws its height field's outline, a Lines
+	// record joining its border samples in order (Asset/TerrainGeometry.h's placement); one whose heightfield does not load
+	// (or with null `assets`) draws nothing.
 	// With `physics` (the session's PhysicsSystem; null for an edit scene), awake and sleeping Dynamic bodies are told
 	// apart, and a body the session did not create is Invalid; without it, each body's shape is built as the session builds
 	// it (DescribePhysicsBodyShape, PhysicsShape::Create, PhysicsShape::CheckDynamicBody; needs the PhysicsEngine) and a body

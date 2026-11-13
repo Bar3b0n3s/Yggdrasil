@@ -1,7 +1,9 @@
 // Tonemap: §8.3 pass 11, tonemap and encode (Renderer/TonemapPass.h): SceneColor (RGBA16_FLOAT, linear radiance) to
 // LdrColor (RGBA8_UNORM, display-encoded values, §8.9) in the order TonemapPass.h fixes: the bloom composite, the
-// exposure, the tonemapper (Common/Tonemapping.slang), the sRGB OETF and the blue-noise triangular dither. Alpha is 1.
+// exposure (M26: times the Exposure pass's adapted exposure with TonemapFlagAutoExposure), the tonemapper
+// (Common/Tonemapping.slang), the grading LUT (M26), the sRGB OETF and the blue-noise triangular dither. Alpha is 1.
 
+#include "Shared/ExposureConstants.h"
 #include "Shared/TonemapConstants.h"
 #include "Shared/ViewConstants.h"
 
@@ -15,6 +17,12 @@ Texture2D<float4> SceneColor : register(t0, space0);
 Texture2D<float4> Bloom : register(t1, space0);
 // The 64x64 R8 blue-noise texture (§8.4 t7), tiled by pixel coordinate; SceneColor stands in when TonemapFlagDither is clear.
 Texture2D<float> BlueNoise : register(t7, space0);
+// M26 (R-AEX; Docs/Decisions/0037-m26-contract.md decision 15): the Exposure pass's adapted exposure (Renderer/ExposurePass.h),
+// read only with TonemapFlagAutoExposure; the pass's own stand-in buffer is bound without one.
+StructuredBuffer<ExposureState> AdaptedExposure : register(t8, space0);
+// M26 (Docs/Decisions/0037-m26-contract.md decision 15): the grading LUT (GpuLut::Texture), its entries display-encoded; the
+// pass's own 1-texel 3D texture stands in when TonemapFlagLut is clear.
+Texture3D<float4> Lut : register(t9, space0);
 SamplerState LinearClamp : register(s0, space0);
 [vk::image_format("rgba8")]
 RWTexture2D<float4> LdrColor : register(u0, space0);
@@ -45,6 +53,26 @@ float3 Dither(float3 encoded, uint2 pixel)
 	return encoded + noise * amplitude / 255.0;
 }
 
+// The exposure multiplier: the view's 2^ExposureEV, times the adapted exposure with TonemapFlagAutoExposure (where
+// ExposureEV is the compensation).
+float GetExposure()
+{
+	if ((Settings.Flags & TonemapFlagAutoExposure) != 0)
+		return View.Exposure * AdaptedExposure[0].Multiplier;
+	return View.Exposure;
+}
+
+// M26 (decision 15): the LUT step on a tonemapped, display-linear value. The table is addressed by the value encoded with the
+// sRGB OETF (as grading LUTs are authored), mapped to the 3D texture's coordinates by LutScale and LutOffset (the domain and
+// the texel centres, TonemapConstants), sampled trilinearly (LinearClamp clamps a value outside the domain), decoded with the
+// EOTF, and blended with the ungraded value by LutIntensity.
+float3 ApplyLut(float3 display)
+{
+	const float3 coordinate = LinearToSrgb(display) * Settings.LutScale.xyz + Settings.LutOffset.xyz;
+	const float3 graded = SrgbToLinear(Lut.SampleLevel(LinearClamp, coordinate, 0.0).rgb);
+	return lerp(display, graded, Settings.LutIntensity);
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void CSMain(uint3 threadID : SV_DispatchThreadID)
@@ -58,9 +86,11 @@ void CSMain(uint3 threadID : SV_DispatchThreadID)
 		const float2 uv = (float2(pixel) + 0.5) * View.InverseViewportSize;
 		radiance = lerp(radiance, Bloom.SampleLevel(LinearClamp, uv, 0.0).rgb, Settings.BloomIntensity);
 	}
-	const float3 exposed = radiance * View.Exposure;
+	const float3 exposed = radiance * GetExposure();
 	const float3 finite = select(isnan(exposed), float3(0.0), exposed);
-	const float3 display = ApplyTonemapper(Settings.Tonemapper, clamp(finite, 0.0, MaxRadiance));
+	float3 display = ApplyTonemapper(Settings.Tonemapper, clamp(finite, 0.0, MaxRadiance));
+	if ((Settings.Flags & TonemapFlagLut) != 0)
+		display = ApplyLut(display);
 	float3 encoded = (Settings.Flags & TonemapFlagEncodeSrgb) != 0 ? LinearToSrgb(display) : display;
 	if ((Settings.Flags & TonemapFlagDither) != 0)
 		encoded = Dither(encoded, pixel);

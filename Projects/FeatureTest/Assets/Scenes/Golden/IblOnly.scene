@@ -8,7 +8,7 @@
 		"MeshRenderer": 1,
 		"Camera": 1,
 		"Environment": 1,
-		"PostProcess": 1
+		"PostProcess": 2
 	},
 	"Entities": [
 		{
@@ -71,14 +71,26 @@
 				},
 				"PostProcess": {
 					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
 					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
 					"SsaoEnabled": false,
 					"SsaoRadius": 0.5,
 					"SsaoIntensity": 1,
 					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
 					"BloomEnabled": true,
 					"BloomIntensity": 0.04,
-					"FxaaEnabled": true
+					"AntiAliasing": "Fxaa"
 				}
 			}
 		},

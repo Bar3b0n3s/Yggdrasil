@@ -102,6 +102,8 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> BloomPrograms = { "Bloom" };
 		inline constexpr std::array<std::string_view, 1> BloomRows = { "Bloom" };
 		inline constexpr std::array<std::string_view, 1> BloomTargets = { "Bloom" };
+		// M26 (C26.1, R-AEX; decision 15, stream X-A): the Exposure program (Passes/Exposure.slang, Renderer/ExposurePass.h).
+		inline constexpr std::array<std::string_view, 1> ExposurePrograms = { "Exposure" };
 		inline constexpr std::array<std::string_view, 1> ExposureRows = { "Exposure" };
 		inline constexpr std::array<std::string_view, 2> TonemapPrograms = { "Tonemap", "SceneDataView" };
 		inline constexpr std::array<std::string_view, 1> TonemapRows = { "Tonemap" };
@@ -128,16 +130,18 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 64 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
+	// The pass list, in stats order (see the file comment). 67 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
 	// output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites records
 	// with the QuadBatcher's), the QuadBatcher's LdrDepth 1 (M22, C22.3, Docs/Decisions/0033-m22-contract.md decision 57;
-	// M22's Ui adds none of its own), and M23's LightClusters 1 and Skinning 1. M23's C23.1 adds PointShadows and
-	// LightClusters at the places phase 2's ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform. M26's C26.1 adds
-	// TerrainDepthNormal, TerrainForward, Ssr, Particles, Taa and Exposure at the places phase 3's ledger fixes, without
-	// pipelines until their streams (37 stats rows). Their planned pipelines (Docs/Decisions/0037-m26-contract.md decision
-	// 13): TerrainDepthNormal 2 (the terrain prepass and picking prepass, program Terrain), TerrainForward 1 (Terrain), Ssr 2
-	// (the trace and the composite, program Ssr), Taa 1 (Taa), Exposure 2 (the histogram and the adaptation, program
-	// Exposure) and the QuadBatcher's HdrAdditive 1 for additive particles (Particles declares none): 73 at M26's landing.
+	// M22's Ui adds none of its own), M23's LightClusters 1 and Skinning 1, M26's QuadBatcher HdrAdditive 1 (stream P-B,
+	// Docs/Decisions/0037-m26-contract.md decision 7; M26's Particles adds none of its own) and M26's Exposure 2 (stream X-A,
+	// decision 15). M23's C23.1 adds PointShadows and LightClusters at the places phase 2's ledger fixes (ADR 0028), and C23.3
+	// Skinning, alone in Deform. M26's C26.1 adds TerrainDepthNormal, TerrainForward, Ssr, Particles, Taa and Exposure at the
+	// places phase 3's ledger fixes, without pipelines until their streams (37 stats rows). Their planned pipelines
+	// (Docs/Decisions/0037-m26-contract.md decision 13): TerrainDepthNormal 2 (the terrain prepass and picking prepass,
+	// program Terrain), TerrainForward 1 (Terrain), Ssr 2 (the trace and the composite, program Ssr), Taa 1 (Taa), Exposure 2
+	// (the histogram and the adaptation, program Exposure) and the QuadBatcher's HdrAdditive 1 for additive particles
+	// (Particles declares none): 73 at M26's landing.
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27): the skinned and morphed meshes' vertices, deformed by
@@ -175,10 +179,11 @@ namespace Engine {
 		{ .Name = "ForwardTransparent", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::ForwardTransparentRows, .Targets = Detail::SceneColorTargets },
 		// The Overdraw data view's additive pass, for the three cull modes.
 		{ .Name = "Overdraw", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::OverdrawRows, .Targets = Detail::OverdrawTargets },
-		// QuadBatcher.h: its users record under their own rows (M21's Sprites and Lights2D in this stage, M22's Ui in
-		// SceneOverlay); Hdr and Ldr, M21's HdrLit and Normals (C21.2, Docs/Decisions/0032-m21-contract.md decision 22) and
-		// M22's LdrDepth (C22.3, Docs/Decisions/0033-m22-contract.md decision 57).
-		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 5, .Programs = Detail::QuadPrograms },
+		// QuadBatcher.h: its users record under their own rows (M21's Sprites and Lights2D and M26's Particles in this stage,
+		// M22's Ui in SceneOverlay); Hdr and Ldr, M21's HdrLit and Normals (C21.2, Docs/Decisions/0032-m21-contract.md decision
+		// 22), M22's LdrDepth (C22.3, Docs/Decisions/0033-m22-contract.md decision 57) and M26's HdrAdditive (C26.1,
+		// Docs/Decisions/0037-m26-contract.md decision 7, stream P-B).
+		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 6, .Programs = Detail::QuadPrograms },
 		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): the snapshot's sprites, in its draw order, with the
 		// QuadBatcher's Hdr pipeline into SceneColor, depth-tested against SceneDepth (lit ones with its HdrLit pipeline, C21.2).
 		{ .Name = "Sprites", .Stage = RenderStage::Sprites, .StatsRows = Detail::SpritesRows },
@@ -190,8 +195,8 @@ namespace Engine {
 		{ .Name = "Lights2D", .Stage = RenderStage::Sprites, .PipelineCount = 1, .Programs = Detail::Lights2DPrograms, .StatsRows = Detail::Lights2DRows, .Targets = Detail::Lights2DTargets },
 		// M26 (C26.1, C-PART; decisions 7 and 13): the snapshot's particles as camera-facing QuadBatcher quads into SceneColor,
 		// depth-tested against SceneDepth without writing it, after the 3D forward passes and the sprites and before the HDR post
-		// chain, so TAA, bloom and exposure see them; with the QuadBatcher's Hdr pipeline and, for additive emitters, the
-		// HdrAdditive target stream P-B appends to it, so it declares none of its own.
+		// chain, so TAA, bloom and exposure see them (Renderer/ParticlePass.h); with the QuadBatcher's Hdr pipeline and, for
+		// additive emitters, its HdrAdditive one, so it declares none of its own.
 		{ .Name = "Particles", .Stage = RenderStage::Sprites, .StatsRows = Detail::ParticlesRows },
 		// M26 (C26.1, R-TAA; decisions 10, 13 and 17): the jittered HDR image resolved against its history (TaaHistory), first
 		// in HdrPost so bloom and exposure read the resolved image; recorded only with AntiAliasing Taa outside pixel-art mode.
@@ -199,9 +204,10 @@ namespace Engine {
 		{ .Name = "Taa", .Stage = RenderStage::HdrPost, .StatsRows = Detail::TaaRows, .Targets = Detail::TaaTargets },
 		{ .Name = "Bloom", .Stage = RenderStage::HdrPost, .PipelineCount = 3, .Programs = Detail::BloomPrograms, .StatsRows = Detail::BloomRows, .Targets = Detail::BloomTargets },
 		// M26 (C26.1, R-AEX; decisions 13 and 15): the luminance histogram of the image Tonemap exposes and the adapted exposure,
-		// compute pipelines of the program Exposure writing the renderer's exposure buffers (no target); recorded only with
-		// ExposureMode Auto in a Lit view outside pixel-art mode. Its pipelines join with stream X-A.
-		{ .Name = "Exposure", .Stage = RenderStage::HdrPost, .StatsRows = Detail::ExposureRows },
+		// ExposurePass's two compute pipelines of the program Exposure (the histogram and the adaptation, stream X-A) writing the
+		// renderer's exposure buffers (no target); recorded only with ExposureMode Auto in a Lit view outside the wireframe and
+		// pixel-art mode.
+		{ .Name = "Exposure", .Stage = RenderStage::HdrPost, .PipelineCount = 2, .Programs = Detail::ExposurePrograms, .StatsRows = Detail::ExposureRows },
 		// The tonemap pass and the data views' composite, which replaces it under the same row.
 		{ .Name = "Tonemap", .Stage = RenderStage::Tonemap, .PipelineCount = 2, .Programs = Detail::TonemapPrograms, .StatsRows = Detail::TonemapRows, .Targets = Detail::TonemapTargets },
 		{ .Name = "Fxaa", .Stage = RenderStage::LdrPost, .PipelineCount = 1, .Programs = Detail::FxaaPrograms, .StatsRows = Detail::FxaaRows, .Targets = Detail::FxaaTargets },

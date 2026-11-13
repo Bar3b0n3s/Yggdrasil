@@ -65,6 +65,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/EnvironmentBaker.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/ProbeCapture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/StaleMirrorSchedule.h"
@@ -169,6 +170,9 @@ namespace Engine {
 		Scope<GpuResourceCache> Cache;
 		Scope<SceneRendererPipelines> Pipelines;
 		Scope<ViewportCapture> Capture; // screenshots (CaptureView)
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 8): lighting.bake's captures, injected into the EditorContext
+		// (EditorContext::SetProbeCapture) and cleared from it before this is destroyed.
+		Scope<ProbeCapture> Probes;
 		bool IsRenderFailing = false;
 		// Stale mirrors (SceneRenderer.h; Docs/Decisions/0013-m8-decisions.md decision 7): the scene change OnUpdate noticed
 		// and when the collections release what only the previous scene used.
@@ -781,6 +785,11 @@ namespace Engine {
 		if (!capture.has_value())
 			return std::unexpected(Utils::CheckStartupGpuObject(std::move(capture).error(), "the viewport capture", *device));
 		rendering->Capture = std::move(*capture);
+		Result<Scope<ProbeCapture>> probes = ProbeCapture::Create(*device, *rendering->Pipelines, *rendering->Cache, assets);
+		if (!probes.has_value())
+			return std::unexpected(Utils::CheckStartupGpuObject(std::move(probes).error(), "the probe capture", *device));
+		rendering->Probes = std::move(*probes);
+		m_State->Editor->SetProbeCapture(rendering->Probes.get());
 		m_Rendering = std::move(rendering);
 		// Adopt dependencies before constructing views: partial startup failure tears the views down first too. The views
 		// and the thumbnails register their ImGui texture keys with the device's recreation registry after the ImGui
@@ -1151,6 +1160,8 @@ namespace Engine {
 		m_State->Recovery.reset();
 		m_State->Thumbnails.reset();
 		m_State->Views.reset();
+		if (m_State->Editor)
+			m_State->Editor->SetProbeCapture(nullptr);
 		m_Rendering.reset();
 		m_State->Inspector.reset();
 		m_State->Gizmos.reset();

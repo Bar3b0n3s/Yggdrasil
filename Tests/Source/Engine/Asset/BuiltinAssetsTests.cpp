@@ -4,6 +4,7 @@
 
 #include "Engine/Asset/AudioClipData.h"
 #include "Engine/Asset/BuiltinTextures.h"
+#include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TextureData.h"
@@ -93,7 +94,9 @@ namespace Engine {
 		TEST_CASE("BuiltinAssets: the procedural entries are the compiled-in meshes, materials, textures and the silent clip")
 		{
 			const std::span<const BuiltinAssetEntry> entries = GetProceduralBuiltinEntries();
-			REQUIRE(entries.size() == 19);
+			// M6's 15 (7 meshes, 2 materials, 5 textures, the silent clip), M21's four sprite textures, M26's particle texture and
+			// its identity LUT.
+			REQUIRE(entries.size() == 21);
 			std::set<std::string> paths;
 			for (size_t index = 0; index < entries.size(); ++index)
 			{
@@ -111,9 +114,15 @@ namespace Engine {
 			}
 			CHECK(entries.front().Handle == BuiltinAssetHandles::CubeMesh);
 			CHECK(entries.front().Path == "engine://Meshes/Cube");
-			CHECK(entries.back().Handle == BuiltinAssetHandles::SilentClip);
-			CHECK(entries.back().Path == "engine://Audio/Silence");
-			CHECK(entries.back().Type == AssetType::AudioClip);
+			const auto silence = std::ranges::find(entries, BuiltinAssetHandles::SilentClip, &BuiltinAssetEntry::Handle);
+			REQUIRE(silence != entries.end());
+			CHECK(silence->Path == "engine://Audio/Silence");
+			CHECK(silence->Type == AssetType::AudioClip);
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 15): the identity LUT, first of the built-in LUTs' block and the
+			// last handle.
+			CHECK(entries.back().Handle == BuiltinAssetHandles::IdentityLut);
+			CHECK(entries.back().Path == std::format("engine://Luts/{}", BuiltinLutToString(BuiltinLut::Identity)));
+			CHECK(entries.back().Type == AssetType::Lut);
 
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 7): the four sprite textures at their reserved handles, each
 			// generated in code as the BuiltinTexture of its name.
@@ -136,6 +145,19 @@ namespace Engine {
 				REQUIRE(texture != nullptr);
 				CHECK(std::ranges::equal(texture->Pixels, GenerateBuiltinSpriteTexture(sprite).Pixels));
 			}
+
+			// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7, stream P-B): the particle texture at its reserved
+			// handle (ADR 0028's phase-3 ledger's 0x018b), generated in code.
+			const auto particle = std::ranges::find(entries, BuiltinAssetHandles::ParticleTexture, &BuiltinAssetEntry::Handle);
+			REQUIRE(particle != entries.end());
+			CHECK(particle->Handle == AssetHandle(0x018b));
+			CHECK(particle->Path == "engine://Textures/Particle");
+			CHECK(particle->Type == AssetType::Texture);
+			const Result<AssetRef<Asset>> created = CreateProceduralBuiltinAsset(BuiltinAssetHandles::ParticleTexture);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			const AssetRef<TextureData> texture = AssetCast<TextureData>(*created);
+			REQUIRE(texture != nullptr);
+			CHECK(std::ranges::equal(texture->Pixels, GenerateBuiltinParticleTexture().Pixels));
 		}
 
 		TEST_CASE("BuiltinAssets: EngineAssets.json names exactly the compiled-in handles")
@@ -182,7 +204,9 @@ namespace Engine {
 		// ADR 0028's phase-2 ledger ("Texture compression") and Docs/Decisions/0034-m23-contract.md decision 13: the built-in
 		// procedural textures, M21's four sprite textures among them, are generated in code and never pass through the
 		// TextureImporter, whose Compression Auto would store BC blocks; no built-in texture is a File entry, the blue noise is
-		// generated (Renderer/BlueNoise.h), and the default font's atlas is FontData's own bytes, never a texture.
+		// generated (Renderer/BlueNoise.h), and the default font's atlas is FontData's own bytes, never a texture. M26's
+		// particle texture is procedural and never compressed too (ADR 0028's phase-3 ledger, Docs/Decisions/0037-m26-contract.md
+		// decision 27).
 		TEST_CASE("BuiltinAssets: the built-in textures, the sprite textures among them, are never block-compressed")
 		{
 			Result<std::string> text = FileSystem::ReadText(Test::GetRepositoryRoot() / "Resources" / BuiltinAssetCatalog::FileName);
@@ -206,8 +230,9 @@ namespace Engine {
 				REQUIRE(texture != nullptr);
 				CHECK_FALSE(GetTextureBlockCodec(texture->Format).has_value());
 			}
-			// White, Black, FlatNormal, Checker, Missing and M21's SpriteSquare, SpriteRounded, SpriteBevel and SpriteCircle.
-			CHECK(procedural == 9);
+			// White, Black, FlatNormal, Checker, Missing, M21's SpriteSquare, SpriteRounded, SpriteBevel and SpriteCircle, and
+			// M26's Particle.
+			CHECK(procedural == 10);
 			const BuiltinAssetEntry* font = catalog->Find(BuiltinAssetHandles::DefaultFont);
 			REQUIRE(font != nullptr);
 			CHECK(font->Type == AssetType::Font);
@@ -390,6 +415,8 @@ namespace Engine {
 					CHECK(ValidateMeshData(*mesh).has_value());
 				if (const AssetRef<TextureData> texture = AssetCast<TextureData>(*asset))
 					CHECK(ValidateTextureData(*texture).has_value());
+				if (const AssetRef<LutData> lut = AssetCast<LutData>(*asset))
+					CHECK(ValidateLutData(*lut).has_value());
 			}
 			// The silent clip (M12): 0.1 s of 48 kHz mono 16-bit zeros, already decoded.
 			Result<AssetRef<Asset>> silence = CreateProceduralBuiltinAsset(BuiltinAssetHandles::SilentClip);

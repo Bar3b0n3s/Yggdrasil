@@ -76,6 +76,8 @@ namespace Engine {
 		state.TileLimitLogged = released.TileLimitLogged;
 		state.PointShadowLimitLogged = released.PointShadowLimitLogged; // M23 (R-PLS): RENDER_POINT_SHADOW_BUDGET's once-per-renderer flag
 		state.SkinMismatchLogged = released.SkinMismatchLogged;         // M23 (C23.3): RENDER_SKIN_MISMATCH's once-per-renderer flag
+		state.ProbeLimitLogged = released.ProbeLimitLogged;             // M26 (stream Q-B): the dropped probes' once-per-renderer flags
+		state.ProbeFormatLogged = released.ProbeFormatLogged;
 		// M18 (C18.4, decision 44): the mode a failed debug-view switch falls back to, and its once-per-view log flags.
 		state.RenderedDebugView = released.RenderedDebugView;
 		state.DebugViewFailureLogged = released.DebugViewFailureLogged;

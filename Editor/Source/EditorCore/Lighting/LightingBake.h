@@ -13,10 +13,16 @@
 // probes and commits their data beside the scene. The editor's Bake Lighting action (a menu item in a file of its own,
 // Editor/Panels/LightingBakeAction, that EditorLayer only calls; ADR 0028's phase-3 ledger) and the method call this one
 // function, so automation bakes exactly as the editor does (Roadmap rule 5).
-//   - The scene must be saved (its file names the bake's folder): Assets/Lighting/<scene stem>/, under the project.
+//   - The scene must be saved (its file names the bake's folder): Assets/Lighting/ followed by the scene's project path below
+//     Assets/ without its extension (Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), so two scenes of one
+//     name in different folders never share a file, even when one is a copy that kept the other's entity ids (W26.1's
+//     review, Docs/Decisions/0037-m26-contract.md decision 31).
 //   - Every effectively enabled IrradianceVolume and ReflectionProbe of the scene, in canonical entity order (each kind
-//     unless its option is off): the scene's render snapshot is extracted once (the editor's scene camera never matters:
-//     captures place their own), then for an IrradianceVolume one capture per probe of its grid (16 texels a face) projected
+//     unless its option is off), is checked first: a volume's counts and Size within IrradianceVolumeData's rules and a
+//     reflection probe's Resolution a power of two in [MinReflectionProbeResolution, MaxReflectionProbeResolution], so a
+//     probe out of its ranges (COMPONENT_FIELD_OUT_OF_RANGE) refuses the bake before anything renders or is written. The
+//     scene's render snapshot is then extracted once (the editor's scene camera never matters: captures place their own),
+//     and for an IrradianceVolume one capture per probe of its grid (16 texels a face) projected
 //     to SH9 (Renderer/ProbeCapture.h), written as `<entity id>.irradiance` (WriteIrradianceVolumeSource); for a
 //     ReflectionProbe one capture of its Resolution at its position, written as `<entity id>.hdr` (WriteRadianceHdr) with a
 //     `.meta` whose EnvironmentImportSettings are the defaults. Files are named by entity id (16 hexadecimal digits), so a
@@ -43,7 +49,7 @@ namespace Engine {
 	struct LightingBakeEntry
 	{
 		UUID Entity{};
-		std::string Path{}; // the written source, project-relative ("Assets/Lighting/Room/7a1c3e5f20b4d608.irradiance")
+		std::string Path{}; // the written source, project-relative ("Assets/Lighting/Scenes/Room/7a1c3e5f20b4d608.irradiance")
 		AssetHandle Asset{};
 		bool Changed = false; // whether the file's bytes changed (false for a rebake of an unchanged scene)
 	};
@@ -56,8 +62,9 @@ namespace Engine {
 
 	// Bakes the open edit scene `scene` (see the file comment). Errors: InvalidState for a scene never saved (the hint names
 	// scene.save), for the play scene, and without a GPU device (headless with --renderer none: the hint names a rendering
-	// editor); NotFound for an unknown open scene; those of the capture (Gpu), the writes (Io) and the imports (ImportFailed),
-	// after which the files already written stay and no component changes.
+	// editor); NotFound for an unknown open scene; Validation for a probe out of its ranges, naming its entity, checked before
+	// the GPU device, so nothing renders or is written; those of the capture (Gpu), the writes (Io) and the imports
+	// (ImportFailed), after which the files already written stay and no component changes.
 	[[nodiscard]] Result<LightingBakeResult> BakeLighting(EditorContext& editor, OpenSceneId scene, const LightingBakeOptions& options);
 
 }

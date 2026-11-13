@@ -15,11 +15,12 @@ namespace Engine {
 		return m_State->RecordedPicking ? m_State->Targets.EntityId.Get() : nullptr;
 	}
 
-	// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 8): a contract stub, implemented by stream Q-A.
+	// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 8): the scene-resolution SceneColor target the last Render recorded
+	// into (ImageGeneration is set by every Render that recorded, never before the first), null before it and while the
+	// targets are released (ReleaseTargets, a device loss's release).
 	nvrhi::ITexture* SceneRenderer::GetSceneColorTexture() const
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		return m_State->ImageGeneration != 0 ? m_State->Targets.SceneColor.Get() : nullptr;
 	}
 
 	uint64_t SceneRenderer::GetViewGeneration() const

@@ -8,15 +8,18 @@
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/DebugRenderer.h"
 #include "Engine/Renderer/DepthPyramidPass.h"
+#include "Engine/Renderer/ExposurePass.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GtaoPass.h"
 #include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/LightClusters.h"
 #include "Engine/Renderer/Lights2DPass.h"
+#include "Engine/Renderer/ParticlePass.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
+#include "Engine/Renderer/Private/ProbeShading.h"
 #include "Engine/Renderer/Private/TilemapDrawCache.h"
 #include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/RenderSnapshot.h"
@@ -287,12 +290,20 @@ namespace Engine {
 			// Set by the HdrPost stage: the bloom chain's result for the Tonemap stage (null without bloom) and its intensity.
 			nvrhi::ITexture* Bloom = nullptr;
 			float BloomIntensity = 0.0f;
+			// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decision 15, stream X-A): set by the HdrPost stage: the
+			// Exposure pass's adapted exposure for the Tonemap stage (SceneRenderer::State::ExposureStateBuffer), null when the
+			// pass did not run (Manual exposure, a debug view, the wireframe, pixel-art mode, or its error).
+			nvrhi::IBuffer* AdaptedExposure = nullptr;
 			// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): set by the Prepare stage with the view's
 			// instance records (SceneRenderer::State::Instances, after the camera's draws'): the shadow casters the Shadows stage
 			// records (ShadowPass::PrepareCasters; empty without a planned shadow) and the selection mask's draws the
 			// EditorOverlay stage records (SelectionPass::PrepareDraws; empty without frame.Selection).
 			ShadowCasterSet ShadowCasters{};
 			SelectionDrawSet SelectionDraws{};
+			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): set by the Prepare stage: the
+			// view's probes (Private/ProbeShading.h), which RecordViewSetup uploads into the renderer's ProbeResources and the
+			// forward passes read (b4, t13 and t14 of set 0).
+			Utils::ProbeShadingInputs Probes{};
 
 			// Keeps `result` when it is the render's first error.
 			void KeepFirstError(Status result)
@@ -324,6 +335,10 @@ namespace Engine {
 		nvrhi::TextureHandle EmptyAtlas{};
 		// M23 (R-PLS): the neutral PointShadowMaps (t12) of a view without a planned point light (SceneRenderer.cpp).
 		nvrhi::TextureHandle EmptyPointShadows{};
+		// M26 (C26.1, R-GI-PROBE; stream Q-B): the neutral IrradianceProbes (t13) and ReflectionProbeCubes (t14) of a view
+		// without irradiance volumes or reflection probes (Private/ProbeShading.h).
+		nvrhi::BufferHandle EmptyIrradianceProbes{};
+		nvrhi::TextureHandle EmptyReflectionProbeCubes{};
 		nvrhi::TextureHandle WhiteAo{};
 		nvrhi::TextureHandle FarDepth{};
 		nvrhi::SamplerHandle ShadowCompare{};
@@ -351,6 +366,9 @@ namespace Engine {
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the 2D lights' accumulation (place 1 of ADR 0029
 		// decision 27).
 		Scope<Lights2DPass> Lights2D{};
+		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decisions 15 and 29, stream X-A): histogram auto-exposure's
+		// Exposure pass (place 1).
+		Scope<ExposurePass> Exposure{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -392,6 +410,13 @@ namespace Engine {
 		PassBindingCache SpriteBindings{};
 		// M21 (C21.2, decision 22): the Lights2D pass's set (its view's Lights2DNormals).
 		PassBindingCache Lights2DBindings{};
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): the Particles pass's sets, the QuadBatcher's one
+		// per texture and sampler (place 2 of ADR 0029 decision 27), released with the others (ClearBindings,
+		// ReleaseUnusedBindings).
+		PassBindingCache ParticleBindings{};
+		// M26 (C26.1, R-AEX; decision 15, stream X-A): the Exposure pass's two sets (its view's SceneColor, bloom chain and
+		// exposure buffers).
+		PassBindingCache ExposureBindings{};
 		Scope<RenderTargetPool> TargetPool{};
 		Scope<AsyncPicker> Picker{};
 		Scope<GpuProfiler> Profiler{};
@@ -442,6 +467,15 @@ namespace Engine {
 		nvrhi::BufferHandle InstanceBuffer{};
 		nvrhi::BufferHandle LightClusterBuffer{};
 		nvrhi::BufferHandle LightClusterConstantsBuffer{};
+		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decisions 10, 15 and 29, stream X-A): the view's exposure
+		// buffers (place 2), created by the first render with auto-exposure (EnsureExposureBuffers): the Exposure pass's
+		// histogram and its adapted exposure (ExposureState, which the next render's pass adapts from and the Tonemap pass
+		// reads). ExposureValid says the state buffer holds this view's adapted exposure of its previous render: false until a
+		// render records the pass, after a render that did not (Manual exposure, a debug view, the wireframe, pixel-art mode, a
+		// failed record), and in the new state a device loss's release makes, so the next pass starts afresh (a reset).
+		nvrhi::BufferHandle ExposureHistogramBuffer{};
+		nvrhi::BufferHandle ExposureStateBuffer{};
+		bool ExposureValid = false;
 		// M18 (C18.3, decision 26): the renderer's registration with its device's recreation registry (Create); kept by
 		// ReleaseGpuObjects like the back-references.
 		GpuRecreationRegistration Recreation{};
@@ -468,6 +502,12 @@ namespace Engine {
 		// render rebuilds it.
 		std::vector<Detail::TilemapDrawCache> TilemapCaches{};
 		std::vector<uint8_t> TilemapChunksDrawn{};
+		// M26 (C26.1, C-PART; decision 7): the Particles pass's plan of the render (ParticlePass.h) and its records' quads, whose
+		// textures are borrowed from the GpuResourceCache's mirrors for the record only. CPU state reused by every render,
+		// keeping room for at most QuadBatcher::MaxQuadsPerRecord quads after it (RecordParticles); a device loss's release
+		// drops it with the rest of the state.
+		ParticlePassPlan ParticlePlan{};
+		std::vector<QuadDraw> ParticleQuads{};
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
 		// M23 (C23.1): the view's instance records, reused by every Render (stream A: the opaque draws', then the transparent
@@ -475,6 +515,13 @@ namespace Engine {
 		// RENDER_POINT_SHADOW_BUDGET logged once per renderer (stream B).
 		std::vector<InstanceRecord> Instances{};
 		bool PointShadowLimitLogged = false;
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the view's copies of its probes'
+		// mirrors (Private/ProbeShading.h, the placement rule's place 2), and whether the probes a view dropped (beyond its
+		// limits, or a reflection probe whose cube's format or size differs from the first's) were logged, once per renderer
+		// each.
+		Utils::ProbeViewResources ProbeResources{};
+		bool ProbeLimitLogged = false;
+		bool ProbeFormatLogged = false;
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the deformed items' GPU state (place 2), the
 		// next VertexStream value to give a new entry (from 1), and the render count that stamps LastRender. A skinned item
 		// whose palette is shorter than its mesh's skin draws its bind pose, which is logged once per renderer
@@ -590,7 +637,17 @@ namespace Engine {
 		// (RecordSpriteQuads). M21's milestone review: at most SceneRenderer::MaxTileQuadsPerView tiles a render (the rest are
 		// counted in Stats.DroppedTiles and logged once per renderer); a render without drawn 2D items releases every tilemap
 		// cache, and every render releases its outsized quad vectors (ReleaseOutsizedSpriteQuads).
+		// M26 (C26.1, decision 7): the stage then draws the particles (RecordParticles), whatever the sprites drew.
 		void RecordSpritesStage(Detail::SceneRendererFrame& frame);
+		// The sprites and tilemaps of RecordSpritesStage, with C21.2's 2D lights (the Sprites and Lights2D rows).
+		void RecordSpritesAndTilemaps(Detail::SceneRendererFrame& frame);
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): the Particles row, in a Lit view with a camera
+		// (not the wireframe) whose snapshot holds particles: PlanParticlePass of the snapshot's ParticleEmitters and Particles
+		// with the frame's camera into ParticlePlan, then RecordParticlePass into the forward passes' framebuffer (SceneColor
+		// with SceneDepth) with ParticleBindings, the Linear sampler and the Point one in pixel-art mode (ParticlePass.h). A
+		// plan without quads records nothing (no row). A planning or recording error is kept as frame's error; the plan and
+		// the quads keep room for at most QuadBatcher::MaxQuadsPerRecord quads afterwards.
+		void RecordParticles(Detail::SceneRendererFrame& frame);
 		// C21.2 (decision 22): appends `quad` to SpriteQuads and its lit-ness to SpriteQuadLit, in the 2D draw order.
 		void AddSpriteQuad(const QuadDraw& quad, bool lit);
 		// M21 (C21.2, decision 24): appends to SpriteQuads the quads of `tilemap`'s tiles that the Sprites stage draws, in the
@@ -621,7 +678,17 @@ namespace Engine {
 		// C21.2, the Sprites row: SpriteQuads in their order, each run of one lit-ness one QuadBatcher record (Hdr, or HdrLit
 		// sampling `light`); a lit run without `light` is not drawn (RecordLights2D kept its error).
 		void RecordSpriteQuads(Detail::SceneRendererFrame& frame, const glm::mat4& viewProjection, nvrhi::ITexture* light);
+		// Bloom, then M26's Exposure pass (RecordExposure).
 		void RecordHdrPostStage(Detail::SceneRendererFrame& frame);
+		// M26 (C26.1, R-AEX; decisions 10 and 15, stream X-A): the Exposure row, with ExposureMode Auto in a Lit view outside the
+		// wireframe and pixel-art mode (where Auto acts as Manual), from the view's exposure buffers (EnsureExposureBuffers),
+		// resetting the adapted exposure when the snapshot's history was reset (CameraData::PreviousViewProjection empty) or
+		// ExposureValid is false; sets frame.AdaptedExposure and ExposureValid. A creation or record error is the render's,
+		// and the Tonemap stage then exposes manually.
+		void RecordExposure(Detail::SceneRendererFrame& frame);
+		// M26 (stream X-A): ExposureHistogramBuffer and ExposureStateBuffer when they are null (ExposurePass's descs), each
+		// replacing the member only when its creation succeeded. Errors: those of GraphicsDevice::CreateBuffer.
+		[[nodiscard]] Status EnsureExposureBuffers();
 		// Tonemap (or the data views' composite); with frame.PixelArt the 2D colour path (decision 7).
 		void RecordTonemapStage(Detail::SceneRendererFrame& frame);
 		// FXAA, never with frame.PixelArt or a debug view.

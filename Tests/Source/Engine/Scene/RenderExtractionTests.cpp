@@ -8,11 +8,15 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
+#include "Engine/Scene/Components/ReflectionProbeComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -21,6 +25,7 @@
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/GlmApprox.h"
@@ -29,6 +34,9 @@
 #include <algorithm>
 #include <limits>
 #include <memory_resource>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 // Render extraction (Architecture §5.2, §8.2): the snapshot of one view built from a scene, with the interpolation rule
 // shared with TransformSystem's render pose (Docs/Decisions/0012-m7-decisions.md decisions 5 and 6).
@@ -218,6 +226,71 @@ namespace Engine {
 			CHECK(snapshot->Environment.FallbackColor == glm::vec3(0.1f, 0.2f, 0.3f));
 			CHECK(snapshot->Post.ExposureEV == -1.0f);
 			CHECK(snapshot->Post.Tonemap == RenderTonemapper::Linear);
+		}
+
+		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decision 12, stream X-A): every member of PostProcess version 2
+		// reaches the snapshot, its enums mapped to the renderer's.
+		TEST_CASE("RenderExtraction: PostProcess version 2's members reach the snapshot with their enums mapped")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity look = scene.CreateEntity("Look");
+			look.AddComponent<PostProcessComponent>(PostProcessComponent{ .ExposureEV = 1.5f,
+				.ExposureMode = ExposureMode::Auto,
+				.AutoExposureMinEV = -3.0f,
+				.AutoExposureMaxEV = 5.0f,
+				.AutoExposureSpeedUp = 4.0f,
+				.AutoExposureSpeedDown = 0.5f,
+				.Tonemap = Tonemapper::PbrNeutral,
+				.Lut = TypedAssetHandle<AssetType::Lut>(UUID(0x0281)),
+				.LutIntensity = 0.75f,
+				.SsaoEnabled = false,
+				.SsaoRadius = 0.8f,
+				.SsaoIntensity = 1.5f,
+				.SsaoQuality = SsaoQuality::High,
+				.SsrEnabled = true,
+				.SsrIntensity = 0.5f,
+				.SsrMaxDistance = 20.0f,
+				.SsrThickness = 0.1f,
+				.SsrMaxRoughness = 0.4f,
+				.BloomEnabled = false,
+				.BloomIntensity = 0.1f,
+				.AntiAliasing = AntiAliasing::Taa });
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			const PostProcessSettings& post = snapshot->Post;
+			CHECK(post.ExposureEV == 1.5f);
+			CHECK(post.ExposureMode == RenderExposureMode::Auto);
+			CHECK(post.AutoExposureMinEV == -3.0f);
+			CHECK(post.AutoExposureMaxEV == 5.0f);
+			CHECK(post.AutoExposureSpeedUp == 4.0f);
+			CHECK(post.AutoExposureSpeedDown == 0.5f);
+			CHECK(post.Tonemap == RenderTonemapper::PbrNeutral);
+			CHECK(post.Lut == AssetHandle(UUID(0x0281)));
+			CHECK(post.LutIntensity == 0.75f);
+			CHECK_FALSE(post.SsaoEnabled);
+			CHECK(post.SsaoRadius == 0.8f);
+			CHECK(post.SsaoIntensity == 1.5f);
+			CHECK(post.SsaoQuality == RenderSsaoQuality::High);
+			CHECK(post.SsrEnabled);
+			CHECK(post.SsrIntensity == 0.5f);
+			CHECK(post.SsrMaxDistance == 20.0f);
+			CHECK(post.SsrThickness == 0.1f);
+			CHECK(post.SsrMaxRoughness == 0.4f);
+			CHECK_FALSE(post.BloomEnabled);
+			CHECK(post.BloomIntensity == 0.1f);
+			CHECK(post.AntiAliasing == RenderAntiAliasing::Taa);
+
+			look.Patch<PostProcessComponent>([](PostProcessComponent& component)
+			{
+				component.ExposureMode = ExposureMode::Manual;
+				component.AntiAliasing = AntiAliasing::None;
+			});
+			const Result<RenderSnapshot> manual = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(manual.has_value(), manual.error().ToString());
+			CHECK(manual->Post.ExposureMode == RenderExposureMode::Manual);
+			CHECK(manual->Post.AntiAliasing == RenderAntiAliasing::None);
 		}
 
 		TEST_CASE("RenderExtraction: a camera's view matrix is the inverse of its pose without scale, and its projection reverse-Z")
@@ -805,6 +878,149 @@ namespace Engine {
 			CHECK(snapshot->Tilemaps[1].Entity == decor);
 			CHECK(snapshot->Tilemaps[1].DrawPosition == 3);
 			CHECK(snapshot->Tilemaps[1].SortingLayer == 2);
+		}
+
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7, stream P-B): every effectively enabled emitter
+		// whose entity holds its runtime state gives an item and its live particles in emission order, in canonical order: a
+		// World emitter's at the extraction's alpha between each particle's last two steps (its Position at alpha 1), a Local
+		// emitter's through the emitter's rendered world matrix; each sized and coloured by the emitter's over-life curves at
+		// its age over its lifetime. An emitter without a state (an edit scene's, or one before its first Particles phase)
+		// gives none, and neither does a disabled one.
+		TEST_CASE("RenderExtraction: emitters with a particle state give their live particles at the extraction's alpha, in canonical order")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			const TypedAssetHandle<AssetType::Texture> spark(AssetHandle(0x7114000000000001ull));
+			const ParticleEmitterComponent worldEmitter{ .Texture = spark,
+				.Blend = ParticleBlend::Additive,
+				.ColorOverLife = { ParticleColorKey{ .Time = 0.0f, .Color = glm::vec4(1.0f, 0.5f, 0.0f, 1.0f) },
+					ParticleColorKey{ .Time = 1.0f, .Color = glm::vec4(0.0f, 0.0f, 1.0f, 0.0f) } },
+				.SizeOverLife = { ParticleSizeKey{ .Time = 0.0f, .Size = 1.0f }, ParticleSizeKey{ .Time = 1.0f, .Size = 3.0f } } };
+			const ParticleEmitterComponent localEmitter{ .SimulationSpace = ParticleSimulationSpace::Local };
+			const auto addEmitter = [&scene](std::string_view name, const ParticleEmitterComponent& emitter, std::vector<Particle> particles)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.AddComponent<ParticleEmitterComponent>(emitter);
+				if (!particles.empty())
+					entity.AddComponent<ParticleStateComponent>().State.Particles = std::move(particles);
+				return entity;
+			};
+			Entity unstepped = scene.CreateEntity("Unstepped");
+			unstepped.AddComponent<ParticleEmitterComponent>();
+			const Particle moving{ .Position = glm::vec3(8.0f, 0.0f, 0.0f),
+				.PreviousPosition = glm::vec3(4.0f, 0.0f, 0.0f),
+				.Age = 0.5f,
+				.Lifetime = 2.0f,
+				.StartSize = 0.25f };
+			const Particle newborn{ .Position = glm::vec3(1.0f), .PreviousPosition = glm::vec3(1.0f), .Age = 0.0f, .Lifetime = 1.0f, .StartSize = 0.5f };
+			const Entity world = addEmitter("World", worldEmitter, { moving, newborn });
+			// A state without live particles still gives its emitter's item.
+			Entity empty = scene.CreateEntity("Empty");
+			empty.AddComponent<ParticleEmitterComponent>();
+			static_cast<void>(empty.AddComponent<ParticleStateComponent>());
+			const Particle carried{ .Position = glm::vec3(0.0f, 3.0f, 0.0f), .PreviousPosition = glm::vec3(0.0f, 1.0f, 0.0f), .Age = 3.0f, .Lifetime = 2.0f };
+			Entity local = addEmitter("Local", localEmitter, { carried });
+			Entity hidden = addEmitter("Hidden", worldEmitter, { newborn });
+			hidden.SetActive(false);
+			// The Local emitter moves from the origin to (2, 0, 0) over the step.
+			TransformSystem::Update(scene);
+			SnapshotPreviousPose(local);
+			SetTranslation(local, glm::vec3(2.0f, 0.0f, 0.0f));
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .Alpha = 0.5f });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->ParticleEmitters.size() == 3);
+			REQUIRE(snapshot->Particles.size() == 3);
+			const ParticleEmitterItem& first = snapshot->ParticleEmitters[0];
+			CHECK(first.Entity == world.GetUUID());
+			CHECK(first.Texture == spark.GetHandle());
+			CHECK(first.Blend == RenderParticleBlend::Additive);
+			CHECK(first.First == 0);
+			CHECK(first.Count == 2);
+			CHECK(snapshot->ParticleEmitters[1].Entity == empty.GetUUID());
+			CHECK(snapshot->ParticleEmitters[1].First == 2);
+			CHECK(snapshot->ParticleEmitters[1].Count == 0);
+			const ParticleEmitterItem& last = snapshot->ParticleEmitters[2];
+			CHECK(last.Entity == local.GetUUID());
+			CHECK_FALSE(last.Texture.IsValid());
+			CHECK(last.Blend == RenderParticleBlend::Alpha);
+			CHECK(last.First == 2);
+			CHECK(last.Count == 1);
+
+			// Halfway between the last two steps; a newborn particle stays where it was born.
+			CHECK(snapshot->Particles[0].Position == glm::vec3(6.0f, 0.0f, 0.0f));
+			CHECK(snapshot->Particles[1].Position == glm::vec3(1.0f));
+			// The Local particle halfway at (0, 2, 0) in the emitter's space, rendered halfway along its move at (1, 0, 0).
+			CHECK(Test::ApproxEqual(snapshot->Particles[2].Position, glm::vec3(1.0f, 2.0f, 0.0f), 1e-6f));
+			// The curves at age over lifetime: 0.25, 0, and 1 for the particle past its lifetime (clamped).
+			CHECK(snapshot->Particles[0].Size == 0.25f * EvaluateParticleSize(worldEmitter, 0.25f));
+			CHECK(snapshot->Particles[0].Color == EvaluateParticleColor(worldEmitter, 0.25f));
+			CHECK(snapshot->Particles[1].Size == 0.5f * EvaluateParticleSize(worldEmitter, 0.0f));
+			CHECK(snapshot->Particles[1].Color == EvaluateParticleColor(worldEmitter, 0.0f));
+			CHECK(snapshot->Particles[2].Size == carried.StartSize * EvaluateParticleSize(localEmitter, 1.0f));
+			CHECK(snapshot->Particles[2].Color == EvaluateParticleColor(localEmitter, 1.0f));
+
+			// At alpha 1 a particle is at its Position exactly, and the Local emitter at its current pose.
+			const Result<RenderSnapshot> current = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .Alpha = 1.0f });
+			REQUIRE_MESSAGE(current.has_value(), current.error().ToString());
+			REQUIRE(current->Particles.size() == 3);
+			CHECK(current->Particles[0].Position == moving.Position);
+			CHECK(Test::ApproxEqual(current->Particles[2].Position, glm::vec3(2.0f, 3.0f, 0.0f), 1e-6f));
+
+			// An edit scene holds no particle state, so its views draw no particles.
+			Test::SceneTestFixture edit;
+			Entity editEmitter = edit.GetScene().CreateEntity("Emitter");
+			editEmitter.AddComponent<ParticleEmitterComponent>();
+			TransformSystem::Update(edit.GetScene());
+			const Result<RenderSnapshot> editSnapshot = ExtractRenderSnapshot(edit.GetScene(), { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(editSnapshot.has_value(), editSnapshot.error().ToString());
+			CHECK(editSnapshot->ParticleEmitters.empty());
+			CHECK(editSnapshot->Particles.empty());
+		}
+
+		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B).
+		TEST_CASE("RenderExtraction: baked probes are extracted in canonical order at their rendered pose, unbaked and disabled ones left out")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const TypedAssetHandle<AssetType::IrradianceVolume> volumeData(AssetHandle(0x1a2b000000000001ull));
+			const TypedAssetHandle<AssetType::Environment> probeData(AssetHandle(0x1a2b000000000002ull));
+			Entity room = scene.CreateEntity("Room");
+			SetTranslation(room, glm::vec3(1.0f, 2.0f, 3.0f));
+			room.AddComponent<IrradianceVolumeComponent>(IrradianceVolumeComponent{ .Data = volumeData, .Size = glm::vec3(6.0f, 3.0f, 5.0f), .Intensity = 0.5f, .BlendDistance = 0.25f });
+			room.AddComponent<ReflectionProbeComponent>(ReflectionProbeComponent{ .Data = probeData, .Size = glm::vec3(4.0f, 2.0f, 7.0f), .BoxProjection = false, .Intensity = 2.0f, .BlendDistance = 0.5f });
+			Entity unbaked = scene.CreateEntity("Unbaked");
+			unbaked.AddComponent<IrradianceVolumeComponent>();
+			unbaked.AddComponent<ReflectionProbeComponent>();
+			Entity hall = scene.CreateEntity("Hall");
+			hall.AddComponent<ReflectionProbeComponent>(ReflectionProbeComponent{ .Data = probeData });
+			Entity off = scene.CreateEntity("Off");
+			off.AddComponent<IrradianceVolumeComponent>(IrradianceVolumeComponent{ .Data = volumeData });
+			off.SetActive(false);
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->IrradianceVolumes.size() == 1);
+			const IrradianceVolumeItem& volume = snapshot->IrradianceVolumes[0];
+			CHECK(volume.Entity == room.GetUUID());
+			CHECK(volume.Data == volumeData.GetHandle());
+			CHECK(volume.Size == glm::vec3(6.0f, 3.0f, 5.0f));
+			CHECK(volume.Intensity == 0.5f);
+			CHECK(volume.BlendDistance == 0.25f);
+			CHECK(Test::ApproxEqual(glm::vec3(volume.World[3]), glm::vec3(1.0f, 2.0f, 3.0f), 1e-6f));
+			REQUIRE(snapshot->ReflectionProbes.size() == 2);
+			const ReflectionProbeItem& probe = snapshot->ReflectionProbes[0];
+			CHECK(probe.Entity == room.GetUUID());
+			CHECK(probe.Data == probeData.GetHandle());
+			CHECK(probe.Size == glm::vec3(4.0f, 2.0f, 7.0f));
+			CHECK_FALSE(probe.BoxProjection);
+			CHECK(probe.Intensity == 2.0f);
+			CHECK(probe.BlendDistance == 0.5f);
+			CHECK(Test::ApproxEqual(glm::vec3(probe.World[3]), glm::vec3(1.0f, 2.0f, 3.0f), 1e-6f));
+			CHECK(snapshot->ReflectionProbes[1].Entity == hall.GetUUID());
+			CHECK(snapshot->ReflectionProbes[1].BoxProjection);
 		}
 	}
 

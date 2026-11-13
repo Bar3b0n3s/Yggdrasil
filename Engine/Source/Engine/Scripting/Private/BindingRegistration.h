@@ -137,6 +137,10 @@ namespace Engine {
 		[[nodiscard]] Status RegisterUi(ScriptApiRegistry& api);
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the Animator and SkinnedMesh proxies' methods.
 		[[nodiscard]] Status RegisterAnimation(ScriptApiRegistry& api);
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the ParticleEmitter proxy's methods.
+		[[nodiscard]] Status RegisterParticles(ScriptApiRegistry& api);
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the Terrain proxy's methods.
+		[[nodiscard]] Status RegisterTerrain(ScriptApiRegistry& api);
 
 	}
 

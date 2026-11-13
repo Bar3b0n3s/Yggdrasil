@@ -2,16 +2,18 @@
 
 #include "Engine/Scene/ParticleSimulation.h"
 
+#include "Engine/Core/DetMath.h"
 #include "Engine/Core/UUID.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <string>
+#include <vector>
 
-// The particle simulation of one emitter (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 5, stream P-A):
-// skipped until stream P-A implements it.
+// The particle simulation of one emitter (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 5, stream P-A).
 
 namespace Engine {
 
@@ -46,21 +48,40 @@ namespace Engine {
 			return state;
 		}
 
+		// An emitter of `burst` particles at its first step that live long, move at `speed` and emit nothing else.
+		ParticleEmitterComponent MakeBurst(ParticleEmitterShape shape, uint32_t burst, float speed)
+		{
+			ParticleEmitterComponent emitter;
+			emitter.Shape = shape;
+			emitter.Rate = 0.0f;
+			emitter.Burst = burst;
+			emitter.MaxParticles = burst;
+			emitter.Lifetime = glm::vec2(10.0f, 10.0f);
+			emitter.Speed = glm::vec2(speed, speed);
+			emitter.SimulationSpace = ParticleSimulationSpace::Local;
+			return emitter;
+		}
+
+		float Length(const glm::vec3& value)
+		{
+			return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+		}
+
 	}
 
 	TEST_SUITE("Scene")
 	{
-		// The acceptance "the seeded particle hash is equal across configurations": stream P-A commits the digest from Debug and
-		// confirms it in Release; FeatureTest's Particles suite checks Test.GetParticleDigest in the Editor, Release and Dist runs
-		// (decision 25), since the Tests executable does not exist in Dist.
-		TEST_CASE("ParticleSimulation: a seeded emitter's particles hash to their committed digest in every configuration" * doctest::skip(true))
+		// The acceptance "the seeded particle hash is equal across configurations": the digest committed from Debug and confirmed
+		// in Release (Test.py --config Release on this case); FeatureTest's Particles suite checks Test.GetParticleDigest in the
+		// Editor, Release and Dist runs (decision 25), since the Tests executable does not exist in Dist.
+		TEST_CASE("ParticleSimulation: a seeded emitter's particles hash to their committed digest in every configuration")
 		{
 			const ParticleEmitterState state = Run(MakeFountain(), UUID(0x7a1c3e5f20b4d608), 240);
 			CHECK_FALSE(state.Particles.empty());
-			CHECK(std::format("{:016x}", ComputeParticleDigest(state)) == std::string("0000000000000000"));
+			CHECK(std::format("{:016x}", ComputeParticleDigest(state)) == std::string("6963470cc388a75b"));
 		}
 
-		TEST_CASE("ParticleSimulation: one emitter repeats exactly, and two emitters with one Seed differ" * doctest::skip(true))
+		TEST_CASE("ParticleSimulation: one emitter repeats exactly, and two emitters with one Seed differ")
 		{
 			const ParticleEmitterComponent emitter = MakeFountain();
 			const ParticleEmitterState first = Run(emitter, UUID(0x1111), 90);
@@ -73,12 +94,13 @@ namespace Engine {
 			CHECK(MakeParticleEmitterSeed(UUID(0x1111), 9) != MakeParticleEmitterSeed(UUID(0x1111), 10));
 		}
 
-		TEST_CASE("ParticleSimulation: a step ages, moves and kills particles, and emits its burst and rate up to its cap" * doctest::skip(true))
+		TEST_CASE("ParticleSimulation: a step ages, moves and kills particles, and emits its burst and rate up to its cap")
 		{
 			// The header's order: integrate, age and kill, then the burst at the cycle's first step, then the rate (60 * (1/60.0f)
 			// is exactly 1.0f, so one particle a step), each while fewer than MaxParticles live.
 			ParticleEmitterComponent emitter;
-			emitter.Rate = 60.0f; // one particle a step at 60 Hz
+			emitter.Shape = ParticleEmitterShape::Point; // at the origin, so a particle's height is how far it rose
+			emitter.Rate = 60.0f;                        // one particle a step at 60 Hz
 			emitter.Burst = 5;
 			emitter.MaxParticles = 7;
 			emitter.Lifetime = glm::vec2(0.05f, 0.05f); // three steps: an age of three steps' sum rounds to above 0.05f
@@ -108,7 +130,7 @@ namespace Engine {
 			CHECK(state.Steps == 4);
 		}
 
-		TEST_CASE("ParticleSimulation: over-life curves hold before the first key and after the last, and are linear between" * doctest::skip(true))
+		TEST_CASE("ParticleSimulation: over-life curves hold before the first key and after the last, and are linear between")
 		{
 			const ParticleEmitterComponent emitter = MakeFountain();
 			CHECK(EvaluateParticleColor(ParticleEmitterComponent{}, 0.5f) == glm::vec4(1.0f));
@@ -118,6 +140,178 @@ namespace Engine {
 			CHECK(EvaluateParticleSize(emitter, 0.5f) == doctest::Approx(1.25f));
 			CHECK(EvaluateParticleSize(emitter, -1.0f) == 0.5f);
 			CHECK(EvaluateParticleSize(emitter, 2.0f) == 2.0f);
+			// Keys inside [0, 1]: held before the first and after the last; three keys interpolate within their segment.
+			ParticleEmitterComponent keyed;
+			keyed.SizeOverLife = { { .Time = 0.25f, .Size = 1.0f }, { .Time = 0.5f, .Size = 3.0f }, { .Time = 0.75f, .Size = 2.0f } };
+			CHECK(EvaluateParticleSize(keyed, 0.0f) == 1.0f);
+			CHECK(EvaluateParticleSize(keyed, 0.375f) == 2.0f);
+			CHECK(EvaluateParticleSize(keyed, 0.625f) == 2.5f);
+			CHECK(EvaluateParticleSize(keyed, 1.0f) == 2.0f);
+			CHECK(EvaluateParticleSize(keyed, std::nanf("")) == 1.0f);
+		}
+
+		// The shapes' rules (ParticleEmitterShape's comments), in Local space at the origin so positions are the shape's own.
+		TEST_CASE("ParticleSimulation: each shape starts its particles inside it and moves them its way")
+		{
+			constexpr uint32_t Count = 200;
+			constexpr float Speed = 2.0f;
+			SUBCASE("Point")
+			{
+				const ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Point, Count, Speed);
+				ParticleEmitterState state(MakeParticleEmitterSeed(UUID(0x44), 0));
+				StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+				REQUIRE(state.Particles.size() == Count);
+				glm::vec3 sum(0.0f);
+				for (const Particle& particle : state.Particles)
+				{
+					CHECK(particle.Position == glm::vec3(0.0f));
+					CHECK(Length(particle.Velocity) == doctest::Approx(Speed).epsilon(1e-5));
+					sum += particle.Velocity;
+				}
+				// Uniform directions: their mean is far from any one direction.
+				CHECK(Length(sum) / static_cast<float>(Count) < 0.5f * Speed);
+			}
+			SUBCASE("Sphere")
+			{
+				ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Sphere, Count, Speed);
+				emitter.ShapeRadius = 1.5f;
+				ParticleEmitterState state(MakeParticleEmitterSeed(UUID(0x45), 0));
+				StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+				REQUIRE(state.Particles.size() == Count);
+				for (const Particle& particle : state.Particles)
+				{
+					const float distance = Length(particle.Position);
+					CHECK(distance <= 1.5f + 1e-5f);
+					CHECK(Length(particle.Velocity) == doctest::Approx(Speed).epsilon(1e-5));
+					// Away from the centre: the velocity points along the position.
+					if (distance > 1e-3f)
+						CHECK(glm::dot(particle.Position, particle.Velocity) == doctest::Approx(distance * Speed).epsilon(1e-4));
+				}
+			}
+			SUBCASE("Cone")
+			{
+				ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Cone, Count, Speed);
+				emitter.ShapeRadius = 0.5f;
+				emitter.ConeAngle = 30.0f;
+				ParticleEmitterState state(MakeParticleEmitterSeed(UUID(0x46), 0));
+				StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+				REQUIRE(state.Particles.size() == Count);
+				const float cosAngle = DetMath::Cos(30.0f * 0.0174532925199432957692f);
+				for (const Particle& particle : state.Particles)
+				{
+					CHECK(particle.Position.z == 0.0f);
+					CHECK(Length(particle.Position) <= 0.5f + 1e-5f);
+					CHECK(Length(particle.Velocity) == doctest::Approx(Speed).epsilon(1e-5));
+					// Within ConeAngle of -Z.
+					CHECK(-particle.Velocity.z / Speed >= cosAngle - 1e-5f);
+				}
+			}
+			SUBCASE("Box")
+			{
+				ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Box, Count, Speed);
+				emitter.BoxHalfExtents = glm::vec3(1.0f, 2.0f, 0.5f);
+				ParticleEmitterState state(MakeParticleEmitterSeed(UUID(0x47), 0));
+				StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+				REQUIRE(state.Particles.size() == Count);
+				for (const Particle& particle : state.Particles)
+				{
+					CHECK(std::abs(particle.Position.x) <= 1.0f);
+					CHECK(std::abs(particle.Position.y) <= 2.0f);
+					CHECK(std::abs(particle.Position.z) <= 0.5f);
+					CHECK(particle.Velocity == glm::vec3(0.0f, 0.0f, -Speed));
+				}
+			}
+		}
+
+		// SimulationSpace (ParticleSimulationSpace's comments): World particles start at the emitter's pose and then ignore it;
+		// Local ones stay in the emitter's space.
+		TEST_CASE("ParticleSimulation: World particles start at the emitter's pose and stay behind, Local ones live in its space")
+		{
+			ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Box, 1, 1.0f);
+			emitter.BoxHalfExtents = glm::vec3(0.0f);
+			const glm::mat4 placed = glm::translate(glm::mat4(1.0f), glm::vec3(5.0f, 0.0f, 0.0f));
+			const glm::mat4 moved = glm::translate(glm::mat4(1.0f), glm::vec3(9.0f, 0.0f, 0.0f));
+
+			emitter.SimulationSpace = ParticleSimulationSpace::World;
+			ParticleEmitterState world(MakeParticleEmitterSeed(UUID(0x48), 0));
+			StepParticleEmitter(emitter, placed, FixedDelta, world);
+			REQUIRE(world.Particles.size() == 1);
+			CHECK(world.Particles[0].Position == glm::vec3(5.0f, 0.0f, 0.0f));
+			CHECK(world.Particles[0].Velocity == glm::vec3(0.0f, 0.0f, -1.0f));
+			StepParticleEmitter(emitter, moved, FixedDelta, world);
+			CHECK(world.Particles[0].PreviousPosition == glm::vec3(5.0f, 0.0f, 0.0f));
+			CHECK(world.Particles[0].Position.x == 5.0f);
+
+			emitter.SimulationSpace = ParticleSimulationSpace::Local;
+			ParticleEmitterState local(MakeParticleEmitterSeed(UUID(0x48), 0));
+			StepParticleEmitter(emitter, placed, FixedDelta, local);
+			REQUIRE(local.Particles.size() == 1);
+			CHECK(local.Particles[0].Position == glm::vec3(0.0f));
+			StepParticleEmitter(emitter, moved, FixedDelta, local);
+			CHECK(local.Particles[0].Position.x == 0.0f);
+		}
+
+		TEST_CASE("ParticleSimulation: drag slows particles each step and never reverses them")
+		{
+			ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Box, 1, 6.0f);
+			emitter.BoxHalfExtents = glm::vec3(0.0f);
+			emitter.Drag = 30.0f; // 1 - 30 / 60: half the velocity a step
+			ParticleEmitterState state(MakeParticleEmitterSeed(UUID(0x49), 0));
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+			REQUIRE(state.Particles.size() == 1);
+			CHECK(state.Particles[0].Velocity.z == doctest::Approx(-3.0f));
+			emitter.Drag = 100.0f; // past a full stop in one step: held at rest
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+			CHECK(state.Particles[0].Velocity == glm::vec3(0.0f));
+		}
+
+		// Decision 5 (the review's finding 10): a looping wrap restarts CycleTime at exactly 0, so every cycle bursts; a one-shot
+		// emitter bursts once and stays finished; queued emits spawn whatever Playing, Loop and the cycle say, up to the cap.
+		TEST_CASE("ParticleSimulation: a looping emitter bursts every cycle, a one-shot one once, and queued emits spawn either way")
+		{
+			ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Point, 3, 0.0f);
+			emitter.MaxParticles = 64;
+			emitter.Duration = 0.03f; // two steps at 60 Hz
+			std::vector<size_t> counts;
+
+			ParticleEmitterState looping(MakeParticleEmitterSeed(UUID(0x50), 0));
+			for (int step = 0; step < 5; ++step)
+			{
+				StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, looping);
+				counts.push_back(looping.Particles.size());
+			}
+			CHECK(counts == std::vector<size_t>{ 3, 3, 6, 6, 9 });
+			CHECK(looping.Cycles == 2);
+			CHECK(looping.CycleTime == FixedDelta);
+
+			emitter.Loop = false;
+			ParticleEmitterState once(MakeParticleEmitterSeed(UUID(0x51), 0));
+			counts.clear();
+			for (int step = 0; step < 4; ++step)
+			{
+				StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, once);
+				counts.push_back(once.Particles.size());
+			}
+			CHECK(counts == std::vector<size_t>{ 3, 3, 3, 3 });
+			CHECK(once.Cycles == 1);
+			CHECK(once.CycleTime == emitter.Duration);
+			once.PendingEmits = 2;
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, once);
+			CHECK(once.Particles.size() == 5);
+			CHECK(once.PendingEmits == 0);
+
+			// A stopped emitter neither bursts nor advances its cycle, but spawns what was queued, up to the cap.
+			emitter.Playing = false;
+			emitter.MaxParticles = 4;
+			ParticleEmitterState stopped(MakeParticleEmitterSeed(UUID(0x52), 0));
+			stopped.PendingEmits = 10;
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, stopped);
+			CHECK(stopped.Particles.size() == 4);
+			CHECK(stopped.Capped == 6);
+			CHECK(stopped.PendingEmits == 0);
+			CHECK(stopped.CycleTime == 0.0f);
+			CHECK(stopped.Cycles == 0);
 		}
 	}
 

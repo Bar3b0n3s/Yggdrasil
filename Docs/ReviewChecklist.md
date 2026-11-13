@@ -160,7 +160,7 @@ Section references (§) point to `Docs/Architecture.md` unless marked CodeStyle 
 ## 13. Security of automation surfaces (where relevant)
 
 - [ ] Automation stays loopback-only and token-authenticated, rejects HTTP probes and oversized frames, and is absent from Dist (§13.2, §14.4).
-- [ ] Every path from a request, script or asset is confined: `VfsPath` rejects `..`, absolute paths, NUL bytes and reserved names. Only `asset.import` reads an absolute source path, and only read-only.
+- [ ] Every path from a request, script or asset is confined: `VfsPath` rejects `..`, absolute paths, NUL bytes and reserved names. Only `asset.import` and `terrain.importHeightmap` (M26; ADR 0028's phase-3 ledger, ADR 0037 decision 31) read an absolute source path, and only read-only.
 - [ ] No method or script API runs a process, a shell command or code that a request names; the only processes a method starts are `project.export`'s smoke test, its feature test and, on macOS, `codesign`, each by a fixed path with fixed arguments. The one exception is a game's native module (Windows only, §13.2): only while the user's "Allow native code" preference is on, the open project's `Native/` sources, which `native.write` may author, are built by the fixed-path `Scripts/BuildNative.py` (`native.build`, and the export's NativeBuild step), loaded into the editor's process (`native.load` and the project's opening) and linked into the games the editor exports; no method can change that preference. Script sandbox escapes (§11.1) stay closed.
 - [ ] Responses are size-bounded, and offloaded results stay inside the project's `Library/`.
 - [ ] Downloads (`Setup.py`, `FetchAssets.py`) use allowlisted official hosts over HTTPS, pinned versions and verified checksums.

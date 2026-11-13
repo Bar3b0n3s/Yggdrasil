@@ -1924,7 +1924,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Animation.scene",
-			"XXH64": "d283d094d8662c62",
+			"XXH64": "dce895935dbadccd",
 			"Method": "scene.save",
 			"RequestId": 15,
 			"Client": "batch",
@@ -1988,7 +1988,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components.scene",
-			"XXH64": "931ac1ec514db42a",
+			"XXH64": "d72c716dedb61b62",
 			"Method": "scene.save",
 			"RequestId": 16,
 			"Client": "batch",
@@ -2068,7 +2068,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components/TonemapAces.scene",
-			"XXH64": "b98c9ccad28d0905",
+			"XXH64": "fa4ae5f0d5f45963",
 			"Method": "scene.save",
 			"RequestId": 7,
 			"Client": "batch",
@@ -2084,7 +2084,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components/TonemapLinear.scene",
-			"XXH64": "1cd1d05b6b92e7e3",
+			"XXH64": "c9989ee2ed5bf572",
 			"Method": "scene.save",
 			"RequestId": 13,
 			"Client": "batch",
@@ -2100,7 +2100,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Components/TonemapPbrNeutral.scene",
-			"XXH64": "17428b03e67c596d",
+			"XXH64": "01732108cc7ef965",
 			"Method": "scene.save",
 			"RequestId": 10,
 			"Client": "batch",
@@ -2244,11 +2244,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/AlphaModes.scene",
-			"XXH64": "422a81229dbdecf0",
+			"XXH64": "c8a680ba890aceca",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/AlphaModes.scene.meta",
@@ -2260,11 +2260,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Bloom.scene",
-			"XXH64": "ea63ed40aa3cb539",
-			"Method": "scene.save",
-			"RequestId": 55,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "dd1e3cb3a5302102",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Bloom.scene.meta",
@@ -2276,11 +2276,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/DebugDraw.scene",
-			"XXH64": "87188662739de170",
-			"Method": "scene.save",
-			"RequestId": 71,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "5bdd09082801eb3b",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/DebugDraw.scene.meta",
@@ -2292,11 +2292,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/GltfFixture.scene",
-			"XXH64": "afac257b2d1d7142",
+			"XXH64": "4b87b0c457aee314",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 3
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/GltfFixture.scene.meta",
@@ -2308,11 +2308,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/IblOnly.scene",
-			"XXH64": "445d10273d988436",
-			"Method": "scene.save",
-			"RequestId": 33,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "7f82f69dd8fea042",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/IblOnly.scene.meta",
@@ -2324,11 +2324,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/MaterialGrid.scene",
-			"XXH64": "bb9de17e66b56bce",
-			"Method": "scene.save",
-			"RequestId": 25,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "06b1b0047351f83e",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/MaterialGrid.scene.meta",
@@ -2340,11 +2340,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Text.scene",
-			"XXH64": "b9263796b036a398",
-			"Method": "scene.save",
-			"RequestId": 76,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "7da6e5f7cd7533cc",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Text.scene.meta",
@@ -2356,11 +2356,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Tonemappers.scene",
-			"XXH64": "8b1018e0a5c26692",
-			"Method": "scene.save",
-			"RequestId": 47,
-			"Client": "batch",
-			"TranscriptLine": null
+			"XXH64": "1b07b9cdbfed5e8a",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 7
 		},
 		{
 			"Path": "Assets/Scenes/Golden/Tonemappers.scene.meta",
@@ -2372,7 +2372,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenClusteredLights/ClusteredLights.scene",
-			"XXH64": "68a59f532b341130",
+			"XXH64": "535c7818af8d2ff9",
 			"Method": "scene.save",
 			"RequestId": 6,
 			"Client": "batch",
@@ -2388,7 +2388,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenPointShadows/PointShadows.scene",
-			"XXH64": "dd943796686f2253",
+			"XXH64": "b178d0fe5297d99b",
 			"Method": "scene.save",
 			"RequestId": 6,
 			"Client": "batch",
@@ -2404,7 +2404,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/AnnotatedScreenshot.scene",
-			"XXH64": "8224d23b03d93b57",
+			"XXH64": "908d3210c366aa18",
 			"Method": "scene.save",
 			"RequestId": 30,
 			"Client": "batch",
@@ -2420,7 +2420,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/GtaoOff.scene",
-			"XXH64": "588a0d99c4455ca3",
+			"XXH64": "afe2a7ba6dc1f2f1",
 			"Method": "scene.save",
 			"RequestId": 21,
 			"Client": "batch",
@@ -2436,7 +2436,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/GtaoOn.scene",
-			"XXH64": "e0c22dd70d04c7e5",
+			"XXH64": "812bf8cb9bc195e8",
 			"Method": "scene.save",
 			"RequestId": 18,
 			"Client": "batch",
@@ -2452,7 +2452,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/GtaoOrtho.scene",
-			"XXH64": "0e9bec4be6b3059f",
+			"XXH64": "dfcf02d773cde854",
 			"Method": "scene.save",
 			"RequestId": 24,
 			"Client": "batch",
@@ -2468,7 +2468,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/SelectionOutline.scene",
-			"XXH64": "53eb30f81584378e",
+			"XXH64": "d35d36dcede6062a",
 			"Method": "scene.save",
 			"RequestId": 27,
 			"Client": "batch",
@@ -2484,7 +2484,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/ShadowsFar.scene",
-			"XXH64": "e93787780e7bc810",
+			"XXH64": "594a9f884dfdbac6",
 			"Method": "scene.save",
 			"RequestId": 9,
 			"Client": "batch",
@@ -2500,7 +2500,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/ShadowsNear.scene",
-			"XXH64": "a391b084a3d4b178",
+			"XXH64": "0727a14ac572d9fb",
 			"Method": "scene.save",
 			"RequestId": 6,
 			"Client": "batch",
@@ -2516,7 +2516,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/ShadowsOrtho.scene",
-			"XXH64": "65ba12fba4164e29",
+			"XXH64": "c060ce195eeb3dd4",
 			"Method": "scene.save",
 			"RequestId": 12,
 			"Client": "batch",
@@ -2532,7 +2532,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenRendererII/SpotShadows.scene",
-			"XXH64": "14784112dd60e729",
+			"XXH64": "55d57882392d890b",
 			"Method": "scene.save",
 			"RequestId": 15,
 			"Client": "batch",
@@ -2548,7 +2548,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenSkinnedPose/SkinnedPose.scene",
-			"XXH64": "1583b71c4e444464",
+			"XXH64": "3f5177c3bc35c046",
 			"Method": "scene.save",
 			"RequestId": 9,
 			"Client": "batch",
@@ -2564,7 +2564,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenTextured/TextureCompression.scene",
-			"XXH64": "b884e098004f15af",
+			"XXH64": "8bda8ac930eb6244",
 			"Method": "scene.save",
 			"RequestId": 19,
 			"Client": "batch",
@@ -2660,7 +2660,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenUiWorld/UiWorld.scene",
-			"XXH64": "aa5b1fc7beac7299",
+			"XXH64": "95c16b291560c35c",
 			"Method": "scene.save",
 			"RequestId": 3,
 			"Client": "batch",
@@ -2724,7 +2724,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/MeshPath.scene",
-			"XXH64": "a86957cb2a124529",
+			"XXH64": "683e4428eadeafae",
 			"Method": "scene.save",
 			"RequestId": 6,
 			"Client": "batch",
@@ -2916,7 +2916,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/Scripting.scene",
-			"XXH64": "5c3f559f983e36c0",
+			"XXH64": "af4392034229d07a",
 			"Method": "scene.save",
 			"RequestId": 46,
 			"Client": "batch",
@@ -4132,7 +4132,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Api/PostProcess.test.luau",
-			"XXH64": "fcd59eb86fe8b632",
+			"XXH64": "23e2b6a01da86095",
 			"Method": "script.write",
 			"RequestId": 26,
 			"Client": "batch",
@@ -4580,7 +4580,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Components/AuthoredValues.luau",
-			"XXH64": "0e5a0fa176bb7d32",
+			"XXH64": "6cec8b686fbc785e",
 			"Method": "script.write",
 			"RequestId": 17,
 			"Client": "batch",
@@ -4980,7 +4980,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Animation.replay",
-			"XXH64": "1e820df2c4c889d1",
+			"XXH64": "f4cd941db957d886",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",

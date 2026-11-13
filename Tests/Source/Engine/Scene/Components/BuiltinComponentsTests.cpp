@@ -158,16 +158,29 @@ namespace Engine {
 			CHECK(environment.SkyboxBlur == 0.0f);
 			CHECK(environment.FallbackColor == glm::vec3(0.2f, 0.22f, 0.25f));
 
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 12): PostProcess version 2's defaults render as version 1's did.
 			const PostProcessComponent post;
 			CHECK(post.ExposureEV == 0.0f);
+			CHECK(post.ExposureMode == ExposureMode::Manual);
+			CHECK(post.AutoExposureMinEV == -6.0f);
+			CHECK(post.AutoExposureMaxEV == 12.0f);
+			CHECK(post.AutoExposureSpeedUp == 3.0f);
+			CHECK(post.AutoExposureSpeedDown == 1.0f);
 			CHECK(post.Tonemap == Tonemapper::AgX);
+			CHECK_FALSE(post.Lut.IsValid());
+			CHECK(post.LutIntensity == 1.0f);
 			CHECK(post.SsaoEnabled);
 			CHECK(post.SsaoRadius == 0.5f);
 			CHECK(post.SsaoIntensity == 1.0f);
 			CHECK(post.SsaoQuality == SsaoQuality::Medium);
+			CHECK_FALSE(post.SsrEnabled);
+			CHECK(post.SsrIntensity == 1.0f);
+			CHECK(post.SsrMaxDistance == 50.0f);
+			CHECK(post.SsrThickness == 0.2f);
+			CHECK(post.SsrMaxRoughness == 0.6f);
 			CHECK(post.BloomEnabled);
 			CHECK(post.BloomIntensity == 0.04f);
-			CHECK(post.FxaaEnabled);
+			CHECK(post.AntiAliasing == AntiAliasing::Fxaa);
 
 			const TextComponent text;
 			CHECK(text.Text.empty());
@@ -659,9 +672,10 @@ namespace Engine {
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
 				"Animation", "Particles", "Probes", "Terrain" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
-			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), and PointLight's CastShadows (M23,
-			// Docs/Decisions/0034-m23-contract.md decision 3). Every other component is at version 1.
-			const std::map<std::string, uint32_t> migrated = { { "PointLight", 2 }, { "Prefab", 2 }, { "Script", 2 } };
+			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
+			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,
+			// Docs/Decisions/0037-m26-contract.md decision 12). Every other component is at version 1.
+			const std::map<std::string, uint32_t> migrated = { { "PointLight", 2 }, { "PostProcess", 2 }, { "Prefab", 2 }, { "Script", 2 } };
 			for (const ComponentInfo* component : registry->GetComponents())
 			{
 				INFO(component->GetName());

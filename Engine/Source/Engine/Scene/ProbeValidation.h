@@ -1,0 +1,46 @@
+#pragma once
+
+#include "Engine/Core/Base.h"
+#include "Engine/Core/UUID.h"
+#include "Engine/Reflection/ValidationContext.h"
+
+#include <string>
+#include <string_view>
+#include <vector>
+
+// The probe checks of one scene (M26, C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 9): what project.validate
+// reports about a scene's IrradianceVolumes and ReflectionProbes. The code is appended after main's in both of
+// ProjectValidator.cpp's code tables in landing order (ADR 0028's phase-3 ledger: M26's after M24's at its merge), with its
+// Tests/Data/Validation/PROBE_NOT_BAKED/ fixture and its row in the game-debugging skill's validation-codes page; the renderer
+// behaves as the code says (a probe without data lights and reflects nothing, RenderSnapshot.h's IrradianceVolumeItem and
+// ReflectionProbeItem).
+
+namespace Engine {
+
+	class AssetManager;
+	class Scene;
+
+	// Warning, not fixable: an IrradianceVolume or ReflectionProbe has no Data, or its Data does not load; it lights nothing.
+	inline constexpr std::string_view ProbeNotBakedCode = "PROBE_NOT_BAKED";
+
+	// One probe validation finding.
+	struct ProbeSceneIssue
+	{
+		std::string Code{}; // ProbeNotBakedCode
+		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
+		UUID Entity{};           // the probe's entity
+		std::string Component{}; // "IrradianceVolume" or "ReflectionProbe"
+		std::string Field{};     // "Data"
+		std::string Message{};
+		std::string Hint{};
+
+		bool operator==(const ProbeSceneIssue&) const = default;
+	};
+
+	// The probe checks over `scene`: every effectively enabled entity's IrradianceVolume, then its ReflectionProbe, in
+	// canonical entity order, whose Data is null or does not load through `assets` (a missing asset, a failed import or
+	// another type) is PROBE_NOT_BAKED. Loads the probes' data (the editor's asset manager imports what it has not); main
+	// thread.
+	[[nodiscard]] std::vector<ProbeSceneIssue> FindProbeSceneIssues(const Scene& scene, AssetManager& assets);
+
+}

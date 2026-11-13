@@ -764,6 +764,9 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Font | `.ttf` | Font | 5 | `FontImportSettings` | yes |
 | Gltf | `.glb` | Prefab | 3 | `GltfImportSettings` | yes |
 | Gltf | `.gltf` | Prefab | 3 | `GltfImportSettings` | yes |
+| Heightfield | `.heightfield` | Heightfield | 1 | none | yes |
+| IrradianceVolume | `.irradiance` | IrradianceVolume | 1 | none | yes |
+| Lut | `.cube` | Lut | 1 | none | yes |
 | Material | `.material` | Material | 2 | none | yes |
 | Prefab | `.prefab` | Prefab | 1 | none | yes |
 | Replay | `.replay` | Replay | 3 | none | yes |

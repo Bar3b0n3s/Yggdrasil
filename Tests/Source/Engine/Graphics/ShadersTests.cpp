@@ -21,8 +21,10 @@
 #include "Shared/InstanceRecord.h"
 #include "Shared/EnvironmentBakeConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/ExposureConstants.h"
 #include "Shared/ImGuiConstants.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/ProbeConstants.h"
 #include "Shared/DepthPyramidConstants.h"
 #include "Shared/GtaoConstants.h"
 #include "Shared/Light2DConstants.h"
@@ -316,6 +318,38 @@ namespace Engine {
 				.Program = "Tonemap",
 				.Entry = "CSMain",
 			},
+			// M26 (R-AEX, stream X-A): the Exposure program's push constants and its adapted exposure, which the Tonemap pass
+			// reads too (t8).
+			{
+				.Name = "ExposureConstants",
+				.Size = sizeof(ExposureConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, ImageSize),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, InverseImageSize),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, Flags),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, BloomIntensity),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, MinEV),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, MaxEV),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, SpeedUp),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, SpeedDown),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, DeltaTime),
+					ENGINE_TEST_SHARED_FIELD(ExposureConstants, Padding0),
+				},
+				.Program = "Exposure",
+				.Entry = "CSAdapt",
+			},
+			{
+				.Name = "ExposureState",
+				.Size = sizeof(ExposureState),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(ExposureState, AdaptedEV),
+					ENGINE_TEST_SHARED_FIELD(ExposureState, Multiplier),
+					ENGINE_TEST_SHARED_FIELD(ExposureState, TargetEV),
+					ENGINE_TEST_SHARED_FIELD(ExposureState, Padding0),
+				},
+				.Program = "Tonemap",
+				.Entry = "CSMain",
+			},
 			{
 				.Name = "BloomConstants",
 				.Size = sizeof(BloomConstants),
@@ -390,6 +424,47 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, Padding0),
 					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, Padding1),
 					ENGINE_TEST_SHARED_FIELD(EnvironmentConstants, Padding2),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): b4 of the forward passes.
+			{
+				.Name = "ProbeConstants",
+				.Size = sizeof(ProbeConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(ProbeConstants, Volumes),
+					ENGINE_TEST_SHARED_FIELD(ProbeConstants, Reflections),
+					ENGINE_TEST_SHARED_FIELD(ProbeConstants, Counts),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			{
+				.Name = "ProbeVolumeConstants",
+				.Size = sizeof(ProbeVolumeConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(ProbeVolumeConstants, WorldToLocal),
+					ENGINE_TEST_SHARED_FIELD(ProbeVolumeConstants, HalfSize),
+					ENGINE_TEST_SHARED_FIELD(ProbeVolumeConstants, AxisScale),
+					ENGINE_TEST_SHARED_FIELD(ProbeVolumeConstants, Probes),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			{
+				.Name = "ProbeReflectionConstants",
+				.Size = sizeof(ProbeReflectionConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(ProbeReflectionConstants, WorldToLocal),
+					ENGINE_TEST_SHARED_FIELD(ProbeReflectionConstants, LocalToWorld),
+					ENGINE_TEST_SHARED_FIELD(ProbeReflectionConstants, HalfSize),
+					ENGINE_TEST_SHARED_FIELD(ProbeReflectionConstants, AxisScale),
+					ENGINE_TEST_SHARED_FIELD(ProbeReflectionConstants, Lookup),
+					ENGINE_TEST_SHARED_FIELD(ProbeReflectionConstants, Indices),
 				},
 				.Program = "Scene",
 				.Entry = "PSForward",

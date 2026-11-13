@@ -38,11 +38,16 @@
 //      specular anti-aliasing) with the visible lights of the pixel's light cluster (artist units, windowed inverse-square
 //      falloff, smoothstep cones, SourceRadius widening; the clustered sum equals the sum over every light) and IBL (§8.6:
 //      SH9 diffuse, split-sum specular from the prefiltered cube, specular and horizon occlusion), or the constant ambient
-//      FallbackColor * Intensity without an environment map; emissive added.
+//      FallbackColor * Intensity without an environment map; inside M26's baked probes' boxes (Private/ProbeShading.h,
+//      Common/Probes.slang; not with RenderQualitySettings::Probes false, as in a bake's captures) an irradiance volume's SH9
+//      replaces the diffuse term and a reflection probe's box-projected cube the prefiltered specular; emissive added.
 //   8. Skybox (SkyboxPass.h): when the camera clears to the skybox and the environment has a map and ShowSkybox.
 //   9. Forward transparent: the Blend draws sorted back to front, alpha blended, depth tested without writes.
-//  10. Bloom (BloomPass.h): when PostProcessSettings::BloomEnabled.
-//  11. Tonemap + encode (TonemapPass.h): exposure 2^ExposureEV, the snapshot's tonemapper, the sRGB OETF, blue-noise dither
+//  10. Bloom (BloomPass.h): when PostProcessSettings::BloomEnabled. Then M26's Exposure pass (ExposurePass.h): with
+//      PostProcessSettings::ExposureMode Auto in a Lit view outside the wireframe and pixel-art mode, the luminance histogram
+//      of the image the tonemap exposes and the adapted exposure, starting afresh when the snapshot's history was reset.
+//  11. Tonemap + encode (TonemapPass.h): exposure 2^ExposureEV (times the adapted exposure with Auto), the snapshot's
+//      tonemapper, M26's grading LUT (PostProcessSettings::Lut, outside pixel-art mode), the sRGB OETF, blue-noise dither
 //      (the BlueNoise built-in through the GpuResourceCache). The renderer asks for it only when
 //      AssetManager::GetAssetType(BuiltinAssetHandles::BlueNoiseTexture) is AssetType::Texture, which records no
 //      diagnostic, and passes no blue noise (no dither) when that check fails or the mirror IsPlaceholder: a manager
@@ -58,7 +63,10 @@
 // views retain overlays/text. M9 AO/ShadowCascades/Overdraw and M23 LightCount suppress them except explicit capture
 // annotations (ADR0017); Overdraw uses a dedicated depth-independent additive pass, not the forward shading specialization.
 // A snapshot without a camera clears SceneColor to the default ClearColor and draws nothing but screen texts.
-// Rendering is deterministic for a snapshot on a given device (§8.3: no temporal effects), which the golden images rely on.
+// Rendering is deterministic for a snapshot on a given device (§8.3), which the golden images rely on. M26's temporal effects
+// keep a per-view state (auto-exposure's adapted exposure), which a snapshot whose history was reset (CameraData::
+// PreviousViewProjection empty: every capture's, Docs/Decisions/0037-m26-contract.md decision 10) starts afresh, so its
+// image never depends on the renders before it.
 //
 // Pipelines (§8.5, §8.12). SceneRendererPipelines holds every pipeline of the pass list, created once per device at startup
 // and shared by every SceneRenderer of that device (Docs/Decisions/0012-m7-decisions.md decision 7): the scene's own mesh
@@ -168,9 +176,10 @@ namespace Engine {
 		static constexpr uint32_t DebugViewPipelineCount = 9;
 		// Every pipeline Create makes: the mesh pipelines plus SkinningPass (1, M23), SkyboxPass (1), BloomPass (3), TonemapPass
 		// (1), FxaaPass (1), DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2),
-		// LightClusterPass (1, M23), Selection (8), the data-view composite (1), QuadBatcher (5: M18's 2, M21's HdrLit and
-		// Normals and M22's LdrDepth), UpscalePass (2) and M21's Lights2DPass (1): 64, the declarations' sum
-		// (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
+		// LightClusterPass (1, M23), Selection (8), the data-view composite (1), QuadBatcher (6: M18's 2, M21's HdrLit and
+		// Normals, M22's LdrDepth and M26's HdrAdditive), UpscalePass (2), M21's Lights2DPass (1) and M26's ExposurePass (2):
+		// 67, the declarations' sum (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against
+		// each pass's PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
@@ -399,7 +408,7 @@ namespace Engine {
 		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 8, stream Q-A): the last Render's SceneColor
 		// (SceneColorFormat: linear HDR radiance after the forward passes, the skybox and the Sprites stage, before the HDR post
 		// chain), at the scene resolution, borrowed until the next Render, Resize, ReleaseTargets or destruction; null before
-		// the first Render. ProbeCapture reads a bake's faces back from it. Until stream Q-A it returns null.
+		// the first Render. ProbeCapture reads a bake's faces back from it.
 		[[nodiscard]] nvrhi::ITexture* GetSceneColorTexture() const;
 		// Monotonic, nonzero; increments after actual resize or CancelPicks, never wraps/reuses a generation.
 		// Host calls CancelPicks on camera change, scene replacement, play target switch and hidden/minimized transition.

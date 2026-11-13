@@ -48,6 +48,10 @@ namespace Engine {
 				{ ".tilemap", "Tilemap", AssetType::Tilemap },
 				// M22.
 				{ ".stringtable", "StringTable", AssetType::StringTable },
+				// M26 (Docs/Decisions/0037-m26-contract.md decisions 8, 15 and 20).
+				{ ".irradiance", "IrradianceVolume", AssetType::IrradianceVolume },
+				{ ".cube", "Lut", AssetType::Lut },
+				{ ".heightfield", "Heightfield", AssetType::Heightfield },
 			};
 			for (const Expected& entry : expected)
 			{
@@ -64,7 +68,9 @@ namespace Engine {
 			CHECK(importers.FindForExtension(".unknown") == nullptr);
 			CHECK(importers.FindForExtension(".SpriteSheet") == importers.FindById("SpriteSheet"));
 			CHECK(importers.FindForExtension(".StringTable") == importers.FindById("StringTable"));
-			CHECK(importers.GetImporters().size() == 14);
+			CHECK(importers.FindForExtension(".CUBE") == importers.FindById("Lut"));
+			CHECK(importers.FindForExtension(".HeightField") == importers.FindById("Heightfield"));
+			CHECK(importers.GetImporters().size() == 17);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -72,7 +78,7 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 14);
+			REQUIRE(descriptions.size() == 17);
 			CHECK(descriptions.front().Id == "Audio");
 			CHECK(descriptions.back().Id == "Tilemap");
 			for (size_t index = 1; index < descriptions.size(); ++index)
@@ -107,6 +113,10 @@ namespace Engine {
 			CHECK(importers.FindById("StringTable")->GetSettingsTypeName().empty());
 			CHECK(registry->FindStruct("StringTable") != nullptr);
 			CHECK(registry->FindStruct("StringTableEntry") != nullptr);
+			// M26: nor has the irradiance volume importer (a binary source written by lighting.bake).
+			CHECK(importers.FindById("IrradianceVolume")->GetSettingsTypeName().empty());
+			// M26: nor has the heightfield importer; its source is binary samples (Asset/HeightfieldData.h).
+			CHECK(importers.FindById("Heightfield")->GetSettingsTypeName().empty());
 		}
 	}
 

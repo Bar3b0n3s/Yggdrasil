@@ -189,6 +189,8 @@ namespace Engine {
 				{ "ClearMode", { "Skybox", "Color" } },
 				{ "Tonemapper", { "AgX", "ACES", "PbrNeutral", "Linear" } },
 				{ "SsaoQuality", { "Low", "Medium", "High" } },
+				{ "ExposureMode", { "Manual", "Auto" } },
+				{ "AntiAliasing", { "None", "Fxaa", "Taa" } },
 				{ "TextSpace", { "Screen", "World" } },
 				{ "TextAlignment", { "Left", "Center", "Right" } },
 			};
@@ -203,6 +205,64 @@ namespace Engine {
 				CHECK(registered == values);
 			}
 			CHECK(registry->FindComponent("PostProcess")->FindField("SsaoQuality")->GetType().GetEnum() == registry->FindEnum("SsaoQuality"));
+			CHECK(registry->FindComponent("PostProcess")->FindField("ExposureMode")->GetType().GetEnum() == registry->FindEnum("ExposureMode"));
+			CHECK(registry->FindComponent("PostProcess")->FindField("AntiAliasing")->GetType().GetEnum() == registry->FindEnum("AntiAliasing"));
+		}
+
+		// M26 (C26.1, R-AEX, R-LUT, R-TAA, R-SSR; Docs/Decisions/0037-m26-contract.md decisions 12 and 27, stream X-A):
+		// PostProcess version 2 lists its fields in the format's order with their ranges and units, AntiAliasing in version
+		// 1's FxaaEnabled's place, and its validator refuses an inverted automatic exposure range, which Generate swaps.
+		TEST_CASE("RenderingRegistration: PostProcess version 2 lists the format's fields and refuses an inverted exposure range")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo& post = FindRenderingComponent(*registry, "PostProcess");
+			CHECK(post.GetVersion() == 2);
+			std::vector<std::string> fields;
+			for (const Scope<FieldInfo>& field : post.GetFields())
+				fields.push_back(field->GetName());
+			const std::vector<std::string> expected = { "ExposureEV", "ExposureMode", "AutoExposureMinEV", "AutoExposureMaxEV",
+				"AutoExposureSpeedUp", "AutoExposureSpeedDown", "Tonemap", "Lut", "LutIntensity", "SsaoEnabled", "SsaoRadius",
+				"SsaoIntensity", "SsaoQuality", "SsrEnabled", "SsrIntensity", "SsrMaxDistance", "SsrThickness", "SsrMaxRoughness",
+				"BloomEnabled", "BloomIntensity", "AntiAliasing" };
+			CHECK(fields == expected);
+			for (const std::string_view name : { "AutoExposureMinEV", "AutoExposureMaxEV" })
+			{
+				INFO(std::string(name));
+				CHECK(post.FindField(name)->GetMeta().Min == -16.0);
+				CHECK(post.FindField(name)->GetMeta().Max == 16.0);
+				CHECK(post.FindField(name)->GetMeta().Unit == "EV");
+			}
+			for (const std::string_view name : { "AutoExposureSpeedUp", "AutoExposureSpeedDown" })
+			{
+				INFO(std::string(name));
+				CHECK(post.FindField(name)->GetMeta().Min == doctest::Approx(0.01));
+				CHECK(post.FindField(name)->GetMeta().Max == 100.0);
+				CHECK(post.FindField(name)->GetMeta().Unit == "EV/s");
+			}
+			CHECK(post.FindField("SsrMaxDistance")->GetMeta().Min == doctest::Approx(0.1));
+			CHECK(post.FindField("SsrMaxDistance")->GetMeta().Max == 1000.0);
+			CHECK(post.FindField("SsrMaxDistance")->GetMeta().Unit == "m");
+			CHECK(post.FindField("SsrThickness")->GetMeta().Min == doctest::Approx(0.001));
+			CHECK(post.FindField("SsrThickness")->GetMeta().Max == 10.0);
+			for (const std::string_view name : { "LutIntensity", "SsrIntensity", "SsrMaxRoughness" })
+			{
+				INFO(std::string(name));
+				CHECK(post.FindField(name)->GetMeta().Min == 0.0);
+				CHECK(post.FindField(name)->GetMeta().Max == 1.0);
+			}
+
+			PostProcessComponent component;
+			CHECK(ValidateRendering(*registry, post, &component).empty());
+			component.AutoExposureMinEV = 4.0f;
+			component.AutoExposureMaxEV = 4.0f;
+			CHECK(ValidateRendering(*registry, post, &component).empty());
+			component.AutoExposureMaxEV = 2.0f;
+			CHECK(ValidateRendering(*registry, post, &component) == std::vector<std::string>{ "/AutoExposureMaxEV" });
+			Random random(7);
+			post.Generate(&component, random);
+			CHECK(component.AutoExposureMinEV == 2.0f);
+			CHECK(component.AutoExposureMaxEV == 4.0f);
+			CHECK(ValidateRendering(*registry, post, &component).empty());
 		}
 	}
 

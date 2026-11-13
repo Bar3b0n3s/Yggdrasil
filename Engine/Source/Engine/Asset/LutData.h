@@ -78,12 +78,15 @@ namespace Engine {
 	[[nodiscard]] Result<LutData> DeserializeLutPayload(std::span<const std::byte> payload);
 
 	// Parses an Adobe/IRIDAS `.cube` file (UTF-8 or ASCII text, external input): an optional TITLE "..." line, LUT_3D_SIZE N
-	// (MinLutSize to MaxLutSize), optional DOMAIN_MIN r g b and DOMAIN_MAX r g b (default 0 0 0 and 1 1 1), then exactly N^3
+	// (MinLutSize to MaxLutSize), optional DOMAIN_MIN r g b and DOMAIN_MAX r g b (default 0 0 0 and 1 1 1) or, instead of
+	// them, DaVinci Resolve's LUT_3D_INPUT_RANGE min max (the uniform domain [min, max] on every channel: DOMAIN_MIN min min
+	// min and DOMAIN_MAX max max max; the W26.1 integration's addition, Docs/Decisions/0037-m26-contract.md), then exactly N^3
 	// lines of three floats, red fastest; blank lines and lines starting with '#' are ignored anywhere, keywords may come in
-	// any order before the first data line, and numbers are read with the locale-independent from_chars. Never asserts on
-	// data. Errors: InvalidArgument for a file over MaxCubeLutBytes; Parse naming the line (1-based) for an unknown keyword,
-	// a malformed number, a data line before LUT_3D_SIZE, the wrong count of values on a line, or a table with fewer or more
-	// than N^3 entries; Unsupported for LUT_1D_SIZE (only 3D tables are graded); Validation from ValidateLutData.
+	// any order before the first data line, each at most once, and numbers are read with the locale-independent from_chars.
+	// Never asserts on data. Errors: InvalidArgument for a file over MaxCubeLutBytes; Parse naming the line (1-based) for an
+	// unknown or repeated keyword, LUT_3D_INPUT_RANGE beside DOMAIN_MIN or DOMAIN_MAX, a malformed number, a data line before
+	// LUT_3D_SIZE, the wrong count of values on a line, or a table with fewer or more than N^3 entries; Unsupported for
+	// LUT_1D_SIZE (only 3D tables are graded); Validation from ValidateLutData.
 	[[nodiscard]] Result<LutData> ParseCubeLut(std::string_view text);
 
 	// The complete cooked artifact (CookedHeader + payload, §6.8) of `lut`, produced by a source of version

@@ -15,7 +15,7 @@
 // phase (Scene/ParticleSystem.h) calls StepParticleEmitter once per fixed step the session ran, so an emitter's particles
 // are a function of its fields, its seed, its poses at the frames that stepped it and the tick count, never of the frame
 // rate within a frame or of the configuration. On the simulation path (Scene), so DetMath only: no CRT transcendental
-// function, no glm function built on one; directions are drawn from the seeded Random and DetMath's Sin, Cos and ACos.
+// function, no glm function built on one; directions are drawn from the seeded Random and DetMath's Sin, Cos and Pow.
 //
 // One step of dt seconds (FixedDelta), in this order:
 //   1. every live particle: PreviousPosition = Position; Velocity += Acceleration * dt; Velocity *= max(0, 1 - Drag * dt);
@@ -30,10 +30,11 @@
 //      emitter's CycleTime restarts at exactly 0 (the remainder dropped, so a cycle lasts a whole number of steps, at least
 //      one, and every cycle's first step emits its Burst), and a one-shot emitter's stays at Duration (it emits nothing
 //      more but queued emits).
-// A new particle draws, in this order, from the emitter's Random: its position and direction (Shape), its speed, its
-// lifetime and its size (each uniform in its range), so the draw count per particle is fixed; it starts with Age 0 and
-// PreviousPosition = Position. With SimulationSpace World its position and velocity are transformed by the emitter's world
-// matrix at the step; with Local they stay in the emitter's space.
+// A new particle draws, in this order, from the emitter's Random: its position and direction (Shape: four NextFloat draws
+// whatever the shape, those it does not use included), its speed, its lifetime and its size (one draw each, uniform in its
+// range), so every particle takes seven draws and a dropped emit takes none; it starts with Age 0 and PreviousPosition =
+// Position. With SimulationSpace World its position and velocity are transformed by the emitter's world matrix at the step
+// (a point and a direction); with Local they stay in the emitter's space.
 
 namespace Engine {
 
@@ -86,9 +87,10 @@ namespace Engine {
 	[[nodiscard]] float EvaluateParticleSize(const ParticleEmitterComponent& emitter, float normalizedAge);
 
 	// The seeded particle hash (the acceptance "the seeded particle hash is equal across configurations"): XXH64 (seed 0) over
-	// the particle count and every live particle's Position, PreviousPosition, Velocity, Age, Lifetime and StartSize as the
-	// little-endian bits of their floats, in order, then the Random state, CycleTime, Cycles, EmitAccumulator, PendingEmits
-	// and Steps. Test.GetParticleDigest returns it as 16 hexadecimal digits. Pure.
+	// the particle count (8 bytes) and every live particle's Position, PreviousPosition, Velocity, Age, Lifetime and StartSize
+	// as the little-endian bits of their floats (4 bytes each), in order, then the Random state (its four 64-bit words),
+	// CycleTime, Cycles, EmitAccumulator, PendingEmits (4 bytes each) and Steps (8 bytes), every value little-endian.
+	// Test.GetParticleDigest returns it as 16 hexadecimal digits. Pure.
 	[[nodiscard]] uint64_t ComputeParticleDigest(const ParticleEmitterState& state);
 
 }

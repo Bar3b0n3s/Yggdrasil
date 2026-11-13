@@ -542,9 +542,8 @@ namespace Engine {
 		[[nodiscard]] const AnimationSystem* GetAnimation() const;
 
 		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 6): the session's particles (Scene/ParticleSystem.h),
-		// which the Particles frame phase steps, in Play and Simulate alike. Stream P-A creates it with the session (and keeps
-		// it across a scene transition: its state lives in the scene's runtime components) and enters the phase; until then it
-		// is null and the session has no Particles phase.
+		// which the Particles frame phase steps, in Play and Simulate alike. Created with the session and kept across a scene
+		// transition (its state lives in the scene's runtime components); never null once the session is created.
 		[[nodiscard]] ParticleSystem* GetParticles();
 		[[nodiscard]] const ParticleSystem* GetParticles() const;
 

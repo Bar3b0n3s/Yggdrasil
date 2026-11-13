@@ -30,8 +30,11 @@
 #include "Engine/ImGui/ImGuiScreenshot.h"
 #include "Engine/Platform/ProjectLock.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/ProbeCapture.h"
+#include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -671,9 +674,9 @@ namespace Engine {
 			LayerUiHarness ui(std::move(specification));
 			ui.Draw();
 			ui.Draw();
-			// Open the real Tools menu, the main menu bar's last, and click its item. EndMenuBar leaves the bar's cursor after
-			// the last menu, and each menu advances its label's width plus twice the item spacing, its label starting half the
-			// spacing in.
+			// Open the real Tools menu, the main menu bar's last, and click its first item, Reload shaders (M26's Bake lighting
+			// follows it, Docs/Decisions/0037-m26-contract.md decision 8). EndMenuBar leaves the bar's cursor after the last menu,
+			// and each menu advances its label's width plus twice the item spacing, its label starting half the spacing in.
 			auto clickReload = [&ui]()
 			{
 				const ImGuiWindow* bar = ImGui::FindWindowByName("##MainMenuBar");
@@ -686,7 +689,7 @@ namespace Engine {
 				REQUIRE_FALSE(popups.empty());
 				const ImGuiWindow* menu = popups.back().Window;
 				REQUIRE(menu != nullptr);
-				ui.Click({ menu->Pos.x + menu->Size.x / 2, menu->DC.CursorPosPrevLine.y + ImGui::GetTextLineHeight() / 2 });
+				ui.Click({ menu->Pos.x + menu->Size.x / 2, menu->DC.CursorStartPos.y + ImGui::GetTextLineHeight() / 2 });
 			};
 			clickReload();
 			// The action runs at the next safe point, outside the ImGui traversal.
@@ -701,6 +704,72 @@ namespace Engine {
 			REQUIRE(ui.SafePoint());
 			CHECK(reported.GetMatchCount() == 1);
 			CHECK(reloads == 1);
+		}
+
+		TEST_CASE("EditorLayer: the Tools menu's Bake lighting bakes the active scene through lighting.bake" * doctest::test_suite(Test::GpuSuite))
+		{
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 8): the item after Reload shaders, enabled by
+			// IsLightingBakeAvailable, submits lighting.bake without params, so the menu bakes the active scene's probes exactly
+			// as the method does; without a renderer (no probe capture, --renderer none) it is disabled and a click does nothing.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			LayerUiHarness ui;
+			EditorContext& editor = ui.Environment.GetEditor();
+			const Entity volume = editor.GetScene().CreateEntity("Volume");
+			IrradianceVolumeComponent& grid = volume.AddComponent<IrradianceVolumeComponent>();
+			grid.Size = glm::vec3(4.0f, 2.0f, 4.0f);
+			grid.ProbeCountX = 2;
+			grid.ProbeCountY = 2;
+			grid.ProbeCountZ = 2;
+			const UUID volumeId = volume.GetUUID();
+			ui.Draw();
+			ui.Draw();
+			// Open the real Tools menu, the main menu bar's last (as the Reload shaders case does), unless a click on its
+			// disabled item left it open, and click its last item.
+			auto clickBake = [&ui]()
+			{
+				auto& popups = ImGui::GetCurrentContext()->OpenPopupStack;
+				if (popups.empty())
+				{
+					const ImGuiWindow* bar = ImGui::FindWindowByName("##MainMenuBar");
+					REQUIRE(bar != nullptr);
+					const float spacing = ImGui::GetStyle().ItemSpacing.x;
+					const float label = ImGui::CalcTextSize("Tools").x;
+					const float x = bar->Pos.x + bar->DC.MenuBarOffset.x - 2 * spacing - label + spacing / 2 + label / 2;
+					ui.Click({ x, ImGui::GetFrameHeight() / 2 });
+				}
+				REQUIRE_FALSE(popups.empty());
+				const ImGuiWindow* menu = popups.back().Window;
+				REQUIRE(menu != nullptr);
+				ui.Click({ menu->Pos.x + menu->Size.x / 2, menu->DC.CursorPosPrevLine.y + ImGui::GetTextLineHeight() / 2 });
+			};
+			const auto volumeData = [&editor, volumeId]()
+			{
+				return editor.GetScene().FindEntityByID(volumeId).GetComponent<IrradianceVolumeComponent>().Data.GetHandle();
+			};
+
+			clickBake();
+			REQUIRE(ui.SafePoint());
+			CHECK_FALSE(volumeData().IsValid());
+			{
+				GpuResourceCache cache(gpu.GetDevice(), editor.GetAssets());
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<ProbeCapture>> capture = ProbeCapture::Create(gpu.GetDevice(), **pipelines, cache, editor.GetAssets());
+				REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+				editor.SetProbeCapture(capture->get());
+				clickBake();
+				// The bake runs at the next safe point, outside the ImGui traversal.
+				CHECK_FALSE(volumeData().IsValid());
+				REQUIRE(ui.SafePoint());
+				CHECK(volumeData().IsValid());
+				CHECK(editor.GetHistory().GetUndoLabel().find("Bake Lighting") != std::string::npos);
+				editor.SetProbeCapture(nullptr);
+				capture->reset();
+				pipelines->reset();
+				gpu.GetDevice().WaitForIdle();
+			}
+			gpu.GetDevice().RunGarbageCollection();
 		}
 
 		TEST_CASE("EditorLayer: first thumbnail load invalidates version zero and the next request succeeds")

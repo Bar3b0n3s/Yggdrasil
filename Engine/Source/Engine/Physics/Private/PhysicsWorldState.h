@@ -32,8 +32,8 @@ namespace Engine {
 		// ColliderShapeDescription::UserData of each collider, in description order. Several make Shape a
 		// JPH::StaticCompoundShape whose sub-shape user data they are; one makes Shape that collider's own shape.
 		std::vector<uint32_t> ColliderUserData{};
-		// Whether a collider is a triangle mesh (a Dynamic body cannot use the shape, PHYSICS_NONCONVEX_DYNAMIC; two such
-		// bodies never meet, PhysicsCollisionGroups).
+		// Whether a collider is a triangle mesh or (M26) a height field (a Dynamic body cannot use the shape,
+		// PHYSICS_NONCONVEX_DYNAMIC; two such bodies never meet, PhysicsCollisionGroups).
 		bool HasMesh = false;
 	};
 

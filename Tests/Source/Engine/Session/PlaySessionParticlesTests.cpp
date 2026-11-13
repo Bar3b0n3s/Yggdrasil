@@ -2,6 +2,7 @@
 
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Core/Error.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
@@ -21,9 +22,9 @@
 #include <utility>
 #include <vector>
 
-// The play session's particles (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decisions 5 and 6): the Particles
-// frame phase's place (ADR 0028's phase-3 execution order), the live guard that particles never change the state hash, and
-// the phase's stepping, which stream P-A implements.
+// The play session's particles (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decisions 5 and 6, stream P-A): the
+// Particles frame phase's place (ADR 0028's phase-3 execution order), the live guard that particles never change the state
+// hash, the phase's stepping and the script entries' runtime state.
 
 namespace Engine {
 
@@ -36,6 +37,14 @@ namespace Engine {
 
 			std::vector<PlaySessionPhase> Phases;
 		};
+
+		// The code of a failed status, or nullopt for a success.
+		std::optional<ErrorCode> ErrorCodeOf(const Status& status)
+		{
+			if (status)
+				return std::nullopt;
+			return status.error().GetCode();
+		}
 
 		// The index of `phase` in `phases`, or the list's size when it is absent.
 		size_t FindPhase(const std::vector<PlaySessionPhase>& phases, PlaySessionPhase phase)
@@ -107,7 +116,7 @@ namespace Engine {
 		// Stream P-A enters the phase: in Play and Simulate, after AudioUpdate (Play only) and right before RenderExtraction,
 		// with the session's ParticleSystem; the streams that enter a phase add it to PlaySessionTests.cpp's phase lists at its
 		// place (ADR 0028's phase-3 ledger).
-		TEST_CASE("PlaySession: the Particles phase runs before the extraction, in Simulate too" * doctest::skip(true))
+		TEST_CASE("PlaySession: the Particles phase runs before the extraction, in Simulate too")
 		{
 			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
 			{
@@ -131,7 +140,7 @@ namespace Engine {
 
 		// Decision 6: one emitter step per tick the frame ran, never per frame: a paused session's frames step nothing, and a
 		// frame after three fixed steps steps three times, so the particles depend on the ticks alone.
-		TEST_CASE("ParticleSystem: the phase steps each emitter once per tick the frame ran, so a paused session freezes its particles" * doctest::skip(true))
+		TEST_CASE("ParticleSystem: the phase steps each emitter once per tick the frame ran, so a paused session freezes its particles")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -161,7 +170,7 @@ namespace Engine {
 		// spawned at tick 600 and emitted at once (as a script's OnUpdate would) gets its state from Emit, unanchored; the next
 		// frame's phase anchors it and steps it once, so its queued particles show in that frame, newly born, instead of being
 		// spawned and aged through the 600 ticks before the emitter existed.
-		TEST_CASE("ParticleSystem: an emitter spawned and emitted at tick 600 starts there, its particles shown in the next frame" * doctest::skip(true))
+		TEST_CASE("ParticleSystem: an emitter spawned and emitted at tick 600 starts there, its particles shown in the next frame")
 		{
 			Test::SceneTestFixture fixture;
 			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, PlayMode::Simulate));
@@ -184,6 +193,117 @@ namespace Engine {
 			for (const Particle& particle : state.State.Particles)
 				CHECK(particle.Age == 0.0f);
 			CHECK(FindParticleDigest(burst).has_value());
+		}
+
+		// Decision 6: a phase steps a state at most MaxParticleStepsPerPhase times; the rest of a longer gap (fixed steps run
+		// without frames) is dropped, not caught up later.
+		TEST_CASE("ParticleSystem: a phase steps a state at most MaxParticleStepsPerPhase times and drops the rest of a longer gap")
+		{
+			Test::SceneTestFixture fixture;
+			static_cast<void>(fixture.GetScene().CreateEntity("Sparks").AddComponent<ParticleEmitterComponent>(ParticleEmitterComponent{ .Rate = 60.0f }));
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, PlayMode::Simulate));
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			(*session)->Tick();
+			const Entity sparks = (*session)->GetScene().FindEntityByPath("/Sparks");
+			REQUIRE(sparks.GetComponent<ParticleStateComponent>().State.Steps == 1);
+			for (int step = 0; step < 100; ++step)
+				(*session)->FixedStep();
+			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0, .UnscaledDeltaTime = 1.0, .Alpha = 1.0, .FrameIndex = 100 });
+			const ParticleStateComponent& state = sparks.GetComponent<ParticleStateComponent>();
+			CHECK(state.State.Steps == 1 + MaxParticleStepsPerPhase);
+			CHECK(state.LastTick == std::optional<uint64_t>(101));
+			CHECK((*session)->GetParticles()->GetStats().Steps == MaxParticleStepsPerPhase);
+			// The next frame after one more tick steps once: the dropped ticks are never caught up.
+			(*session)->Tick();
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.Steps == 2 + MaxParticleStepsPerPhase);
+		}
+
+		// Decision 6: the phase runs whether or not the game view is extracted, and Play and Simulate step alike, so a particle
+		// digest depends on the ticks and the emitters' poses alone.
+		TEST_CASE("ParticleSystem: an emitter's digest is the same with and without extraction, in Play and Simulate")
+		{
+			std::vector<uint64_t> digests;
+			for (const auto& [mode, extract] : { std::pair{ PlayMode::Play, true }, std::pair{ PlayMode::Play, false }, std::pair{ PlayMode::Simulate, true },
+					 std::pair{ PlayMode::Simulate, false } })
+			{
+				CAPTURE(static_cast<int>(mode));
+				CAPTURE(extract);
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				static_cast<void>(Test::AddGround(scene));
+				scene.CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+				static_cast<void>(AddFallingEmitter(scene));
+				Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, mode));
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				(*session)->SetExtractionEnabled(extract);
+				Test::RunTicks(**session, 45);
+				const Entity sparks = (*session)->GetScene().FindEntityByPath("/Box/Sparks");
+				const std::optional<uint64_t> digest = FindParticleDigest(sparks);
+				REQUIRE(digest.has_value());
+				digests.push_back(*digest);
+				CHECK((*session)->GetParticles()->GetStats().Emitters == 1);
+				CHECK((*session)->GetParticles()->GetStats().Particles == sparks.GetComponent<ParticleStateComponent>().State.Particles.size());
+			}
+			CHECK(digests == std::vector<uint64_t>(digests.size(), digests.front()));
+		}
+
+		// Decisions 6 and 26: Emit and Clear write only the runtime state (no revision, no hashed state), an emitter's state
+		// ends when it loses its ParticleEmitter or is disabled, and the entries refuse a count outside its range and an entity
+		// without an emitter.
+		TEST_CASE("ParticleSystem: Emit and Clear write only the runtime state, and an emitter removed or disabled loses its particles")
+		{
+			Test::SceneTestFixture fixture;
+			static_cast<void>(fixture.GetScene().CreateEntity("Sparks").AddComponent<ParticleEmitterComponent>(ParticleEmitterComponent{ .Rate = 0.0f, .MaxParticles = 64 }));
+			static_cast<void>(fixture.GetScene().CreateEntity("Plain"));
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, PlayMode::Simulate));
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			Test::RunTicks(**session, 3);
+			Scene& scene = (*session)->GetScene();
+			const Entity sparks = scene.FindEntityByPath("/Sparks");
+			const Entity plain = scene.FindEntityByPath("/Plain");
+			const uint64_t revision = scene.GetRevision();
+			const uint64_t hash = (*session)->ComputeStateHash();
+
+			CHECK(ErrorCodeOf(QueueParticleEmit(sparks, 0)) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(QueueParticleEmit(sparks, MaxParticlesPerEmitter + 1)) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(QueueParticleEmit(plain, 1)) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(ClearParticles(plain)) == ErrorCode::NotFound);
+			CHECK_FALSE(plain.HasComponent<ParticleStateComponent>());
+			CHECK_FALSE(FindParticleDigest(plain).has_value());
+			REQUIRE(QueueParticleEmit(sparks, 30));
+			REQUIRE(QueueParticleEmit(sparks, 10));
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.PendingEmits == 40);
+			CHECK(scene.GetRevision() == revision);
+			CHECK((*session)->ComputeStateHash() == hash);
+			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 0.0, .UnscaledDeltaTime = 0.0, .Alpha = 1.0, .FrameIndex = 10 });
+			// No tick passed, so the queued emits wait for the next step.
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.Particles.empty());
+			(*session)->Tick();
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.Particles.size() == 40);
+			// Clear kills the particles and drops what is queued; the stream goes on.
+			REQUIRE(QueueParticleEmit(sparks, 5));
+			REQUIRE(ClearParticles(sparks));
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.Particles.empty());
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.PendingEmits == 0);
+			(*session)->Tick();
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.Particles.empty());
+
+			// Disabled, the emitter loses its state at the next phase; enabled again, it starts afresh there.
+			REQUIRE(QueueParticleEmit(sparks, 5));
+			(*session)->Tick();
+			REQUIRE(sparks.GetComponent<ParticleStateComponent>().State.Particles.size() == 5);
+			sparks.SetActive(false);
+			(*session)->Tick();
+			CHECK_FALSE(sparks.HasComponent<ParticleStateComponent>());
+			CHECK_FALSE(FindParticleDigest(sparks).has_value());
+			sparks.SetActive(true);
+			(*session)->Tick();
+			REQUIRE(sparks.HasComponent<ParticleStateComponent>());
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.Steps == 1);
+			// Without its ParticleEmitter, the entity loses its state at the next phase.
+			sparks.RemoveComponent<ParticleEmitterComponent>();
+			(*session)->Tick();
+			CHECK_FALSE(sparks.HasComponent<ParticleStateComponent>());
 		}
 	}
 
