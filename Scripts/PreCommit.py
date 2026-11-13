@@ -94,9 +94,10 @@ from Lib.report import (
 from Lib.scripts import CONTRACT_FLAG_HELP, mode_note, run_script, run_static_checks, test_mode_arguments
 
 # Hang bounds only. The Debug tests step runs the unit, gpu (both API caps), golden, feature, automation and games
-# suites, about 3,600 s on an unloaded machine (ADR 0039: the automation suite alone takes 1,562 s), so its bound
-# leaves three times that for a machine the phase's other worktrees load.
-TIMEOUTS = {"generate": 600.0, "build": 7200.0, "references": 180.0, "tests": 10800.0}
+# suites, about 3,600 s on an unloaded machine (ADR 0039: the automation suite alone takes 1,562 s); at phase 3's
+# setup gate, beside four other agents' builds, it took 8,098 s, and its Debug unit and automation runs are bounded by
+# 3,600 s and 7,200 s (Test.py), so its bound leaves four times the unloaded time for a loaded machine.
+TIMEOUTS = {"generate": 600.0, "build": 7200.0, "references": 180.0, "tests": 14400.0}
 
 
 def run_step(name: str, script: str, arguments: list[str], console: Console) -> Step:

@@ -19,6 +19,13 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 import Scaffold as scaffold  # noqa: E402  (Scripts/ is on sys.path above)
 from Lib.report import Console  # noqa: E402
 
+# The bound of the byte-for-byte check's `Scaffold.py --check` run, which only catches a hang. FeatureTest has 55
+# scaffold files after phase 2, and the Debug check took more than its former 1,800 s at the phase-3 setup gate
+# (2026-11-11), the Debug editor regenerating the project beside four other worktrees' builds
+# (Docs/Decisions/0039-script-budget-cpu-time.md decision 5's amendment). In Release the automation run's own 1,800 s
+# bound (SUITE_TIMEOUT_SECONDS in Scripts/Test.py) stays the nearer one.
+SCAFFOLD_CHECK_TIMEOUT_SECONDS = 3600.0
+
 
 class ScaffoldManifestTests(unittest.TestCase):
     """Scaffold.py's reading of Scaffold/Scaffolds.json, on manifests in a temporary project; no editor runs."""
@@ -72,7 +79,7 @@ class FeatureTestScaffoldTests(AutomationTestCase):
         process = subprocess.run(
             [sys.executable, str(REPOSITORY_ROOT / "Scripts" / "Scaffold.py"), "--check",
              "--config", automation_config()],
-            capture_output=True, text=True, timeout=1800.0, check=False)
+            capture_output=True, text=True, timeout=SCAFFOLD_CHECK_TIMEOUT_SECONDS, check=False)
         self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
 
     def test_scaffold_refuses_a_project_an_editor_holds_before_removing_anything(self) -> None:

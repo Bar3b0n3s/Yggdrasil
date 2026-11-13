@@ -25,6 +25,7 @@
 namespace Engine {
 
 	class IEnvironmentBaker;
+	class ScriptApiRegistry;
 
 	namespace Test {
 
@@ -43,6 +44,9 @@ namespace Engine {
 			// The generators of Generated built-ins (EditorCore's GetEngineAssetGenerators in editor tests); must outlive the
 			// fixture.
 			std::span<const EngineAssetGenerator> EngineAssetGenerators{};
+			// The asset manager's load-time script API (EditorAssetManagerSpecification::LoadTimeScriptApi); must outlive the
+			// fixture. Null: each script import's VM builds its own.
+			ScriptApiRegistry* LoadTimeScriptApi = nullptr;
 		};
 
 		// One asset environment of one test: project:// and cache:// as MemoryMounts (project://Assets created), a JobSystem

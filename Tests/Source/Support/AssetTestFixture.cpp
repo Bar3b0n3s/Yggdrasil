@@ -40,6 +40,7 @@ namespace Engine {
 				.Loaders = &m_Loaders,
 				.EnvironmentBaker = options.EnvironmentBaker,
 				.ScriptDiagnostics = nullptr,
+				.LoadTimeScriptApi = options.LoadTimeScriptApi,
 				.EngineAssetGenerators = options.EngineAssetGenerators,
 			});
 		}

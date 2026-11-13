@@ -32,6 +32,7 @@ namespace Engine {
 
 	class IEnvironmentBaker;
 	class IScriptDiagnosticsProvider;
+	class ScriptApiRegistry;
 	class TypeRegistry;
 	class VirtualFileSystem;
 
@@ -89,6 +90,10 @@ namespace Engine {
 			std::span<const ImportAssetLookupEntry> Assets{};
 			IEnvironmentBaker* EnvironmentBaker = nullptr;           // null without a GPU (§7.4 EnvironmentImporter)
 			IScriptDiagnosticsProvider* ScriptDiagnostics = nullptr; // null in tools without the type checker (§7.4)
+			// The frozen pure script API (PureScriptApi, Scripting/Sandbox.h) a script import's load-time VM binds instead of
+			// building its own, so concurrent imports share one (Docs/Decisions/0041-script-check-performance.md decision 3);
+			// null in tools without one. Borrowed; outlives the context.
+			ScriptApiRegistry* LoadTimeScriptApi = nullptr;
 		};
 
 		explicit ImportContext(Specification specification);
@@ -103,6 +108,7 @@ namespace Engine {
 		[[nodiscard]] const TypeRegistry& GetRegistry() const { return *m_Specification.Registry; }
 		[[nodiscard]] IEnvironmentBaker* GetEnvironmentBaker() const { return m_Specification.EnvironmentBaker; }
 		[[nodiscard]] IScriptDiagnosticsProvider* GetScriptDiagnostics() const { return m_Specification.ScriptDiagnostics; }
+		[[nodiscard]] ScriptApiRegistry* GetLoadTimeScriptApi() const { return m_Specification.LoadTimeScriptApi; }
 
 		// Reads a file the source references, recording it as a dependency read (path and XXH64), so a cached import is
 		// valid only while the file is unchanged. `path` must be in the source's scheme and inside its asset root: under

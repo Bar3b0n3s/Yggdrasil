@@ -43,6 +43,7 @@
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/Sandbox.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
@@ -650,8 +651,8 @@ namespace Engine {
 	// --- EditorContext ---------------------------------------------------------------------------------------------------
 
 	EditorContext::EditorContext(ConstructionKey /*key*/, EngineContext& engine, const EditorContextSpecification& specification,
-		const Random::State& idGeneratorState)
-		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_Importers(CreateScope<ImporterRegistry>()), m_Loaders(CreateScope<AssetLoaderRegistry>()), m_History(specification.HistoryLimits), m_Play(CreateScope<EditorPlayController>(*this))
+		const Random::State& idGeneratorState, Scope<PureScriptApi> loadTimeScriptApi)
+		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_LoadTimeScriptApi(std::move(loadTimeScriptApi)), m_Importers(CreateScope<ImporterRegistry>()), m_Loaders(CreateScope<AssetLoaderRegistry>()), m_History(specification.HistoryLimits), m_Play(CreateScope<EditorPlayController>(*this))
 	{
 		// The editor's asset services (§3 rule 4): the built-in importers and loaders, and the manager the engine context
 		// serves to engine code.
@@ -668,6 +669,7 @@ namespace Engine {
 			.Loaders = m_Loaders.get(),
 			.EnvironmentBaker = specification.EnvironmentBaker,
 			.ScriptDiagnostics = nullptr,
+			.LoadTimeScriptApi = &m_LoadTimeScriptApi->GetApi(),
 			.EngineAssetGenerators = GetEngineAssetGenerators(),
 		});
 		// Borrowed editor back-reference, cleared after CloseProject drains the manager and before members are destroyed.
@@ -1176,12 +1178,22 @@ namespace Engine {
 
 	Result<Scope<EditorContext>> EditorContext::Create(EngineContext& engine, const EditorContextSpecification& specification)
 	{
+		// Built once, so a script import's load-time VM no longer registers the whole API (decision 3 of
+		// Docs/Decisions/0041-script-check-performance.md).
+		Result<Scope<PureScriptApi>> loadTimeScriptApi = PureScriptApi::Create();
+		if (!loadTimeScriptApi)
+			return std::unexpected(std::move(loadTimeScriptApi).error().WithContext("building the editor's load-time script API"));
 		if (specification.IdGeneratorState.has_value())
-			return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *specification.IdGeneratorState);
+			return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *specification.IdGeneratorState, std::move(*loadTimeScriptApi));
 		Result<Random::State> generated = SecureRandom::GenerateState();
 		if (!generated)
 			return std::unexpected(std::move(generated).error().WithContext("seeding the editor's id generator"));
-		return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *generated);
+		return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *generated, std::move(*loadTimeScriptApi));
+	}
+
+	ScriptApiRegistry& EditorContext::GetLoadTimeScriptApi()
+	{
+		return m_LoadTimeScriptApi->GetApi();
 	}
 
 	EditorScriptService* EditorContext::GetScriptService()
@@ -1223,17 +1235,17 @@ namespace Engine {
 	Status EditorContext::RefreshScriptServices()
 	{
 		ENGINE_TRY_ASSIGN(ScriptTypeCheckerConfiguration configuration, ScriptTypeChecker::CaptureConfiguration(GetVfs()));
+		// Only present files, as the checker's environment hash: a new directory without a .luaurc keeps the checker, and with
+		// it every script's check (Docs/Decisions/0041-script-check-performance.md decision 2).
 		XXH64Hasher hash;
 		for (const auto& file : configuration.Files)
 		{
+			if (!file.Source)
+				continue;
 			hash.UpdateU64(file.Path.ToString().size());
 			hash.Update(file.Path.ToString());
-			hash.UpdateU64(file.Source.has_value());
-			if (file.Source)
-			{
-				hash.UpdateU64(file.Source->size());
-				hash.Update(*file.Source);
-			}
+			hash.UpdateU64(file.Source->size());
+			hash.Update(*file.Source);
 		}
 		if (m_ScriptChecker && hash.Digest() == m_ScriptConfigurationHash)
 			return {};
