@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "Editor/EditorLayer.h"
 
+#include "Editor/AssetDesignInteraction.h"
 #include "Editor/EditorPanelContext.h"
 #include "Editor/PanelInteractionFixture.h"
 #include "Editor/Private/EditorHostPreferences.h"
@@ -702,6 +703,65 @@ namespace Engine {
 			REQUIRE(ui.SafePoint());
 			CHECK(reported.GetMatchCount() == 1);
 			CHECK(reloads == 1);
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 15): the Graph Editor is a window of its own that the layer draws while a
+		// graph is open in it, not an EditorPanel, so the open panels editor.state lists and the layout saves do not change.
+		TEST_CASE("EditorLayer: a graph double-clicked in the content browser opens in the Graph Editor window, which is no panel")
+		{
+			Test::WorkspaceTestUi ui;
+			EditorContext& editor = ui.Environment.GetEditor();
+			REQUIRE(ui.Client.Call("graph.create", Json{ { "path", "Assets/Door.graph" } }));
+			const std::optional<AssetHandle> graph = editor.GetAssets().Resolve("Assets/Door.graph");
+			REQUIRE(graph.has_value());
+			ui.Draw();
+			ui.Draw();
+			EditorUiState& state = editor.GetUiState();
+			const std::vector<EditorPanel> panels(state.GetOpenPanels().begin(), state.GetOpenPanels().end());
+			CHECK(ImGui::FindWindowByName("Graph Editor") == nullptr);
+
+			// The graph's tile in the content browser's grid (ContentBrowserPanel.cpp's ids), double-clicked.
+			ImGuiWindow* content = ui.Window("Assets###ContentBrowser");
+			const std::string project = FileSystem::PathToUtf8(editor.GetProject().GetProjectFile());
+			const ImGuiID columns = ImHashStr("ContentColumns", 0, Test::AssetDesignInteraction::AuthoredScope(content->ID, project));
+			ImGuiWindow* grid = nullptr;
+			for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+			{
+				if (window->Active && window->ParentWindow == content && window->ChildId == ImHashStr("AssetTiles", 0, columns))
+					grid = window;
+			}
+			REQUIRE(grid != nullptr);
+			// The bottom dock is short: the grid is scrolled with the wheel, as a user would, until the tile shows.
+			const ImGuiID tileId = ImHashStr("##Asset", 0, ImHashStr(graph->ToString().c_str(), 0, grid->GetID("AssetGrid")));
+			ImVec2 tile = ui.Locate(grid, tileId).GetCenter();
+			for (int step = 0; step < 20 && !grid->InnerClipRect.Contains(tile); ++step)
+			{
+				const ImVec2 center = grid->InnerClipRect.GetCenter();
+				ImGui::GetIO().AddMousePosEvent(center.x, center.y);
+				ImGui::GetIO().AddMouseWheelEvent(0.0f, tile.y > center.y ? -1.0f : 1.0f);
+				ui.Draw();
+				tile = ui.Locate(grid, tileId).GetCenter();
+			}
+			REQUIRE(grid->InnerClipRect.Contains(tile));
+			ImGui::GetIO().AddMousePosEvent(tile.x, tile.y);
+			ui.Draw();
+			for (int click = 0; click < 2; ++click)
+			{
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+				ui.Draw();
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+				ui.Draw();
+			}
+			for (int round = 0; round < 6; ++round)
+			{
+				REQUIRE(ui.Layer.OnSafePoint(0.0));
+				ui.Draw();
+			}
+			const ImGuiWindow* window = ImGui::FindWindowByName("Graph Editor");
+			REQUIRE(window != nullptr);
+			CHECK(window->WasActive);
+			CHECK(ui.Text().contains("Door  (Assets/Door.graph)"));
+			CHECK(std::vector<EditorPanel>(state.GetOpenPanels().begin(), state.GetOpenPanels().end()) == panels);
 		}
 
 		TEST_CASE("EditorLayer: the Window menu's Platform windows checkbox writes the preference at the next safe point")

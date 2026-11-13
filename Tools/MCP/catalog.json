@@ -1127,6 +1127,37 @@
 			"timeoutSeconds": 60
 		},
 		{
+			"name": "graph_live_values",
+			"method": "graph.liveValues",
+			"description": "Reads, during play (a test run's included) and without changing the session, a graph behaviour's last node values, its fields and variables and the script errors its code raised, mapped to nodes.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphLiveValuesParams",
+				"description": "The params of graph.liveValues.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"script": {
+						"description": "The slot's behaviour name, matched against the graph's current Name (of two such slots, the first); empty: the entity's first slot holding a graph.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
 			"name": "graph_nodes",
 			"method": "graph.nodes",
 			"description": "Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own Self.Get and Self.Set kinds.",

@@ -3,6 +3,8 @@
 
 #include "EditorCore/EditorContext.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -168,6 +170,46 @@ namespace Engine {
 			const Result<Json> play = MakeScriptSlotChange(scene, one, ScriptSlotChange::Append, 0, SceneTarget::Play);
 			REQUIRE(play.has_value());
 			CHECK((*play)["ops"][0]["params"]["target"] == Json("Play"));
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 15, the graph editor's CreateGraphInSlot): the inspector's New graph
+		// creates the graph and puts it in the slot of every selected entity, without the slot's old field values, keeping its
+		// order and the other slots, as one edit.batch, so one undo removes the graph and restores the slots.
+		TEST_CASE("ScriptSlotList: New graph creates a graph and puts it in the slot of every selected entity in one undo step")
+		{
+			Test::AutomationFixture setup("ScriptSlotListGraph");
+			EditorContext& editor = setup.GetEditor();
+			const Json written = CallScriptSlotList(setup, "script.write", Json{ { "path", "Assets/Scripts/Aim.luau" }, { "source", "return Script.Define(\"Aim\", {Fields = {Amount = Field.Number(1)}})" } });
+			const std::string aim = JsonReader(written["script"]["id"]).ReadString().value_or(std::string());
+			CallScriptSlotList(setup, "entity.create", Json{ { "name", "Turret" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", aim } }, Json{ { "Script", aim }, { "Fields", Json{ { "Amount", 2 } } }, { "ExecutionOrder", 3 } } }) } } } } } });
+			CallScriptSlotList(setup, "entity.create", Json{ { "name", "Tower" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json::object(), Json::object() }) } } } } } });
+			Scene& scene = editor.GetScene();
+			const std::vector<UUID> both{ scene.FindEntityByPath("/Turret").GetUUID(), scene.FindEntityByPath("/Tower").GetUUID() };
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			const Result<Json> batch = MakeScriptSlotGraph(scene, both, 1, "Assets/Scripts/Turret.graph", SceneTarget::Edit);
+			REQUIRE_MESSAGE(batch.has_value(), batch.error().ToString());
+			CHECK((*batch)["label"] == Json("New Graph"));
+			const Json created = CallScriptSlotList(setup, "edit.batch", *batch);
+			const std::string graph = JsonReader(created["results"][0]["graph"]["id"]).ReadString().value_or(std::string());
+			CHECK(created["results"][0]["name"] == Json("Turret"));
+			CHECK(ReadSlotScripts(scene, "/Turret") == std::vector<std::string>{ aim, graph });
+			CHECK(ReadSlotScripts(scene, "/Tower") == std::vector<std::string>{ "null", graph });
+			const Result<Json> turret = ComponentAccess::GetComponentJson(scene.FindEntityByPath("/Turret"), "Script");
+			REQUIRE(turret.has_value());
+			CHECK((*turret)["Scripts"][1]["Fields"] == Json::object());
+			CHECK((*turret)["Scripts"][1]["ExecutionOrder"] == Json(3));
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+
+			CallScriptSlotList(setup, "edit.undo", Json::object());
+			CHECK(ReadSlotScripts(scene, "/Turret") == std::vector<std::string>{ aim, aim });
+			CHECK(ReadSlotScripts(scene, "/Tower") == std::vector<std::string>{ "null", "null" });
+			CHECK_FALSE(editor.GetVfs().Exists(VfsPath::Create("project", "Assets/Scripts/Turret.graph").value_or(VfsPath())));
+
+			// A slot an entity does not have is refused before anything is written.
+			const Result<Json> missing = MakeScriptSlotGraph(scene, both, 2, "Assets/Scripts/Other.graph", SceneTarget::Edit);
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 	}
 

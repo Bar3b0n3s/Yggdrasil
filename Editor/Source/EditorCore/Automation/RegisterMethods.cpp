@@ -97,7 +97,8 @@ namespace Engine {
 		RegisterTilemapMethods(methods);
 		RegisterUiAuthoringMethods(methods); // M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 32
 		RegisterAnimationMethods(methods);
-		RegisterGraphMethods(methods); // M24 W24.1, Docs/Decisions/0035-m24-contract.md decision 12
+		RegisterGraphMethods(methods);          // M24 W24.1, Docs/Decisions/0035-m24-contract.md decision 12
+		RegisterGraphLiveValueMethods(methods); // M24 W24.2, decision 14
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

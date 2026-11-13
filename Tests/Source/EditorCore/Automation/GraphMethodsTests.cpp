@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // graph.* (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decisions 12 and 13, stream G-C): the C++ round trips. The
 // methods run over streams G-A's document and G-B's library, transpiler and importer, so the cases run from W24.1's
@@ -102,6 +103,54 @@ namespace Engine {
 				if (node["Id"] == Json(id))
 					return node;
 			return Json();
+		}
+
+		// The value of `node`'s output `pin` in a graph.liveValues result, or null.
+		Json FindLiveValue(const Json& live, uint32_t node, std::string_view pin)
+		{
+			for (const Json& value : live["values"])
+				if (value["node"] == Json(node) && value["pin"] == Json(std::string(pin)))
+					return value;
+			return Json();
+		}
+
+		// The ids of the Tagger's nodes.
+		struct TaggerNodes
+		{
+			uint32_t Tick = 0;
+			uint32_t Target = 0;
+			uint32_t Tag = 0;
+		};
+
+		// The Tagger at `path`: each fixed step tags its Target field, which nothing sets, so its first step raises at the
+		// AddTag node.
+		TaggerNodes BuildTagger(Test::AutomationFixture& setup, const Json& path)
+		{
+			CallOrFail(setup, "graph.create", Json{ { "path", path } });
+			CallOrFail(setup, "graph.setMembers", Json{ { "graph", path }, { "fields", Json::array({ Member("Target", "Entity", nullptr, true) }) } });
+			const TaggerNodes nodes{ .Tick = AddNode(setup, path, "Event.OnFixedUpdate"),
+				.Target = AddNode(setup, path, "Self.Get.Target"),
+				.Tag = AddNode(setup, path, "Call.Entity.AddTag", Json{ { "values", Json{ { "tag", "Seen" } } } }) };
+			CallOrFail(setup, "graph.connect", Json{ { "graph", path }, { "from", Pin(nodes.Tick, "Then") }, { "to", Pin(nodes.Tag, "In") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", path }, { "from", Pin(nodes.Target, "Value") }, { "to", Pin(nodes.Tag, "self") } });
+			return nodes;
+		}
+
+		Json ScriptSlot(const Json& script)
+		{
+			return Json{ { "Script", script }, { "Fields", Json::object() }, { "ExecutionOrder", 0 } };
+		}
+
+		// The error graph.liveValues refuses `params` with ("errorCode", "location", "hint", ...).
+		Json RefuseLiveValues(Test::AutomationFixture& setup, const Json& params, std::string_view code, std::string_view pointer)
+		{
+			CAPTURE(params.dump());
+			Json response = setup.Request("graph.liveValues", params);
+			REQUIRE(response.contains("error"));
+			CHECK(response["error"]["data"]["errorCode"] == Json(std::string(code)));
+			if (!pointer.empty())
+				CHECK(response["error"]["data"]["location"]["pointer"] == Json(std::string(pointer)));
+			return response["error"]["data"];
 		}
 
 	}
@@ -658,6 +707,206 @@ namespace Engine {
 			CHECK(ReadDoorText(setup) == before);
 			// A graph is a Script asset all the same, whose fields script.fields reads once it imports.
 			CHECK(CallOrFail(setup, "asset.info", Json{ { "asset", std::string(DoorPath) } })["asset"]["type"] == "Script");
+		}
+
+		// graph.liveValues (decision 14, W24.2's stream B): a play session's graph behaviour, read between frames.
+		TEST_CASE("GraphMethods: graph.liveValues reads a playing graph's node values, members and errors mapped to nodes, and the state hash is the one without the read")
+		{
+			Test::AutomationFixture setup("GraphLiveValues");
+			// The Counter: each fixed step adds its Step field to its Count variable, then moves its entity to x = Count, so the
+			// state hash, which covers the Transform but no script table, sees every Count (W24.2's review: a read that changed
+			// the instance changes the hash).
+			const Json counter = "Assets/Scripts/Counter.graph";
+			CallOrFail(setup, "graph.create", Json{ { "path", counter } });
+			CallOrFail(setup, "graph.setMembers", Json{ { "graph", counter }, { "fields", Json::array({ Member("Step", "Number", 1, true) }) }, { "variables", Json::array({ Member("Count", "Number", 0, false) }) } });
+			const uint32_t step = AddNode(setup, counter, "Event.OnFixedUpdate");
+			const uint32_t count = AddNode(setup, counter, "Self.Get.Count");
+			const uint32_t increment = AddNode(setup, counter, "Self.Get.Step");
+			const uint32_t add = AddNode(setup, counter, "Number.Add");
+			const uint32_t store = AddNode(setup, counter, "Self.Set.Count");
+			const uint32_t self = AddNode(setup, counter, "Self.Entity");
+			const uint32_t transform = AddNode(setup, counter, "Get.Entity.Transform");
+			const uint32_t counted = AddNode(setup, counter, "Self.Get.Count");
+			const uint32_t place = AddNode(setup, counter, "Vector.Make", Json{ { "values", Json{ { "Y", 0 }, { "Z", 0 } } } });
+			const uint32_t move = AddNode(setup, counter, "Set.Transform.Translation");
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(step, "Then") }, { "to", Pin(store, "In") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(count, "Value") }, { "to", Pin(add, "A") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(increment, "Value") }, { "to", Pin(add, "B") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(add, "Result") }, { "to", Pin(store, "Value") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(store, "Then") }, { "to", Pin(move, "In") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(self, "Value") }, { "to", Pin(transform, "self") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(transform, "Value") }, { "to", Pin(move, "self") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(counted, "Value") }, { "to", Pin(place, "X") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", counter }, { "from", Pin(place, "Result") }, { "to", Pin(move, "Value") } });
+			REQUIRE(CallOrFail(setup, "graph.read", Json{ { "graph", counter } })["diagnostics"].empty());
+			const Json tagger = "Assets/Scripts/Tagger.graph";
+			const TaggerNodes taggerNodes = BuildTagger(setup, tagger);
+			REQUIRE(CallOrFail(setup, "graph.read", Json{ { "graph", tagger } })["diagnostics"].empty());
+
+			CallOrFail(setup, "entity.create", Json{ { "name", "Counter" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ ScriptSlot(counter), ScriptSlot(tagger) }) } } } } } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Plain" } });
+			// Without a play session there is nothing to read.
+			RefuseLiveValues(setup, Json{ { "entity", "/Counter" } }, "InvalidState", "");
+
+			// Two lockstep plays of five ticks from one seed, the first reading live values after its second tick. Each play's
+			// Tagger logs its one error at its first step.
+			const auto run = [&](bool read)
+			{
+				const Test::ExpectLog tagged(LogLevel::Error, "attempt to index nil with 'AddTag'");
+				CallOrFail(setup, "play.start", Json{ { "lockstep", true }, { "seed", 5 } });
+				CallOrFail(setup, "play.step", Json{ { "ticks", 2 } });
+				if (read)
+				{
+					const Json live = CallOrFail(setup, "graph.liveValues", Json{ { "entity", "/Counter" } });
+					CHECK(live["graph"]["path"] == counter);
+					CHECK(live["entity"]["path"] == "/Counter");
+					CHECK(live["slot"] == 0);
+					CHECK(live["tick"] == 2);
+					CHECK(live["truncated"] == false);
+					// Tick 2 read a Count of 1 and a Step of 1, stored their sum and moved the entity to x = 2. The values are sorted
+					// by node and pin.
+					CHECK(FindLiveValue(live, count, "Value") == Json{ { "node", count }, { "pin", "Value" }, { "type", "number" }, { "value", 1 } });
+					CHECK(FindLiveValue(live, increment, "Value") == Json{ { "node", increment }, { "pin", "Value" }, { "type", "number" }, { "value", 1 } });
+					CHECK(FindLiveValue(live, add, "Result") == Json{ { "node", add }, { "pin", "Result" }, { "type", "number" }, { "value", 2 } });
+					CHECK(FindLiveValue(live, counted, "Value")["value"] == 2);
+					CHECK(FindLiveValue(live, place, "Result")["value"] == Json::array({ 2, 0, 0 }));
+					// The entity is an id; its Transform, a component proxy, has no JSON spelling and is null under its type.
+					CHECK(FindLiveValue(live, self, "Value")["value"] == live["entity"]["id"]);
+					CHECK(FindLiveValue(live, transform, "Value")["value"].is_null());
+					CHECK(FindLiveValue(live, transform, "Value")["type"] == "Transform");
+					CHECK(live["values"].size() == 7);
+					std::vector<std::pair<uint32_t, std::string>> order;
+					for (const Json& value : live["values"])
+						order.emplace_back(JsonReader(value["node"]).ReadUInt32().value_or(0), JsonReader(value["pin"]).ReadString().value_or(std::string()));
+					CHECK(std::ranges::is_sorted(order));
+					CHECK(live["members"]
+						== Json::array({ { { "name", "Count" }, { "type", "number" }, { "value", 2 } }, { { "name", "Step" }, { "type", "number" }, { "value", 1 } } }));
+					CHECK(live["errors"].empty());
+
+					// The second slot by its behaviour's name: its error, raised at its first step, is the AddTag node's.
+					const Json faulty = CallOrFail(setup, "graph.liveValues", Json{ { "entity", "/Counter" }, { "script", "Tagger" } });
+					CHECK(faulty["slot"] == 1);
+					CHECK(faulty["values"].empty());
+					CHECK(faulty["members"] == Json::array({ { { "name", "Target" }, { "type", "nil" }, { "value", nullptr } } }));
+					REQUIRE(faulty["errors"].size() == 1);
+					CHECK(faulty["errors"][0]["node"] == taggerNodes.Tag);
+					CHECK(faulty["errors"][0]["line"] > 0);
+					CHECK(faulty["errors"][0]["count"] == 1);
+					const Json text = CallOrFail(setup, "graph.read", Json{ { "graph", tagger }, { "luau", true } });
+					const uint32_t line = JsonReader(faulty["errors"][0]["line"]).ReadUInt32().value_or(0);
+					REQUIRE(line >= 1);
+					REQUIRE(line <= text["lineNodes"].size());
+					CHECK(text["lineNodes"][line - 1] == taggerNodes.Tag);
+
+					// The refusals: an entity the play scene does not hold, one with no graph slot, and a behaviour no slot has,
+					// whose hint names the entity's graph behaviours.
+					RefuseLiveValues(setup, Json{ { "entity", "/Nobody" } }, "NotFound", "/entity");
+					RefuseLiveValues(setup, Json{ { "entity", "/Plain" } }, "NotFound", "/script");
+					const Json unknown = RefuseLiveValues(setup, Json{ { "entity", "/Counter" }, { "script", "Door" } }, "NotFound", "/script");
+					const std::string hint = JsonReader(unknown["hint"]).ReadString().value_or(std::string());
+					CHECK(hint.contains("Counter"));
+					CHECK(hint.contains("Tagger"));
+				}
+				const Json stepped = CallOrFail(setup, "play.step", Json{ { "ticks", 3 } });
+				CallOrFail(setup, "play.stop", Json::object());
+				return JsonReader(stepped["stateHash"]).ReadString().value_or(std::string());
+			};
+			const std::string read = run(true);
+			CHECK_FALSE(read.empty());
+			CHECK(read == run(false));
+		}
+
+		// W24.2's review: graph.liveValues' refusals in a simulation and for a graph slot whose source does not read.
+		TEST_CASE("GraphMethods: graph.liveValues refuses a simulation, and a graph slot whose source does not read names no behaviour")
+		{
+			Test::AutomationFixture setup("GraphLiveValuesRefused");
+			const Json gate = "Assets/Scripts/Gate.graph";
+			const Json broken = "Assets/Scripts/Broken.graph";
+			CallOrFail(setup, "graph.create", Json{ { "path", gate } });
+			CallOrFail(setup, "graph.create", Json{ { "path", broken } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Gate" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ ScriptSlot(gate), ScriptSlot(broken) }) } } } } } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Broken" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ ScriptSlot(broken) }) } } } } } });
+
+			// A simulation runs no behaviours, so there is nothing to read.
+			CallOrFail(setup, "play.start", Json{ { "mode", "simulate" }, { "lockstep", true } });
+			const Json simulated = RefuseLiveValues(setup, Json{ { "entity", "/Gate" } }, "InvalidState", "");
+			CHECK(simulated.contains("hint"));
+			CallOrFail(setup, "play.stop", Json::object());
+
+			// During play, Broken's source stops reading (the session keeps running its old code: its reimport waits for the
+			// play's end). Without a behaviour name the first graph slot is read, and its read fails; by name it names nothing.
+			CallOrFail(setup, "play.start", Json{ { "lockstep", true } });
+			CallOrFail(setup, "play.step", Json{ { "ticks", 1 } });
+			const std::string brokenPath = JsonReader(broken).ReadString().value_or(std::string());
+			const VfsPath path = VfsPath::Create("project", brokenPath).value_or(VfsPath());
+			const std::string original = ReadProjectText(setup, brokenPath);
+			constexpr std::string_view Unreadable = R"({"Format": "Graph", "Version": 1, "Name": "Broken", "Nodes": [{"Id": 0}]})";
+			REQUIRE(setup.GetEditor().WriteProjectFile(path, std::as_bytes(std::span(Unreadable))).has_value());
+			const Json failed = RefuseLiveValues(setup, Json{ { "entity", "/Broken" } }, "ImportFailed", "");
+			CHECK(failed["location"]["file"] == broken);
+			const Json named = RefuseLiveValues(setup, Json{ { "entity", "/Broken" }, { "script", "Broken" } }, "NotFound", "/script");
+			CHECK_FALSE(JsonReader(named["hint"]).ReadString().value_or(std::string()).empty());
+			// Gate's first slot still reads; by name, Broken is no behaviour of it now.
+			CHECK(CallOrFail(setup, "graph.liveValues", Json{ { "entity", "/Gate" } })["graph"]["path"] == gate);
+			const Json other = RefuseLiveValues(setup, Json{ { "entity", "/Gate" }, { "script", "Broken" } }, "NotFound", "/script");
+			CHECK(JsonReader(other["hint"]).ReadString().value_or(std::string()).contains("Gate"));
+			// The source restored before the play ends, so the reimport the play deferred imports it as it was.
+			REQUIRE(setup.GetEditor().WriteProjectFile(path, std::as_bytes(std::span(original))).has_value());
+			CallOrFail(setup, "play.stop", Json::object());
+		}
+
+		// W24.2's review (the lead's decision (d)): graph.liveValues keeps a graph's read between its calls, which the Graph Editor
+		// makes once a frame, and reads it again whenever the graph changes. An edit during a lockstep play writes the source and
+		// defers its reimport, so the session runs the old code while the method maps it through the edited text.
+		TEST_CASE("GraphMethods: graph.liveValues follows an edit of its graph during play: the members and the errors' nodes are the edited graph's")
+		{
+			Test::AutomationFixture setup("GraphLiveValuesEdited");
+			const Json tagger = "Assets/Scripts/Tagger.graph";
+			const TaggerNodes nodes = BuildTagger(setup, tagger);
+			CallOrFail(setup, "entity.create", Json{ { "name", "Tagged" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ ScriptSlot(tagger) }) } } } } } });
+			const Test::ExpectLog raised(LogLevel::Error, "attempt to index nil with 'AddTag'");
+			CallOrFail(setup, "play.start", Json{ { "lockstep", true } });
+			CallOrFail(setup, "play.step", Json{ { "ticks", 2 } });
+			// The node a line of the graph's current text is.
+			const auto lineNode = [&setup, &tagger](uint32_t line)
+			{
+				const Json text = CallOrFail(setup, "graph.read", Json{ { "graph", tagger }, { "luau", true } });
+				REQUIRE(line >= 1);
+				REQUIRE(line <= text["lineNodes"].size());
+				return JsonReader(text["lineNodes"][line - 1]).ReadUInt32().value_or(0);
+			};
+			const auto members = [](const Json& live)
+			{
+				std::vector<std::string> names;
+				for (const Json& member : live["members"])
+					names.push_back(JsonReader(member["name"]).ReadString().value_or(std::string()));
+				return names;
+			};
+
+			const Json before = CallOrFail(setup, "graph.liveValues", Json{ { "entity", "/Tagged" } });
+			REQUIRE(before["errors"].size() == 1);
+			const uint32_t line = JsonReader(before["errors"][0]["line"]).ReadUInt32().value_or(0);
+			CHECK(before["errors"][0]["node"] == nodes.Tag);
+			CHECK(members(before) == std::vector<std::string>{ "Target" });
+			// Read again unchanged: the same answer.
+			CHECK(CallOrFail(setup, "graph.liveValues", Json{ { "entity", "/Tagged" } }) == before);
+
+			// A variable added during play: one more line in OnCreate moves every later line down, so the error's line, still
+			// the old code's, is now another node's in the edited text, and the new variable is a member the instance lacks.
+			CallOrFail(setup, "graph.setMembers", Json{ { "graph", tagger }, { "variables", Json::array({ Member("Extra", "Number", 0, false) }) } });
+			const Json edited = CallOrFail(setup, "graph.liveValues", Json{ { "entity", "/Tagged" } });
+			REQUIRE(edited["errors"].size() == 1);
+			CHECK(edited["errors"][0]["line"] == line);
+			CHECK(edited["errors"][0]["node"] == lineNode(line));
+			CHECK(edited["errors"][0]["node"] != nodes.Tag);
+			CHECK(members(edited) == std::vector<std::string>{ "Extra", "Target" });
+
+			// Undone, the graph reads as before.
+			CallOrFail(setup, "edit.undo", Json::object());
+			const Json undone = CallOrFail(setup, "graph.liveValues", Json{ { "entity", "/Tagged" } });
+			CHECK(undone["errors"][0]["node"] == nodes.Tag);
+			CHECK(members(undone) == std::vector<std::string>{ "Target" });
+			CallOrFail(setup, "play.stop", Json::object());
 		}
 	}
 

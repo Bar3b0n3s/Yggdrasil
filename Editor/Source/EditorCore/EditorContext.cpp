@@ -6,6 +6,7 @@
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/EngineAssetGenerators.h"
+#include "EditorCore/Graph/GraphLiveCache.h"
 #include "EditorCore/Native/NativeModuleHost.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/EditorFileError.h"
@@ -1257,6 +1258,13 @@ namespace Engine {
 		return m_GraphNodeLibrary.get();
 	}
 
+	GraphLiveCache& EditorContext::GetGraphLiveCache()
+	{
+		if (m_GraphLiveCache == nullptr)
+			m_GraphLiveCache = CreateScope<GraphLiveCache>();
+		return *m_GraphLiveCache;
+	}
+
 	Result<Ref<const ScriptFieldSchemaSource>> EditorContext::GetScriptSchemaSnapshot() const
 	{
 		std::map<AssetHandle, AssetRef<ScriptData>> scripts;
@@ -1634,6 +1642,9 @@ namespace Engine {
 		m_Assets->SetScriptDiagnosticsProvider(nullptr);
 		m_ScriptService.reset();
 		m_ScriptChecker.reset();
+		// M24: the graphs graph.liveValues kept are the closing project's.
+		if (m_GraphLiveCache != nullptr)
+			m_GraphLiveCache->Clear();
 		VirtualFileSystem& vfs = GetVfs();
 		Utils::UnmountLogged(vfs, Utils::CacheScheme);
 		Utils::UnmountLogged(vfs, Utils::ProjectScheme);
@@ -2254,10 +2265,15 @@ namespace Engine {
 		if (!m_Play->IsTestRunActive())
 			return {};
 		// A test session is published for observation only. Some unflagged methods (play, eval, open, refresh, selection
-		// and validation fixes) still mutate live host state, so admission is an explicit read subset.
+		// and validation fixes) still mutate live host state, so admission is an explicit read subset. M24
+		// (Docs/Decisions/0035-m24-contract.md, W24.2's integration and review): graph.liveValues reads the test session's
+		// instances between frames without changing it (decision 14), and graph.read and graph.nodes read only the editor's
+		// own state (the source, the library and the latest import's check; graph.read's wait for imports starts none, since a
+		// test run defers reimports, and only publishes earlier an import already running, as entity.bounds' wait does), so
+		// the Graph Editor opens a graph and shows its live values during a test run too.
 		constexpr std::string_view Reads[] = { "session.hello", "session.info", "rpc.discover", "docs.get", "scene.tree", "scene.query",
 			"scene.get", "entity.get", "entity.bounds", "log.read", "events.read", "play.state", "physics.bodyInfo", "audio.stats",
-			"stats.get", "script.errors", "viewport.screenshot", "editor.screenshot" };
+			"stats.get", "script.errors", "viewport.screenshot", "editor.screenshot", "graph.liveValues", "graph.read", "graph.nodes" };
 		if (dryRun || std::ranges::find(Reads, method) == std::end(Reads))
 			return MakeError(ErrorCode::InvalidState, "a test run owns the editor; '{}' is unavailable until it finishes", method);
 		return {};

@@ -2,13 +2,22 @@
 #include "Editor/Panels/DiagnosticsPanel.h"
 
 #include "Editor/SupportingPanelTestUi.h"
+#include "EditorCore/Automation/GraphMethods.h"
+#include "EditorCore/Graph/GraphEditorTarget.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
+#include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Reflection/StructInfo.h"
+#include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scripting/ScriptError.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/ExpectLog.h"
+
+#include <algorithm>
+#include <string_view>
 
 namespace Engine {
 
@@ -236,6 +245,91 @@ namespace Engine {
 			const auto released = actions.TakeResult(validation);
 			REQUIRE_FALSE(released);
 			CHECK(released.error().GetCode() == ErrorCode::NotFound);
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 15; C24.1's review finding 16): a finding of a graph opens the Graph
+		// Editor at its node, never the external editor at the .graph JSON: the import check's GRAPH_INVALID findings by their
+		// message, project.validate's by their pointer and a session's runtime errors by their line of the graph's text, each
+		// resolved to the node graph.read gives.
+		TEST_CASE("DiagnosticsPanel: a graph's finding opens the Graph Editor at its node instead of its source")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			Test::AutomationTestClient& client = fixture.GetClient();
+			constexpr std::string_view Path = "Assets/Scripts/Broken.graph";
+			REQUIRE(client.Call("graph.create", Json{ { "path", std::string(Path) } }));
+			REQUIRE(client.Call("graph.addNode", Json{ { "graph", std::string(Path) }, { "kind", "Event.OnStart" } }));
+			// Compare.Equal's A and B take any value and have no default: unlinked, they leave the graph unfinished, which does not
+			// import (GRAPH_INVALID at /Nodes/1/Values/A and /B).
+			const Result<Json> added = client.Call("graph.addNode", Json{ { "graph", std::string(Path) }, { "kind", "Compare.Equal" } });
+			REQUIRE(added.has_value());
+			const uint32_t equal = JsonReader((*added)["node"]).ReadUInt32().value_or(0);
+			editor.GetAssets().WaitIdle();
+			const std::optional<AssetHandle> graph = editor.GetAssets().Resolve(Path);
+			REQUIRE(graph.has_value());
+			{
+				// The import publishes its check, then fails for the graph's issues.
+				const Test::ExpectLog failed(LogLevel::Error, "Broken.graph");
+				CHECK_FALSE(editor.GetAssets().Reimport(*graph));
+			}
+			const Result<ScriptImportCheck> check = editor.GetAssets().GetScriptCheck(*graph);
+			REQUIRE(check.has_value());
+			REQUIRE(std::ranges::any_of(check->Diagnostics, [](const ScriptDiagnostic& finding)
+			{
+				return finding.Code == GraphInvalidCode;
+			}));
+			bool opened = false;
+			fixture.GetContext().OpenSource = [&opened](const std::filesystem::path&, uint32_t) -> Status
+			{
+				opened = true;
+				return {};
+			};
+			const Result<Json> readJson = client.Call("graph.read", Json{ { "graph", std::string(Path) }, { "luau", true } });
+			REQUIRE(readJson.has_value());
+			GraphReadResult read;
+			REQUIRE(editor.GetTypeRegistry().FindStruct<GraphReadResult>()->FromJson(&read, JsonReader(*readJson), {}));
+
+			// The import check's finding (the first entries), then project.validate's (after the report arrives).
+			DiagnosticsPanel panel;
+			static_cast<void>(fixture.Draw(panel));
+			fixture.Pump();
+			CHECK(fixture.Draw(panel).contains("Open in Graph Editor"));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Open in Graph Editor");
+			std::optional<GraphEditorTarget> request = panel.TakeGraphRequest();
+			REQUIRE(request.has_value());
+			CHECK(request->Graph == *graph);
+			CHECK(request->Finding.starts_with("/Nodes/1/Values/"));
+			CHECK(ResolveGraphEditorTarget(*request, read) == equal);
+			CHECK_FALSE(panel.TakeGraphRequest().has_value());
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Open in Graph Editor", 2);
+			request = panel.TakeGraphRequest();
+			REQUIRE(request.has_value());
+			CHECK(request->Graph == *graph);
+			CHECK(request->JsonPointer.starts_with("/Nodes/1/Values/"));
+			CHECK(request->Finding.empty());
+			CHECK(ResolveGraphEditorTarget(*request, read) == equal);
+
+			// A runtime error of the graph's text, at its line: the graph is finished first, since play refuses asset errors.
+			REQUIRE(client.Call("graph.removeNodes", Json{ { "graph", std::string(Path) }, { "nodes", Json::array({ equal }) } }));
+			editor.GetAssets().WaitIdle();
+			REQUIRE(editor.GetAssets().Reimport(*graph));
+			const Result<Json> started = client.Call("play.start", Json::object());
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			PlaySession* session = editor.GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			const ScriptError error{ .Kind = ScriptErrorKind::Runtime, .Script = std::string(Path), .Line = 7, .Column = 3, .Message = "graph runtime failure", .Callback = "OnStart", .EntityName = "Lamp", .Traceback = {} };
+			static_cast<void>(session->GetScriptErrors().Add(error));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Search messages, files or codes");
+			ImGui::GetIO().AddInputCharactersUTF8("graph runtime failure");
+			static_cast<void>(fixture.Draw(panel));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Open in Graph Editor");
+			request = panel.TakeGraphRequest();
+			REQUIRE(request.has_value());
+			CHECK(request->Graph == *graph);
+			CHECK(request->Line == 7);
+			CHECK_FALSE(opened);
+			REQUIRE(client.Call("play.stop", Json::object()));
 		}
 	}
 

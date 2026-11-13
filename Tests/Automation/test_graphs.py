@@ -16,6 +16,9 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 from Lib import xxh64  # noqa: E402  (Scripts/ is on sys.path above)
 
 GRAPH = "Assets/Scripts/Counter.graph"
+REPLAY = "Assets/Tests/Replays/Counter.replay"
+# Past the first state-hash checkpoint (ReplayCheckpointInterval, 60 ticks), so the replay compares one on the way.
+LIVE_TICKS = 61
 
 
 def provenance_entry(root: Path, path: str) -> dict[str, Any]:
@@ -29,9 +32,10 @@ def pin(node: int, name: str) -> dict[str, Any]:
 
 
 class GraphTests(AutomationTestCase):
-    def build_counter(self, client: engine_client.EngineClient) -> dict[str, int]:
+    def build_counter(self, client: engine_client.EngineClient, moves: bool = False) -> dict[str, int]:
         """The Counter behaviour, built through the graph methods alone: each fixed step adds its Step field to its
-        Count variable. Returns the node ids by role."""
+        Count variable and, with `moves`, then moves its entity to x = Count, so the state hash (which covers the
+        Transform but no script table) sees every Count. Returns the node ids by role."""
         created = client.call("graph.create", {"path": GRAPH})
         self.assertEqual(created["name"], "Counter")
         self.assertEqual(created["graph"]["type"], "Script")
@@ -47,6 +51,19 @@ class GraphTests(AutomationTestCase):
                                ((nodes["count"], "Value"), (nodes["add"], "A")),
                                ((nodes["increment"], "Value"), (nodes["add"], "B")),
                                ((nodes["add"], "Result"), (nodes["store"], "Value"))):
+            client.call("graph.connect", {"graph": GRAPH, "from": pin(*source), "to": pin(*target)})
+        if not moves:
+            return nodes
+        for role, kind in (("self", "Self.Entity"), ("transform", "Get.Entity.Transform"),
+                           ("counted", "Self.Get.Count"), ("translate", "Set.Transform.Translation")):
+            nodes[role] = client.call("graph.addNode", {"graph": GRAPH, "kind": kind})["node"]
+        nodes["place"] = client.call("graph.addNode", {"graph": GRAPH, "kind": "Vector.Make",
+                                                       "values": {"Y": 0, "Z": 0}})["node"]
+        for source, target in (((nodes["store"], "Then"), (nodes["translate"], "In")),
+                               ((nodes["self"], "Value"), (nodes["transform"], "self")),
+                               ((nodes["transform"], "Value"), (nodes["translate"], "self")),
+                               ((nodes["counted"], "Value"), (nodes["place"], "X")),
+                               ((nodes["place"], "Result"), (nodes["translate"], "Value"))):
             client.call("graph.connect", {"graph": GRAPH, "from": pin(*source), "to": pin(*target)})
         return nodes
 
@@ -120,32 +137,59 @@ class GraphTests(AutomationTestCase):
         self.assertEqual(entry["Method"], "edit.undo")
         self.assertEqual(entry["XXH64"].lower(), xxh64.xxh64_hex(built))
 
-    @unittest.skip("contract stub: Docs/Decisions/0035-m24-contract.md decision 14, W24.2's stream B")
     def test_live_values_are_read_in_play_without_changing_the_state_hash(self) -> None:
-        # Roadmap M24: "live values show in play without changing the state hash".
+        # Roadmap M24: "live values show in play without changing the state hash" (Docs/Decisions/0035-m24-contract.md
+        # decision 14). A recorded lockstep play reads the graph's live values after every tick; its replay without the
+        # reads reproduces every checkpoint and the final hash (input.record stop's verification, then input.replay),
+        # and a plain play from the same seed gives the same hash at every tick. The Counter moves its entity by its
+        # Count, so a read that changed the instance would change the hashes; they are compared before the values read.
         client, _ = self.open_editor_with_scene()
-        nodes = self.build_counter(client)
+        nodes = self.build_counter(client, moves=True)
         client.call("entity.create", {"name": "Counter", "components": {
             "Script": {"Scripts": [{"Script": GRAPH, "Fields": {}, "ExecutionOrder": 0}]}}})
+        client.call("scene.save")
 
-        def run(read_live_values: bool) -> str:
-            client.call("play.start", {"lockstep": True, "seed": 11})
-            client.call("play.step", {"ticks": 2})
-            if read_live_values:
-                live = client.call("graph.liveValues", {"entity": "/Counter"})
-                self.assertEqual(live["graph"]["path"], GRAPH)
-                self.assertEqual(live["tick"], 2)
-                values = {(value["node"], value["pin"]): value["value"] for value in live["values"]}
-                self.assertEqual(values[(nodes["add"], "Result")], 2)
-                members = {member["name"]: member["value"] for member in live["members"]}
-                self.assertEqual(members["Count"], 2)
-                self.assertEqual(members["Step"], 1)
-                self.assertEqual(live["errors"], [])
-            stepped = client.call("play.step", {"ticks": 3})
-            client.call("play.stop")
-            return stepped["stateHash"]
+        def run(read_live_values: bool) -> tuple[list[str], list[dict[str, Any]]]:
+            """The state hash after each of LIVE_TICKS ticks, and the live values read after each tick when asked."""
+            hashes = []
+            reads = []
+            for _ in range(LIVE_TICKS):
+                hashes.append(client.call("play.step", {"ticks": 1})["stateHash"])
+                if read_live_values:
+                    reads.append(client.call("graph.liveValues", {"entity": "/Counter"}))
+            return hashes, reads
 
-        self.assertEqual(run(True), run(False))
+        client.call("input.record", {"action": "start", "seed": 11})
+        shown, reads = run(True)
+        saved = client.call("input.record", {"action": "stop", "path": REPLAY})
+        self.assertEqual(saved["stateHash"], shown[-1])
+        self.assertGreater(saved["checkpoints"], 0)
+        client.call("play.stop")
+        replayed = client.call("input.replay", {"path": REPLAY, "verify": True, "strictHash": True})
+        self.assertTrue(replayed["passed"], replayed)
+        self.assertEqual(replayed["stateHash"], shown[-1])
+        self.assertEqual(replayed["checkpointsChecked"], saved["checkpoints"])
+        self.assertFalse(replayed["checkpointFailed"], replayed)
+        client.call("play.stop")
+
+        client.call("play.start", {"lockstep": True, "seed": 11})
+        hidden, _ = run(False)
+        self.assertEqual(hidden, shown)
+        client.call("play.stop")
+
+        for tick, live in enumerate(reads, start=1):
+            self.assertEqual(live["graph"]["path"], GRAPH)
+            self.assertEqual((live["tick"], live["slot"]), (tick, 0))
+            values = {(value["node"], value["pin"]): value["value"] for value in live["values"]}
+            # Tick t read a Count of t - 1 and a Step of 1, stored their sum and moved the entity to x = t.
+            self.assertEqual(values[(nodes["count"], "Value")], tick - 1)
+            self.assertEqual(values[(nodes["increment"], "Value")], 1)
+            self.assertEqual(values[(nodes["add"], "Result")], tick)
+            self.assertEqual(values[(nodes["counted"], "Value")], tick)
+            self.assertEqual(values[(nodes["place"], "Result")], [tick, 0, 0])
+            members = {member["name"]: member["value"] for member in live["members"]}
+            self.assertEqual(members, {"Count": tick, "Step": 1})
+            self.assertEqual(live["errors"], [])
         with self.assertRaises(engine_client.EngineError) as stopped:
             client.call("graph.liveValues", {"entity": "/Counter"})
         self.assertEqual(stopped.exception.error_code, "InvalidState")

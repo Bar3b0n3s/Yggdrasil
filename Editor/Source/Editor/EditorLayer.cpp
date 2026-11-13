@@ -8,6 +8,7 @@
 #include "Editor/Panels/ContentBrowserPanel.h"
 #include "Editor/Panels/DiagnosticsPanel.h"
 #include "Editor/Panels/GameViewportPanel.h"
+#include "Editor/Panels/GraphEditorPanel.h"
 #include "Editor/Panels/InspectorPanel.h"
 #include "Editor/Panels/NativePanel.h"
 #include "Editor/Panels/ProjectSettingsPanel.h"
@@ -174,6 +175,7 @@ namespace Engine {
 		UndoHistoryPanel History{};
 		NativePanel Native{};
 		AnimationPreviewPanel AnimationPreview{}; // M23: a window of its own while the selection holds an Animator
+		GraphEditorPanel GraphEditor{};           // M24: a window of its own while a graph is open in it
 		ProjectLauncher Launcher{};
 		std::vector<uint64_t> Tickets{};
 		std::string ErrorMessage{};
@@ -1105,6 +1107,16 @@ namespace Engine {
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the animation preview's controls.
 		if (Status preview = m_State->AnimationPreview.Draw(context); !preview && firstFailure)
 			firstFailure = std::unexpected(std::move(preview).error());
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 15): the Graph Editor, opened by the content browser's double-click, the
+		// inspector's Open graph and New graph, and a graph finding of the Diagnostics panel (at its node).
+		for (std::optional<GraphEditorTarget> request :
+			{ m_State->ContentBrowser.TakeGraphRequest(), m_State->Inspector.TakeGraphRequest(), m_State->Diagnostics.TakeGraphRequest() })
+		{
+			if (request.has_value())
+				m_State->GraphEditor.Open(*request);
+		}
+		if (Status graph = m_State->GraphEditor.Draw(context); !graph && firstFailure)
+			firstFailure = std::unexpected(std::move(graph).error());
 		if (m_State->SelectDefaultTabs)
 		{
 			// Select after all windows join their tabs; this runs only for a new or explicitly reset dock layout.

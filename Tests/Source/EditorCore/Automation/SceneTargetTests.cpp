@@ -123,6 +123,7 @@ namespace Engine {
 				{ "graph.connect", SceneRelation::None },
 				{ "graph.create", SceneRelation::None },
 				{ "graph.disconnect", SceneRelation::None },
+				{ "graph.liveValues", SceneRelation::None }, // W24.2: the play session's instance (decision 14), as play.* reads it
 				{ "graph.moveNodes", SceneRelation::None },
 				{ "graph.nodes", SceneRelation::None },
 				{ "graph.read", SceneRelation::None },

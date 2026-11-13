@@ -25,19 +25,20 @@ namespace Engine {
 		RemoveNodes,       // Delete on the selected nodes: graph.removeNodes
 		MoveNodes,         // the end of a drag of the selected nodes: graph.moveNodes
 		Connect,           // a link dragged from a pin to a pin: graph.connect
-		Disconnect,        // a link removed (Alt+click, or dragged off its input): graph.disconnect
+		Disconnect,        // a link removed (Alt+click, or dragged off its input onto empty canvas): graph.disconnect
 		SetValues,         // an input literal's field: graph.setValues
 		SetMembers,        // the members side panel (name, fields, variables): graph.setMembers
 		DuplicateNodes,    // Ctrl+D and paste: graph.addNode and graph.connect ops in one edit.batch
 		Undo,              // Ctrl+Z: edit.undo
-		Redo               // Ctrl+Y: edit.redo
+		Redo,              // Ctrl+Y: edit.redo
+		MoveLink           // a link dragged off its input onto another input: graph.disconnect and graph.connect ops in one edit.batch
 	};
 
 	// Every action, in enumeration order.
-	inline constexpr std::array<GraphEditorAction, 13> AllGraphEditorActions = { GraphEditorAction::CreateGraph, GraphEditorAction::CreateGraphInSlot,
+	inline constexpr std::array<GraphEditorAction, 14> AllGraphEditorActions = { GraphEditorAction::CreateGraph, GraphEditorAction::CreateGraphInSlot,
 		GraphEditorAction::AddNode, GraphEditorAction::AddLinkedNode, GraphEditorAction::RemoveNodes, GraphEditorAction::MoveNodes, GraphEditorAction::Connect,
 		GraphEditorAction::Disconnect, GraphEditorAction::SetValues, GraphEditorAction::SetMembers, GraphEditorAction::DuplicateNodes,
-		GraphEditorAction::Undo, GraphEditorAction::Redo };
+		GraphEditorAction::Undo, GraphEditorAction::Redo, GraphEditorAction::MoveLink };
 
 	// The method an action submits ("graph.addNode", "edit.batch", "edit.undo"); empty for a value outside the enumeration.
 	// Pure.

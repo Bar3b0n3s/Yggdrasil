@@ -22,7 +22,7 @@ from engine_mcp import server  # noqa: E402
 # (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
 # decision 26), M22's ui_tree and ui_create_widget (Docs/Decisions/0033-m22-contract.md decisions 8 and 32), M23's
 # animation_preview (Docs/Decisions/0034-m23-contract.md decision 32) and M24's graph tools (Docs/Decisions/
-# 0035-m24-contract.md decision 12).
+# 0035-m24-contract.md decisions 12 and 14).
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate", "project_export", "project_upgrade",
@@ -41,7 +41,7 @@ PROXIED_TOOLS = {
     "ui_tree", "ui_create_widget",
     "animation_preview",
     "graph_create", "graph_read", "graph_nodes", "graph_add_node", "graph_remove_nodes", "graph_connect",
-    "graph_disconnect", "graph_set_values", "graph_set_members",
+    "graph_disconnect", "graph_set_values", "graph_set_members", "graph_live_values",
 }
 MAX_SCHEMA_BYTES = 4096
 

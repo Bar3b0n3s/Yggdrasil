@@ -42,6 +42,9 @@ namespace Engine {
 			// step, so it is an edit.batch of graph.create and entity.update (decision 15).
 			CHECK(GetGraphEditorActionMethod(GraphEditorAction::CreateGraph) == "graph.create");
 			CHECK(GetGraphEditorActionMethod(GraphEditorAction::CreateGraphInSlot) == "edit.batch");
+			// A link moved to another input is one edit.batch of graph.disconnect and graph.connect, so a refused connect undoes the
+			// disconnect (W24.2's review).
+			CHECK(GetGraphEditorActionMethod(GraphEditorAction::MoveLink) == "edit.batch");
 			CHECK(GetGraphEditorActionMethod(static_cast<GraphEditorAction>(200)).empty());
 			CHECK(std::ranges::is_sorted(GraphEditMethodNames));
 		}

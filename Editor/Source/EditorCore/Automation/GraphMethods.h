@@ -271,11 +271,16 @@ namespace Engine {
 	// graph.liveValues {entity, script?}: during play, the live values of the graph behaviour on an entity of the play scene,
 	// read between frames (ScriptEngine::ReadInstanceValues) without changing the session's state: its nodes' last values
 	// (the live-value table's keys parsed with ParseGraphProbeKey), its members' values, and the session's retained script
-	// errors of that instance mapped to their nodes through the graph's current transpiled text (decision 14).
+	// errors of that instance raised by the graph's own code, mapped to their nodes through the graph's current transpiled
+	// text (decision 14). Admitted while a test run owns the editor (W24.2's integration), as graph.read and graph.nodes are
+	// (W24.2's review). The graph's read and its text's line map are kept between calls until the graph changes
+	// (EditorContext::GetGraphLiveCache).
 	struct GraphLiveValuesParams
 	{
 		std::string Entity{}; // required: an entity of the play scene (its id, a unique id prefix or its path)
-		std::string Script{}; // the slot's behaviour name, as script.eval's; empty: the entity's first slot holding a graph
+		// The slot's behaviour name, its graph's current Name (of two such slots, the first); empty: the entity's first slot
+		// holding a graph.
+		std::string Script{};
 	};
 
 	// Registry struct "GraphLiveValue": one node output's last value.
@@ -345,9 +350,11 @@ namespace Engine {
 		[[nodiscard]] Result<GraphEditResult> GraphSetValues(EditorMethodContext& context, const GraphSetValuesParams& params);
 		// graph.setMembers (its refusals above, and ValidateGraphStructure's for a member, located in the params).
 		[[nodiscard]] Result<GraphSetMembersResult> GraphSetMembers(EditorMethodContext& context, const GraphSetMembersParams& params);
-		// graph.liveValues. Errors: InvalidState without a play session (the hint names play.start); InvalidParams at /entity
-		// for an entity the play scene does not hold; NotFound at /script for an entity with no graph slot, or none whose
-		// behaviour is `script`; ReadInstanceValues' errors.
+		// graph.liveValues. Errors: InvalidState without a play session (the hint names play.start) and in a simulation, which
+		// runs no behaviours; NotFound at /entity for an entity the play scene does not hold (InvalidArgument for an ambiguous
+		// or malformed reference); NotFound at /script for an entity with no graph slot, or none whose behaviour is `script`
+		// (a graph source that does not read names none); without `script`, the first graph slot's read errors (ImportFailed for
+		// a source that does not read); ReadInstanceValues' errors.
 		[[nodiscard]] Result<GraphLiveValuesResult> GraphLiveValues(EditorMethodContext& context, const GraphLiveValuesParams& params);
 
 	}

@@ -1,6 +1,6 @@
 ---
 name: game-building
-description: Build a game end to end through the editor's automation (the MCP tools or engine_client): launch, project settings, scenes, prefabs, the look, scripts, deterministic checks, test suites, replays recorded from recording suites (autopilots and planned input), validation and export, and the provenance, transcript, soak and demo-audit rules that define done.
+description: Build a game end to end through the editor's automation (the MCP tools or engine_client): launch, project settings, scenes, prefabs, the look, scripts and visual-scripting graphs, deterministic checks, test suites, replays recorded from recording suites (autopilots and planned input), validation and export, and the provenance, transcript, soak and demo-audit rules that define done.
 ---
 
 # Game building
@@ -32,6 +32,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/game-building/sprites-2d` ([sprites-2d.md](sprites-2d.md)): 2D games: sprites, sprite sheets and clips, sorting layers, the pixel-perfect camera, 2D lights and normal maps, tilemaps and `tilemap_paint`, 2D physics and the editor's 2D mode.
 - `skills/game-building/ui` ([ui.md](ui.md)): UI: canvases, rectangles and anchors, containers, images on sprite sheets, text, widgets (`ui_create_widget`), pointer, keyboard and gamepad interaction and where navigation starts, the UI events and the `Ui` settings, text input, fallback fonts for CJK, Arabic and Hebrew with shaping and right-to-left text, World canvases, the UI preview, string tables and `Loc.Get`, `ui_tree`, and input in `OnUpdate`.
 - `skills/game-building/animation` ([animation.md](animation.md)): skinned and morphed glTF characters, their Animators and events, and the editor's animation preview.
+- `skills/game-building/graphs` ([graphs.md](graphs.md)): visual-scripting graphs: a behaviour built from nodes and links with the `graph_*` tools, the node library generated from the script API, `GRAPH_INVALID` and `GRAPH_UNREACHABLE_NODE` with the limits a graph keeps, live values in play (`graph_live_values`), and debugging a graph by node.
 
 ## Ground rules
 
@@ -101,6 +102,7 @@ Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, Exp
 - The Behaviour and Module templates (`templates/Scripts/<Template>` in `docs_get`) name their table `Script_<File>` (a Behaviour also its exported alias and its `Script.Define` name), a unique valid identifier: rename it in the first `script_write`. The Test template has no type and names its suite after the file stem without `.test`: `Assets/Tests/Board.test.luau` gives `Test.Suite("Board", ...)`.
 - `script_write` replaces the whole file. Keep scripts small modules (rules in a Module, the behaviour that drives them in another) so each write stays short.
 - Attach a behaviour with `entity_update {entity, components: {Script: {Scripts: [{Script: "Assets/Scripts/Game.luau", Fields: {...}}]}}}`: a list of slots `{Script, Fields, ExecutionOrder}`, each its own instance (`luau-gameplay`), which `Scripts` replaces whole. An override naming no declared field or of the wrong type or range is refused (InvalidParams at `/components/Script/Scripts/<slot>/Fields/<Name>`), so success means every override matched; `project_validate` reports such overrides already in files (`SCRIPT_UNKNOWN_FIELD_OVERRIDE`, `SCRIPT_FIELD_TYPE_MISMATCH`).
+- **A behaviour can be a visual-scripting graph** (`.graph`), built node by node with the `graph_*` tools and attached to a slot like a Luau behaviour: see `skills/game-building/graphs`.
 - Keep pure logic (boards, scoring, kick tables, and the spawn rules: bag, hold, top-out, levels) in Modules without engine calls, so the empty-scene suites test it. The behaviour reads input, calls them and mirrors their state into components (cells' active flags and materials, HUD `Text`), which the state hash and the replays see.
 - **A native C++ module** (Windows, only while the user's "Allow native code" preference is on, kept in `user://Editor.json` for every editor that user starts; no tool sets it): `native_write` its `.cpp` and `.h` files below `Native/` (one includes the engine's `NativeApi.h`, the topic `native/NativeApi.h`, as `native.write`'s example in `rpc.discover` spells it, and names `ENGINE_NATIVE_MODULE`; own headers as `#include "Native/<File>.h"`), `native_build` (until no `NATIVE_FORMAT_WARNING` is left), `native_load`, then `native_set_components {entity, components: {"Native.<Name>": {...}}}`. A game kept free of `PostProcess` and physics starts from `Empty`, or deletes `Basic3D`'s `/Post Process` and Ground's `RigidBody` and `BoxCollider`. `skills/game-debugging/native-module` has the rules.
 

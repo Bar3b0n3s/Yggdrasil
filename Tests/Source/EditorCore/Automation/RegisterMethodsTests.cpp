@@ -25,16 +25,17 @@ namespace Engine {
 	// (Docs/Decisions/0031-m20-contract.md decision 14), M21's physics2d.raycast, physics2d.overlap and physics2d.bodyInfo
 	// (Docs/Decisions/0032-m21-contract.md decisions 15 and 27) and tilemap.paint (decision 26), M22's ui.tree
 	// (Docs/Decisions/0033-m22-contract.md decision 8) and ui.createWidget (decision 32), M23's animation.preview
-	// (Docs/Decisions/0034-m23-contract.md decision 32), and M24's ten graph.* methods (Docs/Decisions/0035-m24-contract.md
-	// decision 12), test hooks excluded.
+	// (Docs/Decisions/0034-m23-contract.md decision 32), and M24's ten graph edit and read methods
+	// (Docs/Decisions/0035-m24-contract.md decision 12) and graph.liveValues (decision 14), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-			"entity.reparent", "entity.update", "events.read", "graph.addNode", "graph.connect", "graph.create", "graph.disconnect", "graph.moveNodes",
-			"graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "input.inject", "input.readReplay", "input.record",
+			"entity.reparent", "entity.update", "events.read", "graph.addNode", "graph.connect", "graph.create", "graph.disconnect", "graph.liveValues",
+			"graph.moveNodes", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "input.inject", "input.readReplay",
+			"input.record",
 			"input.replay", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
 			"physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
@@ -122,8 +123,8 @@ namespace Engine {
 			const std::vector<std::string> tools = { "animation.preview", "asset.create", "asset.delete", "asset.getProperties", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
 				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "graph.addNode",
-				"graph.connect", "graph.create", "graph.disconnect", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues",
-				"input.inject",
+				"graph.connect", "graph.create", "graph.disconnect", "graph.liveValues", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers",
+				"graph.setValues", "input.inject",
 				"input.readReplay", "input.record", "input.replay", "log.read", "native.build", "native.getComponents", "native.load", "native.read",
 				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
@@ -136,8 +137,8 @@ namespace Engine {
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "audio.stats", "component.list", "component.schema",
 				"docs.get", "edit.getSelection", "edit.history", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-				"entity.reparent", "entity.update", "events.read", "graph.addNode", "graph.connect", "graph.create", "graph.disconnect", "graph.moveNodes",
-				"graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "log.read", "native.getComponents", "native.read",
+				"entity.reparent", "entity.update", "events.read", "graph.addNode", "graph.connect", "graph.create", "graph.disconnect", "graph.liveValues",
+				"graph.moveNodes", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "log.read", "native.getComponents", "native.read",
 				"native.setComponents", "native.status",
 				"native.write", "physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
@@ -299,9 +300,10 @@ namespace Engine {
 			// (ADR 0030 decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
 			// (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
 			// decision 26), M22's ui_tree (Docs/Decisions/0033-m22-contract.md decision 8) and ui_create_widget (decision 32), M23's
-			// animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), and M24's nine graph tools, every graph.* method
-			// but graph.moveNodes (Docs/Decisions/0035-m24-contract.md decision 12).
-			CHECK(catalog["Tools"].size() == 78);
+			// animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), and M24's ten graph tools: the nine graph edit and
+			// read tools, every one but graph.moveNodes (Docs/Decisions/0035-m24-contract.md decision 12), and graph_live_values
+			// (decision 14).
+			CHECK(catalog["Tools"].size() == 79);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

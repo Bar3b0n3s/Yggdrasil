@@ -12,7 +12,7 @@ namespace Engine {
 
 		constexpr EditorIcon AllEditorIcons[] = { EditorIcon::Folder, EditorIcon::Scene, EditorIcon::Prefab, EditorIcon::Mesh, EditorIcon::Material,
 			EditorIcon::Texture, EditorIcon::Environment, EditorIcon::Audio, EditorIcon::Script, EditorIcon::Font, EditorIcon::Replay,
-			EditorIcon::SpriteSheet, EditorIcon::Tilemap, EditorIcon::StringTable, EditorIcon::Skeleton, EditorIcon::AnimationClip };
+			EditorIcon::SpriteSheet, EditorIcon::Tilemap, EditorIcon::StringTable, EditorIcon::Skeleton, EditorIcon::AnimationClip, EditorIcon::Graph };
 
 		struct DrawnIcon
 		{
@@ -93,6 +93,16 @@ namespace Engine {
 			// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 23).
 			CHECK(AssetTypeToEditorIcon(AssetType::Skeleton) == EditorIcon::Skeleton);
 			CHECK(AssetTypeToEditorIcon(AssetType::AnimationClip) == EditorIcon::AnimationClip);
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decisions 2 and 15): a graph is a Script asset, told apart by its importer.
+		TEST_CASE("Icons: a Script asset of the Graph importer shows the Graph glyph and every other asset its type's")
+		{
+			CHECK(AssetToEditorIcon(AssetType::Script, "Graph") == EditorIcon::Graph);
+			CHECK(AssetToEditorIcon(AssetType::Script, "Script") == EditorIcon::Script);
+			CHECK(AssetToEditorIcon(AssetType::Script, "") == EditorIcon::Script);
+			CHECK(AssetToEditorIcon(AssetType::Texture, "Graph") == EditorIcon::Texture);
+			CHECK(AssetToEditorIcon(AssetType::Scene, "Scene") == EditorIcon::Scene);
 		}
 	}
 

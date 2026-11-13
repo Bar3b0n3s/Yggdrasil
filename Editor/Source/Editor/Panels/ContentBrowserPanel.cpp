@@ -7,11 +7,14 @@
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Graph/GraphEditorActions.h"
+#include "EditorCore/Graph/GraphEditorRequests.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetRegistry.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Importers/GraphImporter.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -135,7 +138,10 @@ namespace Engine {
 			tile.Handle = handle;
 			tile.Type = location->Type;
 			tile.Label = location->SubAssetKey.empty() ? std::string(location->Record->SourcePath.GetFileName()) : location->SubAssetKey;
-			tile.TypeLabel = Utils::EditorLabel(AssetTypeToString(location->Type));
+			tile.Importer = location->Record->Metadata.Importer;
+			// A graph is a Script asset (M24 decision 2), shown and searched as a graph.
+			const bool graph = location->Type == AssetType::Script && tile.Importer == GraphImporter::Id;
+			tile.TypeLabel = graph ? std::string("Graph") : Utils::EditorLabel(AssetTypeToString(location->Type));
 			tile.Path = assets.GetReferencePath(handle);
 			tile.SearchKey = Utils::AssetSearchKey(tile.Path + " " + tile.TypeLabel);
 			tile.SubAsset = !location->SubAssetKey.empty();
@@ -514,6 +520,8 @@ namespace Engine {
 							editor.GetUiState().SetSelectedAsset(tile.Handle);
 							if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && tile.Type == AssetType::Scene)
 								sceneToOpen = tile.Path;
+							else if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && AssetToEditorIcon(tile.Type, tile.Importer) == EditorIcon::Graph)
+								m_GraphRequest = GraphEditorTarget{ .Graph = tile.Handle, .Node = 0, .Line = 0, .JsonPointer = {}, .Finding = {} };
 						}
 						const bool hovered = ImGui::IsItemHovered();
 						// Preview failures belong to their tile (type icon and tooltip), not to the panel's operation errors.
@@ -536,7 +544,7 @@ namespace Engine {
 									texture = context.FindThumbnailTexture(request);
 							}
 						}
-						drawTile(tile.Label, tile.TypeLabel, AssetTypeToEditorIcon(tile.Type), texture, minimum, editor.GetUiState().GetSelectedAsset() == tile.Handle, hovered, !tile.Issue.empty());
+						drawTile(tile.Label, tile.TypeLabel, AssetToEditorIcon(tile.Type, tile.Importer), texture, minimum, editor.GetUiState().GetSelectedAsset() == tile.Handle, hovered, !tile.Issue.empty());
 						if (hovered)
 						{
 							ImGui::BeginTooltip();
@@ -568,6 +576,8 @@ namespace Engine {
 									sceneToOpen = tile.Path;
 								ImGui::EndDisabled();
 							}
+							if (AssetToEditorIcon(tile.Type, tile.Importer) == EditorIcon::Graph && ImGui::MenuItem("Open graph"))
+								m_GraphRequest = GraphEditorTarget{ .Graph = tile.Handle, .Node = 0, .Line = 0, .JsonPointer = {}, .Finding = {} };
 							ImGui::BeginDisabled(editor.IsReadOnly() || tile.SubAsset);
 							if (ImGui::MenuItem("Rename..."))
 								requestDialog(tile.Handle, 1);
@@ -655,17 +665,19 @@ namespace Engine {
 		if (ImGui::BeginPopup("Create asset"))
 		{
 			Utils::EditorSectionHeading("Create asset");
-			// Indices 5 to 7 are the script templates (script.create); the others are asset.create types. M18's sprite sheet is
-			// appended last, so the earlier entries keep their indices (Docs/Decisions/0029-m18-contract.md decision 18), then
-			// M21's tilemap (Docs/Decisions/0032-m21-contract.md decision 23) and M22's string table
-			// (Docs/Decisions/0033-m22-contract.md decision 10) in landing order (ADR 0028's phase-2 create-list rule).
+			// Indices 5 to 7 are the script templates (script.create) and 11 the graph (graph.create); the others are asset.create
+			// types. M18's sprite sheet is appended last, so the earlier entries keep their indices (Docs/Decisions/0029-m18-contract.md
+			// decision 18), then M21's tilemap (Docs/Decisions/0032-m21-contract.md decision 23), M22's string table
+			// (Docs/Decisions/0033-m22-contract.md decision 10) and M24's graph (Docs/Decisions/0035-m24-contract.md decision 15) in
+			// landing order (ADR 0028's create-list rule).
 			constexpr const char* Labels[] = { "Folder", "Scene", "Material", "Prefab", "Sound effect", "Behaviour script", "Module script", "Test script", "Sprite sheet",
-				"Tilemap", "String table" };
-			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet", "Tilemap", "StringTable" };
+				"Tilemap", "String table", "Graph" };
+			constexpr const char* Types[] = { "Folder", "Scene", "Material", "Prefab", "SoundEffect", "", "", "", "SpriteSheet", "Tilemap", "StringTable", "" };
 			constexpr const char* Extensions[] = { "", ".scene", ".material", ".prefab", ".sfx", ".luau", ".luau", ".test.luau", ".spritesheet", ".tilemap",
-				".stringtable" };
+				".stringtable", ".graph" };
 			constexpr int FirstScriptTemplate = 5;
 			constexpr int LastScriptTemplate = 7;
+			constexpr int GraphEntry = 11;
 			ImGui::TextDisabled("In %s", m_ActionDirectory.c_str());
 			ImGui::SetNextItemWidth(-1.0f);
 			// Every entry shows without scrolling (ImGui's default height holds eight).
@@ -683,6 +695,15 @@ namespace Engine {
 				{
 					constexpr const char* Templates[] = { "Behaviour", "Module", "Test" };
 					queued = submit("script.create", Json{ { "path", m_ActionDirectory + "/" + name }, { "template", Templates[m_CreateType - FirstScriptTemplate] } });
+				}
+				else if (m_CreateType == GraphEntry)
+				{
+					// The graph editor's CreateGraph action: graph.create, the behaviour named after the file.
+					const Result<GraphEditorRequest> request = MakeGraphEditorRequest(editor.GetTypeRegistry(), GraphCreateParams{ .Path = m_ActionDirectory + "/" + name, .Name = {} });
+					if (request)
+						queued = submit(request->Method, request->Params);
+					else
+						showError(request.error());
 				}
 				else
 				{

@@ -5,6 +5,8 @@
 -- as a field or a variable, and their script slots override fields of several kinds. A graph requires no module and no
 -- script requires it, so a suite reads its instance through Entity:GetScript, typed any. Also driven by
 -- Assets/Tests/Replays/Graphs.replay (Scaffold/GraphReplay.jsonl), whose Rover moves and jumps only with its input.
+-- The last case reads the live-value table that every graph's transpiled text fills (decision 14), which the editor's
+-- graph.liveValues serves, so each mode shows that the values the editor would show are in its cooked scripts.
 local Support = require("../Api/Support")
 
 -- The behaviour `behaviour` of the entity named `entity`.
@@ -98,5 +100,17 @@ return Test.Suite("Graphs", function()
 		Test.InjectAction("Jump", "Tap")
 		Test.WaitTicks(2)
 		Test.ExpectEqual(steering.Jumps, 1, "Flow.Branch on Input.IsActionPressed")
+	end)
+
+	Test.Case("every value a graph computes is also its live value, under its node and pin", function()
+		Test.WaitTicks(1)
+		local arithmetic = Instance("Calculator", "Arithmetic").__GraphLive
+		Test.ExpectEqual(arithmetic["9.Result"], -1.5, "Number.Negate's Result, a pure node's output")
+		Test.ExpectEqual(arithmetic["23.Result"], true, "Logic.And's Result, which the branch read")
+		Test.ExpectEqual(arithmetic["27.Result"], "Result -1.5", "Text.Concat's Result, read on the branch's True flow")
+		local flows = Instance("Flow", "Flows").__GraphLive
+		Test.ExpectEqual(flows["2.Index"], 4, "Flow.ForRange's Index, a statement's output, holds its last run's value")
+		Test.ExpectEqual(flows["11.Result"], Support.Find("Target"), "Flow.IfNotNil's Result, the Entity field's value")
+		Test.ExpectEqual(flows["13.Value"], "Target", "Get.Entity.Name's Value, on the True flow")
 	end)
 end)

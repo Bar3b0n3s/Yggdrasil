@@ -23,6 +23,7 @@ namespace Engine {
 			case GraphEditorAction::DuplicateNodes:    return "edit.batch";
 			case GraphEditorAction::Undo:              return "edit.undo";
 			case GraphEditorAction::Redo:              return "edit.redo";
+			case GraphEditorAction::MoveLink:          return "edit.batch";
 		}
 		return {};
 	}

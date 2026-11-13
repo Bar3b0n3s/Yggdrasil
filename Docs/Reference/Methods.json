@@ -10031,6 +10031,224 @@
 			]
 		},
 		{
+			"name": "graph.liveValues",
+			"domain": "graph",
+			"description": "Reads, during play (a test run's included) and without changing the session, a graph behaviour's last node values, its fields and variables and the script errors its code raised, mapped to nodes.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphLiveValuesParams",
+				"description": "The params of graph.liveValues.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"script": {
+						"description": "The slot's behaviour name, matched against the graph's current Name (of two such slots, the first); empty: the entity's first slot holding a graph.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphLiveValuesResult",
+				"description": "A graph behaviour's live values in play.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph the slot holds.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"entity": {
+						"description": "The entity.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"slot": {
+						"description": "The slot's index in its Script list.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"tick": {
+						"description": "The play session's tick.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"values": {
+						"description": "The nodes' last output values, by node and pin.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLiveValue"
+						}
+					},
+					"members": {
+						"description": "The graph's fields and variables, by name.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLiveMember"
+						}
+					},
+					"errors": {
+						"description": "The instance's retained script errors raised by the graph's own code, each mapped to its node.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLiveError"
+						}
+					},
+					"truncated": {
+						"description": "Whether a list was cut at its limit.",
+						"type": "boolean"
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLiveValue": {
+						"description": "A node output's last value.",
+						"type": "object",
+						"properties": {
+							"node": {
+								"description": "The node's id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"pin": {
+								"description": "The output pin.",
+								"type": "string"
+							},
+							"type": {
+								"description": "The value's Luau or engine type name.",
+								"type": "string"
+							},
+							"value": {
+								"description": "The value in reflection's JSON spelling; null for a table, a function, a proxy, a non-finite number or a string that is not UTF-8, whose type still names it."
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLiveMember": {
+						"description": "A field's or variable's value.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The member's name.",
+								"type": "string"
+							},
+							"type": {
+								"description": "The value's Luau or engine type name.",
+								"type": "string"
+							},
+							"value": {
+								"description": "The value in reflection's JSON spelling; null while the instance holds none, and for a table, a function, a proxy, a non-finite number or a string that is not UTF-8, whose type still names it."
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLiveError": {
+						"description": "A retained script error of the instance.",
+						"type": "object",
+						"properties": {
+							"node": {
+								"description": "The node whose code raised it; 0 when its line maps to none.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"line": {
+								"description": "Its line of the transpiled text.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"message": {
+								"description": "The error's message.",
+								"type": "string"
+							},
+							"count": {
+								"description": "How many times it was raised.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Read the door's live values.",
+					"params": {
+						"entity": "/Door"
+					}
+				}
+			]
+		},
+		{
 			"name": "graph.moveNodes",
 			"domain": "graph",
 			"description": "Moves nodes on a graph's canvas (layout only) as one undoable edit.",

@@ -6,6 +6,7 @@
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/Commands/AssetEditCommand.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Graph/GraphLiveCache.h"
 #include "EditorCore/Private/EditorFileError.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetMetadata.h"
@@ -22,6 +23,12 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/FuzzySuggest.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptError.h"
+#include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
 
@@ -33,6 +40,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -234,20 +242,13 @@ namespace Engine {
 			return record->SourcePath;
 		}
 
-		// The graph `reference` names (the "graph" param), read strictly as its importer reads it: a member the file does not
-		// define would not survive a rewrite. Errors: FindGraphSource's and the reference's at /graph; the read errors;
-		// ImportFailed naming the file for a source that does not read, with the reader's location and issues.
-		Result<LoadedGraph> LoadGraph(EditorMethodContext& context, std::string_view reference)
+		// `text`, the bytes of the graph source at the project path `relative`, read strictly as its importer reads it: a member
+		// the file does not define would not survive a rewrite. Errors: ImportFailed naming the file for a source that does not
+		// read, with the reader's location and issues.
+		Result<GraphDocument> ReadGraphText(EditorContext& editor, std::string_view text, const std::string& relative)
 		{
-			EditorContext& editor = context.GetEditor();
-			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, reference, "/graph"));
-			ENGINE_TRY_ASSIGN(VfsPath source, FindGraphSource(editor.GetAssets(), handle, "/graph"));
-			Result<std::string> text = editor.GetVfs().ReadText(source);
-			if (!text)
-				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
-			std::string relative = Utils::ToProjectRelative(source);
 			GraphLoadReport report;
-			Result<GraphDocument> read = GraphFromText(*text, editor.GetTypeRegistry(), report, true);
+			Result<GraphDocument> read = GraphFromText(text, editor.GetTypeRegistry(), report, true);
 			if (!read)
 			{
 				ErrorLocation location = read.error().GetLocation();
@@ -257,7 +258,40 @@ namespace Engine {
 						.WithIssues(read.error().GetIssues())
 						.WithHint("project.validate reports what is wrong with the file; fix the file, then edit the graph again"));
 			}
-			return LoadedGraph{ .Handle = handle, .Source = std::move(source), .Path = std::move(relative), .Text = std::move(*text), .Document = std::move(*read) };
+			return read;
+		}
+
+		// The graph `reference` names (the "graph" param), read strictly (ReadGraphText). Errors: FindGraphSource's and the
+		// reference's at /graph; the read errors; ReadGraphText's.
+		Result<LoadedGraph> LoadGraph(EditorMethodContext& context, std::string_view reference)
+		{
+			EditorContext& editor = context.GetEditor();
+			ENGINE_TRY_ASSIGN(const AssetHandle handle, Utils::ResolveAssetParam(context, reference, "/graph"));
+			ENGINE_TRY_ASSIGN(VfsPath source, FindGraphSource(editor.GetAssets(), handle, "/graph"));
+			Result<std::string> text = editor.GetVfs().ReadText(source);
+			if (!text)
+				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
+			std::string relative = Utils::ToProjectRelative(source);
+			ENGINE_TRY_ASSIGN(GraphDocument document, ReadGraphText(editor, *text, relative));
+			return LoadedGraph{ .Handle = handle, .Source = std::move(source), .Path = std::move(relative), .Text = std::move(*text), .Document = std::move(document) };
+		}
+
+		// graph.liveValues' read of the graph `handle` (a script slot's), through the editor's GraphLiveCache (decision 14,
+		// W24.2's review): the method runs once a frame for every graph the Graph Editor and the inspector show, so the document
+		// is read strictly again only when the graph changed since the last call: its source's bytes, its path or its asset
+		// version. The source's bytes are read every call, since an edit during a lockstep or test session writes the file but
+		// defers its reimport. Errors: the read errors; ReadGraphText's.
+		Result<GraphLiveCacheEntry*> LoadLiveGraph(EditorContext& editor, AssetHandle handle, const VfsPath& source)
+		{
+			Result<std::string> text = editor.GetVfs().ReadText(source);
+			if (!text)
+				return std::unexpected(Utils::ToEditorFileError(std::move(text).error()));
+			GraphLiveCacheKey key{ .Graph = handle, .Path = Utils::ToProjectRelative(source), .SourceHash = XXH64(*text), .Version = editor.GetAssets().GetVersion(handle) };
+			GraphLiveCache& cache = editor.GetGraphLiveCache();
+			if (GraphLiveCacheEntry* kept = cache.Find(key))
+				return kept;
+			ENGINE_TRY_ASSIGN(GraphDocument document, ReadGraphText(editor, *text, key.Path));
+			return &cache.Insert(std::move(key), std::move(document));
 		}
 
 		// The node library of the editor's frozen script API registry: the declarations the importer's library is built from
@@ -499,6 +533,59 @@ namespace Engine {
 		bool ChangesKind(const Member& before, const Member& after)
 		{
 			return before.Kind != after.Kind || before.Element != after.Element || before.AssetType != after.AssetType || before.EnumValues != after.EnumValues;
+		}
+
+		// The script slot of `entity` graph.liveValues reads (decision 14): the first whose asset is a graph, or with `behaviour`
+		// the first whose graph names that behaviour, with the graph's current document (LoadLiveGraph's kept read). Errors:
+		// NotFound at /script for an entity with no graph slot, or none of that behaviour (its hint lists the entity's graph
+		// behaviours, or says that none of its graphs' sources reads); the chosen graph's read errors (ImportFailed for a source
+		// that does not read).
+		struct LiveGraphSlot
+		{
+			uint32_t Slot = 0;
+			GraphLiveCacheEntry* Graph = nullptr; // the editor's GraphLiveCache's entry, valid for the call
+		};
+
+		Result<LiveGraphSlot> FindLiveGraphSlot(EditorMethodContext& context, const Scene& scene, ConstEntity entity, std::string_view behaviour)
+		{
+			EditorContext& editor = context.GetEditor();
+			const EditorAssetManager& assets = editor.GetAssets();
+			const AssetRegistry& registry = assets.GetRegistry();
+			const ScriptComponent* component = entity.TryGetComponent<ScriptComponent>();
+			bool graphs = false;
+			std::string names;
+			for (size_t slot = 0; component != nullptr && slot < component->Scripts.size(); ++slot)
+			{
+				const AssetHandle handle = component->Scripts[slot].Script.GetHandle();
+				const AssetRecord* record = handle.IsValid() ? registry.Find(handle) : nullptr;
+				if (record == nullptr || record->Metadata.Importer != GraphImporter::Id)
+					continue;
+				graphs = true;
+				Result<GraphLiveCacheEntry*> graph = FindGraphSource(assets, handle, "/script").and_then([&editor, handle](const VfsPath& source)
+				{
+					return LoadLiveGraph(editor, handle, source);
+				});
+				if (behaviour.empty())
+				{
+					if (!graph)
+						return std::unexpected(std::move(graph).error());
+					return LiveGraphSlot{ .Slot = static_cast<uint32_t>(slot), .Graph = *graph };
+				}
+				if (!graph)
+					continue; // a source that does not read names no behaviour now
+				if ((*graph)->Document.Name == behaviour)
+					return LiveGraphSlot{ .Slot = static_cast<uint32_t>(slot), .Graph = *graph };
+				names += std::format("{}{} (slot {})", names.empty() ? "" : ", ", (*graph)->Document.Name, slot);
+			}
+			const std::string path = scene.GetEntityPath(entity);
+			if (!graphs)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/script", std::format("entity '{}' has no script slot holding a graph", path),
+					"graph.liveValues reads a graph behaviour; script.eval reads a Luau one"));
+			}
+			return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/script",
+				std::format("entity '{}' has no graph slot whose behaviour is named '{}'", path, behaviour),
+				names.empty() ? std::string("none of its graphs' sources reads; graph.read names what is wrong") : "its graph behaviours: " + names));
 		}
 
 	}
@@ -1080,10 +1167,75 @@ namespace Engine {
 			return result;
 		}
 
-		Result<GraphLiveValuesResult> GraphLiveValues(EditorMethodContext& /*context*/, const GraphLiveValuesParams& /*params*/)
+		Result<GraphLiveValuesResult> GraphLiveValues(EditorMethodContext& context, const GraphLiveValuesParams& params)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "graph.liveValues (Docs/Decisions/0035-m24-contract.md decision 14, stream B)");
+			PlaySession* session = context.GetPlaySession();
+			if (session == nullptr)
+				return std::unexpected(Error(ErrorCode::InvalidState, "graph.liveValues reads a play session, and none is running").WithHint("start one with play.start"));
+			ScriptEngine* scripts = session->GetScripts();
+			if (scripts == nullptr)
+			{
+				return std::unexpected(Error(ErrorCode::InvalidState, "graph.liveValues reads a playing session's behaviours, and a simulation runs none")
+						.WithHint("play.start with mode Play runs the behaviours"));
+			}
+			Scene& scene = session->GetScene();
+			ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(scene, params.Entity, "/entity"));
+			ENGINE_TRY_ASSIGN(const LiveGraphSlot slot, FindLiveGraphSlot(context, scene, entity, params.Script));
+			GraphLiveCacheEntry& graph = *slot.Graph;
+			Result<ScriptInstanceValues> values = scripts->ReadInstanceValues(entity.GetUUID(), slot.Slot);
+			if (!values)
+				return std::unexpected(std::move(values).error().WithContext(std::format("while reading the live values of '{}' in slot {}", graph.Key.Path, slot.Slot)));
+
+			GraphLiveValuesResult result;
+			result.Graph = Utils::MakeAssetSummary(context.GetEditor().GetAssets(), graph.Key.Graph);
+			result.Entity = context.MakeEntitySummary(entity);
+			result.Slot = slot.Slot;
+			result.Tick = ToAutomationCounter(session->GetTick());
+			result.Truncated = values->Truncated;
+
+			// The nodes' last values: the live-value table's keys that are the transpiler's (GetGraphProbeKey), by (node, pin).
+			for (ScriptInstanceValue& live : values->LiveValues)
+			{
+				if (std::optional<GraphPinRef> pin = ParseGraphProbeKey(live.Key); pin.has_value())
+					result.Values.push_back({ .Node = pin->Node, .Pin = std::move(pin->Pin), .Type = std::move(live.TypeName), .Value = std::move(live.Value) });
+			}
+			std::ranges::sort(result.Values, [](const GraphLiveValue& left, const GraphLiveValue& right)
+			{
+				return std::tie(left.Node, left.Pin) < std::tie(right.Node, right.Pin);
+			});
+
+			// The graph's fields and variables by name, each with its instance value ("nil" while the instance holds none).
+			for (const GraphField& field : graph.Document.Fields)
+				result.Members.push_back({ .Name = field.Name, .Type = "nil", .Value = {} });
+			for (const GraphVariable& variable : graph.Document.Variables)
+				result.Members.push_back({ .Name = variable.Name, .Type = "nil", .Value = {} });
+			std::ranges::sort(result.Members, {}, &GraphLiveMember::Name);
+			for (GraphLiveMember& member : result.Members)
+			{
+				const auto found = std::ranges::lower_bound(values->Members, member.Name, {}, &ScriptInstanceValue::Key);
+				if (found != values->Members.end() && found->Key == member.Name)
+				{
+					member.Type = found->TypeName;
+					member.Value = found->Value;
+				}
+			}
+
+			// The instance's retained errors raised by its graph's code (their script is the graph's path), each line mapped to
+			// its node through the graph's current text (decision 8); transpiled only when there is an error to map, and then
+			// kept with the graph's read, its line map only, until the graph changes.
+			for (const ScriptError& error : scripts->GetErrors().GetErrors())
+			{
+				if (error.Entity != entity.GetUUID() || error.Slot != slot.Slot || error.Script != graph.Key.Path)
+					continue;
+				if (!graph.LineMap.has_value())
+				{
+					ENGINE_TRY_ASSIGN(const GraphNodeLibrary* library, GetLibrary(context.GetEditor()));
+					Result<GraphTranspileResult> transpiled = TranspileGraph(graph.Document, *library, graph.Key.Path);
+					graph.LineMap = GraphTranspileResult{ .Luau = {}, .LineNodes = transpiled ? std::move(transpiled->LineNodes) : std::vector<uint32_t>{}, .Probes = {} };
+				}
+				result.Errors.push_back({ .Node = FindGraphNodeAtLine(*graph.LineMap, error.Line), .Line = error.Line, .Message = error.Message, .Count = ToAutomationCounter(error.Count) });
+			}
+			return result;
 		}
 
 	}
@@ -1220,16 +1372,22 @@ namespace Engine {
 
 		registry.Struct<GraphLiveValuesParams>("GraphLiveValuesParams", "The params of graph.liveValues.")
 			.Field("entity", &GraphLiveValuesParams::Entity, "An entity of the play scene: its id, a unique id prefix or its path.")
-			.Field("script", &GraphLiveValuesParams::Script, "The slot's behaviour name; empty: the entity's first slot holding a graph.");
+			.Field("script", &GraphLiveValuesParams::Script,
+				"The slot's behaviour name, matched against the graph's current Name (of two such slots, the first); empty: the entity's first slot "
+				"holding a graph.");
 		registry.Struct<GraphLiveValue>("GraphLiveValue", "A node output's last value.")
 			.Field("node", &GraphLiveValue::Node, "The node's id.")
 			.Field("pin", &GraphLiveValue::Pin, "The output pin.")
 			.Field("type", &GraphLiveValue::Type, "The value's Luau or engine type name.")
-			.Field("value", &GraphLiveValue::Value, "The value in reflection's JSON spelling; null for a table, a function or a proxy.");
+			.Field("value", &GraphLiveValue::Value,
+				"The value in reflection's JSON spelling; null for a table, a function, a proxy, a non-finite number or a string that is not UTF-8, "
+				"whose type still names it.");
 		registry.Struct<GraphLiveMember>("GraphLiveMember", "A field's or variable's value.")
 			.Field("name", &GraphLiveMember::Name, "The member's name.")
 			.Field("type", &GraphLiveMember::Type, "The value's Luau or engine type name.")
-			.Field("value", &GraphLiveMember::Value, "The value in reflection's JSON spelling.");
+			.Field("value", &GraphLiveMember::Value,
+				"The value in reflection's JSON spelling; null while the instance holds none, and for a table, a function, a proxy, a non-finite "
+				"number or a string that is not UTF-8, whose type still names it.");
 		registry.Struct<GraphLiveError>("GraphLiveError", "A retained script error of the instance.")
 			.Field("node", &GraphLiveError::Node, "The node whose code raised it; 0 when its line maps to none.")
 			.Field("line", &GraphLiveError::Line, "Its line of the transpiled text.")
@@ -1242,7 +1400,7 @@ namespace Engine {
 			.Field("tick", &GraphLiveValuesResult::Tick, "The play session's tick.")
 			.Field("values", &GraphLiveValuesResult::Values, "The nodes' last output values, by node and pin.")
 			.Field("members", &GraphLiveValuesResult::Members, "The graph's fields and variables, by name.")
-			.Field("errors", &GraphLiveValuesResult::Errors, "The instance's retained script errors, each mapped to its node.")
+			.Field("errors", &GraphLiveValuesResult::Errors, "The instance's retained script errors raised by the graph's own code, each mapped to its node.")
 			.Field("truncated", &GraphLiveValuesResult::Truncated, "Whether a list was cut at its limit.");
 	}
 
@@ -1378,8 +1536,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "graph.liveValues",
-				.Description = "Reads, during play and without changing the session, a graph behaviour's last node values, its fields and variables and "
-							   "its script errors mapped to nodes.",
+				.Description = "Reads, during play (a test run's included) and without changing the session, a graph behaviour's last node values, its "
+							   "fields and variables and the script errors its code raised, mapped to nodes.",
 				.RequiredParams = { "entity" },
 				.ExposeAsTool = true,
 				.AllowedInBatch = true,

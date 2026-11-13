@@ -4,6 +4,7 @@
 #include "Editor/EditorLayer.h"
 #include "Editor/PanelInteractionFixture.h"
 #include "Editor/Ui/EditorStyle.h"
+#include "EditorCore/Inspector/ScriptSlotList.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "Engine/Core/Buffer.h"
@@ -1509,6 +1510,222 @@ namespace Engine {
 			REQUIRE(automation.Call("edit.undo", Json{ { "steps", 4 } }));
 			CHECK(scripts(turret) == std::vector<AssetHandle>{ aim, fire });
 			CHECK(scripts(tower) == std::vector<AssetHandle>{ aim, fire });
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 15): a slot's New graph... is the graph editor's CreateGraphInSlot, one
+		// edit.batch of graph.create and the slot's entity.update, whose graph then opens in the Graph Editor; a slot holding a
+		// graph shows Open graph, which opens it there.
+		TEST_CASE("InspectorPanel: New graph creates a graph in a script slot in one undo step and opens it, and Open graph opens a slot's graph")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Door" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json::object() }) } } } } } }));
+			Scene& scene = context.Editor.GetScene();
+			const UUID door = scene.FindEntityByPath("/Door").GetUUID();
+			REQUIRE(context.Editor.SetSelection({ door }, SceneTarget::Edit));
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto settle = [&test]()
+			{
+				for (int round = 0; round < 6; ++round)
+				{
+					REQUIRE(test.Layer.OnSafePoint(0.0));
+					REQUIRE(test.Frame());
+				}
+			};
+			const ImGuiID graphScope = InspectorLayerIntId(ImHashStr("ScriptSlotGraph", 0, InspectorLayerComponentId("Script")), 0);
+			const size_t before = context.Editor.GetHistory().GetUndoCount();
+			CHECK(ImGui::FindWindowByName("Graph Editor") == nullptr);
+
+			// The name the dialog offers is the entity's, a graph in Assets/Scripts.
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("New graph...", 0, graphScope)).GetCenter()));
+			ImGuiWindow* popup = InspectorLayerPopup();
+			REQUIRE(popup != nullptr);
+			REQUIRE(test.Frame()); // the name field takes the keyboard focus as the dialog appears
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test.Ui, draw, popup->Name, popup->GetID("Create graph")).GetCenter()));
+			settle();
+			const auto graph = context.Editor.GetAssets().Resolve("Assets/Scripts/Door.graph");
+			REQUIRE(graph);
+			CHECK(scene.FindEntityByID(door).GetComponent<ScriptComponent>().Scripts.at(0).Script.GetHandle() == *graph);
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			const ImGuiWindow* graphWindow = ImGui::FindWindowByName("Graph Editor");
+			REQUIRE(graphWindow != nullptr);
+			CHECK(graphWindow->WasActive);
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("Door  (Assets/Scripts/Door.graph)"));
+			// A window of its own, not a panel: the open panels are the inspector alone, as before.
+			CHECK(std::vector<EditorPanel>(context.Editor.GetUiState().GetOpenPanels().begin(), context.Editor.GetUiState().GetOpenPanels().end())
+				== std::vector<EditorPanel>{ EditorPanel::Inspector });
+
+			// Another entity's graph opens in its place.
+			REQUIRE(automation.Call("graph.create", Json{ { "path", "Assets/Scripts/Lamp.graph" } }));
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Lamp" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Lamp.graph" } } }) } } } } } }));
+			REQUIRE(context.Editor.SetSelection({ scene.FindEntityByPath("/Lamp").GetUUID() }, SceneTarget::Edit));
+			test.CaptureText = false;
+			// The Graph Editor's window moves aside, so the inspector's button is not under it.
+			REQUIRE(test.Ui.Frame([&test]()
+			{
+				ImGui::SetWindowPos("Graph Editor", ImVec2(1500.0f, 850.0f));
+				return test.Draw();
+			}));
+			REQUIRE(test.Frame());
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("Open graph", 0, graphScope)).GetCenter()));
+			settle();
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("Lamp  (Assets/Scripts/Lamp.graph)"));
+			CHECK_FALSE(test.Text.contains("Door  (Assets/Scripts/Door.graph)"));
+
+			// W24.2's review: a New graph... the methods refuse (Door's graph exists) changes nothing, says why, and the button
+			// works again.
+			test.CaptureText = false;
+			REQUIRE(context.Editor.SetSelection({ door }, SceneTarget::Edit));
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			const size_t steps = context.Editor.GetHistory().GetUndoCount();
+			{
+				const Test::ExpectLog reported(LogLevel::Error, "InspectorPanel");
+				REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("New graph...", 0, graphScope)).GetCenter()));
+				ImGuiWindow* again = InspectorLayerPopup();
+				REQUIRE(again != nullptr);
+				REQUIRE(test.Frame());
+				REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test.Ui, draw, again->Name, again->GetID("Create graph")).GetCenter()));
+				settle();
+			}
+			CHECK(context.Editor.GetHistory().GetUndoCount() == steps);
+			CHECK(scene.FindEntityByID(door).GetComponent<ScriptComponent>().Scripts.at(0).Script.GetHandle() == *graph);
+			// The inspector shows the method's own refusal.
+			const Result<Json> batch = MakeScriptSlotGraph(scene, std::vector<UUID>{ door }, 0, "Assets/Scripts/Door.graph", SceneTarget::Edit);
+			REQUIRE(batch.has_value());
+			const Result<Json> refused = automation.Call("edit.batch", *batch);
+			REQUIRE_FALSE(refused.has_value());
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains(refused.error().GetMessageText()));
+			test.CaptureText = false;
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("New graph...", 0, graphScope)).GetCenter()));
+			CHECK(InspectorLayerPopup() != nullptr);
+		}
+
+		// M24 (decision 14; stream B's inspector drawing, tested at W24.2's integration): during play, a graph slot of the one
+		// selected entity shows its members' live values, read through graph.liveValues once a frame.
+		TEST_CASE("InspectorPanel: during play a graph slot of the one selected entity shows its fields' and variables' live values")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			// Counter: each fixed step adds its Step field (3) to its Count variable.
+			const Json graph = "Assets/Scripts/Counter.graph";
+			const auto call = [&automation](std::string_view method, const Json& params)
+			{
+				Result<Json> result = automation.Call(method, params);
+				INFO(std::string(method));
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				return std::move(*result);
+			};
+			const auto member = [](std::string_view name, double value, bool field)
+			{
+				Json described{ { "Name", std::string(name) }, { "Kind", "Number" }, { "Default", value }, { "Element", "Number" }, { "AssetType", "" },
+					{ "EnumValues", Json::array() } };
+				if (field)
+					described["Options"] = Json::object();
+				return described;
+			};
+			const auto add = [&call, &graph](std::string_view kind)
+			{
+				return JsonReader(call("graph.addNode", Json{ { "graph", graph }, { "kind", std::string(kind) } })["node"]).ReadUInt32().value_or(0);
+			};
+			const auto pin = [](uint32_t node, std::string_view name)
+			{
+				return Json{ { "Node", node }, { "Pin", std::string(name) } };
+			};
+			call("graph.create", Json{ { "path", graph } });
+			call("graph.setMembers", Json{ { "graph", graph }, { "fields", Json::array({ member("Step", 3, true) }) }, { "variables", Json::array({ member("Count", 0, false) }) } });
+			const uint32_t step = add("Event.OnFixedUpdate");
+			const uint32_t count = add("Self.Get.Count");
+			const uint32_t increment = add("Self.Get.Step");
+			const uint32_t sum = add("Number.Add");
+			const uint32_t store = add("Self.Set.Count");
+			call("graph.connect", Json{ { "graph", graph }, { "from", pin(step, "Then") }, { "to", pin(store, "In") } });
+			call("graph.connect", Json{ { "graph", graph }, { "from", pin(count, "Value") }, { "to", pin(sum, "A") } });
+			call("graph.connect", Json{ { "graph", graph }, { "from", pin(increment, "Value") }, { "to", pin(sum, "B") } });
+			call("graph.connect", Json{ { "graph", graph }, { "from", pin(sum, "Result") }, { "to", pin(store, "Value") } });
+			// Tagger: each fixed step tags its Target field, which nothing sets, so its first step raises an error.
+			const Json tagger = "Assets/Scripts/Tagger.graph";
+			call("graph.create", Json{ { "path", tagger } });
+			call("graph.setMembers", Json{ { "graph", tagger }, { "fields", Json::array({ Json{ { "Name", "Target" }, { "Kind", "Entity" }, { "Default", nullptr }, { "Element", "Number" }, { "AssetType", "" }, { "EnumValues", Json::array() }, { "Options", Json::object() } } }) } });
+			const uint32_t tick = JsonReader(call("graph.addNode", Json{ { "graph", tagger }, { "kind", "Event.OnFixedUpdate" } })["node"]).ReadUInt32().value_or(0);
+			const uint32_t target = JsonReader(call("graph.addNode", Json{ { "graph", tagger }, { "kind", "Self.Get.Target" } })["node"]).ReadUInt32().value_or(0);
+			const uint32_t tag = JsonReader(call("graph.addNode", Json{ { "graph", tagger }, { "kind", "Call.Entity.AddTag" }, { "values", Json{ { "tag", "Seen" } } } })["node"]).ReadUInt32().value_or(0);
+			call("graph.connect", Json{ { "graph", tagger }, { "from", pin(tick, "Then") }, { "to", pin(tag, "In") } });
+			call("graph.connect", Json{ { "graph", tagger }, { "from", pin(target, "Value") }, { "to", pin(tag, "self") } });
+			// The Counter entity's slots 0 and 1 hold the one Counter, so they share its behaviour name; Tagged's slot holds the
+			// Tagger.
+			const Json slot{ { "Script", graph }, { "Fields", Json::object() }, { "ExecutionOrder", 0 } };
+			const Json tagging{ { "Script", tagger }, { "Fields", Json::object() }, { "ExecutionOrder", 0 } };
+			call("entity.create", Json{ { "name", "Counter" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ slot, slot }) } } } } } });
+			call("entity.create", Json{ { "name", "Tagged" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ tagging }) } } } } } });
+			const UUID tagged = context.Editor.GetScene().FindEntityByPath("/Tagged").GetUUID();
+			const UUID counter = context.Editor.GetScene().FindEntityByPath("/Counter").GetUUID();
+			REQUIRE(context.Editor.SetSelection({ counter }, SceneTarget::Edit));
+			const auto settle = [&test]()
+			{
+				for (int round = 0; round < 6; ++round)
+				{
+					REQUIRE(test.Layer.OnSafePoint(0.0));
+					REQUIRE(test.Frame());
+				}
+			};
+			settle();
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK_FALSE(test.Text.contains("Live values"));
+
+			// The selection follows into play; two ticks later the slot shows the instance's values.
+			test.CaptureText = false;
+			{
+				const Test::ExpectLog raised(LogLevel::Error, "attempt to index nil with 'AddTag'");
+				call("play.start", Json{ { "lockstep", true }, { "seed", 7 } });
+				call("play.step", Json{ { "ticks", 2 } });
+			}
+			REQUIRE(context.Editor.GetSelectionTarget() == SceneTarget::Play);
+			settle();
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("Live values"));
+			CHECK(test.Text.contains("Count = 6"));
+			CHECK(test.Text.contains("Step = 3"));
+			// graph.liveValues reads the first slot of a behaviour name: the second Counter slot says where its values show
+			// (W24.2's review).
+			CHECK(test.Text.contains("Shown in slot 0"));
+			CHECK_FALSE(test.Text.contains("Shown in slot 1"));
+			// A slot whose graph's code raised an error counts the errors beside its members (W24.2's review).
+			CHECK_FALSE(test.Text.contains("script error(s)"));
+			test.CaptureText = false;
+			REQUIRE(context.Editor.SetSelection({ tagged }, SceneTarget::Play));
+			settle();
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("Target = nil"));
+			CHECK(test.Text.contains("1 script error(s)"));
+			test.CaptureText = false;
+			REQUIRE(context.Editor.SetSelection({ counter }, SceneTarget::Play));
+			settle();
+
+			// Stopped: the values go.
+			test.CaptureText = false;
+			call("play.stop", Json::object());
+			settle();
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK_FALSE(test.Text.contains("Live values"));
+			CHECK_FALSE(test.Text.contains("Count = 6"));
 		}
 
 		// Docs/Decisions/0031-m20-contract.md decision 19: an override of one slot shows beside that slot's member and in

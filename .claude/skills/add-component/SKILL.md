@@ -33,6 +33,8 @@ python Scripts/GenerateDocs.py --config Debug
 
 `GenerateDocs.py` regenerates `Docs/Reference/Components.md` (fields, defaults, ranges, enums, script members), `Docs/Reference/Schemas/*.schema.json` (the scene and prefab schemas embed every component), `ScriptAPI.md`, `Resources/Scripting/Engine.d.luau` (the proxy type and the `GetComponent` overload) and, when automation types change, `Methods.json` and `Tools/MCP/catalog.json`. `--check` must be clean before a commit; commit the regenerated files with the change.
 
+A scriptable component is also visible to visual-scripting graphs: the node library derives `Get.Entity.<Name>` (the proxy, an optional value unless every entity has the component, as `Transform`) and `Get.<Name>.<Field>` and `Set.<Name>.<Field>` nodes from its proxy, and `Call.<Name>.<Method>` from its methods (the `add-script-api` skill's note), so a renamed or removed field makes the graphs that use it `GRAPH_INVALID`.
+
 ## FeatureTest coverage
 
 Every new component, field and enum value is covered in `Projects/FeatureTest` in every run mode (Roadmap rule 5, §15.5, §15.6), through the project's scaffolds (`Projects/FeatureTest/Scaffold/*.jsonl`, regenerated with `python Scripts/Scaffold.py`; never edit project files by hand):
