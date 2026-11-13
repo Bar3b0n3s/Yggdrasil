@@ -79,9 +79,19 @@ class NativeModuleTests(AutomationTestCase):
         document = {"Format": "EditorPreferences", "Version": 1, "AllowNativeCode": True}
         path.write_text(json.dumps(document, indent="\t") + "\n", encoding="utf-8")
 
+    def declared_timeout(self, client: engine_client.EngineClient, method: str) -> float:
+        """The timeoutSeconds the editor declares for `method` (rpc.discover, Docs/Decisions/0026-m16-contract.md
+        decision 13): native.build and project.export wait for the machine-wide build lock and then compile, which
+        takes longer than the client's default 60 s on a loaded machine."""
+        domain = method.partition(".")[0]
+        catalogue = engine_client.load_offloaded(client.call("rpc.discover", {"domain": domain}))
+        timeouts = [entry["timeoutSeconds"] for entry in catalogue["methods"] if entry["name"] == method]
+        self.assertEqual(len(timeouts), 1, method)
+        return float(timeouts[0])
+
     def build(self, client: engine_client.EngineClient) -> dict:
         """native.build, which must succeed; its result."""
-        built = client.call("native.build")
+        built = client.call("native.build", timeout=self.declared_timeout(client, "native.build"))
         self.assertTrue(built["succeeded"], built["diagnostics"])
         return built
 
@@ -124,8 +134,7 @@ class NativeModuleTests(AutomationTestCase):
         self.assertEqual(status["sources"], ["Native/Spinners.cpp"])
         api_header = REPOSITORY_ROOT / native_build.API_HEADER
         self.assertEqual(status["sourceHash"], native_build.source_hash(root, automation_config(), api_header))
-        built = client.call("native.build")
-        self.assertTrue(built["succeeded"], built["diagnostics"])
+        built = self.build(client)
         self.assertTrue((root / built["library"]).is_file())
         loaded = client.call("native.load")
         self.assertEqual([component["registryName"] for component in loaded["components"]], ["Native.Spinner"])
@@ -247,7 +256,7 @@ class NativeModuleTests(AutomationTestCase):
         # libraries the native Runtime links, and archives that executable's PDB and linker map below Library/.
         self.allow_native_code()
         client, root = self.open_native_project()
-        client.call("native.build")
+        self.build(client)
         client.call("native.load")
         client.call("entity.create", {"name": "Wheel"})
         client.call("native.setComponents", {"entity": "/Wheel", "components": {"Native.Spinner": {}}})
@@ -255,7 +264,8 @@ class NativeModuleTests(AutomationTestCase):
         client.call("project.setSettings", {"patch": {"StartScene": "Assets/Scenes/Main.scene",
                                                       "Export": {"BuildScenes": ["Assets/Scenes/Main.scene"]}}})
         config = automation_config()
-        exported = client.call("project.export", {"config": config, "smokeTest": True})
+        exported = client.call("project.export", {"config": config, "smokeTest": True},
+                               timeout=self.declared_timeout(client, "project.export"))
         self.assertTrue(exported["nativeModule"])
         self.assertIn("NativeBuild", [timing["phase"] for timing in exported["phaseTimings"]])
         self.assertEqual(exported["smokeTestExitCode"], 0)
