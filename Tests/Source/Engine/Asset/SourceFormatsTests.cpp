@@ -42,6 +42,14 @@ namespace Engine {
 			REQUIRE(exr != nullptr);
 			CHECK(exr->Importable);
 
+			// M24 (Docs/Decisions/0035-m24-contract.md decision 2): a graph source is a Script asset of the Graph importer, so gate 9
+			// counts the format in every mode as it counts .luau.
+			const SourceFormat* graph = FindSourceFormat(".graph");
+			REQUIRE(graph != nullptr);
+			CHECK(graph->Importer == "Graph");
+			CHECK(graph->MainType == AssetType::Script);
+			CHECK(graph->Importable);
+
 			const SourceFormat* jpeg = FindSourceFormat(".JPEG");
 			REQUIRE(jpeg != nullptr);
 			CHECK(jpeg->Importer == "Texture");

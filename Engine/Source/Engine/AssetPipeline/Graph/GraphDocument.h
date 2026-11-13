@@ -40,20 +40,27 @@
 //     node's input pins, keyed by pin name (a Luau identifier of at most MaxGraphNameBytes bytes), at most MaxGraphNodeValues
 //     of them, each JSON null, a boolean, a finite number, a string of at most MaxGraphStringBytes bytes of valid UTF-8, or an
 //     array of 3 or 4 finite numbers (a vector, a colour, a quaternion). A literal whose pin is also linked is kept, and the
-//     link wins (unlinking restores the literal).
+//     link wins (unlinking restores the literal). A finite number is one JsonWriter writes back as itself: an integer, or a
+//     fractional number in float's range that is the float it rounds to (the writer writes every fractional number as that
+//     float, -0 as 0), so a file and its canonical re-save hold the same numbers and transpile to the same text; 0.30000001
+//     or 1e-50, which the writer would write as 0.3 or 0, is refused, the message naming the float to write.
 //   - Links. From names an output pin and To an input pin (the library checks the directions); both nodes exist and differ;
-//     each (From, To) once.
+//     each (From, To) once. A link's nodes are checked once every node id is valid and in order; until then the ids' issues
+//     stand for them.
 //   - Members. A field (a behaviour field: serialized, set per script slot in the inspector) or a variable (instance state,
-//     created at OnCreate) has a Kind (GraphValueKind) and a Default in the JSON spelling of that kind: Number and Integer a
-//     finite number (Integer an int32), Bool a boolean, String a string, Vector [x, y, z], Color [r, g, b, a] (linear), Quat
-//     [x, y, z, w] (finite, nonzero), Entity and Asset null, Enum one of EnumValues, Array []. Element is an Array's element
-//     kind (any kind but Array) and Number for every other kind; AssetType is an Asset's (or an Array of Asset's) AssetType
-//     name, other than None, and empty otherwise; EnumValues are an Enum's (or an Array of Enum's) 1 to MaxGraphEnumValues
-//     unique choices, each 1 to MaxGraphNameBytes bytes of valid UTF-8, and empty otherwise. A field's Options are the Luau
-//     FieldOptions it is declared with, so only a kind whose Field constructor takes FieldOptions has any (Number, Integer,
-//     Bool, String, Vector, Color, Quat; never Entity, Asset, Enum or Array): "Min", "Max" and "Step" (finite numbers, for
-//     Number, Integer and Vector only, Min <= Max) and "Tooltip" (a string of at most MaxGraphTooltipBytes bytes); a variable
-//     has none.
+//     created at OnCreate) has a Kind (GraphValueKind) and a Default in the JSON spelling of that kind: Number a finite
+//     number, Integer an int32, Bool a boolean, String a string of at most MaxGraphStringBytes bytes of valid UTF-8, Vector
+//     [x, y, z], Color [r, g, b, a] (linear), Quat [x, y, z, w] (finite, nonzero), Entity and Asset null, Enum one of
+//     EnumValues, Array []. Element is an Array's element kind (any kind but Array) and Number for every other kind; AssetType
+//     is an Asset's (or an Array of Asset's) AssetType name, other than None, and empty otherwise; EnumValues are an Enum's (or
+//     an Array of Enum's) 1 to MaxGraphEnumValues unique choices, each 1 to MaxGraphNameBytes bytes of valid UTF-8 without NUL,
+//     and empty otherwise. A field's Options are the Luau FieldOptions it is declared with, so only a kind whose Field
+//     constructor takes FieldOptions has any (Number, Integer, Bool, String, Vector, Color, Quat; never Entity, Asset, Enum or
+//     Array): "Min", "Max" and "Step" (finite numbers, for Number, Integer and Vector only, Min <= Max, Step > 0) and "Tooltip"
+//     (a string of at most MaxGraphTooltipBytes bytes of valid UTF-8 without NUL); a variable has none. A field's Default
+//     also meets what its Field constructor requires of a default: a Number's, Integer's or Vector's (each component) within
+//     Min and Max, compared as the field's reflected type compares them (a float against the bound rounded to float), and a
+//     Quat's of unit length (within UnitQuaternionTolerance, Reflection/FieldType.h).
 //   - Canonical order. Fields and Variables sorted by Name, Nodes by Id, Links by (From.Node, From.Pin, To.Node, To.Pin), all
 //     byte-wise, so the file and its edits are canonical (CanonicalizeGraph) and every write of one graph is byte-identical.
 //   - Limits. The counts and sizes below bound what external input controls, so a hostile file cannot exhaust memory.
@@ -168,9 +175,11 @@ namespace Engine {
 	};
 
 	// Registers the enum "GraphValueKind" and the structs "GraphPinRef", "GraphField", "GraphVariable", "GraphNode",
-	// "GraphLink" and "Graph" (GraphDocument), with ValidateGraphStructure's rules as Validate hooks and Generate hooks that
-	// keep the registry suite's random objects valid. RegisterAssetPipelineTypes calls it (stream G-A), so graphs read and
-	// write wherever the importers' types are registered (the editor, the tests' built-in registry); the Runtime has none.
+	// "GraphLink" and "Graph" (GraphDocument). ValidateGraphStructure's rules are the "Graph" struct's Validate hook (all of
+	// them but the Name's on an empty Name, the registry's default object, which GraphFromJson still refuses), so a document
+	// reports each violation once, in document order; its Generate hook keeps the registry suite's random graphs valid, and
+	// the member structs have neither. RegisterAssetPipelineTypes calls it (stream G-A), so graphs read and write wherever the
+	// importers' types are registered (the editor, the tests' built-in registry); the Runtime has none.
 	void RegisterGraphTypes(TypeRegistry& registry);
 
 	// Whether `name` is a Luau identifier of 1 to MaxGraphNameBytes bytes that is not a Luau reserved word and does not start

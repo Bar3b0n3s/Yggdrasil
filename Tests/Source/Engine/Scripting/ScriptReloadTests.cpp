@@ -614,8 +614,7 @@ return Test.Suite("Chain", function() Test.Case("value", function() Test.Expect(
 			CHECK(fixture.Errors.empty());
 		}
 
-		TEST_CASE("HotReload: a behaviour under a .graph origin extracts, instantiates and hot-reloads as a .luau one, and no script requires it"
-			* doctest::skip(true))
+		TEST_CASE("HotReload: a behaviour under a .graph origin extracts, instantiates and hot-reloads as a .luau one, and no script requires it")
 		{
 			// M24 (C24.1, Docs/Decisions/0035-m24-contract.md decision 9, stream G-B): a graph's cooked script is its transpiled
 			// Luau text under the .graph path (IsScriptSourcePath), which the load-time extraction, the module cache, every

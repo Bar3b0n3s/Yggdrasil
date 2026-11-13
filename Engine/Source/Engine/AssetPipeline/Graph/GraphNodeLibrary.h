@@ -148,8 +148,8 @@ namespace Engine {
 		uint32_t Node = 0;         // the node it concerns; 0 for the graph's members or name
 		std::string Message{};
 		// An issue of an unfinished graph that the edit methods accept on the way to a finished one (a required input not
-		// linked yet; an output read where its statement may not have run); every other issue is refused by the method that
-		// would make it. The import refuses both kinds.
+		// linked yet; an output read where its statement may not have run, or Flow.IfNotNil's Result where its Value may be
+		// nil); every other issue is refused by the method that would make it. The import refuses both kinds.
 		bool Incomplete = false;
 
 		bool operator==(const GraphIssue&) const = default;
@@ -189,20 +189,28 @@ namespace Engine {
 		[[nodiscard]] std::vector<GraphNodeDescription> GetMemberNodes(const GraphDocument& graph) const;
 		// XXH64 of the canonical listing of every kind, for tests and logs.
 		[[nodiscard]] uint64_t GetFingerprint() const;
+		// The choices of the registered enum an Enum pin names (its TypeName), in declaration order; empty for a name the
+		// registry does not hold. ValidateGraph checks an Enum literal against them.
+		[[nodiscard]] std::span<const std::string> GetEnumChoices(std::string_view enumName) const;
 	private:
 		struct State;
 		Scope<State> m_State{};
 	};
 
 	// Every rule a graph keeps against `library`, beyond ValidateGraphStructure's (which `graph` passes): every kind resolves;
-	// every value names a data input of its node and fits its type (Bool, Number, String, Vector, Color, Quat, an Enum's
-	// choice, an Asset handle or null, an Any scalar; an Entity or Object input takes no literal); every link joins an output
-	// to an input of compatible pins (AreGraphPinsCompatible); a data input and an exec output take at most one link (an exec
-	// input any number); no cycle of data links and no exec cycle; a member node names a member of the graph; and, as
-	// Incomplete issues, every required input without a Default is linked or holds a literal, and every data link from a
+	// every value names a data input of its node and fits its type (Bool, Number, String, Vector, Color, a nonzero Quat, an
+	// Enum's choice, an Asset handle or null, an Any scalar; an Entity or Object input takes no literal); every link joins an
+	// output to an input of compatible pins (AreGraphPinsCompatible); a data input and an exec output take at most one link
+	// (an exec input any number); no cycle of data links and no exec cycle; a member node names a member of the graph; and,
+	// as Incomplete issues, every required input without a Default is linked or holds a literal, every data link from a
 	// statement's output reaches only nodes that statement dominates in its event's flow (it has run whenever they do, in
-	// the same event function, Flow.Delay's later flow included). Several event nodes of one callback are valid and run in
-	// id order. The issues are in document order. Pure.
+	// the same event function, Flow.Delay's later flow included), and Flow.IfNotNil's Result reaches only nodes its True
+	// flow alone enters (where its Value is not nil). When every other issue is Incomplete, no statement's code starts more
+	// than 64 blocks deep in the transpiled text (TranspileGraph's layout, where a branch, a loop's body, Flow.Delay's later
+	// flow and a statement's block of pure values each nest one level), reported at the statement that first passes the
+	// limit, and the text holds at most 8 MiB, reported at the statement whose code passes it, so a graph transpiles exactly
+	// when it validates (Docs/Decisions/0035-m24-contract.md decision 7 and risk 1). Several event nodes of one callback are
+	// valid and run in id order. The issues are in document order. Pure.
 	[[nodiscard]] std::vector<GraphIssue> ValidateGraph(const GraphDocument& graph, const GraphNodeLibrary& library);
 
 	// The statement nodes that no event's flow reaches (GRAPH_UNREACHABLE_NODE), sorted by id. Pure; `graph` validates.

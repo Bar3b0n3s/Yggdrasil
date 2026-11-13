@@ -1,0 +1,479 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Flows",
+	"Fields": [
+		{
+			"Name": "Picture",
+			"Kind": "Asset",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "Texture",
+			"EnumValues": [],
+			"Options": {}
+		},
+		{
+			"Name": "Steps",
+			"Kind": "Array",
+			"Default": [],
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		},
+		{
+			"Name": "Target",
+			"Kind": "Entity",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "EachTotal",
+			"Kind": "Number",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "Fired",
+			"Kind": "Bool",
+			"Default": false,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "FiredTick",
+			"Kind": "Integer",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "Picked",
+			"Kind": "Asset",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "Texture",
+			"EnumValues": []
+		},
+		{
+			"Name": "RangeTotal",
+			"Kind": "Number",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "TargetName",
+			"Kind": "String",
+			"Default": "",
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "Waiting",
+			"Kind": "Bool",
+			"Default": false,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnStart",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Flow.ForRange",
+			"Position": [240, 0],
+			"Values": {
+				"First": 1,
+				"Last": 4
+			}
+		},
+		{
+			"Id": 3,
+			"Kind": "Self.Get.RangeTotal",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Number.Add",
+			"Position": [720, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Self.Set.RangeTotal",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Flow.ForEach",
+			"Position": [1200, 0],
+			"Values": {}
+		},
+		{
+			"Id": 7,
+			"Kind": "Self.Get.Steps",
+			"Position": [0, 160],
+			"Values": {}
+		},
+		{
+			"Id": 8,
+			"Kind": "Self.Get.EachTotal",
+			"Position": [240, 160],
+			"Values": {}
+		},
+		{
+			"Id": 9,
+			"Kind": "Number.Add",
+			"Position": [480, 160],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Self.Set.EachTotal",
+			"Position": [720, 160],
+			"Values": {}
+		},
+		{
+			"Id": 11,
+			"Kind": "Flow.IfNotNil",
+			"Position": [960, 160],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Self.Get.Target",
+			"Position": [1200, 160],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Get.Entity.Name",
+			"Position": [0, 320],
+			"Values": {}
+		},
+		{
+			"Id": 14,
+			"Kind": "Self.Set.TargetName",
+			"Position": [240, 320],
+			"Values": {}
+		},
+		{
+			"Id": 15,
+			"Kind": "Self.Set.TargetName",
+			"Position": [480, 320],
+			"Values": {
+				"Value": "none"
+			}
+		},
+		{
+			"Id": 16,
+			"Kind": "Self.Get.Picture",
+			"Position": [720, 320],
+			"Values": {}
+		},
+		{
+			"Id": 17,
+			"Kind": "Self.Set.Picked",
+			"Position": [960, 320],
+			"Values": {}
+		},
+		{
+			"Id": 18,
+			"Kind": "Flow.Delay",
+			"Position": [1200, 320],
+			"Values": {
+				"Seconds": 0.25
+			}
+		},
+		{
+			"Id": 19,
+			"Kind": "Self.Set.Waiting",
+			"Position": [0, 480],
+			"Values": {
+				"Value": true
+			}
+		},
+		{
+			"Id": 20,
+			"Kind": "Self.Set.Fired",
+			"Position": [240, 480],
+			"Values": {
+				"Value": true
+			}
+		},
+		{
+			"Id": 21,
+			"Kind": "Call.Time.GetTick",
+			"Position": [480, 480],
+			"Values": {}
+		},
+		{
+			"Id": 22,
+			"Kind": "Self.Set.FiredTick",
+			"Position": [720, 480],
+			"Values": {}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Body"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Completed"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Index"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Body"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Completed"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Element"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "Array"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "False"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 14,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 17,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 18,
+				"Pin": "Later"
+			},
+			"To": {
+				"Node": 20,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 18,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 20,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 22,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 21,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 22,
+				"Pin": "Value"
+			}
+		}
+	]
+}

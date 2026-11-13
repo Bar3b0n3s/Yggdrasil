@@ -18,6 +18,7 @@
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/Core/Assert.h"
@@ -1245,6 +1246,15 @@ namespace Engine {
 		m_ScriptService = CreateScope<EditorScriptService>(*this, *m_ScriptChecker);
 		m_ScriptConfigurationHash = hash.Digest();
 		return {};
+	}
+
+	Result<const GraphNodeLibrary*> EditorContext::GetGraphNodeLibrary()
+	{
+		if (m_GraphNodeLibrary == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(m_GraphNodeLibrary, GraphNodeLibrary::Create(m_Engine->GetScriptApiRegistry()));
+		}
+		return m_GraphNodeLibrary.get();
 	}
 
 	Result<Ref<const ScriptFieldSchemaSource>> EditorContext::GetScriptSchemaSnapshot() const

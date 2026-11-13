@@ -189,6 +189,42 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 			REQUIRE(client.Call("play.stop", Json::object()).has_value());
 		}
 
+		TEST_CASE("EditorHostViewports: a window's cursor position maps to the game image through the main viewport's desktop position")
+		{
+			// M24 (Docs/Decisions/0035-m24-contract.md decision 18, the coordinate audit): with platform windows on, Dear ImGui's
+			// coordinates, the Game panel's rectangle among them, are the desktop's, while a native window event's cursor
+			// position is relative to the main window's client area, which starts at the main viewport's position.
+			Test::EditorTestFixture fixture("HostGameDesktopCoordinates");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			struct UiContext
+			{
+				ImGuiContext* Context = ImGui::CreateContext();
+				~UiContext() { ImGui::DestroyContext(Context); }
+			} ui;
+			ImGui::GetMainViewport()->Pos = ImVec2(300.0f, 200.0f);
+			GizmoController gizmos(editor);
+			EditorHostViewports host(editor, gizmos);
+			// The Game panel at (700, 280) on the desktop, (400, 80) in the main window, 800x450 logical units showing a
+			// 1920x1080 image.
+			host.SetRectangle(ViewportView::Game, { .Min = { 700.0f, 280.0f }, .Size = { 800.0f, 450.0f }, .ImageSize = { 1920, 1080 } });
+			host.SetGameInputFocused(true);
+			const auto corner = host.ToGameEvent(MouseMoveEvent{ .Position = { 400.0f, 80.0f } });
+			REQUIRE(corner.has_value());
+			CHECK(std::get<MouseMoveEvent>(*corner).Position == glm::vec2(0.0f, 0.0f));
+			const auto center = host.ToGameEvent(MouseMoveEvent{ .Position = { 800.0f, 305.0f } });
+			REQUIRE(center.has_value());
+			CHECK(std::get<MouseMoveEvent>(*center).Position == glm::vec2(960.0f, 540.0f));
+			// A press over the image is game input. The window's (1300, 600) is the desktop's (1600, 800), below and right of the
+			// image, so a press there is not.
+			CHECK(host.ToGameEvent(MouseButtonEvent{ .Button = MouseButton::Left, .Action = ButtonAction::Pressed }).has_value());
+			CHECK(host.ToGameEvent(MouseButtonEvent{ .Button = MouseButton::Left, .Action = ButtonAction::Released }).has_value());
+			REQUIRE(host.ToGameEvent(MouseMoveEvent{ .Position = { 1300.0f, 600.0f } }).has_value());
+			CHECK_FALSE(host.ToGameEvent(MouseButtonEvent{ .Button = MouseButton::Left, .Action = ButtonAction::Pressed }).has_value());
+			host.SetGameInputFocused(false);
+		}
+
 		TEST_CASE("EditorHostViewports: losing game input releases native input of ordinary play but never touches a lockstep session")
 		{
 			Test::EditorTestFixture fixture("HostGameRelease");

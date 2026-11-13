@@ -23,7 +23,7 @@
 		},
 		"Importer": {
 			"description": "The importer that cooks the source (asset metas only).",
-			"enum": ["Audio", "Environment", "Font", "Gltf", "Material", "Prefab", "Replay", "Scene", "Script", "SoundEffect", "SpriteSheet", "StringTable", "Texture", "Tilemap"]
+			"enum": ["Audio", "Environment", "Font", "Gltf", "Graph", "Material", "Prefab", "Replay", "Scene", "Script", "SoundEffect", "SpriteSheet", "StringTable", "Texture", "Tilemap"]
 		},
 		"ImporterVersion": {
 			"description": "The version of that importer when it last wrote the meta (asset metas only).",

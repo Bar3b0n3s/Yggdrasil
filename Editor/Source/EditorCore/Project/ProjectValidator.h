@@ -42,7 +42,10 @@
 // Handle, UiScrollView Content or UiTextInput TextElement or Placeholder that is not a UI element below its widget in its
 // canvas (decisions 35 and 53). M23 adds RENDER_POINT_SHADOW_BUDGET (Renderer/PointShadowMaps.h) when more than
 // MaxPointShadowLights point lights of a scene cast shadows (Docs/Decisions/0034-m23-contract.md decision 18), then
-// ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH (Scene/AnimationValidation.h, decision 30). GetCodes lists every
+// ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH (Scene/AnimationValidation.h, decision 30). M24 adds GRAPH_INVALID
+// and GRAPH_UNREACHABLE_NODE (AssetPipeline/Graph/GraphNodeLibrary.h) from the validator's own read of every Graph-imported
+// source, the Scene scope's script slots sending a graph there and never to the Luau check, and a graph's computed loads to
+// SCRIPT_COMPUTED_ASSET_LOAD from its transpiled text (Docs/Decisions/0035-m24-contract.md decision 5). GetCodes lists every
 // code in §13.7 order, later milestones' codes appended in landing order. A code is never removed or reused: one that
 // nothing reports any more stays in GetCodes and is listed by GetRetiredCodes (M23: GltfImporter version 2 imports COLOR_0,
 // so ASSET_VERTEX_COLORS_IGNORED is retired; decision 18).

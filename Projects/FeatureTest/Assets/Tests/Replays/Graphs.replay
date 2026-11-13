@@ -1,0 +1,186 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "a932782b0d86f419",
+		"Path": "Assets/Scenes/Graphs.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "03f7b5d22d967de6",
+				"Path": "/Vectorizer",
+				"Hash": "ad64e721584ba358",
+				"Components": {
+					"Transform": "cd095e7f43d05303",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "16ca046e31e47f5b"
+				}
+			},
+			{
+				"Id": "141a18231d88449b",
+				"Path": "/Target",
+				"Hash": "6d98c26f95686c26",
+				"Components": {
+					"Transform": "f055a45e218e45b1"
+				}
+			},
+			{
+				"Id": "36bb96d672aae0be",
+				"Path": "/Rover",
+				"Hash": "ca9c51a3710fc1dc",
+				"Components": {
+					"Transform": "75be795811ac7a46",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "a9678242a7e02c6a"
+				}
+			},
+			{
+				"Id": "5d23f186a22eb977",
+				"Path": "/Calculator",
+				"Hash": "e6e88b6c14ff930d",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "02126bed540aabd6"
+				}
+			},
+			{
+				"Id": "652235db65305e33",
+				"Path": "/Flow",
+				"Hash": "7a40f3eb77d0d4fc",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "5d9bf462addbdaf5"
+				}
+			},
+			{
+				"Id": "a8f3e3728b63b7bf",
+				"Path": "/Sun",
+				"Hash": "4cf099a3d95f2e16",
+				"Components": {
+					"Transform": "f4f82fb6196e9853",
+					"DirectionalLight": "60bab90e2cb40d0e"
+				}
+			},
+			{
+				"Id": "f0b2a405ef546f43",
+				"Path": "/Camera",
+				"Hash": "fcd2d4e812b26b16",
+				"Components": {
+					"Transform": "0452654d5f117792",
+					"Camera": "06bc5d3b8e2a9794",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "0ce8d60bf54ab584",
+				"Path": "Assets/Scripts/Graphs/Steering.graph",
+				"Type": "Script",
+				"Hash": "03e5e09bdc8a0ae1"
+			},
+			{
+				"Handle": "a79d0beb3624a894",
+				"Path": "Assets/Scripts/Graphs/Vectors.graph",
+				"Type": "Script",
+				"Hash": "72738f150ed86188"
+			},
+			{
+				"Handle": "b5e6dd14882879df",
+				"Path": "Assets/Scripts/Graphs/Arithmetic.graph",
+				"Type": "Script",
+				"Hash": "671d4ac304c27611"
+			},
+			{
+				"Handle": "e5d73249ee0c32bb",
+				"Path": "Assets/Scripts/Graphs/Flows.graph",
+				"Type": "Script",
+				"Hash": "2191197eb971c025"
+			},
+			{
+				"Handle": "ff1ef48a168df8da",
+				"Path": "Assets/Textures/Tilemaps/Rgba.png",
+				"Type": "Texture",
+				"Hash": "a103b47d529add8e"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 6,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 1
+		},
+		{
+			"Tick": 70,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 90,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 91,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 120,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 150,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 170,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 171,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 200,
+			"Luau": "local rover = Scene.FindByName(\"Rover\")\nreturn rover:GetScript(\"Steering\").Jumps == 2 and rover.Transform.Translation.x > 0"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "388089300f9d3f6e"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "ff609205caab0e4f"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "9104ab10ab83c6ec"
+		}
+	],
+	"FinalTick": 201,
+	"FinalStateHash": "e7bd290ec321763d"
+}

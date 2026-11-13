@@ -22,6 +22,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
@@ -701,6 +702,59 @@ namespace Engine {
 			REQUIRE(ui.SafePoint());
 			CHECK(reported.GetMatchCount() == 1);
 			CHECK(reloads == 1);
+		}
+
+		TEST_CASE("EditorLayer: the Window menu's Platform windows checkbox writes the preference at the next safe point")
+		{
+			// M24 (Docs/Decisions/0035-m24-contract.md decisions 18 and 20): the user's PlatformWindows preference, presentation
+			// without a method, which the editor reads when it starts. The checkbox, the Window menu's item before Reset layout,
+			// queues the change; the next safe point writes it into user://Editor.json, keeping every other member.
+			LayerUiHarness ui;
+			VirtualFileSystem& vfs = ui.Environment.GetEditor().GetVfs();
+			const auto path = VfsPath::Parse("user://Editor.json");
+			REQUIRE(path);
+			const std::string original = R"({"Format":"EditorPreferences","Version":1,"AllowNativeCode":true,"Future":{"Kept":[1,2]}})";
+			REQUIRE(vfs.WriteFileAtomic(*path, std::as_bytes(std::span(original.data(), original.size()))));
+			ui.Draw();
+			ui.Draw();
+			const auto clickPlatformWindows = [&ui]()
+			{
+				const auto& style = ImGui::GetStyle();
+				const float x = style.DisplaySafeAreaPadding.x + ImGui::CalcTextSize("File").x + ImGui::CalcTextSize("Edit").x + 2 * style.ItemSpacing.x + ImGui::CalcTextSize("Window").x / 2;
+				ui.Click({ x, ImGui::GetFrameHeight() / 2 });
+				auto& popups = ImGui::GetCurrentContext()->OpenPopupStack;
+				REQUIRE_FALSE(popups.empty());
+				const ImGuiWindow* menu = popups.back().Window;
+				REQUIRE(menu != nullptr);
+				// One line above the last item, Reset layout.
+				const float line = ImGui::GetTextLineHeight();
+				ui.Click({ menu->Pos.x + menu->Size.x / 2, menu->DC.CursorPosPrevLine.y - style.ItemSpacing.y - line / 2 });
+			};
+			clickPlatformWindows();
+			// Queued while drawing; nothing is written before the safe point.
+			const auto drawn = vfs.ReadText(*path);
+			REQUIRE(drawn);
+			CHECK(*drawn == original);
+			REQUIRE(ui.SafePoint());
+			const auto off = ReadEditorPreferences(vfs);
+			REQUIRE(off);
+			CHECK_FALSE(off->PlatformWindows);
+			CHECK(off->AllowNativeCode);
+			const auto text = vfs.ReadText(*path);
+			REQUIRE(text);
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE(document);
+			const auto future = JsonReader::Parse(R"({"Kept":[1,2]})");
+			REQUIRE(future);
+			CHECK((*document)["Future"] == *future);
+
+			// The checkbox shows the stored preference, so a second click turns it back on.
+			clickPlatformWindows();
+			REQUIRE(ui.SafePoint());
+			const auto on = ReadEditorPreferences(vfs);
+			REQUIRE(on);
+			CHECK(on->PlatformWindows);
+			CHECK(on->AllowNativeCode);
 		}
 
 		TEST_CASE("EditorLayer: first thumbnail load invalidates version zero and the next request succeeds")

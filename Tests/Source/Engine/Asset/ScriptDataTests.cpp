@@ -453,7 +453,7 @@ namespace Engine {
 			CHECK_FALSE(IsReservedScriptFieldName("Opened"));
 		}
 
-		TEST_CASE("ScriptData: a script source path is a project Assets path of a Luau source or a graph" * doctest::skip(true))
+		TEST_CASE("ScriptData: a script source path is a project Assets path of a Luau source or a graph")
 		{
 			// M24 (C24.1, Docs/Decisions/0035-m24-contract.md decision 9, stream G-B): a graph's cooked script keeps its .graph
 			// path, which every site that accepts a script's origin takes as it takes a .luau one.

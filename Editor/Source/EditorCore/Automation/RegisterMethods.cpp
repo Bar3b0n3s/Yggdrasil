@@ -10,6 +10,7 @@
 #include "EditorCore/Automation/EditorMethods.h"
 #include "EditorCore/Automation/EntityMethods.h"
 #include "EditorCore/Automation/ExportMethods.h"
+#include "EditorCore/Automation/GraphMethods.h"
 #include "EditorCore/Automation/NativeMethods.h"
 #include "EditorCore/Automation/ObserveMethods.h"
 #include "EditorCore/Automation/PrefabMethods.h"
@@ -68,6 +69,8 @@ namespace Engine {
 		RegisterUiAuthoringMethodTypes(registry);
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 32): the editor's animation preview.
 		RegisterAnimationMethodTypes(registry);
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 22): the graph edit methods; phase 3 appends in landing order.
+		RegisterGraphMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -94,6 +97,7 @@ namespace Engine {
 		RegisterTilemapMethods(methods);
 		RegisterUiAuthoringMethods(methods); // M22 C22.2, Docs/Decisions/0033-m22-contract.md decision 32
 		RegisterAnimationMethods(methods);
+		RegisterGraphMethods(methods); // M24 W24.1, Docs/Decisions/0035-m24-contract.md decision 12
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

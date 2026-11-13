@@ -16,7 +16,11 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
+#include "Engine/AssetPipeline/Graph/GraphTranspiler.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/AssetPipeline/Importers/GraphImporter.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
@@ -173,6 +177,10 @@ namespace Engine {
 			// M23 (Scene/AnimationValidation.h, Docs/Decisions/0034-m23-contract.md decision 30).
 			AnimationNoAnimatorCode,
 			AnimationSkeletonMismatchCode,
+			// M24 (AssetPipeline/Graph/GraphNodeLibrary.h, Docs/Decisions/0035-m24-contract.md decision 5), appended after M23's in
+			// landing order (ADR 0028's phase-3 ledger).
+			GraphInvalidCode,
+			GraphUnreachableNodeCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -378,6 +386,16 @@ namespace Engine {
 			ValidationCodeInfo{ AnimationSkeletonMismatchCode, "Warning", false,
 				"A SkinnedMesh's mesh skin addresses more joints than its Animator's Skeleton holds; it draws its bind pose.",
 				"Set the Animator's Skeleton to the skin the mesh was imported with." },
+			ValidationCodeInfo{ GraphInvalidCode, "Error", false,
+				"A visual-scripting graph (a .graph source) does not read or breaks a rule of the node library: an unknown kind or pin, a link "
+				"between incompatible pins, a second link into a data input, a cycle, a literal its input does not take, an input left "
+				"unlinked, a Flow.IfNotNil Result read where it may be nil, a flow nested more than 64 blocks deep or a transpiled text "
+				"larger than 8 MiB; it does not import.",
+				"Correct the graph at the node and JSON pointer the finding names with the graph edit methods; graph.read lists the same "
+				"findings." },
+			ValidationCodeInfo{ GraphUnreachableNodeCode, "Warning", false,
+				"A visual-scripting graph's statement node is reached by no event's flow, so it never runs.",
+				"Link it into an event's flow with graph.connect, or remove it with graph.removeNodes." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -496,6 +514,25 @@ namespace Engine {
 			std::vector<CollectedDiagnostic> Diagnostics{};
 			std::optional<AssetRegistry> Scanned{};
 		};
+
+		// What one validation's graph checks share (M24, Docs/Decisions/0035-m24-contract.md decision 5): the node library,
+		// built at the first graph a check reads, and the graphs reported GRAPH_INVALID, whose import fails for that cause.
+		struct GraphChecks
+		{
+			Scope<GraphNodeLibrary> Library{};
+			std::set<AssetHandle> Invalid{};
+		};
+
+		// A Graph-imported source the graph checks read.
+		struct GraphSource
+		{
+			VfsPath Path{};
+			AssetHandle Handle{};
+		};
+
+		constexpr std::string_view GraphInvalidHint =
+			"correct the graph at this node and pointer with the graph edit methods (graph.read lists the same findings); it does not import until it validates";
+		constexpr std::string_view GraphUnreachableHint = "link the node into an event's flow with graph.connect, or remove it with graph.removeNodes";
 
 	}
 
@@ -1614,8 +1651,10 @@ namespace Engine {
 			return std::optional<AssetRegistry>(std::move(scanned));
 		}
 
-		// The import diagnostics the asset manager holds: failed imports and the importers' warnings (§7.4).
-		static void CollectImportDiagnostics(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		// The import diagnostics the asset manager holds: failed imports and the importers' warnings (§7.4). The failed import of
+		// a graph in `invalidGraphs`, which the graph checks reported GRAPH_INVALID, is that code's (M24,
+		// Docs/Decisions/0035-m24-contract.md decision 5), never a second ASSET_IMPORT_FAILED.
+		static void CollectImportDiagnostics(const EditorContext& editor, const std::set<AssetHandle>& invalidGraphs, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			for (const AssetDiagnostic& diagnostic : editor.GetAssets().GetDiagnostics())
 			{
@@ -1625,6 +1664,8 @@ namespace Engine {
 				{
 					continue;
 				}
+				if (diagnostic.Code == AssetImportFailedCode && invalidGraphs.contains(diagnostic.Asset))
+					continue;
 				DiagnosticSite site;
 				site.File = diagnostic.Path;
 				site.Subject = diagnostic.Subject.empty() ? diagnostic.Asset.ToString() : diagnostic.Subject;
@@ -2080,9 +2121,106 @@ namespace Engine {
 			return report;
 		}
 
-		static Status CheckScriptSources(const EditorContext& editor, ValidationScope scope, std::vector<CollectedDiagnostic>& diagnostics)
+		// Whether `record` is a Graph-imported source (Docs/Decisions/0035-m24-contract.md decision 2): a .graph file, a Script
+		// asset whose importer is Graph.
+		static bool IsGraphSource(const AssetRecord& record)
+		{
+			return record.Metadata.Kind == AssetMetaKind::Asset && record.Metadata.Importer == GraphImporter::Id;
+		}
+
+		// The node library of the editor's frozen script API registry, the declarations the importer's and the exporter's
+		// libraries are built from (decisions 9 and 24), built once per validation at the first graph that needs it.
+		static Result<const GraphNodeLibrary*> GetGraphLibrary(const EditorContext& editor, GraphChecks& checks)
+		{
+			if (!checks.Library)
+			{
+				ENGINE_TRY_ASSIGN(checks.Library, GraphNodeLibrary::Create(editor.GetEngine().GetScriptApiRegistry()));
+			}
+			return checks.Library.get();
+		}
+
+		// A graph source's document, read as GraphImporter reads it: strictly, with the editor's types.
+		static Result<GraphDocument> ReadGraphSource(const EditorContext& editor, std::string_view text)
+		{
+			GraphLoadReport report;
+			return GraphFromText(text, editor.GetTypeRegistry(), report, true);
+		}
+
+		// One graph finding of `code` on the source `source`, at the JSON pointer `pointer` (its Field), the message its
+		// subject, so two findings at one pointer keep apart.
+		static CollectedDiagnostic MakeGraphDiagnostic(std::string_view code, DiagnosticSeverity severity, const GraphSource& source, std::string pointer,
+			std::string message, std::string_view hint)
+		{
+			const DiagnosticSite site{ .File = std::string(source.Path.GetPath()), .Field = std::move(pointer), .Subject = message };
+			CollectedDiagnostic collected = MakeDiagnostic(code, severity, std::move(message), site, std::string(hint), false);
+			collected.Diagnostic.Asset = source.Handle.ToString();
+			return collected;
+		}
+
+		// The graph checks of one Graph-imported source (M24, Docs/Decisions/0035-m24-contract.md decision 5), from the
+		// validator's own read of the file, as the importer reads it. GRAPH_INVALID once per issue of a source that does not
+		// read (a parse error at its line, a structural rule at its pointer: the importer's document failure) or per
+		// ValidateGraph issue, Incomplete ones included, located at its JSON pointer and naming its node; then, while no issue
+		// but Incomplete ones remains (graph.read's rule: the reachability follows only valid links), GRAPH_UNREACHABLE_NODE
+		// once per statement no event's flow reaches, at "/Nodes/<i>". A graph reported GRAPH_INVALID joins checks.Invalid:
+		// its import fails for that cause, which this code reports once, never as a second ASSET_IMPORT_FAILED
+		// (CollectImportDiagnostics). A file that cannot be read is the import's to report (ASSET_IMPORT_FAILED).
+		static Status CheckGraphSource(const EditorContext& editor, const GraphSource& source, GraphChecks& checks, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const Result<std::string> text = editor.GetVfs().ReadText(source.Path);
+			if (!text.has_value())
+				return {};
+			const Result<GraphDocument> graph = ReadGraphSource(editor, *text);
+			if (!graph.has_value())
+			{
+				const Error& error = graph.error();
+				if (error.GetIssues().empty())
+				{
+					const ErrorLocation& location = error.GetLocation();
+					std::string message = error.GetMessageText();
+					if (location.Line != 0)
+						message = std::format("line {}, column {}: {}", location.Line, location.Column, message);
+					CollectedDiagnostic collected = MakeGraphDiagnostic(GraphInvalidCode, DiagnosticSeverity::Error, source,
+						location.JsonPointer.value_or(std::string()), std::move(message), GraphInvalidHint);
+					collected.Diagnostic.Line = location.Line;
+					diagnostics.push_back(std::move(collected));
+				}
+				for (const ErrorIssue& issue : error.GetIssues())
+					diagnostics.push_back(MakeGraphDiagnostic(GraphInvalidCode, DiagnosticSeverity::Error, source, issue.JsonPointer, issue.Message, GraphInvalidHint));
+				checks.Invalid.insert(source.Handle);
+				return {};
+			}
+			ENGINE_TRY_ASSIGN(const GraphNodeLibrary* library, GetGraphLibrary(editor, checks));
+			bool blocking = false;
+			for (const GraphIssue& issue : ValidateGraph(*graph, *library))
+			{
+				diagnostics.push_back(MakeGraphDiagnostic(GraphInvalidCode, DiagnosticSeverity::Error, source, issue.JsonPointer, issue.Message, GraphInvalidHint));
+				checks.Invalid.insert(source.Handle);
+				blocking = blocking || !issue.Incomplete;
+			}
+			if (blocking)
+				return {};
+			for (const uint32_t id : FindUnreachableGraphNodes(*graph, *library))
+			{
+				const auto node = std::ranges::lower_bound(graph->Nodes, id, {}, &GraphNode::Id);
+				if (node == graph->Nodes.end() || node->Id != id)
+					continue;
+				diagnostics.push_back(MakeGraphDiagnostic(GraphUnreachableNodeCode, DiagnosticSeverity::Warning, source,
+					std::format("/Nodes/{}", node - graph->Nodes.begin()),
+					std::format("node {} ({}) is a statement that no event's flow reaches, so it never runs", id, node->Kind), GraphUnreachableHint));
+			}
+			return {};
+		}
+
+		// The script sources of `scope` (Asset/ScriptData.h's script source rule, Docs/Decisions/0035-m24-contract.md decisions
+		// 5 and 9): with the project scope every .luau file below Assets/ and every registered Graph-imported source; with the
+		// scene scope the sources of the open scene's script slots, a .luau to the script service's Luau check and a .graph
+		// to the graph checks (CheckGraphSource), never to the Luau check, which refuses it.
+		static Status CheckScriptSources(const EditorContext& editor, ValidationScope scope, GraphChecks& graphChecks, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			std::vector<VfsPath> paths;
+			std::vector<GraphSource> graphs;
+			const AssetRegistry& registry = editor.GetAssets().GetRegistry();
 			if (scope == ValidationScope::Project)
 			{
 				ENGINE_TRY_ASSIGN(const VfsPath root, VfsPath::Create("project", "Assets"));
@@ -2094,21 +2232,34 @@ namespace Engine {
 					if (!entry.Info.IsDirectory && entry.Path.GetExtension() == ".luau")
 						paths.push_back(entry.Path);
 				}
+				for (const AssetRecord* record : registry.GetRecords())
+				{
+					if (IsGraphSource(*record))
+						graphs.push_back({ record->SourcePath, record->Metadata.Handle });
+				}
 			}
 			else if (editor.HasScene())
 			{
-				editor.GetScene().ForEachCanonical([&editor, &paths](ConstEntity entity)
+				editor.GetScene().ForEachCanonical([&registry, &paths, &graphs](ConstEntity entity)
 				{
 					if (!entity.HasComponent<ScriptComponent>())
 						return;
 					for (const ScriptSlot& slot : entity.GetComponent<ScriptComponent>().Scripts)
 					{
-						const auto* record = editor.GetAssets().GetRegistry().Find(slot.Script.GetHandle());
-						if (record != nullptr && record->Metadata.Type == AssetType::Script)
+						const AssetRecord* record = registry.Find(slot.Script.GetHandle());
+						if (record == nullptr || record->Metadata.Type != AssetType::Script || !IsScriptSourcePath(record->SourcePath))
+							continue;
+						if (record->SourcePath.GetExtension() == GraphFileExtension)
+							graphs.push_back({ record->SourcePath, record->Metadata.Handle });
+						else
 							paths.push_back(record->SourcePath);
 					}
 				});
 			}
+			std::ranges::sort(graphs, {}, &GraphSource::Path);
+			graphs.erase(std::ranges::unique(graphs, {}, &GraphSource::Path).begin(), graphs.end());
+			for (const GraphSource& graph : graphs)
+				ENGINE_TRY(CheckGraphSource(editor, graph, graphChecks, diagnostics));
 			if (paths.empty())
 				return {};
 			std::ranges::sort(paths);
@@ -2176,11 +2327,13 @@ namespace Engine {
 		}
 
 		// SCRIPT_COMPUTED_ASSET_LOAD (M19, Docs/Decisions/0030-m19-contract.md decision 21): with Export.PruneUnreferenced on,
-		// every computed load (FindScriptAssetLoads) of a script below Assets/ (every .luau file there, as CheckScriptSources
-		// finds them, since an export refreshes the registry first) that Export.Exclude leaves in, at its line (subject
-		// "<line>:<column>"), since a pruned export cannot follow it. A script that does not parse adds nothing: its
-		// SCRIPT_COMPILE_ERROR says why.
-		static Status CheckComputedAssetLoads(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		// every computed load (FindScriptAssetLoads) of a script below Assets/ (every script source there by Asset/ScriptData.h's
+		// rule, as CheckScriptSources finds them, since an export refreshes the registry first) that Export.Exclude leaves in,
+		// at its line (subject "<line>:<column>"), since a pruned export cannot follow it. A script that does not parse adds
+		// nothing: its SCRIPT_COMPILE_ERROR says why. A graph's loads are its transpiled text's, scanned as the exporter scans
+		// them (M24, Docs/Decisions/0035-m24-contract.md decisions 5 and 24), each at the text's line and its node's JSON
+		// pointer (Field); a graph that does not read or transpile adds nothing: its GRAPH_INVALID says why.
+		static Status CheckComputedAssetLoads(const EditorContext& editor, GraphChecks& graphChecks, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const ExportSettings& exportSettings = editor.GetProject().GetSettings().Export;
 			if (!exportSettings.PruneUnreferenced)
@@ -2192,7 +2345,7 @@ namespace Engine {
 			const EditorScriptService* service = editor.GetScriptService();
 			for (const auto& entry : entries)
 			{
-				if (entry.Info.IsDirectory || entry.Path.GetExtension() != ".luau")
+				if (entry.Info.IsDirectory || !IsScriptSourcePath(entry.Path))
 					continue;
 				const std::string path(entry.Path.GetPath());
 				const bool excluded = std::ranges::any_of(exportSettings.Exclude, [&path](const std::string& glob)
@@ -2201,9 +2354,31 @@ namespace Engine {
 				});
 				if (excluded)
 					continue;
-				if (service == nullptr)
-					return MakeError(ErrorCode::InvalidState, "script validation service is unavailable");
-				ENGINE_TRY_ASSIGN(const std::string source, service->Read(entry.Path));
+				std::string source;
+				std::optional<GraphDocument> graph;
+				std::optional<GraphTranspileResult> transpiled;
+				if (entry.Path.GetExtension() == GraphFileExtension)
+				{
+					const Result<std::string> text = editor.GetVfs().ReadText(entry.Path);
+					if (!text.has_value())
+						continue;
+					Result<GraphDocument> document = ReadGraphSource(editor, *text);
+					if (!document.has_value())
+						continue;
+					ENGINE_TRY_ASSIGN(const GraphNodeLibrary* library, GetGraphLibrary(editor, graphChecks));
+					Result<GraphTranspileResult> result = TranspileGraph(*document, *library, path);
+					if (!result.has_value())
+						continue;
+					source = result->Luau;
+					graph = std::move(*document);
+					transpiled = std::move(*result);
+				}
+				else
+				{
+					if (service == nullptr)
+						return MakeError(ErrorCode::InvalidState, "script validation service is unavailable");
+					ENGINE_TRY_ASSIGN(source, service->Read(entry.Path));
+				}
 				const Result<std::vector<ScriptAssetLoad>> loads = FindScriptAssetLoads(source, path);
 				if (!loads.has_value())
 					continue;
@@ -2211,13 +2386,30 @@ namespace Engine {
 				{
 					if (load.Literal)
 						continue;
-					const DiagnosticSite site{ .File = path, .Subject = std::format("{}:{}", load.Line, load.Column) };
-					auto finding = MakeDiagnostic(ScriptComputedAssetLoadCode, DiagnosticSeverity::Warning,
-						std::format("Assets.Load is used at {}:{} with a reference the script computes, or in a way the export cannot follow, so a "
-									"pruned export (Export.PruneUnreferenced) leaves out an asset only this use names",
-							load.Line, load.Column),
-						site, "pass the path as a string literal, reference the asset from a component or a script field, or turn Export.PruneUnreferenced off",
-						false);
+					DiagnosticSite site{ .File = path, .Subject = std::format("{}:{}", load.Line, load.Column) };
+					std::string message;
+					std::string hint;
+					if (transpiled.has_value())
+					{
+						const uint32_t id = FindGraphNodeAtLine(*transpiled, load.Line);
+						const auto node = std::ranges::lower_bound(graph->Nodes, id, {}, &GraphNode::Id);
+						const bool found = id != 0 && node != graph->Nodes.end() && node->Id == id;
+						if (found)
+							site.Field = std::format("/Nodes/{}", node - graph->Nodes.begin());
+						message = std::format("{}Assets.Load is given a reference the graph computes (line {} of its transpiled text, graph.read {{luau: true}}), "
+											  "so a pruned export (Export.PruneUnreferenced) leaves out an asset only this use names",
+							found ? std::format("node {} ({}): ", id, node->Kind) : std::string(), load.Line);
+						hint = "give the node's reference a literal path (graph.setValues) instead of a link, reference the asset from an Asset field or a "
+							   "component, or turn Export.PruneUnreferenced off";
+					}
+					else
+					{
+						message = std::format("Assets.Load is used at {}:{} with a reference the script computes, or in a way the export cannot follow, so a "
+											  "pruned export (Export.PruneUnreferenced) leaves out an asset only this use names",
+							load.Line, load.Column);
+						hint = "pass the path as a string literal, reference the asset from a component or a script field, or turn Export.PruneUnreferenced off";
+					}
+					auto finding = MakeDiagnostic(ScriptComputedAssetLoadCode, DiagnosticSeverity::Warning, std::move(message), site, std::move(hint), false);
 					finding.Diagnostic.Line = load.Line;
 					diagnostics.push_back(std::move(finding));
 				}
@@ -2253,7 +2445,8 @@ namespace Engine {
 
 			Collection collection;
 			std::vector<CollectedDiagnostic>& diagnostics = collection.Diagnostics;
-			ENGINE_TRY(CheckScriptSources(context, scope, diagnostics));
+			GraphChecks graphs;
+			ENGINE_TRY(CheckScriptSources(context, scope, graphs, diagnostics));
 			const std::optional<PhysicsLayerTable> layers = MakePhysicsLayers(context);
 			const PhysicsLayerTable* physicsLayers = layers.has_value() ? &*layers : nullptr;
 			const std::optional<VfsPath>& openPath = context.GetScenePath();
@@ -2266,9 +2459,9 @@ namespace Engine {
 			if (scope == ValidationScope::Project)
 			{
 				CheckSettings(context, diagnostics);
-				ENGINE_TRY(CheckComputedAssetLoads(context, diagnostics));
+				ENGINE_TRY(CheckComputedAssetLoads(context, graphs, diagnostics));
 				ENGINE_TRY_ASSIGN(collection.Scanned, ScanAssets(context, diagnostics));
-				CollectImportDiagnostics(context, diagnostics);
+				CollectImportDiagnostics(context, graphs.Invalid, diagnostics);
 				CheckAssetFiles(context, diagnostics);
 				CheckTilemapFrames(context, diagnostics);
 				CheckSpriteFrameTextures(context, diagnostics);

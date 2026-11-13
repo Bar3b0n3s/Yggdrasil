@@ -1,0 +1,58 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Broken",
+	"Fields": [],
+	"Variables": [],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnStart",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Flow.Branchh",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Flow.Branch",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Number.Add",
+			"Position": [720, 0],
+			"Values": {
+				"A": 1,
+				"B": 2
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "Condition"
+			}
+		}
+	]
+}

@@ -2,6 +2,7 @@
 
 #include "Engine/AssetPipeline/Importers/GraphImporter.h"
 
+#include "Engine/Asset/IScriptDiagnosticsProvider.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
 #include "Engine/Core/Hash.h"
@@ -11,13 +12,13 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-// GraphImporter (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decision 9, stream G-B). The identity case is live (the
-// contract implements it); the import cases are skipped until stream G-B implements the importer over stream G-A's document.
+// GraphImporter (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decision 9, stream G-B), over stream G-A's document.
 
 namespace Engine {
 
@@ -49,6 +50,49 @@ namespace Engine {
 			return { .Handle = GraphHandle, .Type = AssetType::Script, .Importer = std::string(GraphImporter::Id), .ImporterVersion = GraphImporter::Version };
 		}
 
+		// A diagnostics provider that reports one type finding at the line of a marker in the text it checks, and records what
+		// it was asked.
+		class MarkerProvider final : public IScriptDiagnosticsProvider
+		{
+		public:
+			explicit MarkerProvider(std::string marker)
+				: m_Marker(std::move(marker))
+			{
+			}
+
+			[[nodiscard]] uint64_t GetEnvironmentHash() const override { return 0x5eedull; }
+
+			[[nodiscard]] std::vector<ScriptDiagnostic> CheckScript(const ScriptCheckRequest& request) override
+			{
+				Path = request.Path.ToString();
+				Source = std::string(request.Source);
+				const size_t at = Source.find(m_Marker);
+				if (at == std::string::npos)
+					return {};
+				const uint32_t line = static_cast<uint32_t>(std::count(Source.begin(), Source.begin() + static_cast<std::ptrdiff_t>(at), '\n')) + 1;
+				return { ScriptDiagnostic{ .Severity = DiagnosticSeverity::Error, .Code = "SCRIPT_TYPE_ERROR", .File = std::string(request.Path.GetPath()), .Line = line, .Column = 1, .Message = "a finding" } };
+			}
+
+			std::string Path{};
+			std::string Source{};
+		private:
+			std::string m_Marker{};
+		};
+
+		Result<ImportResult> ImportGraph(Test::AssetTestFixture& fixture, std::string_view text, IScriptDiagnosticsProvider* provider, std::optional<ScriptImportCheck>& check)
+		{
+			fixture.WriteProjectText("Assets/Scripts/Jingle.graph", text);
+			const Buffer bytes = fixture.ReadProjectFile("Assets/Scripts/Jingle.graph");
+			ImportContext context({ .Vfs = &fixture.GetVfs(),
+				.SourcePath = fixture.ProjectPath("Assets/Scripts/Jingle.graph"),
+				.SourceBytes = bytes,
+				.Registry = &fixture.GetRegistry(),
+				.ScriptDiagnostics = provider });
+			Result<ImportResult> imported = GraphImporter().Import(context, GraphMetadata());
+			check = context.GetScriptCheck();
+			return imported;
+		}
+
 	}
 
 	TEST_SUITE("AssetPipeline")
@@ -64,8 +108,7 @@ namespace Engine {
 			CHECK_FALSE(importer.RequiresMainThread());
 		}
 
-		TEST_CASE("GraphImporter: a graph imports as a Script behaviour named after it, whose dependencies hold its asset literals and not its literal loads"
-			* doctest::skip(true))
+		TEST_CASE("GraphImporter: a graph imports as a Script behaviour named after it, whose dependencies hold its asset literals and not its literal loads")
 		{
 			Test::AssetTestFixture fixture;
 			fixture.WriteProjectText("Assets/Scripts/Jingle.graph", JingleGraph);
@@ -106,8 +149,7 @@ namespace Engine {
 			CHECK(second->Artifacts[0].Cooked == imported->Artifacts[0].Cooked);
 		}
 
-		TEST_CASE("GraphImporter: a graph that does not validate fails its import with a GRAPH_INVALID finding per issue and no artifact"
-			* doctest::skip(true))
+		TEST_CASE("GraphImporter: a graph that does not validate fails its import with a GRAPH_INVALID finding per issue and no artifact")
 		{
 			Test::AssetTestFixture fixture;
 			std::string broken(JingleGraph);
@@ -128,6 +170,61 @@ namespace Engine {
 			{
 				return diagnostic.Code == GraphInvalidCode && diagnostic.Severity == DiagnosticSeverity::Error && diagnostic.Line == 0;
 			}));
+		}
+
+		TEST_CASE("GraphImporter: the script check holds the checker's findings of the text, each naming its node, and a document that does not read is a GRAPH_INVALID finding")
+		{
+			Test::AssetTestFixture fixture;
+			MarkerProvider provider("-- 2: Call.Audio.PlayOneShot");
+			std::optional<ScriptImportCheck> check;
+			const Result<ImportResult> imported = ImportGraph(fixture, JingleGraph, &provider, check);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			// The checker sees the transpiled text under the .graph path (decision 9).
+			CHECK(provider.Path == "project://Assets/Scripts/Jingle.graph");
+			CHECK(provider.Source.starts_with("--!strict\n"));
+			REQUIRE(check.has_value());
+			CHECK(check->Performed);
+			CHECK(check->EnvironmentHash == 0x5eedull);
+			REQUIRE(check->Diagnostics.size() == 1);
+			CHECK(check->Diagnostics.front().Code == "SCRIPT_TYPE_ERROR");
+			CHECK(check->Diagnostics.front().Message.starts_with("node 2 (Call.Audio.PlayOneShot): "));
+
+			const Result<ImportResult> unreadable = ImportGraph(fixture, "{ \"Format\": \"Graph\",", &provider, check);
+			REQUIRE_FALSE(unreadable.has_value());
+			CHECK(unreadable.error().GetCode() == ErrorCode::Parse);
+			REQUIRE(check.has_value());
+			REQUIRE(check->Diagnostics.size() == 1);
+			CHECK(check->Diagnostics.front().Code == GraphInvalidCode);
+			CHECK(check->Diagnostics.front().Line == 0);
+		}
+
+		// Docs/Decisions/0035-m24-contract.md risk 1: a graph whose text exceeds a limit of Luau's (here a function's 200 locals,
+		// one statement reading a long chain of values) fails its import at the line of the node that exceeds it.
+		TEST_CASE("GraphImporter: a graph whose text exceeds Luau's limits fails its import at the line of a node, which its compile finding names")
+		{
+			std::string nodes = R"({"Id": 1, "Kind": "Event.OnStart", "Position": [0, 0], "Values": {}}, {"Id": 2, "Kind": "Call.Log.Info", "Position": [0, 0], "Values": {}})";
+			std::string links = R"({"From": {"Node": 1, "Pin": "Then"}, "To": {"Node": 2, "Pin": "In"}})";
+			constexpr uint32_t Last = 400;
+			for (uint32_t id = 3; id < Last; ++id)
+			{
+				nodes += std::format(R"(, {{"Id": {}, "Kind": "Number.Add", "Position": [0, 0], "Values": {{"B": 1}}}})", id);
+				links += std::format(R"(, {{"From": {{"Node": {}, "Pin": "Result"}}, "To": {{"Node": {}, "Pin": "{}"}}}})", id, id == 3 ? 2 : id - 1, id == 3 ? "Values" : "A");
+			}
+			nodes += std::format(R"(, {{"Id": {}, "Kind": "Self.Get.Base", "Position": [0, 0], "Values": {{}}}})", Last);
+			links += std::format(R"(, {{"From": {{"Node": {}, "Pin": "Value"}}, "To": {{"Node": {}, "Pin": "A"}}}})", Last, Last - 1);
+			const std::string graph = std::format(R"({{"Format": "Graph", "Version": 1, "Name": "Jingle", "Fields": [{{"Name": "Base", "Kind": "Number", "Default": 0, "Element": "Number", "AssetType": "", "EnumValues": [], "Options": {{}}}}], "Variables": [], "Nodes": [{}], "Links": [{}]}})",
+				nodes, links);
+			Test::AssetTestFixture fixture;
+			std::optional<ScriptImportCheck> check;
+			const Result<ImportResult> imported = ImportGraph(fixture, graph, nullptr, check);
+			REQUIRE_FALSE(imported.has_value());
+			CHECK(imported.error().GetCode() == ErrorCode::CompileFailed);
+			CHECK(imported.error().GetLocation().Line != 0);
+			REQUIRE(check.has_value());
+			REQUIRE(check->Diagnostics.size() == 1);
+			CHECK(check->Diagnostics.front().Code == "SCRIPT_COMPILE_ERROR");
+			CHECK(check->Diagnostics.front().Line == imported.error().GetLocation().Line);
+			CHECK(check->Diagnostics.front().Message.starts_with("node "));
 		}
 	}
 

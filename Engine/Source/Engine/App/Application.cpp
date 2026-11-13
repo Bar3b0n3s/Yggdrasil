@@ -282,6 +282,9 @@ namespace Engine {
 		uint32_t LastWidth = 1;
 		uint32_t LastHeight = 1;
 		bool IsImGuiFailing = false; // the last UI frame failed to render, so the next failure is not logged again
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 18): the last frame's platform windows failed to render, so the next
+		// failure is not logged again.
+		bool IsPlatformWindowsFailing = false;
 		// M18 (C18.3, decision 29): CommandList is open, from its open() to its close() in OnFrameRender. A device loss that
 		// the frame-boundary catch reported ends the frame in between, and OnFrameDeviceLost closes and executes the list on
 		// the lost device: an opened NVRHI list that is never executed keeps itself, and what it recorded, alive.
@@ -846,6 +849,24 @@ namespace Engine {
 		OnRenderSubmitted(frameIndex, submission);
 		if (acquiredSwapchain)
 			rendering.WindowSwapchain->Present();
+#if !defined(ENGINE_DIST)
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 18): the UI's platform windows, each on its own submission with its
+		// own swapchain's semaphores, after the main window's present and before the pacer's end, so the slot's wait covers
+		// them. Their errors follow the main UI's rule: a Gpu error on a healthy device ends the process, one on a lost device
+		// is the loss, which the frame boundary recovers, and any other is logged once per run of failing frames. A platform
+		// window whose target runs out of memory is no error here (ImGuiPlatformWindows: only that window draws nothing).
+		if (m_ImGuiLayer != nullptr)
+		{
+			const Status platform = m_ImGuiLayer->RenderPlatformWindows(frameSlot);
+			const bool isLost = device.IsLost();
+			if (!platform.has_value() && platform.error().GetCode() == ErrorCode::Gpu && !isLost)
+				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot render the ImGui platform windows: {}", platform.error().ToString()));
+			if (!platform.has_value() && !isLost && !rendering.IsPlatformWindowsFailing)
+				ENGINE_CORE_ERROR("Cannot render the ImGui platform windows: {}", platform.error());
+			if (!isLost)
+				rendering.IsPlatformWindowsFailing = !platform.has_value();
+		}
+#endif
 		rendering.Pacer->EndFrame(device.GetLastSubmissionID());
 		device.RunGarbageCollection();
 	}
@@ -1009,6 +1030,7 @@ namespace Engine {
 												{
 													.IniFilePath = std::move(iniFilePath),
 													.FramesInFlight = framesInFlight,
+													.PlatformWindows = m_Specification.ImGuiPlatformWindows,
 												}),
 					*device, "Cannot create the ImGui layer", "while creating the ImGui layer"));
 		}

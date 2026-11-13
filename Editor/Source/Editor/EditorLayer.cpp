@@ -20,6 +20,7 @@
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/EditorPreferences.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Thumbnails/ThumbnailCache.h"
 #include "Engine/Core/Log.h"
@@ -206,6 +207,11 @@ namespace Engine {
 		Utils::WorkspacePanelSettings PanelSettings{};
 		ImGuiContext* SettingsContext = nullptr;  // the Dear ImGui context holding the panel settings handler
 		std::vector<EditorPanel> WrittenPanels{}; // the persisted set the ini last saw; a change marks the ini dirty
+		// M24 (Docs/Decisions/0035-m24-contract.md decisions 18 and 20): the Window menu's "Platform windows" checkbox shows the
+		// user's PlatformWindows preference of user://Editor.json, read by the first safe point; its change is written at the
+		// next safe point, never while drawing, and takes effect at the next editor start.
+		std::optional<bool> PlatformWindowsPreference{};
+		std::optional<bool> PendingPlatformWindows{};
 
 		// Registers the panel settings handler in the current Dear ImGui context, once per context. Called before the first
 		// frame when a context exists (so the first ini load restores the panels) and again from each UI frame.
@@ -263,6 +269,34 @@ namespace Engine {
 			if (ErrorMessage != message)
 				ENGINE_ERROR("Editor action: {}", error.ToString());
 			ErrorMessage = message;
+		}
+
+		// The safe point's half of the platform windows preference (PlatformWindowsPreference): the first read, then a queued
+		// change written as every writer of the file writes, reading it first and keeping every other member. A file that
+		// cannot be read shows the default (EditorHostPreferences reports it at startup); a failed write is reported.
+		void PumpPlatformWindowsPreference(VirtualFileSystem& vfs)
+		{
+			if (!PlatformWindowsPreference.has_value())
+			{
+				const Result<EditorPreferences> stored = ReadEditorPreferences(vfs);
+				PlatformWindowsPreference = stored.has_value() ? stored->PlatformWindows : EditorPreferences{}.PlatformWindows;
+			}
+			if (!PendingPlatformWindows.has_value())
+				return;
+			const bool enabled = *std::exchange(PendingPlatformWindows, std::nullopt);
+			Result<EditorPreferences> stored = ReadEditorPreferences(vfs);
+			if (!stored.has_value())
+			{
+				ReportFailure(std::move(stored).error().WithContext("while reading user://Editor.json for the platform windows preference"));
+				return;
+			}
+			stored->PlatformWindows = enabled;
+			if (const Status written = WriteEditorPreferences(vfs, *stored); !written.has_value())
+			{
+				ReportFailure(Error(written.error()).WithContext("while writing the platform windows preference to user://Editor.json"));
+				return;
+			}
+			PlatformWindowsPreference = enabled;
 		}
 
 		// Submits a user action; `cancelGesture` also ends the inspector's gesture at the next safe point.
@@ -504,6 +538,7 @@ namespace Engine {
 			else
 				++ticket;
 		}
+		m_State->PumpPlatformWindowsPreference(context.Editor.GetVfs());
 		const bool hasProject = context.Editor.HasProject();
 		if (hasProject != m_State->HadProject)
 		{
@@ -596,6 +631,18 @@ namespace Engine {
 						const Status changed = ui.SetPanelOpen(panel, open);
 						ENGINE_VERIFY(changed.has_value(), "Known panel");
 					}
+				}
+				ImGui::Separator();
+				// M24 (decisions 18 and 20): the user's preference, presentation without a method; read at the next start. Reset layout
+				// stays the menu's last item.
+				bool platformWindows = m_State->PendingPlatformWindows.value_or(m_State->PlatformWindowsPreference.value_or(EditorPreferences{}.PlatformWindows));
+				if (ImGui::MenuItem("Platform windows", nullptr, &platformWindows))
+					m_State->PendingPlatformWindows = platformWindows;
+				if (ImGui::IsItemHovered())
+				{
+					const bool running = (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0;
+					ImGui::SetTooltip("Let panels be dragged out of the editor into windows of their own (Windows only).\nTakes effect at the next start; this editor's are %s.",
+						running ? "on" : "off");
 				}
 				if (ImGui::MenuItem("Reset layout"))
 				{

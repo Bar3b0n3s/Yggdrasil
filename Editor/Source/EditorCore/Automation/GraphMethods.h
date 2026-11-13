@@ -42,10 +42,10 @@
 //     script.read for a Luau script).
 //
 // Frozen by the M24 contract (C24.1): the wire format below. The types and the registration are written here; stream G-C
-// implements the edit handlers and calls RegisterGraphMethodTypes and RegisterGraphMethods from RegisterMethods.cpp, and
-// W24.2's stream B implements graph.liveValues and calls RegisterGraphLiveValueMethods, each with its C++ round trip, its
-// Python test, its scene-target inventory entry, the MCP schema test's proxied tools and the regenerated references and
-// catalogue.
+// implements the edit handlers and W24.2's stream B implements graph.liveValues, each with its C++ round trip, its Python
+// test, its scene-target inventory entry and the MCP schema test's proxied tools. The lead registers them from
+// RegisterMethods.cpp at each wave's integration (RegisterGraphMethodTypes and RegisterGraphMethods at W24.1's,
+// RegisterGraphLiveValueMethods at W24.2's), with the regenerated references and catalogue (decision 22).
 
 namespace Engine {
 
@@ -330,14 +330,16 @@ namespace Engine {
 		// when the graph holds MaxGraphNodes nodes or GetNextGraphNodeId gives 0.
 		[[nodiscard]] Result<GraphAddNodeResult> GraphAddNode(EditorMethodContext& context, const GraphAddNodeParams& params);
 		// graph.removeNodes. Errors: InvalidArgument at /nodes for none or more than MaxGraphMethodItems, at /nodes/<i> for an
-		// unknown or repeated id.
+		// unknown or repeated id, and at /nodes for a removal that adds a ValidateGraph issue that is not Incomplete (removing one
+		// of the exec links into a merge lays its flow out again at the other link's depth, which may nest it too deep).
 		[[nodiscard]] Result<GraphRemoveNodesResult> GraphRemoveNodes(EditorMethodContext& context, const GraphRemoveNodesParams& params);
 		// graph.moveNodes. Errors: InvalidArgument at /positions for none or too many, at /positions/<i>/node for an unknown id,
 		// at /positions/<i>/position for a position outside MaxGraphPosition.
 		[[nodiscard]] Result<GraphEditResult> GraphMoveNodes(EditorMethodContext& context, const GraphMoveNodesParams& params);
 		// graph.connect (its refusals above).
 		[[nodiscard]] Result<GraphConnectResult> GraphConnect(EditorMethodContext& context, const GraphConnectParams& params);
-		// graph.disconnect. Errors: NotFound at /to for a link the graph does not hold.
+		// graph.disconnect. Errors: NotFound at /to for a link the graph does not hold; InvalidArgument at /to for a removal that
+		// adds a ValidateGraph issue that is not Incomplete (as graph.removeNodes' merge).
 		[[nodiscard]] Result<GraphEditResult> GraphDisconnect(EditorMethodContext& context, const GraphDisconnectParams& params);
 		// graph.setValues (its refusals above).
 		[[nodiscard]] Result<GraphEditResult> GraphSetValues(EditorMethodContext& context, const GraphSetValuesParams& params);

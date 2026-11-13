@@ -11,7 +11,7 @@
 // Platform windows' platform layer (M24, C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decision 17, stream V). Windows
 // backends only (ADR 0028 decision 10): a windowed process on Windows may show platform windows; a headless one may not, so
 // headless editors, their screenshots and the editor-UI goldens keep the docked layout; Linux and macOS refuse them, which the
-// portability stage compiles and no machine runs. Skipped until stream V implements the Windows backend.
+// portability stage compiles and no machine runs.
 
 namespace Engine {
 
@@ -30,7 +30,7 @@ namespace Engine {
 #endif
 		}
 
-		TEST_CASE("PlatformWindowSupport: a headless process refuses platform windows and a windowed one on Windows allows them" * doctest::skip(true))
+		TEST_CASE("PlatformWindowSupport: a headless process refuses platform windows and a windowed one on Windows allows them")
 		{
 			// The Tests process is headless (GLFW's null platform): no OS windows, so platform windows are refused there.
 			REQUIRE(GlfwLibrary::GetPlatform() == GlfwPlatform::Null);

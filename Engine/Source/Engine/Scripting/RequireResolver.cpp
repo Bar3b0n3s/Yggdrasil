@@ -21,10 +21,22 @@ namespace Engine {
 			return location;
 		}
 
+		// The module a require request names: a .luau file below project://Assets, never a graph (a graph is a self-contained
+		// behaviour that no script requires: Docs/Decisions/0035-m24-contract.md decisions 9 and 23).
 		static Status ValidateModulePath(const VfsPath& path)
 		{
 			if (path.GetScheme() != "project" || !path.GetPath().starts_with("Assets/") || path.GetExtension() != ".luau")
 				return std::unexpected(Error(ErrorCode::Validation, "require origin must be a .luau file below project://Assets")
+						.WithLocation(ModuleLocation(path)));
+			return {};
+		}
+
+		// A script's origin, which imports requests and enters the module stack: the script source rule (IsScriptSourcePath,
+		// Asset/ScriptData.h), a .luau source or a graph's transpiled text under its .graph path.
+		static Status ValidateModuleOrigin(const VfsPath& path)
+		{
+			if (!IsScriptSourcePath(path))
+				return std::unexpected(Error(ErrorCode::Validation, "a script's origin must be a .luau or .graph file below project://Assets")
 						.WithLocation(ModuleLocation(path)));
 			return {};
 		}
@@ -46,7 +58,7 @@ namespace Engine {
 
 	Result<VfsPath> RequireResolver::Resolve(const VfsPath& importer, std::string_view request)
 	{
-		ENGINE_TRY(Utils::ValidateModulePath(importer));
+		ENGINE_TRY(Utils::ValidateModuleOrigin(importer));
 		const auto invalid = [&importer, request](std::string_view reason)
 		{
 			return std::unexpected(Error(ErrorCode::Validation, std::format("invalid require '{}': {}", request, reason))
@@ -134,7 +146,7 @@ namespace Engine {
 
 	Status RequireResolver::EnterModule(const VfsPath& path)
 	{
-		ENGINE_TRY(Utils::ValidateModulePath(path));
+		ENGINE_TRY(Utils::ValidateModuleOrigin(path));
 		if (std::find(m_State->Active.begin(), m_State->Active.end(), path) != m_State->Active.end())
 		{
 			std::string chain;

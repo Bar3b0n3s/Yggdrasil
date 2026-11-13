@@ -2,6 +2,7 @@
 
 #include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
 
+#include "Engine/AssetPipeline/Graph/GraphTranspiler.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
@@ -11,12 +12,13 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
 
-// The graph node library (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decision 6, stream G-B). The pin-type cases are
-// live (the contract implements them); the others are skipped until stream G-B implements the library and ValidateGraph.
+// The graph node library (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decision 6, stream G-B) and ValidateGraph's rules
+// against it (decision 5).
 
 namespace Engine {
 
@@ -105,7 +107,7 @@ namespace Engine {
 			CHECK(GraphPinTypeToString(static_cast<GraphPinType>(200)) == "Unknown");
 		}
 
-		TEST_CASE("GraphNodeLibrary: every eligible script API member has its node, and no EditorOnly, Test-only or generic one has" * doctest::skip(true))
+		TEST_CASE("GraphNodeLibrary: every eligible script API member has its node, and no EditorOnly, Test-only or generic one has")
 		{
 			const LibrarySetup setup;
 			const GraphNodeLibrary& library = *setup.Library;
@@ -200,7 +202,7 @@ namespace Engine {
 			CHECK(library.GetFingerprint() != 0);
 		}
 
-		TEST_CASE("GraphNodeLibrary: a graph's fields and variables resolve as Self.Get and Self.Set nodes of their kinds" * doctest::skip(true))
+		TEST_CASE("GraphNodeLibrary: a graph's fields and variables resolve as Self.Get and Self.Set nodes of their kinds")
 		{
 			const LibrarySetup setup;
 			GraphDocument graph;
@@ -221,8 +223,7 @@ namespace Engine {
 			CHECK(setup.Library->Find("Self.Get.Speed") == nullptr);
 		}
 
-		TEST_CASE("GraphNodeLibrary: validation refuses unknown kinds and pins, incompatible links, a second link into a data input and cycles, and reports unfinished inputs as incomplete"
-			* doctest::skip(true))
+		TEST_CASE("GraphNodeLibrary: validation refuses unknown kinds and pins, incompatible links, a second link into a data input and cycles, and reports unfinished inputs as incomplete")
 		{
 			const LibrarySetup setup;
 			GraphDocument graph;
@@ -244,13 +245,12 @@ namespace Engine {
 			GraphDocument broken = graph;
 			broken.Nodes[3].Kind = "Logic.Nope";                                                    // an unknown kind
 			broken.Nodes[2].Values["C"] = VariantValue(Json(3));                                    // an unknown pin
-			broken.Links.push_back(GraphLink{ .From = { 3, "Result" }, .To = { 2, "Condition" } }); // a Number into a Bool, and a second link
+			broken.Links.push_back(GraphLink{ .From = { 3, "Result" }, .To = { 2, "Condition" } }); // a Number into a Bool
 			CanonicalizeGraph(broken);
+			// Canonical, the links are 1.Then to 2.In, 3.Result to 2.Condition (refused) and 4.Result to 2.Condition, whose
+			// unknown node 4 is the issue that stands for it; the one-shot's clip is still unfinished.
 			const std::vector<GraphIssue> issues = ValidateGraph(broken, *setup.Library);
-			CHECK(std::ranges::count_if(issues, [](const GraphIssue& issue)
-			{
-				return !issue.Incomplete;
-			}) >= 3);
+			CHECK(Describe(issues) == std::vector<std::string>{ "!/Nodes/2/Values/C", "!/Nodes/3/Kind", "/Nodes/4/Values/clip", "!/Links/1" });
 			CHECK(std::ranges::any_of(issues, [](const GraphIssue& issue)
 			{
 				return issue.JsonPointer == "/Nodes/3/Kind" && issue.Node == 4;
@@ -259,6 +259,50 @@ namespace Engine {
 			{
 				return issue.JsonPointer == "/Nodes/2/Values/C" && issue.Node == 3;
 			}));
+
+			// A data input takes one link, however compatible a second one is: two Number values into one Add's A (canonical:
+			// /Links/2 and /Links/3). The transpiler would read only one of them.
+			GraphDocument twoInputs;
+			twoInputs.Name = "Probe";
+			twoInputs.Nodes = {
+				GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Call.Log.Info" },
+				GraphNode{ .Id = 3, .Kind = "Number.Add" },
+				GraphNode{ .Id = 4, .Kind = "Number.Negate" },
+				GraphNode{ .Id = 5, .Kind = "Number.Negate" },
+			};
+			twoInputs.Links = {
+				GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } },
+				GraphLink{ .From = { 3, "Result" }, .To = { 2, "Values" } },
+				GraphLink{ .From = { 4, "Result" }, .To = { 3, "A" } },
+				GraphLink{ .From = { 5, "Result" }, .To = { 3, "A" } },
+			};
+			REQUIRE(ValidateGraphStructure(twoInputs).has_value());
+			const std::vector<GraphIssue> secondInput = ValidateGraph(twoInputs, *setup.Library);
+			CHECK(Describe(secondInput) == std::vector<std::string>{ "!/Links/3" });
+			REQUIRE_FALSE(secondInput.empty());
+			CHECK(secondInput.front().Node == 3);
+			twoInputs.Links.pop_back();
+			CHECK(ValidateGraph(twoInputs, *setup.Library).empty());
+
+			// An exec output takes one link: the start's Then into two logs (/Links/1 is the second), which would run one flow
+			// and drop the other.
+			GraphDocument twoFlows;
+			twoFlows.Name = "Probe";
+			twoFlows.Nodes = {
+				GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Call.Log.Info" },
+				GraphNode{ .Id = 3, .Kind = "Call.Log.Info" },
+			};
+			twoFlows.Links = {
+				GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } },
+				GraphLink{ .From = { 1, "Then" }, .To = { 3, "In" } },
+			};
+			REQUIRE(ValidateGraphStructure(twoFlows).has_value());
+			const std::vector<GraphIssue> secondFlow = ValidateGraph(twoFlows, *setup.Library);
+			CHECK(Describe(secondFlow) == std::vector<std::string>{ "!/Links/1" });
+			REQUIRE_FALSE(secondFlow.empty());
+			CHECK(secondFlow.front().Node == 1);
 
 			// An exec cycle of two statements: the branch runs the one-shot, which runs the branch again. Canonical, its links are
 			// /Links/1 (2.True to 5.In) and /Links/3 (5.Then to 2.In); a node never links to itself (ValidateGraphStructure).
@@ -272,6 +316,274 @@ namespace Engine {
 				return !issue.Incomplete && (issue.JsonPointer == "/Links/1" || issue.JsonPointer == "/Links/3");
 			}));
 			CHECK(FindUnreachableGraphNodes(graph, *setup.Library) == std::vector<uint32_t>{ 5 });
+		}
+
+		TEST_CASE("GraphNodeLibrary: a statement's output read where it may not have run is incomplete, and an enum literal must be one of its choices")
+		{
+			const LibrarySetup setup;
+			CHECK(std::ranges::equal(setup.Library->GetEnumChoices("AudioGroup"), std::vector<std::string>{ "Music", "Sfx", "Ui" }));
+			CHECK(setup.Library->GetEnumChoices("NoSuchEnum").empty());
+
+			// The entity the branch's True flow creates is logged on its False flow, where it was never created; and a group
+			// volume names a group the enum lacks.
+			GraphDocument graph;
+			graph.Name = "Probe";
+			graph.Nodes = {
+				GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Flow.Branch" },
+				GraphNode{ .Id = 3, .Kind = "Call.Scene.CreateEntity" },
+				GraphNode{ .Id = 4, .Kind = "Call.Log.Info" },
+				GraphNode{ .Id = 5, .Kind = "Call.Audio.SetGroupVolume", .Values = { { "group", VariantValue(Json("Musik")) }, { "volume", VariantValue(Json(1)) } } },
+			};
+			graph.Links = {
+				GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } },
+				GraphLink{ .From = { 2, "False" }, .To = { 4, "In" } },
+				GraphLink{ .From = { 2, "True" }, .To = { 3, "In" } },
+				GraphLink{ .From = { 3, "Result" }, .To = { 4, "Values" } },
+			};
+			CHECK(Describe(ValidateGraph(graph, *setup.Library)) == std::vector<std::string>{ "!/Nodes/4/Values/group", "/Links/3" });
+
+			// Logged after it was created, in the flow that created it, the entity is read where it exists; a choice of the enum fits.
+			graph.Links[1] = GraphLink{ .From = { 3, "Then" }, .To = { 4, "In" } };
+			graph.Nodes[4].Values["group"] = VariantValue(Json("Music"));
+			CHECK(ValidateGraph(graph, *setup.Library).empty());
+			CHECK(FindUnreachableGraphNodes(graph, *setup.Library) == std::vector<uint32_t>{ 5 });
+		}
+
+		// Decision 6's optional values (W24.1's review): Flow.IfNotNil's Result is its Value, which is not nil only on its True flow,
+		// so only nodes that its True flow alone enters may read it: not its False flow, nor a node after a merge that the False
+		// flow enters too, where the Result is nil and a required input would get it. Such a read is unfinished (Incomplete), as
+		// a statement's output read where it may not have run, so the edits accept it and the import refuses it.
+		TEST_CASE("GraphNodeLibrary: Flow.IfNotNil's Result is read only where its True flow alone leads, and elsewhere is incomplete")
+		{
+			const LibrarySetup setup;
+			// The door's name is logged on the True flow, after the node the True flow enters (node 5 reads it through node 6).
+			GraphDocument graph;
+			graph.Name = "Probe";
+			graph.Nodes = {
+				GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Call.Scene.FindByName", .Values = { { "name", VariantValue(Json("Door")) } } },
+				GraphNode{ .Id = 3, .Kind = "Flow.IfNotNil" },
+				GraphNode{ .Id = 4, .Kind = "Call.Log.Info" },
+				GraphNode{ .Id = 5, .Kind = "Call.Log.Info" },
+				GraphNode{ .Id = 6, .Kind = "Get.Entity.Name" },
+			};
+			graph.Links = {
+				GraphLink{ .From = { 1, "Then" }, .To = { 3, "In" } },
+				GraphLink{ .From = { 2, "Result" }, .To = { 3, "Value" } },
+				GraphLink{ .From = { 3, "Result" }, .To = { 6, "self" } },
+				GraphLink{ .From = { 3, "True" }, .To = { 4, "In" } },
+				GraphLink{ .From = { 4, "Then" }, .To = { 5, "In" } },
+				GraphLink{ .From = { 6, "Value" }, .To = { 5, "Values" } },
+			};
+			REQUIRE(ValidateGraphStructure(graph).has_value());
+			CHECK(ValidateGraph(graph, *setup.Library).empty());
+			CHECK(TranspileGraph(graph, *setup.Library, "Assets/Scripts/Probe.graph").has_value());
+
+			// The same read on the False flow (node 7), where the Result is nil: the Result's link (/Links/3) is incomplete.
+			GraphDocument falseFlow = graph;
+			falseFlow.Nodes.push_back(GraphNode{ .Id = 7, .Kind = "Call.Log.Info" });
+			falseFlow.Links.push_back(GraphLink{ .From = { 3, "False" }, .To = { 7, "In" } });
+			falseFlow.Links.push_back(GraphLink{ .From = { 6, "Value" }, .To = { 7, "Values" } });
+			CanonicalizeGraph(falseFlow);
+			REQUIRE(ValidateGraphStructure(falseFlow).has_value());
+			const std::vector<GraphIssue> onFalse = ValidateGraph(falseFlow, *setup.Library);
+			CHECK(Describe(onFalse) == std::vector<std::string>{ "/Links/3" });
+			REQUIRE_FALSE(onFalse.empty());
+			CHECK(onFalse.front().Node == 6);
+			CHECK_FALSE(TranspileGraph(falseFlow, *setup.Library, "Assets/Scripts/Probe.graph").has_value());
+
+			// After a merge that the False flow enters too (node 7 continues at node 5): incomplete.
+			GraphDocument merged = graph;
+			merged.Nodes.push_back(GraphNode{ .Id = 7, .Kind = "Call.Log.Info" });
+			merged.Links.push_back(GraphLink{ .From = { 3, "False" }, .To = { 7, "In" } });
+			merged.Links.push_back(GraphLink{ .From = { 7, "Then" }, .To = { 5, "In" } });
+			CanonicalizeGraph(merged);
+			REQUIRE(ValidateGraphStructure(merged).has_value());
+			CHECK(Describe(ValidateGraph(merged, *setup.Library)) == std::vector<std::string>{ "/Links/3" });
+
+			// The node the True flow enters is entered by the False flow too: incomplete.
+			GraphDocument bothFlows = graph;
+			bothFlows.Links.push_back(GraphLink{ .From = { 3, "False" }, .To = { 4, "In" } });
+			CanonicalizeGraph(bothFlows);
+			REQUIRE(ValidateGraphStructure(bothFlows).has_value());
+			CHECK(Describe(ValidateGraph(bothFlows, *setup.Library)) == std::vector<std::string>{ "/Links/3" });
+		}
+
+		// Quat.New refuses the zero quaternion at run time, so a Quat input's literal is a nonzero quaternion once rounded to
+		// float, as a member's Default is (W24.1's review).
+		TEST_CASE("GraphNodeLibrary: a Quat input's literal is a nonzero quaternion, which Quat.New takes")
+		{
+			const LibrarySetup setup;
+			GraphDocument graph;
+			graph.Name = "Probe";
+			graph.Variables = { GraphVariable{ .Name = "Spin", .Kind = GraphValueKind::Quat, .Default = VariantValue(Json::array({ 0, 0, 0, 1 })) } };
+			graph.Nodes = { GraphNode{ .Id = 1, .Kind = "Self.Set.Spin", .Values = { { "Value", VariantValue(Json::array({ 0, 0, 0, 0 })) } } } };
+			REQUIRE(ValidateGraphStructure(graph).has_value());
+			CHECK(Describe(ValidateGraph(graph, *setup.Library)) == std::vector<std::string>{ "!/Nodes/0/Values/Value" });
+			// Any nonzero quaternion fits (Quat.New normalizes it).
+			graph.Nodes[0].Values["Value"] = VariantValue(Json::array({ 0, 0, 0, 2 }));
+			CHECK(ValidateGraph(graph, *setup.Library).empty());
+			graph.Nodes[0].Values["Value"] = VariantValue(Json::array({ 0, 0.5, 0, 0 }));
+			CHECK(ValidateGraph(graph, *setup.Library).empty());
+		}
+
+		// Docs/Decisions/0035-m24-contract.md risk 1 (W24.1's integration): the transpiled text nests a statement's code at most 64
+		// blocks deep, and ValidateGraph refuses a flow that would nest deeper at the statement that first passes the limit, so a
+		// graph transpiles exactly when it validates.
+		TEST_CASE("GraphNodeLibrary: a flow nested deeper than the transpiled text may nest is invalid at the statement that passes the limit, and a graph transpiles exactly when it validates")
+		{
+			const LibrarySetup setup;
+			// An OnStart event, then `branches` branches, each in the True flow of the one before it; with `pure`, every branch's
+			// Condition is node 1000's value, so each branch also opens a block for it.
+			const auto nest = [](uint32_t branches, bool pure)
+			{
+				GraphDocument graph;
+				graph.Name = "Nested";
+				graph.Nodes.push_back(GraphNode{ .Id = 1, .Kind = "Event.OnStart" });
+				for (uint32_t id = 2; id <= branches + 1; ++id)
+				{
+					graph.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Flow.Branch" });
+					graph.Links.push_back(GraphLink{ .From = { id - 1, id == 2 ? "Then" : "True" }, .To = { id, "In" } });
+					if (pure)
+						graph.Links.push_back(GraphLink{ .From = { 1000, "Result" }, .To = { id, "Condition" } });
+				}
+				if (pure)
+					graph.Nodes.push_back(GraphNode{ .Id = 1000, .Kind = "Logic.Not" });
+				CanonicalizeGraph(graph);
+				REQUIRE(ValidateGraphStructure(graph).has_value());
+				return graph;
+			};
+			const auto transpiles = [&setup](const GraphDocument& graph)
+			{
+				return TranspileGraph(graph, *setup.Library, "Assets/Scripts/Nested.graph").has_value();
+			};
+
+			// The 64th branch starts 64 blocks deep: valid, and it transpiles.
+			const GraphDocument deepest = nest(64, false);
+			CHECK(ValidateGraph(deepest, *setup.Library).empty());
+			CHECK(transpiles(deepest));
+
+			// The 65th would start 65 blocks deep: one blocking issue at that branch (node 66, the 66th node), and no text.
+			const GraphDocument tooDeep = nest(65, false);
+			const std::vector<GraphIssue> issues = ValidateGraph(tooDeep, *setup.Library);
+			CHECK(Describe(issues) == std::vector<std::string>{ "!/Nodes/65" });
+			REQUIRE(issues.size() == 1);
+			CHECK(issues.front().Node == 66);
+			const Result<GraphTranspileResult> refused = TranspileGraph(tooDeep, *setup.Library, "Assets/Scripts/Nested.graph");
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			REQUIRE(refused.error().GetIssues().size() == 1);
+			CHECK(refused.error().GetIssues().front().JsonPointer == "/Nodes/65");
+
+			// A statement's block of pure values nests too: with one, the 32nd branch starts 63 blocks deep and the 33rd 65.
+			CHECK(ValidateGraph(nest(32, true), *setup.Library).empty());
+			CHECK(transpiles(nest(32, true)));
+			const GraphDocument blocks = nest(33, true);
+			CHECK(Describe(ValidateGraph(blocks, *setup.Library)) == std::vector<std::string>{ "!/Nodes/33" });
+			CHECK_FALSE(transpiles(blocks));
+
+			// An unfinished graph is measured too, so the edit that nests a flow too deep is refused while it is built.
+			GraphDocument unfinished = tooDeep;
+			unfinished.Nodes.push_back(GraphNode{ .Id = 200, .Kind = "Call.Audio.PlayOneShot" });
+			CHECK(Describe(ValidateGraph(unfinished, *setup.Library)) == std::vector<std::string>{ "!/Nodes/65", "/Nodes/66/Values/clip" });
+			// A graph with another blocking issue (a value for an input its node lacks) has no layout to measure: that issue alone
+			// is reported.
+			GraphDocument broken = tooDeep;
+			broken.Nodes[1].Values["C"] = VariantValue(Json(3));
+			CHECK(Describe(ValidateGraph(broken, *setup.Library)) == std::vector<std::string>{ "!/Nodes/1/Values/C" });
+		}
+
+		// Docs/Decisions/0035-m24-contract.md decision 7 and risk 1 (W24.1's review): every statement evaluates again the pure
+		// values it reads, so the text grows with statements times values, which the document's limits bound only at hundreds of
+		// megabytes; the text holds at most 8 MiB (GraphTextLimits.h's MaxGraphTextBytes), and ValidateGraph refuses a graph whose
+		// text would pass it at the statement whose code passes it, the layout stopping there, so a graph transpiles exactly when
+		// it validates.
+		TEST_CASE("GraphNodeLibrary: a graph whose transpiled text would pass its size limit is invalid at the statement whose code passes it, and a graph transpiles exactly when it validates")
+		{
+			constexpr size_t MaxTextBytes = 8 * 1024 * 1024;
+			const LibrarySetup setup;
+			const auto transpile = [&setup](const GraphDocument& graph)
+			{
+				return TranspileGraph(graph, *setup.Library, "Assets/Scripts/Large.graph");
+			};
+
+			// An OnStart event, then `statements` logs in a chain, each of a string whose length makes every log's code the same
+			// size whatever the digits of its id.
+			constexpr size_t LogBytes = 2100;
+			const auto chain = [](size_t statements)
+			{
+				GraphDocument graph;
+				graph.Name = "Large";
+				graph.Nodes.push_back(GraphNode{ .Id = 1, .Kind = "Event.OnStart" });
+				for (uint32_t id = 2; id <= statements + 1; ++id)
+				{
+					const size_t digits = std::to_string(id).size();
+					graph.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Call.Log.Info", .Values = { { "Values", VariantValue(Json(std::string(LogBytes - digits, 'x'))) } } });
+					graph.Links.push_back(GraphLink{ .From = { id - 1, "Then" }, .To = { id, "In" } });
+				}
+				REQUIRE(ValidateGraphStructure(graph).has_value());
+				return graph;
+			};
+			const Result<GraphTranspileResult> one = transpile(chain(1));
+			const Result<GraphTranspileResult> two = transpile(chain(2));
+			REQUIRE(one.has_value());
+			REQUIRE(two.has_value());
+			const size_t perStatement = two->Luau.size() - one->Luau.size();
+			const size_t layout = one->Luau.size() - perStatement;
+			const size_t most = (MaxTextBytes - layout) / perStatement;
+			REQUIRE(most + 1 < MaxGraphNodes);
+
+			// The most statements whose text fits: valid, and the text is that size.
+			const GraphDocument fits = chain(most);
+			CHECK(ValidateGraph(fits, *setup.Library).empty());
+			const Result<GraphTranspileResult> largest = transpile(fits);
+			REQUIRE(largest.has_value());
+			CHECK(largest->Luau.size() == layout + most * perStatement);
+			CHECK(largest->Luau.size() <= MaxTextBytes);
+
+			// One more: one blocking issue at that last statement (node index most + 1), and no text.
+			const GraphDocument tooLarge = chain(most + 1);
+			const std::vector<GraphIssue> issues = ValidateGraph(tooLarge, *setup.Library);
+			const std::string pointer = std::format("/Nodes/{}", most + 1);
+			CHECK(Describe(issues) == std::vector<std::string>{ "!" + pointer });
+			REQUIRE(issues.size() == 1);
+			CHECK(issues.front().Node == tooLarge.Nodes.back().Id);
+			const Result<GraphTranspileResult> refused = transpile(tooLarge);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			REQUIRE(refused.error().GetIssues().size() == 1);
+			CHECK(refused.error().GetIssues().front().JsonPointer == pointer);
+
+			// Within the document's limits, a chain of 300 values read by each of 3,000 statements would lay out about 100 MB;
+			// the layout stops at the limit, at the statement whose code passes it.
+			GraphDocument repeated;
+			repeated.Name = "Repeated";
+			repeated.Fields = { GraphField{ .Name = "Base", .Kind = GraphValueKind::Number, .Default = VariantValue(Json(0)) } };
+			repeated.Nodes.push_back(GraphNode{ .Id = 1, .Kind = "Event.OnStart" });
+			repeated.Nodes.push_back(GraphNode{ .Id = 2, .Kind = "Self.Get.Base" });
+			constexpr uint32_t Values = 300;
+			for (uint32_t id = 3; id < 3 + Values; ++id)
+			{
+				repeated.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Number.Add", .Values = { { "B", VariantValue(Json(1)) } } });
+				repeated.Links.push_back(GraphLink{ .From = { id - 1, id == 3 ? "Value" : "Result" }, .To = { id, "A" } });
+			}
+			constexpr uint32_t FirstLog = 1000;
+			constexpr uint32_t Logs = 3000;
+			for (uint32_t id = FirstLog; id < FirstLog + Logs; ++id)
+			{
+				repeated.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Call.Log.Info" });
+				repeated.Links.push_back(GraphLink{ .From = { id == FirstLog ? 1 : id - 1, "Then" }, .To = { id, "In" } });
+				repeated.Links.push_back(GraphLink{ .From = { 2 + Values, "Result" }, .To = { id, "Values" } });
+			}
+			CanonicalizeGraph(repeated);
+			REQUIRE(ValidateGraphStructure(repeated).has_value());
+			const std::vector<GraphIssue> repeats = ValidateGraph(repeated, *setup.Library);
+			REQUIRE(repeats.size() == 1);
+			CHECK_FALSE(repeats.front().Incomplete);
+			CHECK(repeats.front().Node >= FirstLog);
+			CHECK(repeats.front().Node < FirstLog + Logs);
+			CHECK_FALSE(transpile(repeated).has_value());
 		}
 	}
 

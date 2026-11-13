@@ -110,8 +110,13 @@ namespace Engine {
 		// not an engine Window, a Dear ImGui platform window the vendored GLFW backend made (`nativeWindow`, a GLFWwindow*,
 		// ImGuiViewport::PlatformHandle): the swapchain reads the framebuffer size and the iconified state from GLFW itself where
 		// Create reads them from the Window, and behaves as Create's otherwise (its surface on the device's instance, the
-		// presentation check, every recreation rule). The window must outlive the swapchain. Errors: as Create's;
-		// InvalidArgument for a null window.
+		// presentation check, every recreation rule). The window must outlive the swapchain. Such a window appears after
+		// startup (a panel undocked), so the creation is a request (decision 19; M18's rule after startup, ADR 0029 decisions 42
+		// and 44): an out-of-memory creation, classified as AcquireNextImage's recreation classifies it (vkCreateSwapchainKHR's
+		// out-of-memory results, an injected oom-swapchain fault, a failed image wrapping or semaphore), is trimmed for and
+		// retried once (RetryAfterTrim), each attempt creating its swapchain and surface aside, and a second one returns
+		// OutOfMemory; in a recovery's Recreate it is tried once and returned unchanged. Errors: as Create's; InvalidArgument
+		// for a null window; OutOfMemory as above.
 		[[nodiscard]] static Result<Scope<Swapchain>> CreateForNativeWindow(GraphicsDevice& device, void* nativeWindow,
 			const SwapchainSpecification& specification);
 
@@ -204,7 +209,22 @@ namespace Engine {
 			nvrhi::FramebufferHandle Framebuffer{};
 			VkSemaphore PresentSemaphore = VK_NULL_HANDLE;
 		};
+		// The window's framebuffer size and whether it is iconified: the engine Window's (Create), or GLFW's own for a native
+		// window (CreateForNativeWindow: glfwGetFramebufferSize and GLFW_ICONIFIED).
+		struct WindowState
+		{
+			uint32_t FramebufferWidth = 0;
+			uint32_t FramebufferHeight = 0;
+			bool IsMinimized = false;
+		};
 	private:
+		// Create's and CreateForNativeWindow's steps after the members are set: the acquire semaphores, the surface and, unless
+		// the window is minimized, the swapchain at its framebuffer size. An out-of-memory failure is recorded
+		// (m_IsCreationOutOfMemory), as CreateSwapchain records its own.
+		[[nodiscard]] Status Initialize();
+		[[nodiscard]] WindowState ReadWindowState() const;
+		// The creation's Info line: the size, format, present mode and image count, or that the window is minimized.
+		void LogCreated() const;
 		// glfwCreateWindowSurface and the presentation-support check of the graphics queue family.
 		[[nodiscard]] Status CreateSurface();
 		// A VkSwapchainKHR at the framebuffer size `width` x `height` (the surface's fixed extent wins), replacing and
@@ -222,7 +242,8 @@ namespace Engine {
 		[[noreturn]] void EndProcess(std::string_view call, VkResult result);
 	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference: outlives the swapchain
-		Window* m_Window = nullptr;         // documented back-reference: outlives the swapchain
+		Window* m_Window = nullptr;         // documented back-reference: outlives the swapchain; null for CreateForNativeWindow
+		void* m_NativeWindow = nullptr;     // the GLFWwindow* of the surface: the Window's, or CreateForNativeWindow's (outlives it)
 		SwapchainSpecification m_Specification{};
 		VkSurfaceKHR m_Surface = VK_NULL_HANDLE;
 		VkSwapchainKHR m_Swapchain = VK_NULL_HANDLE;

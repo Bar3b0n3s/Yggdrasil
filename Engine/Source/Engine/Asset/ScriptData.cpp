@@ -348,10 +348,14 @@ namespace Engine {
 		return Utils::IsReservedScriptField(name);
 	}
 
-	bool IsScriptSourcePath(const VfsPath& /*path*/)
+	bool IsScriptSourcePath(const VfsPath& path)
 	{
-		ENGINE_CONTRACT_STUB();
-		return false;
+		if (path.GetScheme() != "project" || !path.GetPath().starts_with("Assets/"))
+			return false;
+		// ".luau" is ScriptImporter's extension and ".graph" GraphImporter's (AssetPipeline/Graph/GraphDocument.h's
+		// GraphFileExtension, which this lower layer cannot include).
+		const std::string_view extension = path.GetExtension();
+		return extension == ".luau" || extension == ".graph";
 	}
 
 	Result<Buffer> CookScript(const ScriptData& script, uint32_t importerVersion)

@@ -8,6 +8,7 @@
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
+#include "Engine/Scripting/ScriptCompiler.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
 
@@ -21,9 +22,8 @@
 #include <tuple>
 #include <vector>
 
-// The graph transpiler (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decisions 7 and 8, stream G-B). The line-map and
-// key cases are live (the contract implements them); the others are skipped until stream G-B implements the transpiler and
-// commits the fixture graphs with their texts (Tests/Data/Graphs/<Name>.graph and <Name>.luau).
+// The graph transpiler (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decisions 7 and 8, stream G-B), with the fixture
+// graphs and their committed texts (Tests/Data/Graphs/<Name>.graph and <Name>.luau).
 
 namespace Engine {
 
@@ -90,14 +90,19 @@ namespace Engine {
 				CHECK_MESSAGE(!ParseGraphProbeKey(bad).has_value(), bad);
 		}
 
-		TEST_CASE("GraphTranspiler: the fixture graphs transpile to their committed Luau bytes" * doctest::skip(true))
+		TEST_CASE("GraphTranspiler: the fixture graphs transpile to their committed Luau bytes")
 		{
 			const TranspileSetup setup;
 			for (const std::string_view name : FixtureGraphs)
 			{
 				CAPTURE(name);
 				const std::string path = std::string("Assets/Scripts/") + std::string(name) + ".graph";
-				const Result<GraphTranspileResult> result = TranspileGraph(setup.Read(name), *setup.Library, path);
+				const GraphDocument graph = setup.Read(name);
+				// The fixture files are canonical: the writer gives their bytes back.
+				const Result<std::string> source = Test::ReadTestDataText(std::string("Graphs/") + std::string(name) + ".graph");
+				REQUIRE(source.has_value());
+				CHECK(GraphToText(graph, *setup.Types).value_or(std::string()) == *source);
+				const Result<GraphTranspileResult> result = TranspileGraph(graph, *setup.Library, path);
 				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 				const Result<std::string> expected = Test::ReadTestDataText(std::string("Graphs/") + std::string(name) + ".luau");
 				REQUIRE_MESSAGE(expected.has_value(), expected.error().ToString());
@@ -110,7 +115,7 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("GraphTranspiler: every line maps back to the node whose code it is, and every computed value is a live value" * doctest::skip(true))
+		TEST_CASE("GraphTranspiler: every line maps back to the node whose code it is, and every computed value is a live value")
 		{
 			const TranspileSetup setup;
 			const GraphDocument door = setup.Read("Door");
@@ -143,7 +148,7 @@ namespace Engine {
 			}));
 		}
 
-		TEST_CASE("GraphTranspiler: the text of every fixture graph type-checks without an error" * doctest::skip(true))
+		TEST_CASE("GraphTranspiler: the text of every fixture graph type-checks without an error")
 		{
 			const TranspileSetup setup;
 			const Result<Scope<ScriptTypeChecker>> checker = ScriptTypeChecker::Create(setup.Api, {});
@@ -163,7 +168,81 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("GraphTranspiler: a graph that does not validate has no text, and the error carries every issue" * doctest::skip(true))
+		// Docs/Decisions/0035-m24-contract.md risk 1: the transpiler builds a graph at MaxGraphNodes' scale without recursing per
+		// node; a flow nested deeper than Luau's parser recurses on an import worker's stack is refused at its node; and a text
+		// that exceeds another of Luau's limits (a function's 200 locals) fails its compile at a line the line map gives to a
+		// node, which the import reports (decision 8), never at run time.
+		TEST_CASE("GraphTranspiler: a graph at MaxGraphNodes' scale transpiles, a flow nested too deep is refused at its node, and a text beyond Luau's limits fails its compile at a node's line")
+		{
+			const TranspileSetup setup;
+			const auto compile = [](const GraphTranspileResult& text)
+			{
+				const Result<VfsPath> path = VfsPath::Create("project", "Assets/Scripts/Large.graph");
+				REQUIRE(path.has_value());
+				return ScriptCompiler::Compile({ .Path = *path, .Source = text.Luau });
+			};
+
+			// A flow of MaxGraphNodes - 1 statements, each after the last.
+			GraphDocument chain;
+			chain.Name = "Chain";
+			chain.Nodes.push_back(GraphNode{ .Id = 1, .Kind = "Event.OnStart" });
+			for (uint32_t id = 2; id <= MaxGraphNodes; ++id)
+			{
+				chain.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Call.Log.Info", .Values = { { "Values", VariantValue(Json(id)) } } });
+				chain.Links.push_back(GraphLink{ .From = { id - 1, "Then" }, .To = { id, "In" } });
+			}
+			const Result<GraphTranspileResult> flat = TranspileGraph(chain, *setup.Library, "Assets/Scripts/Large.graph");
+			REQUIRE_MESSAGE(flat.has_value(), flat.error().ToString());
+			CHECK(flat->LineNodes.size() == static_cast<size_t>(std::ranges::count(flat->Luau, '\n')));
+			const Result<ScriptCompilation> compiled = compile(*flat);
+			CHECK_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
+
+			// Branches nested deeper than the script compiler parses on an import worker's stack: refused at the node that goes
+			// too deep, which ValidateGraph reports (W24.1's integration), so the graph transpiles exactly when it validates.
+			GraphDocument nested;
+			nested.Name = "Nested";
+			nested.Nodes.push_back(GraphNode{ .Id = 1, .Kind = "Event.OnStart" });
+			constexpr uint32_t Depth = 200;
+			for (uint32_t id = 2; id <= Depth; ++id)
+			{
+				nested.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Flow.Branch" });
+				nested.Links.push_back(GraphLink{ .From = { id - 1, id == 2 ? "Then" : "True" }, .To = { id, "In" } });
+			}
+			const Result<GraphTranspileResult> deep = TranspileGraph(nested, *setup.Library, "Assets/Scripts/Large.graph");
+			REQUIRE_FALSE(deep.has_value());
+			CHECK(deep.error().GetCode() == ErrorCode::Validation);
+			REQUIRE(deep.error().GetIssues().size() == 1);
+			const std::vector<GraphIssue> issues = ValidateGraph(nested, *setup.Library);
+			REQUIRE(issues.size() == 1);
+			CHECK_FALSE(issues.front().Incomplete);
+			CHECK(deep.error().GetIssues().front().JsonPointer == issues.front().JsonPointer);
+			CHECK(issues.front().JsonPointer.starts_with("/Nodes/"));
+
+			// One statement reading a chain of pure values longer than a function's locals allow (from a field, so that Luau's
+			// constant folding keeps every value a local).
+			GraphDocument values;
+			values.Name = "Values";
+			values.Fields = { GraphField{ .Name = "Base", .Kind = GraphValueKind::Number, .Default = VariantValue(Json(0)) } };
+			values.Nodes.push_back(GraphNode{ .Id = 1, .Kind = "Event.OnStart" });
+			values.Nodes.push_back(GraphNode{ .Id = 2, .Kind = "Call.Log.Info" });
+			values.Links.push_back(GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } });
+			for (uint32_t id = 3; id < MaxGraphNodes; ++id)
+			{
+				values.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Number.Add", .Values = { { "B", VariantValue(Json(1)) } } });
+				values.Links.push_back(GraphLink{ .From = { id, "Result" }, .To = { id == 3 ? 2 : id - 1, id == 3 ? "Values" : "A" } });
+			}
+			values.Nodes.push_back(GraphNode{ .Id = static_cast<uint32_t>(MaxGraphNodes), .Kind = "Self.Get.Base" });
+			values.Links.push_back(GraphLink{ .From = { static_cast<uint32_t>(MaxGraphNodes), "Value" }, .To = { static_cast<uint32_t>(MaxGraphNodes) - 1, "A" } });
+			const Result<GraphTranspileResult> wide = TranspileGraph(values, *setup.Library, "Assets/Scripts/Large.graph");
+			REQUIRE_MESSAGE(wide.has_value(), wide.error().ToString());
+			CHECK(wide->Probes.size() == MaxGraphNodes - 2);
+			const Result<ScriptCompilation> refusedLocals = compile(*wide);
+			REQUIRE_FALSE(refusedLocals.has_value());
+			const uint32_t node = FindGraphNodeAtLine(*wide, refusedLocals.error().GetLocation().Line);
+			CHECK(node >= 3);
+		}
+
+		TEST_CASE("GraphTranspiler: a graph that does not validate has no text, and the error carries every issue")
 		{
 			const TranspileSetup setup;
 			GraphDocument door = setup.Read("Door");

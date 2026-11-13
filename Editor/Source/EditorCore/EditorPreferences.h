@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -22,8 +23,9 @@ namespace Engine {
 		bool AllowNativeCode = false;
 		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 20; stream V): "PlatformWindows", whether
 		// panels may be undocked into OS windows of their own (ApplicationSpecification::ImGuiPlatformWindows), read when the
-		// editor starts, so a change takes effect at the next start. On by default; it has an effect only on Windows in a windowed
-		// editor. Presentation, so no automation method writes it (decision 20); the View menu's checkbox does.
+		// editor starts, so a change takes effect at the next start; absent means on. It has an effect only on Windows in a
+		// windowed editor. Presentation, so no automation method writes it (decision 20); the Window menu's "Platform windows"
+		// checkbox does, keeping every other member (the editor has no View menu).
 		bool PlatformWindows = true;
 		std::string ExternalEditorExecutable{};
 		// Individual argv entries. {path} and {line} substituted without a shell.
@@ -34,6 +36,14 @@ namespace Engine {
 	// Errors: Parse/Validation for malformed content; Io for file errors. Writing needs user:// (InvalidState otherwise).
 	[[nodiscard]] Result<EditorPreferences> ReadEditorPreferences(const VirtualFileSystem& vfs);
 	[[nodiscard]] Status WriteEditorPreferences(VirtualFileSystem& vfs, const EditorPreferences& preferences);
+
+	// M24 (Docs/Decisions/0035-m24-contract.md decision 18; stream V): the PlatformWindows preference a windowed editor starts
+	// with, read before the process level exists (the application factory, Application.h), so a change takes effect at the
+	// next start. The file is Editor.json in the folder ProcessContext mounts as user://: `appName`'s under `userDataRoot`
+	// (--user-data-dir), or under the operating system's root when it is empty (Paths::GetUserDataPaths). A folder or file that
+	// is missing or cannot be read gives the default (on); the editor's startup reads the file again and reports why
+	// (EditorHostPreferences::Load). Reads only.
+	[[nodiscard]] bool ReadStartupPlatformWindowsPreference(std::string_view appName, const std::filesystem::path& userDataRoot);
 
 	// The text every writer of user://Editor.json stores (WriteEditorPreferences, ProjectManager::AddRecentProject):
 	// tab-indented JSON that keeps every number exactly as parsed, so members of a newer editor survive (JsonWriter would

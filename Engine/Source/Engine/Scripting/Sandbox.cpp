@@ -796,9 +796,13 @@ namespace Engine {
 		ENGINE_TRY(Detail::SandboxAccess::EnterProtected(*this, m_State->Specification.Engine ? ScriptExecutionOrigin::Gameplay : ScriptExecutionOrigin::Pure));
 		PublicEntry entry{ *this };
 		Status operation{};
-		const auto outcome = m_State->RunNative(m_State->Vm, [this, &script, &operation](ScriptCall& call)
+		// A script's origin (a .luau source, or a graph's transpiled text under its .graph path: the script source rule,
+		// Asset/ScriptData.h) runs as a cached module, which the extraction's PushModuleReturn finds; any other chunk uncached.
+		const Result<VfsPath> origin = VfsPath::Create("project", script.SourceMap.Path);
+		const bool isModule = origin.has_value() && IsScriptSourcePath(*origin);
+		const auto outcome = m_State->RunNative(m_State->Vm, [this, &script, &operation, isModule](ScriptCall& call)
 		{
-			operation = script.SourceMap.Path.ends_with(".luau") ? Detail::SandboxAccess::PushModule(call, script) : m_State->Execute(call, script, std::nullopt);
+			operation = isModule ? Detail::SandboxAccess::PushModule(call, script) : m_State->Execute(call, script, std::nullopt);
 			return 0;
 		});
 		ENGINE_TRY(Utils::CheckOutcome(outcome));
@@ -1115,8 +1119,8 @@ namespace Engine {
 				if (!candidate)
 					return MakeError(ErrorCode::InvalidArgument, "null reload candidate");
 				ENGINE_TRY_ASSIGN(auto path, VfsPath::Parse(std::string("project://") + candidate->SourceMap.Path));
-				if (!path.GetPath().starts_with("Assets/") || !path.GetPath().ends_with(".luau"))
-					return MakeError(ErrorCode::Validation, "reload candidates require canonical Assets .luau paths");
+				if (!IsScriptSourcePath(path))
+					return MakeError(ErrorCode::Validation, "reload candidates require canonical Assets .luau or .graph paths");
 				if (std::ranges::any_of(pinned, [&candidate](const auto& item)
 				{
 					return item.Data->SourceMap.Path == candidate->SourceMap.Path;
@@ -1193,8 +1197,7 @@ namespace Engine {
 				return !item.Evaluated;
 			}))
 				return MakeError(ErrorCode::InvalidState, "all reload candidates must succeed before sealing the cache");
-			if (path.GetScheme() != "project" || !path.GetPath().starts_with("Assets/") || !path.GetPath().ends_with(".luau")
-				|| lua_type(call.State, valueIndex) == LUA_TNONE)
+			if (!IsScriptSourcePath(path) || lua_type(call.State, valueIndex) == LUA_TNONE)
 				return MakeError(ErrorCode::InvalidArgument, "invalid staged module path or value");
 			state.CacheValue(call.State, path.GetPath(), valueIndex);
 			return state.Poll();

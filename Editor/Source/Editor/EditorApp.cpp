@@ -1551,6 +1551,10 @@ namespace Engine {
 		// Batch runs are among §4.2's unthrottled modes (ADR 0008 decision 4).
 		if (launch.BatchFile.has_value() || launch.Upgrade)
 			specification.ThrottleHeadless = false;
+		// M24 (decisions 17 and 18): a windowed editor asks for Dear ImGui's platform windows when the user's preference is on;
+		// the ImGuiLayer turns them on only where CheckPlatformWindowSupport allows them (Windows). A headless editor never asks.
+		if (specification.Window == WindowMode::Windowed)
+			specification.ImGuiPlatformWindows = ReadStartupPlatformWindowsPreference(specification.Name, specification.UserDataRoot);
 
 		EditorAppOptions editorOptions;
 		ENGINE_TRY_ASSIGN(editorOptions.ViewportScreenshotPath, Utils::GetPathOption(commandLine, Utils::ViewportScreenshotOption));

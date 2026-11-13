@@ -34,7 +34,7 @@
 // the recreation protocol through the shared loss test, with offscreen targets standing in for the windows' swapchains on the
 // headless device, and the presenting half (swapchains on real windows, Recover(window)) in a windowed child, as ADR 0029
 // decision 32 has the owners that present prove it; and the out-of-memory rule of a window's target through the injected
-// oom-rendertarget faults. Skipped until stream V implements them.
+// oom-rendertarget faults.
 
 namespace Engine {
 
@@ -70,6 +70,8 @@ namespace Engine {
 				{
 					return viewport->Size;
 				};
+				// Dear ImGui sets every platform window's title, without a check that the platform side can.
+				platform.Platform_SetWindowTitle = [](ImGuiViewport* /*viewport*/, const char* /*title*/) {};
 				ImGuiPlatformMonitor monitor;
 				monitor.MainPos = monitor.WorkPos = ImVec2(0.0f, 0.0f);
 				monitor.MainSize = monitor.WorkSize = ImVec2(1024.0f, 512.0f);
@@ -125,12 +127,46 @@ namespace Engine {
 			std::optional<OffscreenTarget> m_Target{};
 		};
 
+		// The test's frame pacer as an application's frame owner keeps it: registered with the device's recreation registry, so
+		// a recovery releases its event queries and creates it again on the recovered device, as Application's frame does.
+		class RegisteredPacer
+		{
+		public:
+			explicit RegisteredPacer(GraphicsDevice& device)
+				: m_Device(&device)
+			{
+				m_Pacer.emplace(device, 1);
+				GpuRecreationHooks hooks;
+				hooks.Name = "ImGuiPlatformWindowsTests frame";
+				hooks.Release = [this]()
+				{
+					m_Pacer.reset();
+				};
+				hooks.Recreate = [this]() -> Status
+				{
+					m_Pacer.emplace(*m_Device, 1);
+					return {};
+				};
+				m_Registration = device.GetRecreation().Register(std::move(hooks));
+			}
+
+			RegisteredPacer(const RegisteredPacer&) = delete;
+			RegisteredPacer& operator=(const RegisteredPacer&) = delete;
+
+			// The pacer; between a recovery's Release and its Recreate there is none.
+			[[nodiscard]] FramePacer& Get() { return *m_Pacer; }
+		private:
+			GraphicsDevice* m_Device = nullptr; // documented back-reference: the fixture's device outlives the pacer
+			std::optional<FramePacer> m_Pacer{};
+			GpuRecreationRegistration m_Registration{}; // declared last, so it is dropped first
+		};
+
 	}
 
 	TEST_SUITE("ImGui")
 	{
 		TEST_CASE("ImGuiPlatformWindows: a device loss recreates every platform window's target and draws the same image"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -150,12 +186,13 @@ namespace Engine {
 			};
 			Result<Scope<ImGuiPlatformWindows>> windows = ImGuiPlatformWindows::Create(device, **renderer, specification);
 			REQUIRE_MESSAGE(windows.has_value(), windows.error().ToString());
-			FramePacer pacer(device, 1);
+			RegisteredPacer frames(device);
 
 			// One frame: a window placed beyond the main viewport's 256 x 128 gets a platform window of its own, drawn into its
 			// target, which is read back.
-			const auto frame = [&pacer, &renderer, &windows, &device, &targets]() -> Result<std::vector<std::byte>>
+			const auto frame = [&frames, &renderer, &windows, &device, &targets]() -> Result<std::vector<std::byte>>
 			{
+				FramePacer& pacer = frames.Get();
 				pacer.BeginFrame();
 				(*renderer)->BeginFrame(pacer.GetFrameSlot());
 				ImGui::NewFrame();
@@ -191,7 +228,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ImGuiPlatformWindows: an out-of-memory target is trimmed and retried once, and otherwise only its window draws nothing until its next resize"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// Decision 19 (M18's rule after startup, ADR 0029 decisions 42 and 44): a platform window's target is a request. Under
 			// oom-rendertarget its first creation fails and the retry after the trim succeeds; under oom-rendertarget-persistent
@@ -339,7 +376,7 @@ namespace Engine {
 		}
 
 		TEST_CASE("ImGuiPlatformWindows: platform windows recover their swapchains after an injected loss and present without a GPU message"
-			* doctest::test_suite(Test::GpuSuite) * doctest::skip(true))
+			* doctest::test_suite(Test::GpuSuite))
 		{
 			// M24 acceptance (E-VIEWPORTS): "Platform windows stay clean under synchronization validation and survive an injected
 			// device loss", for the presenting half that the shared loss test's headless device cannot reach.

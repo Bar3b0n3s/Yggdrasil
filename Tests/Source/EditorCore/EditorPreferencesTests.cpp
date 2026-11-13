@@ -2,6 +2,7 @@
 #include "EditorCore/EditorPreferences.h"
 
 #include "EditorCore/Project/ProjectManager.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/Log.h"
@@ -115,6 +116,90 @@ namespace Engine {
 			CHECK(stored->AllowAiAutomation);
 		}
 
+		// Docs/Decisions/0035-m24-contract.md decisions 18 and 20 (stream V): the user's PlatformWindows preference is on when the
+		// file does not name it, is read and written with the others, and the file's other writers keep it as the file holds it.
+		TEST_CASE("EditorPreferences: platform windows are on by default, read and written, and the file's other writers keep them")
+		{
+			VirtualFileSystem vfs;
+			REQUIRE(vfs.Mount("user", CreateScope<MemoryMount>()));
+			const auto path = VfsPath::Parse("user://Editor.json");
+			REQUIRE(path);
+			const auto defaults = ReadEditorPreferences(vfs);
+			REQUIRE(defaults);
+			CHECK(defaults->PlatformWindows);
+			const std::string original = R"({"Format":"EditorPreferences","Version":1,"AllowNativeCode":true,"Future":{"Kept":[1,2]}})";
+			REQUIRE(vfs.WriteFileAtomic(*path, std::as_bytes(std::span(original.data(), original.size()))));
+			const auto absent = ReadEditorPreferences(vfs);
+			REQUIRE(absent);
+			CHECK(absent->PlatformWindows);
+
+			// The checkbox's writer reads the file first and changes only this member.
+			EditorPreferences off = *absent;
+			off.PlatformWindows = false;
+			REQUIRE(WriteEditorPreferences(vfs, off));
+			const auto stored = ReadEditorPreferences(vfs);
+			REQUIRE(stored);
+			CHECK_FALSE(stored->PlatformWindows);
+			CHECK(stored->AllowNativeCode);
+
+			// The AI automation preference's writer and the recent projects keep it.
+			EditorPreferences automation = *stored;
+			automation.AllowAiAutomation = true;
+			REQUIRE(WriteEditorPreferences(vfs, automation));
+			REQUIRE(ProjectManager::AddRecentProject(vfs, std::filesystem::path("D:/Games/Windows/Windows.eproj")));
+			const auto kept = ReadEditorPreferences(vfs);
+			REQUIRE(kept);
+			CHECK_FALSE(kept->PlatformWindows);
+			CHECK(kept->AllowAiAutomation);
+			const auto text = vfs.ReadText(*path);
+			REQUIRE(text);
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE(document);
+			CHECK((*document)["PlatformWindows"] == Json(false));
+			const auto future = JsonReader::Parse(R"({"Kept":[1,2]})");
+			REQUIRE(future);
+			CHECK((*document)["Future"] == *future);
+
+			// A value that is not a boolean is refused, as the file's other members are.
+			const std::string wrong = R"({"Format":"EditorPreferences","Version":1,"PlatformWindows":"yes"})";
+			REQUIRE(vfs.WriteFileAtomic(*path, std::as_bytes(std::span(wrong.data(), wrong.size()))));
+			CHECK_FALSE(ReadEditorPreferences(vfs).has_value());
+		}
+
+		// Docs/Decisions/0035-m24-contract.md decision 18 (stream V): a windowed editor reads the preference it starts with from
+		// Editor.json in its user-data folder, before the process level mounts it, and falls back to the default when the
+		// folder or the file is missing or the file cannot be read.
+		TEST_CASE("EditorPreferences: the startup read takes platform windows from the user-data folder's Editor.json, on when it cannot")
+		{
+			Test::TempDirectory root("StartupPlatformWindows");
+			const std::string appName = "PreferencesApp";
+			// No application folder yet (a first start), then a folder without the file.
+			CHECK(ReadStartupPlatformWindowsPreference(appName, root.GetPath()));
+			const std::filesystem::path folder = root / appName;
+			REQUIRE(FileSystem::CreateDirectories(folder));
+			CHECK(ReadStartupPlatformWindowsPreference(appName, root.GetPath()));
+
+			const auto write = [&folder](std::string_view text)
+			{
+				REQUIRE(FileSystem::WriteFileAtomic(folder / "Editor.json", std::as_bytes(std::span(text.data(), text.size()))));
+			};
+			write(R"({"Format":"EditorPreferences","Version":1,"PlatformWindows":false})");
+			CHECK_FALSE(ReadStartupPlatformWindowsPreference(appName, root.GetPath()));
+			write(R"({"Format":"EditorPreferences","Version":1,"PlatformWindows":true})");
+			CHECK(ReadStartupPlatformWindowsPreference(appName, root.GetPath()));
+			// Another application's folder is not this one's.
+			CHECK(ReadStartupPlatformWindowsPreference("OtherApp", root.GetPath()));
+			// A malformed file, and one of a newer editor, give the default.
+			write(R"({"Format":"EditorPreferences","Version":1,"PlatformWindows":false)");
+			CHECK(ReadStartupPlatformWindowsPreference(appName, root.GetPath()));
+			write(R"({"Format":"EditorPreferences","Version":2,"PlatformWindows":false})");
+			CHECK(ReadStartupPlatformWindowsPreference(appName, root.GetPath()));
+			// Reading changes nothing.
+			const auto text = FileSystem::ReadText(folder / "Editor.json");
+			REQUIRE(text);
+			CHECK(*text == R"({"Format":"EditorPreferences","Version":2,"PlatformWindows":false})");
+		}
+
 		TEST_CASE("EditorPreferences: the shared writer keeps every number exactly and rejects text that is not UTF-8")
 		{
 			const auto document = JsonReader::Parse(R"({"Format":"EditorPreferences","Version":1,"Future":{"Exact":9007199254740993,"Fraction":1.23456789012345,"Large":1e200,"Tiny":5e-324}})");
@@ -146,6 +231,7 @@ namespace Engine {
 			EditorPreferences full;
 			full.AllowAiAutomation = true;
 			full.AllowNativeCode = true;
+			full.PlatformWindows = false;
 			full.ExternalEditorExecutable = "C:/Tools/Editor app.exe";
 			full.ExternalEditorArguments = { "--goto", "{path}:{line}" };
 			REQUIRE(WriteEditorPreferences(vfs, full));
@@ -172,6 +258,7 @@ namespace Engine {
 				REQUIRE(reread);
 				CHECK(reread->AllowAiAutomation == loaded->AllowAiAutomation);
 				CHECK(reread->AllowNativeCode == loaded->AllowNativeCode);
+				CHECK(reread->PlatformWindows == loaded->PlatformWindows);
 				CHECK(reread->ExternalEditorExecutable == loaded->ExternalEditorExecutable);
 				CHECK(reread->ExternalEditorArguments == loaded->ExternalEditorArguments);
 				return true;

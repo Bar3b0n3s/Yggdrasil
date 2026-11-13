@@ -50,7 +50,6 @@ class GraphTests(AutomationTestCase):
             client.call("graph.connect", {"graph": GRAPH, "from": pin(*source), "to": pin(*target)})
         return nodes
 
-    @unittest.skip("contract stub: Docs/Decisions/0035-m24-contract.md decision 12, stream G-C")
     def test_an_agent_builds_a_graph_behaviour_with_the_graph_methods_and_it_runs_in_play(self) -> None:
         # Roadmap M24: "an agent builds a graph through MCP only" (the bridge's tools are these methods; the MCP half is
         # Tools/MCP/tests/test_conformance.py's) and "every editor graph action has its method".
@@ -81,7 +80,6 @@ class GraphTests(AutomationTestCase):
         self.assertEqual(unknown.exception.error_code, "InvalidArgument")
         self.assertEqual(client.call("graph.read", {"graph": GRAPH})["document"], before)
 
-    @unittest.skip("contract stub: Docs/Decisions/0035-m24-contract.md decision 12, stream G-C")
     def test_graph_edits_are_undoable_atomic_in_a_batch_and_recorded_in_provenance(self) -> None:
         client, root = self.open_editor_with_scene()
         nodes = self.build_counter(client)

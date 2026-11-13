@@ -53,6 +53,7 @@ namespace Engine {
 	class ScriptFieldSchemaSource;
 	class EditorTransaction;
 	class EngineContext;
+	class GraphNodeLibrary;
 	class IEnvironmentBaker;
 	class IMount;
 	class INativeBuildBackend;
@@ -237,6 +238,11 @@ namespace Engine {
 		// Pinned current cooked schemas; caller retains this snapshot through reflection/UI work. Failed imports
 		// preserve their last good artifact; unknown scripts remain unresolved instead of inventing descriptors.
 		[[nodiscard]] Result<Ref<const ScriptFieldSchemaSource>> GetScriptSchemaSnapshot() const;
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 13): the graph node library of the engine's frozen script API
+		// registry, the declarations the graph importer's library is built from. It is built at its first use and kept for the
+		// editor's lifetime, since the registry never changes once frozen, so the graph methods do not build it again for every
+		// request. Main thread only; the pointer is valid for the editor's lifetime. Errors: GraphNodeLibrary::Create's.
+		[[nodiscard]] Result<const GraphNodeLibrary*> GetGraphNodeLibrary();
 		// M12: the asset browser's audio preview (EditorCore/Audio/AudioPreview.h) over the engine context's AudioEngine;
 		// nullptr when the engine context has none (most in-process tests). Valid for the editor's lifetime; CloseProject
 		// stops it.
@@ -724,6 +730,7 @@ namespace Engine {
 		Scope<EditorAssetManager> m_Assets;
 		Scope<ScriptTypeChecker> m_ScriptChecker;
 		Scope<EditorScriptService> m_ScriptService;
+		Scope<GraphNodeLibrary> m_GraphNodeLibrary; // M24: GetGraphNodeLibrary's, built at its first use
 		uint64_t m_ScriptConfigurationHash = 0;
 		double m_NextScriptConfigurationCheck = 0.0;
 		std::string m_ScriptConfigurationError{};

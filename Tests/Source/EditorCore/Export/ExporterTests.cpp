@@ -19,6 +19,9 @@
 #include "Engine/Asset/PakReader.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
+#include "Engine/AssetPipeline/Graph/GraphTranspiler.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/Core/BuildId.h"
 #include "Engine/Core/FileSystem.h"
@@ -1974,6 +1977,100 @@ namespace Engine {
 			CHECK(full.Reachability.GameAssets.empty());
 			CHECK(full.Reachability.PrunedAssets.empty());
 			CHECK(full.GameAssetCount == 7);
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 24): the exporter scans a graph's transpiled text as it scans a .luau
+		// source, so a graph's literal load of a project asset keeps it in a pruned Game.pak, its literal load of a built-in
+		// reaches Engine.pak, and its computed load (Text.Concat into Assets.Load's reference) keeps every built-in and is named
+		// at the text's line.
+		TEST_CASE("Exporter: a graph's literal and computed loads are scanned from its transpiled text, as a Luau script's")
+		{
+			EngineResourcesEditor fixture;
+			EditorContext& editor = fixture.GetEditor();
+			const Result<std::string> material = Test::ReadTestDataText("Assets/Materials/Red.material");
+			REQUIRE(material.has_value());
+			for (const std::string_view name : { "Loaded", "Computed" })
+				WriteTestFile(fixture.GetProjectRoot() / std::format("Assets/Materials/{}.material", name), *material);
+			constexpr std::string_view LoaderGraph = R"({"Format": "Graph", "Version": 1, "Name": "Loader", "Fields": [], "Variables": [],
+				"Nodes": [
+					{"Id": 1, "Kind": "Event.OnStart", "Position": [0, 0], "Values": {}},
+					{"Id": 2, "Kind": "Call.Assets.Load", "Position": [240, 160], "Values": {"reference": "Assets/Materials/Loaded.material"}},
+					{"Id": 3, "Kind": "Call.Assets.Load", "Position": [240, 320], "Values": {"reference": "engine://Audio/Hit"}},
+					{"Id": 4, "Kind": "Call.Assets.Load", "Position": [480, 480], "Values": {}},
+					{"Id": 5, "Kind": "Text.Concat", "Position": [240, 480], "Values": {"A": "Assets/Materials/", "B": "Computed.material"}},
+					{"Id": 6, "Kind": "Call.Log.Info", "Position": [480, 0], "Values": {}},
+					{"Id": 7, "Kind": "Call.Log.Info", "Position": [720, 0], "Values": {}},
+					{"Id": 8, "Kind": "Call.Log.Info", "Position": [960, 0], "Values": {}}],
+				"Links": [
+					{"From": {"Node": 1, "Pin": "Then"}, "To": {"Node": 6, "Pin": "In"}},
+					{"From": {"Node": 2, "Pin": "Result"}, "To": {"Node": 6, "Pin": "Values"}},
+					{"From": {"Node": 3, "Pin": "Result"}, "To": {"Node": 7, "Pin": "Values"}},
+					{"From": {"Node": 4, "Pin": "Result"}, "To": {"Node": 8, "Pin": "Values"}},
+					{"From": {"Node": 5, "Pin": "Result"}, "To": {"Node": 4, "Pin": "reference"}},
+					{"From": {"Node": 6, "Pin": "Then"}, "To": {"Node": 7, "Pin": "In"}},
+					{"From": {"Node": 7, "Pin": "Then"}, "To": {"Node": 8, "Pin": "In"}}]})";
+			constexpr std::string_view GraphPath = "Assets/Scripts/Loader.graph";
+			WriteTestFile(fixture.GetProjectRoot() / GraphPath, LoaderGraph);
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const auto handleOf = [&editor](std::string_view path)
+			{
+				const std::optional<AssetHandle> handle = editor.GetAssets().Resolve(path);
+				REQUIRE_MESSAGE(handle.has_value(), path);
+				return *handle;
+			};
+			const Entity cube = editor.GetScene().FindEntityByPath("/Cube");
+			REQUIRE(cube.IsValid());
+			ScriptSlot loader;
+			loader.Script = TypedAssetHandle<AssetType::Script>(handleOf(GraphPath));
+			cube.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(loader) } });
+			SaveScene(editor);
+			ApplySettings(editor, R"({"Export":{"PruneUnreferenced":true}})");
+
+			// The lines the scan reports are the transpiled text's, which the editor's library gives.
+			const Result<Scope<GraphNodeLibrary>> library = GraphNodeLibrary::Create(editor.GetEngine().GetScriptApiRegistry());
+			REQUIRE_MESSAGE(library.has_value(), library.error().ToString());
+			GraphLoadReport report;
+			const Result<GraphDocument> graph = GraphFromText(LoaderGraph, editor.GetTypeRegistry(), report, true);
+			REQUIRE_MESSAGE(graph.has_value(), graph.error().ToString());
+			const Result<GraphTranspileResult> text = TranspileGraph(*graph, **library, GraphPath);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const auto lineOf = [&text](std::string_view code)
+			{
+				const size_t at = text->Luau.find(code);
+				REQUIRE_MESSAGE(at != std::string::npos, code);
+				return static_cast<uint32_t>(std::count(text->Luau.begin(), text->Luau.begin() + static_cast<std::ptrdiff_t>(at), '\n')) + 1;
+			};
+
+			const Test::TempDirectory binaries("ExportBinaries");
+			const std::filesystem::path binaryRoot = MakeRealBinaryRoot(binaries);
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(binaryRoot));
+			REQUIRE_MESSAGE(exporter.has_value(), exporter.error().ToString());
+			std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_MESSAGE(outcome->has_value(), outcome->error().ToString());
+			const ExportReachability& reach = (*outcome)->Reachability;
+			CHECK(reach.Pruned);
+			const auto reasonOf = [](std::span<const ExportReachedAsset> assets, std::string_view path) -> const ExportReachedAsset*
+			{
+				const auto found = std::ranges::find(assets, path, &ExportReachedAsset::Path);
+				return found == assets.end() ? nullptr : &*found;
+			};
+			const ExportReachedAsset* loaded = reasonOf(reach.GameAssets, "Assets/Materials/Loaded.material");
+			REQUIRE(loaded != nullptr);
+			CHECK(loaded->Reason == ExportReachReason::LiteralLoad);
+			CHECK(loaded->From == GraphPath);
+			CHECK(loaded->Line == lineOf("Assets.Load(\"Assets/Materials/Loaded.material\")"));
+			CHECK(std::ranges::find(reach.PrunedAssets, "Assets/Materials/Computed.material") != reach.PrunedAssets.end());
+			const ExportReachedAsset* hit = reasonOf(reach.EngineBuiltins, "engine://Audio/Hit");
+			REQUIRE(hit != nullptr);
+			CHECK(hit->From == GraphPath);
+			REQUIRE(reach.ComputedLoads.size() == 1);
+			CHECK(reach.ComputedLoads.front().Script == GraphPath);
+			CHECK(reach.ComputedLoads.front().Line == lineOf("Assets.Load(v5_Result)"));
+			// A computed load may name any built-in: Engine.pak keeps every one this editor can cook.
+			const Result<Ref<const PakReader>> enginePak = PakReader::Open(PackageResources((*outcome)->OutputDirectory, "TestProject") / "Data" / "Engine.pak");
+			REQUIRE_MESSAGE(enginePak.has_value(), enginePak.error().ToString());
+			CheckSoundPresets(**enginePak, SoundPresets);
 		}
 
 		// The phase 1 ledger's importer-dependency rule (Docs/Decisions/0030-m19-contract.md decision 21) on M18's sprite sheet

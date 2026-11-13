@@ -28,10 +28,13 @@ namespace Engine {
 		RequireResolver(const RequireResolver&) = delete;
 		RequireResolver& operator=(const RequireResolver&) = delete;
 
-		// importer must be a .luau file strictly below project://Assets. request begins ./ or ../; normalize dot
-		// segments without ever escaping Assets and append .luau when extensionless. Explicit .luau is accepted.
-		// Reject schemes, absolute paths, backslashes, aliases, other extensions and invalid VfsPath spellings with
-		// Validation, located at importer. No directory/init or case-insensitive fallback. Does not read the module.
+		// importer must be a script's origin: a .luau file or a graph's .graph file strictly below project://Assets (the
+		// script source rule, IsScriptSourcePath in Asset/ScriptData.h; M24, Docs/Decisions/0035-m24-contract.md decision 9).
+		// request begins ./ or ../; normalize dot segments without ever escaping Assets and append .luau when extensionless.
+		// Explicit .luau is accepted. The module a request resolves to keeps the .luau rule alone, so no script requires a
+		// graph (decision 23). Reject schemes, absolute paths, backslashes, aliases, other extensions and invalid VfsPath
+		// spellings with Validation, located at importer. No directory/init or case-insensitive fallback. Does not read the
+		// module.
 		// Records the edge even on a module-cache hit; Requires are unique/sorted (From, Request, Path, Handle), at most
 		// MaxScriptRequireEdges of them (ScriptLimits.h): a request that would add another fails with Validation.
 		// From/Path are Assets/...; Request keeps the supplied spelling. Handle is unset until the importer resolves it.
@@ -42,8 +45,10 @@ namespace Engine {
 		// without calling it. Runtime cooked modules use Resolve and their trusted asset provider instead.
 		[[nodiscard]] Result<std::string> ReadSource(IScriptModuleReader& reader, const VfsPath& path) const;
 
-		// Enter before executing an uncached module (root included); an active path returns Script with the complete
-		// cycle chain and does not alter the stack. Cache hits record Resolve's edge but never re-enter or execute.
+		// Enter before executing an uncached module (root included); path follows the script source rule, as Resolve's
+		// importer does (a behaviour instance of a graph enters its .graph origin), else Validation. An active path returns
+		// Script with the complete cycle chain and does not alter the stack. Cache hits record Resolve's edge but never
+		// re-enter or execute.
 		[[nodiscard]] Status EnterModule(const VfsPath& path);
 		// Pops the matching active module on success or failure; unmatched/out-of-order calls are programmer errors.
 		void LeaveModule(const VfsPath& path);

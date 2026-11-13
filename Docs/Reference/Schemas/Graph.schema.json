@@ -1,0 +1,191 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"title": "Graph",
+	"description": "A visual-scripting graph file (§6.11).",
+	"type": "object",
+	"properties": {
+		"Format": {
+			"description": "The file's format name; first key of the file.",
+			"enum": ["Graph"]
+		},
+		"Version": {
+			"description": "The format version this build writes; older versions are migrated when read.",
+			"enum": [1]
+		},
+		"Name": {
+			"description": "The behaviour's Script.Define name: a Luau identifier of 1 to 64 bytes that is not a reserved word and does not start with \"__\".",
+			"type": "string"
+		},
+		"Fields": {
+			"description": "At most 128 fields, sorted by Name.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/GraphField"
+			}
+		},
+		"Variables": {
+			"description": "At most 128 variables, sorted by Name.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/GraphVariable"
+			}
+		},
+		"Nodes": {
+			"description": "At most 4096 nodes, sorted by Id.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/GraphNode"
+			}
+		},
+		"Links": {
+			"description": "At most 16384 links, sorted by (From.Node, From.Pin, To.Node, To.Pin) byte-wise, each once, joining two different nodes.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/GraphLink"
+			}
+		}
+	},
+	"required": ["Format", "Version"],
+	"additionalProperties": false,
+	"$defs": {
+		"GraphField": {
+			"description": "A behaviour field, set per script slot (§6.11).",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "A Luau identifier, unique across fields and variables (§6.11).",
+					"type": "string"
+				},
+				"Kind": {
+					"description": "Its Luau Field constructor.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+				},
+				"Default": {
+					"description": "Its default, in its Kind's JSON spelling (§6.11)."
+				},
+				"Element": {
+					"description": "An Array's element kind; Number otherwise.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+				},
+				"AssetType": {
+					"description": "An Asset's AssetType; empty otherwise.",
+					"type": "string"
+				},
+				"EnumValues": {
+					"description": "An Enum's choices; empty otherwise.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				},
+				"Options": {
+					"description": "Its Luau FieldOptions: Min, Max, Step, Tooltip (§6.11).",
+					"type": "object",
+					"additionalProperties": {}
+				}
+			},
+			"additionalProperties": false
+		},
+		"GraphVariable": {
+			"description": "Instance state, set to its Default at OnCreate (§6.11).",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "A Luau identifier, unique across fields and variables (§6.11).",
+					"type": "string"
+				},
+				"Kind": {
+					"description": "Its kind, as a field's.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+				},
+				"Default": {
+					"description": "Its default, in its Kind's JSON spelling (§6.11)."
+				},
+				"Element": {
+					"description": "An Array's element kind; Number otherwise.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+				},
+				"AssetType": {
+					"description": "An Asset's AssetType; empty otherwise.",
+					"type": "string"
+				},
+				"EnumValues": {
+					"description": "An Enum's choices; empty otherwise.",
+					"type": "array",
+					"items": {
+						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"GraphNode": {
+			"description": "One node: a node kind of the library at a place on the canvas, with literals of its input pins.",
+			"type": "object",
+			"properties": {
+				"Id": {
+					"description": "From 1 to 2147483647, unique in the graph and stable for the node's life.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4294967295
+				},
+				"Kind": {
+					"description": "Its node kind: 1 to 256 bytes of dot-separated parts of letters, digits and '_' (Flow.Branch, Call.Input.GetAxis, Self.Get.Speed; graph.nodes lists them).",
+					"type": "string"
+				},
+				"Position": {
+					"description": "The canvas place of its top-left corner, each component finite and within 1000000 of the origin; layout only.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Values": {
+					"description": "At most 64 literals of its input pins by pin name: null, a boolean, a finite number, a string of at most 4096 bytes of UTF-8, or an array of 3 or 4 finite numbers (a vector, a colour, a quaternion). A linked input keeps its literal, and the link wins.",
+					"type": "object",
+					"additionalProperties": {}
+				}
+			},
+			"additionalProperties": false
+		},
+		"GraphLink": {
+			"description": "A link from an output pin of one node to an input pin of another.",
+			"type": "object",
+			"properties": {
+				"From": {
+					"description": "The output pin.",
+					"$ref": "#/$defs/GraphPinRef"
+				},
+				"To": {
+					"description": "The input pin.",
+					"$ref": "#/$defs/GraphPinRef"
+				}
+			},
+			"additionalProperties": false
+		},
+		"GraphPinRef": {
+			"description": "One pin of one node: an end of a link.",
+			"type": "object",
+			"properties": {
+				"Node": {
+					"description": "The node's Id.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 4294967295
+				},
+				"Pin": {
+					"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}

@@ -29,6 +29,22 @@
 
 namespace Engine {
 
+	namespace Utils {
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 18, the coordinate audit): where Dear ImGui's coordinates start in
+		// the main window's client area. With platform windows on they are the desktop's, so the main window's client area
+		// starts at the main viewport's position; without them the main viewport is at (0, 0). A native window event's cursor
+		// position is relative to the client area, while the views' rectangles are in Dear ImGui's coordinates.
+		[[nodiscard]] static glm::vec2 GetUiOrigin()
+		{
+			if (ImGui::GetCurrentContext() == nullptr)
+				return glm::vec2(0.0f);
+			const ImVec2 origin = ImGui::GetMainViewport()->Pos;
+			return glm::vec2(origin.x, origin.y);
+		}
+
+	}
+
 	EditorHostViewports::EditorHostViewports(EditorContext& editor, GizmoController& gizmos)
 		: m_Editor(editor), m_Gizmos(gizmos)
 	{
@@ -574,9 +590,12 @@ namespace Engine {
 			m_Pointer = move->Position;
 		if (!m_GameFocused)
 			return std::nullopt;
+		// The window's cursor positions in the game rectangle's coordinates, Dear ImGui's (M24, decision 18).
+		const glm::vec2 origin = Utils::GetUiOrigin();
 		if (const auto* move = std::get_if<MouseMoveEvent>(&event))
 		{
-			const std::optional<glm::vec2> position = MapToViewCoordinates(move->Position, m_GameRectangle.Min, m_GameRectangle.Size, m_GameRectangle.ImageSize);
+			const std::optional<glm::vec2> position =
+				MapToViewCoordinates(move->Position + origin, m_GameRectangle.Min, m_GameRectangle.Size, m_GameRectangle.ImageSize);
 			if (!position)
 				return std::nullopt;
 			return Event(MouseMoveEvent{ .Position = *position });
@@ -584,7 +603,7 @@ namespace Engine {
 		if (const auto* button = std::get_if<MouseButtonEvent>(&event))
 		{
 			// A press in the letterbox bars, or anywhere off the game image, is not a press on the game.
-			if (button->Action == ButtonAction::Pressed && !IsCursorLocked() && (!m_Pointer || !ToViewportPixel(m_GameRectangle, *m_Pointer)))
+			if (button->Action == ButtonAction::Pressed && !IsCursorLocked() && (!m_Pointer || !ToViewportPixel(m_GameRectangle, *m_Pointer + origin)))
 				return std::nullopt;
 			return event;
 		}
@@ -626,8 +645,9 @@ namespace Engine {
 			return;
 		// The capturing press itself is not game input; the game's cursor starts where that press happened.
 		std::optional<glm::vec2> pointer = m_Pointer;
+		// Dear ImGui's position in the window's coordinates, which ToGameEvent takes (M24, decision 18).
 		if (!pointer && ImGui::GetCurrentContext() != nullptr && ImGui::IsMousePosValid())
-			pointer = glm::vec2(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y);
+			pointer = glm::vec2(ImGui::GetIO().MousePos.x, ImGui::GetIO().MousePos.y) - Utils::GetUiOrigin();
 		if (!pointer)
 			return;
 		if (const std::optional<Event> move = ToGameEvent(MouseMoveEvent{ .Position = *pointer }))

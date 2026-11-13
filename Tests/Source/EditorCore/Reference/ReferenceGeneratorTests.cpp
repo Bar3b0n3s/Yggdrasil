@@ -11,6 +11,7 @@
 #include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/Asset/TilemapData.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/Audio/SoundSynth.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -138,14 +139,14 @@ namespace Engine {
 			CHECK(std::ranges::is_sorted(*files, {}, &GeneratedReferenceFile::Path));
 			for (const std::string_view path : { "Automation.md", "BuiltinAssets.md", "catalog.json", "Components.md", "Engine.d.luau", "FileFormats.md", "Methods.json",
 					 "ScriptAPI.md", "Validation.md", "Schemas/AssetMeta.schema.json", "Schemas/BatchRequest.schema.json",
-					 "Schemas/GameManifest.schema.json", "Schemas/Material.schema.json", "Schemas/Prefab.schema.json", "Schemas/Project.schema.json",
+					 "Schemas/GameManifest.schema.json", "Schemas/Graph.schema.json", "Schemas/Material.schema.json", "Schemas/Prefab.schema.json", "Schemas/Project.schema.json",
 					 "Schemas/Provenance.schema.json", "Schemas/Replay.schema.json", "Schemas/Scene.schema.json", "Schemas/SoundEffect.schema.json",
 					 "Schemas/SpriteSheet.schema.json", "Schemas/StringTable.schema.json", "Schemas/Tilemap.schema.json" })
 			{
 				CAPTURE(path);
 				CHECK(FindFile(*files, path) != nullptr);
 			}
-			CHECK(files->size() == 22);
+			CHECK(files->size() == 23);
 			for (const GeneratedReferenceFile& file : *files)
 			{
 				CAPTURE(file.Path);
@@ -177,7 +178,7 @@ namespace Engine {
 			for (const std::string_view code : ProjectValidator::GetCodes())
 				CHECK(validation.find(code) != std::string::npos);
 			const std::string& formats = FindFile(*files, "FileFormats.md")->Content;
-			for (const std::string_view extension : { ".png", ".jpeg", ".glb", ".otf", ".hdr", ".exr", ".sfx", ".replay" })
+			for (const std::string_view extension : { ".png", ".jpeg", ".glb", ".otf", ".hdr", ".exr", ".sfx", ".replay", ".graph" })
 				CHECK(formats.find(extension) != std::string::npos);
 
 			const auto again = GenerateReferences(sources);
@@ -318,7 +319,7 @@ namespace Engine {
 		}
 
 		// The schemas describe the files authors and agents write: every .eproj, .scene, .prefab, .material, .sfx, .meta,
-		// .replay, .spritesheet, .tilemap and .stringtable under Projects/FeatureTest and Tests/Data validates against its format's
+		// .replay, .spritesheet, .tilemap, .stringtable and .graph under Projects/FeatureTest and Tests/Data validates against its format's
 		// schema, except the deliberately invalid or other-version fixtures: Scenes/Invalid/, Formats/ (v0.scene,
 		// NewerVersion.scene), Validation/, CoverageGaps/ and Lint/. The project's Automation/Provenance.json files and every line
 		// of its batch scaffolds (Scaffold/*.jsonl) validate against the Provenance and BatchRequest schemas too;
@@ -332,11 +333,11 @@ namespace Engine {
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
 			const std::map<std::string, std::string> formats = { { ".eproj", "Project" }, { ".scene", "Scene" }, { ".prefab", "Prefab" },
 				{ ".material", "Material" }, { ".sfx", "SoundEffect" }, { ".meta", "AssetMeta" }, { ".replay", "Replay" }, { ".spritesheet", "SpriteSheet" },
-				{ ".tilemap", "Tilemap" }, { ".stringtable", "StringTable" } };
+				{ ".tilemap", "Tilemap" }, { ".stringtable", "StringTable" }, { ".graph", "Graph" } };
 			std::map<std::string, Json> schemas;
 			for (const std::string_view format :
 				{ "Project", "Scene", "Prefab", "Material", "SoundEffect", "AssetMeta", "Replay", "Provenance", "BatchRequest", "SpriteSheet", "Tilemap",
-					"StringTable" })
+					"StringTable", "Graph" })
 				schemas.emplace(std::string(format), ParseSchema(*files, format));
 
 			// (label, text, format) of every document to validate.
@@ -605,6 +606,58 @@ namespace Engine {
 			}
 		}
 
+		// M24 (Docs/Decisions/0035-m24-contract.md decisions 4 and 22): FileFormats.md documents the .graph format with the fields
+		// of the graph, its members, nodes and links and the values of GraphValueKind, the graph importer's source row, and a
+		// schema and section that state the limits a builder must respect.
+		TEST_CASE("ReferenceGenerator: the Graph section lists every field of the graph, its members, nodes and links, every value kind and the limits")
+		{
+			Test::EditorTestFixture fixture("ReferenceGraph");
+			const ReferenceRegistries registries(fixture);
+			const auto files = GenerateReferences(registries.GetSources());
+			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
+			const std::string& formats = FindFile(*files, "FileFormats.md")->Content;
+			CHECK(formats.find("| Graph | `.graph` | 1 | [Schemas/Graph.schema.json](Schemas/Graph.schema.json) |") != std::string::npos);
+			CHECK(formats.find("| Graph | `.graph` | Script | 1 | none | yes |") != std::string::npos);
+			const size_t begin = formats.find("### Graph (`.graph`)");
+			const size_t end = formats.find("### Material (`.material`)");
+			REQUIRE(begin != std::string::npos);
+			REQUIRE(end != std::string::npos);
+			REQUIRE(begin < end);
+			const std::string section = formats.substr(begin, end - begin);
+			const TypeRegistry& types = fixture.GetEngine().GetTypeRegistry();
+			for (const std::string_view name : { "Graph", "GraphField", "GraphVariable", "GraphNode", "GraphLink", "GraphPinRef" })
+			{
+				CAPTURE(name);
+				const StructInfo* type = types.FindStruct(name);
+				REQUIRE(type != nullptr);
+				CHECK(section.find(std::format("#### Fields of {}\n", name)) != std::string::npos);
+				for (const auto& field : type->GetFields())
+				{
+					CAPTURE(field->GetName());
+					CHECK(section.find(std::format("| `{}` |", field->GetName())) != std::string::npos);
+				}
+			}
+			const EnumInfo* kinds = types.FindEnum("GraphValueKind");
+			REQUIRE(kinds != nullptr);
+			CHECK(section.find("#### Values of GraphValueKind\n") != std::string::npos);
+			for (const EnumEntry& entry : kinds->GetEntries())
+			{
+				CAPTURE(entry.Name);
+				CHECK(section.find(std::format("| `{}` |", entry.Name)) != std::string::npos);
+			}
+
+			const Json schema = ParseSchema(*files, "Graph");
+			const std::string schemaText = schema.dump();
+			for (const std::string& text : { std::format("At most {} nodes", MaxGraphNodes), std::format("At most {} links", MaxGraphLinks),
+					 std::format("At most {} fields", MaxGraphFields), std::format("At most {} variables", MaxGraphVariables),
+					 std::format("At most {} literals", MaxGraphNodeValues), std::format("1 to {} bytes", MaxGraphNameBytes) })
+			{
+				CAPTURE(text);
+				CHECK(section.find(text) != std::string::npos);
+				CHECK(schemaText.find(text) != std::string::npos);
+			}
+		}
+
 		// A schema rejects what its format's reader rejects, as far as the supported keywords can say it.
 		TEST_CASE("ReferenceGenerator: the schemas reject wrong headers, unknown keys and malformed handles")
 		{
@@ -631,6 +684,10 @@ namespace Engine {
 			rejects(ParseSchema(*files, "AssetMeta"), R"({"Format":"AssetMeta","Version":1,"Handle":"0000000000000001","Type":"Texture","Importer":"NoSuchImporter"})");
 			rejects(ParseSchema(*files, "Replay"), R"({"Format":"Replay","Version":1})");
 			rejects(ParseSchema(*files, "Project"), R"({"Format":"Project","Version":1,"Window":{"Width":"wide"}})");
+			const Json graph = ParseSchema(*files, "Graph");
+			rejects(graph, R"({"Format":"Graph","Version":2})");
+			rejects(graph, R"({"Format":"Graph","Version":1,"Name":"Door","Nodes":[{"Id":1,"Kind":"Flow.Branch","Colour":"red"}]})");
+			rejects(graph, R"({"Format":"Graph","Version":1,"Name":"Door","Fields":[{"Name":"Speed","Kind":"Float"}]})");
 			const Json batch = ParseSchema(*files, "BatchRequest");
 			rejects(batch, R"({"method":"no.such","params":{}})");
 			rejects(batch, R"({"method":"scene.tree","params":{},"id":1})");

@@ -2,6 +2,7 @@
 #include "EditorCore/Scripting/ScriptTypeChecker.h"
 
 #include "EditorCore/Scripting/Private/ScriptValidation.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/BinaryWriter.h"
 #include "Engine/Core/Hash.h"
@@ -483,7 +484,8 @@ namespace Engine {
 	{
 		std::vector<ScriptDiagnostic> findings;
 		const std::string root = request.Path.ToString();
-		if (!IsScriptingRuntimeInitialized() || request.Modules == nullptr || request.Path.GetScheme() != "project" || !request.Path.GetPath().starts_with("Assets/") || request.Path.GetExtension() != ".luau" || !IsValidUtf8(request.Source) || request.Source.size() > std::numeric_limits<uint32_t>::max())
+		// The script source rule (Asset/ScriptData.h): a .luau source, or a graph's transpiled text under its .graph path.
+		if (!IsScriptingRuntimeInitialized() || request.Modules == nullptr || !IsScriptSourcePath(request.Path) || !IsValidUtf8(request.Source) || request.Source.size() > std::numeric_limits<uint32_t>::max())
 			return { Utils::CheckerError(root, "invalid script check request or scripting runtime is not initialized") };
 		// A script that declares a type function is refused before the frontend parses it (RefuseTypeFunctions); its required
 		// modules are refused as the frontend reads them (CheckerFileResolver::readSource).

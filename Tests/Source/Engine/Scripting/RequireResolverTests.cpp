@@ -86,6 +86,33 @@ namespace Engine {
 			}
 		}
 
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 9): a graph's cooked script keeps its .graph origin, which imports
+		// requests and enters the module stack as a .luau one does, while the module a request names stays a .luau file.
+		TEST_CASE("RequireResolver: a graph's origin imports and enters as a Luau one, and no request resolves to a graph")
+		{
+			auto graph = VfsPath::Parse("project://Assets/Scripts/Door.graph");
+			auto script = VfsPath::Parse("project://Assets/Scripts/Game.luau");
+			REQUIRE(graph.has_value());
+			REQUIRE(script.has_value());
+			RequireResolver resolver;
+			const auto board = resolver.Resolve(*graph, "./Board");
+			REQUIRE_MESSAGE(board.has_value(), board.error().ToString());
+			CHECK(board->ToString() == "project://Assets/Scripts/Board.luau");
+			REQUIRE(resolver.EnterModule(*graph).has_value());
+			resolver.LeaveModule(*graph);
+
+			const auto required = resolver.Resolve(*script, "./Door.graph");
+			REQUIRE_FALSE(required.has_value());
+			CHECK(required.error().GetCode() == ErrorCode::Validation);
+			RecordingModuleReader reader;
+			CHECK_FALSE(resolver.ReadSource(reader, *graph).has_value());
+			CHECK(reader.Reads.empty());
+			auto other = VfsPath::Parse("project://Assets/Scripts/Door.lua");
+			REQUIRE(other.has_value());
+			CHECK_FALSE(resolver.Resolve(*other, "./Board").has_value());
+			CHECK_FALSE(resolver.EnterModule(*other).has_value());
+		}
+
 		TEST_CASE("RequireResolver: rejects escapes schemes aliases and invalid path spellings before reading")
 		{
 			auto root = VfsPath::Parse("project://Assets/Scripts/Game.luau");
