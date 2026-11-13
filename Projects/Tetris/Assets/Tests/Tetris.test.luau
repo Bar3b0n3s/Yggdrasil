@@ -2,7 +2,7 @@
 -- Integration cases in Main.scene on sprites and UI, driven through the project's input actions with Test.InjectAction
 -- and, for the game-over panel's RESTART button, a pointer click with Test.InjectMouse. Each case starts from a fresh
 -- scene (Isolation "Case"); a few set up the board through the match first. The cases read the well's SpriteRenderer
--- colours and the HUD's UiText through their component proxies.
+-- colours and Transforms, and the HUD's UiText and preview cells' UiRect, through their component proxies.
 local GameScript = require("../Scripts/Game")
 local Palette = require("../Scripts/Palette")
 local Pieces = require("../Scripts/Pieces")
@@ -76,6 +76,27 @@ local function cellColor(game: GameScript.Game, column: number, row: number): Co
 	return if renderer then renderer.Color else Color.New(0, 0, 0, 0)
 end
 
+-- Expects every well cell on its square: game.Cells[(row - 1) * 10 + column] has its Transform translation at
+-- (column - 5.5, row - 10.5, 0), row 1 at the bottom and column 1 at the left, so a well drawn upside down, mirrored
+-- or shifted fails. The comparison is exact: every coordinate is a binary fraction.
+local function expectWellInPlace(game: GameScript.Game)
+	for row = 1, 20 do
+		for column = 1, 10 do
+			local cell = game.Cells[(row - 1) * 10 + column]
+			local x, y = column - 5.5, row - 10.5
+			local placed = "<no Transform>"
+			local exact = false
+			local transform = cell.Transform
+			if transform then
+				local at = transform.Translation
+				placed = `{at.x},{at.y},{at.z}`
+				exact = at.x == x and at.y == y and at.z == 0
+			end
+			Test.Expect(exact, `{cell.Name} (column {column}, row {row}) sits at {x},{y},0 (placed at {placed})`)
+		end
+	end
+end
+
 -- Counts the cells of a row that show a block (neither the empty nor the ghost colour).
 local function countShown(game: GameScript.Game, row: number): number
 	local count = 0
@@ -111,14 +132,16 @@ local function expectGhostBelowPiece(game: GameScript.Game)
 	end
 end
 
--- Expects NEXT box `index` (1 to 3) to show `piece`: its four preview cells (Preview<index + 1>_1 to _4) are active
--- children of NextBox<index>, each in the piece's colour, together on the piece's four cell positions in the box, both
--- as placed (UiRect.Position) and as laid out (Ui.GetRect, relative to the box), and 16 x 16.
-local function expectNextPreview(game: GameScript.Game, index: number, piece: string)
-	local box = find(`NextBox{index}`)
+-- Expects preview slot `slot` (0 the hold, 1 to 3 the NEXT boxes) to show `piece` in its box `boxName` (HoldBox or
+-- NextBox<slot>): the slot's four preview cells (Preview<slot + 1>_1 to _4, game.Previews[slot * 4 + 1] to
+-- [slot * 4 + 4]) are active children of the box, each in the piece's colour, together on the piece's four cell
+-- positions in the box, both as placed (UiRect.Position) and as laid out (Ui.GetRect, relative to the box), and
+-- 16 x 16.
+local function expectPreview(game: GameScript.Game, slot: number, boxName: string, piece: string)
+	local box = find(boxName)
 	local boxRect = Ui.GetRect(box)
 	if boxRect == nil then
-		Test.Fail(`NextBox{index} is not laid out`)
+		Test.Fail(`{boxName} is not laid out`)
 	end
 	local boxMin = (boxRect :: UiElementRect).Min
 	local open: { [string]: boolean } = {}
@@ -126,11 +149,11 @@ local function expectNextPreview(game: GameScript.Game, index: number, piece: st
 		open[`{position[1]},{position[2]}`] = true
 	end
 	for i = 1, 4 do
-		local cell = game.Previews[index * 4 + i]
-		local label = `NEXT {index} cell {i} ({cell.Name})`
+		local cell = game.Previews[slot * 4 + i]
+		local label = `{boxName} cell {i} ({cell.Name})`
 		Test.Expect(cell:IsActive(), `{label} shows`)
 		local parent = cell:GetParent()
-		Test.Expect(parent ~= nil and parent == box, `{label} sits in NextBox{index}`)
+		Test.Expect(parent ~= nil and parent == box, `{label} sits in {boxName}`)
 		local image = cell.UiImage
 		Test.Expect(image ~= nil and image.Color == Palette.Pieces[piece], `{label} shows the {piece}'s colour`)
 		local rect = cell.UiRect
@@ -199,6 +222,7 @@ return Test.Suite("Tetris", function()
 		Test.ExpectEqual(sprites, 200, "every cell is a sprite")
 		Test.ExpectEqual(meshes, 0, "no cell has a MeshRenderer")
 		Test.ExpectEqual(active, 200, "every cell is active")
+		expectWellInPlace(game)
 		local empty = countColor(game, Palette.Empty)
 		Test.Expect(empty >= 192 and empty <= 196, `only the falling piece and its ghost leave the empty colour (got {empty})`)
 		Test.ExpectEqual(countColor(game, Palette.Ghost), 4, "four ghost cells")
@@ -281,15 +305,12 @@ return Test.Suite("Tetris", function()
 		local game = getGame()
 		local first = game.Match.Piece
 		local second = game.Match.Queue[1]
+		-- Simulation.Seed 1717's first bag starts with the O, so the first hold puts the known O in the hold box.
+		Test.ExpectEqual(first, "O", "the first bag starts with the O")
 		tap("Hold")
 		Test.ExpectEqual(game.Match.Hold, first, "the piece went to the hold")
 		Test.ExpectEqual(game.Match.Piece, second, "the next piece came in")
-		for i = 1, 4 do
-			local cell = game.Previews[i]
-			local image = cell.UiImage
-			Test.Expect(cell:IsActiveSelf(), `hold preview cell {i} shows`)
-			Test.Expect(image ~= nil and image.Color == Palette.Pieces[first], `hold preview cell {i} shows the {first}'s colour`)
-		end
+		expectPreview(game, 0, "HoldBox", first)
 		tap("Hold")
 		Test.ExpectEqual(game.Match.Piece, second, "a second hold of the same piece does nothing")
 		tap("HardDrop")
@@ -305,14 +326,14 @@ return Test.Suite("Tetris", function()
 		Test.ExpectEqual(table.concat(game.Match.Queue, ","), "J,S,Z", "the bag queues J, S and Z")
 		local start = { "J", "S", "Z" }
 		for index = 1, 3 do
-			expectNextPreview(game, index, start[index])
+			expectPreview(game, index, `NextBox{index}`, start[index])
 		end
 		tap("HardDrop")
 		Test.ExpectEqual(game.Match.Piece, "J", "the first queued piece came in")
 		Test.ExpectEqual(table.concat(game.Match.Queue, ","), "S,Z,I", "the queue moved up and the I joined it")
 		local after = { "S", "Z", "I" }
 		for index = 1, 3 do
-			expectNextPreview(game, index, after[index])
+			expectPreview(game, index, `NextBox{index}`, after[index])
 		end
 	end)
 

@@ -428,11 +428,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Tetris.test.luau",
-			"XXH64": "f87641e7e82123ce",
+			"XXH64": "d4597efa64dca2ac",
 			"Method": "script.write",
 			"RequestId": 7,
 			"Client": "engine-mcp",
-			"TranscriptLine": 321
+			"TranscriptLine": 359
 		},
 		{
 			"Path": "Assets/Tests/Tetris.test.luau.meta",

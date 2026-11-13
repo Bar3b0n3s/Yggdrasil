@@ -19,7 +19,8 @@ Rebuilt in place as pixel art in M25 (`Docs/Decisions/0036-m25-tetris-pixel-art.
 builder agent through the MCP tools only, from an emptied folder: session S1 created the project with
 `editor_launch {project: "Projects/Tetris", create: true, template: "Empty", renderer: "vulkan"}`, session S2
 continued it with `editor_launch {project: "Projects/Tetris", renderer: "vulkan"}`, and session S3 (two test-suite
-review findings only) with `editor_launch {project: "Projects/Tetris", renderer: "none"}`. M17's 3D build (cube
+review findings only) and session S4 (one milestone-review finding on the `Tetris` suite) with
+`editor_launch {project: "Projects/Tetris", renderer: "none"}`. M17's 3D build (cube
 cells with PBR materials, shadows, GTAO and bloom, a Screen `Text` HUD) is history in git, not guidance. Launch it with
 `editor_launch {project: "Projects/Tetris", renderer: "vulkan"}` (screenshots and the Dist smoke test need the renderer),
 then `scene_open {path: "Assets/Scenes/Main.scene"}`.
@@ -151,19 +152,23 @@ return `{m.Piece} hold={m.Hold} next={table.concat(m.Queue, ",")} score={m.Score
   the 7-bag, the three game-over rules (each built so only its own rule can end the game), hold, gravity, soft drop, lock
   delay and its reset, DAS/ARR, hard drop at the ghost position, reset.
 - `Assets/Tests/Tetris.test.luau` (suite "Tetris", `Main.scene`, `Isolation: "Case"`, Editor, Release and Dist, 14
-  cases): the pool and the HUD at start (200 cells, each an active `SpriteRenderer` with no `MeshRenderer`, only the
-  piece and its ghost off the empty colour, 16 preview `UiImage`s, the 14 HUD texts each a `UiText` with no `Text`
-  component, values "0", "1", "0", the panel hidden, the camera pixel-perfect at 360 x 450 and 16 pixels per unit), a
-  hard drop, taps and DAS to the wall, both rotations, hold and the hold slot's colour, "the next boxes show the queued
-  pieces centred in their boxes" (after the known start, the O falling with J, S and Z queued, and again after a hard
-  drop with S, Z and I queued: each NEXT box's four cells are active children of `NextBox<n>`, in the queued piece's
-  colour, on that piece's literal cell positions in the box, `UiRect.Position` and the `Ui.GetRect` layout relative to
-  the box agreeing, each 16 x 16), soft drop, the ghost (exactly 4
+  cases): the pool and the HUD at start (200 cells, each an active `SpriteRenderer` with no `MeshRenderer`, every cell
+  `game.Cells[(row - 1) * 10 + column]` with its `Transform` translation exactly at (column - 5.5, row - 10.5, 0), so a
+  well drawn upside down, mirrored or shifted fails, only the piece and its ghost off the empty colour, 16 preview
+  `UiImage`s, the 14 HUD texts each a `UiText` with no `Text` component, values "0", "1", "0", the panel hidden, the
+  camera pixel-perfect at 360 x 450 and 16 pixels per unit), a hard drop, taps and DAS to the wall, both rotations, hold
+  (after the first hold of the known O, the hold slot's four cells pass the same preview check as a NEXT box, in
+  `HoldBox` at the O's (24, 8), (40, 8), (24, 24) and (40, 24)), "the next boxes show the queued pieces centred in their
+  boxes" (after the known start, the O falling with J, S and Z queued, and again after a hard drop with S, Z and I
+  queued). The one preview check, `expectPreview(game, slot, box, piece)`, expects a slot's four cells to be active
+  children of the box, in the piece's colour, on that piece's literal cell positions in the box, `UiRect.Position` and
+  the `Ui.GetRect` layout relative to the box agreeing, each 16 x 16. Then soft drop, the ghost (exactly 4
   ghost-coloured cells under the piece, before and after a move), a clear on `ScoreText` and `ClearText`, a tetris, a
   level rise, top-out then the `Restart` action, "game over shows the panel and its RESTART button restarts by a pointer
-  click" and "a Restart action and a click in one tick restart once". The cases read `UiText.Text` and
-  `SpriteRenderer.Color` through the component proxies; the pointer goes in view coordinates, twice the scene pixels
-  `Ui.GetRect` reports (`ViewScale` 2: 720 x 900 over 360 x 450, no bars).
+  click" and "a Restart action and a click in one tick restart once". The cases read `UiText.Text`,
+  `SpriteRenderer.Color`, `Transform.Translation` and `UiRect.Position` through the component proxies; the pointer
+  goes in view coordinates, twice the scene pixels `Ui.GetRect` reports (`ViewScale` 2: 720 x 900 over 360 x 450, no
+  bars).
 - Recording suites (`Modes: ["Editor"]`, `Main.scene`, `Isolation: "Suite"`): `Assets/Tests/Record/Opening.test.luau`
   ("Record.Opening", M17's planned taps, reused), `Assets/Tests/Record/LineClear.test.luau` ("Record.LineClear", M17's
   autopilot from `Assets/Tests/Lib/Autopilot.luau`, reused) and `Assets/Tests/Record/Restart.test.luau`
@@ -188,7 +193,7 @@ export's `--feature-test` reported the same three hashes. Any change to a hashed
 the camera, the seed, an input action, or a script that changes what is written) means re-recording all three through
 their suites, verifying each twice and running the input check again.
 
-## Status (end of session S3)
+## Status (end of session S4)
 
 Session S1 built the whole game as above. Session S2, after the engine fixes of S1's friction (small text keeps its
 strokes; `ui.tree` reports `textBounds` and `textOverflows`):
@@ -219,6 +224,22 @@ Session S3, for the lead's review of the staged rebuild, changed only the `Tetri
   unchanged); no warning or error in the log.
 - The editor ran with `renderer: "none"` (no screenshot or export was needed; a rendering launch waited on the GPU
   lock), so the testing Dist export's `featureTest`, now 36 cases, was not rerun.
+
+Session S4, for M25's milestone review (the suite tested the script's own cell index order, never where a cell is),
+changed only the `Tetris` suite and this file:
+
+- The pool case also checks every well cell's `Transform` translation, exactly, at (column - 5.5, row - 10.5, 0) for
+  all 200 cells. At the end of `Opening.replay` that mapping matched 200 cells, and an upside-down or mirrored one 0.
+- The NEXT case's helper became `expectPreview(game, slot, box, piece)` (slot 0 the hold, 1 to 3 the NEXT boxes), and
+  the hold case uses it after the first hold of the known O: the four hold cells are active children of `HoldBox` at
+  (24, 8), (40, 8), (24, 24) and (40, 24), with the `Ui.GetRect` layout relative to the box agreeing. The case now
+  also expects the first piece to be the O.
+- No hashed value changed: each replay verified once with `input_replay {verify: true, strictHash: true}` at its
+  committed hash (Opening `00e57904fd23c567`, 5 checkpoints; LineClear `57a04e6df7415162`, 1; Restart
+  `c661a4e2e2d7981a`, 1).
+- `test_run {}` 39/39 green (19 Board, 14 Tetris, 3 recording, 3 replays); `script_check {}` no diagnostics (12
+  scripts); `project_validate {}` no diagnostics; no warning or error in the log. The editor ran with `renderer:
+  "none"`, so no export was rerun.
 
 Not verifiable from automation: the games suite (Debug and Release editors and the testing Dist export's hashes) and
 `Scripts/AuditProvenance.py`, and the soak's game-view rendering; the lead runs them from the repository.
