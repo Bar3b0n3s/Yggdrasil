@@ -49,6 +49,7 @@ namespace Engine {
 	class EditorPlayController;
 	class EditorSceneTargetScope;
 	class EditorScriptService;
+	class ScriptApiRegistry;
 	class ScriptTypeChecker;
 	class ScriptFieldSchemaSource;
 	class EditorTransaction;
@@ -62,6 +63,7 @@ namespace Engine {
 	class PlaySession;
 	class Prefab;
 	class ProjectSettingsCommand;
+	class PureScriptApi;
 	class SceneEdit;
 	class TypeRegistry;
 	class VirtualFileSystem;
@@ -199,17 +201,17 @@ namespace Engine {
 			friend class EditorContext;
 		};
 
-		// Use Create, which resolves the id generator's state.
+		// Use Create, which resolves the id generator's state and builds the load-time script API.
 		EditorContext(ConstructionKey key, EngineContext& engine, const EditorContextSpecification& specification,
-			const Random::State& idGeneratorState);
+			const Random::State& idGeneratorState, Scope<PureScriptApi> loadTimeScriptApi);
 		~EditorContext();
 
 		EditorContext(const EditorContext&) = delete;
 		EditorContext& operator=(const EditorContext&) = delete;
 
 		// An editor without a project (the launcher state, §12.1) over `engine` (a documented back-reference that outlives
-		// the editor; its TypeRegistry holds the editor's automation types). Errors: those of SecureRandom::GenerateState (Io)
-		// when the specification gives no IdGeneratorState.
+		// the editor; its TypeRegistry holds the editor's automation types). Errors: those of PureScriptApi::Create; those of
+		// SecureRandom::GenerateState (Io) when the specification gives no IdGeneratorState.
 		[[nodiscard]] static Result<Scope<EditorContext>> Create(EngineContext& engine, const EditorContextSpecification& specification);
 
 		// Services, from the engine context.
@@ -234,6 +236,14 @@ namespace Engine {
 		// Observes the service initialized by OpenProject; never creates or replaces state through a const editor.
 		// Configuration snapshots are refreshed by Update and the mutable accessor before mutable host operations.
 		[[nodiscard]] const EditorScriptService* GetScriptService() const;
+		// The type checker the script service and the imports use (its environment hash and statistics), null whenever the
+		// const GetScriptService is; the mutable GetScriptService replaces it when a present .luaurc was added, changed or
+		// removed.
+		[[nodiscard]] const ScriptTypeChecker* GetScriptChecker() const { return m_ScriptChecker.get(); }
+		// The frozen pure script API (PureScriptApi, Engine/Scripting/Sandbox.h) every load-time VM of the editor's script
+		// imports borrows, the asset manager's and the script service's alike (Docs/Decisions/0041-script-check-performance.md
+		// decision 3); built once by Create, valid for the editor's lifetime.
+		[[nodiscard]] ScriptApiRegistry& GetLoadTimeScriptApi();
 		// Pinned current cooked schemas; caller retains this snapshot through reflection/UI work. Failed imports
 		// preserve their last good artifact; unknown scripts remain unresolved instead of inventing descriptors.
 		[[nodiscard]] Result<Ref<const ScriptFieldSchemaSource>> GetScriptSchemaSnapshot() const;
@@ -718,6 +728,8 @@ namespace Engine {
 		EditorContextSpecification m_Specification;
 		EditorLifecycleCallbacks m_Lifecycle{};
 		UUIDGenerator m_IdGenerator;
+		// GetLoadTimeScriptApi's, before the asset services that borrow it, so it is destroyed after them.
+		Scope<PureScriptApi> m_LoadTimeScriptApi;
 		// The asset services (M6), after the generator the manager draws handles from, so they are destroyed before it.
 		Scope<ImporterRegistry> m_Importers;
 		Scope<AssetLoaderRegistry> m_Loaders;

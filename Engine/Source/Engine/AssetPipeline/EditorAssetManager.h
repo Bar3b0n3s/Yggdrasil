@@ -72,6 +72,7 @@ namespace Engine {
 	class IScriptDiagnosticsProvider;
 	class ImporterRegistry;
 	class MainThreadQueue;
+	class ScriptApiRegistry;
 	class TypeRegistry;
 	class UUIDGenerator;
 	class VirtualFileSystem;
@@ -89,9 +90,12 @@ namespace Engine {
 		UUIDGenerator* IdGenerator = nullptr;
 		const ImporterRegistry* Importers = nullptr;
 		const AssetLoaderRegistry* Loaders = nullptr;
-		// Injected by the editor: the Renderer's baker when a device exists (M8), the EditorCore type checker (M13).
+		// Injected by the editor: the Renderer's baker when a device exists (M8), the EditorCore type checker (M13), and the
+		// frozen pure script API every script import's load-time VM borrows (ImportContext::GetLoadTimeScriptApi,
+		// Docs/Decisions/0041-script-check-performance.md decision 3; it must outlive the manager; null: each builds its own).
 		IEnvironmentBaker* EnvironmentBaker = nullptr;
 		IScriptDiagnosticsProvider* ScriptDiagnostics = nullptr;
+		ScriptApiRegistry* LoadTimeScriptApi = nullptr;
 		// The generators of Generated built-ins (EngineAssetBaker.h; the Renderer's blue noise from M8), sorted by Id, for
 		// GetOrBakeEngineAsset on first use; must outlive the manager. Empty: Generated built-ins load only from a bake run.
 		std::span<const EngineAssetGenerator> EngineAssetGenerators{};

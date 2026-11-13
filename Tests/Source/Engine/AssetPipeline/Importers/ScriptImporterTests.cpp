@@ -4,6 +4,9 @@
 #include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/Importers/ScriptImporter.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/Sandbox.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/TestData.h"
@@ -15,6 +18,7 @@
 #include <array>
 #include <functional>
 #include <latch>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -137,6 +141,92 @@ namespace Engine {
 			const auto warm = fixture.GetManager().Load(*root);
 			REQUIRE(warm);
 			CHECK(AssetCast<ScriptData>(*warm)->Fields[0].DefaultValue.Get() == 2);
+		}
+
+		// Docs/Decisions/0041-script-check-performance.md decision 3: every import's load-time VM registered the whole script
+		// API into registries of its own. The editor builds one PureScriptApi, which its imports borrow, on any import thread.
+		TEST_CASE("ScriptImporter: imports that borrow one pure script API cook what imports with their own cook")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Board.luau", "--!strict\nlocal Board = {}\nBoard.Tint = Color.New(0.25, 0.5, 0.75)\n"
+														  "Board.Turn = Quat.FromEuler(0, 90, 0)\nBoard.Size = Math.Clamp(12, 1, 10)\nreturn table.freeze(Board)\n");
+			fixture.WriteProjectText("Assets/Game.luau",
+				"--!strict\nlocal Board = require('./Board')\nlocal Game = { Fields = { Speed = Field.Number(Board.Size, { Min = 0, Max = 20 }),\n"
+				"\tTint = Field.Color(Board.Tint), Mode = Field.Enum({ 'Easy', 'Hard' }, 'Hard'), Target = Field.Entity() } }\n"
+				"function Game.OnStart(self)\n\tself.Speed = 1\nend\nreturn Script.Define('Game', Game)\n");
+			fixture.WriteProjectText("Assets/Game.test.luau", "--!strict\nreturn Test.Suite('Game', function()\n\tTest.Case('Starts', function()\n"
+															  "\t\tTest.Expect(true)\n\tend)\nend)\n");
+			const std::array assets{ ImportAssetLookupEntry{ .SourcePath = fixture.ProjectPath("Assets/Board.luau"), .Handle = AssetHandle(0x4002), .Type = AssetType::Script } };
+			struct Imported
+			{
+				std::optional<ImportResult> Result{};
+				std::optional<ScriptImportCheck> Check{};
+				std::vector<ImportDependencyRead> Reads{};
+				std::vector<ImportAssetLookup> Lookups{};
+			};
+			// Runs on worker threads too, so it makes no doctest assertion: its path and source are read beforehand.
+			const auto import = [&fixture, &assets](const VfsPath& path, const Buffer& source, ScriptApiRegistry* api)
+			{
+				ImportContext context({ .Vfs = &fixture.GetVfs(), .SourcePath = path, .SourceBytes = source, .Registry = &fixture.GetRegistry(), .Assets = assets, .LoadTimeScriptApi = api });
+				Result<ImportResult> result = ScriptImporter().Import(context, Test::ScriptMetadata());
+				Imported imported{ .Check = context.GetScriptCheck(), .Reads = context.GetDependencyReads(), .Lookups = context.GetLookups() };
+				if (result)
+					imported.Result = std::move(*result);
+				return imported;
+			};
+			const std::array<std::string_view, 3> sources{ "Assets/Board.luau", "Assets/Game.luau", "Assets/Game.test.luau" };
+			auto pure = PureScriptApi::Create();
+			REQUIRE(pure);
+			for (const std::string_view relative : sources)
+			{
+				CAPTURE(relative);
+				const VfsPath path = fixture.ProjectPath(relative);
+				const Buffer source = fixture.ReadProjectFile(relative);
+				const Imported own = import(path, source, nullptr);
+				REQUIRE(own.Result.has_value());
+				// Two imports borrow the one API at the same time, each on its own thread, as import jobs do.
+				std::array<Imported, 2> shared;
+				{
+					std::jthread first([&shared, &import, &path, &source, &pure]()
+					{
+						shared[0] = import(path, source, &(*pure)->GetApi());
+					});
+					std::jthread second([&shared, &import, &path, &source, &pure]()
+					{
+						shared[1] = import(path, source, &(*pure)->GetApi());
+					});
+				}
+				for (const Imported& borrowed : shared)
+				{
+					REQUIRE(borrowed.Result.has_value());
+					REQUIRE(borrowed.Result->Artifacts.size() == own.Result->Artifacts.size());
+					for (size_t index = 0; index < own.Result->Artifacts.size(); ++index)
+					{
+						CHECK(borrowed.Result->Artifacts[index].Handle == own.Result->Artifacts[index].Handle);
+						CHECK(borrowed.Result->Artifacts[index].Type == own.Result->Artifacts[index].Type);
+						CHECK(borrowed.Result->Artifacts[index].SubAssetKey == own.Result->Artifacts[index].SubAssetKey);
+						CHECK(borrowed.Result->Artifacts[index].Cooked == own.Result->Artifacts[index].Cooked);
+					}
+					CHECK(borrowed.Result->Dependencies == own.Result->Dependencies);
+					CHECK(borrowed.Result->Diagnostics == own.Result->Diagnostics);
+					REQUIRE(borrowed.Check.has_value());
+					REQUIRE(own.Check.has_value());
+					CHECK(borrowed.Check->SourceHash == own.Check->SourceHash);
+					CHECK(borrowed.Check->Diagnostics == own.Check->Diagnostics);
+					CHECK(borrowed.Reads == own.Reads);
+					CHECK(borrowed.Lookups == own.Lookups);
+				}
+			}
+
+			// The import binds the API it borrows: one without the bindings offers no Script.Define at the module top.
+			TypeRegistry types;
+			types.Freeze();
+			ScriptApiRegistry bare;
+			REQUIRE(bare.Freeze(types));
+			const VfsPath gamePath = fixture.ProjectPath("Assets/Game.luau");
+			const Buffer game = fixture.ReadProjectFile("Assets/Game.luau");
+			CHECK_FALSE(import(gamePath, game, &bare).Result.has_value());
+			REQUIRE(import(gamePath, game, &(*pure)->GetApi()).Result.has_value());
 		}
 
 		TEST_CASE("ScriptImporter: require reads and asset edges share one immutable source view")

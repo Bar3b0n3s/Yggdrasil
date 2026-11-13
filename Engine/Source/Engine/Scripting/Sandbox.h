@@ -22,6 +22,7 @@ namespace Engine {
 	class Random;
 	class ScriptApiRegistry;
 	class ScriptEngine;
+	class TypeRegistry;
 	struct ScriptData;
 
 	namespace Detail {
@@ -71,8 +72,9 @@ namespace Engine {
 		// Null with Runtime retains runtime limits but permits only members that are Runtime eligible and LoadTime available;
 		// other APIs reject before their callbacks with "<API> requires an active script engine". No runtime counters.
 		ScriptEngine* Engine = nullptr;
-		// Frozen registry, borrowed for VM lifetime. Null uses a VM-owned pure registry built through the same binding
-		// registrations; no duplicate function table. Load-time dispatch rejects unavailable APIs before any host use.
+		// Frozen registry, borrowed for VM lifetime. Null builds a VM-owned PureScriptApi (below); no duplicate function
+		// table. A PureScriptApi's registry built once may be passed instead and shared by VMs without an engine, on any
+		// threads. Load-time dispatch rejects unavailable APIs before any host use.
 		ScriptApiRegistry* Api = nullptr;
 		Random* RandomStream = nullptr;
 		IScriptModuleReader* SourceModules = nullptr;
@@ -88,6 +90,37 @@ namespace Engine {
 		// exact without sleeps.
 		std::function<double()> ClockSeconds{};
 		std::function<double()> CpuClockSeconds{};
+	};
+
+	// The pure script API: every built-in component type (RegisterBuiltinComponents) and every binding (RegisterBindings),
+	// both frozen, with no host. A Sandbox without SandboxSpecification::Api builds one for itself. One built once can be
+	// borrowed by many VMs instead (Docs/Decisions/0041-script-check-performance.md decision 3): it is immutable after
+	// Create, and a VM without an engine binds and dispatches it without touching its coverage counters (ScriptApiRegistry),
+	// so load-time VMs on different import threads may share it. The editor builds one, and its script imports' load-time
+	// VMs borrow it (ImportContext::GetLoadTimeScriptApi). Not copyable or movable: the API borrows the type registry.
+	class PureScriptApi
+	{
+	public:
+		// Restricts construction to Create while allowing CreateScope to call the public constructor.
+		class ConstructionKey
+		{
+			ConstructionKey() = default;
+			friend class PureScriptApi;
+		};
+
+		explicit PureScriptApi(ConstructionKey key); // use Create
+		~PureScriptApi();
+		PureScriptApi(const PureScriptApi&) = delete;
+		PureScriptApi& operator=(const PureScriptApi&) = delete;
+
+		// Registers and freezes both registries on the calling thread. Errors: those of RegisterBindings.
+		[[nodiscard]] static Result<Scope<PureScriptApi>> Create();
+
+		// The frozen API, for SandboxSpecification::Api and LoadTimeVmSpecification::Api; valid for this object's lifetime.
+		[[nodiscard]] ScriptApiRegistry& GetApi() { return *m_Api; }
+	private:
+		Scope<TypeRegistry> m_Types{}; // declared first, so it is destroyed after the API that borrows it
+		Scope<ScriptApiRegistry> m_Api{};
 	};
 
 	// Owns one VM, its allocator, deadline stack, resolver, module-return cache and immutable loaded source maps.

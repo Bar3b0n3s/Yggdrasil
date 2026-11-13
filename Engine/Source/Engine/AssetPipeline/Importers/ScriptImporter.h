@@ -11,8 +11,10 @@ namespace Engine {
 
 	// Imports .luau (including .test.luau) into ScriptData. LoadTimeVm::Extract supplies engine-compiled bytecode,
 	// authenticated Behaviour/Module/TestSuite kind, field descriptors, source map and unresolved require edges.
-	// Each import owns its isolated VM, source-reader cache and 250 ms whole-graph budget. Concurrent calls are safe
-	// after main-thread scripting process initialization; no live scene, Session or EditorCore service is accessed.
+	// Each import owns its isolated VM, source-reader cache and 250 ms whole-graph budget; the VM binds the context's
+	// borrowed pure script API (ImportContext::GetLoadTimeScriptApi) when it has one, else builds its own, with the same
+	// result. Concurrent calls are safe after main-thread scripting process initialization; no live scene, Session or
+	// EditorCore service is accessed.
 	class ScriptImporter final : public IAssetImporter
 	{
 	public:

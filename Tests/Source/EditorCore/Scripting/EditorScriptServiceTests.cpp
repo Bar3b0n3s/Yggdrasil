@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 
+#include "EditorCore/Scripting/ScriptTypeChecker.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -87,6 +88,49 @@ namespace Engine {
 			const auto strictAgain = editor.GetScriptService()->Check(paths);
 			REQUIRE(strictAgain.has_value());
 			CHECK(strictAgain->Diagnostics == strict->Diagnostics);
+		}
+
+		// Docs/Decisions/0041-script-check-performance.md decision 2: every new directory used to change the checker's
+		// configuration hash, so the editor replaced its checker and marked every script for a re-check, which the next asset
+		// refresh imported again. A directory without a .luaurc configures nothing; a .luaurc added to it still does.
+		TEST_CASE("EditorScriptService: a new directory without a .luaurc keeps the checker and every script's check")
+		{
+			Test::EditorTestFixture fixture("ScriptCheckerNewDirectory");
+			fixture.CreateAndOpenProject();
+			auto& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			const auto written = editor.GetScriptService()->Write(ScriptServicePath("Assets/Probe.luau"), "local value: number = 'wrong'\nreturn { Value = value }\n");
+			REQUIRE(written.has_value());
+			editor.GetAssets().WaitIdle();
+			REQUIRE(editor.GetAssets().Load(written->Script).has_value());
+			const auto before = editor.GetAssets().GetScriptCheck(written->Script);
+			REQUIRE(before.has_value());
+			REQUIRE(before->Performed);
+			REQUIRE(editor.GetScriptChecker() != nullptr);
+			const uint64_t environment = editor.GetScriptChecker()->GetEnvironmentHash();
+			const uint64_t checks = editor.GetScriptChecker()->GetStatistics().Checks;
+			REQUIRE(checks > 0);
+
+			REQUIRE(editor.GetVfs().CreateDirectories(ScriptServicePath("Assets/NewFolder")));
+			REQUIRE(editor.GetScriptService() != nullptr);
+			// The same checker: a new one would start from no checks.
+			REQUIRE(editor.GetScriptChecker() != nullptr);
+			CHECK(editor.GetScriptChecker()->GetStatistics().Checks == checks);
+			CHECK(editor.GetScriptChecker()->GetEnvironmentHash() == environment);
+			// A script marked for a re-check has no check until it imports again.
+			const auto after = editor.GetAssets().GetScriptCheck(written->Script);
+			REQUIRE(after.has_value());
+			CHECK(after->EnvironmentHash == before->EnvironmentHash);
+			CHECK(after->SourceHash == before->SourceHash);
+			CHECK(after->Diagnostics == before->Diagnostics);
+
+			// A .luaurc in the new directory is seen: a new checker, and every script is checked again.
+			WriteScriptServiceFile(fixture, "Assets/NewFolder/.luaurc", "{\"languageMode\":\"nocheck\"}");
+			REQUIRE(editor.GetScriptService() != nullptr);
+			REQUIRE(editor.GetScriptChecker() != nullptr);
+			CHECK(editor.GetScriptChecker()->GetEnvironmentHash() != environment);
+			CHECK(editor.GetScriptChecker()->GetStatistics().Checks == 0);
+			CHECK_FALSE(editor.GetAssets().GetScriptCheck(written->Script).has_value());
 		}
 
 		TEST_CASE("EditorScriptService: published field snapshots retain their old schema across source replacement")

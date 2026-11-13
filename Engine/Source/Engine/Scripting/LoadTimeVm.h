@@ -8,6 +8,7 @@
 
 namespace Engine {
 
+	class ScriptApiRegistry;
 	struct ScriptCheckRequest;
 	struct ScriptData;
 
@@ -19,11 +20,17 @@ namespace Engine {
 		// compared first and the thread's CPU time counted. Borrowed captures must live for Extract only. This does not
 		// change the budget or expose time to the imported script.
 		std::function<double()> ClockSeconds{};
+		// A PureScriptApi's frozen registry (Sandbox.h) the VM binds instead of building its own, borrowed for Extract only;
+		// concurrent Extract calls may share one (Docs/Decisions/0041-script-check-performance.md decision 3). Null builds the
+		// VM's own, as Sandbox::Create does; the extraction is the same either way. Another registry changes what the module
+		// top can call.
+		ScriptApiRegistry* Api = nullptr;
 	};
 
 	// Import-time classification/extraction (§11.2). A fresh isolated VM/cache/fixed random seed per Extract, on the
-	// calling import thread. Concurrent Extract calls are independent after process initialization. No Session,
-	// AssetPipeline or Testing dependency, native filesystem reads, live scene or runtime engine host.
+	// calling import thread, binding the specification's shared pure API or one of its own. Concurrent Extract calls are
+	// independent after process initialization. No Session, AssetPipeline or Testing dependency, native filesystem reads,
+	// live scene or runtime engine host.
 	class LoadTimeVm
 	{
 	public:

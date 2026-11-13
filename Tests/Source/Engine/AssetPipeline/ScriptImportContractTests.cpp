@@ -7,6 +7,8 @@
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/Importers/ScriptImporter.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 
@@ -122,6 +124,31 @@ namespace Engine {
 			CHECK(clean.Calls.load() == 1);
 			// The borrowed provider must outlive the fixture's manager.
 			manager.SetScriptDiagnosticsProvider(nullptr);
+		}
+
+		// Docs/Decisions/0041-script-check-performance.md decision 3: the editor's manager hands every script import the
+		// pure script API its specification names, which the import's load-time VM binds.
+		TEST_CASE("ScriptImport: the manager's script imports bind the load-time API its specification gives")
+		{
+			// An API without the bindings offers no Script.Define at a module top, so the import fails with it.
+			TypeRegistry types;
+			types.Freeze();
+			ScriptApiRegistry bare;
+			REQUIRE(bare.Freeze(types));
+			Test::AssetTestFixture fixture(Test::AssetTestFixtureOptions{ .LoadTimeScriptApi = &bare });
+			fixture.WriteProjectText("Assets/Main.luau", "return Script.Define('Main', { Fields = {} })\n");
+			fixture.OpenProject(false);
+			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Main.luau").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
+			{
+				Test::ExpectLog expected(LogLevel::Error, "Main.luau");
+				CHECK_FALSE(fixture.GetManager().Load(handle).has_value());
+			}
+			// The same project's import with an API of its own succeeds.
+			Test::AssetTestFixture own;
+			own.WriteProjectText("Assets/Main.luau", "return Script.Define('Main', { Fields = {} })\n");
+			own.OpenProject(false);
+			static_cast<void>(Test::LoadCheckedScript(own, "Assets/Main.luau"));
 		}
 
 		TEST_CASE("ScriptImport: changed checker configuration invalidates cached checks and failed attempts")

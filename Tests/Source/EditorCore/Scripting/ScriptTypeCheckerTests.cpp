@@ -4,10 +4,13 @@
 
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Mounts/NativeDirectoryMount.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scripting/RegisterBindings.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/SceneTestFixture.h"
 #include "Support/TestData.h"
 #include "Support/TestTimeout.h"
 
@@ -16,12 +19,15 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <format>
+#include <functional>
 #include <latch>
 #include <map>
 #include <set>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace Engine {
 
@@ -79,6 +85,73 @@ namespace Engine {
 			{
 				return finding.Severity == DiagnosticSeverity::Error;
 			});
+		}
+
+		// Reads required modules through a VFS, as the importer's reader does.
+		class VfsModuleReader final : public IScriptModuleReader
+		{
+		public:
+			explicit VfsModuleReader(const VirtualFileSystem& vfs)
+				: m_Vfs(vfs)
+			{
+			}
+
+			Result<std::string> ReadModule(const VfsPath& path) override
+			{
+				return m_Vfs.ReadText(path);
+			}
+		private:
+			const VirtualFileSystem& m_Vfs; // borrowed for the test case
+		};
+
+		using CheckedScripts = std::vector<std::pair<VfsPath, std::string>>;
+
+		// Docs/Decisions/0041-script-check-performance.md decision 1: a checker leases prepared frontends, and its findings
+		// must not depend on what a frontend checked before. Checks every script twice with one checker, in order and then in
+		// reverse, and compares each finding list with a fresh checker's (built from the same API and configuration, so its
+		// check is its frontend's first). The fresh checks are independent, so they run on a few threads at once. `reader`
+		// must be thread-safe. Returns the fresh findings, in the order of `scripts`.
+		static std::vector<std::vector<ScriptDiagnostic>> CheckReusedAgainstFresh(const ScriptApiRegistry& api,
+			const ScriptTypeCheckerConfiguration& configuration, IScriptModuleReader& reader, const CheckedScripts& scripts)
+		{
+			auto reused = ScriptTypeChecker::Create(api, configuration);
+			REQUIRE(reused);
+			std::vector<std::vector<ScriptDiagnostic>> fresh(scripts.size());
+			std::atomic<size_t> unavailable = 0; // fresh checkers Create refused (doctest asserts stay on this thread)
+			const size_t workers = std::clamp<size_t>(std::thread::hardware_concurrency(), 1, 8);
+			{
+				std::vector<std::jthread> threads;
+				for (size_t worker = 0; worker < workers; ++worker)
+				{
+					threads.emplace_back([&api, &configuration, &reader, &scripts, &fresh, &unavailable, worker, workers]()
+					{
+						for (size_t index = worker; index < scripts.size(); index += workers)
+						{
+							auto checker = ScriptTypeChecker::Create(api, configuration);
+							if (!checker)
+							{
+								++unavailable;
+								continue;
+							}
+							fresh[index] = (*checker)->CheckScript({ scripts[index].first, scripts[index].second, &reader });
+						}
+					});
+				}
+			}
+			REQUIRE(unavailable == 0);
+			const auto compare = [&reused, &reader, &scripts, &fresh](size_t index)
+			{
+				const auto& [path, source] = scripts[index];
+				CAPTURE(path);
+				CHECK((*reused)->CheckScript({ path, source, &reader }) == fresh[index]);
+			};
+			for (size_t index = 0; index < scripts.size(); ++index)
+				compare(index);
+			for (size_t index = scripts.size(); index-- > 0;)
+				compare(index);
+			// Every sequential check leased the one frontend Create prepared.
+			CHECK((*reused)->GetStatistics().DefinitionLoads == 1);
+			return fresh;
 		}
 
 	}
@@ -307,10 +380,160 @@ namespace Engine {
 			const auto removed = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
 			REQUIRE(removed);
 			CHECK(malformed->GetEnvironmentHash() != Test::PrimitiveChecker(*removed)->GetEnvironmentHash());
+			// A new directory is listed, so a .luaurc it gets later is seen, but without one it configures nothing and changes no
+			// hash (Docs/Decisions/0041-script-check-performance.md decision 2); a new .luaurc, a change to it and its removal
+			// each do.
 			REQUIRE(fixture.GetVfs().CreateDirectories(fixture.ProjectPath("Assets/NewDirectory")));
 			const auto newDirectory = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
 			REQUIRE(newDirectory);
-			CHECK(Test::PrimitiveChecker(*removed)->GetEnvironmentHash() != Test::PrimitiveChecker(*newDirectory)->GetEnvironmentHash());
+			CHECK(newDirectory->Files.size() == removed->Files.size() + 1);
+			const uint64_t withoutConfig = Test::PrimitiveChecker(*removed)->GetEnvironmentHash();
+			CHECK(Test::PrimitiveChecker(*newDirectory)->GetEnvironmentHash() == withoutConfig);
+			fixture.WriteProjectText("Assets/NewDirectory/.luaurc", "{\"languageMode\":\"nocheck\"}");
+			const auto added = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
+			REQUIRE(added);
+			const uint64_t withConfig = Test::PrimitiveChecker(*added)->GetEnvironmentHash();
+			CHECK(withConfig != withoutConfig);
+			fixture.WriteProjectText("Assets/NewDirectory/.luaurc", "{\"languageMode\":\"strict\"}");
+			const auto changed = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
+			REQUIRE(changed);
+			const uint64_t changedConfig = Test::PrimitiveChecker(*changed)->GetEnvironmentHash();
+			CHECK(changedConfig != withConfig);
+			CHECK(changedConfig != withoutConfig);
+			REQUIRE(fixture.GetVfs().Remove(fixture.ProjectPath("Assets/NewDirectory/.luaurc")));
+			const auto removedAgain = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
+			REQUIRE(removedAgain);
+			CHECK(Test::PrimitiveChecker(*removedAgain)->GetEnvironmentHash() == withoutConfig);
+		}
+
+		TEST_CASE("ScriptTypeChecker: consecutive checks load the definitions once")
+		{
+			const auto checker = Test::PrimitiveChecker();
+			// Create prepared the frontend that validated the definitions; no check ran yet.
+			CHECK(checker->GetStatistics().Checks == 0);
+			CHECK(checker->GetStatistics().DefinitionLoads == 1);
+			Test::CheckerModuleReader reader;
+			const auto root = Test::ParseVfsPath("project://Assets/Root.luau");
+			reader.Sources[Test::ParseVfsPath("project://Assets/Typed.luau")] = "local bad: number = 'wrong'\nreturn bad";
+			CHECK(Test::HasCheckerErrors(checker->CheckScript({ root, "local value: number = 'wrong'\nreturn value", &reader })));
+			CHECK(checker->CheckScript({ root, "return 1", &reader }).empty());
+			CHECK(Test::HasCheckerErrors(checker->CheckScript({ root, "return )", &reader })));
+			CHECK(Test::HasCheckerErrors(checker->CheckScript({ root, "return require('./Typed')", &reader })));
+			CHECK(Test::HasCheckerErrors(checker->CheckScript({ root, "return require('./Missing')", &reader })));
+			CHECK(checker->GetStatistics().Checks == 5);
+			CHECK(checker->GetStatistics().DefinitionLoads == 1);
+			// A request that never reaches analysis is not a check.
+			CHECK(Test::HasCheckerErrors(checker->CheckScript({ root, "return 1", nullptr })));
+			CHECK(checker->GetStatistics().Checks == 5);
+		}
+
+		TEST_CASE("ScriptTypeChecker: a reused checker finds what fresh checkers find")
+		{
+			Test::SetTestCaseTimeLimit(300.0);
+			Test::AssetTestFixture fixture;
+			ScriptApiRegistry api;
+			REQUIRE(RegisterBindings(api, fixture.GetRegistry()));
+			Test::CheckedScripts scripts;
+			const auto add = [&fixture, &scripts](const std::string& relative, const std::string& source)
+			{
+				fixture.WriteProjectText(relative, source);
+				scripts.emplace_back(fixture.ProjectPath(relative), source);
+			};
+			// The checker's fixtures and the importer's error fixtures.
+			for (const std::string_view directory : { std::string_view("TypeChecker"), std::string_view("Scripts") })
+			{
+				const auto files = Test::ListTestDataFiles(directory, { ".luau" });
+				REQUIRE(files);
+				for (const auto& file : *files)
+				{
+					const auto source = Test::ReadTestDataText(file);
+					REQUIRE(source);
+					add("Assets/" + file, *source);
+				}
+			}
+			// Deliberately broken scripts: type, syntax, lint, generic and engine API errors, a missing require, required
+			// modules with errors, a require cycle, refused type functions, and nested configurations (nocheck, invalid).
+			add("Assets/Broken/Type.luau", "--!strict\nlocal n: number = 'text'\nreturn n\n");
+			add("Assets/Broken/Syntax.luau", "local t = {\nreturn t\n");
+			add("Assets/Broken/Lint.luau", "--!strict\nlocal unused = 1\nlocal function f(a: number): number\n\tlocal a = a + 1\n\treturn a\nend\n"
+										   "local t = { X = 1, X = 2 }\nreturn { F = f, T = t, S = string.format('%d %d', 1) }\n");
+			add("Assets/Broken/Generic.luau", "--!strict\nlocal function first<T>(items: { T }): T\n\treturn items[1]\nend\n"
+											  "local n: number = first({ 'a' })\nlocal s: string = first({ 1, 2 })\nreturn { N = n, S = s }\n");
+			add("Assets/Broken/Engine.luau", "--!strict\nlocal function move(e: Entity)\n\tlocal t = e:GetComponent('Transform')\n"
+											 "\tt.Translation = 5\n\te:NoSuchMethod()\nend\nreturn move\n");
+			add("Assets/Broken/MissingRequire.luau", "--!strict\nlocal M = require('./DoesNotExist')\nreturn M\n");
+			add("Assets/Broken/RequiresBroken.luau", "--!strict\nlocal T = require('./Type')\nlocal S = require('./Syntax')\nreturn { T = T, S = S }\n");
+			add("Assets/Broken/CycleA.luau", "--!strict\nlocal B = require('./CycleB')\nreturn { B = B }\n");
+			add("Assets/Broken/CycleB.luau", "--!strict\nlocal A = require('./CycleA')\nreturn { A = A }\n");
+			add("Assets/Broken/TypeFunction.luau", "--!strict\ntype function Id(t)\n\treturn t\nend\nlocal v: Id<number> = 1\nreturn v\n");
+			add("Assets/Broken/RequiresTypeFunction.luau", "--!strict\nreturn require('./TypeFunction')\n");
+			add("Assets/Broken/Behaviour.luau", "--!strict\nreturn Script.Define('Broken', { Fields = { Speed = Field.Number(1) } })\n");
+			fixture.WriteProjectText("Assets/Broken/Nocheck/.luaurc", "{\"languageMode\":\"nocheck\"}");
+			add("Assets/Broken/Nocheck/Unchecked.luau", "local n: number = 'text'\nreturn n\n");
+			fixture.WriteProjectText("Assets/Broken/Invalid/.luaurc", "{bad config");
+			add("Assets/Broken/Invalid/Configured.luau", "return 1\n");
+			const auto configuration = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
+			REQUIRE(configuration);
+			Test::VfsModuleReader reader(fixture.GetVfs());
+			const auto findings = Test::CheckReusedAgainstFresh(api, *configuration, reader, scripts);
+			// The corpus reaches every kind of finding: compile and type errors, lint warnings, a configuration finding and a
+			// require cycle.
+			const auto any = [&findings](const std::function<bool(const ScriptDiagnostic&)>& predicate)
+			{
+				return std::ranges::any_of(findings, [&predicate](const std::vector<ScriptDiagnostic>& list)
+				{
+					return std::ranges::any_of(list, predicate);
+				});
+			};
+			CHECK(any([](const ScriptDiagnostic& finding)
+			{
+				return finding.Code == "SCRIPT_COMPILE_ERROR";
+			}));
+			CHECK(any([](const ScriptDiagnostic& finding)
+			{
+				return finding.Code == "SCRIPT_TYPE_ERROR" && finding.Severity == DiagnosticSeverity::Error;
+			}));
+			CHECK(any([](const ScriptDiagnostic& finding)
+			{
+				return finding.Severity == DiagnosticSeverity::Warning;
+			}));
+			CHECK(any([](const ScriptDiagnostic& finding)
+			{
+				return finding.File == "Assets/Broken/Invalid/.luaurc";
+			}));
+			CHECK(any([](const ScriptDiagnostic& finding)
+			{
+				return finding.Message == "cyclic script require graph";
+			}));
+		}
+
+		TEST_CASE("ScriptTypeChecker: a reused checker finds what fresh checkers find in FeatureTest's scripts")
+		{
+			Test::SetTestCaseTimeLimit(600.0);
+			const auto types = Test::CreateBuiltinRegistry();
+			ScriptApiRegistry api;
+			REQUIRE(RegisterBindings(api, *types));
+			VirtualFileSystem vfs;
+			auto mount = NativeDirectoryMount::Create(Test::GetRepositoryRoot() / "Projects" / "FeatureTest", MountAccess::ReadOnly);
+			REQUIRE(mount);
+			REQUIRE(vfs.Mount("project", std::move(*mount)));
+			const auto configuration = ScriptTypeChecker::CaptureConfiguration(vfs);
+			REQUIRE(configuration);
+			const auto entries = vfs.List(Test::ParseVfsPath("project://Assets"), true);
+			REQUIRE(entries);
+			Test::CheckedScripts scripts;
+			for (const auto& entry : *entries)
+			{
+				if (entry.Info.IsDirectory || entry.Path.GetExtension() != ".luau")
+					continue;
+				const auto source = vfs.ReadText(entry.Path);
+				REQUIRE(source);
+				scripts.emplace_back(entry.Path, *source);
+			}
+			std::ranges::sort(scripts, {}, &std::pair<VfsPath, std::string>::first);
+			REQUIRE(scripts.size() > 100);
+			Test::VfsModuleReader reader(vfs);
+			static_cast<void>(Test::CheckReusedAgainstFresh(api, *configuration, reader, scripts));
 		}
 
 		TEST_CASE("ScriptTypeChecker: unsaved source and required modules use the supplied reader only")
@@ -451,10 +674,13 @@ namespace Engine {
 			CHECK(scriptModuleSources[1].Reads.size() == 1);
 			CHECK(Test::HasCheckerErrors(results[0]));
 			CHECK(results[0] == results[1]);
+			// Each overlapping check leased a frontend of its own: Create's and a second one prepared for it.
+			CHECK(checker->GetStatistics().DefinitionLoads == 2);
 			CHECK(results[0] == checker->CheckScript({ root, "return require('./Dependency')", &scriptModuleSources[0] }));
 			CHECK(Test::HasCheckerErrors(checker->CheckScript({ root, "return {}", nullptr })));
 			CHECK(Test::HasCheckerErrors(checker->CheckScript({ root, "return )", &scriptModuleSources[0] })));
 			CHECK_FALSE(Test::HasCheckerErrors(checker->CheckScript({ root, "return 1", &scriptModuleSources[0] })));
+			CHECK(checker->GetStatistics().DefinitionLoads == 2);
 		}
 	}
 
