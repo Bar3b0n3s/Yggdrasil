@@ -5182,7 +5182,7 @@ What asset.create makes.
 
 - `Scene`: A .scene file: an empty scene named after the file.
 
-- `Prefab`: A .prefab file with one root entity named after the file.
+- `Prefab`: A .prefab file with one empty root entity named after the file; it takes no values (prefab.create saves an entity built in a scene, its components and children, as a prefab).
 
 - `SoundEffect`: A .sfx sound effect: synthesized layers of oscillators, imported as an AudioClip.
 

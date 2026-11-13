@@ -72,7 +72,7 @@ Example: Pose the hero half a second into its clips.
 
 ### asset.create
 
-Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.
+Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a prefab of one empty root entity (no values: prefab.create saves a built entity as a prefab) or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.
 
 - Flags: tool `asset_create`, mutates, dry run, batch
 - Timeout: 60 s
@@ -82,7 +82,7 @@ Creates a material, a sound effect, a sprite sheet, a tilemap or a string table 
 |---|---|---|---|---|
 | `type` | `AssetCreateType` | yes | `"Material"` | What to create. |
 | `path` | `String` | yes | `""` | The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap, .stringtable; none for a folder); missing parent folders are created with it. |
-| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types. |
+| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed). A Scene, a Prefab and a Folder take no values and refuse them: a prefab is created with one empty root entity, and prefab.create saves an entity built in a scene, its components and children, as a prefab. |
 
 | Result | Type | Description |
 |---|---|---|
