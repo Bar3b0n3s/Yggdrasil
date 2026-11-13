@@ -1072,7 +1072,7 @@ class LauncherTests(BridgeTestCase):
         bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
         requests: list[LaunchRequest] = []
 
-        def launch(request: LaunchRequest) -> EditorConnection:
+        def launch(request: LaunchRequest, cancelled: threading.Event | None = None) -> EditorConnection:
             requests.append(request)
             return EditorConnection(root, supervised=False)
 
@@ -1162,7 +1162,8 @@ class LauncherTests(BridgeTestCase):
                 connection = EditorConnection(root, supervised=True, client=self.connect(editor))
                 connection.recovery = recovery
 
-                def launch(request: LaunchRequest, launched: EditorConnection = connection) -> EditorConnection:
+                def launch(request: LaunchRequest, cancelled: threading.Event | None = None,
+                           launched: EditorConnection = connection) -> EditorConnection:
                     requests.append(request)
                     return launched
 

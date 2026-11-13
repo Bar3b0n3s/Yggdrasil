@@ -45,6 +45,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The text pass (Architecture §8.10, §8.3 pass 14; Docs/Decisions/0013-m8-decisions.md decision 11) with the Default font
@@ -177,6 +178,38 @@ namespace Engine {
 			font->Glyphs = { FontGlyph{ .Codepoint = 'A', .Advance = 1.0f, .PlaneMax = glm::vec2(1.0f), .AtlasMin = glm::vec2(0.0f), .AtlasMax = glm::vec2(1.0f) } };
 			REQUIRE(ValidateFontData(*font).has_value());
 			return font;
+		}
+
+		// The milestone review of M25's F01 (Docs/Decisions/0036-m25-tetris-pixel-art.md): a font whose 32 x 32 atlas holds
+		// FlatFieldValue everywhere, 16 below the outline's 128, with the distance range `spread`. Its field is flat, so its
+		// screen-space derivative is 0 and the Text shader's edge width is its floor alone: the outline's value over `spread` per
+		// atlas pixel times the atlas pixels a screen pixel spans (Passes/Text.slang). Its glyph 'A' spans the whole atlas and
+		// one em, so a glyph drawn 16 pixels square spans 2 atlas pixels per screen pixel.
+		constexpr std::byte FlatFieldValue{ 112 };
+		Ref<FontData> MakeFlatFieldFont(float spread)
+		{
+			auto font = CreateRef<FontData>();
+			font->Spread = spread;
+			font->Ascent = 0.8f;
+			font->Descent = -0.2f;
+			font->AtlasWidth = 32;
+			font->AtlasHeight = 32;
+			font->AtlasPixels.assign(32 * 32, FlatFieldValue);
+			font->Glyphs = { FontGlyph{ .Codepoint = 'A', .Advance = 1.0f, .PlaneMax = glm::vec2(1.0f), .AtlasMin = glm::vec2(0.0f), .AtlasMax = glm::vec2(1.0f) } };
+			REQUIRE(ValidateFontData(*font).has_value());
+			return font;
+		}
+
+		// The red byte a white glyph of a MakeFlatFieldFont(spread) font gives where it spans 2 atlas pixels per screen pixel:
+		// the floor's half-width w = 2 * 128 / 255 / spread (at most 128 / 255) and coverage smoothstep(e - w, e + w, 112 / 255),
+		// e the outline's 128 / 255, blended over black. Spread 4: w = e / 2, coverage 0.316 (81); spread 8: w = e / 4, 0.156
+		// (40); spread 16: w = e / 8 = e - 112 / 255, so 0.
+		int ExpectedFlatFieldCoverage(float spread)
+		{
+			constexpr float Edge = 128.0f / 255.0f;
+			const float width = std::min(2.0f * Edge / spread, Edge);
+			const float t = std::clamp((static_cast<float>(std::to_integer<int>(FlatFieldValue)) / 255.0f - (Edge - width)) / (2.0f * width), 0.0f, 1.0f);
+			return static_cast<int>(std::lround(255.0f * t * t * (3.0f - 2.0f * t)));
 		}
 
 		// A glyph of the solid font over [min, max) in pixels.
@@ -741,6 +774,86 @@ namespace Engine {
 				const std::string summary = std::format("{} of {} strokes keep no coverage, the first {}:{}", check.Misses.size(), check.Strokes,
 					std::min<size_t>(check.Misses.size(), 20), misses);
 				CHECK_MESSAGE(check.Misses.empty(), summary);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("TextRenderer: glyph runs and screen texts are shaded with the Spread of their own font, batch by batch"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// The milestone review of M25's F01 (Docs/Decisions/0036-m25-tetris-pixel-art.md): the Text program's push constants
+			// carry the drawn font's FontData::Spread to each batch, the Ui pass's glyph runs and the Text pass's texts alike.
+			// Flat-field fonts of spreads 4, 16 and 8 (MakeFlatFieldFont) draw where only that floor shades them, alternating so
+			// that consecutive batches change spread; a constant 8, or a batch keeping the previous batch's constants, gives
+			// another coverage.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			constexpr AssetHandle Spread4{ 0xF048 };
+			constexpr AssetHandle Spread16{ 0xF049 };
+			constexpr AssetHandle Spread8{ 0xF04A };
+			Test::InMemoryAssetManager assets;
+			assets.Publish(Spread4, MakeFlatFieldFont(4.0f));
+			assets.Publish(Spread16, MakeFlatFieldFont(16.0f));
+			assets.Publish(Spread8, MakeFlatFieldFont(8.0f));
+			CHECK(ExpectedFlatFieldCoverage(4.0f) == 81);
+			CHECK(ExpectedFlatFieldCoverage(8.0f) == 40);
+			CHECK(ExpectedFlatFieldCoverage(16.0f) == 0);
+			{
+				TextSetup setup(gpu);
+				// Glyph runs (the Ui pass's path): four 16-pixel glyphs, one run each, of spreads 4, 16, 8, then 4 again.
+				const std::vector<TextPixelGlyph> glyphs = {
+					MakeSolidGlyph(glm::vec2(8.0f), glm::vec2(24.0f)),
+					MakeSolidGlyph(glm::vec2(40.0f, 8.0f), glm::vec2(56.0f, 24.0f)),
+					MakeSolidGlyph(glm::vec2(72.0f, 8.0f), glm::vec2(88.0f, 24.0f)),
+					MakeSolidGlyph(glm::vec2(104.0f, 8.0f), glm::vec2(120.0f, 24.0f)),
+				};
+				const std::array<std::pair<AssetHandle, float>, 4> fonts = { std::pair{ Spread4, 4.0f }, std::pair{ Spread16, 16.0f }, std::pair{ Spread8, 8.0f },
+					std::pair{ Spread4, 4.0f } };
+				std::vector<TextGlyphRun> runs;
+				for (uint32_t index = 0; index < fonts.size(); ++index)
+					runs.push_back(TextGlyphRun{ .Font = fonts[index].first, .Color = glm::vec4(1.0f), .FirstGlyph = index, .GlyphCount = 1 });
+				uint32_t drawn = 0;
+				RenderPassCounters counters;
+				const Image image = setup.RenderGlyphRuns({ .Glyphs = glyphs, .Runs = runs, .Assets = &assets }, drawn, counters);
+				CHECK(drawn == 4);
+				CHECK(counters.DrawCalls == 4);
+				for (size_t index = 0; index < fonts.size(); ++index)
+				{
+					CAPTURE(index);
+					CAPTURE(fonts[index].second);
+					const uint32_t x = 16 + static_cast<uint32_t>(index) * 32;
+					CHECK(std::abs(GetPixel(image, x, 16).x - ExpectedFlatFieldCoverage(fonts[index].second)) <= 2);
+				}
+
+				// Screen texts (the Text pass's path): an 'A' at 16 pixels per em (270 at the 1080p reference on this 64-pixel
+				// target) in each half of the target, of spreads 4 and 8, then 8 and 4.
+				constexpr float Size = 16.0f * TextReferenceHeight / static_cast<float>(Height);
+				const std::array<std::pair<AssetHandle, AssetHandle>, 2> orders = { std::pair{ Spread4, Spread8 }, std::pair{ Spread8, Spread4 } };
+				for (const auto& [left, right] : orders)
+				{
+					const std::vector<TextItem> texts = {
+						TextItem{ .Text = "A", .Font = left, .Size = Size, .Color = glm::vec4(1.0f), .Anchor = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Offset = glm::vec2(8.0f * TextReferenceHeight / static_cast<float>(Height)) },
+						TextItem{ .Text = "A", .Font = right, .Size = Size, .Color = glm::vec4(1.0f), .Anchor = glm::vec2(0.5f, 0.0f), .Pivot = glm::vec2(0.0f), .Offset = glm::vec2(8.0f * TextReferenceHeight / static_cast<float>(Height)) },
+					};
+					const Image textImage = setup.Render({ .Texts = texts, .DebugDraw = nullptr, .Assets = &assets }, drawn);
+					CHECK(drawn == 2);
+					// The brightest pixel of each half: every pixel a glyph covers takes the one coverage of its flat field.
+					const auto brightest = [&textImage](uint32_t x0, uint32_t x1)
+					{
+						int value = 0;
+						for (uint32_t y = 0; y < Height; ++y)
+						{
+							for (uint32_t x = x0; x < x1; ++x)
+								value = std::max(value, GetPixel(textImage, x, y).x);
+						}
+						return value;
+					};
+					const float leftSpread = left == Spread4 ? 4.0f : 8.0f;
+					const float rightSpread = right == Spread4 ? 4.0f : 8.0f;
+					CAPTURE(leftSpread);
+					CHECK(std::abs(brightest(0, Width / 2) - ExpectedFlatFieldCoverage(leftSpread)) <= 2);
+					CHECK(std::abs(brightest(Width / 2, Width) - ExpectedFlatFieldCoverage(rightSpread)) <= 2);
+				}
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

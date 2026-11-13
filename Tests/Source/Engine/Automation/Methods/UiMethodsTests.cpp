@@ -3,16 +3,29 @@
 #include "Engine/Automation/Methods/UiMethods.h"
 
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/FontData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Project/ProjectSettings.h"
+#include "Engine/Renderer/TextMeasurement.h"
+#include "Engine/Renderer/UiDrawList.h"
+#include "Engine/Renderer/UiPass.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/UiExtraction.h"
+#include "Engine/Scene/UiLayout.h"
+#include "Engine/Scene/UiSystem.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/TestData.h"
 
+#include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -70,6 +83,112 @@ namespace Engine {
 				start = end + 1;
 			}
 			return lines;
+		}
+
+		// The Ui pass's text alignment of a draw item's horizontal alignment (the Ui pass's own mapping: start, centre, end).
+		RenderTextAlignment ToUiPassTextAlignment(UiDrawAlignment alignment)
+		{
+			switch (alignment)
+			{
+				case UiDrawAlignment::Start:  return RenderTextAlignment::Left;
+				case UiDrawAlignment::Center: return RenderTextAlignment::Center;
+				case UiDrawAlignment::End:    return RenderTextAlignment::Right;
+			}
+			return RenderTextAlignment::Left;
+		}
+
+		// Where the Ui pass lays the text draw item `item` out, from what it actually draws.
+		struct UiPassTextBox
+		{
+			glm::vec2 Min = glm::vec2(0.0f);
+			glm::vec2 Max = glm::vec2(0.0f);
+			bool FallbackGlyph = false; // a glyph is drawn by a later font of the text's chain
+			bool Caret = false;         // the plan drew the item's caret
+		};
+
+		// The box of `item` as the Ui pass places it (the milestone review of M25's F02): PlanUiPass of the item alone puts each
+		// glyph at the block's top-left corner plus its position in the item's measurement (MeasureText with BuildUiFontChain's
+		// fonts at the item's size, line spacing, wrap, width and alignment), so the corner is each glyph's planned corner less
+		// its measured one, the same for every glyph; the box runs from that corner plus the lines' leftmost pen start to their
+		// rightmost advance end, and from the corner down by the block's height, as ui.tree's textBounds does. nullopt when the
+		// plan draws no glyph.
+		std::optional<UiPassTextBox> PlanUiPassTextBox(const UiDrawItem& item, AssetManager& assets)
+		{
+			UiDrawList single;
+			single.Items.push_back(item);
+			const UiPassPlan plan = PlanUiPass(single, assets);
+			if (plan.Glyphs.empty())
+				return std::nullopt;
+			std::vector<AssetRef<FontData>> chain;
+			std::vector<const FontData*> fonts;
+			for (const AssetHandle handle : BuildUiFontChain(item.Font, assets))
+			{
+				chain.push_back(assets.GetOrPlaceholder<FontData>(handle));
+				REQUIRE(chain.back() != nullptr);
+				fonts.push_back(chain.back().get());
+			}
+			const TextMeasureOptions options{ .Size = item.FontSize,
+				.LineSpacing = item.LineSpacing,
+				.Wrap = item.Wrap ? TextWrap::Word : TextWrap::None,
+				.MaxWidth = item.Max.x - item.Min.x,
+				.Alignment = ToUiPassTextAlignment(item.HorizontalAlignment) };
+			const TextMeasurement measured = MeasureText(fonts, item.Text, options);
+			REQUIRE(measured.Glyphs.size() == plan.Glyphs.size());
+			REQUIRE_FALSE(measured.Lines.empty());
+			UiPassTextBox box;
+			const glm::vec2 corner = plan.Glyphs.front().Min - measured.Glyphs.front().Min;
+			for (size_t index = 0; index < plan.Glyphs.size(); ++index)
+			{
+				CAPTURE(index);
+				CHECK(plan.Glyphs[index].Min.x == doctest::Approx(corner.x + measured.Glyphs[index].Min.x));
+				CHECK(plan.Glyphs[index].Min.y == doctest::Approx(corner.y + measured.Glyphs[index].Min.y));
+				box.FallbackGlyph = box.FallbackGlyph || measured.Glyphs[index].Font > 0;
+			}
+			float left = measured.Lines.front().Left;
+			float right = left + measured.Lines.front().Width;
+			for (const TextMeasuredLine& line : measured.Lines)
+			{
+				left = std::min(left, line.Left);
+				right = std::max(right, line.Left + line.Width);
+			}
+			box.Min = corner + glm::vec2(left, 0.0f);
+			box.Max = corner + glm::vec2(right, measured.Size.y);
+			box.Caret = std::ranges::any_of(plan.Quads, [](const UiPassQuad& quad)
+			{
+				return !quad.Texture.IsValid();
+			});
+			return box;
+		}
+
+		// Checks that ui.tree's entries `elements` (format Json) report, for every text item of `list`, the box the Ui pass lays
+		// it out in (PlanUiPassTextBox); returns the boxes by the entry's name.
+		std::map<std::string, UiPassTextBox> CheckUiTreeTextBoxes(const Json& elements, const UiDrawList& list, AssetManager& assets)
+		{
+			std::map<std::string, UiPassTextBox> boxes;
+			for (const UiDrawItem& item : list.Items)
+			{
+				if (item.Kind != UiDrawKind::Text)
+					continue;
+				const std::optional<UiPassTextBox> box = PlanUiPassTextBox(item, assets);
+				REQUIRE(box.has_value());
+				const auto entry = std::ranges::find_if(elements, [&item](const Json& element)
+				{
+					return element["id"] == Json(item.Entity.ToString());
+				});
+				REQUIRE(entry != elements.end());
+				CAPTURE((*entry)["name"]);
+				const Json& bounds = (*entry)["textBounds"];
+				const auto read = [&bounds](std::string_view member)
+				{
+					return JsonReader(bounds[std::string(member)]).ReadFloat().value_or(-1.0f);
+				};
+				CHECK(read("x") == doctest::Approx(box->Min.x).epsilon(1e-5));
+				CHECK(read("y") == doctest::Approx(box->Min.y).epsilon(1e-5));
+				CHECK(read("width") == doctest::Approx(box->Max.x - box->Min.x).epsilon(1e-5));
+				CHECK(read("height") == doctest::Approx(box->Max.y - box->Min.y).epsilon(1e-5));
+				boxes[JsonReader((*entry)["name"]).ReadString().value_or(std::string())] = *box;
+			}
+			return boxes;
 		}
 
 	}
@@ -477,6 +596,81 @@ namespace Engine {
 			}
 		}
 
+		// The milestone review of M25's F02 (Docs/Decisions/0036-m25-tetris-pixel-art.md): ui.tree measures each text where the Ui
+		// pass lays it out with a copy of its placement and font chain (UiPass.cpp's PlanGlyphs and BuildUiFontChain, the font
+		// and text pipeline, which phase 3's ledger gives M25 only for its named text fixes), so this ties the copy to what the Ui
+		// pass draws: left-, centre- and right-aligned texts at the top, middle and bottom of their rectangles, a wrapped text, a
+		// text partly drawn by its font's fallback, and a focused text input whose caret moves its long text inside its field.
+		TEST_CASE("UiMethods: ui.tree's text boxes are where the Ui pass lays the texts out")
+		{
+			// The Default font measures the texts: the fixture mounts the engine's resources.
+			Test::AutomationFixture setup("UiTreeTextPlacement", true, std::nullopt, true);
+			// A font with four glyphs (A, O, V and the space) that falls back to the Default font for the rest.
+			const std::string glyphs = (Test::GetTestDataPath("Assets/Fonts") / "Glyphs.ttf").generic_string();
+			Result<Json> imported = setup.Call("asset.import", Json{ { "source", glyphs }, { "destDir", "Assets/Fonts" } });
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			Result<Json> fallback = setup.Call("asset.setImportSettings",
+				Json{ { "asset", "Assets/Fonts/Glyphs.ttf" }, { "settings", Json{ { "Fallbacks", Json::array({ BuiltinAssetHandles::DefaultFont.ToString() }) } } } });
+			REQUIRE_MESSAGE(fallback.has_value(), fallback.error().ToString());
+			Result<Json> reimported = setup.Call("asset.reimport", Json{ { "asset", "Assets/Fonts/Glyphs.ttf" } });
+			REQUIRE_MESSAGE(reimported.has_value(), reimported.error().ToString());
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Texts","ops":[
+				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{}}}},
+				{"method":"entity.create","params":{"name":"Left","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,10],"Size":[120,30]},
+					"UiText":{"Text":"Score 1200","Size":12,"Alignment":"Left","VerticalAlignment":"Top","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"Centre","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,50],"Size":[120,30]},
+					"UiText":{"Text":"Score 1200","Size":12,"Alignment":"Center","VerticalAlignment":"Middle","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"Right","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,90],"Size":[120,30]},
+					"UiText":{"Text":"Score 1200","Size":12,"Alignment":"Right","VerticalAlignment":"Bottom","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"Wrapped","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[150,10],"Size":[60,80]},
+					"UiText":{"Text":"A label that wraps over several lines","Size":10,"Alignment":"Center","VerticalAlignment":"Middle","Wrap":true}}}},
+				{"method":"entity.create","params":{"name":"Fallback","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[150,100],"Size":[80,20]},
+					"UiText":{"Text":"AVOID","Font":"Assets/Fonts/Glyphs.ttf","Size":12,"Alignment":"Center","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"Name","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,130],"Size":[60,16]},"UiImage":{},
+					"UiTextInput":{"Text":"a name far longer than its field","Caret":32}}}},
+				{"method":"entity.create","params":{"name":"Value","parent":{"$ref":"6.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[1,1],"Size":[0,0]},"UiText":{"Size":10,"Wrap":false}}}},
+				{"method":"entity.update","params":{"entity":"/Hud/Name","components":{"UiTextInput":{"TextElement":"/Hud/Name/Value"}}}}]})"))
+					.has_value());
+			AssetManager& assets = setup.GetEditor().GetAssets();
+
+			// The edit scene at an explicit resolution: ComputeUiLayout's table, drawn without a session's interaction.
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 240 }, { "height", 160 } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			const Scene& scene = setup.GetEditor().GetScene();
+			UiDrawList list;
+			AppendUiDrawItems(scene, ComputeUiLayout(scene, glm::uvec2(240, 160)), list);
+			std::map<std::string, UiPassTextBox> boxes = CheckUiTreeTextBoxes((*listed)["elements"], list, assets);
+			CHECK(boxes.size() == 6);
+			// The wrapped text takes several lines, the fallback draws part of "AVOID", and no caret is drawn outside play.
+			CHECK(boxes["Wrapped"].Max.y - boxes["Wrapped"].Min.y > 20.0f);
+			CHECK(boxes["Fallback"].FallbackGlyph);
+			CHECK_FALSE(boxes["Value"].Caret);
+
+			// The play scene, its text input focused by a press: the session's layout and interaction, whose caret at the end of
+			// the long text moves the text left inside the field.
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			const Json press = Json::array({ Json{ { "type", "mouseButton" }, { "button", "Left" }, { "state", "down" }, { "position", Json::array({ 40, 138 }) } } });
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 1 }, { "render", "none" }, { "input", press } }).has_value());
+			Result<Json> played = setup.Call("ui.tree", Json{ { "format", "Json" }, { "target", "play" } });
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			const PlaySession* session = setup.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			UiDrawList playedList;
+			AppendUiDrawItems(session->GetScene(), session->GetUi().GetLayout(), playedList, &session->GetUi().GetInteraction());
+			std::map<std::string, UiPassTextBox> playedBoxes = CheckUiTreeTextBoxes((*played)["elements"], playedList, assets);
+			REQUIRE(playedBoxes.contains("Value"));
+			CHECK(playedBoxes["Value"].Caret);
+			CHECK(playedBoxes["Value"].Min.x < 10.0f);
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
 		// M25's friction F11 (Docs/Decisions/0036-m25-tetris-pixel-art.md): every entry reports the scale of its canvas, the
 		// scene pixels per canvas unit that turn its pixel measurements into the canvas units UiRect takes, an element its own
 		// canvas's: a constant-pixel-size canvas's, a match-height canvas's at the resolution laid out at, and a canvas nested
@@ -513,7 +707,8 @@ namespace Engine {
 		// M25's friction F10 (Docs/Decisions/0036-m25-tetris-pixel-art.md): ui.tree {includeInactive: true} lists the inactive
 		// canvases and elements too, each laid out, and its text measured, as if it were active, and marked inactive in both
 		// formats (JSON active false, the outline's "inactive"); without it nothing changes. The target scene is only read: a
-		// copy is laid out, in the edit scene and the play scene alike.
+		// copy is laid out, in the edit scene (its revision and flags unchanged) and the play scene (the session's tick and
+		// state hash unchanged) alike.
 		TEST_CASE("UiMethods: ui.tree lists inactive canvases and elements on request, laid out as if active and marked inactive")
 		{
 			// The Default font measures the texts: the fixture mounts the engine's resources.
@@ -610,6 +805,8 @@ namespace Engine {
 			// active UI.
 			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
 			REQUIRE(setup.Call("play.step", Json{ { "ticks", 1 }, { "render", "none" } }).has_value());
+			Result<Json> stateBefore = setup.Call("play.state", Json::object());
+			REQUIRE_MESSAGE(stateBefore.has_value(), stateBefore.error().ToString());
 			Result<Json> played = setup.Call("ui.tree", Json{ { "format", "Json" }, { "target", "play" } });
 			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
 			CHECK(namesOf((*played)["elements"]) == std::vector<std::string>{ "Hud", "Score" });
@@ -620,6 +817,13 @@ namespace Engine {
 			std::map<std::string, Json> playedEntries = byName((*playedInactive)["elements"]);
 			CHECK(playedEntries["GameOver"]["active"] == Json(false));
 			CHECK(playedEntries["GameOver"]["rect"] == Json{ { "x", 20 }, { "y", 40 }, { "width", 80 }, { "height", 40 } });
+			// Only read in the session as well (the milestone review): its tick and state hash, which cover the scene, the
+			// Random state, the id draws and the ui block, are as before.
+			Result<Json> stateAfter = setup.Call("play.state", Json::object());
+			REQUIRE_MESSAGE(stateAfter.has_value(), stateAfter.error().ToString());
+			CHECK((*stateAfter)["tick"] == (*stateBefore)["tick"]);
+			CHECK((*stateAfter)["stateHash"] == (*stateBefore)["stateHash"]);
+			CHECK_FALSE(JsonReader((*stateBefore)["stateHash"]).ReadString().value_or(std::string()).empty());
 			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
 
 			// Activated, the panel, its title and the canvas's element land where includeInactive laid them out.

@@ -55,13 +55,20 @@ request-scoped report_progress, in both protocol eras; a request without a token
 call which reports nothing (Claude Code, after 30 min) keeps waiting. The progress counts 1, 2, 3 and so on. Calls run
 one at a time, so while a call waits for its turn the message names the tool, how long it has been queued and the tool
 whose call runs (queued_message); once it runs on the worker thread, the message names the tool and how long it has
-run, followed, while editor_launch waits for a machine-wide lock, by the latest report of that wait (the lock, its
-holder's pid, worktree and command, the seconds waited and the bound; launcher.Activity). The heartbeat stops when the
-call returns, is cancelled or raises. Each notification is bounded by NOTIFY_TIMEOUT_SECONDS, and one that cannot be
-sent ends the heartbeat (logged), never the call. A launch that gives up its wait (launcher.LOCK_WAIT_SECONDS, below
-that client's 30 min) fails with LockUnavailable naming the lock, its holders and the seconds waited, and a hint: call
-editor_launch again to keep waiting, or, for the GPU lock, launch with renderer "none" when no rendering is needed
-(lock_unavailable).
+run, followed, while editor_launch waits for a machine-wide lock, by that wait's report (the lock, its holder's pid,
+worktree and command, the seconds waited, counted when the message is sent, and the bound; launcher.Activity). The
+heartbeat stops when the call returns, is cancelled or raises. Each notification is bounded by NOTIFY_TIMEOUT_SECONDS,
+and one that cannot be sent ends the heartbeat (logged), never the call. A launch that gives up its wait
+(launcher.LOCK_WAIT_SECONDS, below that client's 30 min) fails with LockUnavailable naming the lock, its holders and the
+seconds waited, and a hint: call editor_launch again to keep waiting, or, for the GPU lock, launch with renderer "none"
+when no rendering is needed (lock_unavailable).
+
+Cancellation (Docs/Decisions/0036-m25-tetris-pixel-art.md, the milestone review): a call runs on a worker thread, which
+anyio does not interrupt, so a call the client cancels sets the call's cancel event (a threading.Event that
+Bridge.call_tool hands down). editor_launch's wait for a machine-wide lock checks it between its tries of the lock and
+ends (launcher.LaunchCancelled): it spawns nothing, releases a lock it took as the call was cancelled, and leaves the
+bridge free for the next call at once, such as the LockUnavailable hint's launch with renderer "none". Every other call
+runs to its end, each bounded by its method's timeoutSeconds.
 
 Environment (all optional): ENGINE_MCP_TRANSCRIPT redirects the transcript (transcript.py); ENGINE_MCP_USER_DATA_DIR
 replaces the OS user-data root the bridge passes to the editors it launches and scans for session files (the bridge's
@@ -73,6 +80,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import functools
 import hashlib
 import json
 import logging
@@ -80,13 +88,14 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable
 
 import engine_client
 from engine_mcp.connection import EditorConnection, EditorCrashed
-from engine_mcp.launcher import EditorAlreadyOpen, Launcher, LaunchRequest
+from engine_mcp.launcher import EditorAlreadyOpen, LaunchCancelled, Launcher, LaunchRequest
 from Lib import locks
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "catalog.json"
@@ -592,19 +601,23 @@ class Bridge:
         self.catalog_revision = 0
         self.catalog_error = ""
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
-        """Runs one tool: (structuredContent, text, isError). A launch or attach result, a failed one too, reports what
-        its reload of catalog.json found (with_catalog_status)."""
+    def call_tool(self, name: str, arguments: dict[str, Any],
+                  cancelled: threading.Event | None = None) -> tuple[dict[str, Any], str, bool]:
+        """Runs one tool: (structuredContent, text, isError). `cancelled` is set when the client cancels the call (the
+        server's run_with_progress), which ends editor_launch's wait for a machine-wide lock (Launcher.wait_for_lock).
+        A launch or attach result, a failed one too, reports what its reload of catalog.json found
+        (with_catalog_status)."""
         revision = self.catalog_revision
-        structured, text, is_error = self.run_tool(name, arguments)
+        structured, text, is_error = self.run_tool(name, arguments, cancelled)
         if name in CATALOG_RELOADING_TOOL_NAMES:
             return self.with_catalog_status(structured, text, is_error, self.catalog_revision != revision)
         return structured, text, is_error
 
-    def run_tool(self, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
+    def run_tool(self, name: str, arguments: dict[str, Any],
+                 cancelled: threading.Event | None = None) -> tuple[dict[str, Any], str, bool]:
         """call_tool's dispatch, with the bridge's and the editor's expected failures mapped to error results."""
         local: dict[str, Callable[[dict[str, Any]], tuple[dict[str, Any], str, bool]]] = {
-            "editor_launch": self.editor_launch,
+            "editor_launch": functools.partial(self.editor_launch, cancelled=cancelled),
             "editor_attach": self.editor_attach,
             "editor_status": self.editor_status,
             "editor_shutdown": self.editor_shutdown,
@@ -631,6 +644,9 @@ class Bridge:
             return already_open.to_json(), str(already_open), True
         except locks.LockUnavailable as error:
             return lock_unavailable(error)
+        except LaunchCancelled as error:
+            # The client cancelled the call, so it never reads this answer; the bridge is free for the next call.
+            return _failure("Cancelled", str(error))
         except engine_client.ConnectionClosed as error:
             return _failure("ConnectionClosed", str(error))
         except TimeoutError as error:
@@ -646,7 +662,8 @@ class Bridge:
         structured, text = format_result(response)
         return structured, text, "error" in response
 
-    def editor_launch(self, arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
+    def editor_launch(self, arguments: dict[str, Any],
+                      cancelled: threading.Event | None = None) -> tuple[dict[str, Any], str, bool]:
         self.reload_catalog()
         project = arguments.get("project")
         if not isinstance(project, str) or not project:
@@ -661,7 +678,7 @@ class Bridge:
                                 headless=boolean_argument(arguments, "headless", True),
                                 renderer=str(arguments.get("renderer", "none")),
                                 recover=boolean_argument(arguments, "recover", False))
-        self.connection = self.launcher.launch(request)
+        self.connection = self.launcher.launch(request, cancelled)
         status = self.connection.describe()
         verb = "Launched" if self.connection.supervised else "Attached to the running"
         text = f"{verb} editor (pid {status['pid']}) on {status['project'] or 'no project'}"
@@ -1003,7 +1020,7 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
             if times.started is None:
                 message = queued_message(name, now - times.arrived, running_tool)
             else:
-                message = progress_message(name, now - times.started, bridge.launcher.activity.read())
+                message = progress_message(name, now - times.started, bridge.launcher.activity.read(now))
             # A notification is best effort: one that cannot be sent ends the heartbeat, never the call.
             with anyio.move_on_after(NOTIFY_TIMEOUT_SECONDS):
                 try:
@@ -1012,8 +1029,18 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
                     LOGGER.warning("cannot send the progress of %s, so it sends no more: %s", name, error)
                     return
 
-    async def run_in_turn(context: ServerRequestContext, name: str, arguments: dict[str, Any],
-                          times: CallTimes) -> tuple[dict[str, Any], str, bool]:
+    async def set_when_cancelled(cancelled: threading.Event) -> None:
+        # Sets the call's cancel event once the call's scope is cancelled (the client cancelled it): the worker thread
+        # ignores the cancellation until it returns (to_thread.run_sync), so without the event editor_launch would wait
+        # out its whole wait for a machine-wide lock, holding the bridge, and then spawn an editor nobody asked for
+        # (module comment, "Cancellation"). The heartbeat's end sets it too, when nothing reads it any more.
+        try:
+            await anyio.sleep_forever()
+        finally:
+            cancelled.set()
+
+    async def run_in_turn(context: ServerRequestContext, name: str, arguments: dict[str, Any], times: CallTimes,
+                          cancelled: threading.Event) -> tuple[dict[str, Any], str, bool]:
         # One call at a time, in turn (the lock): the bridge's state is never shared between calls.
         nonlocal notified_revision, running_tool
         async with lock:
@@ -1023,7 +1050,7 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
                 # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds), so the
                 # call runs on a worker thread and the event loop keeps serving the MCP session meanwhile, the
                 # heartbeats included.
-                return await anyio.to_thread.run_sync(bridge.call_tool, name, arguments)
+                return await anyio.to_thread.run_sync(bridge.call_tool, name, arguments, cancelled)
             finally:
                 running_tool = ""
                 # Also when the client cancelled the call (the worker thread still finished the reload) or it raised,
@@ -1039,14 +1066,17 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
 
     async def run_with_progress(context: ServerRequestContext, name: str,
                                 arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
-        # The call with its heartbeat, which starts when the request arrives, before the call waits for its turn.
+        # The call with its heartbeat, which starts when the request arrives, before the call waits for its turn, and
+        # with the task that sets the call's cancel event when the client cancels it.
         times = CallTimes(arrived=time.monotonic())
+        cancelled = threading.Event()
         failure: Exception | None = None
         outcome: tuple[dict[str, Any], str, bool] | None = None
         async with anyio.create_task_group() as heartbeat:
             heartbeat.start_soon(send_progress, context, name, times)
+            heartbeat.start_soon(set_when_cancelled, cancelled)
             try:
-                outcome = await run_in_turn(context, name, arguments, times)
+                outcome = await run_in_turn(context, name, arguments, times, cancelled)
             except Exception as error:
                 # Raised again below, outside the task group, which would wrap it in an ExceptionGroup: the SDK then
                 # answers the call with this error's own message.

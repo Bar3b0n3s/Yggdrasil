@@ -170,47 +170,47 @@ Example.Fields = {{
 
 return Script.Define("Example", Example)
 """,
-    # The falling-block Game behaviour of Architecture §13.11, for its OnFixedUpdate excerpt. The methods are part of
-    # the instance type, so strict mode checks self-method calls (`self:TryMove(0, -1)`).
+    # The Tetris Game behaviour of Architecture §13.11 (M25's pixel-art build), for its OnUiClick and OnFixedUpdate
+    # excerpt: the match and its controls as the game's Match module types them, and the behaviour's local helpers. The
+    # match's methods are part of its type, so strict mode checks the calls (`match:Step(controls)`).
     "TetrisGame": f"""--!strict
-local Board = {{}}
+export type Controls = {{
+\tLeft: boolean,
+\tRight: boolean,
+\tLeftPressed: boolean,
+\tRightPressed: boolean,
+\tSoftDrop: boolean,
+\tHardDrop: boolean,
+\tRotateCW: boolean,
+\tRotateCCW: boolean,
+\tHold: boolean,
+}}
 
-function Board.GravityTicksForLevel(level: number): number
-\treturn math.max(1, 48 - level * 5)
-end
+export type Match = {{
+\tGameOver: boolean,
+\tEvents: {{ string }},
+\tStep: (self: Match, controls: Controls) -> (),
+\tReset: (self: Match) -> (),
+}}
 
 export type Game = ScriptInstance & {{
-\tGameOver: boolean,
-\tGravityTicks: number,
-\tLevel: number,
-\tReset: (self: Game) -> (),
-\tHandleShift: (self: Game) -> (),
-\tTryRotate: (self: Game, direction: number) -> boolean,
-\tTryMove: (self: Game, columns: number, rows: number) -> boolean,
-\tHardDrop: (self: Game) -> (),
-\tBeginLockDelay: (self: Game) -> (),
+\tMatch: Match,
+\tControls: Controls,
+\tRestartClicked: boolean,
+\tRestarts: number,
 }}
 
 local Game = {{}}
 
-function Game.Reset(self: Game)
-\tself.GameOver = false
-\tself.GravityTicks = 0
+local function onEvent(self: Game, event: string)
+\tif event == "GameOver" then
+\t\tself.RestartClicked = false
+\tend
 end
 
-function Game.HandleShift(self: Game) end
-
-function Game.TryRotate(self: Game, direction: number): boolean
-\treturn direction ~= 0
+local function refresh(self: Game)
+\tself.Controls.Hold = false
 end
-
-function Game.TryMove(self: Game, columns: number, rows: number): boolean
-\treturn columns ~= 0 or rows ~= 0
-end
-
-function Game.HardDrop(self: Game) end
-
-function Game.BeginLockDelay(self: Game) end
 
 {PRELUDE_MARKER}
 

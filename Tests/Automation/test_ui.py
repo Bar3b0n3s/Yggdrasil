@@ -142,13 +142,26 @@ class UiTreeTests(AutomationTestCase):
         self.assertFalse(client.call("entity.get", {"entity": "/Hud/GameOver"})["entity"]["active"])
 
     def test_ui_tree_works_in_the_runtime(self) -> None:
+        # The exported Runtime serves ui.tree from its own asset manager and scene (the Dist Runtime holds no
+        # automation, so the Release export is the one that serves it). M25's milestone review: its text measurement
+        # (textBounds, textOverflows: the font loaded from the pak), the element scale, active and includeInactive
+        # (a serializer copy of the running scene) answer as the editor's do.
         if not self.require_gpu():
             return
         client = self.connect(self.start_editor())
         self.create_project(client, TINY_GAME_NAME)
         build_tiny_game(client)
         create_ui(client)
+        notice_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [10, 30],
+                       "Size": [60, 10]}
+        client.call("edit.batch", {"label": "Notice", "ops": [
+            {"method": "entity.create", "params": {"name": "Notice", "parent": "/Hud", "active": False, "components": {
+                "UiRect": notice_rect, "UiText": {"Text": "Paused", "Size": 5, "Wrap": False}}}},
+        ]})
         client.call("scene.save")
+        size = {"format": "Json", "width": 200, "height": 100}
+        edited = client.call("ui.tree", size)["elements"]
+        edited_everything = client.call("ui.tree", {**size, "includeInactive": True})["elements"]
         executable = exported_executable(export_tiny_game(client))
         client.call("session.shutdown")
         self.editors[-1].wait()
@@ -161,6 +174,27 @@ class UiTreeTests(AutomationTestCase):
         listed = runtime.call("ui.tree", {"format": "Json"})
         self.assertEqual([element["name"] for element in listed["elements"]], ["Hud", "Panel", "Label"])
         self.assertTrue(listed["elements"][1]["visible"])
+        self.assertEqual([element["scale"] for element in listed["elements"]], [2, 2, 2])
+        self.assertTrue(all(element["active"] for element in listed["elements"]))
+        label = listed["elements"][2]["textBounds"]
+        self.assertGreater(label["width"], 0)
+        self.assertGreater(label["height"], 0)
+
+        # At the editor's resolution, every entry measures as the editor's did, the hidden one included.
+        everything = runtime.call("ui.tree", {**size, "includeInactive": True})["elements"]
+        self.assertEqual([element["name"] for element in everything], ["Hud", "Panel", "Label", "Notice"])
+        notice = everything[3]
+        self.assertFalse(notice["active"])
+        self.assertGreater(notice["textBounds"]["width"], 0)
+        for expected_list, answered_list in ((edited, runtime.call("ui.tree", size)["elements"]),
+                                             (edited_everything, everything)):
+            self.assertEqual(len(answered_list), len(expected_list))
+            for expected, answered in zip(expected_list, answered_list):
+                with self.subTest(element=expected["name"], inactive=len(expected_list) > 3):
+                    for key in ("name", "active", "scale", "rect", "textOverflows"):
+                        self.assertEqual(answered[key], expected[key], key)
+                    for edge in ("x", "y", "width", "height"):
+                        self.assertAlmostEqual(answered["textBounds"][edge], expected["textBounds"][edge], places=3)
         runtime.call("session.shutdown")
         self.assertEqual(game.wait(), EXIT_SUCCESS, game.output())
 
