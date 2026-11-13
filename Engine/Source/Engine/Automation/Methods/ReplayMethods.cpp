@@ -373,7 +373,16 @@ namespace Engine {
 
 			[[nodiscard]] InputReplayResult MakeReplayResult(const ReplayPlaybackResult& playback) const
 			{
-				InputReplayResult result{ .Passed = playback.Passed, .Verified = playback.Verified, .HashChecked = playback.HashChecked, .HashMatched = playback.HashMatched, .FinalTick = ToAutomationCounter(playback.FinalTick), .StateHash = playback.StateHash, .ExpectedStateHash = playback.ExpectedStateHash, .StopReason = playback.StopReason, .CheckpointsChecked = ToAutomationCounter(playback.CheckpointsChecked), .CheckpointFailed = playback.CheckpointFailed, .WithoutInput = m_WithoutInput, .CheckpointsFailed = ToAutomationCounter(playback.CheckpointsFailed), .FirstFailedCheckpointTick = ToAutomationCounter(playback.FirstCheckpointFailure.has_value() ? playback.FirstCheckpointFailure->Tick : 0), .Changes = playback.Changes, .Expect = {} };
+				// M25's friction F12 (Docs/Decisions/0036-m25-tetris-pixel-art.md): the failure data counts every checkpoint whose
+				// hash differed. A playback that continued past them counted them itself (CheckpointsFailed, FirstCheckpointFailure);
+				// one that a checkpoint stopped (CheckpointFailed without FirstCheckpointFailure) failed at that one checkpoint, at
+				// the tick where it stopped (FinalTick).
+				const bool stoppedAtCheckpoint = playback.CheckpointFailed && !playback.FirstCheckpointFailure.has_value();
+				const uint64_t checkpointsFailed = stoppedAtCheckpoint ? 1 : playback.CheckpointsFailed;
+				uint64_t firstFailedTick = stoppedAtCheckpoint ? playback.FinalTick : 0;
+				if (playback.FirstCheckpointFailure.has_value())
+					firstFailedTick = playback.FirstCheckpointFailure->Tick;
+				InputReplayResult result{ .Passed = playback.Passed, .Verified = playback.Verified, .HashChecked = playback.HashChecked, .HashMatched = playback.HashMatched, .FinalTick = ToAutomationCounter(playback.FinalTick), .StateHash = playback.StateHash, .ExpectedStateHash = playback.ExpectedStateHash, .StopReason = playback.StopReason, .CheckpointsChecked = ToAutomationCounter(playback.CheckpointsChecked), .CheckpointFailed = playback.CheckpointFailed, .WithoutInput = m_WithoutInput, .CheckpointsFailed = ToAutomationCounter(checkpointsFailed), .FirstFailedCheckpointTick = ToAutomationCounter(firstFailedTick), .Changes = playback.Changes, .Expect = {} };
 				for (size_t index = 0; index < playback.Expect.size(); ++index)
 				{
 					const ReplayExpectationOutcome& outcome = playback.Expect[index];
@@ -625,10 +634,10 @@ namespace Engine {
 			.Field("expectedStateHash", &InputReplayResult::ExpectedStateHash, "Recorded state hash at finalTick: the final hash, or the failed checkpoint's.")
 			.Field("stopReason", &InputReplayResult::StopReason, "Why playback ended before the replay's final tick (a quit, a fatal script error or a checkpoint whose hash differed); empty when it reached it.")
 			.Field("checkpointsChecked", &InputReplayResult::CheckpointsChecked, "State-hash checkpoints compared (strictHash), the failed one included.")
-			.Field("checkpointFailed", &InputReplayResult::CheckpointFailed, "A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first.")
+			.Field("checkpointFailed", &InputReplayResult::CheckpointFailed, "A checkpoint's hash differed (checkpointsFailed counts them, firstFailedCheckpointTick names the first). Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick.")
 			.Field("withoutInput", &InputReplayResult::WithoutInput, "None of the replay's input events were applied.")
-			.Field("checkpointsFailed", &InputReplayResult::CheckpointsFailed, "continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise.")
-			.Field("firstFailedCheckpointTick", &InputReplayResult::FirstFailedCheckpointTick, "continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint.")
+			.Field("checkpointsFailed", &InputReplayResult::CheckpointsFailed, "The checkpoints whose hash differed: with continuePastCheckpoint every one, without it 1 when the first that differed stopped playback; 0 when none differed.")
+			.Field("firstFailedCheckpointTick", &InputReplayResult::FirstFailedCheckpointTick, "The tick of the first checkpoint whose hash differed (without continuePastCheckpoint the one where playback stopped, finalTick); 0 when none differed.")
 			.Field("changes", &InputReplayResult::Changes, "When a hash differed in a playback with the replay's input: what changed since the recording, by the replay's start fingerprint (an entity, a component of an entity, a script, a material or another referenced asset), one line each; empty for a replay recorded without a fingerprint.")
 			.Field("expect", &InputReplayResult::Expect, "Every expectation outcome in authored order.");
 		registry.Struct<InputReadReplayParams>("InputReadReplayParams", "Read a replay back, its input events a page at a time.")

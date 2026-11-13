@@ -84,8 +84,10 @@ namespace Engine {
 		uint32_t CheckpointsChecked = 0; // ReplayPlaybackResult::CheckpointsChecked
 		bool CheckpointFailed = false;   // ReplayPlaybackResult::CheckpointFailed
 		bool WithoutInput = false;       // the playback applied none of the replay's events (params.withoutInput)
-		// continuePastCheckpoint (M19 decision 3): ReplayPlaybackResult::CheckpointsFailed and the tick of its
-		// FirstCheckpointFailure; 0 otherwise.
+		// The checkpoints whose hash differed and the tick of the first: with continuePastCheckpoint (M19 decision 3)
+		// ReplayPlaybackResult::CheckpointsFailed and the tick of its FirstCheckpointFailure; without it (M25's friction F12,
+		// Docs/Decisions/0036-m25-tetris-pixel-art.md) 1 and FinalTick when a checkpoint stopped the playback
+		// (CheckpointFailed); 0 when none differed.
 		uint32_t CheckpointsFailed = 0;
 		uint32_t FirstFailedCheckpointTick = 0;
 		// ReplayPlaybackResult::Changes (M19 decision 2, A-FPRINT): what changed since the recording, by the replay's start
@@ -183,7 +185,8 @@ namespace Engine {
 		// Validation with the complete outcome in error data, preserving all locations and hash status; so does gameplay
 		// that quits or stops fatally before the replay's final tick (stopReason, the tick reached, unevaluated later
 		// expectations), which is a failed replay, never Cancelled. With strictHash a checkpoint whose hash differs ends the
-		// playback there as failed (checkpointFailed, the tick and both hashes in the message and the outcome); its error, and
+		// playback there as failed (checkpointFailed, the tick and both hashes in the message and the outcome, and, M25's
+		// friction F12, checkpointsFailed 1 and firstFailedCheckpointTick its tick, as continuePastCheckpoint counts it); its error, and
 		// that of a final hash that differs, carries GetReplayDivergenceHint as its hint (M17 friction F03). withoutInput
 		// applies none of the replay's events (ReplayPlaybackOptions::WithoutInput): a replay whose verification still passes
 		// that way proves nothing about its input. That playback is the input check, whose failure is the expected outcome

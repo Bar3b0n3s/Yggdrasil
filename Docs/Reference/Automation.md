@@ -1042,10 +1042,10 @@ Replays recorded inputs in a fresh session; verification failures retain every e
 | `expectedStateHash` | `String` | Recorded state hash at finalTick: the final hash, or the failed checkpoint's. |
 | `stopReason` | `String` | Why playback ended before the replay's final tick (a quit, a fatal script error or a checkpoint whose hash differed); empty when it reached it. |
 | `checkpointsChecked` | `UInt32` | State-hash checkpoints compared (strictHash), the failed one included. |
-| `checkpointFailed` | `Bool` | A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first. |
+| `checkpointFailed` | `Bool` | A checkpoint's hash differed (checkpointsFailed counts them, firstFailedCheckpointTick names the first). Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick. |
 | `withoutInput` | `Bool` | None of the replay's input events were applied. |
-| `checkpointsFailed` | `UInt32` | continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise. |
-| `firstFailedCheckpointTick` | `UInt32` | continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint. |
+| `checkpointsFailed` | `UInt32` | The checkpoints whose hash differed: with continuePastCheckpoint every one, without it 1 when the first that differed stopped playback; 0 when none differed. |
+| `firstFailedCheckpointTick` | `UInt32` | The tick of the first checkpoint whose hash differed (without continuePastCheckpoint the one where playback stopped, finalTick); 0 when none differed. |
 | `changes` | `Array<String>` | When a hash differed in a playback with the replay's input: what changed since the recording, by the replay's start fingerprint (an entity, a component of an entity, a script, a material or another referenced asset), one line each; empty for a replay recorded without a fingerprint. |
 | `expect` | `Array<InputReplayExpectationResult>` | Every expectation outcome in authored order. |
 
