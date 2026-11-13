@@ -49,17 +49,19 @@ notification on the session of a handshake-era connection and publishes it to th
 the SDK advertises listChanged there too). A call that is cancelled or fails still notifies, and a change whose
 notification could not be sent is sent after the next call.
 
-Progress (Docs/Decisions/0036-m25-tetris-pixel-art.md, friction F14): while a tool call runs on the worker thread, the
+Progress (Docs/Decisions/0036-m25-tetris-pixel-art.md, friction F14): from the moment a tool call's request arrives, the
 server sends notifications/progress every PROGRESS_INTERVAL_SECONDS against the request's progress token (the SDK's
 request-scoped report_progress, in both protocol eras; a request without a token gets none), so a client that ends a
-call which reports nothing (Claude Code, after 30 min) keeps waiting. The progress counts 1, 2, 3 and so on, and the
-message names the tool and how long it has run, followed, while editor_launch waits for a machine-wide lock, by the
-latest report of that wait (the lock, its holder's pid, worktree and command, the seconds waited and the bound;
-launcher.Activity). The heartbeat stops when the call returns, is cancelled or raises. Each notification is bounded by
-NOTIFY_TIMEOUT_SECONDS, and one that cannot be sent ends the heartbeat (logged), never the call. A launch that gives up
-its wait (launcher.LOCK_WAIT_SECONDS, below that client's 30 min) fails with LockUnavailable naming the lock, its
-holders and the seconds waited, and a hint: call editor_launch again to keep waiting, or, for the GPU lock, launch with
-renderer "none" when no rendering is needed (lock_unavailable).
+call which reports nothing (Claude Code, after 30 min) keeps waiting. The progress counts 1, 2, 3 and so on. Calls run
+one at a time, so while a call waits for its turn the message names the tool, how long it has been queued and the tool
+whose call runs (queued_message); once it runs on the worker thread, the message names the tool and how long it has
+run, followed, while editor_launch waits for a machine-wide lock, by the latest report of that wait (the lock, its
+holder's pid, worktree and command, the seconds waited and the bound; launcher.Activity). The heartbeat stops when the
+call returns, is cancelled or raises. Each notification is bounded by NOTIFY_TIMEOUT_SECONDS, and one that cannot be
+sent ends the heartbeat (logged), never the call. A launch that gives up its wait (launcher.LOCK_WAIT_SECONDS, below
+that client's 30 min) fails with LockUnavailable naming the lock, its holders and the seconds waited, and a hint: call
+editor_launch again to keep waiting, or, for the GPU lock, launch with renderer "none" when no rendering is needed
+(lock_unavailable).
 
 Environment (all optional): ENGINE_MCP_TRANSCRIPT redirects the transcript (transcript.py); ENGINE_MCP_USER_DATA_DIR
 replaces the OS user-data root the bridge passes to the editors it launches and scans for session files (the bridge's
@@ -307,11 +309,27 @@ def describe_running_editors(editors: list[dict[str, Any]]) -> str:
             f"of them as it is, with its project and renderer")
 
 
+@dataclasses.dataclass
+class CallTimes:
+    """The clock of one tool call's progress notifications (module comment, "Progress"): when its request arrived, and
+    when it began to run (None while it waits for the running call to end)."""
+
+    arrived: float
+    started: float | None = None
+
+
 def progress_message(name: str, elapsed: float, activity: str) -> str:
     """The message of a running tool call's progress notification (module comment, "Progress"): the tool and how long it
     has run, then `activity`, the launcher's report of what it waits for (launcher.Activity), when there is one."""
     running = f"{name} running for {elapsed:.0f} s"
     return f"{running}: {activity}" if activity else running
+
+
+def queued_message(name: str, queued: float, running: str) -> str:
+    """The message of a queued tool call's progress notification (module comment, "Progress"): the tool, how long it
+    has waited for its turn and the tool whose call runs meanwhile ("" between two calls)."""
+    behind = f"the running {running} call" if running else "the running call"
+    return f"{name} queued for {queued:.0f} s behind {behind}"
 
 
 def lock_unavailable(error: locks.LockUnavailable) -> tuple[dict[str, Any], str, bool]:
@@ -954,6 +972,8 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
     # streams, which the listen handler serves from this bus (and which make the SDK advertise listChanged there).
     bus = InMemorySubscriptionBus()
     lock = anyio.Lock()
+    # The tool whose call holds the lock ("" between calls), which the progress of a call queued behind it names.
+    running_tool = ""
     # The catalogue revision the client last heard about: a call compares it with the bridge's, so a change is sent
     # once, and a change whose notification could not be sent goes out after the next call.
     notified_revision = bridge.catalog_revision
@@ -971,15 +991,19 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
         # Immediately stale (ttlMs 0 on a 2026-07-28 connection): a launch or attach may change the tool list.
         return types.ListToolsResult(tools=tool_list(), ttl_ms=0)
 
-    async def send_progress(context: ServerRequestContext, name: str) -> None:
-        # The heartbeat of a running call (module comment, "Progress"), until the call cancels it. The SDK's
-        # request-scoped report_progress sends nothing for a request without a progress token.
-        started = time.monotonic()
+    async def send_progress(context: ServerRequestContext, name: str, times: CallTimes) -> None:
+        # The heartbeat of a call from its arrival (module comment, "Progress"), until the call cancels it: queued
+        # behind the running call while it waits for the lock, then running. The SDK's request-scoped report_progress
+        # sends nothing for a request without a progress token.
         progress = 0
         while True:
             await anyio.sleep(PROGRESS_INTERVAL_SECONDS)
             progress += 1
-            message = progress_message(name, time.monotonic() - started, bridge.launcher.activity.read())
+            now = time.monotonic()
+            if times.started is None:
+                message = queued_message(name, now - times.arrived, running_tool)
+            else:
+                message = progress_message(name, now - times.started, bridge.launcher.activity.read())
             # A notification is best effort: one that cannot be sent ends the heartbeat, never the call.
             with anyio.move_on_after(NOTIFY_TIMEOUT_SECONDS):
                 try:
@@ -988,16 +1012,41 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
                     LOGGER.warning("cannot send the progress of %s, so it sends no more: %s", name, error)
                     return
 
+    async def run_in_turn(context: ServerRequestContext, name: str, arguments: dict[str, Any],
+                          times: CallTimes) -> tuple[dict[str, Any], str, bool]:
+        # One call at a time, in turn (the lock): the bridge's state is never shared between calls.
+        nonlocal notified_revision, running_tool
+        async with lock:
+            running_tool = name
+            times.started = time.monotonic()
+            try:
+                # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds), so the
+                # call runs on a worker thread and the event loop keeps serving the MCP session meanwhile, the
+                # heartbeats included.
+                return await anyio.to_thread.run_sync(bridge.call_tool, name, arguments)
+            finally:
+                running_tool = ""
+                # Also when the client cancelled the call (the worker thread still finished the reload) or it raised,
+                # shielded from that cancellation and bounded. Before returning, the server sends the notification on
+                # the session of a handshake-era connection and publishes it to the listen streams of a 2026-07-28 one
+                # (the SDK drops the session's copy there by design).
+                revision = bridge.catalog_revision
+                if revision != notified_revision:
+                    with anyio.move_on_after(NOTIFY_TIMEOUT_SECONDS, shield=True):
+                        await bus.publish(ToolsListChanged())
+                        await context.session.send_tool_list_changed()
+                        notified_revision = revision
+
     async def run_with_progress(context: ServerRequestContext, name: str,
                                 arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
-        # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds), so the call
-        # runs on a worker thread and the event loop keeps serving the MCP session meanwhile, its heartbeat included.
+        # The call with its heartbeat, which starts when the request arrives, before the call waits for its turn.
+        times = CallTimes(arrived=time.monotonic())
         failure: Exception | None = None
         outcome: tuple[dict[str, Any], str, bool] | None = None
         async with anyio.create_task_group() as heartbeat:
-            heartbeat.start_soon(send_progress, context, name)
+            heartbeat.start_soon(send_progress, context, name, times)
             try:
-                outcome = await anyio.to_thread.run_sync(bridge.call_tool, name, arguments)
+                outcome = await run_in_turn(context, name, arguments, times)
             except Exception as error:
                 # Raised again below, outside the task group, which would wrap it in an ExceptionGroup: the SDK then
                 # answers the call with this error's own message.
@@ -1010,22 +1059,7 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
         return outcome
 
     async def call_tool(context: ServerRequestContext, params: types.CallToolRequestParams) -> Any:
-        nonlocal notified_revision
-        arguments = dict(params.arguments or {})
-        async with lock:
-            try:
-                structured, text, is_error = await run_with_progress(context, params.name, arguments)
-            finally:
-                # Also when the client cancelled the call (the worker thread still finished the reload) or it raised,
-                # shielded from that cancellation and bounded. Before returning, the server sends the notification on
-                # the session of a handshake-era connection and publishes it to the listen streams of a 2026-07-28 one
-                # (the SDK drops the session's copy there by design).
-                revision = bridge.catalog_revision
-                if revision != notified_revision:
-                    with anyio.move_on_after(NOTIFY_TIMEOUT_SECONDS, shield=True):
-                        await bus.publish(ToolsListChanged())
-                        await context.session.send_tool_list_changed()
-                        notified_revision = revision
+        structured, text, is_error = await run_with_progress(context, params.name, dict(params.arguments or {}))
         content: list[Any] = [types.TextContent(type="text", text=text)]
         structured, image = tool_content(structured, is_error)
         if image is not None:

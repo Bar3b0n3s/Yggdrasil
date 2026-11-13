@@ -1,10 +1,10 @@
-"""The progress of a running tool call (Docs/Architecture.md §13.8 "Progress"; Docs/Decisions/
-0036-m25-tetris-pixel-art.md, friction F14), through the official SDK's client on its in-memory transport: a request
-with a progress token gets notifications/progress while the call runs, naming the holder of a machine-wide lock while
-editor_launch waits for it and then answering with LockUnavailable; a request without one gets none; a notification
-that cannot be sent never fails the call; and the launch's default wait ends before a client that hears nothing gives
-up. No editor is spawned: the waits are for a lock of a test's own lock directory (lock_holder), and the long calls are
-stand-ins."""
+"""The progress of a tool call (Docs/Architecture.md §13.8 "Progress"; Docs/Decisions/0036-m25-tetris-pixel-art.md,
+friction F14), through the official SDK's client on its in-memory transport: a request with a progress token gets
+notifications/progress while the call waits for its turn behind another call and while it runs, naming the holder of a
+machine-wide lock while editor_launch waits for it and then answering with LockUnavailable; a request without one gets
+none; a notification that cannot be sent never fails the call; and the launch's default wait ends before a client that
+hears nothing gives up. No editor is spawned: the waits are for a lock of a test's own lock directory (lock_holder), and
+the long calls are stand-ins."""
 
 from __future__ import annotations
 
@@ -188,6 +188,50 @@ class ProgressTests(unittest.TestCase):
                     self.assertTrue(message.startswith("editor_status"), message)
                     self.assertRegex(message, r"\b\d+ s$")
                     self.assertNotIn("lock", message)
+                values = [progress for progress, _ in recorder.notifications]
+                self.assertEqual(values, sorted(set(values)), "the progress increases")
+
+    def test_a_call_queued_behind_a_running_call_reports_that_it_waits(self) -> None:
+        # Calls run one at a time: a call that arrives while another runs (a long export or test run) reports, while it
+        # waits for its turn, that it is queued behind that call, so its client does not give up on it either.
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                entered = threading.Event()
+                recorder = ProgressRecorder("editor_status")
+                status = self.stand_in_status(recorder.heard)
+
+                def first_status(arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
+                    # Runs until the queued call has reported that it waits behind it (bounded).
+                    entered.set()
+                    return status(arguments)
+
+                mcp_server, _ = server._build_server(self.bridge)
+                results: dict[str, types.CallToolResult] = {}
+
+                async def session() -> None:
+                    with anyio.fail_after(SESSION_TIMEOUT_SECONDS):
+                        async with Client(mcp_server, mode=mode) as client:
+                            async def call_first() -> None:
+                                results["first"] = await client.call_tool("editor_status", {})
+
+                            async with anyio.create_task_group() as group:
+                                group.start_soon(call_first)
+                                await anyio.to_thread.run_sync(entered.wait, WAIT_SECONDS)
+                                results["queued"] = await client.call_tool("engine_methods", {},
+                                                                           progress_callback=recorder.record)
+
+                with mock.patch.object(self.bridge, "editor_status", first_status):
+                    anyio.run(session)
+                self.assertTrue(entered.is_set())
+                self.assertFalse(results["first"].is_error, results["first"].content)
+                self.assertEqual(self.text_of(results["first"]), "status read")
+                self.assertFalse(results["queued"].is_error, results["queued"].content)
+                self.assertTrue(recorder.heard.is_set(), recorder.notifications)
+                # The queued tool, that it is queued and for how long, and the tool whose call runs meanwhile.
+                queued = [message for _, message in recorder.notifications if "editor_status" in message]
+                self.assertTrue(queued[0].startswith("engine_methods"), queued[0])
+                self.assertIn("queued", queued[0])
+                self.assertRegex(queued[0], r"\b\d+ s\b")
                 values = [progress for progress, _ in recorder.notifications]
                 self.assertEqual(values, sorted(set(values)), "the progress increases")
 
