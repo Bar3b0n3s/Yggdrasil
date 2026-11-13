@@ -43,9 +43,11 @@ namespace Engine {
 		// The UI components it holds (UiCanvas, UiRect, UiImage, UiText, UiLayout, UiLayoutElement), registry order.
 		std::vector<std::string> Components{};
 		UiPixelRect Rect{}; // laid out (UiLayoutNode::Min and Max); a canvas's is the scene image
-		// A canvas's own (UiCanvasLayout): its UiCanvas SortOrder and its scale, the scene pixels per canvas unit at the
-		// resolution laid out at (what turns a pixel measurement into the canvas units UiRect takes); 0 for an element.
+		// A canvas's own UiCanvas SortOrder (UiCanvasLayout); 0 for an element.
 		int32_t SortOrder = 0;
+		// The scale of the entry's canvas (UiCanvasLayout::Scale), a canvas's own and an element's its canvas's (M25's friction
+		// F11, Docs/Decisions/0036-m25-tetris-pixel-art.md): the scene pixels per canvas unit at the resolution laid out at, what
+		// turns a pixel measurement of the entry into the canvas units UiRect takes (a World canvas's: its canvas pixels per unit).
 		float Scale = 0.0f;
 		bool Clipped = false; // Clip holds the clip its clipping ancestors impose
 		UiPixelRect Clip{};
@@ -71,26 +73,36 @@ namespace Engine {
 		// element). TextOverflows: that box reaches beyond Rect by more than UiTextOverflowTolerance on a side.
 		UiPixelRect TextBounds{};
 		bool TextOverflows = false;
+		// M25's friction F10 (registered after TextOverflows): whether the entity is effectively active now (Entity::IsActive: it
+		// and every ancestor) in the scene read. UiTreeParams::IncludeInactive lists the inactive ones, laid out as if they were
+		// active; otherwise only the play session's current layout can hold one, deactivated after the session laid it out.
+		bool Active = true;
 	};
 
 	// M25's F02: how far a text's box may reach beyond its rectangle before ui.tree reports it as overflowing, in pixels: the
 	// rounding of the alignment's arithmetic, never a visible overhang.
 	inline constexpr float UiTextOverflowTolerance = 0.01f;
 
-	// ui.tree {canvas?, depth?, format?, width?, height?, target?}: the UI of the target scene laid out in scene pixels: every
-	// canvas, or the one `canvas` names (an EntityRef to an entity with a UiCanvas), with its elements at most `depth` levels
-	// below it (0: unlimited). The play scene reads the session's current layout (UiSystem::GetLayout) at its scene resolution
-	// unless `width` and `height` ask for another; the edit scene is laid out at `width` x `height`, by default its game view's
-	// scene resolution at the project's window size (GetDeterministicViewSize, the size of every deterministic session's
-	// view, through ComputeGameViewOutputMapping: a PixelPerfectCamera's reference resolution under one, M22's landing).
+	// ui.tree {canvas?, depth?, format?, width?, height?, target?, includeInactive?}: the UI of the target scene laid out in scene
+	// pixels: every canvas, or the one `canvas` names (an EntityRef to an entity with a UiCanvas), with its elements at most
+	// `depth` levels below it (0: unlimited). The play scene reads the session's current layout (UiSystem::GetLayout) at its
+	// scene resolution unless `width` and `height` ask for another; the edit scene is laid out at `width` x `height`, by default
+	// its game view's scene resolution at the project's window size (GetDeterministicViewSize, the size of every deterministic
+	// session's view, through ComputeGameViewOutputMapping: a PixelPerfectCamera's reference resolution under one, M22's
+	// landing). Only effectively active canvases and elements are laid out and listed, unless `includeInactive` (M25's friction
+	// F10, Docs/Decisions/0036-m25-tetris-pixel-art.md): then a copy of the scene as it is now (the serializer's, the one
+	// scene-copy path), in which every entity is active, is laid out at that scene resolution in its place (the play scene's
+	// too, rather than the session's layout), so an inactive canvas or element is listed where it would land and its text
+	// measured as if it were active, and marked inactive (UiTreeEntry::Active false); the target scene is only read.
 	// Text: a header line
 	// "<file name>  rev <n>  <width>x<height> scene pixels  <count> elements", then per canvas a line "<name> <8 hex>
-	// UiCanvas(sort <n>, scale <s>)" and per element a line with box-drawing indentation, its name, its first 8 hex digits, its
-	// short component forms ("UiImage(<sheet path>#<frame>)", "UiText(\"<text>\")", "UiLayout(<kind> <direction>)"; C22.2's
-	// widgets "UiButton", "UiToggle(on|off)", "UiSlider(<value as read>)" and "UiScrollView(<x>,<y>)", the scroll position as
-	// read), its rectangle "(x,y wxh)", and "clipped" or "hidden" when it is, then (M25's F02) "overflows" when its text's box
-	// reaches beyond its rectangle (UiTreeEntry::TextOverflows), then (C22.2) "disabled" for a widget that is not interactable and
-	// "focused", "hovered" and "pressed" by the play session's state.
+	// UiCanvas(sort <n>, scale <s>)", followed by "inactive" when it is, and per element a line with box-drawing indentation, its
+	// name, its first 8 hex digits, its short component forms ("UiImage(<sheet path>#<frame>)", "UiText(\"<text>\")",
+	// "UiLayout(<kind> <direction>)"; C22.2's widgets "UiButton", "UiToggle(on|off)", "UiSlider(<value as read>)" and
+	// "UiScrollView(<x>,<y>)", the scroll position as read), its rectangle "(x,y wxh)", and "clipped" or "hidden" when it is,
+	// then (M25's F10) "inactive" when it is, then (M25's F02) "overflows" when its text's box reaches beyond its rectangle
+	// (UiTreeEntry::TextOverflows), then (C22.2) "disabled" for a widget that is not interactable and "focused", "hovered" and
+	// "pressed" by the play session's state.
 	struct UiTreeParams
 	{
 		std::string Canvas{};
@@ -100,6 +112,7 @@ namespace Engine {
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		SceneTarget Target = SceneTarget::Edit;
+		bool IncludeInactive = false; // M25's F10: list the inactive canvases and elements too, laid out as if active
 	};
 
 	struct UiTreeResult
@@ -114,7 +127,8 @@ namespace Engine {
 	namespace Automation {
 
 		// ui.tree. Errors: those of the target (ResolveTargetScene) and of `canvas` (ResolveEntity at /canvas); InvalidArgument
-		// at /canvas for an entity without a UiCanvas, and for only one of width and height.
+		// at /canvas for an entity without a UiCanvas, and for only one of width and height; with includeInactive, those of the
+		// scene's copy (SceneSerializer::ToJson and FromJson).
 		[[nodiscard]] Result<UiTreeResult> UiTree(AutomationMethodContext& context, const UiTreeParams& params);
 
 	}

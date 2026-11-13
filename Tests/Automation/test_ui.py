@@ -48,10 +48,10 @@ class UiTreeTests(AutomationTestCase):
         self.assertEqual((listed["width"], listed["height"]), (200, 100))
         names = [element["name"] for element in listed["elements"]]
         self.assertEqual(names, ["Hud", "Panel", "Label"])
-        # The canvas's scale turns scene pixels into the canvas units UiRect takes; an element reports 0.
-        self.assertEqual(listed["elements"][0]["scale"], 2)
+        # The canvas's scale turns scene pixels into the canvas units UiRect takes; an element reports its canvas's
+        # (M25's friction F11).
+        self.assertEqual([element["scale"] for element in listed["elements"]], [2, 2, 2])
         panel = listed["elements"][1]
-        self.assertEqual(panel["scale"], 0)
         self.assertEqual(panel["rect"], {"x": 20, "y": 10, "width": 80, "height": 40})
         self.assertEqual(panel["components"], ["UiRect", "UiImage"])
         self.assertTrue(panel["visible"])
@@ -105,6 +105,41 @@ class UiTreeTests(AutomationTestCase):
         self.assertTrue(wide_line.endswith("overflows"), wide_line)
         fits_line = next(line for line in outline.splitlines() if "Fits" in line)
         self.assertNotIn("overflows", fits_line)
+
+    def test_ui_tree_lists_inactive_elements_on_request(self) -> None:
+        # M25's friction F10 (Docs/Decisions/0036-m25-tetris-pixel-art.md): includeInactive lists an inactive panel
+        # and its text, laid out and measured as if active and marked inactive, so an agent checks a hidden game-over
+        # panel's texts in the edit scene; the scene is only read.
+        client, _ = self.open_editor_with_scene()
+        panel_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [10, 20], "Size": [80, 40]}
+        title_rect = {"AnchorMin": [0, 0], "AnchorMax": [0, 0], "Pivot": [0, 0], "Position": [0, 4], "Size": [80, 16]}
+        client.call("edit.batch", {"label": "Panel", "ops": [
+            {"method": "entity.create", "params": {"name": "Hud", "components": {"UiCanvas": {}}}},
+            {"method": "entity.create", "params": {"name": "GameOver", "parent": {"$ref": "0.entity.id"},
+                                                   "active": False,
+                                                   "components": {"UiRect": panel_rect, "UiImage": {}}}},
+            {"method": "entity.create", "params": {"name": "Title", "parent": {"$ref": "1.entity.id"}, "components": {
+                "UiRect": title_rect,
+                "UiText": {"Text": "GAME OVER", "Size": 10, "Alignment": "Center", "Wrap": False}}}},
+        ]})
+        listed = client.call("ui.tree", {"format": "Json", "width": 200, "height": 100})
+        self.assertEqual([element["name"] for element in listed["elements"]], ["Hud"])
+        revision = listed["scene"]["revision"]
+        everything = client.call("ui.tree", {"format": "Json", "width": 200, "height": 100, "includeInactive": True})
+        elements = {element["name"]: element for element in everything["elements"]}
+        self.assertEqual(list(elements), ["Hud", "GameOver", "Title"])
+        self.assertTrue(elements["Hud"]["active"])
+        self.assertFalse(elements["GameOver"]["active"])
+        title = elements["Title"]
+        self.assertFalse(title["active"])
+        self.assertEqual(title["rect"], {"x": 10, "y": 24, "width": 80, "height": 16})
+        self.assertGreater(title["textBounds"]["width"], 0)
+        self.assertFalse(title["textOverflows"])
+        self.assertEqual(everything["scene"]["revision"], revision)
+        outline = client.call("ui.tree", {"width": 200, "height": 100, "includeInactive": True})["text"]
+        title_line = next(line for line in outline.splitlines() if "Title" in line)
+        self.assertTrue(title_line.endswith("(10,24 80x16)  inactive"), title_line)
+        self.assertFalse(client.call("entity.get", {"entity": "/Hud/GameOver"})["entity"]["active"])
 
     def test_ui_tree_works_in_the_runtime(self) -> None:
         if not self.require_gpu():

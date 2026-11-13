@@ -23133,7 +23133,7 @@
 		{
 			"name": "ui.tree",
 			"domain": "ui",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every active canvas and element (with includeInactive the inactive ones too, laid out as if active and marked inactive) with its rectangle, its canvas's scale, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -23159,7 +23159,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), an inactive canvas or element that includeInactive lists marked inactive, a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -23177,6 +23177,10 @@
 					"target": {
 						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
 						"enum": ["Edit", "Play"]
+					},
+					"includeInactive": {
+						"description": "Also list the inactive canvases and elements (a hidden panel and its texts), each laid out, and its text measured, as if it were active, and marked inactive (active false); a copy of the scene as it is now is laid out at the scene resolution, the play scene's too, and the scene itself is only read. Omitted: only the active ones.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -23316,7 +23320,7 @@
 								"maximum": 2147483647
 							},
 							"scale": {
-								"description": "A canvas's scale: the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement into UiRect's canvas units; 0 for an element.",
+								"description": "The scale of the entry's canvas (a canvas's own, an element's its canvas's): the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement of the entry into UiRect's canvas units.",
 								"type": "number"
 							},
 							"clipped": {
@@ -23366,6 +23370,10 @@
 							"textOverflows": {
 								"description": "Whether textBounds reaches beyond rect on a side (by more than 0.01 pixel).",
 								"type": "boolean"
+							},
+							"active": {
+								"description": "Whether the entity is active now, it and every ancestor; false for an inactive canvas or element that includeInactive lists, laid out and measured as if it were active.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -23400,6 +23408,13 @@
 					"description": "Outline every canvas.",
 					"params": {
 						"format": "Text"
+					}
+				},
+				{
+					"description": "List every canvas and element as JSON, the inactive ones (a hidden panel and its texts) included.",
+					"params": {
+						"format": "Json",
+						"includeInactive": true
 					}
 				}
 			]

@@ -2799,7 +2799,7 @@
 		{
 			"name": "ui_tree",
 			"method": "ui.tree",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every active canvas and element (with includeInactive the inactive ones too, laid out as if active and marked inactive) with its rectangle, its canvas's scale, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "UiTreeParams",
@@ -2817,7 +2817,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), an inactive canvas or element that includeInactive lists marked inactive, a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -2835,6 +2835,10 @@
 					"target": {
 						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
 						"enum": ["Edit", "Play"]
+					},
+					"includeInactive": {
+						"description": "Also list the inactive canvases and elements (a hidden panel and its texts), each laid out, and its text measured, as if it were active, and marked inactive (active false); a copy of the scene as it is now is laid out at the scene resolution, the play scene's too, and the scene itself is only read. Omitted: only the active ones.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",

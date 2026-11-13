@@ -89,11 +89,13 @@ namespace Engine {
 			CHECK(elements[0]["name"] == Json("Hud"));
 			CHECK(elements[0]["depth"] == Json(0));
 			CHECK(elements[0]["rect"] == Json{ { "x", 0 }, { "y", 0 }, { "width", 200 }, { "height", 100 } });
-			// A canvas reports its sort order and its scale (scene pixels per canvas unit); an element reports 0 for both.
+			// A canvas reports its sort order and its scale (scene pixels per canvas unit); an element reports a sort order of 0
+			// and its canvas's scale (M25's friction F11).
 			CHECK(elements[0]["sortOrder"] == Json(3));
 			CHECK(elements[0]["scale"] == Json(2));
 			CHECK(elements[1]["sortOrder"] == Json(0));
-			CHECK(elements[1]["scale"] == Json(0));
+			CHECK(elements[1]["scale"] == Json(2));
+			CHECK(elements[2]["scale"] == Json(2));
 			CHECK(elements[1]["name"] == Json("Panel"));
 			CHECK(elements[1]["depth"] == Json(1));
 			CHECK(elements[1]["rect"] == Json{ { "x", 20 }, { "y", 10 }, { "width", 80 }, { "height", 40 } });
@@ -472,6 +474,169 @@ namespace Engine {
 				CAPTURE(line);
 				const bool overflowing = line.contains("Wide  ") || line.contains("Tall  ");
 				CHECK(line.ends_with("  overflows") == overflowing);
+			}
+		}
+
+		// M25's friction F11 (Docs/Decisions/0036-m25-tetris-pixel-art.md): every entry reports the scale of its canvas, the
+		// scene pixels per canvas unit that turn its pixel measurements into the canvas units UiRect takes, an element its own
+		// canvas's: a constant-pixel-size canvas's, a match-height canvas's at the resolution laid out at, and a canvas nested
+		// below another canvas's element its own.
+		TEST_CASE("UiMethods: ui.tree reports every entry's canvas scale, an element's its canvas's")
+		{
+			Test::AutomationFixture setup("UiTreeScale");
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[
+				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{"ScaleFactor":2}}}},
+				{"method":"entity.create","params":{"name":"Panel","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Size":[40,20]}}}},
+				{"method":"entity.create","params":{"name":"Label","parent":{"$ref":"1.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[1,1],"Size":[0,0]}}}},
+				{"method":"entity.create","params":{"name":"Inset","parent":{"$ref":"1.entity.id"},"components":{"UiCanvas":{"ScaleFactor":3,"SortOrder":1}}}},
+				{"method":"entity.create","params":{"name":"Badge","parent":{"$ref":"3.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Size":[5,5]}}}},
+				{"method":"entity.create","params":{"name":"Menu","components":{"UiCanvas":{"ScaleMode":"MatchHeight","ReferenceHeight":25,"SortOrder":2}}}},
+				{"method":"entity.create","params":{"name":"Item","parent":{"$ref":"5.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Size":[10,5]}}}}]})"))
+					.has_value());
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			std::vector<std::pair<std::string, Json>> scales;
+			for (const Json& element : (*listed)["elements"])
+				scales.emplace_back(JsonReader(element["name"]).ReadString().value_or(std::string()), element["scale"]);
+			// Draw order: Hud (sort 0), Inset (sort 1), Menu (sort 2), each followed by its elements. Menu matches 25 units to the
+			// 100 scene pixels laid out at.
+			const std::vector<std::pair<std::string, Json>> expected = { { "Hud", Json(2) }, { "Panel", Json(2) }, { "Label", Json(2) },
+				{ "Inset", Json(3) }, { "Badge", Json(3) }, { "Menu", Json(4) }, { "Item", Json(4) } };
+			CHECK(scales == expected);
+			CHECK(FindUiTreeRect((*listed)["elements"], "Item") == Json{ { "x", 0 }, { "y", 0 }, { "width", 40 }, { "height", 20 } });
+		}
+
+		// M25's friction F10 (Docs/Decisions/0036-m25-tetris-pixel-art.md): ui.tree {includeInactive: true} lists the inactive
+		// canvases and elements too, each laid out, and its text measured, as if it were active, and marked inactive in both
+		// formats (JSON active false, the outline's "inactive"); without it nothing changes. The target scene is only read: a
+		// copy is laid out, in the edit scene and the play scene alike.
+		TEST_CASE("UiMethods: ui.tree lists inactive canvases and elements on request, laid out as if active and marked inactive")
+		{
+			// The Default font measures the texts: the fixture mounts the engine's resources.
+			Test::AutomationFixture setup("UiTreeInactive", true, std::nullopt, true);
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[
+				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{"ScaleFactor":2}}}},
+				{"method":"entity.create","params":{"name":"Score","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[5,5],"Size":[50,10]},
+					"UiText":{"Text":"Score","Size":5,"Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"GameOver","parent":{"$ref":"0.entity.id"},"active":false,"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,20],"Size":[40,20]},"UiImage":{}}}},
+				{"method":"entity.create","params":{"name":"Title","parent":{"$ref":"2.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[0,2],"Size":[40,8]},
+					"UiText":{"Text":"GAME OVER","Size":5,"Alignment":"Center","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"Pause","active":false,"components":{"UiCanvas":{"SortOrder":1}}}},
+				{"method":"entity.create","params":{"name":"Resume","parent":{"$ref":"4.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Size":[30,10]}}}}]})"))
+					.has_value());
+			const Json size{ { "format", "Json" }, { "width", 200 }, { "height", 100 } };
+			const auto namesOf = [](const Json& elements)
+			{
+				std::vector<std::string> names;
+				for (const Json& element : elements)
+					names.push_back(JsonReader(element["name"]).ReadString().value_or(std::string()));
+				return names;
+			};
+			const auto byName = [](const Json& elements)
+			{
+				std::map<std::string, Json> entries;
+				for (const Json& element : elements)
+					entries[JsonReader(element["name"]).ReadString().value_or(std::string())] = element;
+				return entries;
+			};
+
+			// By default only the active canvas and element are listed, both active.
+			Result<Json> active = setup.Call("ui.tree", size);
+			REQUIRE_MESSAGE(active.has_value(), active.error().ToString());
+			CHECK(namesOf((*active)["elements"]) == std::vector<std::string>{ "Hud", "Score" });
+			for (Json& element : (*active)["elements"])
+				CHECK(element["active"] == Json(true));
+			const Json revision = (*active)["scene"]["revision"];
+
+			// includeInactive lists the panel, its title, the inactive canvas and its element, in draw order, laid out and
+			// measured as if active.
+			Json inactiveParams = size;
+			inactiveParams["includeInactive"] = true;
+			Result<Json> listed = setup.Call("ui.tree", inactiveParams);
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			CHECK(namesOf((*listed)["elements"]) == std::vector<std::string>{ "Hud", "Score", "GameOver", "Title", "Pause", "Resume" });
+			std::map<std::string, Json> entries = byName((*listed)["elements"]);
+			for (const std::string& name : { "Hud", "Score" })
+			{
+				CAPTURE(name);
+				CHECK(entries[name]["active"] == Json(true));
+			}
+			for (const std::string& name : { "GameOver", "Title", "Pause", "Resume" })
+			{
+				CAPTURE(name);
+				CHECK(entries[name]["active"] == Json(false));
+			}
+			CHECK(entries["GameOver"]["rect"] == Json{ { "x", 20 }, { "y", 40 }, { "width", 80 }, { "height", 40 } });
+			CHECK(entries["GameOver"]["visible"] == Json(true));
+			CHECK(entries["Title"]["rect"] == Json{ { "x", 20 }, { "y", 44 }, { "width", 80 }, { "height", 16 } });
+			CHECK(entries["Title"]["text"] == Json("GAME OVER"));
+			CHECK(JsonReader(entries["Title"]["textBounds"]["width"]).ReadFloat().value_or(0.0f) > 0.0f);
+			CHECK(JsonReader(entries["Title"]["textBounds"]["height"]).ReadFloat().value_or(0.0f) > 0.0f);
+			CHECK(entries["Title"]["textOverflows"] == Json(false));
+			CHECK(entries["Pause"]["rect"] == Json{ { "x", 0 }, { "y", 0 }, { "width", 200 }, { "height", 100 } });
+			CHECK(entries["Resume"]["rect"] == Json{ { "x", 0 }, { "y", 0 }, { "width", 30 }, { "height", 10 } });
+
+			// The outline marks each inactive canvas and element after its rectangle.
+			Json outlineParams{ { "width", 200 }, { "height", 100 }, { "includeInactive", true } };
+			Result<Json> text = setup.Call("ui.tree", outlineParams);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const std::vector<std::string> lines = SplitUiOutline(JsonReader((*text)["text"]).ReadString().value_or(std::string()));
+			REQUIRE(lines.size() == 7);
+			CHECK(lines[0].ends_with("  200x100 scene pixels  4 elements"));
+			CHECK(lines[1].ends_with("  UiCanvas(sort 0, scale 2)"));
+			CHECK_FALSE(lines[2].contains("inactive"));
+			CHECK(lines[3].ends_with("  UiImage(none)  (20,40 80x40)  inactive"));
+			CHECK(lines[4].ends_with("  UiText(\"GAME OVER\")  (20,44 80x16)  inactive"));
+			CHECK(lines[5].ends_with("  UiCanvas(sort 1, scale 1)  inactive"));
+			CHECK(lines[6].ends_with("  (0,0 30x10)  inactive"));
+
+			// Only read: the edit scene's revision and the panel's flag are as before.
+			Result<Json> after = setup.Call("ui.tree", size);
+			REQUIRE_MESSAGE(after.has_value(), after.error().ToString());
+			CHECK((*after)["scene"]["revision"] == revision);
+			Result<Json> panel = setup.Call("entity.get", Json{ { "entity", "/Hud/GameOver" } });
+			REQUIRE_MESSAGE(panel.has_value(), panel.error().ToString());
+			CHECK((*panel)["entity"]["active"] == Json(false));
+
+			// The play scene too: its copy is laid out at the session's scene resolution, while its own layout lists only the
+			// active UI.
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 1 }, { "render", "none" } }).has_value());
+			Result<Json> played = setup.Call("ui.tree", Json{ { "format", "Json" }, { "target", "play" } });
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			CHECK(namesOf((*played)["elements"]) == std::vector<std::string>{ "Hud", "Score" });
+			Result<Json> playedInactive = setup.Call("ui.tree", Json{ { "format", "Json" }, { "target", "play" }, { "includeInactive", true } });
+			REQUIRE_MESSAGE(playedInactive.has_value(), playedInactive.error().ToString());
+			CHECK((*playedInactive)["width"] == (*played)["width"]);
+			CHECK((*playedInactive)["height"] == (*played)["height"]);
+			std::map<std::string, Json> playedEntries = byName((*playedInactive)["elements"]);
+			CHECK(playedEntries["GameOver"]["active"] == Json(false));
+			CHECK(playedEntries["GameOver"]["rect"] == Json{ { "x", 20 }, { "y", 40 }, { "width", 80 }, { "height", 40 } });
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+
+			// Activated, the panel, its title and the canvas's element land where includeInactive laid them out.
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Show","ops":[
+				{"method":"entity.update","params":{"entity":"/Hud/GameOver","active":true}},
+				{"method":"entity.update","params":{"entity":"/Pause","active":true}}]})"))
+					.has_value());
+			Result<Json> shown = setup.Call("ui.tree", size);
+			REQUIRE_MESSAGE(shown.has_value(), shown.error().ToString());
+			std::map<std::string, Json> shownEntries = byName((*shown)["elements"]);
+			for (const std::string& name : { "GameOver", "Title", "Pause", "Resume" })
+			{
+				CAPTURE(name);
+				CHECK(shownEntries[name]["active"] == Json(true));
+				CHECK(shownEntries[name]["rect"] == entries[name]["rect"]);
+				CHECK(shownEntries[name]["textBounds"] == entries[name]["textBounds"]);
+				CHECK(shownEntries[name]["textOverflows"] == entries[name]["textOverflows"]);
 			}
 		}
 	}
