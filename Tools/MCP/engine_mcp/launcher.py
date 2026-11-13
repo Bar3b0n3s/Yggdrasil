@@ -40,9 +40,11 @@ Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, Docs/Decis
 the editor exits, however it exits (Launcher.release_when_exits), or until the bridge itself exits: an editor left
 running with unsaved changes when the MCP client goes away holds none (Docs/Architecture.md §2.3). Under a process that
 already holds the lock (the automation suite's Test.py, whose bridge tests launch rendering editors) the launch runs
-under that hold and waits for nothing. A wait reports the holder (pid, worktree, command) on the bridge's log and lasts
-at most the launcher's lock_wait_seconds (LOCK_WAIT_SECONDS by default); then the launch fails with LockUnavailable
-naming the holder, and no editor is spawned. Attaching takes no lock: the attached editor is not the bridge's.
+under that hold and waits for nothing. Each report of a wait, naming the lock, its holder (pid, worktree, command), the
+seconds waited and the bound, goes to the bridge's log and becomes the launcher's current activity (Activity) until the
+wait ends, which the server's progress notifications carry to the client (server.py, "Progress"). A wait lasts at most
+the launcher's lock_wait_seconds (LOCK_WAIT_SECONDS by default); then the launch fails with LockUnavailable naming the
+holder, and no editor is spawned. Attaching takes no lock: the attached editor is not the bridge's.
 """
 
 from __future__ import annotations
@@ -62,8 +64,11 @@ from Lib import locks
 ALREADY_OPEN_HINT = "enable Allow AI automation in the editor's Automation panel, then call editor_attach"
 PROJECT_FILE_EXTENSION = ".eproj"
 RENDERERS = ("vulkan", "none")
-# How long editor_launch waits for a running gate or GPU run before it fails naming the holder.
-LOCK_WAIT_SECONDS = 1800.0
+# How long editor_launch waits for a running gate or GPU run before it fails naming the holder: 25 min, below the
+# 30 min (1,800 s) a Claude Code client waits for a tool call that sends it nothing, so a client that asks for no
+# progress notifications still receives the LockUnavailable that names the holder (Docs/Decisions/
+# 0036-m25-tetris-pixel-art.md, friction F14).
+LOCK_WAIT_SECONDS = 1500.0
 # How long editor_status waits for each running editor's connection and session.info (Launcher.running_editors).
 PROBE_TIMEOUT_SECONDS = 5.0
 LOGGER = logging.getLogger("engine_mcp")
@@ -81,6 +86,24 @@ class EditorAlreadyOpen(Exception):
     def to_json(self) -> dict[str, Any]:
         """{"error": "EditorAlreadyOpen", "pid": pid, "hint": ALREADY_OPEN_HINT}."""
         return {"error": "EditorAlreadyOpen", "pid": self.pid, "hint": ALREADY_OPEN_HINT}
+
+
+class Activity:
+    """What the running tool call is doing beyond running: the latest report of editor_launch's wait for a machine-wide
+    lock while it waits, "" otherwise. The worker thread that runs the call sets it, and the server's event loop reads
+    it for the call's progress notifications, so a lock guards it."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._text = ""
+
+    def set(self, text: str) -> None:
+        with self._lock:
+            self._text = text
+
+    def read(self) -> str:
+        with self._lock:
+            return self._text
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,6 +146,8 @@ class Launcher:
         self.configurations = configurations
         # The bound of a launch's wait for the machine-wide locks (0: fail at once when one is held).
         self.lock_wait_seconds = lock_wait_seconds
+        # The latest report of a launch's wait for those locks while it waits (take_machine_locks).
+        self.activity = Activity()
 
     @property
     def app_name(self) -> str:
@@ -272,12 +297,21 @@ class Launcher:
     def take_machine_locks(self, renderer: str, project: Path) -> locks.Hold | None:
         """Before an editor is spawned: the GPU lock for a rendering editor (the caller hands it to
         release_when_exits), or for any other only the wait until no gate runs. Raises locks.LockUnavailable after
-        lock_wait_seconds."""
-        if renderer == "vulkan":
-            command = f"MCP bridge (pid {os.getpid()}): a rendering editor for {project}"
-            return locks.acquire_gpu(self.lock_wait_seconds, LOGGER.info, command)
-        locks.wait_for_gate(self.lock_wait_seconds, LOGGER.info)
-        return None
+        lock_wait_seconds. Each report of the wait goes to the bridge's log and is the current activity until the wait
+        ends."""
+
+        def report(message: str) -> None:
+            LOGGER.info("%s", message)
+            self.activity.set(message)
+
+        try:
+            if renderer == "vulkan":
+                command = f"MCP bridge (pid {os.getpid()}): a rendering editor for {project}"
+                return locks.acquire_gpu(self.lock_wait_seconds, report, command)
+            locks.wait_for_gate(self.lock_wait_seconds, report)
+            return None
+        finally:
+            self.activity.set("")
 
     @staticmethod
     def release_when_exits(editor: engine_client.EditorProcess, hold: locks.Hold) -> threading.Thread:

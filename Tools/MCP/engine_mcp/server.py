@@ -49,6 +49,18 @@ notification on the session of a handshake-era connection and publishes it to th
 the SDK advertises listChanged there too). A call that is cancelled or fails still notifies, and a change whose
 notification could not be sent is sent after the next call.
 
+Progress (Docs/Decisions/0036-m25-tetris-pixel-art.md, friction F14): while a tool call runs on the worker thread, the
+server sends notifications/progress every PROGRESS_INTERVAL_SECONDS against the request's progress token (the SDK's
+request-scoped report_progress, in both protocol eras; a request without a token gets none), so a client that ends a
+call which reports nothing (Claude Code, after 30 min) keeps waiting. The progress counts 1, 2, 3 and so on, and the
+message names the tool and how long it has run, followed, while editor_launch waits for a machine-wide lock, by the
+latest report of that wait (the lock, its holder's pid, worktree and command, the seconds waited and the bound;
+launcher.Activity). The heartbeat stops when the call returns, is cancelled or raises. Each notification is bounded by
+NOTIFY_TIMEOUT_SECONDS, and one that cannot be sent ends the heartbeat (logged), never the call. A launch that gives up
+its wait (launcher.LOCK_WAIT_SECONDS, below that client's 30 min) fails with LockUnavailable naming the lock, its
+holders and the seconds waited, and a hint: call editor_launch again to keep waiting, or, for the GPU lock, launch with
+renderer "none" when no rendering is needed (lock_unavailable).
+
 Environment (all optional): ENGINE_MCP_TRANSCRIPT redirects the transcript (transcript.py); ENGINE_MCP_USER_DATA_DIR
 replaces the OS user-data root the bridge passes to the editors it launches and scans for session files (the bridge's
 tests keep session files, logs and crash reports in a temporary directory with it); ENGINE_AUTOMATION_CONFIG names the
@@ -66,12 +78,14 @@ import math
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Callable
 
 import engine_client
 from engine_mcp.connection import EditorConnection, EditorCrashed
 from engine_mcp.launcher import EditorAlreadyOpen, Launcher, LaunchRequest
+from Lib import locks
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "catalog.json"
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -86,8 +100,12 @@ LOCAL_TOOL_NAMES = (
 )
 # The tools that reread catalog.json first (Bridge.reload_catalog) and report what that found, failed calls included.
 CATALOG_RELOADING_TOOL_NAMES = ("editor_launch", "editor_attach")
-# Bounds sending a tool-list change to the client, which goes ahead even when the call that made it is cancelled.
+# Bounds sending a tool-list change to the client, which goes ahead even when the call that made it is cancelled, and
+# sending each progress notification.
 NOTIFY_TIMEOUT_SECONDS = 5.0
+# How often a running tool call sends a progress notification when its request carries a progress token (module
+# comment, "Progress").
+PROGRESS_INTERVAL_SECONDS = 30.0
 # The most bytes of text one result_read page holds (docs.get's page size, DocsPageBytes).
 RESULT_PAGE_BYTES = 32 * 1024
 # The project-relative offload folder (Engine/Automation/Protocol/ResultOffload.h, OffloadDirectory).
@@ -246,8 +264,9 @@ _LOCAL_TOOL_DESCRIPTIONS = {
                      "available autosave, which recover: true adopts (every autosaved scene, each as an unsaved open "
                      "scene). A start waits while a gate (CI.py) runs and, with renderer vulkan, while another GPU run "
                      "holds the machine-wide GPU lock, which the bridge then holds until the editor exits or the "
-                     "bridge itself exits (an editor left running with unsaved changes holds none); after 30 min it "
-                     "fails with LockUnavailable, naming the holder.",
+                     "bridge itself exits (an editor left running with unsaved changes holds none). While it waits, "
+                     "its progress notifications name the lock's holder; after 25 min it fails with LockUnavailable, "
+                     "naming the holder: call it again to keep waiting.",
     "editor_attach": "Attaches to a running editor with automation, by project or process id; reports its session, the "
                      "active scene included.",
     "editor_status": "Reports the connected editor: process, project, active scene, versions and whether it crashed. "
@@ -286,6 +305,26 @@ def describe_running_editors(editors: list[dict[str, Any]]) -> str:
                  f"{editor['renderer'] or 'unknown'})" for editor in editors]
     return (f"{NOT_CONNECTED}. Running with automation: {'; '.join(described)}. editor_attach {{pid}} connects to one "
             f"of them as it is, with its project and renderer")
+
+
+def progress_message(name: str, elapsed: float, activity: str) -> str:
+    """The message of a running tool call's progress notification (module comment, "Progress"): the tool and how long it
+    has run, then `activity`, the launcher's report of what it waits for (launcher.Activity), when there is one."""
+    running = f"{name} running for {elapsed:.0f} s"
+    return f"{running}: {activity}" if activity else running
+
+
+def lock_unavailable(error: locks.LockUnavailable) -> tuple[dict[str, Any], str, bool]:
+    """editor_launch's failure when its wait for a machine-wide lock ran out (launcher.LOCK_WAIT_SECONDS): the lock, its
+    holders (pid, worktree, command, since), the seconds waited, and a hint that offers renderer "none" only for the GPU
+    lock, since every launch waits while a gate runs."""
+    hint = f"call editor_launch again to keep waiting for the {error.lock} lock"
+    if error.lock == locks.GPU:
+        hint += ', or launch with renderer "none" when no rendering is needed (no screenshot and no smoke test)'
+    elif error.lock == locks.GATE:
+        hint += " (every launch waits while a gate runs, whatever its renderer)"
+    structured = {**error.to_json(), "message": str(error), "hint": hint}
+    return structured, f"LockUnavailable: {error}\nhint: {hint}", True
 
 
 def coerce_arguments(arguments: dict[str, Any], input_schema: dict[str, Any]) -> dict[str, Any]:
@@ -516,8 +555,9 @@ def _limit(text: str, meta: Any = None) -> str:
 class Bridge:
     """The bridge's state: the catalogue, the launcher and the current editor connection. Tool calls run one at a time
     on a worker thread (the server serializes them), so nothing here is shared between threads at once, except that
-    the server lists the tools of `catalog` on its event loop meanwhile: reload_catalog replaces that dictionary,
-    never changes it, so a listing reads one catalogue whole."""
+    the server lists the tools of `catalog` on its event loop meanwhile (reload_catalog replaces that dictionary,
+    never changes it, so a listing reads one catalogue whole) and reads the launcher's activity for the call's progress
+    notifications (launcher.Activity, which a lock guards)."""
 
     def __init__(self, repository_root: Path, catalog: list[CatalogTool], launcher: Launcher,
                  catalog_path: Path | None = None, catalog_digest: str = "") -> None:
@@ -571,6 +611,8 @@ class Bridge:
             return crashed.to_json(), f"EditorCrashed: {crashed}\n" + "\n".join(crashed.last_log_lines[-10:]), True
         except EditorAlreadyOpen as already_open:
             return already_open.to_json(), str(already_open), True
+        except locks.LockUnavailable as error:
+            return lock_unavailable(error)
         except engine_client.ConnectionClosed as error:
             return _failure("ConnectionClosed", str(error))
         except TimeoutError as error:
@@ -929,14 +971,50 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
         # Immediately stale (ttlMs 0 on a 2026-07-28 connection): a launch or attach may change the tool list.
         return types.ListToolsResult(tools=tool_list(), ttl_ms=0)
 
+    async def send_progress(context: ServerRequestContext, name: str) -> None:
+        # The heartbeat of a running call (module comment, "Progress"), until the call cancels it. The SDK's
+        # request-scoped report_progress sends nothing for a request without a progress token.
+        started = time.monotonic()
+        progress = 0
+        while True:
+            await anyio.sleep(PROGRESS_INTERVAL_SECONDS)
+            progress += 1
+            message = progress_message(name, time.monotonic() - started, bridge.launcher.activity.read())
+            # A notification is best effort: one that cannot be sent ends the heartbeat, never the call.
+            with anyio.move_on_after(NOTIFY_TIMEOUT_SECONDS):
+                try:
+                    await context.session.report_progress(progress, None, message)
+                except Exception as error:
+                    LOGGER.warning("cannot send the progress of %s, so it sends no more: %s", name, error)
+                    return
+
+    async def run_with_progress(context: ServerRequestContext, name: str,
+                                arguments: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
+        # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds), so the call
+        # runs on a worker thread and the event loop keeps serving the MCP session meanwhile, its heartbeat included.
+        failure: Exception | None = None
+        outcome: tuple[dict[str, Any], str, bool] | None = None
+        async with anyio.create_task_group() as heartbeat:
+            heartbeat.start_soon(send_progress, context, name)
+            try:
+                outcome = await anyio.to_thread.run_sync(bridge.call_tool, name, arguments)
+            except Exception as error:
+                # Raised again below, outside the task group, which would wrap it in an ExceptionGroup: the SDK then
+                # answers the call with this error's own message.
+                failure = error
+            finally:
+                heartbeat.cancel_scope.cancel()
+        if failure is not None:
+            raise failure
+        assert outcome is not None, "the worker thread returned"
+        return outcome
+
     async def call_tool(context: ServerRequestContext, params: types.CallToolRequestParams) -> Any:
         nonlocal notified_revision
         arguments = dict(params.arguments or {})
         async with lock:
             try:
-                # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds), so the
-                # call runs on a worker thread and the event loop keeps serving the MCP session meanwhile.
-                structured, text, is_error = await anyio.to_thread.run_sync(bridge.call_tool, params.name, arguments)
+                structured, text, is_error = await run_with_progress(context, params.name, arguments)
             finally:
                 # Also when the client cancelled the call (the worker thread still finished the reload) or it raised,
                 # shielded from that cancellation and bounded. Before returning, the server sends the notification on
