@@ -721,23 +721,18 @@ namespace Engine {
 			INFO("child stderr: ", standardError);
 			CHECK(child->Result.ExitCode == ExitCode::Crash);
 			CHECK(standardError.contains(std::format("Crash: {}", SimulatedCrashReason)));
-	#if defined(__SANITIZE_ADDRESS__)
-			// The hardening stage's AddressSanitizer build (Docs/Decisions/0024-m15-contract.md decision 12): its runtime
-			// replaces the C runtime's heap with its own allocator, so the process heap's lock blocks nothing the reporter
-			// needs and the report is written completely.
-			const std::filesystem::path written = Test::PathFromUtf8(FindLineValue(standardError, "; report written to "));
-			REQUIRE(Test::ListCrashFiles(reports, ".txt") == std::vector<std::filesystem::path>{ written });
-			const Result<std::string> complete = FileSystem::ReadText(written);
-			REQUIRE(complete.has_value());
-			CHECK(complete->starts_with(std::format("Crash report\nReason: {}", SimulatedCrashReason)));
-			CHECK(complete->contains("\nBreadcrumbs:\n"));
-			CHECK(complete->contains("\nLast log lines:\n"));
-	#else
+	#if !defined(__SANITIZE_ADDRESS__)
+			// The plain build's reporter allocates from the locked heap itself, so its report is never complete.
 			CHECK_FALSE(standardError.contains("; report written to "));
+	#endif
 
 			// Where the reporter blocks depends on what the OS allocates: once the file exists (on current Windows it does,
 			// and the reporter blocks in DbgHelp), the report holds the reason and the breadcrumbs and the stderr line calls
-			// it incomplete; before that, nothing is written.
+			// it incomplete; before that, nothing is written. The hardening stage's AddressSanitizer build
+			// (Docs/Decisions/0024-m15-contract.md decision 12) serves the C runtime's allocations from its own allocator, so
+			// its reporter blocks only where the OS allocates from the process heap: its report was complete until Windows
+			// 11's November 2026 security update, and since then it blocks in DbgHelp as well
+			// (Docs/Decisions/0037-m26-contract.md, "Gate and fast-forward").
 			const std::vector<std::filesystem::path> files = Test::ListCrashFiles(reports, ".txt");
 			REQUIRE(files.size() <= 1);
 			if (files.empty())
@@ -746,14 +741,15 @@ namespace Engine {
 			}
 			else
 			{
-				CHECK(Test::PathFromUtf8(FindLineValue(standardError, "; incomplete report written to ")) == files.front());
+				const bool complete = standardError.contains("; report written to ");
+				const std::string_view line = complete ? "; report written to " : "; incomplete report written to ";
+				CHECK(Test::PathFromUtf8(FindLineValue(standardError, line)) == files.front());
 				const Result<std::string> report = FileSystem::ReadText(files.front());
 				REQUIRE(report.has_value());
 				CHECK(report->starts_with(std::format("Crash report\nReason: {}", SimulatedCrashReason)));
 				CHECK(report->contains("\nBreadcrumbs:\n"));
-				CHECK_FALSE(report->contains("\nLast log lines:\n"));
+				CHECK(report->contains("\nLast log lines:\n") == complete);
 			}
-	#endif
 		}
 
 		TEST_CASE("CrashHandler: an invalid parameter passed to the C runtime is a crash with exit code 4")
