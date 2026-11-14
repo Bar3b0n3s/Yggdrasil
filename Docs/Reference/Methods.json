@@ -127,7 +127,7 @@
 		{
 			"name": "asset.create",
 			"domain": "asset",
-			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a prefab of one empty root entity (no values: prefab.create saves a built entity as a prefab) or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -151,7 +151,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed). A Scene, a Prefab and a Folder take no values and refuse them: a prefab is created with one empty root entity, and prefab.create saves an entity built in a scene, its components and children, as a prefab."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -11931,7 +11931,7 @@
 						"maximum": 4294967295
 					},
 					"checkpointFailed": {
-						"description": "A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first.",
+						"description": "A checkpoint's hash differed (checkpointsFailed counts them, firstFailedCheckpointTick names the first). Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick.",
 						"type": "boolean"
 					},
 					"withoutInput": {
@@ -11939,13 +11939,13 @@
 						"type": "boolean"
 					},
 					"checkpointsFailed": {
-						"description": "continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise.",
+						"description": "The checkpoints whose hash differed: with continuePastCheckpoint every one, without it 1 when the first that differed stopped playback; 0 when none differed.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
 					},
 					"firstFailedCheckpointTick": {
-						"description": "continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint.",
+						"description": "The tick of the first checkpoint whose hash differed (without continuePastCheckpoint the one where playback stopped, finalTick); 0 when none differed.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -23951,6 +23951,14 @@
 						"description": "Approximate script heap hard limit in bytes when available.",
 						"type": "number"
 					},
+					"processHeapAvailable": {
+						"description": "Whether the host measured the heap the C runtime allocates from: false on Linux and macOS, which have no measure, and when the query fails.",
+						"type": "boolean"
+					},
+					"processHeapCommittedBytes": {
+						"description": "Approximate committed bytes of the heap the C runtime allocates from (malloc and new: the engine's own memory and that of every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. What a graphics driver keeps in allocations of its own is not in it, nor, in an AddressSanitizer build, what the C runtime or HeapAlloc allocates, which the sanitizer's allocator serves. The hardening soak's memory rule measures it.",
+						"type": "number"
+					},
 					"memoryAllocationCount": {
 						"description": "Current Vulkan device memory allocation count.",
 						"type": "integer",
@@ -24975,7 +24983,7 @@
 		{
 			"name": "ui.tree",
 			"domain": "ui",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every active canvas and element (with includeInactive the inactive ones too, laid out as if active and marked inactive) with its rectangle, its canvas's scale, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -25001,7 +25009,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), an inactive canvas or element that includeInactive lists marked inactive, a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -25019,6 +25027,10 @@
 					"target": {
 						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
 						"enum": ["Edit", "Play"]
+					},
+					"includeInactive": {
+						"description": "Also list the inactive canvases and elements (a hidden panel and its texts), each laid out, and its text measured, as if it were active, and marked inactive (active false); a copy of the scene as it is now is laid out at the scene resolution, the play scene's too, and the scene itself is only read. Omitted: only the active ones.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -25158,7 +25170,7 @@
 								"maximum": 2147483647
 							},
 							"scale": {
-								"description": "A canvas's scale: the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement into UiRect's canvas units; 0 for an element.",
+								"description": "The scale of the entry's canvas (a canvas's own, an element's its canvas's): the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement of the entry into UiRect's canvas units.",
 								"type": "number"
 							},
 							"clipped": {
@@ -25200,6 +25212,18 @@
 							"worldCanvas": {
 								"description": "True for a World canvas and its elements, whose rect and clip are in the canvas's own pixels.",
 								"type": "boolean"
+							},
+							"textBounds": {
+								"description": "The box of the text the element draws, where it is laid out in rect: from its lines' leftmost pen start to their rightmost advance end, and from the block's top to its bottom, in rect's pixels; all 0 when it draws none (no UiText, an empty text, or hidden).",
+								"$ref": "#/$defs/UiPixelRect"
+							},
+							"textOverflows": {
+								"description": "Whether textBounds reaches beyond rect on a side (by more than 0.01 pixel).",
+								"type": "boolean"
+							},
+							"active": {
+								"description": "Whether the entity is active now, it and every ancestor; false for an inactive canvas or element that includeInactive lists, laid out and measured as if it were active.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -25234,6 +25258,13 @@
 					"description": "Outline every canvas.",
 					"params": {
 						"format": "Text"
+					}
+				},
+				{
+					"description": "List every canvas and element as JSON, the inactive ones (a hidden panel and its texts) included.",
+					"params": {
+						"format": "Json",
+						"includeInactive": true
 					}
 				}
 			]

@@ -73,7 +73,7 @@ Example: Pose the hero half a second into its clips.
 
 ### asset.create
 
-Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.
+Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a prefab of one empty root entity (no values: prefab.create saves a built entity as a prefab) or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.
 
 - Flags: tool `asset_create`, mutates, dry run, batch
 - Timeout: 60 s
@@ -83,7 +83,7 @@ Creates a material, a sound effect, a sprite sheet, a tilemap or a string table 
 |---|---|---|---|---|
 | `type` | `AssetCreateType` | yes | `"Material"` | What to create. |
 | `path` | `String` | yes | `""` | The project-relative path below Assets/, with the type's extension (.material, .scene, .prefab, .sfx, .spritesheet, .tilemap, .stringtable; none for a folder); missing parent folders are created with it. |
-| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types. |
+| `values` | `Variant` |  | `null` | A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed). A Scene, a Prefab and a Folder take no values and refuse them: a prefab is created with one empty root entity, and prefab.create saves an entity built in a scene, its components and children, as a prefab. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -1330,10 +1330,10 @@ Replays recorded inputs in a fresh session; verification failures retain every e
 | `expectedStateHash` | `String` | Recorded state hash at finalTick: the final hash, or the failed checkpoint's. |
 | `stopReason` | `String` | Why playback ended before the replay's final tick (a quit, a fatal script error or a checkpoint whose hash differed); empty when it reached it. |
 | `checkpointsChecked` | `UInt32` | State-hash checkpoints compared (strictHash), the failed one included. |
-| `checkpointFailed` | `Bool` | A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first. |
+| `checkpointFailed` | `Bool` | A checkpoint's hash differed (checkpointsFailed counts them, firstFailedCheckpointTick names the first). Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick. |
 | `withoutInput` | `Bool` | None of the replay's input events were applied. |
-| `checkpointsFailed` | `UInt32` | continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise. |
-| `firstFailedCheckpointTick` | `UInt32` | continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint. |
+| `checkpointsFailed` | `UInt32` | The checkpoints whose hash differed: with continuePastCheckpoint every one, without it 1 when the first that differed stopped playback; 0 when none differed. |
+| `firstFailedCheckpointTick` | `UInt32` | The tick of the first checkpoint whose hash differed (without continuePastCheckpoint the one where playback stopped, finalTick); 0 when none differed. |
 | `changes` | `Array<String>` | When a hash differed in a playback with the replay's input: what changed since the recording, by the replay's start fingerprint (an entity, a component of an entity, a script, a material or another referenced asset), one line each; empty for a replay recorded without a fingerprint. |
 | `expect` | `Array<InputReplayExpectationResult>` | Every expectation outcome in authored order. |
 
@@ -2999,6 +2999,8 @@ Param: none.
 | `scriptHeapBytes` | `Float` | Approximate current script heap bytes when available. |
 | `scriptSoftLimitBytes` | `Float` | Approximate script heap soft limit in bytes when available. |
 | `scriptHardLimitBytes` | `Float` | Approximate script heap hard limit in bytes when available. |
+| `processHeapAvailable` | `Bool` | Whether the host measured the heap the C runtime allocates from: false on Linux and macOS, which have no measure, and when the query fails. |
+| `processHeapCommittedBytes` | `Float` | Approximate committed bytes of the heap the C runtime allocates from (malloc and new: the engine's own memory and that of every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. What a graphics driver keeps in allocations of its own is not in it, nor, in an AddressSanitizer build, what the C runtime or HeapAlloc allocates, which the sanitizer's allocator serves. The hardening soak's memory rule measures it. |
 | `memoryAllocationCount` | `UInt32` | Current Vulkan device memory allocation count. |
 | `maxMemoryAllocationCount` | `UInt32` | Vulkan device allocation limit, zero without a device. |
 | `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' gameResolution). The Runtime supplies game only. |
@@ -3134,7 +3136,7 @@ Example: Add a Play button to the canvas.
 
 ### ui.tree
 
-Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.
+Shows the scene's UI laid out in scene pixels: every active canvas and element (with includeInactive the inactive ones too, laid out as if active and marked inactive) with its rectangle, its canvas's scale, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.
 
 - Flags: tool `ui_tree`, runtime, batch, scene target
 - Timeout: 60 s
@@ -3143,10 +3145,11 @@ Shows the scene's UI laid out in scene pixels: every canvas and element with its
 |---|---|---|---|---|
 | `canvas` | `String` |  | `""` | An entity with a UiCanvas whose UI alone is listed; omitted: every canvas. |
 | `depth` | `UInt32` |  | `0` | The most levels listed below each canvas; 0: unlimited. |
-| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline (widgets as UiButton, UiToggle(on\|off), UiSlider(\<value>), UiScrollView(\<x>,\<y>) and UiTextInput("\<text>"), marked disabled, focused, hovered or pressed); Json: a flat list of entries. |
+| `format` | `SceneTreeFormat` |  | `"Text"` | Text: a compact outline (widgets as UiButton, UiToggle(on\|off), UiSlider(\<value>), UiScrollView(\<x>,\<y>) and UiTextInput("\<text>"), an inactive canvas or element that includeInactive lists marked inactive, a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries. |
 | `width` | `UInt32` |  | `0` | The scene resolution's width to lay out at, with height; omitted: the play session's own, or for the edit scene its game view's at the project's window size (a PixelPerfectCamera's reference resolution under one). |
 | `height` | `UInt32` |  | `0` | The scene resolution's height to lay out at, with width. |
 | `target` | `SceneTarget` |  | `"Edit"` | The scene to read; omitted: the play scene while playing, else the edit scene. |
+| `includeInactive` | `Bool` |  | `false` | Also list the inactive canvases and elements (a hidden panel and its texts), each laid out, and its text measured, as if it were active, and marked inactive (active false); a copy of the scene as it is now is laid out at the scene resolution, the play scene's too, and the scene itself is only read. Omitted: only the active ones. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -3160,6 +3163,12 @@ Example: Outline every canvas.
 
 ```json
 {"format":"Text"}
+```
+
+Example: List every canvas and element as JSON, the inactive ones (a hidden panel and its texts) included.
+
+```json
+{"format":"Json","includeInactive":true}
 ```
 
 ## viewport

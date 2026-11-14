@@ -135,6 +135,28 @@ namespace Engine {
 			REQUIRE(after);
 			CHECK((*after)["scene"] == (*before)["scene"]);
 		}
+		TEST_CASE("StatsGet: reports the committed bytes of the C runtime's heap where the platform measures them")
+		{
+			// Docs/Decisions/0036-m25-tetris-pixel-art.md, "The soak": the soak's memory rule reads these fields. Windows
+			// measures the heap (ProcessHeap); Linux and macOS have no backend (ADR 0028 decision 10) and say so.
+			Test::AutomationFixture setup("StatsProcessHeap");
+			const auto result = setup.Call("stats.get", Json::object());
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			CHECK((*result)["processHeapAvailable"] == Json(true));
+	#if defined(__SANITIZE_ADDRESS__)
+			// The AddressSanitizer build serves malloc, operator new and HeapAlloc from the sanitizer's allocator, so the
+			// process heap holds only what Windows allocates on it below those hooks, a few hundred KiB ("ProcessHeap: the
+			// AddressSanitizer build allocates outside the process heap").
+			CHECK((*result)["processHeapCommittedBytes"] > Json(0));
+	#else
+			CHECK((*result)["processHeapCommittedBytes"] > Json(1024 * 1024));
+	#endif
+#else
+			CHECK((*result)["processHeapAvailable"] == Json(false));
+			CHECK((*result)["processHeapCommittedBytes"] == Json(0));
+#endif
+		}
 		TEST_CASE("StatsGet: per-view pass summaries retain delayed GPU frame identities")
 		{
 			Test::SceneTestFixture fixture;

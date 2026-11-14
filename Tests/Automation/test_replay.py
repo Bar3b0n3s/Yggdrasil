@@ -416,6 +416,7 @@ class ReplayTests(AutomationTestCase):
         self.assertEqual([checkpoint["Tick"] for checkpoint in document["Checkpoints"]], [60, 120])
         verified = client.call("input.replay", {"path": path, "verify": True, "strictHash": True})
         self.assertEqual((verified["passed"], verified["checkpointsChecked"]), (True, 2))
+        self.assertEqual((verified["checkpointsFailed"], verified["firstFailedCheckpointTick"]), (0, 0))
         recorded = document["Checkpoints"][0]["StateHash"]
         document["Checkpoints"][0]["StateHash"] = "0000000000000001" if recorded == "0000000000000000" else \
             "0000000000000000"
@@ -430,6 +431,9 @@ class ReplayTests(AutomationTestCase):
         self.assertTrue(outcome["checkpointFailed"])
         self.assertIn("(the look's included)", outcome["stopReason"])
         self.assertEqual((outcome["finalTick"], outcome["checkpointsChecked"]), (60, 1))
+        # M25's friction F12: the checkpoint that stopped the replay counts as failed, as continuePastCheckpoint
+        # counts it.
+        self.assertEqual((outcome["checkpointsFailed"], outcome["firstFailedCheckpointTick"]), (1, 60))
         self.assertEqual((outcome["stateHash"], outcome["expectedStateHash"]),
                          (recorded, document["Checkpoints"][0]["StateHash"]))
         self.assertEqual(client.call("play.state")["tick"], 60)

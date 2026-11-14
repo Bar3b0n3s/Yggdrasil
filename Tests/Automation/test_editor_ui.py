@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 import unittest
 from pathlib import Path
@@ -175,6 +176,19 @@ class EditorUiTests(AutomationTestCase):
         self.assertEqual(client.call("stats.get")["droppedSeconds"], 0)
         client.call("play.stop")
         self.assertEqual(client.call("stats.get")["droppedSeconds"], 0)
+
+    def test_host_statistics_report_the_c_runtime_heap(self) -> None:
+        # ADR 0036, "The soak": stats.get reports the committed bytes of the heap the C runtime allocates from,
+        # which the hardening soak's memory rule measures; Windows has the measure, Linux and macOS report it
+        # unavailable (ADR 0028 decision 10). An editor's heap holds its open project, far above a mebibyte.
+        client, _ = self.open_editor_with_scene()
+        stats = client.call("stats.get")
+        if sys.platform == "win32":
+            self.assertIs(stats["processHeapAvailable"], True)
+            self.assertGreater(stats["processHeapCommittedBytes"], 1 << 20)
+        else:
+            self.assertIs(stats["processHeapAvailable"], False)
+            self.assertEqual(stats["processHeapCommittedBytes"], 0)
 
     def test_editor_screenshot_after_pipelined_mutation_is_fresh(self) -> None:
         if not self.require_gpu():

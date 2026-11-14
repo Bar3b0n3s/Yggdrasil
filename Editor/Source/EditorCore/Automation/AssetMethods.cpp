@@ -1627,7 +1627,9 @@ namespace Engine {
 		registry.Enum<AssetCreateType>("AssetCreateType", "What asset.create makes.")
 			.Entry(AssetCreateType::Material, "Material", "A .material file: a PBR material.")
 			.Entry(AssetCreateType::Scene, "Scene", "A .scene file: an empty scene named after the file.")
-			.Entry(AssetCreateType::Prefab, "Prefab", "A .prefab file with one root entity named after the file.")
+			.Entry(AssetCreateType::Prefab, "Prefab",
+				"A .prefab file with one empty root entity named after the file; it takes no values (prefab.create saves an entity built in a "
+				"scene, its components and children, as a prefab).")
 			.Entry(AssetCreateType::SoundEffect, "SoundEffect", "A .sfx sound effect: synthesized layers of oscillators, imported as an AudioClip.")
 			.Entry(AssetCreateType::Folder, "Folder", "A folder below Assets/; one that already exists is left as it is (created: false).")
 			.Entry(AssetCreateType::SpriteSheet, "SpriteSheet",
@@ -1706,7 +1708,9 @@ namespace Engine {
 				"Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that "
 				"loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture "
 				"and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture "
-				"is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types.");
+				"is set to Compression None in the same step, so sprite art is never block-compressed). A Scene, a Prefab and a Folder take no "
+				"values and refuse them: a prefab is created with one empty root entity, and prefab.create saves an entity built in a scene, "
+				"its components and children, as a prefab.");
 
 		registry.Struct<AssetCreateResult>("AssetCreateResult", "The created asset.")
 			.Field("asset", &AssetCreateResult::Asset, "The created asset; an empty id and type None for a folder.")
@@ -1888,8 +1892,9 @@ namespace Engine {
 			{
 				.Name = "asset.create",
 				.Description = "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty "
-							   "scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A "
-							   "folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+							   "scene, a prefab of one empty root entity (no values: prefab.create saves a built entity as a prefab) or a folder below "
+							   "Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds "
+							   "without a command (created: false), so a Folder op is needed only for an empty folder.",
 				.RequiredParams = { "type", "path" },
 				.ExposeAsTool = true,
 				.Mutates = true,

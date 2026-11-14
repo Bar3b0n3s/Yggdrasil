@@ -88,10 +88,10 @@ def report_line(case: str, begin: int, end: int, total: int) -> str:
 
 
 def sample(tick: int, private_bytes: int, entities: int = 10, script_heap: int = 1000,
-           allocations: int = 100) -> hardening.SoakSample:
-    """An editor soak sample after `tick` ticks."""
+           allocations: int = 100, heap: int | None = None) -> hardening.SoakSample:
+    """An editor soak sample after `tick` ticks; `heap` is stats.get's processHeapCommittedBytes (None: unavailable)."""
     return hardening.SoakSample(tick / hardening.SOAK_FRAMES, private_bytes, private_bytes, entities, 5, 0, script_heap,
-                                allocations)
+                                allocations, heap)
 
 
 class AsanTests(unittest.TestCase):
@@ -706,6 +706,99 @@ class SoakTests(unittest.TestCase):
         self.assertIn("with no collection since", hardening.evaluate_script_heap(
             heap(lambda tick: floor + tick * 100)) or "")
 
+    def test_a_private_step_beside_a_flat_process_heap_passes_with_a_warning(self) -> None:
+        # ADR 0036, "The soak": the NVIDIA driver's one-off background compilation commits about 12 MiB of its own heaps
+        # at a moment the driver picks. An editor subject's memory rule measures the C runtime's heap, outside those
+        # heaps, so a private step after the baseline window fails nothing and is a warning naming its windows.
+        ticks = range(0, hardening.SOAK_FRAMES + 1, hardening.SOAK_SAMPLE_INTERVAL)
+        stepped = [sample(tick, 350_000_000 + (12 << 20 if tick >= 7000 else 0), heap=200_000_000 + tick % 3)
+                   for tick in ticks]
+        result = hardening.evaluate_soak("FeatureTest:Assets/Scenes/SceneLoadB.scene", stepped)
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.measure, hardening.SOAK_MEASURE_HEAP)
+        self.assertLess(result.growth, hardening.SOAK_GROWTH_LIMIT)
+        self.assertGreaterEqual(result.private_growth, hardening.SOAK_GROWTH_LIMIT)
+        self.assertEqual(len(result.warnings), 1, result.warnings)
+        for text in (f"private memory grew {result.private_growth * 100:.2f} %", "350000000 bytes in 0.50-0.55",
+                     f"{350_000_000 + (12 << 20)} bytes in 0.95-1.00", "warns at 1 % or more"):
+            self.assertIn(text, result.warnings[0])
+        self.assertNotIn("the limit is", result.warnings[0])  # a passing subject broke no limit
+        # A private growth below the limit warns of nothing.
+        flat = [sample(tick, 350_000_000, heap=200_000_000) for tick in ticks]
+        self.assertEqual(hardening.evaluate_soak("FeatureTest:Assets/Scenes/SceneLoadB.scene", flat).warnings, ())
+
+    def test_process_heap_growth_is_bounded_by_one_percent_of_the_baseline_private_bytes(self) -> None:
+        # ADR 0036, "The soak" (A-prime): the heap's growth in bytes must stay below 1 % of the subject's baseline
+        # private bytes, the absolute bound the private memory rule had (3,600,000 bytes here), whatever the heap's
+        # own size, so a first-party leak fails as it did.
+        ticks = range(0, hardening.SOAK_FRAMES + 1, hardening.SOAK_SAMPLE_INTERVAL)
+        for grown, passes in ((3_599_000, True), (3_600_000, False), (3_601_000, False)):
+            with self.subTest(grown=grown):
+                samples = [sample(tick, 360_000_000, heap=120_000_000 + (grown if tick >= 9500 else 0))
+                           for tick in ticks]
+                result = hardening.evaluate_soak("FeatureTest:Assets/Scenes/Physics.scene", samples)
+                self.assertEqual(result.passed, passes, result.failures)
+                self.assertEqual(result.measure, hardening.SOAK_MEASURE_HEAP)
+                self.assertAlmostEqual(result.growth, grown / 360_000_000)
+                self.assertEqual(result.warnings, ())  # the private bytes stayed flat
+                if not passes:
+                    self.assertEqual(len(result.failures), 1, result.failures)
+                    for text in (f"process heap grew {grown} bytes", "baseline median 120000000 bytes in 0.50-0.55",
+                                 f"final maximum {120_000_000 + grown} bytes in 0.95-1.00",
+                                 "the bound is < 3600000 bytes", "the baseline median private memory, 360000000 bytes"):
+                        self.assertIn(text, result.failures[0])
+
+    def test_a_process_heap_growth_above_one_percent_of_the_heap_within_the_bound_passes(self) -> None:
+        # M25's second targeted soak of Physics2D.scene: the NVIDIA driver's compilation at 0.65 committed 15.3 MB of
+        # private memory and 1.66 MB of the process heap, 1.16 % of the heap but 0.42 % of the baseline private bytes.
+        ticks = range(0, hardening.SOAK_FRAMES + 1, hardening.SOAK_SAMPLE_INTERVAL)
+        samples = [sample(tick, 396_075_008 + (15_308_800 if tick >= 6500 else 0),
+                          heap=143_613_952 + (1_662_976 if tick >= 6500 else 0)) for tick in ticks]
+        self.assertGreater(1_662_976 / 143_613_952, hardening.SOAK_GROWTH_LIMIT)
+        result = hardening.evaluate_soak("FeatureTest:Assets/Scenes/Physics2D.scene", samples)
+        self.assertTrue(result.passed, result.failures)
+        self.assertEqual(result.measure, hardening.SOAK_MEASURE_HEAP)
+        self.assertAlmostEqual(result.growth, 1_662_976 / 396_075_008)
+        self.assertEqual(len(result.warnings), 1, result.warnings)
+        self.assertIn("private memory grew", result.warnings[0])
+
+    def test_a_heap_measured_subject_without_baseline_private_bytes_fails(self) -> None:
+        # The heap's bound derives from the baseline private bytes, so a baseline of 0 fails the subject, naming it,
+        # rather than divide by zero or pass unbounded.
+        ticks = range(0, hardening.SOAK_FRAMES + 1, hardening.SOAK_SAMPLE_INTERVAL)
+        result = hardening.evaluate_soak("FeatureTest:Assets/Scenes/Physics.scene",
+                                         [sample(tick, 0, heap=120_000_000) for tick in ticks])
+        self.assertFalse(result.passed)
+        self.assertEqual(result.measure, hardening.SOAK_MEASURE_HEAP)
+        self.assertIn("the baseline window's private memory is 0 bytes", result.failures[0])
+
+    def test_a_subject_without_the_process_heap_keeps_the_private_memory_rule(self) -> None:
+        # The Runtime soak samples only its process's memory from outside, and an editor without the heap measure (a
+        # POSIX host, where it is Unsupported) reports none: their memory rule still measures private bytes.
+        runtime = [hardening.SoakSample(index / 100, 80_000_000 + (2 << 20 if index >= 70 else 0), 90_000_000)
+                   for index in range(101)]
+        result = hardening.evaluate_soak("Runtime:FeatureTest", runtime)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.measure, hardening.SOAK_MEASURE_PRIVATE)
+        self.assertIn("private memory grew", result.failures[0])
+        self.assertIn("the limit is < 1 %", result.failures[0])
+        self.assertEqual(result.growth, result.private_growth)
+        self.assertEqual(result.warnings, ())
+
+    def test_a_subject_with_the_process_heap_in_only_some_samples_fails_naming_them(self) -> None:
+        # The memory rule measures one thing per subject: a heap value missing from some samples (a stats.get that
+        # reported it unavailable part of the way) fails the subject rather than mix two measures or drop samples,
+        # and the subject's growth is then its private growth.
+        ticks = list(range(0, hardening.SOAK_FRAMES + 1, hardening.SOAK_SAMPLE_INTERVAL))
+        mixed = [sample(tick, 350_000_000, heap=200_000_000 if index % 2 == 0 else None)
+                 for index, tick in enumerate(ticks)]
+        result = hardening.evaluate_soak("FeatureTest:Assets/Scenes/Input.scene", mixed)
+        self.assertFalse(result.passed)
+        self.assertEqual(result.measure, hardening.SOAK_MEASURE_PRIVATE)
+        self.assertEqual(len(result.failures), 1, result.failures)
+        self.assertIn(f"the process heap was measured in {(len(ticks) + 1) // 2} of {len(ticks)} sample(s)",
+                      result.failures[0])
+
     def test_the_runtime_soak_has_only_memory_samples(self) -> None:
         samples = [hardening.SoakSample(index / 100, 80_000_000, 90_000_000) for index in range(101)]
         result = hardening.evaluate_soak("Runtime:FeatureTest", samples)
@@ -734,12 +827,14 @@ class SoakTests(unittest.TestCase):
                                            for index in range(101)]}
         result = hardening.evaluate_soak("Runtime:FeatureTest", samples["Runtime:FeatureTest"])
         report = hardening.soak_report([result], samples)
-        self.assertEqual((report["Format"], report["Version"], report["Frames"]), ("SoakReport", 1, 10_000))
+        self.assertEqual((report["Format"], report["Version"], report["Frames"]), ("SoakReport", 2, 10_000))
         subject = report["Subjects"][0]
-        self.assertEqual((subject["Subject"], subject["Passed"], subject["Failures"]),
-                         ("Runtime:FeatureTest", True, []))
+        self.assertEqual((subject["Subject"], subject["Passed"], subject["Failures"], subject["Warnings"]),
+                         ("Runtime:FeatureTest", True, [], []))
+        self.assertEqual((subject["Measure"], subject["Growth"], subject["PrivateGrowth"]), ("private", 0.0, 0.0))
         self.assertEqual(len(subject["Samples"]), 101)
         self.assertIsNone(subject["Samples"][0]["entities"])
+        self.assertIsNone(subject["Samples"][0]["heap_committed_bytes"])
         json.dumps(report)  # the report is plain JSON
         self.assertEqual(hardening.soak_report([result], samples, 20_000)["Frames"], 20_000)
 
@@ -1483,6 +1578,62 @@ class SoakDeadlineTests(unittest.TestCase):
         self.assertEqual(step.status, Status.TIMEOUT)
         self.assertIn(f"did not finish within {hardening_script.TIMEOUTS['soak']:.0f} s", step.detail)
         self.assertEqual(step.data["notRun"], ["Runtime:FeatureTest"])
+
+    def test_a_private_memory_warning_is_printed_counted_and_fails_nothing(self) -> None:
+        # ADR 0036, "The soak": an editor sample takes stats.get's processHeapCommittedBytes only while its
+        # processHeapAvailable is true; a subject measured on that heap passes with a private step, which the step
+        # prints as a WARNING line and counts in its summary without changing its status.
+        stats = {"entities": 3, "bodies": 0, "voices": 0, "scriptHeapBytes": 500_000, "memoryAllocationCount": 9}
+        self.assertEqual(hardening_script.stats_sample(0.5, 4242, {**stats, "processHeapAvailable": True,
+                                                                   "processHeapCommittedBytes": 2.5e8})
+                         .heap_committed_bytes, 250_000_000)
+        self.assertIsNone(hardening_script.stats_sample(0.5, 4242, {**stats, "processHeapAvailable": False,
+                                                                    "processHeapCommittedBytes": 0})
+                          .heap_committed_bytes)
+        self.assertIsNone(hardening_script.stats_sample(0.5, 4242, stats).heap_committed_bytes)
+
+        ticks = range(0, hardening.SOAK_FRAMES + 1, hardening.SOAK_SAMPLE_INTERVAL)
+        stepped = [sample(tick, 350_000_000 + (12 << 20 if tick >= 7000 else 0), heap=200_000_000) for tick in ticks]
+        flat = [sample(tick, 350_000_000, heap=200_000_000) for tick in ticks]
+        subjects = [hardening_script.SoakSubject("FeatureTest:A.scene", "test", lambda limit: (stepped, [])),
+                    hardening_script.SoakSubject("FeatureTest:B.scene", "test", lambda limit: (flat, []))]
+        report, junit = self.directory / "Soak.json", self.directory / "Soak-Release.xml"
+        printed = io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            outcome = hardening_script.run_soak_subjects(subjects, hardening_script.SoakDeadline(1000.0, FakeClock()),
+                                                         hardening_script.Console(False), report, junit)
+        self.assertTrue(all(result.passed for result in outcome.results))
+        warnings = [line for line in printed.getvalue().splitlines() if "WARNING: FeatureTest:A.scene:" in line]
+        self.assertEqual(len(warnings), 1, printed.getvalue())
+        self.assertIn("private memory grew", warnings[0])
+        self.assertNotIn("FeatureTest:B.scene: private", printed.getvalue())
+        for partial, status in ((None, Status.PASSED), ("FeatureTest:*", Status.WARNING)):
+            with self.subTest(partial=partial):
+                step = hardening_script.soak_step("soak Release", outcome, 10.0, partial, report, junit)
+                self.assertEqual(step.status, status)
+                self.assertIn("1 subject(s) with a private memory warning", step.detail)
+                self.assertIn("(FeatureTest:", step.detail)
+                self.assertEqual([entry["warnings"] != [] for entry in step.data["subjects"]], [True, False])
+        document = json.loads(report.read_text(encoding="utf-8"))
+        self.assertEqual([entry["Measure"] for entry in document["Subjects"]], ["heap", "heap"])
+        self.assertEqual(len(document["Subjects"][0]["Warnings"]), 1)
+        # The JUnit report keeps each subject's growth and its warning lines.
+        cases = {case.get("name"): case for case in ElementTree.parse(junit).getroot().iter("testcase")}
+        warned = cases["FeatureTest:A.scene"].findtext("system-out") or ""
+        self.assertIn("heap growth", warned)
+        self.assertIn("warning: private memory grew", warned)
+        self.assertNotIn("warning:", cases["FeatureTest:B.scene"].findtext("system-out") or "")
+        # A failed or timed-out step counts the warning too, and the warning leaves its status as it was.
+        grown = [sample(tick, 350_000_000, heap=200_000_000 + (10_000_000 if tick >= 9500 else 0)) for tick in ticks]
+        failed = hardening_script.SoakOutcome(
+            results=[*outcome.results, hardening.evaluate_soak("FeatureTest:C.scene", grown)])
+        timed_out = hardening_script.SoakOutcome(results=list(outcome.results), not_run=["Runtime:FeatureTest"],
+                                                 timed_out=True)
+        for name, other, status in (("failed", failed, Status.FAILED), ("timed out", timed_out, Status.TIMEOUT)):
+            with self.subTest(step=name):
+                step = hardening_script.soak_step("soak Release", other, 10.0, None, report, junit)
+                self.assertEqual(step.status, status)
+                self.assertIn("1 subject(s) with a private memory warning", step.detail)
 
     def test_the_reports_are_written_when_a_subject_raises(self) -> None:
         deadline = hardening_script.SoakDeadline(1000.0, FakeClock())

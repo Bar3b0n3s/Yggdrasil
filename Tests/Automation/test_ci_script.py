@@ -62,10 +62,12 @@ class RecordingRunner(CI.Runner):
     def __init__(self, arguments: argparse.Namespace) -> None:
         super().__init__(arguments, Console(json_mode=True))
         self.calls: list[tuple[str, str, list[str]]] = []
+        self.timeouts: dict[str, float] = {}
 
     def script(self, name: str, script: str, script_arguments: list[str], timeout: float,
                expected_exit: int = 0, expected_output: object = None) -> Step:
         self.calls.append((name, script, list(script_arguments)))
+        self.timeouts[name] = timeout
         return self.done(Step(name, Status.PASSED, "recorded"))
 
 
@@ -165,6 +167,19 @@ class StageTests(unittest.TestCase):
                 self.assertEqual([step.status for step in steps], [Status.PASSED])
                 self.assertEqual(runner.calls, [(f"games {configs.replace(',', ', ')}", "Test.py",
                                                  ["--suite", "games", "--config", configs, "--junit", *device])])
+
+    def test_each_unit_step_outlasts_the_bound_test_py_gives_its_run(self) -> None:
+        # The stage's bound stays above the one Test.py gives the Tests run it starts, so the stage never stops a run
+        # Test.py still allows (M25's gate, 2026-11-13: the stage stopped the Debug run at 1,800 s, below Test.py's
+        # 3,600 s).
+        runner = RecordingRunner(parse("--stages", "unit"))
+        CI.run_stage(runner, CI.STAGE_BY_NAME["unit"], runner.arguments.configs)
+        self.assertEqual(sorted(runner.timeouts), ["unit Debug", "unit Release"])
+        for config in ("Debug", "Release"):
+            with self.subTest(config=config), contextlib.redirect_stderr(io.StringIO()):
+                own = test_script.tests_timeout(test_script.TestRun("unit", config, ()),
+                                                test_script.parse_arguments(["--suite", "unit", "--config", config]))
+                self.assertGreater(runner.timeouts[f"unit {config}"], own)
 
     def test_contract_mode_allows_skips_in_the_export_stage(self) -> None:
         runner = RecordingRunner(parse("--stages", "export", "--contract", "--configs", "Release"))

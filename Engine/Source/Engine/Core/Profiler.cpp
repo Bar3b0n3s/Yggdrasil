@@ -32,6 +32,16 @@ namespace Engine {
 		// join many short-lived workers, and each ring is ZonesPerThread zones large (2 MiB by default).
 		constexpr size_t MaxRetiredRings = 16;
 
+		// A thread that names itself registers its ring at once (SetThreadName), so a long-lived thread's ring is allocated
+		// when the thread starts, not at its first zone, whose moment the operating system's scheduling decides for a
+		// JobSystem worker (Docs/Decisions/0036-m25-tetris-pixel-art.md, "The soak"). Dist records no zone (Profiler.h), so
+		// it registers no ring it would never fill.
+#if defined(ENGINE_DIST)
+		constexpr bool RegistersNamedThreads = false;
+#else
+		constexpr bool RegistersNamedThreads = true;
+#endif
+
 		constexpr uint32_t ChromeTraceProcessID = 1;
 
 		// One zone of a ring. Every field is atomic, so a collector may read a slot while its thread overwrites it; the
@@ -436,6 +446,16 @@ namespace Engine {
 	void Profiler::SetThreadName(std::string_view name)
 	{
 		s_Thread.Name.assign(name);
+		if constexpr (RegistersNamedThreads)
+		{
+			// Without a ring of the active initialization, the thread registers one now, which takes the name.
+			const uint64_t generation = Utils::GetActiveGeneration();
+			if (generation != 0 && s_Thread.Generation != generation)
+			{
+				static_cast<void>(Utils::GetThreadRing(GetState(), generation));
+				return;
+			}
+		}
 		if (s_Thread.Ring == nullptr)
 			return; // the next ring this thread registers takes the name
 

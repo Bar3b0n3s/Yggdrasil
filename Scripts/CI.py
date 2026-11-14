@@ -229,7 +229,12 @@ TIMEOUTS = {
     "generate": 600.0,
     "build": 7200.0,
     "bake": 1800.0,
-    "unit": 1800.0,
+    # Above the bound Test.py gives each unit run it starts (DEBUG_UNIT_TIMEOUT_SECONDS, 3,600 s, for the Debug run and
+    # SUITE_TIMEOUT_SECONDS, 1,800 s, for the Release run; Docs/Decisions/0039-script-budget-cpu-time.md decision 5),
+    # plus 300 s for Test.py's own setup and report, so the stage never stops a run that Test.py still allows. At
+    # 1,800 s it stopped M25's gate (2026-11-13) in the Debug run of 4,723 cases, which had taken 1,546 s beside the
+    # phase's other worktrees and 2,734 s under heavier load.
+    "unit": 3900.0,
     "gpu": 3600.0,
     "golden": 1800.0,
     "feature": 3600.0,

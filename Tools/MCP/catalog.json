@@ -53,7 +53,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a prefab of one empty root entity (no values: prefab.create saves a built entity as a prefab) or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -69,7 +69,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed). A Scene, a Prefab and a Folder take no values and refuse them: a prefab is created with one empty root entity, and prefab.create saves an entity built in a scene, its components and children, as a prefab."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -3352,7 +3352,7 @@
 		{
 			"name": "ui_tree",
 			"method": "ui.tree",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every active canvas and element (with includeInactive the inactive ones too, laid out as if active and marked inactive) with its rectangle, its canvas's scale, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "UiTreeParams",
@@ -3370,7 +3370,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), an inactive canvas or element that includeInactive lists marked inactive, a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -3388,6 +3388,10 @@
 					"target": {
 						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
 						"enum": ["Edit", "Play"]
+					},
+					"includeInactive": {
+						"description": "Also list the inactive canvases and elements (a hidden panel and its texts), each laid out, and its text measured, as if it were active, and marked inactive (active false); a copy of the scene as it is now is laid out at the scene resolution, the play scene's too, and the scene itself is only read. Omitted: only the active ones.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",

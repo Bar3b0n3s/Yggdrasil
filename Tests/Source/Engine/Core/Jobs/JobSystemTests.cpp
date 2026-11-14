@@ -2,11 +2,16 @@
 
 #include "Engine/Core/Jobs/JobSystem.h"
 
+#include "Engine/Core/Profiler.h"
 #include "Support/DeathTest.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <latch>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -519,6 +524,49 @@ namespace Engine {
 
 			CHECK(applied == std::vector<std::string>{ "new texture" });
 			CHECK(dropped == std::vector<uint64_t>{ 1 });
+		}
+
+		TEST_CASE("JobSystem: every worker holds its profiler ring before any job runs")
+		{
+			// ADR 0036, "The soak": a worker's ring is allocated when the system starts, never at the worker's first job,
+			// whose moment the operating system's wake order decides. The Tests main's ProcessContext initializes the
+			// profiler.
+			REQUIRE(Profiler::IsInitialized());
+			const ProfilerCaptureMark before = Profiler::MarkCapture();
+			const auto ringsSinceBefore = [&before](const ProfilerCaptureMark& mark)
+			{
+				std::vector<std::pair<uint32_t, uint64_t>> rings;
+				for (const auto& ring : mark.ThreadZones)
+				{
+					const bool held = std::ranges::any_of(before.ThreadZones, [&ring](const std::pair<uint32_t, uint64_t>& old)
+					{
+						return old.first == ring.first;
+					});
+					if (!held)
+						rings.push_back(ring);
+				}
+				return rings;
+			};
+
+			MainThreadQueue queue;
+			JobSystem jobs(3, queue);
+			const std::vector<std::pair<uint32_t, uint64_t>> started = ringsSinceBefore(Profiler::MarkCapture());
+			REQUIRE(started.size() == 3);
+			for (const auto& ring : started)
+				CHECK(ring.second == 0);
+
+			// A job records its zone on one of those rings; no ring is added.
+			static_cast<void>(jobs.Submit([]() -> Status
+			{
+				return {};
+			}));
+			jobs.WaitIdle();
+			const std::vector<std::pair<uint32_t, uint64_t>> afterJob = ringsSinceBefore(Profiler::MarkCapture());
+			REQUIRE(afterJob.size() == 3);
+			uint64_t zones = 0;
+			for (const auto& ring : afterJob)
+				zones += ring.second;
+			CHECK(zones == 1);
 		}
 
 		TEST_CASE("JobSystem: the default worker count leaves two hardware threads free")

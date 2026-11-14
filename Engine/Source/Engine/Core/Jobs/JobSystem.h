@@ -217,7 +217,9 @@ namespace Engine {
 	public:
 		// `mainThreadQueue` receives ContinueOnMainThread continuations and must outlive the JobSystem (documented
 		// back-reference, Architecture §4.7). `workerCount` 0 selects inline mode; GetDefaultWorkerCount() is the
-		// production value. A worker thread that cannot be started is FatalError(FatalErrorKind::InitFailed).
+		// production value. A worker thread that cannot be started is FatalError(FatalErrorKind::InitFailed). Returns once
+		// every worker has started and named itself in the profiler ("Job <n>", Profiler::SetThreadName), which outside
+		// Dist registers the worker's profiler ring: the rings exist when the system starts, before any job runs.
 		JobSystem(uint32_t workerCount, MainThreadQueue& mainThreadQueue);
 		~JobSystem();
 
@@ -282,9 +284,11 @@ namespace Engine {
 	private:
 		MainThreadQueue& m_MainThreadQueue;
 		uint32_t m_WorkerCount = 0;
-		std::mutex m_Mutex; // guards m_Queue, m_RunningThreads and m_IsStopping
+		std::mutex m_Mutex; // guards m_Queue, m_RunningThreads, m_IsStopping and m_StartedWorkerCount
 		std::condition_variable m_WorkAvailable;
-		std::condition_variable m_Idle; // notified with m_Mutex held, so the destructor never races a notifier
+		std::condition_variable m_Idle;          // notified with m_Mutex held, so the destructor never races a notifier
+		std::condition_variable m_WorkerStarted; // notified with m_Mutex held when a worker has named itself
+		uint32_t m_StartedWorkerCount = 0;       // the workers that have named themselves, which the constructor waits for
 		std::deque<Scope<Detail::JobTask>> m_Queue;
 		std::vector<std::thread::id> m_RunningThreads; // one entry per job running now, on a worker or inline
 		std::vector<std::thread> m_Workers;

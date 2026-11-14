@@ -3,6 +3,7 @@
 
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Platform/ProcessHeap.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Scene/Physics2DSystem.h"
@@ -10,6 +11,7 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
 
+#include <cstdint>
 #include <limits>
 
 namespace Engine {
@@ -35,6 +37,12 @@ namespace Engine {
 			result.ScriptHeapBytes = ToStatsTelemetry(static_cast<double>(memory.UsedBytes));
 			result.ScriptSoftLimitBytes = ToStatsTelemetry(static_cast<double>(memory.SoftLimitBytes));
 			result.ScriptHardLimitBytes = ToStatsTelemetry(static_cast<double>(memory.HardLimitBytes));
+		}
+		// M25's soak (ADR 0036, "The soak"): the C runtime heap's committed bytes, in both hosts, from the process itself.
+		if (const Result<uint64_t> heap = ProcessHeap::GetCommittedBytes(); heap.has_value())
+		{
+			result.ProcessHeapAvailable = true;
+			result.ProcessHeapCommittedBytes = ToStatsTelemetry(static_cast<double>(*heap));
 		}
 		result.Fps = ToStatsTelemetry(result.Fps);
 		result.CpuMilliseconds = ToStatsTelemetry(result.CpuMilliseconds);
@@ -136,6 +144,14 @@ namespace Engine {
 			.Field("scriptHeapBytes", &StatsGetResult::ScriptHeapBytes, "Approximate current script heap bytes when available.")
 			.Field("scriptSoftLimitBytes", &StatsGetResult::ScriptSoftLimitBytes, "Approximate script heap soft limit in bytes when available.")
 			.Field("scriptHardLimitBytes", &StatsGetResult::ScriptHardLimitBytes, "Approximate script heap hard limit in bytes when available.")
+			.Field("processHeapAvailable", &StatsGetResult::ProcessHeapAvailable,
+				"Whether the host measured the heap the C runtime allocates from: false on Linux and macOS, which have no measure, and "
+				"when the query fails.")
+			.Field("processHeapCommittedBytes", &StatsGetResult::ProcessHeapCommittedBytes,
+				"Approximate committed bytes of the heap the C runtime allocates from (malloc and new: the engine's own memory and that of "
+				"every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. "
+				"What a graphics driver keeps in allocations of its own is not in it, nor, in an AddressSanitizer build, what the C "
+				"runtime or HeapAlloc allocates, which the sanitizer's allocator serves. The hardening soak's memory rule measures it.")
 			.Field("memoryAllocationCount", &StatsGetResult::MemoryAllocationCount, "Current Vulkan device memory allocation count.")
 			.Field("maxMemoryAllocationCount", &StatsGetResult::MaxMemoryAllocationCount, "Vulkan device allocation limit, zero without a device.")
 			.Field("views", &StatsGetResult::Views,

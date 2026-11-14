@@ -18,8 +18,10 @@
 #include <vector>
 
 // §8.3 pass 14, text (Architecture §8.10): signed-distance-field glyph quads from the fonts' R8 atlases (FontData, M6's
-// FontImporter: ASCII and Latin-1 at 48 px, spread 8), shaded with a smoothstep over fwidth of the distance, batched per
-// font and pipeline into one geometrically growing dynamic vertex buffer. Order: world texts (depth-tested against SceneDepth
+// FontImporter: ASCII and Latin-1 at 48 px, spread 8), shaded with a smoothstep over fwidth of the distance, outside the
+// outline at least the field's step across one screen pixel (the font's Spread, Passes/Text.slang; M25's friction F01,
+// Docs/Decisions/0036-m25-tetris-pixel-art.md: a stroke thinner than a pixel keeps its coverage), batched per font and
+// pipeline into one geometrically growing dynamic vertex buffer. Order: world texts (depth-tested against SceneDepth
 // without depth writes), then screen texts and the DebugDrawList's labels (DebugText; depth-tested or on top by their mode).
 // Layout comes from TextLayout.h:
 //   - Screen: Size and Offset scaled by viewport height / TextReferenceHeight, the block placed by PlaceScreenText.
@@ -38,7 +40,8 @@
 // Fonts are resolved through the AssetManager (GetOrPlaceholder<FontData>: a null handle is the Default font, a missing
 // font its placeholder) and their atlases mirrored per (handle, version) by the renderer itself: a pass-owned GPU object
 // (§8.14 item 1), uploaded through HostImageUpload as R8_UNORM, released by CollectStale. A missing font and a null one
-// share the Default font's mirror. Binding layout (set 0): b0 ViewConstants, the atlas and its sampler. The pipelines are
+// share the Default font's mirror. Binding layout (set 0): b0 ViewConstants, the push constants (TextConstants: the batch's
+// font's Spread, Shared/TextVertex.h), the atlas and its sampler. The pipelines are
 // created for GetOverlayFramebufferInfo(). Created once per device at startup and owned by SceneRendererPipelines; the
 // renderer keeps no binding sets: each Record takes them (one per atlas) from the view's PassBindingCache, which releases a
 // stale atlas's set one render after its last use. Main thread only; not copyable or movable. Frozen by the M8 contract

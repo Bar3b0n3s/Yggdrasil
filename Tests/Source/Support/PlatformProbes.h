@@ -48,6 +48,26 @@ namespace Engine {
 		// can still allocate (the lock is recursive). For a crash child that crashes right after. Errors: Io.
 		[[nodiscard]] Status LockProcessHeap();
 
+		// Whether the C runtime allocates from the process heap: _get_heap_handle, the heap malloc and operator new use outside
+		// the AddressSanitizer build (whose runtime serves them from its own allocator), is GetProcessHeap, the heap
+		// ProcessHeap measures (Docs/Decisions/0036-m25-tetris-pixel-art.md, "The soak").
+		[[nodiscard]] bool IsCrtHeapTheProcessHeap();
+
+		// Frees a block that HeapAlloc took from the process heap.
+		struct ProcessHeapBlockFreer
+		{
+			void operator()(void* block) const;
+		};
+
+		// A block of the process heap, freed with the object.
+		using ProcessHeapBlock = std::unique_ptr<void, ProcessHeapBlockFreer>;
+
+		// A block of `bytes` bytes allocated directly on the process heap (HeapAlloc on GetProcessHeap), whatever the C
+		// runtime allocates from, so it proves what ProcessHeap counts (Docs/Decisions/0036-m25-tetris-pixel-art.md,
+		// "The soak"). In the AddressSanitizer build the sanitizer's runtime serves HeapAlloc too, from its own allocator,
+		// so there the block is not on the process heap. Errors: Io.
+		[[nodiscard]] Result<ProcessHeapBlock> AllocateOnProcessHeap(size_t bytes);
+
 		// The content of `file`, read through a handle that denies writers (FILE_SHARE_READ), as .NET's File.ReadAllText
 		// and _wfsopen with _SH_DENYWR do, so opening it fails while any other handle to the file has write access.
 		// Errors: Io.
