@@ -1025,6 +1025,120 @@ return Script.Define("Spawner", Spawner)
 			CHECK(nesting->empty());
 		}
 
+		// M27 friction F04 (Docs/Decisions/0038-m27-rolling-ball.md): the builder added a BottomBar below a HUD instance and
+		// applied; prefab.apply reported success, but HUD.prefab kept no BottomBar, so the HUD instances of the other scenes
+		// never got it. prefab.apply adds every entity added below the instance to the prefab at its place: the instance holds
+		// it once, as a member with a new id (addedEntities), the root's reference to it follows it, every instance in this
+		// and the other open scenes gains it, and one undo step restores the prefab and every instance. An added entity that
+		// an entity outside the instance references, and an added instance of the prefab itself, are refused and nothing
+		// changes.
+		TEST_CASE("PrefabMethods: prefab.apply adds the entities added below the instance to the prefab and every instance in one undo step")
+		{
+			Test::AutomationFixture setup("PrefabApplyAddedEntities");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "script.write", Json{ { "path", "Assets/Scripts/Hud.luau" }, { "source", R"(
+local Hud = { Fields = { Bar = Field.Entity() } }
+return Script.Define("Hud", Hud)
+)" } });
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "HUD"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "TopBar", "parent": "/HUD"})"));
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Score", "parent": "/HUD"})"));
+			CallOrFail(setup, "prefab.create", ParsePrefabMethodJson(R"({"entity": "/HUD", "path": "Assets/Prefabs/HUD.prefab", "replaceWithInstance": true})"));
+			CallOrFail(setup, "prefab.instantiate", ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/HUD.prefab", "name": "HUD2"})"));
+			CallOrFail(setup, "scene.new", ParsePrefabMethodJson(R"({"path": "Assets/Scenes/Level2.scene", "keepOpen": true})"));
+			CallOrFail(setup, "prefab.instantiate", ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/HUD.prefab", "name": "HUD"})"));
+			CallOrFail(setup, "scene.activate", ParsePrefabMethodJson(R"({"scene": "Assets/Scenes/Main.scene"})"));
+			const Json inLevel2{ { "scene", "Assets/Scenes/Level2.scene" } };
+			const auto existsInLevel2 = [&setup, &inLevel2](std::string_view path)
+			{
+				Json params = inLevel2;
+				params["entity"] = path;
+				return setup.Call("entity.get", params).has_value();
+			};
+			const auto childNames = [&editor](std::string_view path)
+			{
+				std::vector<std::string> names;
+				const Entity parent = editor.GetScene().FindEntityByPath(path);
+				REQUIRE(parent.IsValid());
+				for (const UUID child : parent.GetChildren())
+					names.push_back(editor.GetScene().FindEntityByID(child).GetName());
+				return names;
+			};
+
+			// A BottomBar with a child between TopBar and Score; the HUD root's script names it.
+			const Json bottom = CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "BottomBar", "parent": "/HUD", "index": 1})"))["entity"];
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Lives", "parent": "/HUD/BottomBar"})"));
+			const Json hudScript = ScriptSlots(Json{ { "Script", "Assets/Scripts/Hud.luau" }, { "Fields", Json{ { "Bar", bottom["id"] } } } });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/HUD" }, { "components", Json{ { "Script", hudScript } } } });
+			const std::filesystem::path prefabFile = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/HUD.prefab";
+			const Result<std::string> before = FileSystem::ReadText(prefabFile);
+			REQUIRE(before.has_value());
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			const Json applied = CallOrFail(setup, "prefab.apply", ParsePrefabMethodJson(R"({"instance": "/HUD"})"));
+			CHECK(childNames("/HUD2") == std::vector<std::string>{ "TopBar", "BottomBar", "Score" });
+			REQUIRE(applied.contains("addedEntities"));
+			REQUIRE(applied["addedEntities"].size() == 1);
+			CHECK(applied["addedEntities"][0]["path"] == Json("/HUD/BottomBar"));
+			CHECK(applied["addedEntities"][0]["id"] != bottom["id"]);
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+			const Result<std::string> written = FileSystem::ReadText(prefabFile);
+			REQUIRE(written.has_value());
+			CHECK(written->contains("\"BottomBar\""));
+			CHECK(written->contains("\"Lives\""));
+			for (const std::string_view root : { "/HUD", "/HUD2" })
+			{
+				CAPTURE(root);
+				CHECK(childNames(root) == std::vector<std::string>{ "TopBar", "BottomBar", "Score" });
+				const Json bar = CaptureEntity(editor, std::format("{}/BottomBar", root));
+				CHECK(bar["Components"].contains("PrefabLink"));
+				CHECK(CaptureEntity(editor, root)["Components"]["Script"]["Scripts"][0]["Fields"]["Bar"] == bar["ID"]);
+				CHECK(editor.GetScene().FindEntityByPath(std::format("{}/BottomBar/Lives", root)).IsValid());
+				CHECK(CaptureEntity(editor, root)["Components"]["Prefab"]["Overrides"].empty());
+			}
+			CHECK(CaptureEntity(editor, "/HUD/BottomBar")["ID"] == applied["addedEntities"][0]["id"]);
+			CHECK(existsInLevel2("/HUD/BottomBar/Lives"));
+
+			// One undo step restores the prefab and every instance: the BottomBar is a user child of /HUD again, with its id.
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(FileSystem::ReadText(prefabFile).value_or(std::string()) == *before);
+			const Json restored = CaptureEntity(editor, "/HUD/BottomBar");
+			CHECK(restored["ID"] == bottom["id"]);
+			CHECK_FALSE(restored["Components"].contains("PrefabLink"));
+			CHECK(childNames("/HUD2") == std::vector<std::string>{ "TopBar", "Score" });
+			CHECK_FALSE(existsInLevel2("/HUD/BottomBar"));
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+			CHECK(CaptureEntity(editor, "/HUD/BottomBar")["ID"] == applied["addedEntities"][0]["id"]);
+			CHECK(existsInLevel2("/HUD/BottomBar/Lives"));
+
+			// A Banner added below HUD2 that an entity outside it references is refused, and nothing changes.
+			CallOrFail(setup, "entity.create", ParsePrefabMethodJson(R"({"name": "Banner", "parent": "/HUD2"})"));
+			const Json banner = CaptureEntity(editor, "/HUD2/Banner");
+			CallOrFail(setup, "entity.create", Json{ { "name", "Watcher" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Script", "Assets/Scripts/Hud.luau" }, { "Fields", Json{ { "Bar", banner["ID"] } } } }) } } } });
+			const Result<std::string> applyOnce = FileSystem::ReadText(prefabFile);
+			REQUIRE(applyOnce.has_value());
+			const size_t refusedSteps = editor.GetHistory().GetUndoCount();
+			const Json referenced = setup.Request("prefab.apply", ParsePrefabMethodJson(R"({"instance": "/HUD2"})"));
+			REQUIRE(referenced.contains("error"));
+			CHECK(referenced["error"]["data"]["errorCode"] == Json("InvalidState"));
+			CHECK(referenced["error"]["data"]["location"]["entity"] == CaptureEntity(editor, "/Watcher")["ID"]);
+			CHECK(editor.GetHistory().GetUndoCount() == refusedSteps);
+			CHECK(FileSystem::ReadText(prefabFile).value_or(std::string()) == *applyOnce);
+			CHECK(CaptureEntity(editor, "/HUD2/Banner") == banner);
+
+			// An instance of HUD.prefab placed below HUD2 would make the prefab nest itself: refused, nothing written.
+			CallOrFail(setup, "entity.destroy", ParsePrefabMethodJson(R"({"entities": ["/Watcher"]})"));
+			CallOrFail(setup, "prefab.instantiate", ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/HUD.prefab", "parent": "/HUD2/Banner", "name": "Inner"})"));
+			const size_t cycleSteps = editor.GetHistory().GetUndoCount();
+			const Result<Json> cycle = setup.Call("prefab.apply", ParsePrefabMethodJson(R"({"instance": "/HUD2"})"));
+			REQUIRE_FALSE(cycle.has_value());
+			CHECK(cycle.error().GetCode() == ErrorCode::Validation);
+			REQUIRE_FALSE(cycle.error().GetIssues().empty());
+			CHECK(cycle.error().GetIssues()[0].JsonPointer == "/instance");
+			CHECK(editor.GetHistory().GetUndoCount() == cycleSteps);
+			CHECK(FileSystem::ReadText(prefabFile).value_or(std::string()) == *applyOnce);
+		}
+
 		TEST_CASE("PrefabMethods: errors name the problem")
 		{
 			Test::AutomationFixture setup("PrefabErrors");

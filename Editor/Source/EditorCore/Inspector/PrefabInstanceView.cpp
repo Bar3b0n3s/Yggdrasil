@@ -183,6 +183,9 @@ namespace Engine {
 			}
 			view.Overrides.push_back(std::move(row));
 		}
+		ENGINE_TRY_ASSIGN(const std::vector<Entity> added, PrefabInstantiator::GetAddedEntities(levels.back()));
+		for (const Entity top : added)
+			view.AddedEntities.push_back(scene.GetEntityPath(top));
 		return view;
 	}
 

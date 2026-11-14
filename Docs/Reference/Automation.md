@@ -2000,7 +2000,7 @@ Example: Wait for tick 60.
 
 ### prefab.apply
 
-Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the scene it addresses, as one undoable step, and in every other open scene, as a step of that scene's own undo history.
+Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down, together with every entity added below the instance (a user child with its subtree, an instance placed there as a nested instance), each at its place; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the scene it addresses, as one undoable step, and in every other open scene, as a step of that scene's own undo history. The added entities become members of the instance with new ids (addedEntities), so a reference to one from outside the added entities is refused (InvalidState), except from the outermost instance's members when the prefab written is the outermost's.
 
 - Flags: tool `prefab_apply`, mutates, batch, scene target
 - Timeout: 60 s
@@ -2016,9 +2016,10 @@ Writes an instance's overrides into a .prefab asset, by default its outermost in
 | `prefab` | `AssetSummary` | The prefab asset written: the level's. |
 | `updatedInstances` | `UInt32` | The outermost instances rebuilt in the scene the request addresses from it or from a prefab nesting it, this one's included. |
 | `updatedPrefabs` | `Array<AssetSummary>` | The prefab assets nesting the applied prefab that were rewritten, in nesting order. |
+| `addedEntities` | `Array<EntitySummary>` | The entities added below the instance that the prefab now holds (the top of each added subtree), as the members they became, with new ids; empty when none was added. |
 | `undoIndex` | `UInt32` | The undo index; 0 in a batch. |
 
-Example: Make the cell's edits the prefab's.
+Example: Make the cell's edits, and the entities added below it, the prefab's.
 
 ```json
 {"instance":"/Board/Cell"}

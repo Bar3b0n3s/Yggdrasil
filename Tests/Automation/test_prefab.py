@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from typing import Any
 
 from harness import AutomationTestCase, engine_client, read_json
 
@@ -17,6 +18,20 @@ Brick.Fields = {
 return Script.Define("Brick", Brick)
 """
 BRICK_PREFAB = "Assets/Prefabs/Brick.prefab"
+HUD_SCRIPT = """--!strict
+local Hud = {}
+
+Hud.Fields = {
+\tBar = Field.Entity(),
+}
+
+return Script.Define("Hud", Hud)
+"""
+
+
+def tree_names(tree: dict[str, Any]) -> list[str]:
+    """The names of the entities of a scene.tree {format: "json"} result, depth first."""
+    return [entity["name"] for entity in tree["entities"]]
 
 
 def hinted_params(hint: str, method: str) -> dict[str, object]:
@@ -285,6 +300,69 @@ class PrefabTests(AutomationTestCase):
         bulb = client.call("entity.get", {"entity": "/Lamp/Bulb", "components": ["MeshRenderer"]})
         self.assertTrue(bulb["entity"]["components"]["MeshRenderer"]["Visible"])
         self.assertTrue(bulb["entity"]["components"]["MeshRenderer"]["CastShadows"])
+
+    def test_apply_adds_an_entity_added_below_the_instance(self) -> None:
+        # M27 friction F04 (Docs/Decisions/0038-m27-rolling-ball.md): a BottomBar added below a HUD instance never
+        # reached HUD.prefab, though prefab.apply reported success, so the HUD instances of the other levels never got
+        # it. prefab.apply adds it to the prefab at its place: every instance, in every open scene, gains it, the
+        # applied instance holds it once as a member with a new id (addedEntities), and one undo step restores
+        # everything. An entity outside the instance that references an added entity makes the apply refuse.
+        client, root = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "HUD"})
+        client.call("entity.create", {"name": "TopBar", "parent": "/HUD"})
+        client.call("entity.create", {"name": "Score", "parent": "/HUD"})
+        client.call("prefab.create", {"entity": "/HUD", "path": "Assets/Prefabs/HUD.prefab",
+                                      "replaceWithInstance": True})
+        client.call("prefab.instantiate", {"prefab": "Assets/Prefabs/HUD.prefab", "name": "HUD2"})
+        client.call("scene.new", {"path": "Assets/Scenes/Level2.scene", "keepOpen": True})
+        client.call("prefab.instantiate", {"prefab": "Assets/Prefabs/HUD.prefab", "name": "HUD"})
+        client.call("scene.activate", {"scene": "Assets/Scenes/Main.scene"})
+        level2 = {"scene": "Assets/Scenes/Level2.scene"}
+        prefab_file = root / "Assets" / "Prefabs" / "HUD.prefab"
+        prefab_before = prefab_file.read_bytes()
+
+        # The builder's batch: the new bar below the instance, then the apply.
+        undo_entries = len(client.call("edit.history")["entries"])
+        batch = client.call("edit.batch", {"label": "Bottom bar", "ops": [
+            {"method": "entity.create", "params": {"name": "BottomBar", "parent": "/HUD", "index": 1}},
+            {"method": "entity.create", "params": {"name": "Lives", "parent": "/HUD/BottomBar"}},
+            {"method": "prefab.apply", "params": {"instance": "/HUD"}}]})
+        bottom = batch["results"][0]["entity"]
+        applied = batch["results"][2]
+        self.assertEqual([entity["path"] for entity in applied["addedEntities"]], ["/HUD/BottomBar"])
+        self.assertNotEqual(applied["addedEntities"][0]["id"], bottom["id"])
+        self.assertEqual(len(client.call("edit.history")["entries"]), undo_entries + 1)
+        hud = ["TopBar", "BottomBar", "Lives", "Score"]
+        self.assertEqual(tree_names(client.call("scene.tree", {"format": "json"})), ["HUD", *hud, "HUD2", *hud])
+        self.assertEqual(tree_names(client.call("scene.tree", {"format": "json", **level2})), ["HUD", *hud])
+        added = client.call("entity.get", {"entity": "/HUD/BottomBar", "components": "all"})["entity"]
+        self.assertEqual(added["id"], applied["addedEntities"][0]["id"])
+        self.assertIn("PrefabLink", added["components"])
+        self.assertIn("BottomBar", [entity["Name"] for entity in read_json(prefab_file)["Entities"]])
+
+        # One undo step undoes the batch: the prefab file and every instance as before, the bar gone again.
+        client.call("edit.undo")
+        self.assertEqual(prefab_file.read_bytes(), prefab_before)
+        self.assertEqual(tree_names(client.call("scene.tree", {"format": "json"})),
+                         ["HUD", "TopBar", "Score", "HUD2", "TopBar", "Score"])
+        self.assertEqual(tree_names(client.call("scene.tree", {"format": "json", **level2})),
+                         ["HUD", "TopBar", "Score"])
+        client.call("edit.redo")
+        self.assertEqual(client.call("entity.get", {"entity": "/HUD2/BottomBar/Lives"})["entity"]["name"], "Lives")
+
+        # A Banner added below HUD2 that the HUD's script references from outside HUD2 is refused, naming the referrer.
+        client.call("script.write", {"path": "Assets/Scripts/Hud.luau", "source": HUD_SCRIPT})
+        banner = client.call("entity.create", {"name": "Banner", "parent": "/HUD2"})["entity"]
+        client.call("entity.create", {"name": "Watcher", "components": {
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Hud.luau", "Fields": {"Bar": banner["id"]}}]}}})
+        prefab_applied = prefab_file.read_bytes()
+        with self.assertRaises(engine_client.EngineError) as referenced:
+            client.call("prefab.apply", {"instance": "/HUD2"})
+        self.assert_engine_error(referenced.exception, engine_client.INVALID_STATE, "InvalidState")
+        watcher = client.call("entity.get", {"entity": "/Watcher"})["entity"]
+        self.assertEqual(referenced.exception.data.get("location", {}).get("entity"), watcher["id"])
+        self.assertEqual(prefab_file.read_bytes(), prefab_applied)
+        self.assertEqual(client.call("entity.get", {"entity": "/HUD2/Banner"})["entity"]["id"], banner["id"])
 
     def test_prefab_errors_and_dry_run(self) -> None:
         client, root = self.open_editor_with_scene()

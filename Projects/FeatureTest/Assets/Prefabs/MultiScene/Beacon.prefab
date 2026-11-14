@@ -36,6 +36,27 @@
 					"SourceRadius": 0.05
 				}
 			}
+		},
+		{
+			"ID": "6d5ad7bf770148f5",
+			"Name": "Lens",
+			"Parent": "dd92fa90a01cff3e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.75, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.4, 0.4, 0.4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
 		}
 	]
 }

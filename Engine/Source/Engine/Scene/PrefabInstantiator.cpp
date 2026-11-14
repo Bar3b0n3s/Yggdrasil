@@ -1793,13 +1793,250 @@ namespace Engine {
 			return current;
 		}
 
+		// The entities prefab.apply adds to the prefab it writes (M27 friction F04; PrefabInstantiator's "Added entities"):
+		// every entity of the subtree of the instance root it applies that is not an entity of its outermost instance, in
+		// canonical order.
+		struct AddedEntities
+		{
+			std::vector<ConstEntity> Entities{};
+			std::unordered_set<UUID> IDs{}; // lookup only
+		};
+
+		// The added entities below the instance root `instance`, whose outermost instance's entities are `members`.
+		static AddedEntities CollectAddedEntities(ConstEntity instance, const InstanceMembers& members)
+		{
+			AddedEntities added;
+			for (const ConstEntity entity : CollectSubtree(instance))
+			{
+				if (members.IDs.contains(entity.GetUUID()))
+					continue;
+				added.Entities.push_back(entity);
+				added.IDs.insert(entity.GetUUID());
+			}
+			return added;
+		}
+
+		// The entities of the outermost instance of the instance root `instance` (CollectMembers). Errors: InvalidArgument
+		// when `instance` is not an instance root; those of FindInstanceLevels.
+		static Result<InstanceMembers> CollectOutermostMembers(ConstEntity instance)
+		{
+			ENGINE_TRY(RequireInstanceRoot(instance));
+			ENGINE_TRY_ASSIGN(const std::vector<ConstEntity> levels, FindInstanceLevels(instance));
+			ENGINE_CORE_ASSERT(!levels.empty(), "An instance root is one of its own levels");
+			const ConstEntity outermost = levels.empty() ? instance : levels.front();
+			const PrefabLinkComponent* link = outermost.TryGetComponent<PrefabLinkComponent>();
+			return CollectMembers(outermost, link != nullptr ? link->PrefabEntityID : UUID());
+		}
+
+		// Refuses to carry `added` into a prefab (PrefabInstantiator's "Added entities") while an entity of their scene that is
+		// neither added nor one of `referrers` references one of them: an added entity becomes a member with a derived ID, so
+		// that reference would name no entity. With `atNestedLevel` the hint also offers applying at the outermost level,
+		// whose members may reference added entities. Errors: InvalidState naming the added entity and the first entity
+		// referencing it, located at the latter.
+		static Status CheckAddedEntityReferences(const AddedEntities& added, const std::unordered_set<UUID>& referrers, bool atNestedLevel,
+			const PrefabOptions& options)
+		{
+			if (added.Entities.empty())
+				return {};
+			const Scene& scene = *added.Entities.front().GetScene();
+			const IdMap none;
+			std::vector<UUID> referenced;
+			const EntityRefRemapper finder(scene.GetTypeRegistry(), options.Schemas, none, added.IDs, referenced);
+			for (const UUID id : scene.GetCanonicalOrder())
+			{
+				if (added.IDs.contains(id) || referrers.contains(id))
+					continue;
+				const ConstEntity entity = scene.FindEntityByID(id);
+				if (!entity.IsValid())
+					continue;
+				ENGINE_TRY_ASSIGN(Json json, SceneSerializer::EntityToJson(entity));
+				finder.RemapComponents(json);
+				if (referenced.empty())
+					continue;
+				const ConstEntity target = scene.FindEntityByID(referenced.front());
+				ErrorLocation location;
+				location.Entity = id;
+				location.JsonPointer = "/Components";
+				return std::unexpected(Error(ErrorCode::InvalidState,
+					std::format("'{}' ({}) cannot be added to the prefab: '{}' ({}) references it, and as a member of the instance it gets a new ID, "
+								"which that reference would not name",
+						scene.GetEntityPath(target), target.GetUUID(), scene.GetEntityPath(entity), id))
+						.WithLocation(std::move(location))
+						.WithHint(std::format("clear that reference, apply, then set it to the member the entity became, which the apply reports{}",
+							atNestedLevel ? "; or apply at the outermost level, whose members may reference it" : "")));
+			}
+			return {};
+		}
+
+		// One added entity as an entity of the document prefab.apply writes: its JSON in the document's space, and the document
+		// IDs of the entities before it among its parent's children in the scene, nearest first (InsertCarriedEntities).
+		struct CarriedEntity
+		{
+			Json Object{};
+			std::vector<UUID> Preceding{};
+		};
+
+		// `added` as entities of a prefab's document (PrefabInstantiator's "Added entities"). Each keeps its ID, which must not
+		// be one of `taken` (the document's IDs). Its parent there is its nearest ancestor that is added or that `written` maps
+		// (a member written to the document, to its document ID); its entity references go through `references` (the members'
+		// IDs in the document's space; added entities keep theirs), as a member's do, a reference to an entity outside them
+		// whose ID is one of `taken` rejected as ComputeOverrides rejects it. An added instance root keeps its Prefab and
+		// PrefabLink components, so it stays live in the document, outermost there, the values of its record mapped the same
+		// way. The unknown components' versions are appended to `unknownVersions`. Errors: InvalidState for an ID in `taken`,
+		// and for an ambiguous reference (MakeAmbiguousReferenceError); those of serializing the entities.
+		static Result<std::vector<CarriedEntity>> MakeCarriedEntities(const AddedEntities& added, const IdMap& references, const IdMap& written,
+			const std::unordered_set<UUID>& taken, const PrefabOptions& options, std::vector<std::pair<std::string, uint32_t>>& unknownVersions)
+		{
+			std::vector<CarriedEntity> carried;
+			if (added.Entities.empty())
+				return carried;
+			const Scene& scene = *added.Entities.front().GetScene();
+			const TypeRegistry& registry = scene.GetTypeRegistry();
+			ENGINE_TRY_ASSIGN(const PrefabComponentInfos infos, FindPrefabComponents(registry));
+			IdMap map = references;
+			for (const ConstEntity entity : added.Entities)
+				map.emplace(entity.GetUUID(), entity.GetUUID());
+			std::vector<UUID> ambiguous;
+			const EntityRefRemapper remapper(registry, options.Schemas, map, taken, ambiguous);
+			// The document ID of an entity the document holds: an added entity's own, a written member's through `written`.
+			const auto documentID = [&added, &written](UUID id)
+			{
+				return added.IDs.contains(id) ? id : Lookup(written, id);
+			};
+
+			carried.reserve(added.Entities.size());
+			for (const ConstEntity entity : added.Entities)
+			{
+				if (taken.contains(entity.GetUUID()))
+				{
+					return std::unexpected(Error(ErrorCode::InvalidState,
+						std::format("'{}' ({}) cannot be added to the prefab: the prefab already has an entity with its ID", scene.GetEntityPath(entity),
+							entity.GetUUID()))
+							.WithHint("duplicate the entity (the copy gets new IDs), destroy the original, then apply"));
+				}
+				ENGINE_TRY_ASSIGN(Json json, SceneSerializer::EntityToJson(entity));
+				UUID parent;
+				for (ConstEntity ancestor = entity.GetParent(); ancestor.IsValid() && !parent.IsValid(); ancestor = ancestor.GetParent())
+					parent = documentID(ancestor.GetUUID());
+				ENGINE_CORE_ASSERT(parent.IsValid(), "An added entity lies below the instance root, which the document holds");
+				json["Parent"] = parent.IsValid() ? Json(parent.ToString()) : Json(nullptr);
+				remapper.RemapComponents(json);
+				if (!ambiguous.empty())
+					return std::unexpected(MakeAmbiguousReferenceError(entity.GetUUID(), "/Components", ambiguous.front()));
+
+				// An added instance's record targets its own entities by their paths in its prefab; only its values' references
+				// to other entities change space.
+				const PrefabInstanceComponent* instance = entity.TryGetComponent<PrefabInstanceComponent>();
+				if (instance != nullptr && !instance->Overrides.empty() && !IsNestedInstanceRoot(entity))
+				{
+					const PrefabLinkComponent* link = entity.TryGetComponent<PrefabLinkComponent>();
+					const InstanceMembers own = CollectMembers(entity, link != nullptr ? link->PrefabEntityID : UUID());
+					const ComponentOwners owners(scene, own, {});
+					PrefabInstanceComponent record = *instance;
+					for (PrefabOverride& entry : record.Overrides)
+						RemapOverrideValue(registry, remapper, entry, owners.Find(entry.Path, entry.Component));
+					if (!ambiguous.empty())
+					{
+						return std::unexpected(MakeAmbiguousReferenceError(entity.GetUUID(),
+							JsonReader::AppendPointer(JsonReader::AppendPointer("/Components", infos.Instance->GetName()), OverridesKey),
+							ambiguous.front()));
+					}
+					ENGINE_TRY_ASSIGN(json[ComponentsKey][infos.Instance->GetName()], infos.Instance->ToJson(&record));
+				}
+
+				CarriedEntity entry{ std::move(json), {} };
+				if (const ConstEntity sceneParent = entity.GetParent(); sceneParent.IsValid())
+				{
+					const std::span<const UUID> siblings = sceneParent.GetChildren();
+					const auto self = std::find(siblings.begin(), siblings.end(), entity.GetUUID());
+					for (auto sibling = std::make_reverse_iterator(self); sibling != siblings.rend(); ++sibling)
+					{
+						if (const UUID id = documentID(*sibling); id.IsValid())
+							entry.Preceding.push_back(id);
+					}
+				}
+				CollectUnknownVersions(entity, unknownVersions);
+				carried.push_back(std::move(entry));
+			}
+			return carried;
+		}
+
+		// `entities`, a document's entity array (parents first), with `carried` (MakeCarriedEntities, in canonical order)
+		// inserted: each among its parent's children right after the nearest of its Preceding entities there, or first, and
+		// the array written again in canonical order (depth first, children in that order). The array is returned as it is
+		// when nothing is carried, so an apply without added entities writes what it wrote before them.
+		static Json InsertCarriedEntities(Json entities, std::vector<CarriedEntity> carried)
+		{
+			if (carried.empty())
+				return entities;
+			std::vector<Json> objects;
+			objects.reserve(entities.size() + carried.size());
+			std::unordered_map<UUID, size_t> indices;             // lookup only
+			std::unordered_map<UUID, std::vector<UUID>> children; // lookup only: each parent's children in document order
+			std::vector<UUID> roots;
+			for (Json& object : entities)
+			{
+				const UUID id = ReadEntityUUID(object, "ID");
+				const UUID parent = ReadEntityUUID(object, "Parent");
+				indices.emplace(id, objects.size());
+				objects.push_back(std::move(object));
+				if (parent.IsValid())
+					children[parent].push_back(id);
+				else
+					roots.push_back(id);
+			}
+			for (CarriedEntity& entry : carried)
+			{
+				const UUID id = ReadEntityUUID(entry.Object, "ID");
+				std::vector<UUID>& siblings = children[ReadEntityUUID(entry.Object, "Parent")];
+				auto position = siblings.begin();
+				for (const UUID before : entry.Preceding)
+				{
+					if (const auto found = std::find(siblings.begin(), siblings.end(), before); found != siblings.end())
+					{
+						position = found + 1;
+						break;
+					}
+				}
+				siblings.insert(position, id);
+				indices.emplace(id, objects.size());
+				objects.push_back(std::move(entry.Object));
+			}
+
+			Json ordered = Json::array();
+			std::vector<bool> emitted(objects.size(), false);
+			std::vector<UUID> stack(roots.rbegin(), roots.rend());
+			while (!stack.empty())
+			{
+				const UUID id = stack.back();
+				stack.pop_back();
+				const auto index = indices.find(id);
+				if (index == indices.end() || emitted[index->second])
+					continue;
+				emitted[index->second] = true;
+				ordered.push_back(std::move(objects[index->second]));
+				if (const auto own = children.find(id); own != children.end())
+					stack.insert(stack.end(), own->second.rbegin(), own->second.rend());
+			}
+			// An entity no root reaches (a parent the document lacks) keeps its place after the others, for the loader to report.
+			for (size_t index = 0; index < objects.size(); ++index)
+			{
+				if (!emitted[index])
+					ordered.push_back(std::move(objects[index]));
+			}
+			return ordered;
+		}
+
 		// `prefab` with `overrides` (paths and values in its own space) written into its document (the prefab.apply of a level,
 		// decision 9): applied to its entities' JSON as an update applies them, dropping the stale ones with a warning into
 		// `report`, a RemoveEntity removing its entity with its descendants; an override that targets an instance nested in
 		// the document, or the nested root itself (but its Name and Transform), also becomes that instance's own override in
-		// its record (MergeNestedRecord). Errors: Validation when the result fails to load as a prefab; those of the reads.
+		// its record (MergeNestedRecord). `carried`, the entities added below the instance applied (MakeCarriedEntities, with
+		// their unknown components' versions `carriedVersions`), join the document at their places. Errors: Validation when
+		// the result fails to load as a prefab; those of the reads.
 		static Result<Prefab> WriteOverridesToDocument(const TypeRegistry& registry, const Prefab& prefab, std::span<const PrefabOverride> overrides,
-			const PrefabOptions& options, LoadReport& report)
+			const PrefabOptions& options, std::vector<CarriedEntity> carried, std::span<const std::pair<std::string, uint32_t>> carriedVersions,
+			LoadReport& report)
 		{
 			ENGINE_TRY_ASSIGN(const PrefabComponentInfos infos, FindPrefabComponents(registry));
 			const PrefabDocument document(prefab, *infos.Link, *infos.Instance);
@@ -1844,6 +2081,7 @@ namespace Engine {
 				if (!removed.IDs.contains(target.DocumentID))
 					entities.push_back(std::move(target.Object));
 			}
+			entities = InsertCarriedEntities(std::move(entities), std::move(carried));
 			ENGINE_TRY_ASSIGN(const Json versions, GetUnknownComponentVersions(registry, prefab));
 			std::vector<std::pair<std::string, uint32_t>> unknownVersions;
 			for (auto entry = versions.begin(); entry != versions.end(); ++entry)
@@ -1851,6 +2089,7 @@ namespace Engine {
 				if (const Result<uint32_t> version = JsonReader(*entry).ReadUInt32())
 					unknownVersions.emplace_back(entry.key(), *version);
 			}
+			unknownVersions.insert(unknownVersions.end(), carriedVersions.begin(), carriedVersions.end());
 			const Json written = MakePrefabDocument(registry, prefab.GetName(), prefab.GetRootID(), std::move(entities), unknownVersions);
 			LoadOptions loadOptions;
 			loadOptions.Schemas = options.Schemas;
@@ -2202,6 +2441,11 @@ namespace Engine {
 		const Json* prefabRoot = prefab.FindEntity(prefab.GetRootID());
 		ENGINE_CORE_ASSERT(prefabRoot != nullptr, "A prefab contains its root");
 
+		// The entities added below the instance join the prefab (M27 friction F04). The members are written whole, so a
+		// member may reference an added entity; nothing else may, since the added entity gets a derived ID.
+		const Utils::AddedEntities added = Utils::CollectAddedEntities(instanceRoot, members);
+		ENGINE_TRY(Utils::CheckAddedEntityReferences(added, members.IDs, false, options));
+
 		// The overrides within each instance nested directly in this one: written below as that instance's own record in
 		// the document (decision 9), composed with what the document records for it.
 		std::vector<PrefabOverride> current;
@@ -2277,16 +2521,27 @@ namespace Engine {
 			}
 			else
 			{
-				// The nearest member above it (user children in between are not part of the prefab).
-				ConstEntity parent = member.GetParent();
-				while (parent.IsValid() && !members.IDs.contains(parent.GetUUID()))
-					parent = parent.GetParent();
+				// Its parent: a member's place in the document, or an added entity, which keeps its ID there.
+				const ConstEntity parent = member.GetParent();
 				const auto parentIndex = parent.IsValid() ? memberIndex.find(parent.GetUUID()) : memberIndex.end();
-				json["Parent"] = parentIndex != memberIndex.end() ? Json(documentIDs[parentIndex->second].ToString()) : Json(nullptr);
+				if (parentIndex != memberIndex.end())
+					json["Parent"] = documentIDs[parentIndex->second].ToString();
+				else
+					json["Parent"] = parent.IsValid() && added.IDs.contains(parent.GetUUID()) ? Json(parent.GetUUID().ToString()) : Json(nullptr);
 			}
 			entities.push_back(std::move(json));
 			Utils::CollectUnknownVersions(member, unknownVersions);
 		}
+
+		// The added entities at their places, keeping their IDs, which the document must not use yet.
+		std::unordered_set<UUID> taken = prefabIDs;
+		taken.insert(documentIDs.begin(), documentIDs.end());
+		IdMap memberDocumentIDs;
+		for (size_t index = 0; index < members.Members.size(); ++index)
+			memberDocumentIDs.emplace(members.Members[index], documentIDs[index]);
+		ENGINE_TRY_ASSIGN(std::vector<Utils::CarriedEntity> carried,
+			Utils::MakeCarriedEntities(added, toPrefabMap, memberDocumentIDs, taken, options, unknownVersions));
+		entities = Utils::InsertCarriedEntities(std::move(entities), std::move(carried));
 
 		// Unknown components follow the prefab, so a member that records no version for one (a scene file that lists none)
 		// takes the prefab's.
@@ -2396,8 +2651,92 @@ namespace Engine {
 		const EntityRefRemapper remapper(registry, options.Schemas, values);
 		const Utils::ComponentOwners owners(scene, members, within);
 		const std::vector<PrefabOverride> rebased = Utils::RebaseOverrides(registry, selected, levelPath, levelPrefab.GetRootID(), remapper, owners);
+
+		// The entities added below `instance` join the level's prefab (M27 friction F04). At the outermost level a member may
+		// reference one, since the outermost root's record and the written prefab share that prefab's space; at a nested
+		// level only another added entity may.
+		const Utils::AddedEntities added = Utils::CollectAddedEntities(instance, members);
+		std::vector<Utils::CarriedEntity> carried;
+		std::vector<std::pair<std::string, uint32_t>> carriedVersions;
+		if (!added.Entities.empty())
+		{
+			static const std::unordered_set<UUID> NoReferrers; // immutable after its thread-safe initialization
+			ENGINE_TRY(Utils::CheckAddedEntityReferences(added, level == outermost ? members.IDs : NoReferrers, level != outermost, options));
+			// Members in the level's document space: those within the level at their IDs in its prefab (written to the
+			// document), the others at their IDs in the outermost prefab, as the overrides' values hold them.
+			IdMap references;
+			IdMap written;
+			for (size_t index = 0; index < members.Members.size(); ++index)
+			{
+				const OverridePath& path = members.Paths[index];
+				if (Utils::StartsWith(path, levelPath))
+				{
+					const std::span<const UUID> rest = std::span<const UUID>(path).subspan(levelPath.size());
+					const UUID documentID = rest.empty() ? levelPrefab.GetRootID() : Utils::GetDocumentID(rest);
+					references.emplace(members.Members[index], documentID);
+					written.emplace(members.Members[index], documentID);
+				}
+				else
+				{
+					references.emplace(members.Members[index], Utils::GetDocumentID(path));
+				}
+			}
+			ENGINE_TRY_ASSIGN(carried, Utils::MakeCarriedEntities(added, references, written, Utils::CollectPrefabIDs(levelPrefab), options, carriedVersions));
+		}
 		LoadReport report;
-		return Utils::WriteOverridesToDocument(registry, levelPrefab, rebased, options, report);
+		return Utils::WriteOverridesToDocument(registry, levelPrefab, rebased, options, std::move(carried), carriedVersions, report);
+	}
+
+	Result<std::vector<Entity>> PrefabInstantiator::GetAddedEntities(Entity instance)
+	{
+		ENGINE_TRY_ASSIGN(const InstanceMembers members, Utils::CollectOutermostMembers(instance));
+		const Utils::AddedEntities added = Utils::CollectAddedEntities(instance, members);
+		Scene& scene = *instance.GetScene();
+		std::vector<Entity> tops;
+		for (const ConstEntity entity : added.Entities)
+		{
+			const ConstEntity parent = entity.GetParent();
+			if (!parent.IsValid() || !added.IDs.contains(parent.GetUUID()))
+				tops.push_back(scene.FindEntityByID(entity.GetUUID()));
+		}
+		return tops;
+	}
+
+	Status PrefabInstantiator::RemoveAddedEntities(Entity instance)
+	{
+		ENGINE_TRY_ASSIGN(const InstanceMembers members, Utils::CollectOutermostMembers(instance));
+		const Utils::AddedEntities added = Utils::CollectAddedEntities(instance, members);
+		std::vector<UUID> ids;
+		ids.reserve(added.Entities.size());
+		for (const ConstEntity entity : added.Entities)
+			ids.push_back(entity.GetUUID());
+		Scene& scene = *instance.GetScene();
+
+		// The members below added entities move up first, so destroying the added entities takes none of them along.
+		for (const UUID id : ids)
+		{
+			const Entity entity = scene.FindEntityByID(id);
+			Entity keeper = entity.GetParent();
+			while (keeper.IsValid() && added.IDs.contains(keeper.GetUUID()))
+				keeper = keeper.GetParent();
+			const std::vector<UUID> children(entity.GetChildren().begin(), entity.GetChildren().end());
+			for (const UUID child : children)
+			{
+				if (members.IDs.contains(child))
+					ENGINE_TRY(scene.SetParent(scene.FindEntityByID(child), keeper, std::nullopt, false));
+			}
+		}
+		// Each added subtree goes with its top; an added entity below another one is gone with it by the time it comes up.
+		for (const UUID id : ids)
+		{
+			const Entity entity = scene.FindEntityByID(id);
+			if (!entity.IsValid())
+				continue;
+			const Entity parent = entity.GetParent();
+			if (!parent.IsValid() || !added.IDs.contains(parent.GetUUID()))
+				scene.DestroyEntity(entity);
+		}
+		return {};
 	}
 
 	std::optional<ScriptSlotField> PrefabInstantiator::ParseScriptSlotField(std::string_view field)

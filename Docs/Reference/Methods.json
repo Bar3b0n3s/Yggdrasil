@@ -16406,7 +16406,7 @@
 		{
 			"name": "prefab.apply",
 			"domain": "prefab",
-			"description": "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the scene it addresses, as one undoable step, and in every other open scene, as a step of that scene's own undo history.",
+			"description": "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the prefab of a nested instance on the way down, together with every entity added below the instance (a user child with its subtree, an instance placed there as a nested instance), each at its place; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds their instances in the scene it addresses, as one undoable step, and in every other open scene, as a step of that scene's own undo history. The added entities become members of the instance with new ids (addedEntities), so a reference to one from outside the added entities is refused (InvalidState), except from the outermost instance's members when the prefab written is the outermost's.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -16468,6 +16468,13 @@
 							"$ref": "#/$defs/AssetSummary"
 						}
 					},
+					"addedEntities": {
+						"description": "The entities added below the instance that the prefab now holds (the top of each added subtree), as the members they became, with new ids; empty when none was added.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/EntitySummary"
+						}
+					},
 					"undoIndex": {
 						"description": "The undo index; 0 in a batch.",
 						"type": "integer",
@@ -16503,12 +16510,31 @@
 							}
 						},
 						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
 					}
 				}
 			},
 			"examples": [
 				{
-					"description": "Make the cell's edits the prefab's.",
+					"description": "Make the cell's edits, and the entities added below it, the prefab's.",
 					"params": {
 						"instance": "/Board/Cell"
 					}

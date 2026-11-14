@@ -66,8 +66,20 @@ namespace Engine {
 	// Overrides (PrefabOverride) are field-level {Path, Component, Field, Value}, component-level {AddComponent |
 	// RemoveComponent} and entity keys {EntityKey: Name, Active or Tags}, so a deactivated or renamed member stays so
 	// across updates. Root Name, Transform and Parent are always implicit overrides. Entities under an instance without
-	// PrefabLinkComponent are user children and survive updates. Deleting a member is recorded as a RemoveEntity override
-	// (M20, below).
+	// PrefabLinkComponent are user children and survive updates; prefab.apply carries them into the prefab it writes
+	// (added entities, below). Deleting a member is recorded as a RemoveEntity override (M20, below).
+	//
+	// Added entities (M27 friction F04). The entities below an instance root that are not entities of its outermost
+	// instance (user children with their subtrees, an instance a user placed there included) are what prefab.apply adds to
+	// the prefab it writes: ApplyOverrides writes each into the document as an entity of that prefab, at its place among its
+	// parent's children, keeping its ID as its prefab-local ID (so the member it becomes in an instance rooted at R is
+	// DeriveInstanceID(R, its ID)); an added instance stays live there as a nested instance, with its record. Its references
+	// to members and to other added entities are mapped as a member's are. The scene still holds the added entities as
+	// user children, so before the instances are rebuilt from the written prefab the caller removes them
+	// (RemoveAddedEntities), and the rebuild creates them as members with derived IDs. An added entity therefore changes its
+	// ID, so ApplyOverrides refuses (InvalidState, naming both) when an entity that is not added references one, unless that
+	// entity is a member of the outermost instance and the prefab written is the outermost's (whose members' references are
+	// written with the prefab and recorded in its space); and when an added entity's ID is already an ID of the document.
 	//
 	// Comparisons between an instance and its prefab (ComputeOverrides, RefreshOverrides) are made in instance space: the
 	// prefab entity's JSON is first remapped as instantiation would remap it, so a fresh instance has no overrides and an
@@ -178,15 +190,31 @@ namespace Engine {
 		[[nodiscard]] static Status Unpack(Entity instanceRoot);
 
 		// prefab.apply: `prefab` with the instance's overrides written back (the instance's members become the prefab's
-		// entities, entity keys included; user children are not added; a prefab entity deleted from the instance is left out
-		// with its descendants, and a reference to its deleted member keeps its prefab-local ID), with internal references
-		// mapped back to prefab-local IDs and unknown components at their recorded versions (the prefab's when the member
-		// records none). An instance nested in it stays live in the document, outermost there, its record there composed with
-		// the overrides the instance records within it (decision 9).
-		// The caller writes the asset and then updates every instance. Errors: InvalidArgument when `instanceRoot` is not an
-		// outermost instance root or `prefab` is empty; InvalidState for a reference that ComputeOverrides rejects; Validation when
-		// the written-back document fails to load as a prefab.
+		// entities, entity keys included; a prefab entity deleted from the instance is left out with its descendants, and a
+		// reference to its deleted member keeps its prefab-local ID), with internal references mapped back to prefab-local IDs
+		// and unknown components at their recorded versions (the prefab's when the member records none). An instance nested
+		// in it stays live in the document, outermost there, its record there composed with the overrides the instance
+		// records within it (decision 9). Every entity added below the instance is added to the prefab (the class comment's
+		// "Added entities", GetAddedEntities), and a member below an added entity keeps it as its parent there.
+		// The caller writes the asset, removes the added entities (RemoveAddedEntities) and then updates every instance.
+		// Errors: InvalidArgument when `instanceRoot` is not an outermost instance root or `prefab` is empty; InvalidState for
+		// a reference that ComputeOverrides rejects, for an added entity that an entity outside the instance references, and
+		// for an added entity whose ID the prefab already uses; Validation when the written-back document fails to load as a
+		// prefab.
 		[[nodiscard]] static Result<Prefab> ApplyOverrides(Entity instanceRoot, const Prefab& prefab, const PrefabOptions& options);
+
+		// The entities prefab.apply {instance} adds to the prefab it writes (the class comment's "Added entities"): the top of
+		// each added subtree below `instance` (an outermost or nested instance root), an entity of its subtree that is not an
+		// entity of its outermost instance and whose parent is one, in canonical order. Errors: InvalidArgument when
+		// `instance` is not an instance root; those of GetInstanceLevels.
+		[[nodiscard]] static Result<std::vector<Entity>> GetAddedEntities(Entity instance);
+
+		// prefab.apply's scene step once the prefab it writes holds the added entities of `instance` (ApplyOverrides): every
+		// entity of its outermost instance whose parent is an added entity moves up to its nearest ancestor that is not one
+		// (its local transform kept, as an update keeps a user child's), then every added entity is destroyed with its
+		// descendants, so the update from the written prefab that follows builds them as members instead of keeping them
+		// beside their copies. Changes nothing when `instance` has none. Errors: as GetAddedEntities; those of Scene::SetParent.
+		[[nodiscard]] static Status RemoveAddedEntities(Entity instance);
 
 		// --- Nesting (M20, E-PFB-NEST; Docs/Decisions/0031-m20-contract.md decisions 8 and 9) ----------------------------
 
@@ -216,12 +244,16 @@ namespace Engine {
 		// the prefab that encloses it, implicit at its own level as every instance root's are, so they are never written
 		// into `levelPrefab` and stay recorded on the outermost root (the root's Active, Tags and components are written
 		// like any member's). An override of an instance nested in `level`'s prefab is written as that nested instance's
-		// own override in `levelPrefab`'s document; a RemoveEntity removes the entity and its descendants from it. `level`
-		// is one of GetInstanceLevels(instance), `instance` itself included; ApplyOverrides above is the
-		// case `level` = `instance` = the outermost root. The caller writes the asset, rewrites the prefab assets nesting it
-		// and updates their instances. Errors: InvalidArgument when `instance` is not an instance root, `level` is not one of
-		// its levels or `levelPrefab` is empty; InvalidState for a reference that ComputeOverrides rejects; Validation when
-		// the written-back document fails to load as a prefab.
+		// own override in `levelPrefab`'s document; a RemoveEntity removes the entity and its descendants from it. Every
+		// entity added below `instance` (GetAddedEntities) is added to `levelPrefab` at its place, as ApplyOverrides above adds
+		// it; while `level` is a nested instance, an entity that references one must be an added entity itself, since the
+		// outermost root's record keeps a member's reference in the outermost prefab's space, which holds the added entity
+		// at another ID. `level` is one of GetInstanceLevels(instance), `instance` itself included; ApplyOverrides above is the
+		// case `level` = `instance` = the outermost root. The caller writes the asset, removes the added entities
+		// (RemoveAddedEntities), rewrites the prefab assets nesting it and updates their instances. Errors: InvalidArgument when
+		// `instance` is not an instance root, `level` is not one of its levels or `levelPrefab` is empty; InvalidState for a
+		// reference that ComputeOverrides rejects, for an added entity referenced as above, and for an added entity whose ID
+		// `levelPrefab` already uses; Validation when the written-back document fails to load as a prefab.
 		[[nodiscard]] static Result<Prefab> ApplyOverrides(Entity instance, Entity level, const Prefab& levelPrefab, const PrefabOptions& options);
 
 		// --- Script slots (M20, S-MULTI; Docs/Decisions/0031-m20-contract.md decision 19) ----------------------------------

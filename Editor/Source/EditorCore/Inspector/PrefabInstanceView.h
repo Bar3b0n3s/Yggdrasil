@@ -53,6 +53,10 @@ namespace Engine {
 		// The overrides of Outermost whose paths lie within Instance (every one when Instance is outermost), in record order:
 		// those prefab.apply {instance: Instance} writes.
 		std::vector<PrefabOverrideRow> Overrides{};
+		// The scene paths of the entities added below Instance (the top of each added subtree, in canonical order), which
+		// prefab.apply {instance: Instance} adds to the prefab with the overrides (PrefabInstantiator::GetAddedEntities; M27
+		// friction F04).
+		std::vector<std::string> AddedEntities{};
 		AssetHandle OutermostPrefab{}; // the outermost root's prefab asset, whose document names removed entities
 	};
 

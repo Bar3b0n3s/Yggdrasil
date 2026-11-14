@@ -204,6 +204,33 @@ namespace Engine {
 			REQUIRE(nested.has_value());
 			CHECK(nested->Overrides.size() == 1);
 		}
+
+		// M27 friction F04: prefab.apply adds the entities added below an instance to the prefab, so the inspector lists
+		// them beside the overrides: those below the instance the entity belongs to, the top of each added subtree, in
+		// canonical order.
+		TEST_CASE("PrefabInstanceView: lists the entities added below the instance, which Apply adds to the prefab")
+		{
+			Test::AutomationFixture setup("PrefabViewAdded");
+			EditorContext& editor = setup.GetEditor();
+			MakeNestedRoom(setup);
+			CallPrefabView(setup, "entity.create", Json{ { "name", "Rug" }, { "parent", "/Room" } });
+			CallPrefabView(setup, "entity.create", Json{ { "name", "Shade" }, { "parent", "/Room/Lamp/Bulb" } });
+			CallPrefabView(setup, "entity.create", Json{ { "name", "Tassel" }, { "parent", "/Room/Lamp/Bulb/Shade" } });
+			Scene& scene = editor.GetScene();
+
+			const Result<PrefabInstanceView> lamp = DescribePrefabInstance(editor, scene.FindEntityByPath("/Room/Lamp/Bulb"));
+			REQUIRE_MESSAGE(lamp.has_value(), lamp.error().ToString());
+			CHECK(lamp->AddedEntities == std::vector<std::string>{ "/Room/Lamp/Bulb/Shade" });
+			const Result<PrefabInstanceView> room = DescribePrefabInstance(editor, scene.FindEntityByPath("/Room"));
+			REQUIRE_MESSAGE(room.has_value(), room.error().ToString());
+			CHECK(room->AddedEntities == std::vector<std::string>{ "/Room/Lamp/Bulb/Shade", "/Room/Rug" });
+
+			// Applied, they are members: nothing is listed any more.
+			CallPrefabView(setup, "prefab.apply", Json{ { "instance", "/Room" } });
+			const Result<PrefabInstanceView> applied = DescribePrefabInstance(editor, scene.FindEntityByPath("/Room"));
+			REQUIRE(applied.has_value());
+			CHECK(applied->AddedEntities.empty());
+		}
 	}
 
 }

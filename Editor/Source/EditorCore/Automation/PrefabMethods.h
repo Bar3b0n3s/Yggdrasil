@@ -82,13 +82,19 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 	};
 
-	// prefab.apply {instance, level?}: writes overrides of an instance back into a prefab asset (user children are not
-	// added) and rebuilds the instances that follow it (§5.5 "Update"), as one undo step. `instance` is an instance root,
+	// prefab.apply {instance, level?}: writes overrides of an instance back into a prefab asset, with the entities added
+	// below it, and rebuilds the instances that follow it (§5.5 "Update"), as one undo step. `instance` is an instance root,
 	// outermost or nested; the overrides written are those of its outermost instance that target `instance` or an entity
 	// below it in the instance (every override of an outermost root). `level` names the instance whose prefab receives them:
 	// one of PrefabInstantiator::GetInstanceLevels(instance), from the outermost root down to `instance` itself; absent, the
 	// outermost (decision 9: PrefabInstantiator::ApplyOverrides re-bases their paths onto that prefab and keeps the level
-	// root's own Name, Transform and Parent recorded on the outermost root). Then the prefab assets nesting the written one
+	// root's own Name, Transform and Parent recorded on the outermost root). Every entity added below `instance` (an entity
+	// of its subtree that is not an entity of its outermost instance: a user child with its subtree, an instance placed
+	// there included) is written into that prefab too, at its place among its parent's children, an added instance as a
+	// live nested instance with its record (M27 friction F04; PrefabInstantiator::ApplyOverrides and GetAddedEntities); in
+	// the same undo step the added entities leave the scene (PrefabInstantiator::RemoveAddedEntities) and the rebuild below
+	// creates them as members of the level's instance, each at DeriveInstanceID(level, its old ID), which the result's
+	// addedEntities lists, so no instance holds a copy beside them. Then the prefab assets nesting the written one
 	// are rewritten in nesting order (EditorContext::GetNestingPrefabs and CreateNestingPrefabUpdateCommand), and every
 	// outermost instance in the addressed scene of a prefab written or rewritten is rebuilt (EditorContext::
 	// CreatePrefabUpdateCommand), all in the same undo step (Utils::UpdatePrefabVersion). Every other open scene that
@@ -108,6 +114,9 @@ namespace Engine {
 		AssetSummary Prefab{};                      // the level's prefab asset, written
 		uint32_t UpdatedInstances = 0;              // outermost instances in the addressed scene rebuilt, this one's included
 		std::vector<AssetSummary> UpdatedPrefabs{}; // the prefab assets nesting it that were rewritten, in nesting order
+		// The entities added below the instance that the prefab now holds (the top of each added subtree), as the members
+		// they became, with their new IDs, in canonical order; empty when none was added.
+		std::vector<EntitySummary> AddedEntities{};
 		uint32_t UndoIndex = 0;
 	};
 
@@ -168,8 +177,11 @@ namespace Engine {
 		// (PREFAB_MISSING_ASSET); InvalidArgument when `instance` is not an instance root, when `level` is not one of its
 		// levels (the hint lists them by path) and when the level's prefab is imported rather than a .prefab file; Validation
 		// PREFAB_CYCLE when the propagation meets a nesting cycle, one through the prefab or among the prefabs nesting it
-		// (EditorContext::GetNestingPrefabs; one issue per prefab on it; nothing is written);
-		// InvalidState for an ambiguous reference.
+		// (EditorContext::GetNestingPrefabs; one issue per prefab on it; nothing is written), and at /instance when an
+		// instance added below the instance is one of the prefab or of a prefab nesting it (nothing is written);
+		// InvalidState for an ambiguous reference, for an added entity that an entity outside the added ones references
+		// (any but a member of the outermost instance when the level is the outermost; naming both: the added entity changes
+		// its ID) and for an added entity whose ID the prefab already uses (nothing is written).
 		[[nodiscard]] Result<PrefabApplyResult> PrefabApply(EditorMethodContext& context, const PrefabApplyParams& params);
 		// prefab.revert. Errors: as prefab.apply's for `instance`; InvalidArgument for a malformed override key (located at
 		// /overrides/<i>/path, /overrides/<i>/path/<j> or /overrides/<i>/kind).

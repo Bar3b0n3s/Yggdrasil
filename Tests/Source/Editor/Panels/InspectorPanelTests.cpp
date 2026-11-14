@@ -1417,6 +1417,43 @@ namespace Engine {
 			CHECK(scene.FindEntityByPath("/Room").GetComponent<PrefabInstanceComponent>().Overrides.empty());
 		}
 
+		// M27 friction F04: Apply writes the entities added below the instance with its overrides (prefab.apply), so the
+		// inspector lists them and offers Apply for an instance whose only change is an added child; the other instance
+		// gains it.
+		TEST_CASE("InspectorPanel: Apply is offered for an added child alone and adds it to the prefab")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Hud" } }));
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "TopBar" }, { "parent", "/Hud" } }));
+			REQUIRE(automation.Call("prefab.create", Json{ { "entity", "/Hud" }, { "path", "Assets/Prefabs/Hud.prefab" }, { "replaceWithInstance", true } }));
+			REQUIRE(automation.Call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Hud.prefab" }, { "name", "Hud2" } }));
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "BottomBar" }, { "parent", "/Hud" } }));
+			Scene& scene = context.Editor.GetScene();
+			REQUIRE(scene.FindEntityByPath("/Hud").GetComponent<PrefabInstanceComponent>().Overrides.empty());
+			REQUIRE(context.Editor.SetSelection({ scene.FindEntityByPath("/Hud").GetUUID() }, SceneTarget::Edit));
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("Added entities (1)"));
+			CHECK(test.Text.contains("/Hud/BottomBar"));
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto* inspector = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Inspector));
+			REQUIRE(inspector != nullptr);
+			const ImGuiID prefab = ImHashStr("PrefabInstance", 0, inspector->ID);
+
+			const auto before = context.Editor.GetHistory().GetUndoCount();
+			REQUIRE(test.Ui.Click(draw, InspectorLayerItem(test, ImHashStr("Apply", 0, prefab)).GetCenter()));
+			REQUIRE(test.Layer.OnSafePoint(0.0));
+			CHECK(context.Editor.GetHistory().GetUndoCount() == before + 1);
+			CHECK(scene.FindEntityByPath("/Hud2/BottomBar").IsValid());
+			CHECK(scene.FindEntityByPath("/Hud/BottomBar").HasComponent<PrefabLinkComponent>());
+		}
+
 		// Docs/Decisions/0031-m20-contract.md decision 7: the override list names a deleted member, which has no entity to
 		// select, and its Revert brings it back.
 		TEST_CASE("InspectorPanel: the override list shows a deleted member and its Revert restores it")

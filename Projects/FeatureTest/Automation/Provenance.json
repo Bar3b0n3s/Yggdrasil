@@ -2276,9 +2276,9 @@
 		},
 		{
 			"Path": "Assets/Prefabs/MultiScene/Beacon.prefab",
-			"XXH64": "b51437a5d46378a8",
+			"XXH64": "356407716abb04b0",
 			"Method": "prefab.apply",
-			"RequestId": 14,
+			"RequestId": 15,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3300,9 +3300,9 @@
 		},
 		{
 			"Path": "Assets/Scenes/MultiSceneFirst.scene",
-			"XXH64": "d236d492f52dcf71",
+			"XXH64": "aabff87e088a7441",
 			"Method": "scene.save",
-			"RequestId": 17,
+			"RequestId": 18,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3316,9 +3316,9 @@
 		},
 		{
 			"Path": "Assets/Scenes/MultiSceneSecond.scene",
-			"XXH64": "d66d05bf9e5e1872",
+			"XXH64": "44ed13690c7a8b88",
 			"Method": "scene.save",
-			"RequestId": 15,
+			"RequestId": 16,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5540,7 +5540,7 @@
 		},
 		{
 			"Path": "Assets/Tests/MultiScene/First.test.luau",
-			"XXH64": "bba8940f8b9ef04d",
+			"XXH64": "8fd589a900676080",
 			"Method": "script.write",
 			"RequestId": 1,
 			"Client": "batch",
@@ -5556,7 +5556,7 @@
 		},
 		{
 			"Path": "Assets/Tests/MultiScene/Second.test.luau",
-			"XXH64": "baf968a6e590b554",
+			"XXH64": "4f9412113e4b38e5",
 			"Method": "script.write",
 			"RequestId": 2,
 			"Client": "batch",

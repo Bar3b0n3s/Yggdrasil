@@ -323,14 +323,15 @@ namespace Engine {
 			m_ApplyLevel = view.Levels.front().Root;
 		}
 		const auto level = std::find_if(view.Levels.begin(), view.Levels.end(), picked);
-		ImGui::BeginDisabled(editor.IsReadOnly() || view.Overrides.empty());
+		// Apply writes the overrides and the entities added below the instance (M27 friction F04), so either enables it.
+		ImGui::BeginDisabled(editor.IsReadOnly() || (view.Overrides.empty() && view.AddedEntities.empty()));
 		if (ImGui::Button("Apply"))
 		{
 			CancelEdit(context);
 			QueueAction(context, "prefab.apply", Json{ { "instance", view.Instance.ToString() }, { "level", m_ApplyLevel.ToString() } });
 		}
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-			ImGui::SetTooltip("Write this instance's overrides into the picked prefab and update every instance of it");
+			ImGui::SetTooltip("Write this instance's overrides and the entities added below it into the picked prefab and update every instance of it");
 		ImGui::EndDisabled();
 		ImGui::SameLine();
 		if (view.Levels.size() > 1)
@@ -352,9 +353,15 @@ namespace Engine {
 		}
 		else
 			ImGui::TextUnformatted(level->Label.c_str());
-		if (view.Overrides.empty())
+		if (view.Overrides.empty() && view.AddedEntities.empty())
 			ImGui::TextDisabled("No overrides");
-		else if (ImGui::TreeNodeEx("Overrides", ImGuiTreeNodeFlags_DefaultOpen, "Overrides (%zu)", view.Overrides.size()))
+		if (!view.AddedEntities.empty() && ImGui::TreeNodeEx("Added", ImGuiTreeNodeFlags_DefaultOpen, "Added entities (%zu)", view.AddedEntities.size()))
+		{
+			for (const std::string& path : view.AddedEntities)
+				ImGui::TextWrapped("%s", path.c_str());
+			ImGui::TreePop();
+		}
+		if (!view.Overrides.empty() && ImGui::TreeNodeEx("Overrides", ImGuiTreeNodeFlags_DefaultOpen, "Overrides (%zu)", view.Overrides.size()))
 		{
 			for (size_t index = 0; index < view.Overrides.size(); ++index)
 			{

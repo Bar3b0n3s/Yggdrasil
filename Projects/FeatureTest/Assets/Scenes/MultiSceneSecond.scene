@@ -104,6 +104,32 @@
 			}
 		},
 		{
+			"ID": "e5b647b0eb2cfe6a",
+			"Name": "Lens",
+			"Parent": "54c3dd6b436a30dc",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.75, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.4, 0.4, 0.4]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "6d5ad7bf770148f5",
+					"InstanceRoot": "54c3dd6b436a30dc",
+					"OuterPrefabEntityID": null
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
 			"ID": "221acb236d2627c3",
 			"Name": "Marker",
 			"Parent": null,

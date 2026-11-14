@@ -26,6 +26,7 @@
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/PrefabInstantiator.h"
@@ -152,6 +153,42 @@ namespace Engine {
 				versions.emplace(handle, std::move(*version));
 			}
 			return RefreshNestedPrefabOverrides(created, types, versions, options);
+		}
+
+		// Refuses prefab.apply when an instance among the entities `added` below the applied instance, or below one of them,
+		// is an instance of `prefab` (the prefab written) or of one of `nesting` (the prefabs nesting it, FindNestingPrefabs):
+		// added to `prefab` as a nested instance (M27 friction F04), it would make that prefab nest itself. Errors: Validation
+		// PREFAB_CYCLE at /instance naming the entity and its prefab; nothing is written then.
+		Status CheckAddedInstanceCycles(const EditorContext& editor, const Scene& scene, std::span<const Entity> added, AssetHandle prefab,
+			std::span<const AssetHandle> nesting)
+		{
+			std::vector<ConstEntity> stack(added.rbegin(), added.rend());
+			while (!stack.empty())
+			{
+				const ConstEntity entity = stack.back();
+				stack.pop_back();
+				if (const PrefabInstanceComponent* instance = entity.TryGetComponent<PrefabInstanceComponent>(); instance != nullptr)
+				{
+					const AssetHandle nested = instance->Prefab.GetHandle();
+					if (nested.IsValid() && (nested == prefab || std::ranges::find(nesting, nested) != nesting.end()))
+					{
+						const EditorAssetManager& assets = editor.GetAssets();
+						const std::string written = assets.GetReferencePath(prefab);
+						return std::unexpected(Utils::MakeParamError(ErrorCode::Validation, "/instance",
+							std::format("{}: '{}', added below the instance, is an instance of '{}', which {} '{}', so adding it to that prefab would make the "
+										"prefab nest itself",
+								PrefabCycleCode, scene.GetEntityPath(entity), assets.GetReferencePath(nested), nested == prefab ? "is" : "nests", written),
+							"move that entity out of the instance, or unpack it (prefab.unpack), before applying"));
+					}
+				}
+				const std::span<const UUID> children = entity.GetChildren();
+				for (auto child = children.rbegin(); child != children.rend(); ++child)
+				{
+					if (const ConstEntity handle = scene.FindEntityByID(*child); handle.IsValid())
+						stack.push_back(handle);
+				}
+			}
+			return {};
 		}
 
 		// Writes the (partial) Transform value `value` onto `entity`: stored fields in one write, then writable virtual fields
@@ -419,6 +456,12 @@ namespace Engine {
 			const VfsPath source = record->SourcePath;
 			ENGINE_TRY_ASSIGN(const auto schemas, editor.GetScriptSchemaSnapshot());
 			const PrefabOptions prefabOptions{ .Schemas = schemas.get() };
+			// The entities added below the instance, which the written prefab holds (M27 friction F04).
+			ENGINE_TRY_ASSIGN(const std::vector<Entity> added, PrefabInstantiator::GetAddedEntities(root));
+			std::vector<UUID> addedIDs;
+			addedIDs.reserve(added.size());
+			for (const Entity entity : added)
+				addedIDs.push_back(entity.GetUUID());
 			ENGINE_TRY_ASSIGN(const Prefab applied, ApplyToLevel(root, levels, level, current, prefabOptions));
 			ENGINE_TRY_ASSIGN(const std::string text, applied.SaveToString());
 			Result<std::string> before = editor.GetVfs().ReadText(source);
@@ -426,11 +469,22 @@ namespace Engine {
 				return std::unexpected(Utils::ToEditorFileError(std::move(before).error()));
 			// Before anything is written, so that a nesting cycle refuses the whole update.
 			ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> nesting, Utils::FindNestingPrefabs(editor, handle, current));
+			ENGINE_TRY(CheckAddedInstanceCycles(editor, *scene, added, handle, nesting));
 
-			// One undo step (§5.5 "Update"): the overrides of every instance recorded against the current versions, the .prefab
-			// written and imported, the prefabs nesting it rewritten, and every instance of them rebuilt from the new versions,
-			// the other open scenes' in their own histories (decision 15).
+			// One undo step (§5.5 "Update"): the added entities removed from the scene (their copies in the prefab replace
+			// them), the overrides of every instance recorded against the current versions, the .prefab written and imported,
+			// the prefabs nesting it rewritten, and every instance of them rebuilt from the new versions, the other open
+			// scenes' in their own histories (decision 15).
 			const std::string label = std::format("Apply Prefab '{}'", Utils::ToProjectRelative(source));
+			const UUID levelID = level.GetUUID();
+			EditorTransaction transaction(editor, label);
+			if (!added.empty())
+			{
+				SceneEdit edit(editor, label);
+				ENGINE_TRY(PrefabInstantiator::RemoveAddedEntities(root));
+				ENGINE_TRY_ASSIGN(const uint64_t removed, edit.Commit());
+				static_cast<void>(removed);
+			}
 			Scope<Command> write;
 			if (text != *before)
 			{
@@ -445,7 +499,15 @@ namespace Engine {
 			result.UpdatedPrefabs.reserve(update.UpdatedPrefabs.size());
 			for (const AssetHandle nestingPrefab : update.UpdatedPrefabs)
 				result.UpdatedPrefabs.push_back(Utils::MakeAssetSummary(assets, nestingPrefab));
-			result.UndoIndex = ToAutomationCounter(update.UndoIndex);
+			// Each added entity is now a member of the level's instance, at the ID its prefab-local ID (its old ID) derives.
+			for (const UUID id : addedIDs)
+			{
+				const Entity member = scene->FindEntityByID(PrefabInstantiator::DeriveInstanceID(levelID, id));
+				ENGINE_ASSERT(member.IsValid(), "The rebuilt instance holds the member of every added entity");
+				if (member.IsValid())
+					result.AddedEntities.push_back(context.MakeEntitySummary(member));
+			}
+			result.UndoIndex = ToAutomationCounter(transaction.Commit());
 			return result;
 		}
 
@@ -591,6 +653,9 @@ namespace Engine {
 			.Field("updatedInstances", &PrefabApplyResult::UpdatedInstances,
 				"The outermost instances rebuilt in the scene the request addresses from it or from a prefab nesting it, this one's included.")
 			.Field("updatedPrefabs", &PrefabApplyResult::UpdatedPrefabs, "The prefab assets nesting the applied prefab that were rewritten, in nesting order.")
+			.Field("addedEntities", &PrefabApplyResult::AddedEntities,
+				"The entities added below the instance that the prefab now holds (the top of each added subtree), as the members they became, "
+				"with new ids; empty when none was added.")
 			.Field("undoIndex", &PrefabApplyResult::UndoIndex, "The undo index; 0 in a batch.");
 
 		registry.Struct<PrefabRevertParams>("PrefabRevertParams", "The params of prefab.revert.")
@@ -671,15 +736,18 @@ namespace Engine {
 			{
 				.Name = "prefab.apply",
 				.Description = "Writes an instance's overrides into a .prefab asset, by default its outermost instance's prefab, or with level the "
-							   "prefab of a nested instance on the way down; then rewrites the prefabs nesting it (updatedPrefabs) and rebuilds "
-							   "their instances in the scene it addresses, as one undoable step, and in every other open scene, as a step of "
-							   "that scene's own undo history.",
+							   "prefab of a nested instance on the way down, together with every entity added below the instance (a user child "
+							   "with its subtree, an instance placed there as a nested instance), each at its place; then rewrites the prefabs "
+							   "nesting it (updatedPrefabs) and rebuilds their instances in the scene it addresses, as one undoable step, and in "
+							   "every other open scene, as a step of that scene's own undo history. The added entities become members of the "
+							   "instance with new ids (addedEntities), so a reference to one from outside the added entities is refused "
+							   "(InvalidState), except from the outermost instance's members when the prefab written is the outermost's.",
 				.RequiredParams = { "instance" },
 				.ExposeAsTool = true,
 				.Mutates = true,
 				.SupportsSceneTarget = true,
 				.AllowedInBatch = true,
-				.Examples = { { .Description = "Make the cell's edits the prefab's.", .Params = applyExample },
+				.Examples = { { .Description = "Make the cell's edits, and the entities added below it, the prefab's.", .Params = applyExample },
 					{ .Description = "Make the edits of a lamp inside a room the Lamp prefab's, so every room's lamps follow.", .Params = levelExample } },
 			},
 			&Automation::PrefabApply);

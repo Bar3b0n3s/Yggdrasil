@@ -1,8 +1,9 @@
 --!strict
 -- Two open scenes (Docs/Decisions/0031-m20-contract.md decisions 13 to 16): MultiSceneSecond.scene was the active scene
 -- while the MultiScene scaffold built part of MultiSceneFirst.scene through scene targets, so it holds only what its own
--- requests built; its Beacon instance was rebuilt when the other open scene applied its edit to Beacon.prefab
--- (decision 15), and a request targeting it saved it while it was not the active scene.
+-- requests built; its Beacon instance was rebuilt when the other open scene applied its edit and the Lens added
+-- below its Beacon to Beacon.prefab (decision 15; M27 friction F04), and a request targeting it saved it while it was
+-- not the active scene.
 local function Find(name: string): Entity
 	local entity = Scene.FindByName(name)
 	assert(entity ~= nil, name .. " exists")
@@ -18,5 +19,6 @@ return Test.Suite("MultiScene.Second", function()
 
 	Test.Case("its prefab instance follows the prefab applied from the other open scene", function()
 		Test.ExpectEqual((Find("Beacon").PointLight :: PointLight).Intensity, 6)
+		Test.ExpectEqual(Find("Lens"):GetParent(), Find("Beacon"), "the child added below the other scene's Beacon reached this one")
 	end)
 end)
