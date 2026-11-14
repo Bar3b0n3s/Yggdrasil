@@ -364,11 +364,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay",
-			"XXH64": "406fd2edec4e8f8a",
+			"XXH64": "23257246122bdcc5",
 			"Method": "test.run",
-			"RequestId": 7,
+			"RequestId": 14,
 			"Client": "engine-mcp",
-			"TranscriptLine": 415
+			"TranscriptLine": 475
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay.meta",

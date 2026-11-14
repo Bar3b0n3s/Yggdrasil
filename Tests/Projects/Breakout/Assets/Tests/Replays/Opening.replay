@@ -250,7 +250,7 @@
 				"Components": {
 					"Transform": "82125f902860db21",
 					"Environment": "966b96aa3d3e7154",
-					"PostProcess": "43801d8b4acd6fc4"
+					"PostProcess": "8e3aaf4cd70b2c45"
 				}
 			},
 			{
@@ -853,7 +853,7 @@
 				"Handle": "04a73e94d0da0935",
 				"Path": "Assets/Audio/LifeLost.sfx",
 				"Type": "AudioClip",
-				"Hash": "a210e8987c5bd357"
+				"Hash": "89e34e956935df66"
 			},
 			{
 				"Handle": "11d04163305d2e9f",
@@ -865,73 +865,73 @@
 				"Handle": "1281af27c6d1d20f",
 				"Path": "Assets/Audio/GameOver.sfx",
 				"Type": "AudioClip",
-				"Hash": "4a79873539dd1b54"
+				"Hash": "4f9bcf3528e0362b"
 			},
 			{
 				"Handle": "16305f6ca94cdc2d",
 				"Path": "Assets/Materials/BrickGreen.material",
 				"Type": "Material",
-				"Hash": "ea1950041e2003b6"
+				"Hash": "db9a009d4bd262a4"
 			},
 			{
 				"Handle": "18c27cc27d24eda2",
 				"Path": "Assets/Materials/BrickRed.material",
 				"Type": "Material",
-				"Hash": "78b902bb0f6c5b02"
+				"Hash": "d693410a632ac95e"
 			},
 			{
 				"Handle": "19c57a9ec62c018d",
 				"Path": "Assets/Materials/BrickOrange.material",
 				"Type": "Material",
-				"Hash": "9ae89518f411d448"
+				"Hash": "c8ea2de28420d6a1"
 			},
 			{
 				"Handle": "1f23a7278b972c0a",
 				"Path": "Assets/Materials/Ball.material",
 				"Type": "Material",
-				"Hash": "9c7fa3abe3ffff1b"
+				"Hash": "9ba248e516702a9f"
 			},
 			{
 				"Handle": "3b22308614f51348",
 				"Path": "Assets/Audio/WallHit.sfx",
 				"Type": "AudioClip",
-				"Hash": "486cae6898db3fce"
+				"Hash": "1dcb05e25ed1ea7c"
 			},
 			{
 				"Handle": "3e69f27e1119a90d",
 				"Path": "Assets/Audio/BrickBreak.sfx",
 				"Type": "AudioClip",
-				"Hash": "389dc670b7d84d26"
+				"Hash": "55d30948da3e62ba"
 			},
 			{
 				"Handle": "4680262ddf5bce12",
 				"Path": "Assets/Materials/Wall.material",
 				"Type": "Material",
-				"Hash": "431314116cf52900"
+				"Hash": "ce98e6f8a8e2ca5b"
 			},
 			{
 				"Handle": "47480773fb23c464",
 				"Path": "Assets/Audio/PaddleHit.sfx",
 				"Type": "AudioClip",
-				"Hash": "d4a410a6aceb7b29"
+				"Hash": "562bd990debcd85e"
 			},
 			{
 				"Handle": "4a99b5db3ab5af16",
 				"Path": "Assets/Audio/Win.sfx",
 				"Type": "AudioClip",
-				"Hash": "143f89ea2df02b1e"
+				"Hash": "841c5e3c0ef618ed"
 			},
 			{
 				"Handle": "4fe19c1c1e553eec",
 				"Path": "Assets/Materials/BrickBlue.material",
 				"Type": "Material",
-				"Hash": "639bc2c06f01c034"
+				"Hash": "edcb2fd591c44a39"
 			},
 			{
 				"Handle": "a6d76e2cc629df81",
 				"Path": "Assets/Materials/BrickYellow.material",
 				"Type": "Material",
-				"Hash": "712e9697f271ac63"
+				"Hash": "db70f9d2b3ae4e94"
 			},
 			{
 				"Handle": "e29b62c819907a37",
@@ -955,7 +955,7 @@
 				"Handle": "fbaa5ba7c97f054e",
 				"Path": "Assets/Materials/Paddle.material",
 				"Type": "Material",
-				"Hash": "b27e99ff15dc4e9a"
+				"Hash": "fd4e47d600280ac0"
 			}
 		]
 	},
@@ -5711,61 +5711,61 @@
 	"Checkpoints": [
 		{
 			"Tick": 60,
-			"StateHash": "84971d0672aca529"
+			"StateHash": "bb345d822eb14fba"
 		},
 		{
 			"Tick": 120,
-			"StateHash": "40fe44df55a19fc3"
+			"StateHash": "1cd5588dde02fd89"
 		},
 		{
 			"Tick": 180,
-			"StateHash": "063a4e2e6cc8bd95"
+			"StateHash": "014fbdae24ef06e4"
 		},
 		{
 			"Tick": 240,
-			"StateHash": "5e2dcdc3dd0ad503"
+			"StateHash": "db084620e6707eae"
 		},
 		{
 			"Tick": 300,
-			"StateHash": "faa7db9e323a853e"
+			"StateHash": "b18010fff161cd54"
 		},
 		{
 			"Tick": 360,
-			"StateHash": "b7d2c4125bfce396"
+			"StateHash": "947c575d5b962a30"
 		},
 		{
 			"Tick": 420,
-			"StateHash": "eb0b1d00fc85b55d"
+			"StateHash": "d77f1606e2835e3c"
 		},
 		{
 			"Tick": 480,
-			"StateHash": "56540b61c584ac39"
+			"StateHash": "d036184f3694d7d3"
 		},
 		{
 			"Tick": 540,
-			"StateHash": "f430b8c561f5ebba"
+			"StateHash": "d8644068de8f077a"
 		},
 		{
 			"Tick": 600,
-			"StateHash": "00f09fb4724ec295"
+			"StateHash": "3a220f3f7387cc3f"
 		},
 		{
 			"Tick": 660,
-			"StateHash": "8ebb9cca0f14e894"
+			"StateHash": "f61acc91be3c5f86"
 		},
 		{
 			"Tick": 720,
-			"StateHash": "af80c3ae3cc24eb0"
+			"StateHash": "a3e5d5587b1015cd"
 		},
 		{
 			"Tick": 780,
-			"StateHash": "d8ec18eb1f4f3f99"
+			"StateHash": "934bc366a7fec92b"
 		},
 		{
 			"Tick": 840,
-			"StateHash": "a71cb211cef1a309"
+			"StateHash": "263d4150651c1526"
 		}
 	],
 	"FinalTick": 872,
-	"FinalStateHash": "685d68832c1f74d4"
+	"FinalStateHash": "6b4d41f6bb24be28"
 }
