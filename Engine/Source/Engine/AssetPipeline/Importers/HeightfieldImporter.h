@@ -28,6 +28,8 @@ namespace Engine {
 	// the terrain's +Z). Never asserts on data. Errors: InvalidArgument for a non-square image, a side outside the range, an
 	// 8-bit PNG or a RAW whose byte count is not 2 N^2 for such an N (each naming the size found); Parse for a PNG stb_image
 	// cannot read (its reason quoted). Pure; identical in every configuration. Stream T-A, with terrain.importHeightmap.
+	// Fuzzed by the HeightfieldData target, which mutates a 16-bit PNG and a RAW in turn with the payload (the milestone
+	// review).
 	[[nodiscard]] Result<HeightfieldData> ConvertHeightmap(std::span<const std::byte> source, HeightmapSourceKind kind);
 
 	// .heightfield files (M26, C26.1, C-TERR; decision 20; Architecture §6, §7.4): ReadHeightfieldSource (Asset/

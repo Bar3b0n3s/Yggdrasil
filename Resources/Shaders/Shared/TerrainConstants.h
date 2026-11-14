@@ -17,10 +17,11 @@ namespace Engine {
 	//
 	// TerrainConstants: World places the terrain's local space (Asset/TerrainGeometry.h: sample (x, z) at (x CellSize.x,
 	// texel HeightScale, z CellSize.y)); the prepass writes the camera's motion alone to SceneVelocity from ViewConstants'
-	// view-projections (a terrain has no previous world, RenderSnapshot.h's TerrainItem). Layer i (below LayerCount; the others weigh nothing): LayerTints[i] its linear tint
-	// (rgb) and the inverse of its Tiling (a: local metres to its maps' coordinates), LayerSurfaces[i] its perceptual
-	// Roughness (x) and Metallic (y), and z 1 when its normal map holds x and y only (a BC5 map: z is reconstructed, as
-	// MaterialFlagNormalMapTwoChannel does for meshes). InverseSize maps local XZ to the splat map's coordinates (1 / Size).
+	// view-projections (a terrain has no previous world, RenderSnapshot.h's TerrainItem). Layer i (below LayerCount; the
+	// others weigh nothing): LayerTints[i] its linear tint (rgb) and the inverse of its Tiling (a: local metres to its maps'
+	// coordinates), LayerSurfaces[i] its perceptual Roughness (x) and Metallic (y), and z 1 when its normal map holds x and y
+	// only (a BC5 map: z is reconstructed, as MaterialFlagNormalMapTwoChannel does for meshes). InverseSize maps local XZ to
+	// the splat map's coordinates (1 / Size).
 	// Flags: TerrainFlag*. PickId: the picking prepass's EntityId. DebugView: RenderDebugView's value, Lit or a material
 	// view (the forward pass outputs that view's quantity, as the Scene program's specialization does).
 #if defined(ENGINE_SHADER)

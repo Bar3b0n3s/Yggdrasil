@@ -3,6 +3,7 @@
 
 #include "Editor/EditorLayer.h"
 #include "Editor/PanelInteractionFixture.h"
+#include "Editor/ScriptedFileDialog.h"
 #include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/Inspector/ScriptSlotList.h"
 #include "EditorCore/Play/EditorPlayController.h"
@@ -17,6 +18,7 @@
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -1611,6 +1613,88 @@ namespace Engine {
 			test.CaptureText = false;
 			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, ImHashStr("New graph...", 0, graphScope)).GetCenter()));
 			CHECK(InspectorLayerPopup() != nullptr);
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decisions 20 and 32 (e); the milestone review): the inspector hosts the
+		// Terrain's Import heightmap action (Editor/Tools/TerrainHeightmapImport.h) under the Terrain component's header, for
+		// one entity of the edit scene: the heightmap chosen in the dialog goes through terrain.importHeightmap and is
+		// assigned, and a refused import shows the method's refusal. Two selected entities and the play scene show no button.
+		TEST_CASE("InspectorPanel: a selected edit-scene Terrain's Import heightmap imports the chosen heightmap through terrain.importHeightmap")
+		{
+			InspectorLayerHarness test;
+			auto& context = test.Fixture.GetContext();
+			auto& automation = test.Fixture.GetAutomation();
+			EditorContext& editor = context.Editor;
+			// A flat 17 x 17 RAW heightmap and a RAW of 5 bytes in the project, chosen through the (scripted) native dialog.
+			const VfsPath hillsRaw = VfsPath::Create("project", "Heightmaps/Hills.raw").value_or(VfsPath());
+			REQUIRE(editor.CreateProjectDirectory(hillsRaw.GetParent()));
+			REQUIRE(editor.WriteProjectFile(hillsRaw, Buffer(static_cast<size_t>(17) * 17 * 2, std::byte{ 0 })));
+			REQUIRE(editor.WriteProjectFile(VfsPath::Create("project", "Heightmaps/Broken.raw").value_or(VfsPath()), Buffer(5, std::byte{ 0 })));
+			const auto script = CreateRef<Test::ScriptedFileDialogScript>();
+			script->Outcome = FileDialogOutcome{ .State = FileDialogState::Accepted, .Path = editor.GetProject().GetRoot() / "Heightmaps" / "Hills.raw" };
+			context.FileDialogs = Test::MakeScriptedFileDialogBackend(script);
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Hills" }, { "components", Json{ { "Terrain", Json::object() } } } }));
+			REQUIRE(automation.Call("entity.create", Json{ { "name", "Dunes" }, { "components", Json{ { "Terrain", Json::object() } } } }));
+			Scene& scene = editor.GetScene();
+			const UUID hills = scene.FindEntityByPath("/Hills").GetUUID();
+			const UUID dunes = scene.FindEntityByPath("/Dunes").GetUUID();
+			const auto draw = [&test]()
+			{
+				return test.Draw();
+			};
+			const auto settle = [&test]()
+			{
+				for (int round = 0; round < 6; ++round)
+				{
+					REQUIRE(test.Layer.OnSafePoint(0.0));
+					REQUIRE(test.Frame());
+				}
+			};
+			const auto shows = [&test](std::string_view text)
+			{
+				test.CaptureText = true;
+				REQUIRE(test.Frame());
+				test.CaptureText = false;
+				return test.Text.contains(text);
+			};
+
+			REQUIRE(context.Editor.SetSelection({ hills, dunes }, SceneTarget::Edit));
+			REQUIRE(test.Frame());
+			CHECK_FALSE(shows("Import heightmap..."));
+			REQUIRE(context.Editor.SetSelection({ hills }, SceneTarget::Edit));
+			REQUIRE(test.Frame());
+			CHECK(shows("Import heightmap..."));
+			const size_t before = editor.GetHistory().GetUndoCount();
+			const ImGuiID button = ImHashStr("Import heightmap...", 0, InspectorLayerComponentId("Terrain"));
+			REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, button).GetCenter()));
+			REQUIRE(script->Requests.size() == 1);
+			settle();
+			const std::optional<AssetHandle> imported = editor.GetAssets().Resolve("Assets/Terrain/Hills.heightfield");
+			REQUIRE(imported.has_value());
+			CHECK(scene.FindEntityByID(hills).GetComponent<TerrainComponent>().Heightfield.GetHandle() == *imported);
+			// Two undo steps: the import and the assignment.
+			CHECK(editor.GetHistory().GetUndoCount() == before + 2);
+
+			// A heightmap the method refuses changes nothing, and the inspector shows the method's refusal.
+			const Json broken{ { "source", "Heightmaps/Broken.raw" }, { "path", "Assets/Terrain/Hills.heightfield" } };
+			const Result<Json> refused = automation.Call("terrain.importHeightmap", broken);
+			REQUIRE_FALSE(refused.has_value());
+			script->Outcome = FileDialogOutcome{ .State = FileDialogState::Accepted, .Path = editor.GetProject().GetRoot() / "Heightmaps" / "Broken.raw" };
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			{
+				const Test::ExpectLog reported(LogLevel::Error, "InspectorPanel");
+				REQUIRE(test.Ui.Click(draw, InspectorLayerScrolledItem(test, button).GetCenter()));
+				settle();
+			}
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+			CHECK(shows(refused.error().GetMessageText()));
+
+			// The play scene's terrain shows no button.
+			REQUIRE(automation.Call("play.start", Json{ { "lockstep", true } }));
+			REQUIRE(context.Editor.SetSelection({ hills }, SceneTarget::Play));
+			REQUIRE(test.Frame());
+			CHECK_FALSE(shows("Import heightmap..."));
+			REQUIRE(automation.Call("play.stop", Json::object()));
 		}
 
 		// M24 (decision 14; stream B's inspector drawing, tested at W24.2's integration): during play, a graph slot of the one

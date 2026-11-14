@@ -73,7 +73,9 @@ class ScaffoldManifestTests(unittest.TestCase):
 
 class FeatureTestScaffoldTests(AutomationTestCase):
     def test_scaffolds_reproduce_the_project_byte_for_byte(self) -> None:
-        # Formats.jsonl imports an .hdr, which needs the GPU environment baker.
+        # Formats.jsonl imports an .hdr, which needs the GPU environment baker, and lighting.bake's scaffolds
+        # (Probes.jsonl and GoldenProbes.jsonl) render their probes, whose committed bakes reproduce only on the device
+        # class and driver that baked them (Tests/Golden/README.md's rename procedure re-bakes them).
         if not self.require_gpu():
             return
         process = subprocess.run(

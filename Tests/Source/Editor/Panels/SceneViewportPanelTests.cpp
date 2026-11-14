@@ -11,6 +11,7 @@
 #include "EditorCore/Viewport/TilemapPainting.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/TilemapData.h"
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/Components/CameraComponent.h"
@@ -1332,6 +1333,122 @@ namespace Engine {
 			CHECK(editor.GetHistory().GetUndoCount() == history);
 			CHECK(editor.GetVfs().ReadText(VfsPath::Create("project", "Assets/Tilemaps/Brush.tilemap").value_or(VfsPath())).value_or(std::string()) == before);
 			CHECK(test.Viewport.Clicks.empty());
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decisions 23 and 32 (e); the milestone review): the scene view hosts the
+		// terrain brush (Editor/Tools/TerrainBrush.h). Its controls show in the toolbar for a selected terrain; armed, it hides
+		// the gizmo, whose handles then own no press, so a stroke that starts where the gizmo's centre handle was is the brush's
+		// and queues one terrain.edit, one undo step; and while the tile brush is armed too, the tile brush takes the stroke.
+		TEST_CASE("SceneViewportPanel: an armed terrain brush hides the gizmo and a left stroke queues one terrain.edit, unless the tile brush is armed")
+		{
+			ScenePanelHarness test("SceneTerrainBrush");
+			EditorContext& editor = test.GetEditor();
+			Test::AutomationFixture& automation = test.GetAutomation();
+			// A terrain flat at half its HeightScale (8 m), so the ray to its entity's origin, where the gizmo stands below the
+			// surface's corner, meets the surface inside the terrain first.
+			Buffer raw;
+			for (size_t sample = 0; sample < static_cast<size_t>(33) * 33; ++sample)
+			{
+				raw.push_back(std::byte{ 0x00 });
+				raw.push_back(std::byte{ 0x80 });
+			}
+			const VfsPath heightmap = VfsPath::Create("project", "Heightmaps/Raised.raw").value_or(VfsPath());
+			REQUIRE(editor.CreateProjectDirectory(heightmap.GetParent()).has_value());
+			REQUIRE(editor.WriteProjectFile(heightmap, raw).has_value());
+			REQUIRE(automation.Call("terrain.importHeightmap", Json{ { "source", "Heightmaps/Raised.raw" }, { "path", "Assets/Terrain/Raised.heightfield" } }).has_value());
+			const auto created = automation.Call("entity.create",
+				Json{ { "name", "Field" }, { "components", Json{ { "Terrain", Json{ { "Heightfield", "Assets/Terrain/Raised.heightfield" } } } } } });
+			REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
+			const auto field = JsonReader((*created)["entity"]["id"]).ReadUUID();
+			REQUIRE(field.has_value());
+			REQUIRE(editor.GetViewportState().SetCamera(ExplicitRenderCamera{ .Position = glm::vec3(40.0f, 30.0f, 70.0f), .Target = glm::vec3(0.0f) }).has_value());
+			REQUIRE(editor.SetSelection({ *field }, SceneTarget::Edit).has_value());
+			test.RefreshCamera();
+			test.FrameOk();
+			const ExplicitRenderCamera camera = test.Camera();
+			const VfsPath source = VfsPath::Create("project", "Assets/Terrain/Raised.heightfield").value_or(VfsPath());
+			// Whether the heightfield's source holds `bytes` (a bool, so a failure does not print every sample).
+			const auto sourceHolds = [&editor, &source](const Buffer& bytes)
+			{
+				return editor.GetVfs().ReadFile(source).value_or(Buffer()) == bytes;
+			};
+			const auto translation = [&editor, &field]()
+			{
+				return editor.GetScene().FindEntityByID(*field).GetComponent<TransformComponent>().Translation;
+			};
+			// Picks the entry `steps` below "Off" of the toolbar picker `id`: Space opens it, Down moves, Space takes it.
+			const auto pick = [&test](const char* id, int steps)
+			{
+				test.FrameOk([id]()
+				{
+					ImGuiWindow* window = ScenePanelHarness::SceneWindow();
+					REQUIRE(window != nullptr);
+					ImGui::SetWindowFocus(Utils::EditorWindowTitle(EditorPanel::SceneViewport));
+					ImGui::SetNavID(window->GetID(id), ImGuiNavLayer_Main, window->NavRootFocusScopeId, ImRect());
+					ImGui::SetNavCursorVisible(true);
+				});
+				std::vector<ImGuiKey> keys{ ImGuiKey_Space };
+				for (int step = 0; step < steps; ++step)
+					keys.push_back(ImGuiKey_DownArrow);
+				keys.push_back(ImGuiKey_Space);
+				for (const ImGuiKey key : keys)
+				{
+					ImGui::GetIO().AddKeyEvent(key, true);
+					test.FrameOk();
+					ImGui::GetIO().AddKeyEvent(key, false);
+					test.FrameOk();
+				}
+			};
+			// A left stroke from the image's centre, where the entity's origin is shown, then the queued actions.
+			const auto stroke = [&test]()
+			{
+				test.MoveTo(test.Center());
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+				test.FrameOk();
+				test.MoveTo(ImVec2(test.Center().x + 80.0f, test.Center().y + 10.0f));
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+				test.FrameOk();
+				test.GetContext().Actions.Pump();
+				test.FrameOk();
+			};
+
+			// Unarmed, the gizmo stands at the image's centre: the pointer there is over its centre handle.
+			test.MoveTo(test.Center());
+			test.FrameOk();
+			REQUIRE(ImGuizmo::IsOver());
+			// The toolbar's picker shows for the selected terrain; its first tool, Raise, arms the brush.
+			pick("##TerrainBrushTool", 1);
+			const size_t history = editor.GetHistory().GetUndoCount();
+			const Buffer before = editor.GetVfs().ReadFile(source).value_or(Buffer());
+			REQUIRE_FALSE(before.empty());
+			stroke();
+			CHECK_FALSE(test.GetContext().Gizmos.IsDragging());
+			CHECK(test.Viewport.Clicks.empty());
+			CHECK(translation() == glm::vec3(0.0f));
+			CHECK(test.Camera().Position == camera.Position);
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			CHECK_FALSE(sourceHolds(before));
+			REQUIRE(automation.Call("edit.undo", Json::object()).has_value());
+			CHECK(sourceHolds(before));
+
+			// With the tile brush armed too (the entity also holds a tilemap), the tile brush takes the stroke: one
+			// tilemap.paint, and the heightfield keeps its bytes.
+			const Json sheet{ { "Texture", "engine://Textures/Checker" },
+				{ "Frames", Json::array({ Json{ { "Name", "Ground" }, { "Rect", Json{ { "X", 0 }, { "Y", 0 }, { "Width", 16 }, { "Height", 16 } } } } }) } };
+			REQUIRE(automation.Call("asset.create", Json{ { "type", "SpriteSheet" }, { "path", "Assets/Sheets/Brush.spritesheet" }, { "values", sheet } }).has_value());
+			const Json palette = Json::array({ Json{ { "Sheet", "Assets/Sheets/Brush.spritesheet" }, { "Frame", 0 }, { "Solid", true } } });
+			REQUIRE(automation.Call("asset.create", Json{ { "type", "Tilemap" }, { "path", "Assets/Tilemaps/Brush.tilemap" }, { "values", Json{ { "Palette", palette } } } }).has_value());
+			REQUIRE(automation.Call("entity.update", Json{ { "entity", field->ToString() }, { "components", Json{ { "TilemapRenderer", Json{ { "Tilemap", "Assets/Tilemaps/Brush.tilemap" } } } } } }).has_value());
+			REQUIRE(editor.SetSelection({ *field }, SceneTarget::Edit).has_value());
+			test.FrameOk();
+			pick("##TilemapBrushTile", 1);
+			const VfsPath tilemap = VfsPath::Create("project", "Assets/Tilemaps/Brush.tilemap").value_or(VfsPath());
+			const std::string cells = editor.GetVfs().ReadText(tilemap).value_or(std::string());
+			const size_t painted = editor.GetHistory().GetUndoCount();
+			stroke();
+			CHECK(editor.GetHistory().GetUndoCount() == painted + 1);
+			CHECK(editor.GetVfs().ReadText(tilemap).value_or(std::string()) != cells);
+			CHECK(sourceHolds(before));
 		}
 
 		// M22 (decision 34; the review of W22.2): over the UI preview, a click on the selected element's body keeps it

@@ -34,6 +34,6 @@ A reference page of the `game-building` skill (`skills/game-building`), for its 
 
 ## Screenshots, goldens and tests
 
-- `viewport_screenshot`, `Test.Screenshot` and the editor's thumbnails of a scene with TAA or auto-exposure reset the view's history and render the same frame eight times (the jitter sequence) before keeping the last image, so two screenshots of one scene and tick are byte-identical; a scene without either renders once. Expect such captures to take several times longer.
+- `viewport_screenshot`, `editor_screenshot`, `Test.Screenshot` and the editor's thumbnails of a scene with TAA or auto-exposure reset the view's history and render the same frame eight times (the jitter sequence) before keeping the last image, so two screenshots of one scene and tick are byte-identical; a scene without either renders once. `editor_screenshot` renders its Scene and Game views that way in the frame it captures, and the live views go on from there. Expect such captures to take several times longer.
 - In play, the game view keeps its history between frames, so a screenshot taken during play still starts from a reset history and may differ slightly from what the window showed at that tick (the window's TAA had resolved over earlier, moving frames). Compare screenshots with screenshots, never with frames read back from the window.
 - After a GPU device loss the renderer starts its temporal history afresh: the first frames after the recovery may differ from an uninterrupted run, while screenshots stay identical.

@@ -16,6 +16,7 @@
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Project/ProjectSettings.h"
+#include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/Scene.h"
@@ -404,7 +405,7 @@ namespace Engine {
 			return {};
 		return m_Editor.GetProject().GetSettings().SortingLayers.Layers;
 	}
-	Status EditorHostViewports::Render(RenderContext& context)
+	Status EditorHostViewports::Render(RenderContext& context, ViewportCapture* capture)
 	{
 		if (m_Device == nullptr)
 			return {};
@@ -415,7 +416,7 @@ namespace Engine {
 		std::optional<Error> failure;
 		for (size_t i = 0; i < m_Views.size(); ++i)
 		{
-			Status rendered = RenderView(i, context, sceneChanged);
+			Status rendered = RenderView(i, context, sceneChanged, capture);
 			if (rendered)
 				continue;
 			// A Gpu error comes first: the host trims for it after the frame (M18, C18.4 decision 44).
@@ -427,7 +428,7 @@ namespace Engine {
 		m_TrimAfterSubmission = failure.has_value() && IsGpuOutOfMemory(*failure, *m_Device);
 		return failure ? Status(std::unexpected(std::move(*failure))) : Status{};
 	}
-	Status EditorHostViewports::RenderView(size_t index, RenderContext& context, bool sceneChanged)
+	Status EditorHostViewports::RenderView(size_t index, RenderContext& context, bool sceneChanged, ViewportCapture* capture)
 	{
 		View& view = m_Views[index];
 		const ViewportView kind = index == 0 ? ViewportView::Scene : ViewportView::Game;
@@ -500,13 +501,18 @@ namespace Engine {
 		view.Source = source;
 		view.Flags = snapshot.Flags;
 		ENGINE_TRY(Poll(view, kind, context.FrameIndex));
-		snapshot.FrameIndex = context.FrameIndex;
 		// M26 (decision 10): the view's temporal inputs, its delta time the seconds since its previous render (presentation
-		// only: auto-exposure's adaptation; captures render from a reset history of their own, ViewportCapture).
+		// only: auto-exposure's adaptation). A capture's frame renders the capture's warm-up instead (the milestone review):
+		// its history reset, the warm-up's renders submitted on their own, and this render its last, at delta time 0.
 		const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 		const double elapsed = view.LastRenderSeconds.has_value() ? std::max(now - *view.LastRenderSeconds, 0.0) : 0.0;
 		view.LastRenderSeconds = now;
-		view.History.Apply(snapshot, static_cast<float>(elapsed));
+		Status warmed{};
+		if (capture != nullptr)
+			warmed = capture->RenderWarmup(*view.Renderer, view.History, snapshot);
+		else
+			view.History.Apply(snapshot, static_cast<float>(elapsed));
+		snapshot.FrameIndex = context.FrameIndex;
 		view.Recorded = true;
 		view.HoldsSceneResources = true;
 		Status recorded = view.Renderer->Render(*context.CommandList, snapshot);
@@ -542,7 +548,8 @@ namespace Engine {
 		// publish viewport extents); the views stay unavailable until the window is restored.
 		if (!m_Unavailable)
 			ENGINE_TRY(m_Editor.GetViewportState().SetPixelSize(kind, rendered));
-		return recorded;
+		// A warm-up render's error is the view's after its own render, which shows the frame either way.
+		return recorded ? warmed : recorded;
 	}
 	Status EditorHostViewports::Submitted(uint64_t frameIndex, uint64_t submissionId)
 	{

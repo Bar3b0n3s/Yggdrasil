@@ -46,10 +46,15 @@ Regeneration, in place (the default) or in a temporary copy (--check):
 that differs, is missing or is extra, unless every file outside Library/ is byte-identical to the repository's (the
 editor's *.bak backups, which the project's .gitignore excludes, are not compared), and each kept file of the
 repository's project holds the bytes its baseline entry records ("kept-differs", "kept-missing"). A
-scaffold with Renderer "vulkan" (an .hdr or .exr import needs the GPU environment baker) fails without a usable Vulkan
-device and names the reason. In place, an editor that has the project open makes the run fail before anything is
-removed: the project's Library/Editor.lock is probed on every OS like the engine's ProjectLock::IsHeld (a non-blocking
-lock of the lock's byte on Windows, a shared non-blocking flock on Linux and macOS), released at once if it succeeds.
+scaffold with Renderer "vulkan" (an .hdr or .exr import needs the GPU environment baker, and lighting.bake's scaffolds,
+Probes.jsonl and GoldenProbes.jsonl, render their probes) fails without a usable Vulkan device and names the reason.
+Every other output is the same on every machine, but lighting.bake's .irradiance and .hdr files below Assets/Lighting/
+are GPU renders read back: --check reproduces them byte for byte only on the device class and driver that baked them,
+so a driver or device change re-bakes them as Tests/Golden/README.md's rename procedure says
+(Docs/Decisions/0037-m26-contract.md decision 8). In place, an editor that has the project open makes the run fail
+before anything is removed: the project's Library/Editor.lock is probed on every OS like the engine's
+ProjectLock::IsHeld (a non-blocking lock of the lock's byte on Windows, a shared non-blocking flock on Linux and macOS),
+released at once if it succeeds.
 
 Every run, --check included, holds the machine-wide GPU lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028
 decision 16), shared by every checkout of the repository, from its start to its end: it waits while another GPU run

@@ -22,6 +22,7 @@ namespace Engine {
 	class GpuResourceCache;
 	class GraphicsDevice;
 	class Readback;
+	class RenderViewHistory;
 	class SceneRenderer;
 	class SceneRendererPipelines;
 
@@ -116,6 +117,20 @@ namespace Engine {
 		// startup (CreateForScenes) stays fatal.
 		[[nodiscard]] Result<Image> Capture(const ViewportScreenshotRequest& request, const RenderSnapshot& snapshot);
 
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 10; the milestone review): the warm-up every capture renders, for a
+		// view that another owner renders and shows: editor.screenshot's views (Editor/Private/EditorHostViewports.h), whose
+		// fresh UI frame is a capture of the editor UI. Resets `history` and, when `snapshot` NeedsTemporalWarmup, renders
+		// `snapshot` through `renderer` CaptureWarmupFrames - 1 times with delta time 0, each render recorded into the
+		// capture's command list, submitted and notified (SceneRenderer::OnSubmitted, its FrameIndex the capture's own), as
+		// Capture's renders are; then applies `history` to `snapshot` once more with delta time 0. The caller's Render of
+		// `snapshot` (with its own FrameIndex) is then the warm-up's last render, the image Capture reads back for that
+		// snapshot, and `history` goes on from it. A snapshot without temporal post-processing renders nothing here: the
+		// caller's render is the capture's one render, from the reset history. Capture renders through it, so the two never
+		// differ. `renderer` awaits no OnSubmitted (SceneRenderer::Render's rule) and is a documented back-reference for the
+		// call only. Errors: the first of SceneRenderer::Render's, once every render of the warm-up ran (`snapshot` is applied
+		// for the last render either way).
+		[[nodiscard]] Status RenderWarmup(SceneRenderer& renderer, RenderViewHistory& history, RenderSnapshot& snapshot);
+
 		// M18 (C18.1, R-2D-PIXEL; Docs/Decisions/0029-m18-contract.md decision 6): the output mapping of the last successful
 		// Capture's rendered image (request.Width x request.Height, before MaxDimension's downscale), SceneRenderer's
 		// GetOutputMapping: which of its pixels show which scene pixels, and which are letterbox. A caller that maps pixels of
@@ -129,6 +144,9 @@ namespace Engine {
 		// M18 (C18.4, decision 43): the registration's TrimUnused hook: SceneRenderer::ReleaseTargets of the private
 		// renderer, unless a Capture is running (see the class comment).
 		void TrimUnused();
+		// Renders `snapshot` through `renderer` into the capture's command list with the capture's next FrameIndex, submits it
+		// and notifies the renderer (the list runs whatever Render reports). Errors: those of SceneRenderer::Render.
+		[[nodiscard]] Status RenderSubmitted(SceneRenderer& renderer, RenderSnapshot& snapshot);
 	private:
 		GraphicsDevice* m_Device = nullptr; // documented back-reference
 		Scope<SceneRenderer> m_SceneRenderer;

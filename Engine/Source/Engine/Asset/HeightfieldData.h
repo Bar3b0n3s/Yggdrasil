@@ -74,8 +74,9 @@ namespace Engine {
 
 	// Reads a payload written by SerializeHeightfieldPayload, checking Resolution against its limits and the bytes left
 	// before anything is allocated, then ValidateHeightfieldData. Never asserts on data (fuzzed: the fuzz target
-	// HeightfieldData, "HeightfieldData: 10,000 seeded mutations of a payload never crash"). Errors: Parse for truncation,
-	// a resolution outside its limits or trailing bytes; Validation from ValidateHeightfieldData.
+	// HeightfieldData, "HeightfieldData: 10,000 seeded mutations of a payload and of 16-bit PNG and RAW heightmaps never
+	// crash"). Errors: Parse for truncation, a resolution outside its limits or trailing bytes; Validation from
+	// ValidateHeightfieldData.
 	[[nodiscard]] Result<HeightfieldData> DeserializeHeightfieldPayload(std::span<const std::byte> payload);
 
 	// The source file of `heightfield`: the source header (HeightfieldSourceMagic, then uint32 FormatVersion) followed by

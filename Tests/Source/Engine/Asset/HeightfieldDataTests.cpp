@@ -4,15 +4,19 @@
 
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/CookedFormat.h"
+#include "Engine/AssetPipeline/Importers/HeightfieldImporter.h"
+#include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Random.h"
 #include "Support/Fuzz.h"
+#include "Support/TestData.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 
 // Heightfields (M26, C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decisions 20 and 21, stream T-A): the format version
-// 1, its source file and the fuzz target.
+// 1, its source file and the fuzz target, which also mutates the heightmaps the importer converts (decision 24).
 
 namespace Engine {
 
@@ -79,15 +83,35 @@ namespace Engine {
 			CHECK(ValidateHeightfieldData(tooLarge).error().GetCode() == ErrorCode::Validation);
 		}
 
-		TEST_CASE("HeightfieldData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
+		// The milestone review: the target also mutates the heightmap sources terrain.importHeightmap converts from any file
+		// (AssetPipeline/Importers/HeightfieldImporter.h's ConvertHeightmap): the 16-bit grey PNG fixture, whose stored deflate
+		// blocks let a mutation reach stb_image's 16-bit unfiltering and ConvertPng16's checks and copy, and the ramp's samples
+		// as a RAW, in turn with the payload, as LutData's target alternates its .cube text and its payload.
+		TEST_CASE("HeightfieldData: 10,000 seeded mutations of a payload and of 16-bit PNG and RAW heightmaps never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
-			const Buffer payload = SerializeHeightfieldPayload(MakeRamp());
+			const HeightfieldData ramp = MakeRamp();
+			const Buffer payload = SerializeHeightfieldPayload(ramp);
 			REQUIRE(DeserializeHeightfieldPayload(payload).has_value());
-			const Test::FuzzRun run = Test::RunFuzzCase(0x4EF1, 10000, [&payload](Random& random, uint64_t /*index*/)
+			const Result<Buffer> png = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Heightmaps/Ramp16.png"));
+			REQUIRE_MESSAGE(png.has_value(), png.error().ToString());
+			REQUIRE(ConvertHeightmap(*png, HeightmapSourceKind::Png16).has_value());
+			Buffer raw;
+			for (const uint16_t sample : ramp.Heights)
 			{
-				Buffer mutated = payload;
+				raw.push_back(static_cast<std::byte>(sample & 0xFFU));
+				raw.push_back(static_cast<std::byte>(sample >> 8U));
+			}
+			REQUIRE(ConvertHeightmap(raw, HeightmapSourceKind::Raw16).has_value());
+			const std::array<const Buffer*, 3> seeds = { &payload, &*png, &raw };
+			const Test::FuzzRun run = Test::RunFuzzCase(0x4EF1, 10000, [&seeds](Random& random, uint64_t index)
+			{
+				// Iteration i mutates the payload, the PNG or the RAW as i mod 3 is 0, 1 or 2; whatever a reader accepts is a
+				// valid heightfield.
+				const uint64_t kind = index % seeds.size();
+				Buffer mutated = *seeds[kind];
 				Test::MutateBytes(mutated, random);
-				const Result<HeightfieldData> read = DeserializeHeightfieldPayload(mutated);
+				const HeightmapSourceKind source = kind == 1 ? HeightmapSourceKind::Png16 : HeightmapSourceKind::Raw16;
+				const Result<HeightfieldData> read = kind == 0 ? DeserializeHeightfieldPayload(mutated) : ConvertHeightmap(mutated, source);
 				if (!read.has_value())
 					return false;
 				CHECK(ValidateHeightfieldData(*read).has_value());

@@ -77,7 +77,8 @@ namespace Engine {
 		void RefreshFatalSnapshot();
 		// Asks for a complete UI frame at the next render, also while minimized (RequestOffscreenUiFrame), and keeps asking
 		// until one completes with the views' layout ready (OnRenderSubmitted): editor.screenshot's request, and the
-		// recovery's.
+		// recovery's. M26 (Docs/Decisions/0037-m26-contract.md decision 10; the milestone review): while it is asked for, the
+		// frames render the views as a capture does (EditorHostViewports::Render with the viewport capture).
 		[[nodiscard]] Status RequestFreshUiFrame();
 		void NoteShownScene();
 		void CollectStaleMirrors();

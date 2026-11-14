@@ -20,6 +20,7 @@ namespace Engine {
 	class ImGuiRenderer;
 	class PlaySession;
 	class Scene;
+	class ViewportCapture;
 	struct RenderContext;
 
 	// EditorApp-owned adapter. All services are borrowed, main-thread-only and outlive this adapter.
@@ -72,7 +73,14 @@ namespace Engine {
 		// set, for which Submitted trims after the frame, never fatal; on a lost device the loss). A view that is not displayed
 		// withdraws its image; when the shown scene changes while it is hidden, it also releases its renderer, whose binding
 		// caches would otherwise keep the previous scene's GPU textures alive, and gets a new one when displayed again.
-		[[nodiscard]] Status Render(RenderContext& context);
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 10; the milestone review): a view's history goes on between its
+		// renders, its delta time the steady clock's since its previous render. With `capture`, the frame is a capture of the
+		// editor UI (editor.screenshot's fresh frame, EditorApp::RequestFreshUiFrame): each displayed view renders as every
+		// capture does, through the capture's warm-up (ViewportCapture::RenderWarmup), its history reset and, for a snapshot
+		// that NeedsTemporalWarmup, CaptureWarmupFrames renders with delta time 0, the frame's own render the last, so two
+		// captures of an unchanged scene show byte-identical views; the live frames after it go on from that history. An error
+		// of a warm-up render is the view's, after its own render. `capture` outlives the call.
+		[[nodiscard]] Status Render(RenderContext& context, ViewportCapture* capture = nullptr);
 		// Notifies every view recorded in the frame of its submission and requests its queued pick. M18 (C18.4, decision 44):
 		// then, when the frame's Render returned an out-of-memory error (IsGpuOutOfMemory: a Gpu error on a device that is
 		// not lost), runs GraphicsDevice::TrimUnused once, which waits for that submission before any owner drops what it can
@@ -155,8 +163,9 @@ namespace Engine {
 			std::vector<TilemapItem> Tilemaps{};
 			// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 10, stream X-C): the view's history (TAA's jitter and
 			// motion, auto-exposure's delta time), reset when the shown scene changes (a scene opened, closed or swapped, play
-			// started or stopped) and when the view gets a new renderer; and when it last rendered (the steady clock's
-			// seconds), so its delta time is the time since its previous render.
+			// started or stopped), when the view gets a new renderer and (the milestone review) by a capture's frame, which
+			// renders the capture's warm-up (Render's capture); and when it last rendered (the steady clock's seconds), so its
+			// delta time is the time since its previous render.
 			RenderViewHistory History{};
 			std::optional<double> LastRenderSeconds{};
 		};
@@ -182,7 +191,7 @@ namespace Engine {
 		[[nodiscard]] Result<UUID> PickSpriteAt(const View& view, const EditorViewportClick& click) const;
 		// M21: the project's sorting layers (SortingLayers.Layers), empty without a project.
 		[[nodiscard]] std::vector<std::string> GetSortingLayers() const;
-		[[nodiscard]] Status RenderView(size_t index, RenderContext& context, bool sceneChanged);
+		[[nodiscard]] Status RenderView(size_t index, RenderContext& context, bool sceneChanged, ViewportCapture* capture);
 		[[nodiscard]] bool IsCursorLocked() const;
 	private:
 		EditorContext& m_Editor;

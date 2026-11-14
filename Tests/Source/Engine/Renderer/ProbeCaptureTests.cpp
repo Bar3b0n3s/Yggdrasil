@@ -28,8 +28,8 @@
 // colour-bleed oracles of an irradiance probe's SH9 projection, against the test support's double-precision reference
 // (Test::ProjectIrradianceSH9), the reflection probe's deterministic HDR image, and the GPU capture: a uniform background
 // captured as its radiance, each face looking along its cube direction (neither mirrored nor flipped), the scene's SSR left
-// out, and the capture's recovery from a device loss. The bake's byte-identical files are LightingBakeTests.cpp's, the shading's oracles stream
-// Q-B's.
+// out, and the capture's recovery from a device loss. The bake's byte-identical files are LightingBakeTests.cpp's, the
+// shading's oracles stream Q-B's.
 
 namespace Engine {
 

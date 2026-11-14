@@ -5,9 +5,13 @@
 #include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Asset/TerrainGeometry.h"
+#include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
+#include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TerrainColliderComponent.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -34,6 +38,21 @@ namespace Engine {
 			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 		}
 
+		// Whether `entity` holds a solid collider of the physics composition (Scene/PhysicsComposition.cpp's own colliders): a
+		// Box, Sphere, Capsule or Mesh collider that is not a trigger, or a TerrainCollider whose Terrain names a Heightfield.
+		static bool HasSolidCollider(ConstEntity entity)
+		{
+			const auto solid = [](const auto* collider)
+			{
+				return collider != nullptr && !collider->IsTrigger;
+			};
+			if (solid(entity.TryGetComponent<BoxColliderComponent>()) || solid(entity.TryGetComponent<SphereColliderComponent>())
+				|| solid(entity.TryGetComponent<CapsuleColliderComponent>()) || solid(entity.TryGetComponent<MeshColliderComponent>()))
+				return true;
+			const auto* terrain = entity.TryGetComponent<TerrainComponent>();
+			return entity.HasComponent<TerrainColliderComponent>() && terrain != nullptr && terrain->Heightfield.IsValid();
+		}
+
 		static uint32_t GetVisualRayLayer(ConstEntity entity, const PhysicsLayerTable& layers)
 		{
 			for (ConstEntity current = entity; current.IsValid(); current = current.GetParent())
@@ -43,10 +62,19 @@ namespace Engine {
 			if (const auto* character = entity.TryGetComponent<CharacterControllerComponent>())
 				return layers.FindLayer(character->Layer).value_or(0);
 			// M26 (Docs/Decisions/0037-m26-contract.md decision 21): without a RigidBody at or above it, a terrain's own
-			// TerrainCollider gives the implicit static body it holds its layer.
-			if (const auto* collider = entity.TryGetComponent<TerrainColliderComponent>(); collider != nullptr && entity.HasComponent<TerrainComponent>())
-				return layers.FindLayer(collider->Layer).value_or(0);
-			return 0;
+			// TerrainCollider gives its layer to the implicit static body the terrain's own entity owns, as physics composes it
+			// (Scene/PhysicsComposition.h): only when no ancestor carries the terrain's colliders (a CharacterController, under
+			// which they make nothing) or gathers them into its own implicit static body (a solid collider). Otherwise the
+			// terrain is on Default, as physics puts it (the milestone review).
+			const auto* collider = entity.TryGetComponent<TerrainColliderComponent>();
+			if (collider == nullptr || !entity.HasComponent<TerrainComponent>())
+				return 0;
+			for (ConstEntity ancestor = entity.GetParent(); ancestor.IsValid(); ancestor = ancestor.GetParent())
+			{
+				if (ancestor.HasComponent<CharacterControllerComponent>() || HasSolidCollider(ancestor))
+					return 0;
+			}
+			return layers.FindLayer(collider->Layer).value_or(0);
 		}
 
 		static bool IntersectsRayBounds(const Aabb& bounds, const glm::dmat4& transform, const glm::dvec3& origin, const glm::dvec3& direction, double minimum, double maximum)

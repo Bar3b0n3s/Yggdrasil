@@ -319,6 +319,28 @@ class ScreenshotRenderingTests(AutomationTestCase):
         client.call("scene.save")
         self.shut_down(client)
 
+    def test_editor_screenshots_of_a_temporal_scene_are_byte_identical(self) -> None:
+        # M26 (Docs/Decisions/0037-m26-contract.md decision 10; the milestone review): editor.screenshot's fresh UI
+        # frame is a capture, so the views it shows render the capture's warm-up from a reset history (TAA's jitter
+        # sequence once, auto-exposure converged at once) instead of their live history: two screenshots of an
+        # unchanged TAA and auto-exposure scene are byte-identical, whatever the live frames between them did.
+        if not self.require_gpu():
+            return
+        client, _ = self.open_editor_with_scene(renderer="vulkan")
+        client.call("edit.batch", {"label": "Temporal scene", "ops": [
+            {"method": "entity.create", "params": {"name": "Cube", "components": {
+                "Transform": {"EulerAngles": [20, 35, 0]}, "MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}}},
+            {"method": "entity.create", "params": {"name": "Sun", "components": {
+                "Transform": {"EulerAngles": [-50, 30, 0]}, "DirectionalLight": {"Intensity": 2}}}},
+            {"method": "entity.create", "params": {"name": "Post", "components": {
+                "PostProcess": {"AntiAliasing": "Taa", "ExposureMode": "Auto"}}}}]})
+        client.call("viewport.camera", {"position": [0, 1.5, 4], "target": [0, 0, 0]})
+        client.call("scene.save")
+        first = Path(client.call("editor.screenshot", {"maxDimension": 4096})["path"]).read_bytes()
+        second = Path(client.call("editor.screenshot", {"maxDimension": 4096})["path"]).read_bytes()
+        self.assertEqual(second, first)
+        self.shut_down(client)
+
 
 if __name__ == "__main__":
     unittest.main()

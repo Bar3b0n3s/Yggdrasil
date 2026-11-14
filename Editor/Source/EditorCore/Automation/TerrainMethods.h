@@ -15,9 +15,9 @@
 // 20 and 23): the editor's terrain tools as methods (Roadmap rule 5).
 //   - terrain.edit is the sculpt and paint tool's one action (EditorCore/Terrain/TerrainEditing.h's EditTerrain behind it;
 //     the scene view's terrain brush queues it with the stroke it collected), so a stroke through it is byte-identical to
-//     the same stroke made in the editor. It rewrites an asset source and records one undo step: Mutates, no dry run (a stroke's result is its files),
-//     not a batch op (it writes files directly); it addresses an open edit scene's entity, so it takes M20's scene target
-//     (the scene-target inventory's relation "the target scene's entity"). Stream T-E.
+//     the same stroke made in the editor. It rewrites an asset source and records one undo step: Mutates, no dry run (a
+//     stroke's result is its files), not a batch op (it writes files directly); it addresses an open edit scene's entity,
+//     so it takes M20's scene target (the scene-target inventory's relation "the target scene's entity"). Stream T-E.
 //   - terrain.importHeightmap converts a 16-bit PNG or RAW heightmap into a `.heightfield` source (ConvertHeightmap,
 //     AssetPipeline/Importers/HeightfieldImporter.h) and imports it: the terrain inspector's Import Heightmap action. It
 //     writes a project file: Mutates, no dry run, not a batch op; it addresses no scene (the inventory's relation "none").

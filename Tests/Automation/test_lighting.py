@@ -1,6 +1,7 @@
 """Baked lighting through automation (Docs/Decisions/0037-m26-contract.md decision 8; Roadmap M26's baked irradiance and
 reflection probes): lighting.bake, the editor's Bake Lighting action, writes each probe's data beside the saved scene,
-assigns it in one undoable edit, and two bakes write byte-identical files."""
+assigns it in one undoable edit, and two bakes write byte-identical files; a playing editor and an editor without a
+renderer are refused, the latter tested without a GPU."""
 
 from __future__ import annotations
 
@@ -69,6 +70,19 @@ class LightingBakeTests(AutomationTestCase):
         self.assert_engine_error(refused.exception, engine_client.INVALID_STATE, "InvalidState")
         self.assertFalse((root / "Assets" / "Lighting").exists())
         client.call("play.stop")
+        self.assertIsNone(probe_data(client, "/Volume", "IrradianceVolume"))
+
+    def test_an_editor_without_a_renderer_cannot_bake(self) -> None:
+        # Decision 8 (the milestone review): an editor without a renderer (--renderer none) has no probe capture, so a
+        # bake of probes within their ranges is refused with a hint, writes nothing and assigns nothing. No GPU is
+        # needed, so every run of the suite covers the method.
+        client, root = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Volume", "components": {"IrradianceVolume": {"Size": [4, 2, 4]}}})
+        client.call("scene.save")
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("lighting.bake")
+        self.assert_engine_error(refused.exception, engine_client.INVALID_STATE, "InvalidState")
+        self.assertFalse((root / "Assets" / "Lighting").exists())
         self.assertIsNone(probe_data(client, "/Volume", "IrradianceVolume"))
 
 

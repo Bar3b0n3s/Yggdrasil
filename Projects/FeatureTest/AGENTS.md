@@ -37,8 +37,10 @@ serves its skills and generated reference through automation (`docs.get {}` list
   `Graphs.replay` and M26's `TerrainReplays.jsonl` for `Terrain.replay`, each with its planned action input). M24's
   `Graphs.jsonl` builds its graph behaviours under `Assets/Scripts/Graphs/` through the `graph.*` methods alone. M26's
   `Probes.jsonl` and `GoldenProbes.jsonl` run in a rendering editor (`Renderer` `vulkan`), whose `lighting.bake` writes
-  their probes' bakes under `Assets/Lighting/`; its `PostProcessV2.jsonl` and `GoldenLut.jsonl` import a `.cube` LUT
-  into `Assets/Luts/`, and `Terrain.jsonl` converts a 16-bit heightmap with `terrain.importHeightmap` into
+  their probes' bakes under `Assets/Lighting/`: GPU renders read back, which `Scaffold.py --check` reproduces byte for
+  byte only on the device class and driver that baked them, so a driver change re-bakes them as one reviewed
+  regeneration (`Tests/Golden/README.md`'s rename procedure); its `PostProcessV2.jsonl` and `GoldenLut.jsonl` import a
+  `.cube` LUT into `Assets/Luts/`, and `Terrain.jsonl` converts a 16-bit heightmap with `terrain.importHeightmap` into
   `Assets/Heightfields/Terrain/` and sculpts and paints it with `terrain.edit`.
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte

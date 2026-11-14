@@ -16,9 +16,11 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/InMemoryAssetManager.h"
+#include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 
 #include <glm/gtc/quaternion.hpp>
@@ -485,6 +487,75 @@ namespace Engine {
 			CHECK_FALSE(RaycastScene(scene, assets, *layers, ray)->has_value());
 			ray.LayerMask = 4;
 			CHECK(RaycastScene(scene, assets, *layers, ray)->has_value());
+		}
+
+		// The milestone review (decision 21): a TerrainCollider's layer is the body's only when the terrain's own entity owns
+		// its implicit static body. Under a collider-only parent, whose implicit static body gathers the terrain's height field,
+		// physics puts the terrain on Default, and so does the visual ray; under a CharacterController, which makes no body of
+		// it, the visual ray takes Default, as for a mesh.
+		TEST_CASE("Raycast: a terrain gathered into a collider-only parent's body is on that body's layer, as Physics.Raycast finds it")
+		{
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			assets.Publish(QueryHeightfield, CreateRef<HeightfieldData>(MakeFlatHeightfield(5)));
+			Scene& scene = fixture.GetScene();
+			// The parent's box lies far below the terrain, so a ray from above meets the terrain first.
+			const Entity rocks = Test::AddBoxBody(scene, "Rocks", glm::vec3(0.0f, -20.0f, 0.0f), glm::vec3(0.5f), std::nullopt);
+			Entity terrain = scene.CreateEntityWithID(UUID(60), "Terrain", rocks);
+			terrain.AddComponent<TerrainComponent>(
+				TerrainComponent{ .Heightfield = TypedAssetHandle<AssetType::Heightfield>(QueryHeightfield), .Size = glm::vec2(8.0f), .HeightScale = 10.0f });
+			terrain.AddComponent<TerrainColliderComponent>().Layer = "Ground";
+			terrain.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 20.0f, 0.0f);
+			});
+			const std::vector<std::string> names{ "Default", "Ground" };
+			const std::vector<std::vector<std::string>> collisions{ { "Default", "Default" }, { "Default", "Ground" } };
+			const auto layers = PhysicsLayerTable::Create(names, collisions);
+			REQUIRE(layers);
+			PlaySessionSpecification specification = Test::MakePhysicsSessionSpecification(fixture);
+			specification.Assets = &assets;
+			specification.Project.Physics.Layers = names;
+			specification.Project.Physics.Collisions = collisions;
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, specification);
+			REQUIRE_MESSAGE(session.has_value(), (session ? std::string() : session.error().ToString()));
+			const glm::vec3 origin(4.0f, 30.0f, 4.0f);
+			const glm::vec3 down(0.0f, -1.0f, 0.0f);
+			for (const PhysicsLayerMask mask : { PhysicsLayerMask(1), PhysicsLayerMask(2) })
+			{
+				CAPTURE(mask);
+				const Result<std::optional<PhysicsRaycastHit>> physical = (*session)->GetPhysics().Raycast(origin, down, 100.0f, mask);
+				REQUIRE(physical.has_value());
+				const auto visual = RaycastScene((*session)->GetScene(), assets, *layers, { .Ray = { origin, down }, .MaxDistance = 100.0f, .LayerMask = mask });
+				REQUIRE(visual.has_value());
+				// Default (mask 1) hits the terrain, through the parent's body; Ground (mask 2) hits nothing.
+				CHECK(physical->has_value() == (mask == 1));
+				CHECK(visual->has_value() == physical->has_value());
+				if (physical->has_value() && visual->has_value())
+				{
+					CHECK((*physical)->Entity == terrain.GetUUID());
+					CHECK((*physical)->Body == rocks.GetUUID());
+					CHECK((*visual)->Entity == terrain.GetUUID());
+				}
+			}
+
+			// Under a CharacterController the terrain's colliders make nothing, and the drawn terrain is on Default.
+			Test::SceneTestFixture characterFixture;
+			Scene& characterScene = characterFixture.GetScene();
+			Entity walker = characterScene.CreateEntity("Walker");
+			walker.AddComponent<CharacterControllerComponent>().Layer = "Ground";
+			Entity carried = characterScene.CreateEntityWithID(UUID(61), "Terrain", walker);
+			carried.AddComponent<TerrainComponent>(
+				TerrainComponent{ .Heightfield = TypedAssetHandle<AssetType::Heightfield>(QueryHeightfield), .Size = glm::vec2(8.0f), .HeightScale = 10.0f });
+			carried.AddComponent<TerrainColliderComponent>().Layer = "Ground";
+			TransformSystem::Update(characterScene);
+			SceneRaycastRequest ray{ .Ray = { origin, down }, .MaxDistance = 100.0f, .LayerMask = 1 };
+			const auto onDefault = RaycastScene(characterScene, assets, *layers, ray);
+			REQUIRE(onDefault.has_value());
+			REQUIRE(onDefault->has_value());
+			CHECK((*onDefault)->Entity == carried.GetUUID());
+			ray.LayerMask = 2;
+			CHECK_FALSE(RaycastScene(characterScene, assets, *layers, ray)->has_value());
 		}
 	}
 

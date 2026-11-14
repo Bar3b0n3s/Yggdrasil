@@ -13,9 +13,12 @@
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/TemporalHistory.h"
+#include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
@@ -52,7 +55,7 @@ namespace Engine {
 		{
 		public:
 			HostGpuHarness(Test::HeadlessGpuFixture& gpu, EditorContext& editor)
-				: m_Device(gpu.GetDevice()), m_Cache(m_Device, editor.GetAssets()), m_Gizmos(editor), m_Host(editor, m_Gizmos)
+				: m_Device(gpu.GetDevice()), m_Editor(&editor), m_Cache(m_Device, editor.GetAssets()), m_Gizmos(editor), m_Host(editor, m_Gizmos)
 			{
 				ImGui::GetIO().IniFilename = nullptr;
 				ImGui::GetIO().DisplayFramebufferScale = ImVec2(1, 1);
@@ -70,6 +73,7 @@ namespace Engine {
 			~HostGpuHarness()
 			{
 				m_Device.WaitForIdle();
+				m_Capture.reset();
 				m_Command = nullptr;
 				m_Host.Retire();
 				m_Renderer->DestroyTextures();
@@ -78,14 +82,15 @@ namespace Engine {
 			HostGpuHarness& operator=(const HostGpuHarness&) = delete;
 
 			// One frame: records both views, submits them and notifies the host. Returns Render's status. `beforeSubmission`,
-			// when set, runs after the recording and before the submission.
-			Status Frame(uint64_t frame, std::optional<EditorViewportClick> click = {}, const std::function<void()>& beforeSubmission = {})
+			// when set, runs after the recording and before the submission. `capture`: the frame is a capture of the editor UI,
+			// as editor.screenshot's fresh frame is (EditorHostViewports::Render), through the harness's viewport capture.
+			Status Frame(uint64_t frame, std::optional<EditorViewportClick> click = {}, const std::function<void()>& beforeSubmission = {}, bool capture = false)
 			{
 				m_Device.WaitForIdle();
 				m_Renderer->BeginFrame(static_cast<uint32_t>(frame % 2));
 				m_Command->open();
 				RenderContext context{ .Device = &m_Device, .CommandList = m_Command, .FrameIndex = frame };
-				const Status rendered = m_Host.Render(context);
+				const Status rendered = m_Host.Render(context, capture ? &GetCapture() : nullptr);
 				if (click)
 					REQUIRE(m_Host.RequestPick(*click).has_value());
 				m_Command->close();
@@ -97,6 +102,17 @@ namespace Engine {
 			}
 
 			[[nodiscard]] EditorHostViewports& GetHost() { return m_Host; }
+			// The viewport capture over the views' pipelines and cache, as EditorApp's, created at its first use.
+			[[nodiscard]] ViewportCapture& GetCapture()
+			{
+				if (m_Capture == nullptr)
+				{
+					auto capture = ViewportCapture::CreateForScenes(m_Device, *m_Pipelines, m_Cache, m_Editor->GetAssets());
+					REQUIRE_MESSAGE(capture.has_value(), (capture ? std::string() : capture.error().ToString()));
+					m_Capture = std::move(*capture);
+				}
+				return *m_Capture;
+			}
 			// The views' shared pipeline set (a shader reload calls its CreatePipelines).
 			[[nodiscard]] SceneRendererPipelines& GetPipelines() { return *m_Pipelines; }
 			// The status of the last frame's Submitted notification.
@@ -110,10 +126,12 @@ namespace Engine {
 			// Declared in construction order; the host goes first at destruction, after the destructor retired it.
 			ImGuiScope m_Ui{};
 			GraphicsDevice& m_Device;
+			EditorContext* m_Editor = nullptr; // the test's, which outlives the harness
 			GpuResourceCache m_Cache;
 			Scope<SceneRendererPipelines> m_Pipelines{};
 			Scope<ImGuiRenderer> m_Renderer{};
 			nvrhi::CommandListHandle m_Command{};
+			Scope<ViewportCapture> m_Capture{}; // GetCapture's, released after the device idles
 			GizmoController m_Gizmos;
 			EditorHostViewports m_Host;
 			Status m_Submitted{};
@@ -585,6 +603,90 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 				CHECK(historyFrames(ViewportView::Scene) == 1);
 				REQUIRE(harness.Frame(frame++).has_value());
 				CHECK(historyFrames(ViewportView::Game) == 1);
+			}
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 10; the milestone review): a capture's frame, as editor.screenshot's
+		// fresh UI frame is, renders each displayed view as every capture renders: the capture's warm-up from a reset history at
+		// delta time 0 (ViewportCapture::RenderWarmup), the frame's own render its last. So two captures of an unchanged TAA and
+		// auto-exposure scene show byte-identical views, however many live frames (each a step of the jitter sequence and of
+		// the steady clock's adaptation) ran before each, and the live frames after a capture go on from its history.
+		TEST_CASE("EditorHostViewports: a capture's frame renders each view's warm-up from a reset history, so two captures of a TAA scene are byte-identical"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostCaptureWarmup");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			Entity mesh = scene.CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			mesh.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Rotation = glm::quat(glm::radians(glm::vec3(20.0f, 35.0f, 0.0f)));
+			});
+			scene.CreateEntity("Sun").AddComponent<DirectionalLightComponent>();
+			scene.CreateEntity("Post").AddComponent<PostProcessComponent>(PostProcessComponent{ .ExposureMode = ExposureMode::Auto, .AntiAliasing = AntiAliasing::Taa });
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 4.0f);
+			});
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				host.SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+				// Both views' final images, read back after their frame.
+				const auto images = [&gpu, &host]()
+				{
+					gpu.GetDevice().WaitForIdle();
+					Readback readback(gpu.GetDevice());
+					std::vector<std::byte> pixels;
+					for (const ViewportView view : { ViewportView::Scene, ViewportView::Game })
+					{
+						const SceneRenderer* renderer = host.GetRenderer(view);
+						REQUIRE(renderer != nullptr);
+						REQUIRE(renderer->GetFinalTexture() != nullptr);
+						const Result<Image> image = readback.ReadTexture(*renderer->GetFinalTexture());
+						REQUIRE_MESSAGE(image.has_value(), (image ? std::string() : image.error().ToString()));
+						pixels.insert(pixels.end(), image->Pixels.begin(), image->Pixels.end());
+					}
+					return pixels;
+				};
+				const auto historyFrames = [&host](ViewportView view) -> uint32_t
+				{
+					const SceneRenderer* renderer = host.GetRenderer(view);
+					REQUIRE(renderer != nullptr);
+					const RenderStats stats = renderer->GetRenderStats();
+					REQUIRE(stats.Available);
+					return stats.HistoryFrames;
+				};
+				uint64_t frame = 0;
+				for (int live = 0; live < 3; ++live)
+					REQUIRE(harness.Frame(frame++).has_value());
+				REQUIRE(harness.Frame(frame++, {}, {}, true).has_value());
+				const std::vector<std::byte> captured = images();
+				// The frame's render was the warm-up's last, the history's eighth from its reset.
+				CHECK(historyFrames(ViewportView::Scene) == CaptureWarmupFrames - 1);
+				CHECK(historyFrames(ViewportView::Game) == CaptureWarmupFrames - 1);
+				CHECK(host.GetImage(ViewportView::Scene).FrameIndex == frame - 1);
+				// The live frames go on from the capture's history.
+				REQUIRE(harness.Frame(frame++).has_value());
+				CHECK(historyFrames(ViewportView::Scene) == CaptureWarmupFrames);
+				CHECK(historyFrames(ViewportView::Game) == CaptureWarmupFrames);
+				for (int live = 0; live < 4; ++live)
+					REQUIRE(harness.Frame(frame++).has_value());
+				// Five live frames later, another phase of the jitter sequence: the next capture shows the same views.
+				REQUIRE(harness.Frame(frame++, {}, {}, true).has_value());
+				CHECK(historyFrames(ViewportView::Scene) == CaptureWarmupFrames - 1);
+				const bool identical = images() == captured;
+				CHECK(identical);
 			}
 		}
 

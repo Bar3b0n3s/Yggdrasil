@@ -140,23 +140,13 @@ namespace Engine {
 			// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 10, stream X-C): every capture renders from a reset view
 			// history, and a snapshot with temporal post-processing (NeedsTemporalWarmup: TAA or auto-exposure) renders
 			// CaptureWarmupFrames times with delta time 0, the jitter sequence once, keeping the last image; any other renders
-			// once. So two captures of one snapshot are byte-identical, whatever the capture rendered before.
+			// once. So two captures of one snapshot are byte-identical, whatever the capture rendered before. The warm-up is
+			// RenderWarmup's, which editor.screenshot's views render too (the milestone review); this is its last render.
 			RenderSnapshot captured = snapshot;
 			RenderViewHistory history;
-			const uint32_t renders = NeedsTemporalWarmup(snapshot) ? CaptureWarmupFrames : 1;
-			for (uint32_t render = 0; render < renders; ++render)
-			{
-				history.Apply(captured, 0.0f);
-				ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
-				captured.FrameIndex = ++m_FrameIndex;
-				// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
-				CommandListRecording recording(*m_Device, *m_CommandList);
-				const Status rendered = m_SceneRenderer->Render(*m_CommandList, captured);
-				const uint64_t submission = recording.Execute();
-				m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
-				// A debug view that stayed on another mode is OutOfMemory: never an image of another debug view (decision 44).
-				ENGINE_TRY(rendered);
-			}
+			ENGINE_TRY(RenderWarmup(*m_SceneRenderer, history, captured));
+			// A debug view that stayed on another mode is OutOfMemory: never an image of another debug view (decision 44).
+			ENGINE_TRY(RenderSubmitted(*m_SceneRenderer, captured));
 
 			// The view-resolution image: the upscaled scene image in its letterbox when the snapshot's output stage scales it.
 			ENGINE_TRY_ASSIGN(Image read, m_Readback->ReadTexture(*m_SceneRenderer->GetFinalTexture()));
@@ -170,6 +160,35 @@ namespace Engine {
 		});
 		ENGINE_TRY(captured);
 		return image;
+	}
+
+	Status ViewportCapture::RenderWarmup(SceneRenderer& renderer, RenderViewHistory& history, RenderSnapshot& snapshot)
+	{
+		history.Reset();
+		const uint32_t renders = NeedsTemporalWarmup(snapshot) ? CaptureWarmupFrames : 1;
+		Status first{};
+		for (uint32_t render = 1; render < renders; ++render)
+		{
+			history.Apply(snapshot, 0.0f);
+			const Status rendered = RenderSubmitted(renderer, snapshot);
+			if (!rendered && first)
+				first = rendered;
+		}
+		// The last render's inputs, which the caller renders.
+		history.Apply(snapshot, 0.0f);
+		return first;
+	}
+
+	Status ViewportCapture::RenderSubmitted(SceneRenderer& renderer, RenderSnapshot& snapshot)
+	{
+		ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
+		snapshot.FrameIndex = ++m_FrameIndex;
+		// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
+		CommandListRecording recording(*m_Device, *m_CommandList);
+		const Status rendered = renderer.Render(*m_CommandList, snapshot);
+		const uint64_t submission = recording.Execute();
+		renderer.OnSubmitted(snapshot.FrameIndex, submission);
+		return rendered;
 	}
 
 	RenderOutputMapping ViewportCapture::GetLastOutputMapping() const

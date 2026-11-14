@@ -16,8 +16,8 @@
 #include <utility>
 
 // The heightfield importer and the heightmap conversion (HeightfieldImporter.h; Docs/Decisions/0037-m26-contract.md decision
-// 20), stream T-A. The conversion reads a 16-bit PNG through the vendored stb_image's 16-bit path (whose PNG decoding the
-// DecodePng fuzz target covers) and a RAW by a size check and a copy.
+// 20), stream T-A. The conversion reads a 16-bit PNG through the vendored stb_image's 16-bit path and a RAW by a size check
+// and a copy; the HeightfieldData fuzz target mutates both (decision 24, as the milestone review widened it).
 
 namespace Engine {
 

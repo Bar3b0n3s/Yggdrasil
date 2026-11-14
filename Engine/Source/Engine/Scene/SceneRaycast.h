@@ -53,7 +53,9 @@ namespace Engine {
 	// terrain whose heightfield does not load as one, or whose Size or HeightScale is not positive and finite, draws
 	// nothing and is skipped. IEEE-exact double arithmetic with floor and sqrt only (Scene is a simulation-path module).
 	// Layer: nearest effectively enabled ancestor-or-self RigidBody.Layer, else own CharacterController.Layer, else (M26)
-	// own TerrainCollider.Layer on a Terrain's entity (the layer of the implicit static body it holds), else Default.
+	// own TerrainCollider.Layer on a Terrain's entity whose own implicit static body holds it, as physics composes it (no
+	// ancestor holds a CharacterController, or a solid collider whose body gathers the terrain; Scene/PhysicsComposition.h),
+	// else Default.
 	// Unknown names use Default as physics does. Parent accepted this visual mask policy in ADR0017;
 	// it adds no render-layer field and requires no physics world.
 	// InvalidArgument for nonfinite/zero direction, nonfinite origin, invalid distance interval or Alpha.

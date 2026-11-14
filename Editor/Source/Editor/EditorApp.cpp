@@ -1380,8 +1380,10 @@ namespace Engine {
 		if (!m_Rendering)
 			return;
 		CollectStaleMirrors();
-		// The frame's edit scene was published at its safe point; nothing between it and this GPU work commits edits.
-		const Status rendered = m_State->Views->Render(context);
+		// The frame's edit scene was published at its safe point; nothing between it and this GPU work commits edits. M26
+		// (Docs/Decisions/0037-m26-contract.md decision 10; the milestone review): the fresh UI frame editor.screenshot asks for
+		// (RequestFreshUiFrame) is a capture of the editor UI, so its views render the capture's warm-up from a reset history.
+		const Status rendered = m_State->Views->Render(context, m_State->FreshUiRequested ? m_Rendering->Capture.get() : nullptr);
 		m_Rendering->Mirrors.NoteRendered();
 		// On a device lost during the render, the failure is the loss, which the frame boundary recovers (decision 28).
 		if (context.Device->IsLost())
