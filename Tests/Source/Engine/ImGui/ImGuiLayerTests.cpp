@@ -298,6 +298,44 @@ namespace Engine {
 			CHECK(second.error().GetCode() == ErrorCode::InvalidState);
 		}
 
+		// M24 (Docs/Decisions/0035-m24-contract.md decisions 17 and 18; W24.1's review): asked for platform windows on GLFW's
+		// null platform (this headless process, as every headless editor), the layer keeps ImGuiConfigFlags_ViewportsEnable
+		// cleared, creates no platform windows, says why (Unsupported) and renders none; not asked, it says so (InvalidState).
+		TEST_CASE("ImGuiLayer: a headless process asked for platform windows keeps every panel docked, says why and renders none"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			Result<Scope<EngineContext>> created = CreateRenderingContext();
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			EngineContext& context = **created;
+			{
+				ImGuiLayerSpecification specification;
+				specification.PlatformWindows = true;
+				Result<Scope<ImGuiLayer>> layer = ImGuiLayer::Create(*context.GetWindow(), *context.GetGraphicsDevice(), *context.GetPipelineFactory(), specification);
+				REQUIRE_MESSAGE(layer.has_value(), layer.error().ToString());
+				const Status support = (*layer)->GetPlatformWindowSupport();
+				REQUIRE_FALSE(support.has_value());
+				CHECK(support.error().GetCode() == ErrorCode::Unsupported);
+				CHECK((*layer)->GetPlatformWindows() == nullptr);
+				CHECK((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0);
+				CHECK((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DockingEnable) != 0);
+				const Status rendered = (*layer)->RenderPlatformWindows(0);
+				CHECK_MESSAGE(rendered.has_value(), (rendered.has_value() ? std::string() : rendered.error().ToString()));
+			}
+			{
+				Result<Scope<ImGuiLayer>> layer = ImGuiLayer::Create(*context.GetWindow(), *context.GetGraphicsDevice(), *context.GetPipelineFactory(), {});
+				REQUIRE_MESSAGE(layer.has_value(), layer.error().ToString());
+				const Status support = (*layer)->GetPlatformWindowSupport();
+				REQUIRE_FALSE(support.has_value());
+				CHECK(support.error().GetCode() == ErrorCode::InvalidState);
+				CHECK((*layer)->GetPlatformWindows() == nullptr);
+				CHECK((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0);
+			}
+			context.GetGraphicsDevice()->WaitForIdle();
+			CHECK(context.GetGraphicsDevice()->GetDiagnostics().GetErrorCount() == 0);
+		}
+
 		TEST_CASE("ImGuiLayer: imgui.ini is written under user:// before a project opens"
 			* doctest::test_suite(Test::GpuSuite))
 		{

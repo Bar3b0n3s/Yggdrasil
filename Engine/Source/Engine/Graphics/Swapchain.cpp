@@ -131,6 +131,18 @@ namespace Engine {
 			return result == VK_ERROR_OUT_OF_HOST_MEMORY || result == VK_ERROR_OUT_OF_DEVICE_MEMORY;
 		}
 
+		// A headless device has no swapchain entry points: an error, never a call through a null pointer.
+		[[nodiscard]] static Status CheckSwapchainEntryPoints()
+		{
+			if (VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateSwapchainKHR == nullptr
+				|| VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceSurfaceCapabilitiesKHR == nullptr)
+			{
+				return MakeError(ErrorCode::InvalidState,
+					"cannot create a swapchain: the device was created without presentation support (GraphicsDeviceSpecification::PresentWindow)");
+			}
+			return {};
+		}
+
 	}
 
 	SwapchainAction ClassifyAcquireResult(VkResult result)
@@ -186,44 +198,54 @@ namespace Engine {
 		DestroySurface();
 	}
 
+	Result<Scope<Swapchain>> Swapchain::CreateForNativeWindow(GraphicsDevice& device, void* nativeWindow, const SwapchainSpecification& specification)
+	{
+		ENGINE_CORE_VERIFY(specification.FramesInFlight >= 1, "Swapchain needs at least one frame in flight");
+		if (nativeWindow == nullptr)
+			return MakeError(ErrorCode::InvalidArgument, "a native window's swapchain needs the window: the GLFW window is null");
+		ENGINE_TRY(Utils::CheckSwapchainEntryPoints());
+
+		// M24 (decision 19): a native window's swapchain is created after startup (a Dear ImGui platform window appears when a
+		// panel is undocked), so its creation is a request (M18's rule, ADR 0029 decisions 42 and 44): an out-of-memory
+		// creation is trimmed for and retried once, with the classification AcquireNextImage's recreation passes (only what the
+		// attempt recorded as out-of-memory is), and a second one returns OutOfMemory. Each attempt creates its swapchain
+		// aside, and a failed one destroys what it made before the next.
+		Scope<Swapchain> created;
+		bool isOutOfMemory = false;
+		const Status attempted = RetryAfterTrim(device, "a platform window's swapchain",
+			[&created, &isOutOfMemory, &device, nativeWindow, &specification]() -> Status
+		{
+			Scope<Swapchain> swapchain = CreateScope<Swapchain>(ConstructionKey());
+			swapchain->m_Device = &device;
+			swapchain->m_NativeWindow = nativeWindow;
+			swapchain->m_Specification = specification;
+			const Status initialized = swapchain->Initialize();
+			isOutOfMemory = swapchain->m_IsCreationOutOfMemory;
+			ENGINE_TRY(initialized);
+			created = std::move(swapchain);
+			return {};
+		},
+			[&isOutOfMemory](const Error& /*error*/)
+		{
+			return isOutOfMemory;
+		});
+		ENGINE_TRY(attempted);
+		created->LogCreated();
+		return created;
+	}
+
 	Result<Scope<Swapchain>> Swapchain::Create(GraphicsDevice& device, Window& window, const SwapchainSpecification& specification)
 	{
 		ENGINE_CORE_VERIFY(specification.FramesInFlight >= 1, "Swapchain needs at least one frame in flight");
-		// A headless device has no swapchain entry points: an error, never a call through a null pointer.
-		if (VULKAN_HPP_DEFAULT_DISPATCHER.vkCreateSwapchainKHR == nullptr
-			|| VULKAN_HPP_DEFAULT_DISPATCHER.vkGetPhysicalDeviceSurfaceCapabilitiesKHR == nullptr)
-		{
-			return MakeError(ErrorCode::InvalidState,
-				"cannot create a swapchain: the device was created without presentation support (GraphicsDeviceSpecification::PresentWindow)");
-		}
+		ENGINE_TRY(Utils::CheckSwapchainEntryPoints());
 
 		Scope<Swapchain> swapchain = CreateScope<Swapchain>(ConstructionKey());
 		swapchain->m_Device = &device;
 		swapchain->m_Window = &window;
+		swapchain->m_NativeWindow = window.GetNativeHandle();
 		swapchain->m_Specification = specification;
-
-		const VkDevice vulkanDevice = device.GetVulkanDevice();
-		for (uint32_t slot = 0; slot < specification.FramesInFlight; ++slot)
-		{
-			ENGINE_TRY_ASSIGN(const VkSemaphore semaphore,
-				WithContext(Utils::CreateBinarySemaphore(vulkanDevice), "while creating the swapchain's acquire semaphores"));
-			swapchain->m_AcquireSemaphores.push_back(semaphore);
-		}
-
-		ENGINE_TRY(swapchain->CreateSurface());
-		if (!window.IsMinimized() && window.GetFramebufferWidth() > 0 && window.GetFramebufferHeight() > 0)
-			ENGINE_TRY(swapchain->CreateSwapchain(window.GetFramebufferWidth(), window.GetFramebufferHeight()));
-
-		if (swapchain->m_Swapchain != VK_NULL_HANDLE)
-		{
-			ENGINE_CORE_INFO("Swapchain created: {}x{} {}, {} present mode, {} images", swapchain->m_Width, swapchain->m_Height,
-				swapchain->m_Format == nvrhi::Format::BGRA8_UNORM ? "B8G8R8A8_UNORM" : "R8G8B8A8_UNORM",
-				Utils::PresentModeToString(swapchain->m_PresentMode), swapchain->m_Images.size());
-		}
-		else
-		{
-			ENGINE_CORE_INFO("Swapchain: the window is minimized; its images are created when it is restored");
-		}
+		ENGINE_TRY(swapchain->Initialize());
+		swapchain->LogCreated();
 		return swapchain;
 	}
 
@@ -241,9 +263,10 @@ namespace Engine {
 
 		// Minimized (iconified, or a framebuffer with a zero dimension): nothing to render or present (§4.2). The images
 		// are released while the window stays minimized and created again at the restored size.
-		const uint32_t width = m_Window->GetFramebufferWidth();
-		const uint32_t height = m_Window->GetFramebufferHeight();
-		if (m_Window->IsMinimized() || width == 0 || height == 0)
+		const WindowState window = ReadWindowState();
+		const uint32_t width = window.FramebufferWidth;
+		const uint32_t height = window.FramebufferHeight;
+		if (window.IsMinimized || width == 0 || height == 0)
 		{
 			// A minimized window forgets the size whose recreation ran out of memory, so restoring it retries (decision 44).
 			m_FailedWidth = 0;
@@ -517,11 +540,68 @@ namespace Engine {
 		return m_RecreationCount;
 	}
 
+	Status Swapchain::Initialize()
+	{
+		const VkDevice vulkanDevice = m_Device->GetVulkanDevice();
+		for (uint32_t slot = 0; slot < m_Specification.FramesInFlight; ++slot)
+		{
+			// vkCreateSemaphore fails only out of memory (decision 42), unless the device is lost.
+			Result<VkSemaphore> semaphore = Utils::CreateBinarySemaphore(vulkanDevice);
+			if (!semaphore.has_value())
+			{
+				m_IsCreationOutOfMemory = !m_Device->IsLost();
+				return std::unexpected(std::move(semaphore).error().WithContext("while creating the swapchain's acquire semaphores"));
+			}
+			m_AcquireSemaphores.push_back(*semaphore);
+		}
+
+		ENGINE_TRY(CreateSurface());
+		const WindowState window = ReadWindowState();
+		if (!window.IsMinimized && window.FramebufferWidth > 0 && window.FramebufferHeight > 0)
+			ENGINE_TRY(CreateSwapchain(window.FramebufferWidth, window.FramebufferHeight));
+		return {};
+	}
+
+	Swapchain::WindowState Swapchain::ReadWindowState() const
+	{
+		if (m_Window != nullptr)
+		{
+			return {
+				.FramebufferWidth = m_Window->GetFramebufferWidth(),
+				.FramebufferHeight = m_Window->GetFramebufferHeight(),
+				.IsMinimized = m_Window->IsMinimized(),
+			};
+		}
+		// A native window (CreateForNativeWindow): GLFW's own state, as Window keeps it for its window.
+		GLFWwindow* window = static_cast<GLFWwindow*>(m_NativeWindow);
+		int width = 0;
+		int height = 0;
+		glfwGetFramebufferSize(window, &width, &height);
+		return {
+			.FramebufferWidth = static_cast<uint32_t>(std::max(width, 0)),
+			.FramebufferHeight = static_cast<uint32_t>(std::max(height, 0)),
+			.IsMinimized = glfwGetWindowAttrib(window, GLFW_ICONIFIED) != GLFW_FALSE,
+		};
+	}
+
+	void Swapchain::LogCreated() const
+	{
+		if (m_Swapchain != VK_NULL_HANDLE)
+		{
+			ENGINE_CORE_INFO("Swapchain created: {}x{} {}, {} present mode, {} images", m_Width, m_Height,
+				m_Format == nvrhi::Format::BGRA8_UNORM ? "B8G8R8A8_UNORM" : "R8G8B8A8_UNORM", Utils::PresentModeToString(m_PresentMode), m_Images.size());
+		}
+		else
+		{
+			ENGINE_CORE_INFO("Swapchain: the window is minimized; its images are created when it is restored");
+		}
+	}
+
 	Status Swapchain::CreateSurface()
 	{
 		ENGINE_CORE_ASSERT(m_Surface == VK_NULL_HANDLE, "Swapchain::CreateSurface with a surface");
 		VkSurfaceKHR surface = VK_NULL_HANDLE;
-		VkResult result = glfwCreateWindowSurface(m_Device->GetVulkanInstance(), static_cast<GLFWwindow*>(m_Window->GetNativeHandle()), nullptr, &surface);
+		VkResult result = glfwCreateWindowSurface(m_Device->GetVulkanInstance(), static_cast<GLFWwindow*>(m_NativeWindow), nullptr, &surface);
 		if (result != VK_SUCCESS)
 			return std::unexpected(Utils::MakeSwapchainCallError(*m_Device, result, "glfwCreateWindowSurface"));
 		m_Surface = surface;

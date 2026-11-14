@@ -22,6 +22,7 @@ namespace Engine {
 			{ .Importer = "Font", .Extension = ".ttf", .MainType = AssetType::Font, .Importable = true },
 			{ .Importer = "Gltf", .Extension = ".glb", .MainType = AssetType::Prefab, .Importable = true },
 			{ .Importer = "Gltf", .Extension = ".gltf", .MainType = AssetType::Prefab, .Importable = true },
+			{ .Importer = "Graph", .Extension = ".graph", .MainType = AssetType::Script, .Importable = true },
 			{ .Importer = "Heightfield", .Extension = ".heightfield", .MainType = AssetType::Heightfield, .Importable = true },
 			{ .Importer = "IrradianceVolume", .Extension = ".irradiance", .MainType = AssetType::IrradianceVolume, .Importable = true },
 			{ .Importer = "Lut", .Extension = ".cube", .MainType = AssetType::Lut, .Importable = true },

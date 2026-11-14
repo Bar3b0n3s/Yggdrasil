@@ -25,7 +25,8 @@ namespace Engine {
 	// (Docs/Decisions/0031-m20-contract.md decision 14), M21's physics2d.raycast, physics2d.overlap and physics2d.bodyInfo
 	// (Docs/Decisions/0032-m21-contract.md decisions 15 and 27) and tilemap.paint (decision 26), M22's ui.tree
 	// (Docs/Decisions/0033-m22-contract.md decision 8) and ui.createWidget (decision 32), M23's animation.preview
-	// (Docs/Decisions/0034-m23-contract.md decision 32), and M26's lighting.bake, terrain.edit and terrain.importHeightmap
+	// (Docs/Decisions/0034-m23-contract.md decision 32), M24's ten graph edit and read methods (Docs/Decisions/0035-m24-contract.md
+	// decision 12) and graph.liveValues (decision 14), and M26's lighting.bake, terrain.edit and terrain.importHeightmap
 	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
@@ -33,7 +34,9 @@ namespace Engine {
 			"asset.import", "asset.info", "asset.list", "asset.move", "asset.reimport", "asset.setImportSettings", "asset.setProperties",
 			"audio.stats", "component.list", "component.schema", "docs.get", "edit.batch", "edit.getSelection", "edit.history", "edit.redo", "edit.select",
 			"edit.undo", "editor.screenshot", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-			"entity.reparent", "entity.update", "events.read", "input.inject", "input.readReplay", "input.record", "input.replay", "lighting.bake", "log.read",
+			"entity.reparent", "entity.update", "events.read", "graph.addNode", "graph.connect", "graph.create", "graph.disconnect", "graph.liveValues",
+			"graph.moveNodes", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "input.inject", "input.readReplay",
+			"input.record", "input.replay", "lighting.bake", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
 			"physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
 			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
@@ -119,8 +122,10 @@ namespace Engine {
 				"session.info", "session.shutdown" };
 			const std::vector<std::string> tools = { "animation.preview", "asset.create", "asset.delete", "asset.getProperties", "asset.import", "asset.list", "asset.move",
 				"asset.setProperties", "component.list", "component.schema", "docs.get", "edit.batch", "edit.redo", "edit.undo", "editor.screenshot",
-				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "input.inject",
-				"input.readReplay", "input.record", "input.replay", "lighting.bake", "log.read", "native.build", "native.getComponents", "native.load", "native.read",
+				"entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get", "entity.reparent", "entity.update", "graph.addNode",
+				"graph.connect", "graph.create", "graph.disconnect", "graph.liveValues", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers",
+				"graph.setValues", "input.inject", "input.readReplay", "input.record", "input.replay", "lighting.bake", "log.read", "native.build",
+				"native.getComponents", "native.load", "native.read",
 				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
 				"scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
@@ -131,7 +136,9 @@ namespace Engine {
 			const std::vector<std::string> batchable = { "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
 				"asset.info", "asset.list", "asset.move", "asset.setImportSettings", "asset.setProperties", "audio.stats", "component.list", "component.schema",
 				"docs.get", "edit.getSelection", "edit.history", "editor.state", "entity.bounds", "entity.create", "entity.destroy", "entity.duplicate", "entity.get",
-				"entity.reparent", "entity.update", "events.read", "log.read", "native.getComponents", "native.read", "native.setComponents", "native.status",
+				"entity.reparent", "entity.update", "events.read", "graph.addNode", "graph.connect", "graph.create", "graph.disconnect", "graph.liveValues",
+				"graph.moveNodes", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "log.read", "native.getComponents", "native.read",
+				"native.setComponents", "native.status",
 				"native.write", "physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
@@ -291,10 +298,12 @@ namespace Engine {
 			// M16's project_upgrade (friction S3-09), M17's asset_get_properties (friction F11), M19's input_read_replay
 			// (ADR 0030 decision 14) and seven native tools (decision 32), M20's scene_list, scene_activate and scene_close
 			// (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
-			// decision 26), M22's ui_tree (Docs/Decisions/0033-m22-contract.md decision 8) and ui_create_widget (decision 32),
-			// M23's animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), and M26's lighting_bake, terrain_edit and
-			// terrain_import_heightmap (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23).
-			CHECK(catalog["Tools"].size() == 72);
+			// decision 26), M22's ui_tree (Docs/Decisions/0033-m22-contract.md decision 8) and ui_create_widget (decision 32), M23's
+			// animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), M24's ten graph tools: the nine graph edit and read
+			// tools, every one but graph.moveNodes (Docs/Decisions/0035-m24-contract.md decision 12), and graph_live_values (decision
+			// 14), and M26's lighting_bake, terrain_edit and terrain_import_heightmap (Docs/Decisions/0037-m26-contract.md decisions 8,
+			// 20 and 23).
+			CHECK(catalog["Tools"].size() == 82);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

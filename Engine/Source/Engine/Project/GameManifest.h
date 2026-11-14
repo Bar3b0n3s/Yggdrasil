@@ -34,7 +34,7 @@
 //
 // Version 2 (M19, Docs/Decisions/0030-m19-contract.md decision 18, B-BVER; GameManifestBuildVersion, reserved by the
 // phase 1 ledger) adds "Build" after "EngineVersion": the exporting build's id as FormatBuildId writes it
-// ("0.3.0+3f2a9c1d4e5b.dirty", Core/BuildId.h), which ParseBuildId must read back and whose version must equal
+// ("0.4.0+3f2a9c1d4e5b.dirty", Core/BuildId.h), which ParseBuildId must read back and whose version must equal
 // EngineVersion. The readers accept versions 1 and 2: a version 1 manifest has no Build (one is an unknown key there) and
 // reads with an empty Build; SaveToString always writes version 2 and needs a valid Build.
 

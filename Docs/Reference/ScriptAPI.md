@@ -5748,7 +5748,7 @@ What asset.create makes.
 
 - `Scene`: A .scene file: an empty scene named after the file.
 
-- `Prefab`: A .prefab file with one root entity named after the file.
+- `Prefab`: A .prefab file with one empty root entity named after the file; it takes no values (prefab.create saves an entity built in a scene, its components and children, as a prefab).
 
 - `SoundEffect`: A .sfx sound effect: synthesized layers of oscillators, imported as an AudioClip.
 
@@ -6101,6 +6101,86 @@ Gamepad button positions.
 - `DPadDown`: The DPadDown input value.
 
 - `DPadLeft`: The DPadLeft input value.
+
+## GraphNodeCategory
+
+Where the graph editor's node menu lists a node kind.
+
+- `Event`: A behaviour callback: where a flow starts (Event.*).
+
+- `Flow`: Branches, sequences, loops and delays (Flow.*).
+
+- `Member`: The behaviour's own entity, fields and variables (Self.*).
+
+- `Operator`: Arithmetic, comparison, logic, vector and text operators.
+
+- `Call`: A script API function, method or constructor (Call.*).
+
+- `Property`: A script API property or component field (Get.*, Set.*).
+
+- `Constant`: A script API constant (Const.*).
+
+## GraphPinDirection
+
+Whether a graph pin takes or gives its value.
+
+- `Input`: The pin takes a value (or, for Exec, is where the flow enters).
+
+- `Output`: The pin gives a value (or, for Exec, is where the flow continues).
+
+## GraphPinType
+
+What a graph pin carries.
+
+- `Exec`: Control flow, no value.
+
+- `Any`: Any value (Luau's any): links to every data pin.
+
+- `Bool`: A boolean.
+
+- `Number`: A number.
+
+- `String`: A string.
+
+- `Vector`: A native three-component vector.
+
+- `Color`: A linear RGBA Color.
+
+- `Quat`: A quaternion.
+
+- `Entity`: An Entity.
+
+- `Asset`: An AssetRef; typeName names its AssetType when the member restricts it.
+
+- `Enum`: One choice of a registered enum, a string; typeName names the enum.
+
+- `Object`: A value of another named type (a component, a TaskHandle, a record such as CollisionContact); typeName names it.
+
+## GraphValueKind
+
+The kind of a graph field or variable: its Luau Field constructor.
+
+- `Number`: A finite f32 number (Field.Number); Default a number.
+
+- `Integer`: An exact signed 32-bit integer (Field.Integer); Default an integer.
+
+- `Bool`: A boolean (Field.Bool); Default true or false.
+
+- `String`: A string (Field.String); Default a string.
+
+- `Vector`: A native three-component vector (Field.Vector); Default [x, y, z].
+
+- `Color`: A linear RGBA colour (Field.Color); Default [r, g, b, a].
+
+- `Quat`: A quaternion (Field.Quat); Default [x, y, z, w], nonzero, and of unit length for a field.
+
+- `Entity`: An Entity (Field.Entity); Default null.
+
+- `Asset`: An asset reference of one AssetType (Field.Asset); Default null.
+
+- `Enum`: One of EnumValues (Field.Enum); Default one of them.
+
+- `Array`: An array of Element values (Field.Array); Default [].
 
 ## InputActionType
 

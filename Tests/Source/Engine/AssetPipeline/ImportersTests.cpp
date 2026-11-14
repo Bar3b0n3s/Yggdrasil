@@ -3,6 +3,7 @@
 #include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/IrradianceVolumeData.h"
 #include "Engine/Asset/ReplayData.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
@@ -82,7 +83,7 @@ namespace Engine {
 			Result<Scope<NativeDirectoryMount>> resources = NativeDirectoryMount::Create(Test::GetRepositoryRoot() / "Resources", MountAccess::ReadOnly);
 			REQUIRE(resources.has_value());
 			REQUIRE(vfs.Mount("engine", std::move(*resources)).has_value());
-			// Extend the read-only fixture corpus in memory with script and replay sources. The replay's lookup uses the
+			// Extend the read-only fixture corpus in memory with script, replay and graph sources. The replay's lookup uses the
 			// same stable source-path handles as ImportOnce, and exercises compiled expectations as well as the container.
 			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.luau"),
 						   AsBytes("return Script.Define('Deterministic', { Fields = { Speed = Field.Number(2) } })"))
@@ -96,6 +97,16 @@ namespace Engine {
 			const auto replayText = ReplayToText(replay);
 			REQUIRE(replayText.has_value());
 			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.replay"), AsBytes(*replayText)).has_value());
+			// M24 (Docs/Decisions/0035-m24-contract.md decision 9): a graph, whose import transpiles and compiles it, with a field.
+			GraphDocument graph;
+			graph.Name = "Deterministic";
+			graph.Fields = { GraphField{ .Name = "Speed", .Kind = GraphValueKind::Number, .Default = VariantValue(Json(2)) } };
+			graph.Nodes = { GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Call.Log.Info", .Position = glm::vec2(240.0f, 0.0f), .Values = { { "Values", VariantValue(Json("Started")) } } } };
+			graph.Links = { GraphLink{ .From = { .Node = 1, .Pin = "Then" }, .To = { .Node = 2, .Pin = "In" } } };
+			const Result<std::string> graphText = GraphToText(graph, fixture.GetRegistry());
+			REQUIRE_MESSAGE(graphText.has_value(), graphText.error().ToString());
+			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.graph"), AsBytes(*graphText)).has_value());
 			// M26 (Docs/Decisions/0037-m26-contract.md decisions 8 and 20): the binary sources lighting.bake and the terrain
 			// methods write, which have no file fixture (FormatFixturesTests' native importers): a 5 x 5 heightfield whose
 			// samples all differ and a 2 x 2 x 2 irradiance volume whose coefficients all differ.

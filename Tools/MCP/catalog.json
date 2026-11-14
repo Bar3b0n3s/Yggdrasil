@@ -53,7 +53,7 @@
 		{
 			"name": "asset_create",
 			"method": "asset.create",
-			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab, a flat heightfield or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a prefab of one empty root entity (no values: prefab.create saves a built entity as a prefab), a flat heightfield (no values: terrain.importHeightmap converts a heightmap into one and terrain.edit sculpts it) or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetCreateParams",
@@ -69,7 +69,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed). A Scene, a Prefab, a Heightfield and a Folder take no values and refuse them: a prefab is created with one empty root entity, and prefab.create saves an entity built in a scene, its components and children, as a prefab; a heightfield is created flat, and terrain.importHeightmap converts a heightmap into one and terrain.edit sculpts it."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -902,6 +902,559 @@
 				},
 				"additionalProperties": false,
 				"required": ["entity"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_add_node",
+			"method": "graph.addNode",
+			"description": "Adds a node of a kind to a graph, with literals for its inputs, as one undoable edit; returns its id.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphAddNodeParams",
+				"description": "The params of graph.addNode.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"kind": {
+						"description": "The node's kind (graph.nodes lists them).",
+						"type": "string"
+					},
+					"position": {
+						"description": "The node's place on the canvas; absent: right of the rightmost node.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"values": {
+						"description": "Literals of the node's inputs, by pin name.",
+						"type": "object",
+						"additionalProperties": {}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "kind"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_connect",
+			"method": "graph.connect",
+			"description": "Links an output pin to a compatible input pin of a graph as one undoable edit; a data input or exec output already linked loses its old link.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphConnectParams",
+				"description": "The params of graph.connect.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"from": {
+						"description": "An output pin: {Node, Pin}.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"to": {
+						"description": "An input pin: {Node, Pin}.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "from", "to"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_create",
+			"method": "graph.create",
+			"description": "Creates an empty visual-scripting graph, a behaviour transpiled to Luau at import, as one undoable edit.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphCreateParams",
+				"description": "The params of graph.create.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "The new graph's \"Assets/....graph\" path.",
+						"type": "string"
+					},
+					"name": {
+						"description": "The behaviour's name (a Luau identifier); empty takes the file's stem.",
+						"type": "string"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_disconnect",
+			"method": "graph.disconnect",
+			"description": "Removes a link of a graph as one undoable edit.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphDisconnectParams",
+				"description": "The params of graph.disconnect.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"from": {
+						"description": "The link's output pin.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"to": {
+						"description": "The link's input pin.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "from", "to"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_live_values",
+			"method": "graph.liveValues",
+			"description": "Reads, during play (a test run's included) and without changing the session, a graph behaviour's last node values, its fields and variables and the script errors its code raised, mapped to nodes.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphLiveValuesParams",
+				"description": "The params of graph.liveValues.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"script": {
+						"description": "The slot's behaviour name, matched against the graph's current Name (of two such slots, the first); empty: the entity's first slot holding a graph.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_nodes",
+			"method": "graph.nodes",
+			"description": "Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own Self.Get and Self.Set kinds.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphNodesParams",
+				"description": "The params of graph.nodes.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "A graph whose Self.Get and Self.Set kinds to add; empty for none.",
+						"type": "string"
+					},
+					"prefix": {
+						"description": "Only the kinds that start with it (\"Call.Input.\", \"Flow.\").",
+						"type": "string"
+					},
+					"kinds": {
+						"description": "Only these kinds.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_read",
+			"method": "graph.read",
+			"description": "Reads a graph's document and its findings mapped to nodes, and optionally its transpiled Luau with each line's node.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphReadParams",
+				"description": "The params of graph.read.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph: its id, its \"Assets/...\" path or another asset reference.",
+						"type": "string"
+					},
+					"luau": {
+						"description": "Also return the transpiled Luau text and its line map.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_remove_nodes",
+			"method": "graph.removeNodes",
+			"description": "Removes nodes and their links from a graph as one undoable edit.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphRemoveNodesParams",
+				"description": "The params of graph.removeNodes.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"nodes": {
+						"description": "The ids of the nodes to remove.",
+						"type": "array",
+						"items": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "nodes"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_set_members",
+			"method": "graph.setMembers",
+			"description": "Renames the behaviour and renames, removes, adds or replaces its fields and variables as one undoable edit.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphSetMembersParams",
+				"description": "The params of graph.setMembers.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"name": {
+						"description": "The behaviour's new name; empty keeps it.",
+						"type": "string"
+					},
+					"rename": {
+						"description": "Fields and variables to rename, with their Self nodes.",
+						"type": "array",
+						"items": {
+							"description": "One field or variable to rename.",
+							"type": "object",
+							"properties": {
+								"from": {
+									"description": "Its name.",
+									"type": "string"
+								},
+								"to": {
+									"description": "Its new name.",
+									"type": "string"
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"remove": {
+						"description": "Fields and variables to remove; refused while a node uses one.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"fields": {
+						"description": "Fields to add or replace, by name.",
+						"type": "array",
+						"items": {
+							"description": "A behaviour field, set per script slot (§6.11).",
+							"type": "object",
+							"properties": {
+								"Name": {
+									"description": "A Luau identifier, unique across fields and variables (§6.11).",
+									"type": "string"
+								},
+								"Kind": {
+									"description": "Its Luau Field constructor.",
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+								},
+								"Default": {
+									"description": "Its default, in its Kind's JSON spelling (§6.11)."
+								},
+								"Element": {
+									"description": "An Array's element kind; Number otherwise.",
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+								},
+								"AssetType": {
+									"description": "An Asset's AssetType; empty otherwise.",
+									"type": "string"
+								},
+								"EnumValues": {
+									"description": "An Enum's choices; empty otherwise.",
+									"type": "array",
+									"items": {
+										"type": "string"
+									}
+								},
+								"Options": {
+									"description": "Its Luau FieldOptions: Min, Max, Step, Tooltip (§6.11).",
+									"type": "object",
+									"additionalProperties": {}
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"variables": {
+						"description": "Variables to add or replace, by name.",
+						"type": "array",
+						"items": {
+							"description": "Instance state, set to its Default at OnCreate (§6.11).",
+							"type": "object",
+							"properties": {
+								"Name": {
+									"description": "A Luau identifier, unique across fields and variables (§6.11).",
+									"type": "string"
+								},
+								"Kind": {
+									"description": "Its kind, as a field's.",
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+								},
+								"Default": {
+									"description": "Its default, in its Kind's JSON spelling (§6.11)."
+								},
+								"Element": {
+									"description": "An Array's element kind; Number otherwise.",
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+								},
+								"AssetType": {
+									"description": "An Asset's AssetType; empty otherwise.",
+									"type": "string"
+								},
+								"EnumValues": {
+									"description": "An Enum's choices; empty otherwise.",
+									"type": "array",
+									"items": {
+										"type": "string"
+									}
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph"]
+			},
+			"mutates": true,
+			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "graph_set_values",
+			"method": "graph.setValues",
+			"description": "Sets or removes literals of graph nodes' inputs as one undoable edit.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphSetValuesParams",
+				"description": "The params of graph.setValues.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"values": {
+						"description": "The literals, in order.",
+						"type": "array",
+						"items": {
+							"description": "One input literal to set.",
+							"type": "object",
+							"properties": {
+								"node": {
+									"description": "The node's id.",
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								},
+								"pin": {
+									"description": "The data input's name.",
+									"type": "string"
+								},
+								"value": {
+									"description": "The literal in its pin type's JSON spelling; null removes it."
+								}
+							},
+							"additionalProperties": false
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "values"]
 			},
 			"mutates": true,
 			"supportsDryRun": true,
@@ -2018,7 +2571,7 @@
 		{
 			"name": "project_upgrade",
 			"method": "project.upgrade",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet, tilemap and string table under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet, tilemap or string table fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet, tilemap, string table and graph under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet, tilemap, string table or graph fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "NoParams",
@@ -2946,7 +3499,7 @@
 		{
 			"name": "ui_tree",
 			"method": "ui.tree",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every active canvas and element (with includeInactive the inactive ones too, laid out as if active and marked inactive) with its rectangle, its canvas's scale, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "UiTreeParams",
@@ -2964,7 +3517,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), an inactive canvas or element that includeInactive lists marked inactive, a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -2982,6 +3535,10 @@
 					"target": {
 						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
 						"enum": ["Edit", "Play"]
+					},
+					"includeInactive": {
+						"description": "Also list the inactive canvases and elements (a hidden panel and its texts), each laid out, and its text measured, as if it were active, and marked inactive (active false); a copy of the scene as it is now is laid out at the scene resolution, the play scene's too, and the scene itself is only read. Omitted: only the active ones.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",

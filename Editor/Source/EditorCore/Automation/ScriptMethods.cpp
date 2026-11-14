@@ -6,6 +6,7 @@
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Reflection/JsonSchema.h"
 #include "Engine/Reflection/TypeRegistry.h"
@@ -16,6 +17,8 @@
 #include <array>
 #include <format>
 #include <map>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -28,6 +31,19 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidState, "the editor script service is unavailable");
 			return service;
 		}
+
+		// Decision 2 of Docs/Decisions/0035-m24-contract.md: a graph is a Script asset, but its source is a .graph document
+		// that only the graph methods read and edit, so the script source methods refuse it at `pointer`, naming them.
+		Status RefuseGraphSource(std::string_view path, std::string_view pointer, std::string_view hint)
+		{
+			if (!path.ends_with(GraphFileExtension))
+				return {};
+			return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer,
+				std::format("'{}' is a visual-scripting graph, not a Luau script", path), std::string(hint)));
+		}
+
+		constexpr std::string_view GraphEditHint = "read a graph with graph.read and change it with graph.addNode, graph.connect, graph.setValues, "
+												   "graph.setMembers and the other graph edits";
 
 		void AddScriptDefaults(Json& schema, const ScriptFieldSchema& field)
 		{
@@ -44,6 +60,7 @@ namespace Engine {
 
 		Result<ScriptCreateResult> ScriptCreate(EditorMethodContext& context, const ScriptCreateParams& params)
 		{
+			ENGINE_TRY(RefuseGraphSource(params.Path, "/path", "script.create makes Luau scripts; graph.create makes a graph"));
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", ".luau"));
 			ENGINE_TRY_ASSIGN(EditorScriptService * service, RequireScriptService(context));
 			const auto written = service->Create(path, params.Template);
@@ -56,6 +73,7 @@ namespace Engine {
 
 		Result<ScriptReadResult> ScriptRead(EditorMethodContext& context, const ScriptReadParams& params)
 		{
+			ENGINE_TRY(RefuseGraphSource(params.Path, "/path", GraphEditHint));
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", ".luau"));
 			ENGINE_TRY_ASSIGN(EditorScriptService * service, RequireScriptService(context));
 			const auto source = service->Read(path);
@@ -67,6 +85,7 @@ namespace Engine {
 
 		Result<ScriptWriteResult> ScriptWrite(EditorMethodContext& context, const ScriptWriteParams& params)
 		{
+			ENGINE_TRY(RefuseGraphSource(params.Path, "/path", GraphEditHint));
 			ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolveAssetsPath(context, params.Path, "/path", ".luau"));
 			ENGINE_TRY_ASSIGN(EditorScriptService * service, RequireScriptService(context));
 			const auto written = service->Write(path, params.Source);
@@ -83,6 +102,7 @@ namespace Engine {
 			std::vector<VfsPath> paths;
 			for (size_t index = 0; index < params.Paths.size(); ++index)
 			{
+				ENGINE_TRY(RefuseGraphSource(params.Paths[index], std::format("/paths/{}", index), "a graph's findings are graph.read's and project.validate's"));
 				ENGINE_TRY_ASSIGN(VfsPath path, Utils::ResolveAssetsPath(context, params.Paths[index], std::format("/paths/{}", index), ".luau"));
 				paths.push_back(std::move(path));
 			}

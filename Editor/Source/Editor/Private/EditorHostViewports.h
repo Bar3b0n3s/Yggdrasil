@@ -109,7 +109,10 @@ namespace Engine {
 		// not game input: the Game view does not own input, the event is no device input, or it is a button press outside
 		// the displayed game image (letterbox bars included) while the cursor is not Locked. Cursor positions map through
 		// the displayed image (fixed resolution, letterbox and framebuffer scale), unclamped so motion beyond the image and
-		// Locked-cursor deltas stay continuous; releases always pass. Every cursor event updates the tracked pointer.
+		// Locked-cursor deltas stay continuous; releases always pass. Every cursor event updates the tracked pointer. M24
+		// (Docs/Decisions/0035-m24-contract.md decision 18): a cursor position is relative to the main window's client area
+		// and the rectangles are in Dear ImGui's coordinates, which with platform windows on are the desktop's, so the main
+		// viewport's position is added first (it is (0, 0) without them).
 		[[nodiscard]] std::optional<Event> ToGameEvent(const Event& event);
 		[[nodiscard]] EditorViewportImage GetImage(ViewportView view) const override;
 		void SetRectangle(ViewportView view, const EditorViewportRect& rectangle) override;

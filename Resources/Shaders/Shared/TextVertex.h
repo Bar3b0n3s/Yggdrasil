@@ -31,7 +31,20 @@ inline constexpr uint32_t TextVertexBillboard = 2;
 inline constexpr uint32_t TextVertexLabel = 3;
 #endif
 
+	// The push constants of the Text program (M25's friction F01, Docs/Decisions/0036-m25-tetris-pixel-art.md): the drawn
+	// font's FontData::Spread, the distance field's range in atlas pixels on each side of an outline (positive,
+	// ValidateFontData). The field moves by the outline's value over Spread per atlas pixel, from which the fragment shader
+	// takes the least edge width a screen pixel sees (Passes/Text.slang).
+	struct TextConstants
+	{
+		float Spread = 8.0f;
+		uint32_t Padding0 = 0;
+		uint32_t Padding1 = 0;
+		uint32_t Padding2 = 0;
+	};
+
 #if !defined(ENGINE_SHADER)
+	static_assert(sizeof(TextConstants) == 16, "TextConstants must match its 16-byte push-constant layout");
 
 }
 #endif

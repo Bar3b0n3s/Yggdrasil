@@ -23,10 +23,13 @@ namespace Engine {
 		DiagnosticSeverity Severity = DiagnosticSeverity::Error;
 		// §13.7: "SCRIPT_TYPE_ERROR" for a type finding; "SCRIPT_COMPILE_ERROR" for a syntax error (the checker's Luau
 		// SyntaxError) and for a failed import attempt's compile, load-time or unresolved-require failure (ScriptImporter).
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 9): a Graph import's check also holds "GRAPH_INVALID" for each
+		// issue of the graph itself, located by the JSON pointer and node its message names, at line and column 0; its type and
+		// compile findings are of the graph's transpiled text, at that text's lines, under the .graph path.
 		std::string Code{};
 		std::string File{};  // project-relative path of the script the finding is in (a required module's, too)
-		uint32_t Line = 0;   // 1-based
-		uint32_t Column = 0; // 1-based
+		uint32_t Line = 0;   // 1-based; 0 only for a GRAPH_INVALID finding
+		uint32_t Column = 0; // 1-based; 0 only for a GRAPH_INVALID finding
 		std::string Message{};
 		uint32_t EndLine = 0;   // 1-based exclusive range end; zero only when the checker supplies no range
 		uint32_t EndColumn = 0; // UTF-8 byte column, matching Luau's source positions
@@ -61,7 +64,7 @@ namespace Engine {
 	// What to check: one script's source, with the reader its requires resolve through.
 	struct ScriptCheckRequest
 	{
-		VfsPath Path{};                         // the script, project://Assets/...
+		VfsPath Path{};                         // the script, project://Assets/... (IsScriptSourcePath: a .luau, or a .graph whose transpiled text is Source)
 		std::string_view Source{};              // its UTF-8 source (the bytes being imported, which may differ from the file)
 		IScriptModuleReader* Modules = nullptr; // reads required modules (never through the VFS directly); never null
 	};

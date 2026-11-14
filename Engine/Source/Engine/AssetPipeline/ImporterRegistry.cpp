@@ -1,10 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/Importers/AudioImporter.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/AssetPipeline/Importers/FontImporter.h"
 #include "Engine/AssetPipeline/Importers/GltfImporter.h"
+#include "Engine/AssetPipeline/Importers/GraphImporter.h"
 #include "Engine/AssetPipeline/Importers/HeightfieldImporter.h"
 #include "Engine/AssetPipeline/Importers/IrradianceVolumeImporter.h"
 #include "Engine/AssetPipeline/Importers/LutImporter.h"
@@ -125,6 +127,8 @@ namespace Engine {
 		registry.Register(CreateScope<TilemapImporter>());
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 10).
 		registry.Register(CreateScope<StringTableImporter>());
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 9): .graph sources into Script assets.
+		registry.Register(CreateScope<GraphImporter>());
 		// M26 (Docs/Decisions/0037-m26-contract.md decision 8): lighting.bake's irradiance volumes.
 		registry.Register(CreateScope<IrradianceVolumeImporter>());
 		// M26 (Docs/Decisions/0037-m26-contract.md decision 15).
@@ -136,8 +140,8 @@ namespace Engine {
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)
 	{
 		// In the order of RegisterBuiltinImporters; the material, scene, prefab, script, replay, sprite sheet, tilemap, string
-		// table, irradiance volume, LUT and heightfield importers have no settings (the sprite sheet, tilemap and string table
-		// structs are the Asset module's, RegisterAssetTypes).
+		// table, graph, irradiance volume, LUT and heightfield importers have no settings (the sprite sheet, tilemap and string
+		// table structs are the Asset module's, RegisterAssetTypes).
 		TextureImporter::RegisterTypes(registry);
 		GltfImporter::RegisterTypes(registry);
 		FontImporter::RegisterTypes(registry);
@@ -145,6 +149,8 @@ namespace Engine {
 		// M12 (Docs/Decisions/0015-m12-decisions.md): the audio import settings and the .sfx description.
 		AudioImporter::RegisterTypes(registry);
 		SoundEffectImporter::RegisterTypes(registry);
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 4): the .graph document, which only the editor reads.
+		RegisterGraphTypes(registry);
 	}
 
 }

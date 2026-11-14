@@ -6,6 +6,7 @@
 #include "EditorCore/Commands/CompositeCommand.h"
 #include "EditorCore/Commands/SceneEditCommand.h"
 #include "EditorCore/EngineAssetGenerators.h"
+#include "EditorCore/Graph/GraphLiveCache.h"
 #include "EditorCore/Native/NativeModuleHost.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Private/EditorFileError.h"
@@ -18,6 +19,7 @@
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/Core/Assert.h"
@@ -43,6 +45,7 @@
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/PrefabInstantiator.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/Sandbox.h"
 #include "Engine/Session/PlaySession.h"
 
 #include <nlohmann/json.hpp>
@@ -650,8 +653,8 @@ namespace Engine {
 	// --- EditorContext ---------------------------------------------------------------------------------------------------
 
 	EditorContext::EditorContext(ConstructionKey /*key*/, EngineContext& engine, const EditorContextSpecification& specification,
-		const Random::State& idGeneratorState)
-		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_Importers(CreateScope<ImporterRegistry>()), m_Loaders(CreateScope<AssetLoaderRegistry>()), m_History(specification.HistoryLimits), m_Play(CreateScope<EditorPlayController>(*this))
+		const Random::State& idGeneratorState, Scope<PureScriptApi> loadTimeScriptApi)
+		: m_Engine(&engine), m_Specification(specification), m_IdGenerator(UUIDGenerator::CreateRandom(idGeneratorState)), m_LoadTimeScriptApi(std::move(loadTimeScriptApi)), m_Importers(CreateScope<ImporterRegistry>()), m_Loaders(CreateScope<AssetLoaderRegistry>()), m_History(specification.HistoryLimits), m_Play(CreateScope<EditorPlayController>(*this))
 	{
 		// The editor's asset services (§3 rule 4): the built-in importers and loaders, and the manager the engine context
 		// serves to engine code.
@@ -668,6 +671,7 @@ namespace Engine {
 			.Loaders = m_Loaders.get(),
 			.EnvironmentBaker = specification.EnvironmentBaker,
 			.ScriptDiagnostics = nullptr,
+			.LoadTimeScriptApi = &m_LoadTimeScriptApi->GetApi(),
 			.EngineAssetGenerators = GetEngineAssetGenerators(),
 		});
 		// Borrowed editor back-reference, cleared after CloseProject drains the manager and before members are destroyed.
@@ -1176,12 +1180,22 @@ namespace Engine {
 
 	Result<Scope<EditorContext>> EditorContext::Create(EngineContext& engine, const EditorContextSpecification& specification)
 	{
+		// Built once, so a script import's load-time VM no longer registers the whole API (decision 3 of
+		// Docs/Decisions/0041-script-check-performance.md).
+		Result<Scope<PureScriptApi>> loadTimeScriptApi = PureScriptApi::Create();
+		if (!loadTimeScriptApi)
+			return std::unexpected(std::move(loadTimeScriptApi).error().WithContext("building the editor's load-time script API"));
 		if (specification.IdGeneratorState.has_value())
-			return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *specification.IdGeneratorState);
+			return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *specification.IdGeneratorState, std::move(*loadTimeScriptApi));
 		Result<Random::State> generated = SecureRandom::GenerateState();
 		if (!generated)
 			return std::unexpected(std::move(generated).error().WithContext("seeding the editor's id generator"));
-		return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *generated);
+		return CreateScope<EditorContext>(ConstructionKey(), engine, specification, *generated, std::move(*loadTimeScriptApi));
+	}
+
+	ScriptApiRegistry& EditorContext::GetLoadTimeScriptApi()
+	{
+		return m_LoadTimeScriptApi->GetApi();
 	}
 
 	EditorScriptService* EditorContext::GetScriptService()
@@ -1223,17 +1237,17 @@ namespace Engine {
 	Status EditorContext::RefreshScriptServices()
 	{
 		ENGINE_TRY_ASSIGN(ScriptTypeCheckerConfiguration configuration, ScriptTypeChecker::CaptureConfiguration(GetVfs()));
+		// Only present files, as the checker's environment hash: a new directory without a .luaurc keeps the checker, and with
+		// it every script's check (Docs/Decisions/0041-script-check-performance.md decision 2).
 		XXH64Hasher hash;
 		for (const auto& file : configuration.Files)
 		{
+			if (!file.Source)
+				continue;
 			hash.UpdateU64(file.Path.ToString().size());
 			hash.Update(file.Path.ToString());
-			hash.UpdateU64(file.Source.has_value());
-			if (file.Source)
-			{
-				hash.UpdateU64(file.Source->size());
-				hash.Update(*file.Source);
-			}
+			hash.UpdateU64(file.Source->size());
+			hash.Update(*file.Source);
 		}
 		if (m_ScriptChecker && hash.Digest() == m_ScriptConfigurationHash)
 			return {};
@@ -1245,6 +1259,22 @@ namespace Engine {
 		m_ScriptService = CreateScope<EditorScriptService>(*this, *m_ScriptChecker);
 		m_ScriptConfigurationHash = hash.Digest();
 		return {};
+	}
+
+	Result<const GraphNodeLibrary*> EditorContext::GetGraphNodeLibrary()
+	{
+		if (m_GraphNodeLibrary == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(m_GraphNodeLibrary, GraphNodeLibrary::Create(m_Engine->GetScriptApiRegistry()));
+		}
+		return m_GraphNodeLibrary.get();
+	}
+
+	GraphLiveCache& EditorContext::GetGraphLiveCache()
+	{
+		if (m_GraphLiveCache == nullptr)
+			m_GraphLiveCache = CreateScope<GraphLiveCache>();
+		return *m_GraphLiveCache;
 	}
 
 	Result<Ref<const ScriptFieldSchemaSource>> EditorContext::GetScriptSchemaSnapshot() const
@@ -1624,6 +1654,9 @@ namespace Engine {
 		m_Assets->SetScriptDiagnosticsProvider(nullptr);
 		m_ScriptService.reset();
 		m_ScriptChecker.reset();
+		// M24: the graphs graph.liveValues kept are the closing project's.
+		if (m_GraphLiveCache != nullptr)
+			m_GraphLiveCache->Clear();
 		VirtualFileSystem& vfs = GetVfs();
 		Utils::UnmountLogged(vfs, Utils::CacheScheme);
 		Utils::UnmountLogged(vfs, Utils::ProjectScheme);
@@ -2244,10 +2277,15 @@ namespace Engine {
 		if (!m_Play->IsTestRunActive())
 			return {};
 		// A test session is published for observation only. Some unflagged methods (play, eval, open, refresh, selection
-		// and validation fixes) still mutate live host state, so admission is an explicit read subset.
+		// and validation fixes) still mutate live host state, so admission is an explicit read subset. M24
+		// (Docs/Decisions/0035-m24-contract.md, W24.2's integration and review): graph.liveValues reads the test session's
+		// instances between frames without changing it (decision 14), and graph.read and graph.nodes read only the editor's
+		// own state (the source, the library and the latest import's check; graph.read's wait for imports starts none, since a
+		// test run defers reimports, and only publishes earlier an import already running, as entity.bounds' wait does), so
+		// the Graph Editor opens a graph and shows its live values during a test run too.
 		constexpr std::string_view Reads[] = { "session.hello", "session.info", "rpc.discover", "docs.get", "scene.tree", "scene.query",
 			"scene.get", "entity.get", "entity.bounds", "log.read", "events.read", "play.state", "physics.bodyInfo", "audio.stats",
-			"stats.get", "script.errors", "viewport.screenshot", "editor.screenshot" };
+			"stats.get", "script.errors", "viewport.screenshot", "editor.screenshot", "graph.liveValues", "graph.read", "graph.nodes" };
 		if (dryRun || std::ranges::find(Reads, method) == std::end(Reads))
 			return MakeError(ErrorCode::InvalidState, "a test run owns the editor; '{}' is unavailable until it finishes", method);
 		return {};

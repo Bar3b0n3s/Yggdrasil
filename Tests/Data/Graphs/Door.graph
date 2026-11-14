@@ -1,0 +1,142 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Door",
+	"Fields": [
+		{
+			"Name": "Player",
+			"Kind": "Entity",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		},
+		{
+			"Name": "Speed",
+			"Kind": "Number",
+			"Default": 2,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Max": 10,
+				"Min": 0
+			}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Opened",
+			"Kind": "Bool",
+			"Default": false,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnTriggerEnter",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Compare.Equal",
+			"Position": [240, 120],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Self.Get.Player",
+			"Position": [0, 160],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Flow.Branch",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Self.Set.Opened",
+			"Position": [720, 0],
+			"Values": {
+				"Value": true
+			}
+		},
+		{
+			"Id": 6,
+			"Kind": "Call.Log.Info",
+			"Position": [960, 0],
+			"Values": {
+				"Values": "Door opened"
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "other"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "In"
+			}
+		}
+	]
+}

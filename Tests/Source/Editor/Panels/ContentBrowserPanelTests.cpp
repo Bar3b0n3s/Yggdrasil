@@ -9,6 +9,7 @@
 #include "Editor/Ui/EditorStyle.h"
 #include "Editor/Viewport/EditorViewportHost.h"
 #include "EditorCore/Automation/EditorAutomationControls.h"
+#include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
@@ -332,9 +333,54 @@ namespace Engine {
 			REQUIRE(ui.Frame(draw));
 		}
 
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 15): the create list's entry after M22's string table is the graph editor's
+		// CreateGraph, graph.create; a graph shows as one and a double-click asks the Graph Editor to open it.
+		TEST_CASE("ContentBrowserPanel: creating a graph queues graph.create, and double-clicking a graph asks the Graph Editor to open it")
+		{
+			Test::PanelInteractionFixture fixture("ContentCreateGraph", false);
+			auto& context = fixture.GetContext();
+			ContentBrowserPanel panel;
+			Test::AssetDesignInteraction ui;
+			const auto draw = [&panel, &context]()
+			{
+				return panel.Draw(context);
+			};
+			REQUIRE(ui.Frame(draw));
+			CreateContentAsset(ui, draw, context.Editor, 11, "Graph", "Door");
+			CHECK_FALSE(context.Editor.GetAssets().Resolve("Assets/Door.graph"));
+			context.Actions.Pump();
+			context.Editor.GetAssets().WaitIdle();
+			context.Actions.Pump();
+			const auto asset = context.Editor.GetAssets().Resolve("Assets/Door.graph");
+			REQUIRE(asset);
+			CHECK(context.Editor.GetAssets().GetAssetType(*asset) == AssetType::Script);
+			const AssetRecord* record = context.Editor.GetAssets().GetRegistry().Find(*asset);
+			REQUIRE(record != nullptr);
+			CHECK(record->Metadata.Importer == "Graph");
+			const auto read = fixture.GetAutomation().Call("graph.read", Json{ { "graph", "Assets/Door.graph" } });
+			REQUIRE(read);
+			CHECK((*read)["document"]["Name"] == "Door");
+			const auto history = context.Editor.GetHistory().GetEntries(10);
+			REQUIRE(history.size() == 1);
+			CHECK(history.front().Origin == CommandOrigin::User);
+			CHECK(history.front().Label.contains("Create Graph"));
+
+			REQUIRE(ui.Frame(draw));
+			REQUIRE(ui.Frame(draw));
+			CHECK_FALSE(panel.TakeGraphRequest().has_value());
+			auto* root = ui.Window("Panel interaction");
+			auto* grid = ui.Child(root, ImHashStr("AssetTiles", 0, ContentControlID(root, context.Editor, "ContentColumns")));
+			DoubleClickContentItem(ui, draw, grid, ImHashStr("##Asset", 0, ImHashStr(asset->ToString().c_str(), 0, grid->GetID("AssetGrid"))));
+			const std::optional<GraphEditorTarget> request = panel.TakeGraphRequest();
+			REQUIRE(request.has_value());
+			CHECK(request->Graph == *asset);
+			CHECK(request->Node == 0);
+			CHECK_FALSE(panel.TakeGraphRequest().has_value());
+		}
+
 		TEST_CASE("ContentBrowserPanel: creating a heightfield queues a flat 129 x 129 heightfield")
 		{
-			// M26, C-TERR (Docs/Decisions/0037-m26-contract.md decision 20): the Create popup's entry after M22's string table (the
+			// M26, C-TERR (Docs/Decisions/0037-m26-contract.md decision 20): the Create popup's entry after M24's graph (the
 			// create list in landing order), asset.create {type: Heightfield}.
 			Test::PanelInteractionFixture fixture("ContentCreateHeightfield", false);
 			auto& context = fixture.GetContext();
@@ -345,7 +391,7 @@ namespace Engine {
 				return panel.Draw(context);
 			};
 			REQUIRE(ui.Frame(draw));
-			CreateContentAsset(ui, draw, context.Editor, 11, "Heightfield", "Ground");
+			CreateContentAsset(ui, draw, context.Editor, 12, "Heightfield", "Ground");
 			CHECK_FALSE(context.Editor.GetAssets().Resolve("Assets/Ground.heightfield"));
 			context.Actions.Pump();
 			context.Editor.GetAssets().WaitIdle();

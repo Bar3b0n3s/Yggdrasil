@@ -53,7 +53,7 @@ namespace Engine {
 			std::ranges::sort(assets, {}, &ImportAssetLookupEntry::SourcePath);
 			// Detached real import: checks current bytes even while lockstep defers publication. AssetWriter alone
 			// schedules the manager's normal import/publication; this validation never replaces a live artifact.
-			ImportContext context({ .Vfs = &editor.GetVfs(), .SourcePath = path, .SourceBytes = AsBytes(source), .Registry = &editor.GetTypeRegistry(), .Assets = assets, .ScriptDiagnostics = &diagnostics });
+			ImportContext context({ .Vfs = &editor.GetVfs(), .SourcePath = path, .SourceBytes = AsBytes(source), .Registry = &editor.GetTypeRegistry(), .Assets = assets, .ScriptDiagnostics = &diagnostics, .LoadTimeScriptApi = &editor.GetLoadTimeScriptApi() });
 			const Result<ImportResult> imported = ScriptImporter{}.Import(context, metadata);
 			if (!imported && IsInfrastructureFailure(imported.error()))
 				return std::unexpected(imported.error());

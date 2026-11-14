@@ -503,7 +503,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 - ImGui platform windows on Windows, registered with M18's recreation protocol; M24's ADR exempts undocking as presentation. Windows backends only (rule 1): on Linux and macOS no platform-window code is written, the editor keeps platform windows off as today, and its platform-window support returns `ErrorCode::Unsupported`.
 
 **Acceptance**
-- A graph transpiles to the same Luau bytes in every configuration; a graph behaviour's replay is identical in all four runs; an agent builds a graph through MCP only; every editor graph action has its method.
+- A graph transpiles to the same Luau bytes in every configuration; a graph behaviour's replay is identical in all four runs; an agent builds a graph through MCP only; every editor graph action has its method; live values show in play without changing the state hash.
 - Platform windows stay clean under synchronization validation and survive an injected device loss.
 
 **Parallelization**: W24.1 has a contract; W24.2 builds on its methods and has none.
@@ -518,7 +518,7 @@ Tests support (`Tests/Source/Support/`): recording assert handler, death-test re
 
 **Acceptance**: M17's feature list on sprites and UI, with no MeshRenderer cells and no Screen Text HUD. Its replays are strict-hash identical in both editors and the testing Dist export, and each fails without its input. Its suites are green; `StartScene` and `Export.BuildScenes` set; `project.validate` clean; Dist export smoke exits 0 (the games suite's three halves); `AuditProvenance.py --project Projects/Tetris` passes from a fresh clone; the soak passes.
 
-**Parallelization**: one builder in a fresh top-level session, `D:\Engine` holding M25's branch for the builder window.
+**Parallelization**: one builder per session, a background agent of the lead's session (as M17's were; `Docs/Decisions/0036-m25-tetris-pixel-art.md`), `D:\Engine` holding M25's branch for the builder window.
 
 ---
 

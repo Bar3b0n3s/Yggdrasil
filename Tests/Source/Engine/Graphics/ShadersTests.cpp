@@ -42,6 +42,7 @@
 #include "Shared/SmokeConstants.h"
 #include "Shared/TaaConstants.h"
 #include "Shared/TerrainConstants.h"
+#include "Shared/TextVertex.h"
 #include "Shared/TonemapConstants.h"
 #include "Shared/ViewConstants.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -615,6 +616,19 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(Light2DConstants, Padding1),
 				},
 				.Program = "Lights2D",
+				.Entry = "PSMain",
+			},
+			{
+				// M25's friction F01 (Docs/Decisions/0036-m25-tetris-pixel-art.md): the Text program's push constants.
+				.Name = "TextConstants",
+				.Size = sizeof(TextConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(TextConstants, Spread),
+					ENGINE_TEST_SHARED_FIELD(TextConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(TextConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(TextConstants, Padding2),
+				},
+				.Program = "Text",
 				.Entry = "PSMain",
 			},
 			{

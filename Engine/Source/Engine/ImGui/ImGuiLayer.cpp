@@ -3,10 +3,13 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Log.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/PipelineFactory.h"
+#include "Engine/ImGui/ImGuiPlatformWindows.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/Platform/GlfwLibrary.h"
+#include "Engine/Platform/PlatformWindowSupport.h"
 #include "Engine/Platform/Window.h"
 
 #include <GLFW/glfw3.h>
@@ -77,8 +80,11 @@ namespace Engine {
 			return;
 
 		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer destroyed while another Dear ImGui context is current");
-		// The renderer first: its destructor destroys the textures (the device is idle; Application waits before) and clears
-		// its backend fields, then the platform side, then the context, which saves imgui.ini when an ini path is set.
+		// The platform windows' renderer side first (M24): their swapchains and surfaces go before the GLFW windows the
+		// backend's shutdown destroys, and before the renderer they draw with. Then the renderer: its destructor destroys the
+		// textures (the device is idle; Application waits before) and clears its backend fields, then the platform side, then
+		// the context, which saves imgui.ini when an ini path is set.
+		m_PlatformWindows.reset();
 		m_Renderer.reset();
 		if (m_UsesGlfwBackend)
 			ImGui_ImplGlfw_Shutdown();
@@ -121,6 +127,11 @@ namespace Engine {
 		}
 
 		ENGINE_TRY_ASSIGN(layer->m_Renderer, ImGuiRenderer::Create(device, pipelines, { .FramesInFlight = specification.FramesInFlight }));
+		layer->m_PlatformWindowSupport = layer->CreatePlatformWindows(device, specification);
+		if (specification.PlatformWindows && layer->m_PlatformWindowSupport.has_value())
+			ENGINE_CORE_INFO("Dear ImGui platform windows are on: panels may be undocked into windows of their own");
+		else if (specification.PlatformWindows)
+			ENGINE_CORE_INFO("Dear ImGui platform windows stay off, so every panel stays docked: {}", layer->m_PlatformWindowSupport.error());
 		return layer;
 	}
 
@@ -143,6 +154,7 @@ namespace Engine {
 				: ImVec2(static_cast<float>(std::max(m_Window->GetWidth(), 1u)), static_cast<float>(std::max(m_Window->GetHeight(), 1u)));
 			io.DisplayFramebufferScale = previousScale;
 		}
+		m_RetainedDisplaySize = retainDisplaySize;
 		// After the backend, which sets its own wall-clock delta (see the declaration).
 		ImGui::GetIO().DeltaTime = static_cast<float>(std::max(deltaSeconds, MinimumDeltaSeconds));
 		ImGui::NewFrame();
@@ -152,6 +164,24 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer::EndFrame with another Dear ImGui context current");
 		ImGui::Render();
+		if (m_PlatformWindows != nullptr && m_RetainedDisplaySize)
+		{
+			// M24's review: with platform windows on, Dear ImGui asks the platform side whether the main viewport is minimized
+			// and then gives its draw data an empty display (0 x 0), which BeginFrame's retained io.DisplaySize does not reach.
+			// A frame forced while the window is minimized (Application::RequestOffscreenUiFrame) renders the main window's UI
+			// at the size it was laid out at, the main viewport's, which Dear ImGui keeps while the window is minimized, so
+			// editor.screenshot captures it as it does without platform windows.
+			const ImGuiViewport* main = ImGui::GetMainViewport();
+			if (ImDrawData* drawData = ImGui::GetDrawData(); drawData != nullptr && main != nullptr)
+				drawData->DisplaySize = main->Size;
+		}
+		if (m_PlatformWindows != nullptr)
+		{
+			// The GLFW backend creates a platform window with GLFW's current window hints, and a window the swapchain's Vulkan
+			// surface goes on must have no client API (Window::Create sets the same hint for the main window).
+			glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+			ImGui::UpdatePlatformWindows();
+		}
 	}
 
 	void ImGuiLayer::EndInterruptedFrame()
@@ -172,6 +202,11 @@ namespace Engine {
 		io.ConfigErrorRecoveryEnableDebugLog = false;
 		io.ConfigErrorRecoveryEnableTooltip = false;
 		ImGui::EndFrame();
+		// M24: with platform windows on, Dear ImGui expects every frame to end with ImGui::UpdatePlatformWindows. The
+		// interrupted frame leaves the platform windows as they are (their targets are the recreation protocol's, released and
+		// created again by the recovery), so it is only marked as ended for them.
+		if (m_PlatformWindows != nullptr)
+			m_Context->FrameCountPlatformEnded = m_Context->FrameCount;
 		io.ConfigErrorRecovery = recovery;
 		io.ConfigErrorRecoveryEnableAssert = asserts;
 		io.ConfigErrorRecoveryEnableDebugLog = debugLog;
@@ -231,6 +266,43 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer::GetDrawData with another Dear ImGui context current");
 		// Dear ImGui's draw data is valid from Render (EndFrame) to the next NewFrame; before the first EndFrame it is null.
 		return ImGui::GetDrawData();
+	}
+
+	Status ImGuiLayer::GetPlatformWindowSupport() const
+	{
+		return m_PlatformWindowSupport;
+	}
+
+	Status ImGuiLayer::RenderPlatformWindows(uint32_t frameSlot)
+	{
+		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer::RenderPlatformWindows with another Dear ImGui context current");
+		if (m_PlatformWindows == nullptr)
+			return {};
+		return m_PlatformWindows->Render(frameSlot);
+	}
+
+	ImGuiPlatformWindows* ImGuiLayer::GetPlatformWindows()
+	{
+		return m_PlatformWindows.get();
+	}
+
+	Status ImGuiLayer::CreatePlatformWindows(GraphicsDevice& device, const ImGuiLayerSpecification& specification)
+	{
+		if (!specification.PlatformWindows)
+			return MakeError(ErrorCode::InvalidState, "platform windows are off: the application did not ask for them");
+		// Windows backends only (decision 17): Linux and macOS, and a headless process, refuse them here.
+		ENGINE_TRY(CheckPlatformWindowSupport());
+		if (!m_UsesGlfwBackend)
+			return MakeError(ErrorCode::Unsupported, "platform windows need Dear ImGui's GLFW backend, which this process does not use");
+		ENGINE_TRY_ASSIGN(m_PlatformWindows, WithContext(ImGuiPlatformWindows::Create(device, *m_Renderer, {
+																											   .FramesInFlight = specification.FramesInFlight,
+																											   .VSync = device.GetSpecification().VSync,
+																											   .CreateTarget = {},
+																										   }),
+												 "while creating the platform windows' renderer side"));
+		// Before the first frame, as Dear ImGui requires: from then on panels may be undocked into OS windows of their own.
+		ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+		return {};
 	}
 
 	void ImGuiLayer::InstallNullPlatform()

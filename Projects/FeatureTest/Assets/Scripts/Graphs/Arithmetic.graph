@@ -1,0 +1,673 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Arithmetic",
+	"Fields": [
+		{
+			"Name": "A",
+			"Kind": "Number",
+			"Default": 7,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Max": 100,
+				"Min": -100,
+				"Step": 0.5,
+				"Tooltip": "The left operand"
+			}
+		},
+		{
+			"Name": "B",
+			"Kind": "Integer",
+			"Default": 3,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Max": 10,
+				"Min": 1
+			}
+		},
+		{
+			"Name": "Label",
+			"Kind": "String",
+			"Default": "Result ",
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Tooltip": "The text before the result"
+			}
+		},
+		{
+			"Name": "Mode",
+			"Kind": "Enum",
+			"Default": "Up",
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": ["Up", "Down"],
+			"Options": {}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Result",
+			"Kind": "Number",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "Text",
+			"Kind": "String",
+			"Default": "",
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnStart",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Self.Get.A",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Self.Get.B",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Number.Add",
+			"Position": [720, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Number.Subtract",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Number.Multiply",
+			"Position": [1200, 0],
+			"Values": {}
+		},
+		{
+			"Id": 7,
+			"Kind": "Number.Divide",
+			"Position": [0, 160],
+			"Values": {}
+		},
+		{
+			"Id": 8,
+			"Kind": "Number.Modulo",
+			"Position": [240, 160],
+			"Values": {}
+		},
+		{
+			"Id": 9,
+			"Kind": "Number.Negate",
+			"Position": [480, 160],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Self.Set.Result",
+			"Position": [720, 160],
+			"Values": {}
+		},
+		{
+			"Id": 11,
+			"Kind": "Compare.Less",
+			"Position": [960, 160],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Compare.LessEqual",
+			"Position": [1200, 160],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Logic.And",
+			"Position": [0, 320],
+			"Values": {}
+		},
+		{
+			"Id": 14,
+			"Kind": "Compare.Greater",
+			"Position": [240, 320],
+			"Values": {}
+		},
+		{
+			"Id": 15,
+			"Kind": "Compare.GreaterEqual",
+			"Position": [480, 320],
+			"Values": {}
+		},
+		{
+			"Id": 16,
+			"Kind": "Logic.Or",
+			"Position": [720, 320],
+			"Values": {}
+		},
+		{
+			"Id": 17,
+			"Kind": "Logic.Not",
+			"Position": [960, 320],
+			"Values": {}
+		},
+		{
+			"Id": 18,
+			"Kind": "Logic.And",
+			"Position": [1200, 320],
+			"Values": {}
+		},
+		{
+			"Id": 19,
+			"Kind": "Compare.NotEqual",
+			"Position": [0, 480],
+			"Values": {}
+		},
+		{
+			"Id": 20,
+			"Kind": "Self.Get.Mode",
+			"Position": [240, 480],
+			"Values": {}
+		},
+		{
+			"Id": 21,
+			"Kind": "Compare.Equal",
+			"Position": [480, 480],
+			"Values": {
+				"B": "Down"
+			}
+		},
+		{
+			"Id": 22,
+			"Kind": "Logic.And",
+			"Position": [720, 480],
+			"Values": {}
+		},
+		{
+			"Id": 23,
+			"Kind": "Logic.And",
+			"Position": [960, 480],
+			"Values": {}
+		},
+		{
+			"Id": 24,
+			"Kind": "Flow.Branch",
+			"Position": [1200, 480],
+			"Values": {}
+		},
+		{
+			"Id": 25,
+			"Kind": "Self.Get.Label",
+			"Position": [0, 640],
+			"Values": {}
+		},
+		{
+			"Id": 26,
+			"Kind": "Self.Get.Result",
+			"Position": [240, 640],
+			"Values": {}
+		},
+		{
+			"Id": 27,
+			"Kind": "Text.Concat",
+			"Position": [480, 640],
+			"Values": {}
+		},
+		{
+			"Id": 28,
+			"Kind": "Self.Set.Text",
+			"Position": [720, 640],
+			"Values": {}
+		},
+		{
+			"Id": 29,
+			"Kind": "Self.Set.Text",
+			"Position": [960, 640],
+			"Values": {
+				"Value": "unexpected"
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 24,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 14,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 16,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 15,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 16,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 17,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 18,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 23,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 19,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 22,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 20,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 21,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 21,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 22,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 22,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 23,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 23,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 24,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 24,
+				"Pin": "False"
+			},
+			"To": {
+				"Node": 29,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 24,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 28,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 25,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 27,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 26,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 27,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 27,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 28,
+				"Pin": "Value"
+			}
+		}
+	]
+}

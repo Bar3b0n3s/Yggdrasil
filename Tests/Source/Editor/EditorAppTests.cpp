@@ -23,12 +23,18 @@
 
 #include <nlohmann/json.hpp>
 
+#include <format>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
 // The editor executable as a whole process (Roadmap M2, M4): RunApplication with the editor's application, its EditorCore
 // modes (--project, --read-only, --batch, --upgrade, --dump-reference, --bake-engine-assets) and its loader checks (M5). Every run gets
 // --user-data-dir, so the editor's log file goes to the test's temporary directory, and --engine-cache-dir below it, so no
 // run writes the checkout's engine cooked cache (bin/EngineCache). Runs that need no GPU pass --renderer
-// none; the ones that render are in the GPU suite: the initialization failures of a rendering editor below, and
-// EditorFaultInjectionTests.cpp and EditorScreenshotOptionsTests.cpp.
+// none; the ones that render are in the GPU suite: the initialization failures of a rendering editor below, its layouts and
+// its platform windows (M24), and EditorFaultInjectionTests.cpp and EditorScreenshotOptionsTests.cpp.
 
 namespace Engine {
 
@@ -1055,6 +1061,48 @@ end)
 			CHECK(result->ExitCode == ExitCode::Success);
 			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
 			CHECK(ReadSavedLayoutPanels(userLayout) == "Panels=Console,Stats");
+		}
+
+		// M24's review (Docs/Decisions/0035-m24-contract.md decision 18): a windowed editor asks for Dear ImGui's platform windows
+		// from the user's PlatformWindows preference in user://Editor.json, on by default, and Windows allows them (the layer's
+		// startup line says so); with the preference off it does not ask, and a headless editor never asks, so neither logs a
+		// line about them.
+		TEST_CASE("EditorApp: a windowed editor asks for platform windows unless the user's preference turns them off, and a headless one never asks"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+			constexpr std::string_view On = "Dear ImGui platform windows are on";
+			constexpr std::string_view Off = "Dear ImGui platform windows stay off";
+			// The rendering editor's standard error, run with the preference `preference` (none: no Editor.json).
+			const auto run = [](std::string_view name, std::optional<bool> preference, bool headless)
+			{
+				Test::TempDirectory userData(name);
+				if (preference.has_value())
+				{
+					const std::filesystem::path folder = userData / ENGINE_PRODUCT_NAME;
+					REQUIRE(FileSystem::CreateDirectories(folder).has_value());
+					WriteProcessTestFile(folder / "Editor.json",
+						std::format(R"({{"Format":"EditorPreferences","Version":1,"PlatformWindows":{}}})", *preference ? "true" : "false"));
+				}
+				std::vector<std::string> arguments{ "--frames", "3" };
+				if (headless)
+					arguments.insert(arguments.begin(), "--headless");
+				const Result<ProcessResult> result = RunRenderingEditor(userData, std::move(arguments));
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("editor stderr: ", result->StandardError);
+				CHECK(result->ExitCode == ExitCode::Success);
+				CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+				return result->StandardError;
+			};
+			CHECK(run("EditorPlatformWindowsDefault", std::nullopt, false).contains(On));
+			CHECK(run("EditorPlatformWindowsOn", true, false).contains(On));
+			const std::string off = run("EditorPlatformWindowsOff", false, false);
+			CHECK_FALSE(off.contains(On));
+			CHECK_FALSE(off.contains(Off));
+			const std::string headless = run("EditorPlatformWindowsHeadless", true, true);
+			CHECK_FALSE(headless.contains(On));
+			CHECK_FALSE(headless.contains(Off));
 		}
 	}
 

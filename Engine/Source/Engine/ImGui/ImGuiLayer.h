@@ -12,14 +12,17 @@
 
 // Dear ImGui for an application (Architecture §8.11): the context, the vendored GLFW platform backend
 // (ImGui_ImplGlfw_InitForVulkan, compiled in ImGui/ImGuiGlfwImplementation.cpp), the NVRHI renderer (ImGuiRenderer) and
-// the imgui.ini location. Docking is on, multi-viewport off. Headless processes run on GLFW's null platform, where the
-// vendored backend cannot initialize (on Windows it asserts that the window has an HWND to subclass), so there the layer
-// is the platform backend itself: the display size and framebuffer scale from the window each frame and GLFW's in-memory
-// clipboard (ImGui/ImGuiLayer.cpp). The full editor UI therefore renders offscreen there (editor.screenshot, §8.13, §13.9).
+// the imgui.ini location. Docking is on; multi-viewport (platform windows) only where the specification asks for it and
+// CheckPlatformWindowSupport allows it (M24; ImGuiLayerSpecification::PlatformWindows). Headless processes run on GLFW's
+// null platform, where the vendored backend cannot initialize (on Windows it asserts that the window has an HWND to
+// subclass), so there the layer is the platform backend itself: the display size and framebuffer scale from the window
+// each frame and GLFW's in-memory clipboard (ImGui/ImGuiLayer.cpp). The full editor UI therefore renders offscreen there
+// (editor.screenshot, §8.13, §13.9).
 
 namespace Engine {
 
 	class GraphicsDevice;
+	class ImGuiPlatformWindows;
 	class ImGuiRenderer;
 	class PipelineFactory;
 	class Window;
@@ -32,6 +35,13 @@ namespace Engine {
 		std::filesystem::path IniFilePath{};
 		// GraphicsSpecification::FramesInFlight, for the renderer.
 		uint32_t FramesInFlight = 2;
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 18; stream V): Dear ImGui's platform
+		// windows, panels undocked into OS windows of their own. Create sets ImGuiConfigFlags_ViewportsEnable and creates the
+		// ImGuiPlatformWindows (ImGui/ImGuiPlatformWindows.h) only when this is set, the GLFW backend is in use and
+		// CheckPlatformWindowSupport (Platform/PlatformWindowSupport.h) allows them; otherwise the flag stays cleared, as before
+		// M24, and GetPlatformWindowSupport says why. The editor sets it from the user's PlatformWindows preference
+		// (ApplicationSpecification::ImGuiPlatformWindows); the Runtime's overlay never does.
+		bool PlatformWindows = false;
 	};
 
 	// One per process at a time (Dear ImGui's current context is global; Create fails while a context exists). Not copyable
@@ -60,10 +70,13 @@ namespace Engine {
 
 		// Creates the context (docking enabled, viewports disabled, the ini path), initializes the GLFW backend on `window`
 		// with its callbacks installed (they chain to the Window's own) on a native platform, or the layer's own platform
-		// side on GLFW's null platform (see the file comment), and creates the ImGuiRenderer. `window`, `device` and
-		// `pipelines` are documented back-references that must outlive the layer. Errors: InvalidState when another
-		// ImGuiLayer (any Dear ImGui context) exists; Io when the ini directory cannot be created; Unsupported when the GLFW
-		// backend cannot initialize; those of ImGuiRenderer::Create. Nothing stays created on failure.
+		// side on GLFW's null platform (see the file comment), and creates the ImGuiRenderer. M24: with
+		// ImGuiLayerSpecification::PlatformWindows, then the ImGuiPlatformWindows and ImGuiConfigFlags_ViewportsEnable where
+		// CheckPlatformWindowSupport allows them on the GLFW backend; a refusal or a failure of that step only leaves them off
+		// (GetPlatformWindowSupport says why, and one Info line). `window`, `device` and `pipelines` are documented
+		// back-references that must outlive the layer. Errors: InvalidState when another ImGuiLayer (any Dear ImGui context)
+		// exists; Io when the ini directory cannot be created; Unsupported when the GLFW backend cannot initialize; those of
+		// ImGuiRenderer::Create. Nothing stays created on failure.
 		[[nodiscard]] static Result<Scope<ImGuiLayer>> Create(Window& window, GraphicsDevice& device, PipelineFactory& pipelines,
 			const ImGuiLayerSpecification& specification);
 
@@ -77,7 +90,9 @@ namespace Engine {
 		// A forced minimized frame retains the last usable display size and scale after updating backend input.
 		void BeginFrame(double deltaSeconds, uint32_t frameSlot, bool retainDisplaySize = false);
 
-		// ImGui::Render: finishes the frame's draw data.
+		// ImGui::Render: finishes the frame's draw data. M24: with platform windows on, a frame whose BeginFrame retained the
+		// display size keeps the main viewport's draw data at the size its UI was laid out at, which Dear ImGui would give an
+		// empty display while the window is minimized, so a forced minimized frame renders and editor.screenshot captures it.
 		void EndFrame();
 
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26 and risk 10): ends a UI frame that BeginFrame started
@@ -103,6 +118,22 @@ namespace Engine {
 		[[nodiscard]] ImGuiRenderer& GetRenderer();
 		// The draw data of the last EndFrame; nullptr before the first.
 		[[nodiscard]] ImDrawData* GetDrawData() const;
+
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 18; stream V). EndFrame also calls
+		// ImGui::UpdatePlatformWindows when platform windows are on (with GLFW's GLFW_CLIENT_API hint at GLFW_NO_API, so the
+		// backend's new windows take a Vulkan surface), and EndInterruptedFrame leaves the platform windows as they are (their
+		// targets are the recreation protocol's), only marking the frame as ended for them, as Dear ImGui's next frame requires.
+		// Ok when platform windows are on. Errors: InvalidState when the specification did not ask for them; Unsupported from
+		// CheckPlatformWindowSupport (Linux and macOS, a headless process); those of ImGuiPlatformWindows::Create, which leave
+		// them off.
+		[[nodiscard]] Status GetPlatformWindowSupport() const;
+		// ImGuiPlatformWindows::Render for this frame; Ok, doing nothing, when platform windows are off. Application calls it
+		// after the main window's submission and before FramePacer::EndFrame, on every frame that rendered the UI while the main
+		// window is not minimized. Errors: those of ImGuiPlatformWindows::Render, a recording's OutOfMemory, which the
+		// Application treats as ImGuiLayer::Render's Gpu error, and a target's Gpu error as the main window's swapchain's.
+		[[nodiscard]] Status RenderPlatformWindows(uint32_t frameSlot);
+		// The platform windows; nullptr when they are off.
+		[[nodiscard]] ImGuiPlatformWindows* GetPlatformWindows();
 	private:
 		// GLFW's null platform (headless processes): the layer is the platform backend itself (see ImGuiLayer.cpp).
 		void InstallNullPlatform();
@@ -110,14 +141,21 @@ namespace Engine {
 		// Per frame on the null platform: the display size and framebuffer scale from the window, as the GLFW backend
 		// computes them on a native platform.
 		void UpdateNullPlatform();
+		// M24: Create's platform-window step, after the renderer: the ImGuiPlatformWindows and ImGuiConfigFlags_ViewportsEnable
+		// when the specification asks, CheckPlatformWindowSupport allows and the GLFW backend is in use. Returns what
+		// GetPlatformWindowSupport reports; on an error nothing of the step stays.
+		[[nodiscard]] Status CreatePlatformWindows(GraphicsDevice& device, const ImGuiLayerSpecification& specification);
 	private:
 		std::filesystem::path m_IniFilePath;
 		std::string m_IniFileName; // m_IniFilePath as UTF-8: the storage io.IniFilename points at
 		Scope<ImGuiRenderer> m_Renderer;
-		Window* m_Window = nullptr;        // documented back-reference
-		ImGuiContext* m_Context = nullptr; // created by Create, destroyed by the destructor
-		bool m_UsesGlfwBackend = false;    // the vendored GLFW backend is initialized (native platforms)
-		bool m_UsesNullPlatform = false;   // InstallNullPlatform ran (GLFW's null platform)
+		Scope<ImGuiPlatformWindows> m_PlatformWindows; // M24: with platform windows on, created after the renderer
+		Status m_PlatformWindowSupport{};              // M24: GetPlatformWindowSupport's answer, from Create
+		Window* m_Window = nullptr;                    // documented back-reference
+		ImGuiContext* m_Context = nullptr;             // created by Create, destroyed by the destructor
+		bool m_UsesGlfwBackend = false;                // the vendored GLFW backend is initialized (native platforms)
+		bool m_UsesNullPlatform = false;               // InstallNullPlatform ran (GLFW's null platform)
+		bool m_RetainedDisplaySize = false;            // M24: the open frame's BeginFrame retained the display size (EndFrame)
 	};
 
 }

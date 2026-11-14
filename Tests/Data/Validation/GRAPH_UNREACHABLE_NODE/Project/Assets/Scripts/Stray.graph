@@ -1,0 +1,43 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Stray",
+	"Fields": [],
+	"Variables": [],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnStart",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Call.Log.Info",
+			"Position": [240, 0],
+			"Values": {
+				"Values": "started"
+			}
+		},
+		{
+			"Id": 3,
+			"Kind": "Call.Log.Info",
+			"Position": [480, 0],
+			"Values": {
+				"Values": "never"
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "In"
+			}
+		}
+	]
+}

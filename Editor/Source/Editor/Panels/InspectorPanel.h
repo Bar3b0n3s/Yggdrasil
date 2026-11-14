@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Editor/Tools/TerrainHeightmapImport.h"
+#include "EditorCore/Graph/GraphEditorTarget.h"
+#include "EditorCore/Graph/GraphLiveView.h"
 #include "EditorCore/Inspector/PrefabInstanceView.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "Engine/Asset/AssetHandle.h"
@@ -18,6 +20,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -57,6 +60,12 @@ namespace Engine {
 	// and the fields of its one selected element (picked in the list or by its index); each of that element's gestures,
 	// Add element (the element type's default, appended) and Remove element (the selected one) submits asset.setProperties
 	// with the whole array, so no frame draws or converts every element. Smaller arrays draw every element as before.
+	// M24 (Docs/Decisions/0035-m24-contract.md decision 15): a script slot holding a graph shows Open graph, which asks the Graph
+	// Editor (EditorLayer's) to open it (TakeGraphRequest), and every slot shared by the selection offers New graph..., the graph
+	// editor's CreateGraphInSlot: one edit.batch of graph.create and the slot's entity.update per selected entity
+	// (MakeScriptSlotGraph), so creating the graph and assigning it is one undo step; the new graph then opens.
+	// M24 (decision 14): during play, a script slot holding a graph shows its fields' and variables' live values for the one
+	// selected entity, read through graph.liveValues once a frame (GraphLiveView).
 	// M26 (Docs/Decisions/0037-m26-contract.md decision 20): a Terrain of one selected edit-scene entity shows the Import Heightmap
 	// action above its fields (Editor/Tools/TerrainHeightmapImport.h: terrain.importHeightmap, then the assignment).
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
@@ -67,6 +76,8 @@ namespace Engine {
 		static constexpr size_t InlineAssetElements = 64;
 
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+		// M24: the graph Open graph, or a finished New graph, asked the Graph Editor to open since the last call, once.
+		[[nodiscard]] std::optional<GraphEditorTarget> TakeGraphRequest() { return std::exchange(m_GraphRequest, std::nullopt); }
 	private:
 		// A gesture that started while another still owned the controller (released, or ending in the same frame).
 		struct PendingEdit
@@ -104,6 +115,12 @@ namespace Engine {
 			// M21's milestone review: for a listed array, the index of the element the gesture edits (Candidate is that
 			// element's value); nullopt for a whole field.
 			std::optional<size_t> Element{};
+		};
+		// M24: one graph slot's live values; the views that a frame did not draw stop at the next Draw.
+		struct GraphSlotLiveView
+		{
+			GraphLiveView View{};
+			bool Drawn = false;
 		};
 		// The inspected entity's prefab instance (DescribePrefabInstance), re-read when the entity, the inspected owner, the
 		// editor revision or the outermost prefab's version changes, so an override list is never rebuilt every frame.
@@ -143,6 +160,9 @@ namespace Engine {
 		// clipped list with its selected element's fields (see the class comment); ids keyed by `path`, labels by `typeName`.
 		void DrawListedAssetArray(EditorPanelContext& context, AssetHandle asset, const AssetProperties& properties, const FieldInfo& field,
 			const Json& elements, bool escape, const std::string& path, std::string_view typeName);
+		// M24: the live values of the play entity `entity`'s script slot `slot` when it holds a graph (`script`), polled once a
+		// frame while drawn; nothing for a slot of another script.
+		void DrawGraphSlotLiveValues(EditorPanelContext& context, UUID entity, size_t slot, AssetHandle script);
 		std::optional<InspectorEditTarget> m_ActiveTarget{};
 		std::optional<PendingEdit> m_Pending{};
 		uint32_t m_ActiveComponents = 0;
@@ -162,7 +182,13 @@ namespace Engine {
 		UUID m_ApplyInstance{}; // the instance the level picker belongs to
 		UUID m_ApplyLevel{};    // the picked level's root; reset to the outermost for another instance
 		bool m_CommitQueued = false;
-		TerrainHeightmapImport m_TerrainHeightmapImport{}; // M26
+		// M24: TakeGraphRequest's; the New graph... batch in flight, its slot and its name.
+		std::optional<GraphEditorTarget> m_GraphRequest{};
+		uint64_t m_NewGraphTicket = 0;
+		size_t m_NewGraphSlot = 0;
+		std::string m_NewGraphName{};
+		std::map<size_t, GraphSlotLiveView> m_GraphLiveViews{}; // M24: by slot index, of the one selected play entity
+		TerrainHeightmapImport m_TerrainHeightmapImport{};      // M26
 		friend class EditorLayer;
 	};
 

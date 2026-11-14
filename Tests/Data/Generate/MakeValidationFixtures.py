@@ -33,6 +33,9 @@ Special cases (also in Tests/Data/Validation/README.md, which this generator wri
 - ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH reference the meshes and skeletons of generated skinned glTF
   files (GltfImporter version 3) by their sub-asset handles, Hash64(the .meta's handle, the sub-asset key), so their
   .meta files fix the handles.
+- GRAPH_INVALID and GRAPH_UNREACHABLE_NODE hold a .graph source (a Script asset whose importer is Graph,
+  Docs/Decisions/0035-m24-contract.md decision 5), which the validator reads itself; a graph reported GRAPH_INVALID is
+  never also ASSET_IMPORT_FAILED for the same cause.
 
 Scenes, metas and project files are written in the canonical JsonWriter form; images are PNGs of stored deflate blocks,
 so no zlib build changes their bytes. The glTF diagnostics fixtures and Truncated.png are byte copies of
@@ -389,6 +392,21 @@ def tilemap(palette: list[tuple[str | None, int, bool]], chunks: list[tuple[int,
         "Format": "Tilemap", "Version": 1, "CellSize": [1, 1], "ChunkSize": chunk_size,
         "Palette": [{"Sheet": sheet, "Frame": frame, "Solid": solid} for sheet, frame, solid in palette],
         "Chunks": [{"X": x, "Y": y, "Tiles": tiles} for x, y, tiles in chunks],
+    }
+
+
+def graph(name: str, nodes: list[tuple[int, str, dict[str, Any]]],
+          links: list[tuple[int, str, int, str]]) -> dict[str, Any]:
+    """A .graph document (Docs/Decisions/0035-m24-contract.md decision 4) without fields or variables: nodes (id, kind,
+    input literals), each 240 canvas units right of the one before, and links (from node, output pin, to node, input
+    pin), in the canonical order."""
+    return {
+        "Format": "Graph", "Version": 1, "Name": name, "Fields": [], "Variables": [],
+        "Nodes": [{"Id": identifier, "Kind": kind, "Position": [index * 240, 0], "Values": values}
+                  for index, (identifier, kind, values) in enumerate(sorted(nodes, key=lambda node: node[0]))],
+        "Links": [{"From": {"Node": source, "Pin": output}, "To": {"Node": target, "Pin": input_pin}}
+                  for source, output, target, input_pin in sorted(links, key=lambda link: (link[0], link[1].encode(),
+                                                                                          link[2], link[3].encode()))],
     }
 
 
@@ -927,6 +945,21 @@ return Script.Define("Jumper", Jumper)
                      "RootMotion": "None"}}))
     item.entities.append(entity("e000000000000032", "Body", skinned_body, parent="e000000000000031"))
 
+    # The graph checks (Docs/Decisions/0035-m24-contract.md decision 5). A graph naming a kind the node library lacks
+    # and linking a Number output into a Bool input: a GRAPH_INVALID error per issue, the graph left out of the import.
+    item = fixture("GRAPH_INVALID")
+    item.add_json("Project/Assets/Scripts/Broken.graph", graph("Broken", [
+        (1, "Event.OnStart", {}), (2, "Flow.Branchh", {}), (3, "Flow.Branch", {}), (4, "Number.Add", {"A": 1, "B": 2})],
+        [(1, "Then", 3, "In"), (4, "Result", 3, "Condition")]))
+    item.add_json("Project/Assets/Scripts/Broken.graph.meta", meta("9a40000000000001", "Script", "Graph"))
+
+    # A valid graph whose second Log.Info no event's flow reaches: a GRAPH_UNREACHABLE_NODE warning on that node.
+    item = fixture("GRAPH_UNREACHABLE_NODE")
+    item.add_json("Project/Assets/Scripts/Stray.graph", graph("Stray", [
+        (1, "Event.OnStart", {}), (2, "Call.Log.Info", {"Values": "started"}),
+        (3, "Call.Log.Info", {"Values": "never"})], [(1, "Then", 2, "In")]))
+    item.add_json("Project/Assets/Scripts/Stray.graph.meta", meta("9a40000000000002", "Script", "Graph"))
+
     # The probe check (Docs/Decisions/0037-m26-contract.md decision 9): an irradiance volume and a reflection probe that
     # were never baked (no Data); both report the code.
     item = fixture("PROBE_NOT_BAKED")
@@ -979,6 +1012,9 @@ reports: `ASSET_VERTEX_COLORS_IGNORED` since GltfImporter version 2 imports `COL
   placeholder, so the asset manager logs nothing for them and only the validator reports them.
 - `ANIMATION_NO_ANIMATOR` and `ANIMATION_SKELETON_MISMATCH` reference the meshes and skeletons of generated skinned glTF
   files by their sub-asset handles, so their `.meta` files fix the source handles.
+- `GRAPH_INVALID` and `GRAPH_UNREACHABLE_NODE` hold a `.graph` source (a Script asset whose importer is Graph),
+  which the validator reads itself; a graph reported `GRAPH_INVALID` is never also `ASSET_IMPORT_FAILED` for the same
+  cause.
 """
 
 # ---------------------------------------------------------------------------------------------------------------------

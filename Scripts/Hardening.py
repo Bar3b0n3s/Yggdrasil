@@ -23,7 +23,12 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
                  ticks either way);
                  then the exported Release FeatureTest that the export stage leaves in bin/Exports/Release/FeatureTest
                  (--headless --frames N, its memory sampled from outside every 0.5 s). hardening.evaluate_soak applies
-                 the rules of decision 15 to each subject, its windows being fractions of the soak whatever N is;
+                 the rules of decision 15 to each subject, its windows being fractions of the soak whatever N is; the
+                 memory rule measures an editor subject's C runtime heap (stats.get's processHeapCommittedBytes), whose
+                 growth in bytes must stay below 1 % of its baseline private bytes, so the memory a graphics driver
+                 commits in heaps of its own fails nothing, and prints its private bytes' growth of 1 % or more as a
+                 WARNING line that fails nothing, counted in the step's summary; the Runtime subject's, and an
+                 editor's without the heap measure, are its private bytes (ADR 0036, "The soak", A-prime);
                  bin/TestResults/Soak.json and Soak-Release.xml record them. A missing or stale package is exit code 3
                  naming Test.py --suite export --config Release --junit. The step has one deadline (soak_timeout(N):
                  TIMEOUTS["soak"] at 10,000 frames, in proportion for a longer soak) for both halves: every call waits
@@ -384,7 +389,9 @@ def stats_sample(position: float, pid: int, stats: dict[str, Any]) -> hardening.
     return hardening.SoakSample(position, memory.private_bytes, memory.resident_bytes, integer("entities"),
                                 integer("bodies"), integer("voices"),
                                 integer("scriptHeapBytes") if stats.get("scriptAvailable", True) else None,
-                                integer("memoryAllocationCount"))
+                                integer("memoryAllocationCount"),
+                                integer("processHeapCommittedBytes") if stats.get("processHeapAvailable") is True
+                                else None)
 
 
 class SoakDeadlinePassed(Exception):
@@ -687,9 +694,19 @@ def write_soak_reports(outcome: SoakOutcome, report: Path, junit: Path, frames: 
                       encoding="utf-8")
     write_junit(junit, "Soak.Release", [
         Step(result.subject, Status.PASSED if result.passed else Status.FAILED,
-             "\n".join(result.failures) if result.failures else f"growth {result.growth * 100:.3f} %",
+             "\n".join(result.failures + tuple(f"warning: {line}" for line in result.warnings)) if result.failures
+             else "\n".join((soak_growth_text(result), *(f"warning: {line}" for line in result.warnings))),
              outcome.seconds.get(result.subject, 0.0))
         for result in outcome.results])
+
+
+def soak_growth_text(result: hardening.SoakResult) -> str:
+    """"<measure> growth <x> %" of a soaked subject, with its private growth beside a heap measure, whose growth is a
+    fraction of the baseline private bytes."""
+    if result.measure == hardening.SOAK_MEASURE_HEAP:
+        return (f"heap growth {result.growth * 100:.3f} % of the private bytes (private growth "
+                f"{result.private_growth * 100:.3f} %)")
+    return f"private growth {result.growth * 100:.3f} %"
 
 
 def run_soak_subjects(subjects: list[SoakSubject], deadline: SoakDeadline, console: Console,
@@ -718,9 +735,11 @@ def run_soak_subjects(subjects: list[SoakSubject], deadline: SoakDeadline, conso
             outcome.seconds[subject.name] = deadline.clock() - started
             if errors and deadline.expired():
                 outcome.timed_out = True
-            console.print(f"  {'passed' if result.passed else 'FAILED'}: growth {result.growth * 100:.3f} % in "
+            console.print(f"  {'passed' if result.passed else 'FAILED'}: {soak_growth_text(result)} in "
                           f"{outcome.seconds[subject.name]:.0f} s"
                           + (f"; {result.failures[0].splitlines()[0]}" if result.failures else ""))
+            for warning in result.warnings:
+                console.print(f"  WARNING: {subject.name}: {warning}")
     finally:
         write_soak_reports(outcome, report, junit, frames)
     return outcome
@@ -733,21 +752,26 @@ def soak_step(name: str, outcome: SoakOutcome, duration: float, partial: str | N
     results = outcome.results
     failed = [result for result in results if not result.passed]
     data = {"report": paths.display_path(report), "junit": paths.display_path(junit),
-            "subjects": [{"subject": result.subject, "growth": result.growth, "passed": result.passed,
-                          "seconds": outcome.seconds.get(result.subject, 0.0), "failures": list(result.failures)}
+            "subjects": [{"subject": result.subject, "measure": result.measure, "growth": result.growth,
+                          "privateGrowth": result.private_growth, "passed": result.passed,
+                          "seconds": outcome.seconds.get(result.subject, 0.0), "failures": list(result.failures),
+                          "warnings": list(result.warnings)}
                          for result in results],
             "notRun": outcome.not_run}
+    warned = sum(1 for result in results if result.warnings)
+    # A heap-measured subject's private growth fails nothing; the summary counts the subjects that showed one.
+    warnings = f"; {warned} subject(s) with a private memory warning" if warned else ""
     if outcome.timed_out:
         return Step(name, Status.TIMEOUT, f"the soak did not finish within {soak_timeout(frames):.0f} s: "
                                           f"{len(results) - len(failed)} of {len(results)} soaked subject(s) passed "
                                           f"and {len(outcome.not_run)} did not run; {paths.display_path(report)} "
-                                          f"holds the soaked ones", duration, data=data)
+                                          f"holds the soaked ones{warnings}", duration, data=data)
     if failed:
         return Step(name, Status.FAILED, f"{len(failed)} of {len(results)} subject(s) failed: {failed[0].subject}: "
-                                         f"{failed[0].failures[0].splitlines()[0]}", duration, data=data)
+                                         f"{failed[0].failures[0].splitlines()[0]}{warnings}", duration, data=data)
     largest = max(results, key=lambda result: result.growth)
-    detail = (f"{len(results)} subject(s) passed every rule over {frames} frames; the largest private "
-              f"memory growth {largest.growth * 100:.3f} % ({largest.subject})")
+    detail = (f"{len(results)} subject(s) passed every rule over {frames} frames; the largest memory growth "
+              f"{largest.growth * 100:.3f} % of the private bytes ({largest.subject}, {largest.measure}){warnings}")
     if partial is not None:
         return Step(name, Status.WARNING, f"{detail}; partial soak (--soak-only {partial})", duration, data=data)
     return Step(name, Status.PASSED, detail, duration, data=data)
@@ -822,6 +846,9 @@ def step_soak(arguments: argparse.Namespace, console: Console) -> Step:
     for result in (result for result in outcome.results if not result.passed):
         for failure in result.failures:
             console.print(f"FAILED: {result.subject}: {failure.splitlines()[0]}")
+    for result in outcome.results:
+        for warning in result.warnings:
+            console.print(f"WARNING: {result.subject}: {warning}")
     if outcome.not_run:
         console.print(f"TIMEOUT: not run: {', '.join(outcome.not_run)}")
     return soak_step(name, outcome, time.monotonic() - started,

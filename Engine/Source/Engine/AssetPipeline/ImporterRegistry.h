@@ -43,13 +43,15 @@ namespace Engine {
 
 	// Registers the built-in importers (§7.4): M6's TextureImporter, GltfImporter, MaterialImporter, SceneImporter,
 	// PrefabImporter and FontImporter, M8's EnvironmentImporter, M12's AudioImporter and SoundEffectImporter, M13's
-	// ScriptImporter and ReplayImporter, M18's SpriteSheetImporter, M21's TilemapImporter and M22's StringTableImporter.
+	// ScriptImporter and ReplayImporter, M18's SpriteSheetImporter, M21's TilemapImporter, M22's StringTableImporter and M24's
+	// GraphImporter.
 	void RegisterBuiltinImporters(ImporterRegistry& registry);
 
 	// Registers every importer's settings struct and enum (§5.4: "every *ImportSettings" is a reflected struct) in the order
 	// of RegisterBuiltinImporters (so M12's AudioImportSettings and the .sfx description structs of SoundEffectImporter.h
-	// come last). The editor's RegisterEditorMethodTypes calls it (asset.getImportSettings and asset.setImportSettings
-	// validate against these types); the registry suite's registry includes it.
+	// follow the others), then M24's .graph document types (RegisterGraphTypes, AssetPipeline/Graph/GraphDocument.h). The
+	// editor's RegisterEditorMethodTypes calls it (asset.getImportSettings and asset.setImportSettings validate against these
+	// types); the registry suite's registry includes it.
 	void RegisterAssetPipelineTypes(TypeRegistry& registry);
 
 }

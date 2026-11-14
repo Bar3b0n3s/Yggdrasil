@@ -48,6 +48,8 @@ namespace Engine {
 				{ ".tilemap", "Tilemap", AssetType::Tilemap },
 				// M22.
 				{ ".stringtable", "StringTable", AssetType::StringTable },
+				// M24: a graph is a Script asset of its own importer (Docs/Decisions/0035-m24-contract.md decision 2).
+				{ ".graph", "Graph", AssetType::Script },
 				// M26 (Docs/Decisions/0037-m26-contract.md decisions 8, 15 and 20).
 				{ ".irradiance", "IrradianceVolume", AssetType::IrradianceVolume },
 				{ ".cube", "Lut", AssetType::Lut },
@@ -68,9 +70,10 @@ namespace Engine {
 			CHECK(importers.FindForExtension(".unknown") == nullptr);
 			CHECK(importers.FindForExtension(".SpriteSheet") == importers.FindById("SpriteSheet"));
 			CHECK(importers.FindForExtension(".StringTable") == importers.FindById("StringTable"));
+			CHECK(importers.FindForExtension(".Graph") == importers.FindById("Graph"));
 			CHECK(importers.FindForExtension(".CUBE") == importers.FindById("Lut"));
 			CHECK(importers.FindForExtension(".HeightField") == importers.FindById("Heightfield"));
-			CHECK(importers.GetImporters().size() == 17);
+			CHECK(importers.GetImporters().size() == 18);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -78,7 +81,7 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 17);
+			REQUIRE(descriptions.size() == 18);
 			CHECK(descriptions.front().Id == "Audio");
 			CHECK(descriptions.back().Id == "Tilemap");
 			for (size_t index = 1; index < descriptions.size(); ++index)
@@ -113,6 +116,11 @@ namespace Engine {
 			CHECK(importers.FindById("StringTable")->GetSettingsTypeName().empty());
 			CHECK(registry->FindStruct("StringTable") != nullptr);
 			CHECK(registry->FindStruct("StringTableEntry") != nullptr);
+			// M24: neither has the graph importer; its document types are registered with the importers' (RegisterGraphTypes).
+			CHECK(importers.FindById("Graph")->GetSettingsTypeName().empty());
+			for (const std::string_view name : { "Graph", "GraphField", "GraphVariable", "GraphNode", "GraphLink", "GraphPinRef" })
+				CHECK_MESSAGE(registry->FindStruct(name) != nullptr, name);
+			CHECK(registry->FindEnum("GraphValueKind") != nullptr);
 			// M26: nor has the irradiance volume importer (a binary source written by lighting.bake).
 			CHECK(importers.FindById("IrradianceVolume")->GetSettingsTypeName().empty());
 			// M26: nor has the heightfield importer; its source is binary samples (Asset/HeightfieldData.h).

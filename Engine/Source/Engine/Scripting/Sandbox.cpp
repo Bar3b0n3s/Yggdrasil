@@ -222,8 +222,7 @@ namespace Engine {
 		Scope<RequireResolver> ReloadResolver{}; // staged graph, then the original graph until FinalizeReload
 		Random LocalRandom{ 0 };
 		Random ReloadRandom{ 0 };
-		Scope<TypeRegistry> OwnedTypes{};
-		Scope<ScriptApiRegistry> OwnedApi{};
+		Scope<PureScriptApi> OwnedApi{};
 		uint64_t Generation = 0;
 		uint64_t NextChunk = 1;
 		uint32_t Budget = 0;
@@ -675,6 +674,25 @@ namespace Engine {
 			Luau::assertHandler() = s_PreviousAssertHandler;
 	}
 
+	PureScriptApi::PureScriptApi(ConstructionKey /*key*/)
+	{
+	}
+
+	PureScriptApi::~PureScriptApi() = default;
+
+	Result<Scope<PureScriptApi>> PureScriptApi::Create()
+	{
+		auto pure = CreateScope<PureScriptApi>(ConstructionKey{});
+		pure->m_Types = CreateScope<TypeRegistry>();
+		// The complete API includes reflected component types and enums even when runtime dispatch is unavailable.
+		// Registration creates immutable metadata only; it neither creates a scene nor borrows a runtime host.
+		RegisterBuiltinComponents(*pure->m_Types);
+		pure->m_Types->Freeze();
+		pure->m_Api = CreateScope<ScriptApiRegistry>();
+		ENGINE_TRY(RegisterBindings(*pure->m_Api, *pure->m_Types));
+		return pure;
+	}
+
 	Sandbox::Sandbox(ConstructionKey)
 		: m_State(CreateScope<State>())
 	{
@@ -722,14 +740,8 @@ namespace Engine {
 		state.Allocator = std::move(allocator);
 		if (!state.Specification.Api)
 		{
-			state.OwnedTypes = CreateScope<TypeRegistry>();
-			// The complete API includes reflected component types and enums even when runtime dispatch is unavailable.
-			// Registration creates immutable metadata only; it neither creates a scene nor borrows a runtime host.
-			RegisterBuiltinComponents(*state.OwnedTypes);
-			state.OwnedTypes->Freeze();
-			state.OwnedApi = CreateScope<ScriptApiRegistry>();
-			ENGINE_TRY(RegisterBindings(*state.OwnedApi, *state.OwnedTypes));
-			state.Specification.Api = state.OwnedApi.get();
+			ENGINE_TRY_ASSIGN(state.OwnedApi, PureScriptApi::Create());
+			state.Specification.Api = &state.OwnedApi->GetApi();
 		}
 		if (!state.Specification.Api->IsFrozen())
 			return MakeError(ErrorCode::InvalidState, "Sandbox requires a frozen script registry");
@@ -796,9 +808,13 @@ namespace Engine {
 		ENGINE_TRY(Detail::SandboxAccess::EnterProtected(*this, m_State->Specification.Engine ? ScriptExecutionOrigin::Gameplay : ScriptExecutionOrigin::Pure));
 		PublicEntry entry{ *this };
 		Status operation{};
-		const auto outcome = m_State->RunNative(m_State->Vm, [this, &script, &operation](ScriptCall& call)
+		// A script's origin (a .luau source, or a graph's transpiled text under its .graph path: the script source rule,
+		// Asset/ScriptData.h) runs as a cached module, which the extraction's PushModuleReturn finds; any other chunk uncached.
+		const Result<VfsPath> origin = VfsPath::Create("project", script.SourceMap.Path);
+		const bool isModule = origin.has_value() && IsScriptSourcePath(*origin);
+		const auto outcome = m_State->RunNative(m_State->Vm, [this, &script, &operation, isModule](ScriptCall& call)
 		{
-			operation = script.SourceMap.Path.ends_with(".luau") ? Detail::SandboxAccess::PushModule(call, script) : m_State->Execute(call, script, std::nullopt);
+			operation = isModule ? Detail::SandboxAccess::PushModule(call, script) : m_State->Execute(call, script, std::nullopt);
 			return 0;
 		});
 		ENGINE_TRY(Utils::CheckOutcome(outcome));
@@ -1115,8 +1131,8 @@ namespace Engine {
 				if (!candidate)
 					return MakeError(ErrorCode::InvalidArgument, "null reload candidate");
 				ENGINE_TRY_ASSIGN(auto path, VfsPath::Parse(std::string("project://") + candidate->SourceMap.Path));
-				if (!path.GetPath().starts_with("Assets/") || !path.GetPath().ends_with(".luau"))
-					return MakeError(ErrorCode::Validation, "reload candidates require canonical Assets .luau paths");
+				if (!IsScriptSourcePath(path))
+					return MakeError(ErrorCode::Validation, "reload candidates require canonical Assets .luau or .graph paths");
 				if (std::ranges::any_of(pinned, [&candidate](const auto& item)
 				{
 					return item.Data->SourceMap.Path == candidate->SourceMap.Path;
@@ -1193,8 +1209,7 @@ namespace Engine {
 				return !item.Evaluated;
 			}))
 				return MakeError(ErrorCode::InvalidState, "all reload candidates must succeed before sealing the cache");
-			if (path.GetScheme() != "project" || !path.GetPath().starts_with("Assets/") || !path.GetPath().ends_with(".luau")
-				|| lua_type(call.State, valueIndex) == LUA_TNONE)
+			if (!IsScriptSourcePath(path) || lua_type(call.State, valueIndex) == LUA_TNONE)
 				return MakeError(ErrorCode::InvalidArgument, "invalid staged module path or value");
 			state.CacheValue(call.State, path.GetPath(), valueIndex);
 			return state.Poll();

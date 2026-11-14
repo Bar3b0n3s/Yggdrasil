@@ -2,6 +2,7 @@
 #include "EditorCore/Scripting/ScriptTypeChecker.h"
 
 #include "EditorCore/Scripting/Private/ScriptValidation.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/BinaryWriter.h"
 #include "Engine/Core/Hash.h"
@@ -23,8 +24,10 @@
 #include <Luau/TypeArena.h>
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <set>
 #include <tuple>
 #include <vector>
@@ -387,11 +390,66 @@ namespace Engine {
 
 	}
 
+	// The prepared frontends (Docs/Decisions/0041-script-check-performance.md decision 1): building a frontend and loading
+	// the builtin globals and the definitions into it was most of every check's cost, so a checker prepares them once per
+	// frontend and leases each to one check at a time.
 	struct ScriptTypeChecker::State
 	{
+		State()
+		{
+			IdleConfigs.defaultConfig.mode = Luau::Mode::Strict; // CheckerConfigResolver's default, as before
+		}
+
+		// A frontend with the builtin globals and the definitions loaded and frozen (LoadCheckerDefinitions), no module, and
+		// the idle resolvers. Throws Luau::InternalCompilerError as analysis does.
+		Result<Scope<Luau::Frontend>> Prepare()
+		{
+			Luau::FrontendOptions options;
+			options.runLintChecks = true;
+			auto frontend = CreateScope<Luau::Frontend>(Luau::SolverMode::New, &IdleFiles, &IdleConfigs, options);
+			DefinitionLoads.fetch_add(1, std::memory_order_relaxed);
+			ENGINE_TRY(Utils::LoadCheckerDefinitions(*frontend, Definitions));
+			return frontend;
+		}
+
+		// An idle prepared frontend for one check, or a newly prepared one when every prepared frontend is in use.
+		Result<Scope<Luau::Frontend>> Lease()
+		{
+			{
+				std::scoped_lock lock(PoolMutex);
+				if (!Pool.empty())
+				{
+					Scope<Luau::Frontend> frontend = std::move(Pool.back());
+					Pool.pop_back();
+					return frontend;
+				}
+			}
+			return Prepare();
+		}
+
+		// Takes back a frontend whose check completed, without the check's modules, sources, require traces, require-cycle
+		// groups (which Frontend::clear keeps until the next check computes its own) and resolvers: what the next check
+		// leases holds only what Prepare loaded.
+		void Return(Scope<Luau::Frontend> frontend)
+		{
+			frontend->clear();
+			frontend->sccs.clear();
+			frontend->fileResolver = &IdleFiles;
+			frontend->configResolver = &IdleConfigs;
+			std::scoped_lock lock(PoolMutex);
+			Pool.push_back(std::move(frontend));
+		}
+
 		std::string Definitions{};
 		ScriptTypeCheckerConfiguration Configuration{};
 		uint64_t EnvironmentHash = 0;
+		// What an idle frontend reads; stateless, so every idle frontend shares them.
+		Luau::NullFileResolver IdleFiles{};
+		Luau::NullConfigResolver IdleConfigs{};
+		std::mutex PoolMutex{};
+		std::vector<Scope<Luau::Frontend>> Pool{}; // the idle prepared frontends, guarded by PoolMutex
+		std::atomic<uint64_t> Checks = 0;
+		std::atomic<uint64_t> DefinitionLoads = 0;
 	};
 
 	ScriptTypeChecker::ScriptTypeChecker(ConstructionKey /*key*/)
@@ -445,32 +503,34 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(std::string definitions, api.GenerateDefinitions());
 		if (!IsValidUtf8(definitions) || definitions.size() > std::numeric_limits<uint32_t>::max())
 			return MakeError(ErrorCode::Validation, "generated definitions must be bounded UTF-8");
+		// v2: only present configuration files are hashed (Docs/Decisions/0041-script-check-performance.md decision 2).
+		BinaryWriter fingerprint;
+		fingerprint.WriteString("Luau-0.741/New/Strict/RelativeAssets/v2");
+		fingerprint.WriteString(definitions);
+		for (const auto& file : configuration.Files)
+		{
+			// An absent file configures nothing (CheckerConfigResolver reads present files only), so a directory without a
+			// .luaurc changes no check and no hash.
+			if (!file.Source)
+				continue;
+			fingerprint.WriteString(file.Path.ToString());
+			fingerprint.WriteString(*file.Source);
+		}
+		auto checker = CreateScope<ScriptTypeChecker>(ConstructionKey{});
+		State& state = *checker->m_State;
+		state.Definitions = std::move(definitions);
+		state.Configuration = std::move(configuration);
+		state.EnvironmentHash = XXH64(fingerprint.GetData());
+		// The first prepared frontend validates the definitions; the first check leases it.
 		try
 		{
-			Luau::NullFileResolver files;
-			Luau::NullConfigResolver configs;
-			configs.defaultConfig.mode = Luau::Mode::Strict;
-			Luau::Frontend frontend(Luau::SolverMode::New, &files, &configs);
-			ENGINE_TRY(Utils::LoadCheckerDefinitions(frontend, definitions));
+			ENGINE_TRY_ASSIGN(Scope<Luau::Frontend> frontend, state.Prepare());
+			state.Return(std::move(frontend));
 		}
 		catch (const Luau::InternalCompilerError& error)
 		{
 			return MakeError(ErrorCode::Validation, "definition analysis failed: {}", error.what());
 		}
-		BinaryWriter fingerprint;
-		fingerprint.WriteString("Luau-0.741/New/Strict/RelativeAssets/v1");
-		fingerprint.WriteString(definitions);
-		for (const auto& file : configuration.Files)
-		{
-			fingerprint.WriteString(file.Path.ToString());
-			fingerprint.WriteBool(file.Source.has_value());
-			if (file.Source)
-				fingerprint.WriteString(*file.Source);
-		}
-		auto checker = CreateScope<ScriptTypeChecker>(ConstructionKey{});
-		checker->m_State->Definitions = std::move(definitions);
-		checker->m_State->Configuration = std::move(configuration);
-		checker->m_State->EnvironmentHash = XXH64(fingerprint.GetData());
 		return checker;
 	}
 
@@ -479,11 +539,17 @@ namespace Engine {
 		return m_State->EnvironmentHash;
 	}
 
+	ScriptTypeCheckerStatistics ScriptTypeChecker::GetStatistics() const
+	{
+		return { .Checks = m_State->Checks.load(std::memory_order_relaxed), .DefinitionLoads = m_State->DefinitionLoads.load(std::memory_order_relaxed) };
+	}
+
 	std::vector<ScriptDiagnostic> ScriptTypeChecker::CheckScript(const ScriptCheckRequest& request)
 	{
 		std::vector<ScriptDiagnostic> findings;
 		const std::string root = request.Path.ToString();
-		if (!IsScriptingRuntimeInitialized() || request.Modules == nullptr || request.Path.GetScheme() != "project" || !request.Path.GetPath().starts_with("Assets/") || request.Path.GetExtension() != ".luau" || !IsValidUtf8(request.Source) || request.Source.size() > std::numeric_limits<uint32_t>::max())
+		// The script source rule (Asset/ScriptData.h): a .luau source, or a graph's transpiled text under its .graph path.
+		if (!IsScriptingRuntimeInitialized() || request.Modules == nullptr || !IsScriptSourcePath(request.Path) || !IsValidUtf8(request.Source) || request.Source.size() > std::numeric_limits<uint32_t>::max())
 			return { Utils::CheckerError(root, "invalid script check request or scripting runtime is not initialized") };
 		// A script that declares a type function is refused before the frontend parses it (RefuseTypeFunctions); its required
 		// modules are refused as the frontend reads them (CheckerFileResolver::readSource).
@@ -501,12 +567,14 @@ namespace Engine {
 			// functions, the only user code analysis would run (and the only work no complexity limit bounds), never reach the
 			// frontend (RefuseTypeFunctions). Luau's complexity limits, which count work instead of time, bound the rest of
 			// every analysis; what they cut short is reported deterministically as a type error at the offending location.
-			Luau::FrontendOptions options;
-			options.runLintChecks = true;
-			Luau::Frontend frontend(Luau::SolverMode::New, &files, &configs, options);
-			const auto definitions = Utils::LoadCheckerDefinitions(frontend, m_State->Definitions);
-			if (!definitions)
-				return { Utils::CheckerError(root, definitions.error().GetMessageText()) };
+			// The leased frontend is this call's alone until Return; if analysis throws, it is dropped with what it holds.
+			auto leased = m_State->Lease();
+			if (!leased)
+				return { Utils::CheckerError(root, leased.error().GetMessageText()) };
+			m_State->Checks.fetch_add(1, std::memory_order_relaxed);
+			Luau::Frontend& frontend = **leased;
+			frontend.fileResolver = &files;
+			frontend.configResolver = &configs;
 			const auto result = frontend.check(root);
 			for (const auto& error : result.errors)
 			{
@@ -533,6 +601,7 @@ namespace Engine {
 				findings.push_back(std::move(diagnostic));
 			}
 			files.ReportCycles();
+			m_State->Return(std::move(*leased));
 		}
 		catch (const Luau::InternalCompilerError& error)
 		{

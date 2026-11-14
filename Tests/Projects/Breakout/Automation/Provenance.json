@@ -252,11 +252,11 @@
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene",
-			"XXH64": "d68425e3bf5595eb",
+			"XXH64": "6dbcbb28f7ea90c6",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 403
+			"TranscriptLine": 449
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene.meta",

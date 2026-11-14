@@ -1,42 +1,41 @@
 --!strict
-local Board = {}
+export type Controls = {
+	Left: boolean,
+	Right: boolean,
+	LeftPressed: boolean,
+	RightPressed: boolean,
+	SoftDrop: boolean,
+	HardDrop: boolean,
+	RotateCW: boolean,
+	RotateCCW: boolean,
+	Hold: boolean,
+}
 
-function Board.GravityTicksForLevel(level: number): number
-	return math.max(1, 48 - level * 5)
-end
+export type Match = {
+	GameOver: boolean,
+	Events: { string },
+	Step: (self: Match, controls: Controls) -> (),
+	Reset: (self: Match) -> (),
+}
 
 export type Game = ScriptInstance & {
-	GameOver: boolean,
-	GravityTicks: number,
-	Level: number,
-	Reset: (self: Game) -> (),
-	HandleShift: (self: Game) -> (),
-	TryRotate: (self: Game, direction: number) -> boolean,
-	TryMove: (self: Game, columns: number, rows: number) -> boolean,
-	HardDrop: (self: Game) -> (),
-	BeginLockDelay: (self: Game) -> (),
+	Match: Match,
+	Controls: Controls,
+	RestartClicked: boolean,
+	Restarts: number,
 }
 
 local Game = {}
 
-function Game.Reset(self: Game)
-	self.GameOver = false
-	self.GravityTicks = 0
+local function onEvent(self: Game, event: string)
+	if event == "GameOver" then
+		self.RestartClicked = false
+	end
 end
 
-function Game.HandleShift(self: Game) end
-
-function Game.TryRotate(self: Game, direction: number): boolean
-	return direction ~= 0
+local function refresh(self: Game)
+	self.Controls.Hold = false
 end
-
-function Game.TryMove(self: Game, columns: number, rows: number): boolean
-	return columns ~= 0 or rows ~= 0
-end
-
-function Game.HardDrop(self: Game) end
-
-function Game.BeginLockDelay(self: Game) end
 
 -- @example
 

@@ -27,7 +27,7 @@ namespace Engine {
 
 		// Authored-format extensions (§6), as in Scripts/ModuleRules.json "Json".
 		const std::vector<std::string> AuthoredExtensions = { ".eproj", ".scene", ".prefab", ".material", ".sfx", ".meta", ".replay", ".spritesheet", ".tilemap",
-			".stringtable" };
+			".stringtable", ".graph" };
 
 		// Whether `text` is its own canonical JsonWriter form.
 		void CheckCanonical(const std::string& label, const std::string& text)

@@ -40,9 +40,18 @@ Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, Docs/Decis
 the editor exits, however it exits (Launcher.release_when_exits), or until the bridge itself exits: an editor left
 running with unsaved changes when the MCP client goes away holds none (Docs/Architecture.md §2.3). Under a process that
 already holds the lock (the automation suite's Test.py, whose bridge tests launch rendering editors) the launch runs
-under that hold and waits for nothing. A wait reports the holder (pid, worktree, command) on the bridge's log and lasts
-at most the launcher's lock_wait_seconds (LOCK_WAIT_SECONDS by default); then the launch fails with LockUnavailable
-naming the holder, and no editor is spawned. Attaching takes no lock: the attached editor is not the bridge's.
+under that hold and waits for nothing. The wait tries the lock without waiting (locks' no-wait acquisition) every
+WAIT_POLL_SECONDS, so it can end between two tries when the launch's tool call is cancelled. While it waits, the
+launcher's current activity (Activity) is the wait (LockWait: the lock, its holder's pid, worktree and command, when the
+wait began and its bound), which the server's progress notifications carry to the client with the seconds waited
+counted when each is sent (server.py, "Progress"); the bridge's log gets the same report when the wait starts, when the
+holder changes and every locks.REPORT_SECONDS. A wait lasts at most the launcher's lock_wait_seconds (LOCK_WAIT_SECONDS
+by default); then the launch fails with LockUnavailable naming the holder, and no editor is spawned. A launch whose tool
+call the client cancels (the server sets the call's cancel event) ends its wait at the next try and raises
+LaunchCancelled: it spawns nothing, and a lock it took as the call was cancelled is released again (a hold under an
+ancestor's releases nothing of that hold), so the bridge is free for the next call at once
+(Docs/Decisions/0036-m25-tetris-pixel-art.md, the milestone review). Attaching takes no lock: the attached editor is not
+the bridge's.
 """
 
 from __future__ import annotations
@@ -51,8 +60,9 @@ import dataclasses
 import logging
 import os
 import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import engine_client
 from engine_mcp.connection import EditorConnection
@@ -62,11 +72,21 @@ from Lib import locks
 ALREADY_OPEN_HINT = "enable Allow AI automation in the editor's Automation panel, then call editor_attach"
 PROJECT_FILE_EXTENSION = ".eproj"
 RENDERERS = ("vulkan", "none")
-# How long editor_launch waits for a running gate or GPU run before it fails naming the holder.
-LOCK_WAIT_SECONDS = 1800.0
+# How long editor_launch waits for a running gate or GPU run before it fails naming the holder: 25 min, below the
+# 30 min (1,800 s) a Claude Code client waits for a tool call that sends it nothing, so a client that asks for no
+# progress notifications still receives the LockUnavailable that names the holder (Docs/Decisions/
+# 0036-m25-tetris-pixel-art.md, friction F14).
+LOCK_WAIT_SECONDS = 1500.0
+# How long a launch's wait for a machine-wide lock pauses between two no-wait tries of it (locks' own poll interval),
+# and so the longest it keeps waiting once its tool call is cancelled, besides one try's settle polls.
+WAIT_POLL_SECONDS = locks.POLL_SECONDS
 # How long editor_status waits for each running editor's connection and session.info (Launcher.running_editors).
 PROBE_TIMEOUT_SECONDS = 5.0
 LOGGER = logging.getLogger("engine_mcp")
+
+
+def _unreported(message: str) -> None:
+    """The reporter of locks' no-wait tries, which report nothing (Launcher.wait_for_lock reports the wait itself)."""
 
 
 @dataclasses.dataclass(eq=False)
@@ -81,6 +101,52 @@ class EditorAlreadyOpen(Exception):
     def to_json(self) -> dict[str, Any]:
         """{"error": "EditorAlreadyOpen", "pid": pid, "hint": ALREADY_OPEN_HINT}."""
         return {"error": "EditorAlreadyOpen", "pid": self.pid, "hint": ALREADY_OPEN_HINT}
+
+
+@dataclasses.dataclass(frozen=True)
+class LockWait:
+    """editor_launch's wait for a machine-wide lock: what it waits for (locks' description: "gpu lock", "end of the
+    running gate"), the lock in the way and its holders (pid, worktree, command, since), when the wait began
+    (time.monotonic()) and its bound in seconds."""
+
+    description: str
+    lock: str
+    holders: str
+    started: float
+    bound: float
+
+    def describe(self, now: float) -> str:
+        """The wait's report, worded as locks' own, with the seconds waited counted at `now` (time.monotonic())."""
+        return (f"Waiting for the {self.description} ({now - self.started:.0f} s of at most {self.bound:.0f} s): the "
+                f"{self.lock} lock is held by {self.holders}")
+
+
+class Activity:
+    """What the running tool call is doing beyond running: editor_launch's wait for a machine-wide lock while it waits,
+    none otherwise. The worker thread that runs the call sets it, and the server's event loop reads it for the call's
+    progress notifications, so a lock guards it."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._wait: LockWait | None = None
+
+    def set(self, wait: LockWait | None) -> None:
+        with self._lock:
+            self._wait = wait
+
+    def read(self, now: float | None = None) -> str:
+        """The wait's report with the seconds waited counted at `now` (default: the current time.monotonic()), so each
+        progress notification counts them when it is sent; "" when no wait runs."""
+        with self._lock:
+            wait = self._wait
+        if wait is None:
+            return ""
+        return wait.describe(time.monotonic() if now is None else now)
+
+
+class LaunchCancelled(Exception):
+    """editor_launch's tool call was cancelled while the launch waited for a machine-wide lock: nothing was spawned, and
+    a lock taken as it was cancelled was released again."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -123,6 +189,8 @@ class Launcher:
         self.configurations = configurations
         # The bound of a launch's wait for the machine-wide locks (0: fail at once when one is held).
         self.lock_wait_seconds = lock_wait_seconds
+        # The latest report of a launch's wait for those locks while it waits (take_machine_locks).
+        self.activity = Activity()
 
     @property
     def app_name(self) -> str:
@@ -137,10 +205,12 @@ class Launcher:
         project = project.expanduser()
         return (project if project.is_absolute() else self.repository_root / project).resolve()
 
-    def launch(self, request: LaunchRequest) -> EditorConnection:
-        """editor_launch (see the module comment). Raises EditorAlreadyOpen, FileNotFoundError for a missing binary,
-        locks.LockUnavailable when a gate or another GPU run kept the machine-wide locks for lock_wait_seconds (nothing
-        is spawned then), or RuntimeError when the spawned editor exits before it listens (with its exit code), when
+    def launch(self, request: LaunchRequest, cancelled: threading.Event | None = None) -> EditorConnection:
+        """editor_launch (see the module comment); `cancelled` is set when the client cancels the tool call. Raises
+        EditorAlreadyOpen, FileNotFoundError for a missing binary, locks.LockUnavailable when a gate or another GPU run
+        kept the machine-wide locks for lock_wait_seconds, LaunchCancelled when `cancelled` was set while the launch
+        waited for them (nothing is spawned then), or RuntimeError when the spawned editor exits before it listens (with
+        its exit code), when
         project.create or project.open fails (a locked or invalid project, a refused recovery), or when recover asks to
         adopt an autosave that an editor already serving the project holds. Whatever else the project.create,
         project.open or session.info of a spawned editor raises (a timeout, a broken connection) propagates after that
@@ -168,7 +238,7 @@ class Launcher:
         # the creation or the open (the .meta files the open's scan writes for new sources) is attributed to it.
         executable = engine_client.find_editor_executable(self.repository_root, self.configurations)
         arguments = ["--automation", "--renderer", request.renderer, *(["--headless"] if request.headless else [])]
-        hold = self.take_machine_locks(request.renderer, project)
+        hold = self.take_machine_locks(request.renderer, project, cancelled)
         try:
             editor = engine_client.launch_editor(executable, arguments, self.user_data_directory(), self.app_name)
         except BaseException:
@@ -269,15 +339,63 @@ class Launcher:
 
     # ----------------------------------------------------------------------------------------------------------------
 
-    def take_machine_locks(self, renderer: str, project: Path) -> locks.Hold | None:
+    def take_machine_locks(self, renderer: str, project: Path,
+                           cancelled: threading.Event | None = None) -> locks.Hold | None:
         """Before an editor is spawned: the GPU lock for a rendering editor (the caller hands it to
-        release_when_exits), or for any other only the wait until no gate runs. Raises locks.LockUnavailable after
-        lock_wait_seconds."""
+        release_when_exits), or for any other only the wait until no gate runs (wait_for_lock). Raises
+        locks.LockUnavailable after lock_wait_seconds, or LaunchCancelled once `cancelled` is set."""
         if renderer == "vulkan":
             command = f"MCP bridge (pid {os.getpid()}): a rendering editor for {project}"
-            return locks.acquire_gpu(self.lock_wait_seconds, LOGGER.info, command)
-        locks.wait_for_gate(self.lock_wait_seconds, LOGGER.info)
-        return None
+            return self.wait_for_lock(f"{locks.GPU} lock", lambda: locks.acquire_gpu(0.0, _unreported, command),
+                                      cancelled)
+        return self.wait_for_lock("end of the running gate", lambda: locks.wait_for_gate(0.0, _unreported), cancelled)
+
+    def wait_for_lock(self, description: str, attempt: Callable[[], locks.Hold | None],
+                      cancelled: threading.Event | None) -> locks.Hold | None:
+        """Tries `attempt` (one of locks' no-wait acquisitions, which raises LockUnavailable when the lock is held)
+        every WAIT_POLL_SECONDS until it succeeds, lock_wait_seconds have passed (LockUnavailable naming the holders
+        and the seconds waited) or `cancelled` is set (LaunchCancelled). A hold taken just as `cancelled` was set is
+        released again, which releases nothing of an ancestor's hold (locks.Hold). While it waits, the wait is the
+        current activity, and its report goes to the bridge's log when it starts, when the holders change and every
+        locks.REPORT_SECONDS."""
+        started = time.monotonic()
+        logged: str | None = None
+        next_log = started
+        try:
+            while True:
+                if cancelled is not None and cancelled.is_set():
+                    raise LaunchCancelled(f"editor_launch was cancelled while it waited for the {description}; "
+                                          "nothing was spawned")
+                try:
+                    hold = attempt()
+                except locks.LockUnavailable as error:
+                    now = time.monotonic()
+                    if now - started >= self.lock_wait_seconds:
+                        raise locks.LockUnavailable(error.lock, error.holders, now - started,
+                                                    timed_out=self.lock_wait_seconds > 0) from None
+                    holders = "; ".join(holder.describe() for holder in error.holders) or "another process"
+                    wait = LockWait(description, error.lock, holders, started, self.lock_wait_seconds)
+                    self.activity.set(wait)
+                    if holders != logged or now >= next_log:
+                        LOGGER.info("%s", wait.describe(now))
+                        logged = holders
+                        next_log = now + locks.REPORT_SECONDS
+                    pause = min(WAIT_POLL_SECONDS, max(0.0, started + self.lock_wait_seconds - now))
+                    if cancelled is not None:
+                        cancelled.wait(pause)
+                    else:
+                        time.sleep(pause)
+                    continue
+                if cancelled is not None and cancelled.is_set():
+                    if hold is not None:
+                        hold.release()
+                    raise LaunchCancelled(f"editor_launch was cancelled as it took the {description}; nothing was "
+                                          "spawned, and the lock was released")
+                if logged is not None:
+                    LOGGER.info("Took the %s after waiting %.0f s", description, time.monotonic() - started)
+                return hold
+        finally:
+            self.activity.set(None)
 
     @staticmethod
     def release_when_exits(editor: engine_client.EditorProcess, hold: locks.Hold) -> threading.Thread:

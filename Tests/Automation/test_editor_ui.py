@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 import unittest
 from pathlib import Path
@@ -176,6 +177,19 @@ class EditorUiTests(AutomationTestCase):
         client.call("play.stop")
         self.assertEqual(client.call("stats.get")["droppedSeconds"], 0)
 
+    def test_host_statistics_report_the_c_runtime_heap(self) -> None:
+        # ADR 0036, "The soak": stats.get reports the committed bytes of the heap the C runtime allocates from,
+        # which the hardening soak's memory rule measures; Windows has the measure, Linux and macOS report it
+        # unavailable (ADR 0028 decision 10). An editor's heap holds its open project, far above a mebibyte.
+        client, _ = self.open_editor_with_scene()
+        stats = client.call("stats.get")
+        if sys.platform == "win32":
+            self.assertIs(stats["processHeapAvailable"], True)
+            self.assertGreater(stats["processHeapCommittedBytes"], 1 << 20)
+        else:
+            self.assertIs(stats["processHeapAvailable"], False)
+            self.assertEqual(stats["processHeapCommittedBytes"], 0)
+
     def test_editor_screenshot_after_pipelined_mutation_is_fresh(self) -> None:
         if not self.require_gpu():
             return
@@ -253,6 +267,77 @@ class EditorUiTests(AutomationTestCase):
         client.call("scene.activate", {"scene": second})
         self.assertTrue(client.call("editor.state")["sceneChangedOnDisk"])
         self.assertEqual(client.call("editor.state")["selection"], [])
+
+    def test_graph_editor_batches_are_calls_an_agent_makes(self) -> None:
+        """Every action of the Graph Editor's canvas and of the inspector's script slots that changes a graph submits a
+        method an agent calls the same way (ADR 0035 decision 15; EditorCore/Graph/GraphEditorRequests.h and
+        EditorCore/Inspector/ScriptSlotList.h): a node added linked to a dropped pin is one edit.batch of graph.addNode
+        and graph.connect naming the new node with a named $ref, a duplicate one edit.batch of graph.addNode and
+        graph.connect ops, a link moved to another input one edit.batch of graph.disconnect and graph.connect, and New
+        graph... one edit.batch of graph.create and the slot's entity.update naming the new graph, each one undo step.
+        Opening the window and its fields are presentation without a method (decision 16), so the window itself, which
+        is no panel, and its literal field, which writes a float's shortest spelling, are proven in the C++ cases that
+        draw it: EditorLayerTests' "a graph double-clicked in the content browser opens in the Graph Editor window,
+        which is no panel" and GraphEditorPanelTests' "a number literal typed into its field is written as the float's
+        shortest spelling"."""
+        client, root = self.open_editor_with_scene()
+        graph = "Assets/Scripts/Door.graph"
+        client.call("graph.create", {"path": graph})
+        start = client.call("graph.addNode", {"graph": graph, "kind": "Event.OnStart", "position": [0, 0]})["node"]
+        linked = client.call("edit.batch", {"label": "Add Linked Graph Node", "ops": [
+            {"method": "graph.addNode", "name": "node",
+             "params": {"graph": graph, "kind": "Call.Log.Info", "position": [240, 0], "values": {}}},
+            {"method": "graph.connect", "params": {"graph": graph, "from": {"Node": start, "Pin": "Then"},
+                                                   "to": {"Node": {"$ref": "node.node"}, "Pin": "In"}}}]})
+        log = linked["results"][0]["node"]
+        self.assertGreater(linked["undoIndex"], 0)
+        built = (root / graph).read_bytes()
+
+        duplicated = client.call("edit.batch", {"label": "Duplicate Graph Nodes", "ops": [
+            {"method": "graph.addNode", "name": f"n{start}",
+             "params": {"graph": graph, "kind": "Event.OnStart", "position": [32, 32], "values": {}}},
+            {"method": "graph.addNode", "name": f"n{log}",
+             "params": {"graph": graph, "kind": "Call.Log.Info", "position": [272, 32], "values": {}}},
+            {"method": "graph.connect", "params": {"graph": graph,
+                                                   "from": {"Node": {"$ref": f"n{start}.node"}, "Pin": "Then"},
+                                                   "to": {"Node": {"$ref": f"n{log}.node"}, "Pin": "In"}}}]})
+        self.assertGreater(duplicated["undoIndex"], 0)
+        document = client.call("graph.read", {"graph": graph})["document"]
+        self.assertEqual(len(document["Nodes"]), 4)
+        self.assertEqual(len(document["Links"]), 2)
+        client.call("edit.undo")
+        self.assertEqual((root / graph).read_bytes(), built)
+
+        # A link moved to another input: refused onto an input that cannot take it, the batch undoes its disconnect.
+        number = client.call("graph.addNode", {"graph": graph, "kind": "Number.Add", "position": [0, 200]})["node"]
+        branch = client.call("graph.addNode", {"graph": graph, "kind": "Flow.Branch", "position": [240, 200]})["node"]
+        client.call("graph.connect", {"graph": graph, "from": {"Node": number, "Pin": "Result"},
+                                      "to": {"Node": log, "Pin": "Values"}})
+        linked = (root / graph).read_bytes()
+        with self.assertRaises(engine_client.EngineError):
+            client.call("edit.batch", {"label": "Move Graph Link", "ops": [
+                {"method": "graph.disconnect", "params": {"graph": graph, "from": {"Node": number, "Pin": "Result"},
+                                                          "to": {"Node": log, "Pin": "Values"}}},
+                {"method": "graph.connect", "params": {"graph": graph, "from": {"Node": number, "Pin": "Result"},
+                                                       "to": {"Node": branch, "Pin": "Condition"}}}]})
+        self.assertEqual((root / graph).read_bytes(), linked)
+
+        # New graph... in a script slot: the graph and the slot's assignment are one undo step.
+        holder = client.call("entity.create", {"name": "Holder", "components": {"Script": {"Scripts": [{}]}}})
+        entity = holder["entity"]["id"]
+        before = client.call("entity.get", {"entity": entity})["entity"]["components"]["Script"]
+        created = client.call("edit.batch", {"label": "New Graph", "ops": [
+            {"method": "graph.create", "name": "graph", "params": {"path": "Assets/Scripts/Holder.graph"}},
+            {"method": "entity.update", "params": {"entity": entity, "components": {"Script": {"Scripts": [
+                {"Script": {"$ref": "graph.graph.id"}, "Fields": {}, "ExecutionOrder": 0}]}}, "target": "Edit"}}]})
+        self.assertGreater(created["undoIndex"], 0)
+        new_graph = created["results"][0]["graph"]["id"]
+        slots = client.call("entity.get", {"entity": entity})["entity"]["components"]["Script"]["Scripts"]
+        self.assertEqual(slots[0]["Script"], new_graph)
+        self.assertTrue((root / "Assets/Scripts/Holder.graph").is_file())
+        client.call("edit.undo")
+        self.assertFalse((root / "Assets/Scripts/Holder.graph").exists())
+        self.assertEqual(client.call("entity.get", {"entity": entity})["entity"]["components"]["Script"], before)
 
 
 if __name__ == "__main__":

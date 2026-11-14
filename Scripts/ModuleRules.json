@@ -790,7 +790,8 @@
 			".replay",
 			".spritesheet",
 			".tilemap",
-			".stringtable"
+			".stringtable",
+			".graph"
 		],
 		"LineDelimitedExtensions": [
 			".jsonl"

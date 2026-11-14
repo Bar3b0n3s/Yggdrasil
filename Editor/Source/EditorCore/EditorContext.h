@@ -49,10 +49,13 @@ namespace Engine {
 	class EditorPlayController;
 	class EditorSceneTargetScope;
 	class EditorScriptService;
+	class ScriptApiRegistry;
 	class ScriptTypeChecker;
 	class ScriptFieldSchemaSource;
 	class EditorTransaction;
 	class EngineContext;
+	class GraphLiveCache;
+	class GraphNodeLibrary;
 	class IEnvironmentBaker;
 	class IMount;
 	class INativeBuildBackend;
@@ -63,6 +66,7 @@ namespace Engine {
 	class Prefab;
 	class ProbeCapture;
 	class ProjectSettingsCommand;
+	class PureScriptApi;
 	class SceneEdit;
 	class TypeRegistry;
 	class VirtualFileSystem;
@@ -200,17 +204,17 @@ namespace Engine {
 			friend class EditorContext;
 		};
 
-		// Use Create, which resolves the id generator's state.
+		// Use Create, which resolves the id generator's state and builds the load-time script API.
 		EditorContext(ConstructionKey key, EngineContext& engine, const EditorContextSpecification& specification,
-			const Random::State& idGeneratorState);
+			const Random::State& idGeneratorState, Scope<PureScriptApi> loadTimeScriptApi);
 		~EditorContext();
 
 		EditorContext(const EditorContext&) = delete;
 		EditorContext& operator=(const EditorContext&) = delete;
 
 		// An editor without a project (the launcher state, §12.1) over `engine` (a documented back-reference that outlives
-		// the editor; its TypeRegistry holds the editor's automation types). Errors: those of SecureRandom::GenerateState (Io)
-		// when the specification gives no IdGeneratorState.
+		// the editor; its TypeRegistry holds the editor's automation types). Errors: those of PureScriptApi::Create; those of
+		// SecureRandom::GenerateState (Io) when the specification gives no IdGeneratorState.
 		[[nodiscard]] static Result<Scope<EditorContext>> Create(EngineContext& engine, const EditorContextSpecification& specification);
 
 		// Services, from the engine context.
@@ -235,9 +239,26 @@ namespace Engine {
 		// Observes the service initialized by OpenProject; never creates or replaces state through a const editor.
 		// Configuration snapshots are refreshed by Update and the mutable accessor before mutable host operations.
 		[[nodiscard]] const EditorScriptService* GetScriptService() const;
+		// The type checker the script service and the imports use (its environment hash and statistics), null whenever the
+		// const GetScriptService is; the mutable GetScriptService replaces it when a present .luaurc was added, changed or
+		// removed.
+		[[nodiscard]] const ScriptTypeChecker* GetScriptChecker() const { return m_ScriptChecker.get(); }
+		// The frozen pure script API (PureScriptApi, Engine/Scripting/Sandbox.h) every load-time VM of the editor's script
+		// imports borrows, the asset manager's and the script service's alike (Docs/Decisions/0041-script-check-performance.md
+		// decision 3); built once by Create, valid for the editor's lifetime.
+		[[nodiscard]] ScriptApiRegistry& GetLoadTimeScriptApi();
 		// Pinned current cooked schemas; caller retains this snapshot through reflection/UI work. Failed imports
 		// preserve their last good artifact; unknown scripts remain unresolved instead of inventing descriptors.
 		[[nodiscard]] Result<Ref<const ScriptFieldSchemaSource>> GetScriptSchemaSnapshot() const;
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 13): the graph node library of the engine's frozen script API
+		// registry, the same library the graph importer builds from GetLoadTimeScriptApi's. It is built at its first use and
+		// kept for the editor's lifetime, since the registry never changes once frozen, so the graph methods do not build it again
+		// for every request. Main thread only; the pointer is valid for the editor's lifetime. Errors: GraphNodeLibrary::Create's.
+		[[nodiscard]] Result<const GraphNodeLibrary*> GetGraphNodeLibrary();
+		// M24 (decision 14, W24.2's review): what graph.liveValues keeps of each graph it reads between its calls, which the
+		// Graph Editor and the inspector make once a frame during play (EditorCore/Graph/GraphLiveCache.h): every entry holds
+		// only while its graph is unchanged. Created at its first use; CloseProject empties it. Main thread only.
+		[[nodiscard]] GraphLiveCache& GetGraphLiveCache();
 		// M12: the asset browser's audio preview (EditorCore/Audio/AudioPreview.h) over the engine context's AudioEngine;
 		// nullptr when the engine context has none (most in-process tests). Valid for the editor's lifetime; CloseProject
 		// stops it.
@@ -726,12 +747,16 @@ namespace Engine {
 		EditorContextSpecification m_Specification;
 		EditorLifecycleCallbacks m_Lifecycle{};
 		UUIDGenerator m_IdGenerator;
+		// GetLoadTimeScriptApi's, before the asset services that borrow it, so it is destroyed after them.
+		Scope<PureScriptApi> m_LoadTimeScriptApi;
 		// The asset services (M6), after the generator the manager draws handles from, so they are destroyed before it.
 		Scope<ImporterRegistry> m_Importers;
 		Scope<AssetLoaderRegistry> m_Loaders;
 		Scope<EditorAssetManager> m_Assets;
 		Scope<ScriptTypeChecker> m_ScriptChecker;
 		Scope<EditorScriptService> m_ScriptService;
+		Scope<GraphNodeLibrary> m_GraphNodeLibrary; // M24: GetGraphNodeLibrary's, built at its first use
+		Scope<GraphLiveCache> m_GraphLiveCache;     // M24: GetGraphLiveCache's, created at its first use
 		uint64_t m_ScriptConfigurationHash = 0;
 		double m_NextScriptConfigurationCheck = 0.0;
 		std::string m_ScriptConfigurationError{};

@@ -25,8 +25,12 @@
 #include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/EngineAssetBaker.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
+#include "Engine/AssetPipeline/Graph/GraphTranspiler.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
+#include "Engine/AssetPipeline/Importers/GraphImporter.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/AssetPipeline/Importers/SceneImporter.h"
 #include "Engine/AssetPipeline/PakWriter.h"
@@ -531,6 +535,9 @@ namespace Engine {
 		bool LoadsStarted = false;
 		std::vector<PakWriterEntry> EngineEntries{};
 		std::vector<PakWriterEntry> GameEntries{};
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 24): the graph node library of the editor's script API, built at the
+		// first graph source the cook scans, which transpiles every graph of the export.
+		Scope<GraphNodeLibrary> GraphLibrary{};
 
 		// WritePaks.
 		std::optional<JobHandle<WrittenPaks>> PakJob{};
@@ -1186,11 +1193,44 @@ namespace Engine {
 		}
 
 		// A packaged script's uses of Assets.Load (decision 19), read from its source through the project file system, as the
-		// importer reads it; no cooked format carries them.
-		[[nodiscard]] Result<std::vector<ScriptAssetLoad>> ScanScriptLoads(const AssetRecord& record) const
+		// importer reads it; no cooked format carries them. A graph's are its transpiled text's (M24,
+		// Docs/Decisions/0035-m24-contract.md decision 24): the text its import compiled, a pure function of the document, the
+		// library and the path, so its literal and computed loads behave exactly as a Luau script's.
+		[[nodiscard]] Result<std::vector<ScriptAssetLoad>> ScanScriptLoads(const AssetRecord& record)
 		{
 			ENGINE_TRY_ASSIGN(const std::string source, Editor->GetVfs().ReadText(record.SourcePath));
-			return FindScriptAssetLoads(source, record.SourcePath.GetPath());
+			if (record.Metadata.Importer != GraphImporter::Id)
+				return FindScriptAssetLoads(source, record.SourcePath.GetPath());
+			ENGINE_TRY_ASSIGN(const std::string text, TranspileGraphSource(source, record.SourcePath.GetPath()));
+			return FindScriptAssetLoads(text, record.SourcePath.GetPath());
+		}
+
+		// The transpiled text of a graph source (decision 24): read strictly with the editor's types, transpiled against one
+		// library per export, built from the editor's frozen script API registry (the declarations the checker's environment
+		// hash comes from, giving the library the importer builds from the editor's load-time script API). A graph that does not
+		// read or transpile fails the export, located at its source, as a .luau source the Luau parser rejects does; its import
+		// has failed too (GRAPH_INVALID).
+		[[nodiscard]] Result<std::string> TranspileGraphSource(std::string_view source, std::string_view path)
+		{
+			if (!GraphLibrary)
+			{
+				ENGINE_TRY_ASSIGN(GraphLibrary, GraphNodeLibrary::Create(Editor->GetEngine().GetScriptApiRegistry()));
+			}
+			const auto located = [path](Error error)
+			{
+				ErrorLocation location = error.GetLocation();
+				if (location.File.empty())
+					location.File = std::string(path);
+				return std::unexpected(std::move(error).WithLocation(std::move(location)));
+			};
+			GraphLoadReport report;
+			Result<GraphDocument> graph = GraphFromText(source, Editor->GetTypeRegistry(), report, true);
+			if (!graph.has_value())
+				return located(std::move(graph).error());
+			Result<GraphTranspileResult> text = TranspileGraph(*graph, *GraphLibrary, path);
+			if (!text.has_value())
+				return located(std::move(text).error());
+			return std::move(text->Luau);
 		}
 
 		// The project path of a packaged main asset, or the engine path of a built-in.

@@ -19,13 +19,15 @@ namespace Engine {
 #else
 		if (!request.Modules)
 			return MakeError(ErrorCode::InvalidArgument, "script extraction requires a module reader");
-		if (request.Path.GetScheme() != "project" || !request.Path.GetPath().starts_with("Assets/") || !request.Path.GetPath().ends_with(".luau"))
-			return MakeError(ErrorCode::Validation, "script extraction requires a project Assets .luau origin");
+		// A .luau source or a graph's transpiled text under its .graph path (the script source rule, Asset/ScriptData.h).
+		if (!IsScriptSourcePath(request.Path))
+			return MakeError(ErrorCode::Validation, "script extraction requires a project Assets .luau or .graph origin");
 		SandboxSpecification sandboxSpecification{};
 		sandboxSpecification.Mode = SandboxMode::LoadTime;
 		sandboxSpecification.MemoryLimitMB = specification.MemoryLimitMB;
 		sandboxSpecification.SourceModules = request.Modules;
 		sandboxSpecification.ClockSeconds = specification.ClockSeconds;
+		sandboxSpecification.Api = specification.Api;
 		ENGINE_TRY_ASSIGN(auto sandbox, Sandbox::Create(sandboxSpecification));
 		ENGINE_TRY(Detail::SandboxAccess::EnterProtected(*sandbox, ScriptExecutionOrigin::Pure));
 		struct GraphScope

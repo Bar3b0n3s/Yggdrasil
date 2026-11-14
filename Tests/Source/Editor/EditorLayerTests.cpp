@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "Editor/EditorLayer.h"
 
+#include "Editor/AssetDesignInteraction.h"
 #include "Editor/EditorPanelContext.h"
 #include "Editor/PanelInteractionFixture.h"
 #include "Editor/Private/EditorHostPreferences.h"
@@ -22,10 +23,12 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiLayer.h"
+#include "Engine/ImGui/ImGuiPlatformWindows.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/ImGui/ImGuiScreenshot.h"
 #include "Engine/Platform/ProjectLock.h"
@@ -471,14 +474,17 @@ namespace Engine {
 		}
 	};
 
-	static ApplicationSpecification LayerCaptureSpecification(bool windowed)
+	// `platformWindows`: Dear ImGui's platform windows, which a windowed editor asks for by default (EditorApp) and Windows
+	// allows (M24).
+	static ApplicationSpecification LayerCaptureSpecification(bool windowed, bool platformWindows)
 	{
 		ApplicationSpecification specification;
 		specification.Name = "LayerScreenshotTests";
 		specification.Window = windowed ? WindowMode::Windowed : WindowMode::Headless;
 		specification.WindowSettings = { .Title = "Editor layer capture", .Width = 900, .Height = 600 };
 		specification.Clock = ClockKind::Manual;
-		specification.MaxFrames = 12;
+		specification.MaxFrames = platformWindows ? 24 : 12;
+		specification.ImGuiPlatformWindows = platformWindows;
 		specification.WorkerCount = 0;
 		specification.ThrottleHeadless = false;
 		specification.EnableImGui = true;
@@ -490,16 +496,21 @@ namespace Engine {
 		return specification;
 	}
 
-	// Drives the real application frame loop, ImGui layer, screenshot method and readback. No cached image provider.
+	// Drives the real application frame loop, ImGui layer, screenshot method and readback. No cached image provider. With
+	// `platformWindows` (M24's review), the minimized editor first renders a few forced UI frames that show a window outside its
+	// main window, which Dear ImGui gives a platform window of its own, then takes its screenshot.
 	class LayerCaptureApplication final : public Application
 	{
 	public:
-		LayerCaptureApplication(Test::EditorTestFixture& fixture, bool windowed)
-			: Application(LayerCaptureSpecification(windowed)), m_Fixture(fixture), m_Windowed(windowed)
+		LayerCaptureApplication(Test::EditorTestFixture& fixture, bool windowed, bool platformWindows = false)
+			: Application(LayerCaptureSpecification(windowed, platformWindows)), m_Fixture(fixture), m_Windowed(windowed), m_PlatformWindows(platformWindows)
 		{
 		}
 		uint32_t Completed = 0;
 		bool CapturedWhileMinimized = false;
+		bool PlatformWindowsOn = false;       // the layer had platform windows when the minimized editor's screenshot was taken
+		size_t UndockedPlatformWindows = 0;   // the platform windows Dear ImGui opened, at the end
+		size_t UndockedWindowsWithTarget = 0; // of them, those whose target was created, so drawn, at the end
 	protected:
 		Status OnInitialize() override
 		{
@@ -522,6 +533,7 @@ namespace Engine {
 				{
 					CapturedWhileMinimized = GetContext().GetWindow()->IsMinimized();
 					CHECK(CapturedWhileMinimized);
+					PlatformWindowsOn = GetImGuiLayer()->GetPlatformWindows() != nullptr;
 				}
 				return CaptureImGuiScreenshot(*GetContext().GetGraphicsDevice(), *GetImGuiLayer(), {});
 			};
@@ -564,10 +576,18 @@ namespace Engine {
 				return;
 			if (Completed == 1)
 			{
-				if (m_Windowed)
+				if (m_Windowed && !m_Minimized)
 				{
 					GetContext().GetWindow()->Minimize();
 					REQUIRE(Test::WaitUntilMinimized(*GetContext().GetWindow(), true));
+					m_Minimized = true;
+				}
+				// Forced UI frames of the minimized editor, which show the window outside its main window (OnImGuiRender).
+				if (m_PlatformWindows && m_MinimizedUiFrames < 4)
+				{
+					++m_MinimizedUiFrames;
+					REQUIRE(RequestOffscreenUiFrame());
+					return;
 				}
 				REQUIRE(m_Client->Call("entity.create", Json{ { "name", "Fresh hierarchy entry" } }));
 			}
@@ -583,6 +603,15 @@ namespace Engine {
 		void OnImGuiRender() override
 		{
 			REQUIRE(m_Ui->Layer.OnImGuiRender());
+			if (m_PlatformWindows && m_Minimized)
+			{
+				const ImGuiViewport* main = ImGui::GetMainViewport();
+				ImGui::SetNextWindowPos(ImVec2(main->Pos.x + main->Size.x + 64.0f, main->Pos.y));
+				ImGui::SetNextWindowSize(ImVec2(200.0f, 120.0f));
+				ImGui::Begin("Outside the minimized window");
+				ImGui::TextUnformatted("A platform window");
+				ImGui::End();
+			}
 		}
 
 		void OnRenderSubmitted(uint64_t /*frameIndex*/, uint64_t submissionId) override
@@ -595,12 +624,26 @@ namespace Engine {
 		void OnShutdown() override
 		{
 			CHECK(Completed == 2);
+			if (m_PlatformWindows)
+			{
+				if (ImGuiPlatformWindows* windows = GetImGuiLayer()->GetPlatformWindows())
+					UndockedWindowsWithTarget = windows->GetWindowCount();
+				const ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+				for (int index = 1; index < platform.Viewports.Size; ++index)
+				{
+					if (platform.Viewports[index]->PlatformHandle != nullptr)
+						++UndockedPlatformWindows;
+				}
+			}
 			m_Ui.reset();
 			m_Client.reset();
 		}
 	private:
 		Test::EditorTestFixture& m_Fixture; // borrowed for Run
 		bool m_Windowed = false;
+		bool m_PlatformWindows = false;
+		bool m_Minimized = false;
+		uint32_t m_MinimizedUiFrames = 0;
 		Scope<Test::AutomationTestClient> m_Client{};
 		Scope<LayerCaptureServices> m_Ui{};
 		uint64_t m_AdmittedFrame = 0;
@@ -704,6 +747,118 @@ namespace Engine {
 			REQUIRE(ui.SafePoint());
 			CHECK(reported.GetMatchCount() == 1);
 			CHECK(reloads == 1);
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 15): the Graph Editor is a window of its own that the layer draws while a
+		// graph is open in it, not an EditorPanel, so the open panels editor.state lists and the layout saves do not change.
+		TEST_CASE("EditorLayer: a graph double-clicked in the content browser opens in the Graph Editor window, which is no panel")
+		{
+			Test::WorkspaceTestUi ui;
+			EditorContext& editor = ui.Environment.GetEditor();
+			REQUIRE(ui.Client.Call("graph.create", Json{ { "path", "Assets/Door.graph" } }));
+			const std::optional<AssetHandle> graph = editor.GetAssets().Resolve("Assets/Door.graph");
+			REQUIRE(graph.has_value());
+			ui.Draw();
+			ui.Draw();
+			EditorUiState& state = editor.GetUiState();
+			const std::vector<EditorPanel> panels(state.GetOpenPanels().begin(), state.GetOpenPanels().end());
+			CHECK(ImGui::FindWindowByName("Graph Editor") == nullptr);
+
+			// The graph's tile in the content browser's grid (ContentBrowserPanel.cpp's ids), double-clicked.
+			ImGuiWindow* content = ui.Window("Assets###ContentBrowser");
+			const std::string project = FileSystem::PathToUtf8(editor.GetProject().GetProjectFile());
+			const ImGuiID columns = ImHashStr("ContentColumns", 0, Test::AssetDesignInteraction::AuthoredScope(content->ID, project));
+			ImGuiWindow* grid = nullptr;
+			for (ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+			{
+				if (window->Active && window->ParentWindow == content && window->ChildId == ImHashStr("AssetTiles", 0, columns))
+					grid = window;
+			}
+			REQUIRE(grid != nullptr);
+			// The bottom dock is short: the grid is scrolled with the wheel, as a user would, until the tile shows.
+			const ImGuiID tileId = ImHashStr("##Asset", 0, ImHashStr(graph->ToString().c_str(), 0, grid->GetID("AssetGrid")));
+			ImVec2 tile = ui.Locate(grid, tileId).GetCenter();
+			for (int step = 0; step < 20 && !grid->InnerClipRect.Contains(tile); ++step)
+			{
+				const ImVec2 center = grid->InnerClipRect.GetCenter();
+				ImGui::GetIO().AddMousePosEvent(center.x, center.y);
+				ImGui::GetIO().AddMouseWheelEvent(0.0f, tile.y > center.y ? -1.0f : 1.0f);
+				ui.Draw();
+				tile = ui.Locate(grid, tileId).GetCenter();
+			}
+			REQUIRE(grid->InnerClipRect.Contains(tile));
+			ImGui::GetIO().AddMousePosEvent(tile.x, tile.y);
+			ui.Draw();
+			for (int click = 0; click < 2; ++click)
+			{
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+				ui.Draw();
+				ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+				ui.Draw();
+			}
+			for (int round = 0; round < 6; ++round)
+			{
+				REQUIRE(ui.Layer.OnSafePoint(0.0));
+				ui.Draw();
+			}
+			const ImGuiWindow* window = ImGui::FindWindowByName("Graph Editor");
+			REQUIRE(window != nullptr);
+			CHECK(window->WasActive);
+			CHECK(ui.Text().contains("Door  (Assets/Door.graph)"));
+			CHECK(std::vector<EditorPanel>(state.GetOpenPanels().begin(), state.GetOpenPanels().end()) == panels);
+		}
+
+		TEST_CASE("EditorLayer: the Window menu's Platform windows checkbox writes the preference at the next safe point")
+		{
+			// M24 (Docs/Decisions/0035-m24-contract.md decisions 18 and 20): the user's PlatformWindows preference, presentation
+			// without a method, which the editor reads when it starts. The checkbox, the Window menu's item before Reset layout,
+			// queues the change; the next safe point writes it into user://Editor.json, keeping every other member.
+			LayerUiHarness ui;
+			VirtualFileSystem& vfs = ui.Environment.GetEditor().GetVfs();
+			const auto path = VfsPath::Parse("user://Editor.json");
+			REQUIRE(path);
+			const std::string original = R"({"Format":"EditorPreferences","Version":1,"AllowNativeCode":true,"Future":{"Kept":[1,2]}})";
+			REQUIRE(vfs.WriteFileAtomic(*path, std::as_bytes(std::span(original.data(), original.size()))));
+			ui.Draw();
+			ui.Draw();
+			const auto clickPlatformWindows = [&ui]()
+			{
+				const auto& style = ImGui::GetStyle();
+				const float x = style.DisplaySafeAreaPadding.x + ImGui::CalcTextSize("File").x + ImGui::CalcTextSize("Edit").x + 2 * style.ItemSpacing.x + ImGui::CalcTextSize("Window").x / 2;
+				ui.Click({ x, ImGui::GetFrameHeight() / 2 });
+				auto& popups = ImGui::GetCurrentContext()->OpenPopupStack;
+				REQUIRE_FALSE(popups.empty());
+				const ImGuiWindow* menu = popups.back().Window;
+				REQUIRE(menu != nullptr);
+				// One line above the last item, Reset layout.
+				const float line = ImGui::GetTextLineHeight();
+				ui.Click({ menu->Pos.x + menu->Size.x / 2, menu->DC.CursorPosPrevLine.y - style.ItemSpacing.y - line / 2 });
+			};
+			clickPlatformWindows();
+			// Queued while drawing; nothing is written before the safe point.
+			const auto drawn = vfs.ReadText(*path);
+			REQUIRE(drawn);
+			CHECK(*drawn == original);
+			REQUIRE(ui.SafePoint());
+			const auto off = ReadEditorPreferences(vfs);
+			REQUIRE(off);
+			CHECK_FALSE(off->PlatformWindows);
+			CHECK(off->AllowNativeCode);
+			const auto text = vfs.ReadText(*path);
+			REQUIRE(text);
+			const auto document = JsonReader::Parse(*text);
+			REQUIRE(document);
+			const auto future = JsonReader::Parse(R"({"Kept":[1,2]})");
+			REQUIRE(future);
+			CHECK((*document)["Future"] == *future);
+
+			// The checkbox shows the stored preference, so a second click turns it back on.
+			clickPlatformWindows();
+			REQUIRE(ui.SafePoint());
+			const auto on = ReadEditorPreferences(vfs);
+			REQUIRE(on);
+			CHECK(on->PlatformWindows);
+			CHECK(on->AllowNativeCode);
 		}
 
 		TEST_CASE("EditorLayer: the Tools menu's Bake lighting bakes the active scene through lighting.bake" * doctest::test_suite(Test::GpuSuite))
@@ -1720,6 +1875,20 @@ namespace Engine {
 			CHECK(child->ExitCode == 0);
 		}
 
+		// M24's review: with platform windows on (a windowed editor's default on Windows), Dear ImGui gives a minimized main
+		// window's draw data an empty display, which made editor.screenshot of a minimized editor fail; the forced frame keeps
+		// the UI's size, and the platform windows are drawn on no frame of the minimized window (decision 23).
+		TEST_CASE("EditorLayer: a minimized editor with platform windows on captures its UI and draws no platform window" * doctest::test_suite(Test::GpuSuite))
+		{
+			std::vector<std::string> arguments{ "--windowed-child=EditorLayer: native minimized screenshot child with platform windows" };
+			const auto gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const auto child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE(child);
+			INFO(child->StandardOutput, child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
 		TEST_CASE("EditorLayer: scene and game targets retire through ImGui texture registration" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -2320,6 +2489,23 @@ namespace Engine {
 		CHECK(application.Run() == ExitCode::Success);
 		CHECK(application.Completed == 2);
 		CHECK(application.CapturedWhileMinimized);
+	}
+
+	TEST_CASE("EditorLayer: native minimized screenshot child with platform windows" * doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+	{
+		if (!Test::ProbeGpuForProcess())
+			return;
+		Test::EditorTestFixture fixture("MinimizedLayerCapturePlatformWindows");
+		fixture.CreateAndOpenProject();
+		fixture.CreateAndOpenScene();
+		LayerCaptureApplication application(fixture, true, true);
+		CHECK(application.Run() == ExitCode::Success);
+		CHECK(application.Completed == 2);
+		CHECK(application.CapturedWhileMinimized);
+		CHECK(application.PlatformWindowsOn);
+		// The window outside the minimized main window got a platform window, but no frame of the minimized window drew it.
+		CHECK(application.UndockedPlatformWindows >= 1);
+		CHECK(application.UndockedWindowsWithTarget == 0);
 	}
 
 }

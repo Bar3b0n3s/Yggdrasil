@@ -8,6 +8,7 @@
 #include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Graph/GraphEditorActions.h"
 #include "EditorCore/Inspector/ScriptSlotList.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
@@ -16,12 +17,15 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/AssetPipeline/Importers/GraphImporter.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/AssetPipeline/Importers/SpriteSheetImporter.h"
 #include "Engine/AssetPipeline/Importers/TilemapImporter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/StructInfo.h"
@@ -239,6 +243,31 @@ namespace Engine {
 
 		// Asset files are re-read at least this often while selected, so an external edit shows without a re-selection.
 		constexpr double AssetPropertiesRefreshSeconds = 0.5;
+
+		// M24: the name New graph... offers for a graph of the entity named `entity`: its letters, digits and underscores, after
+		// any leading digits ("2 Doors" gives "Doors"), or "Behaviour" when that leaves no identifier.
+		static std::string MakeInspectorGraphName(std::string_view entity)
+		{
+			std::string name;
+			for (const char character : entity)
+			{
+				const bool letter = (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || character == '_';
+				const bool digit = character >= '0' && character <= '9';
+				if (letter || (digit && !name.empty()))
+					name += character;
+			}
+			return IsGraphIdentifier(name) ? name : std::string("Behaviour");
+		}
+
+		// The graph the New graph... batch created: its first op's (graph.create's) result.
+		static std::optional<AssetHandle> ReadCreatedGraph(const Json& batch)
+		{
+			const Result<JsonReader> results = JsonReader(batch).GetMember("results");
+			const Result<JsonReader> created = results ? results->GetElement(0) : Result<JsonReader>(std::unexpected(results.error()));
+			const Result<JsonReader> graph = created ? created->GetMember("graph") : Result<JsonReader>(std::unexpected(created.error()));
+			const Result<std::string> id = graph ? graph->ReadMember<std::string>("id") : Result<std::string>(std::unexpected(graph.error()));
+			return id ? UUID::FromString(*id) : std::nullopt;
+		}
 
 	}
 
@@ -789,6 +818,54 @@ namespace Engine {
 		DrawAssetFields(context, asset, properties, escape, "Tilemap", "Tilemap");
 	}
 
+	void InspectorPanel::DrawGraphSlotLiveValues(EditorPanelContext& context, UUID entity, size_t slot, AssetHandle script)
+	{
+		EditorContext& editor = context.Editor;
+		const AssetRecord* record = script.IsValid() ? editor.GetAssets().GetRegistry().Find(script) : nullptr;
+		EditorScriptService* service = editor.GetScriptService();
+		if (record == nullptr || record->Metadata.Importer != GraphImporter::Id || service == nullptr || !service->GetFields(script))
+			return;
+		// graph.liveValues names a slot by its behaviour's name, as script.eval does: the graph's current name, as the method
+		// matches it, not its last import's, which a rename during a lockstep, recording, replay or test session leaves behind
+		// until the session ends (M24's review).
+		const Result<std::string> behaviour = ReadGraphBehaviourName(editor, script);
+		GraphSlotLiveView& live = m_GraphLiveViews[slot];
+		live.Drawn = true;
+		live.View.Update(editor, context.Actions,
+			behaviour ? std::optional<GraphLiveTarget>(GraphLiveTarget{ .Entity = entity, .Script = *behaviour }) : std::nullopt);
+		ImGui::TextDisabled("Live values");
+		if (!behaviour)
+		{
+			ImGui::TextWrapped("%s", behaviour.error().GetMessageText().c_str());
+			return;
+		}
+		if (!live.View.GetTarget().has_value())
+		{
+			// A simulation runs no behaviours (decision 14), so it has no live values to read.
+			ImGui::TextDisabled("None in a simulation, which runs no behaviours.");
+			return;
+		}
+		const std::optional<GraphLiveValuesResult>& values = live.View.GetValues();
+		if (!values.has_value())
+		{
+			if (live.View.GetError().empty())
+				ImGui::TextDisabled("Reading...");
+			else
+				ImGui::TextWrapped("%s", live.View.GetError().c_str());
+			return;
+		}
+		if (values->Slot != slot)
+		{
+			// Another slot of the entity holds a graph of the same behaviour name, and graph.liveValues reads the first.
+			ImGui::TextDisabled("Shown in slot %u, the first slot of this behaviour", values->Slot);
+			return;
+		}
+		for (const GraphLiveMember& member : values->Members)
+			ImGui::TextUnformatted(GraphLiveView::FormatMemberLine(member).c_str());
+		if (!values->Errors.empty())
+			ImGui::TextWrapped("%zu script error(s): the Graph Editor shows each at its node.", values->Errors.size());
+	}
+
 	Status InspectorPanel::Draw(EditorPanelContext& context)
 	{
 		EditorContext& editor = context.Editor;
@@ -805,6 +882,17 @@ namespace Engine {
 			{
 				if (scene->FindEntityByID(id).IsValid())
 					selection.push_back(id);
+			}
+		}
+		// M24: the graph slots' live-value views that the last frame did not draw stop polling.
+		for (auto view = m_GraphLiveViews.begin(); view != m_GraphLiveViews.end();)
+		{
+			if (std::exchange(view->second.Drawn, false))
+				++view;
+			else
+			{
+				view->second.View.Reset(context.Actions);
+				view = m_GraphLiveViews.erase(view);
 			}
 		}
 		const std::string ownerIdentity = Utils::InspectorOwnerIdentity(context, asset.IsValid(), sceneTarget);
@@ -837,6 +925,21 @@ namespace Engine {
 			}
 			else
 				++ticket;
+		}
+		if (m_NewGraphTicket != 0)
+		{
+			// A finished New graph...: the graph it created and assigned opens in the Graph Editor.
+			auto result = context.Actions.TakeResult(m_NewGraphTicket);
+			if (!result || result->has_value())
+			{
+				m_NewGraphTicket = 0;
+				if (!result)
+					ReportFailure(result.error());
+				else if (!**result)
+					ReportFailure((**result).error());
+				else if (const std::optional<AssetHandle> created = Utils::ReadCreatedGraph(***result); created.has_value())
+					m_GraphRequest = GraphEditorTarget{ .Graph = *created, .Node = 0, .Line = 0, .JsonPointer = {}, .Finding = {} };
+			}
 		}
 		const bool escape = ImGui::IsKeyPressed(ImGuiKey_Escape);
 		const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
@@ -1289,6 +1392,58 @@ namespace Engine {
 								drawPrefabOverride("Script", slotField, slotField);
 							}
 
+							// M24 (decision 15): Open graph for a slot holding a graph; New graph... creates a graph and assigns it to
+							// this slot of every selected entity in one undo step (the graph editor's CreateGraphInSlot).
+							ImGui::PushID("ScriptSlotGraph");
+							ImGui::PushID(static_cast<int>(slotIndex));
+							if (IsGraphAsset(editor.GetAssets().GetRegistry(), attached.Script.GetHandle()))
+							{
+								if (ImGui::SmallButton("Open graph"))
+									m_GraphRequest = GraphEditorTarget{ .Graph = attached.Script.GetHandle(), .Node = 0, .Line = 0, .JsonPointer = {}, .Finding = {} };
+								ImGui::SetItemTooltip("Edit this graph in the Graph Editor");
+								ImGui::SameLine();
+							}
+							ImGui::BeginDisabled(editor.IsReadOnly() || slotIndex >= sharedSlots || sceneTarget == SceneTarget::Play || m_NewGraphTicket != 0);
+							if (ImGui::SmallButton("New graph..."))
+							{
+								m_NewGraphSlot = slotIndex;
+								m_NewGraphName = Utils::MakeInspectorGraphName(first.GetName());
+								ImGui::OpenPopup("New graph");
+							}
+							if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+								ImGui::SetTooltip("Create a visual script in Assets/Scripts and put it in this slot");
+							ImGui::EndDisabled();
+							if (ImGui::BeginPopup("New graph"))
+							{
+								Utils::EditorSectionHeading("New graph");
+								ImGui::SetNextItemWidth(260.0f * Utils::EditorUiScale());
+								if (ImGui::IsWindowAppearing())
+									ImGui::SetKeyboardFocusHere();
+								ImGui::InputText("##GraphName", &m_NewGraphName);
+								const std::string graphPath = std::format("Assets/Scripts/{}.graph", m_NewGraphName);
+								ImGui::TextDisabled("%s", graphPath.c_str());
+								ImGui::BeginDisabled(!IsGraphIdentifier(m_NewGraphName));
+								if (ImGui::Button("Create graph"))
+								{
+									CancelEdit(context);
+									const Result<Json> batch = MakeScriptSlotGraph(*scene, selection, m_NewGraphSlot, graphPath, sceneTarget);
+									const Result<uint64_t> submitted = batch ? context.Actions.Submit(GetGraphEditorActionMethod(GraphEditorAction::CreateGraphInSlot), *batch)
+																			 : Result<uint64_t>(std::unexpected(batch.error()));
+									if (submitted)
+										m_NewGraphTicket = *submitted;
+									else
+										ReportFailure(submitted.error());
+									ImGui::CloseCurrentPopup();
+								}
+								ImGui::EndDisabled();
+								ImGui::SameLine();
+								if (ImGui::Button("Cancel"))
+									ImGui::CloseCurrentPopup();
+								ImGui::EndPopup();
+							}
+							ImGui::PopID();
+							ImGui::PopID();
+
 							// The script's declared fields; a script that cannot show them says why.
 							const auto drawSlotFields = [&]()
 							{
@@ -1370,6 +1525,8 @@ namespace Engine {
 								}
 							};
 							drawSlotFields();
+							if (runtime && selection.size() == 1)
+								DrawGraphSlotLiveValues(context, selection.front(), slotIndex, attached.Script.GetHandle());
 							const std::string fieldsOverride = PrefabInstantiator::MakeScriptSlotField(static_cast<uint32_t>(slotIndex), "Fields");
 							drawPrefabOverride("Script", fieldsOverride, fieldsOverride);
 						}

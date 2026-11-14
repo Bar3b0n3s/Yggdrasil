@@ -3,8 +3,10 @@
 
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Platform/Paths.h"
 
 #include <nlohmann/json.hpp>
 
@@ -48,6 +50,10 @@ namespace Engine {
 			if (const auto native = reader.FindMember("AllowNativeCode"))
 			{
 				ENGINE_TRY_ASSIGN(preferences.AllowNativeCode, native->ReadBool());
+			}
+			if (const auto platformWindows = reader.FindMember("PlatformWindows"))
+			{
+				ENGINE_TRY_ASSIGN(preferences.PlatformWindows, platformWindows->ReadBool());
 			}
 			if (const auto executable = reader.FindMember("ExternalEditorExecutable"))
 			{
@@ -134,11 +140,26 @@ namespace Engine {
 		ENGINE_TRY(Utils::DecodeUtilityPreferences(document));
 		document["AllowAiAutomation"] = preferences.AllowAiAutomation;
 		document["AllowNativeCode"] = preferences.AllowNativeCode;
+		document["PlatformWindows"] = preferences.PlatformWindows;
 		document["ExternalEditorExecutable"] = preferences.ExternalEditorExecutable;
 		document["ExternalEditorArguments"] = preferences.ExternalEditorArguments;
 		ENGINE_TRY_ASSIGN(const std::string text, SerializeEditorPreferences(document));
 		ENGINE_TRY_ASSIGN(const VfsPath path, VfsPath::Parse("user://Editor.json"));
 		return vfs.WriteFileAtomic(path, std::as_bytes(std::span(text.data(), text.size())));
+	}
+
+	bool ReadStartupPlatformWindowsPreference(std::string_view appName, const std::filesystem::path& userDataRoot)
+	{
+		const bool defaultValue = EditorPreferences{}.PlatformWindows;
+		const Result<UserDataPaths> paths = Paths::GetUserDataPaths(appName, userDataRoot);
+		if (!paths.has_value())
+			return defaultValue;
+		Result<Scope<NativeDirectoryMount>> mount = NativeDirectoryMount::Create(paths->Root, MountAccess::ReadOnly);
+		VirtualFileSystem vfs;
+		if (!mount.has_value() || !vfs.Mount("user", std::move(*mount)).has_value())
+			return defaultValue;
+		const Result<EditorPreferences> preferences = ReadEditorPreferences(vfs);
+		return preferences.has_value() ? preferences->PlatformWindows : defaultValue;
 	}
 
 	Result<ProcessSpecification> BuildEditorSourceProcessSpecification(const EditorPreferences& preferences,

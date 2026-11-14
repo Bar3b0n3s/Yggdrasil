@@ -121,6 +121,18 @@ namespace Engine {
 				{ "component.schema", SceneRelation::None },
 				{ "docs.get", SceneRelation::None },
 				{ "events.read", SceneRelation::None },
+				// M24: a graph asset's document and the node library (Docs/Decisions/0035-m24-contract.md decision 12).
+				{ "graph.addNode", SceneRelation::None },
+				{ "graph.connect", SceneRelation::None },
+				{ "graph.create", SceneRelation::None },
+				{ "graph.disconnect", SceneRelation::None },
+				{ "graph.liveValues", SceneRelation::None }, // W24.2: the play session's instance (decision 14), as play.* reads it
+				{ "graph.moveNodes", SceneRelation::None },
+				{ "graph.nodes", SceneRelation::None },
+				{ "graph.read", SceneRelation::None },
+				{ "graph.removeNodes", SceneRelation::None },
+				{ "graph.setMembers", SceneRelation::None },
+				{ "graph.setValues", SceneRelation::None },
 				{ "input.inject", SceneRelation::None },
 				{ "input.readReplay", SceneRelation::None }, // M19: a replay file's events
 				{ "input.record", SceneRelation::None },

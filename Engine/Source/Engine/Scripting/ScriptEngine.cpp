@@ -3,21 +3,71 @@
 
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/Utf8.h"
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scripting/Private/BindingRegistration.h"
 #include "Engine/Scripting/Private/SandboxAccess.h"
 #include "Engine/Scripting/Private/ScriptEngineState.h"
 #include "Engine/Scripting/Private/ScriptSlots.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
+#include "Engine/Scripting/ScriptProxy.h"
+
+#include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
+#include <lua.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstddef>
 #include <format>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace Engine {
+
+	namespace {
+
+		// One list of ReadInstanceValues' result, kept to the MaxScriptInstanceValues byte-wise smallest keys while it is
+		// filled, so a huge table costs at most twice that many entries of host memory, and none of the VM's.
+		struct InstanceValueList
+		{
+			std::vector<ScriptInstanceValue> Values{};
+			bool Truncated = false;
+
+			void Add(ScriptInstanceValue value)
+			{
+				Values.push_back(std::move(value));
+				if (Values.size() >= 2 * MaxScriptInstanceValues)
+					Trim();
+			}
+
+			void Trim()
+			{
+				if (Values.size() <= MaxScriptInstanceValues)
+					return;
+				const auto limit = Values.begin() + static_cast<std::ptrdiff_t>(MaxScriptInstanceValues);
+				std::ranges::nth_element(Values, limit, {}, &ScriptInstanceValue::Key);
+				Values.erase(limit, Values.end());
+				Truncated = true;
+			}
+
+			// The kept values, byte-wise by key (a Lua table's keys are unique, so the order is total).
+			[[nodiscard]] std::vector<ScriptInstanceValue> Finish()
+			{
+				Trim();
+				std::ranges::sort(Values, {}, &ScriptInstanceValue::Key);
+				return std::move(Values);
+			}
+		};
+
+	}
 
 	namespace Utils {
 
@@ -33,6 +83,104 @@ namespace Engine {
 			}
 			~ScriptEvaluationOwnerScope() { Owner = Previous; }
 		};
+
+		// Finite components as a JSON array of numbers (reflection's spelling of a vector, a Color or a Quat); null when any
+		// component is not finite.
+		template<size_t Count>
+		static VariantValue MakeComponentsValue(const std::array<float, Count>& components)
+		{
+			Json array = Json::array();
+			for (const float component : components)
+			{
+				if (!std::isfinite(component))
+					return VariantValue();
+				array.push_back(static_cast<double>(component));
+			}
+			return VariantValue(std::move(array));
+		}
+
+		// The value at `index` of `state` as ReadInstanceValues reports it (ScriptEngine.h): read by its type, never converted
+		// (Luau's lua_tolstring would turn a number into a string in place) and never through a metamethod; the type names are
+		// Luau's static ones and the userdata names its registry's own interned strings, so nothing is pushed or allocated.
+		static ScriptInstanceValue ReadInstanceValue(lua_State* state, int index, std::string key)
+		{
+			ScriptInstanceValue result{ .Key = std::move(key), .TypeName = {}, .Value = {} };
+			const int type = lua_type(state, index);
+			result.TypeName = lua_typename(state, type);
+			switch (type)
+			{
+				case LUA_TBOOLEAN:
+					result.Value = VariantValue(Json(lua_toboolean(state, index) != 0));
+					break;
+				case LUA_TNUMBER:
+				{
+					const double number = lua_tonumber(state, index);
+					if (std::isfinite(number))
+						result.Value = VariantValue(Json(number));
+					break;
+				}
+				case LUA_TSTRING:
+				{
+					size_t length = 0;
+					const char* text = lua_tolstring(state, index, &length);
+					const std::string_view view(text, length);
+					if (IsValidUtf8(view))
+						result.Value = VariantValue(Json(std::string(view)));
+					break;
+				}
+				case LUA_TVECTOR:
+				{
+					const float* vector = lua_tovector(state, index);
+					result.Value = MakeComponentsValue(std::array{ vector[0], vector[1], vector[2] });
+					break;
+				}
+				case LUA_TUSERDATA:
+				{
+					const int tag = lua_userdatatag(state, index);
+					if (tag < 0 || tag >= LUA_UTAG_LIMIT)
+						break;
+					result.TypeName = lua_getuserdataname(state, tag);
+					const void* payload = lua_touserdatatagged(state, index, tag);
+					switch (static_cast<Detail::ScriptValueTag>(tag))
+					{
+						case Detail::ScriptValueTag::Entity:
+							result.Value = VariantValue(Json(static_cast<const ScriptEntityIdentity*>(payload)->ID.ToString()));
+							break;
+						case Detail::ScriptValueTag::AssetRef:
+							result.Value = VariantValue(Json(static_cast<const AssetHandle*>(payload)->ToString()));
+							break;
+						case Detail::ScriptValueTag::Color:
+						{
+							const glm::vec4& color = *static_cast<const glm::vec4*>(payload);
+							result.Value = MakeComponentsValue(std::array{ color.r, color.g, color.b, color.a });
+							break;
+						}
+						case Detail::ScriptValueTag::Quat:
+						{
+							const glm::quat& rotation = *static_cast<const glm::quat*>(payload);
+							result.Value = MakeComponentsValue(std::array{ rotation.x, rotation.y, rotation.z, rotation.w });
+							break;
+						}
+						default:
+							break; // a component proxy, a RandomGenerator, a TaskHandle: named, with no value
+					}
+					break;
+				}
+				default:
+					break; // a table, a function, a thread, a buffer: named, with no value
+			}
+			return result;
+		}
+
+		// The string key at `index` of `state`, or nullopt for a key of another type (which is never converted).
+		static std::optional<std::string_view> ReadStringKey(lua_State* state, int index)
+		{
+			if (lua_type(state, index) != LUA_TSTRING)
+				return std::nullopt;
+			size_t length = 0;
+			const char* text = lua_tolstring(state, index, &length);
+			return std::string_view(text, length);
+		}
 
 	}
 
@@ -655,6 +803,65 @@ namespace Engine {
 	IScriptTestHost* ScriptEngine::GetTestHost() const
 	{
 		return m_State->TestHost;
+	}
+
+	Result<ScriptInstanceValues> ScriptEngine::ReadInstanceValues(UUID entity, uint32_t slot) const
+	{
+		m_State->AssertOwner();
+		if (IsStopped())
+			return MakeError(ErrorCode::InvalidState, "The script engine has stopped");
+		Sandbox& vm = *m_State->Vm;
+		if (Detail::SandboxAccess::GetExecution(vm) != nullptr)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState, "an instance's values are read between phases, not inside a script call")
+					.WithHint("read them from the host between frames, as graph.liveValues does"));
+		}
+		const auto found = m_State->Instances.find({ entity, slot });
+		if (found == m_State->Instances.end() || found->second.Table == LUA_NOREF)
+		{
+			std::string names;
+			for (const State::InstanceKey key : m_State->InstancesOf(entity))
+			{
+				const State::Instance& instance = m_State->Instances.find(key)->second;
+				if (instance.Script != nullptr && instance.Table != LUA_NOREF)
+					names += std::format("{}{} (slot {})", names.empty() ? "" : ", ", instance.Script->Name, key.Slot);
+			}
+			return std::unexpected(Error(ErrorCode::NotFound, std::format("entity {} has no behaviour instance in slot {}", entity, slot))
+					.WithHint(names.empty() ? std::string("the entity has no behaviour instance") : "its behaviours: " + names));
+		}
+
+		// Raw reads of the instance table and of its live-value table only: lua_rawgeti and lua_rawiter push existing values
+		// (at most five slots, which an idle main thread's stack holds without growing) and run no metamethod, and keys are
+		// compared as they are, so nothing is interned, allocated or collected, and the session goes on as it would have.
+		lua_State* state = Detail::SandboxAccess::MainCall(vm).State;
+		const int top = lua_gettop(state);
+		if (!lua_checkstack(state, 5))
+			return MakeError(ErrorCode::InvalidState, "the script VM's stack has no room to read an instance");
+		InstanceValueList members;
+		InstanceValueList live;
+		lua_getref(state, found->second.Table);
+		const int table = lua_gettop(state);
+		for (int member = 0; (member = lua_rawiter(state, table, member)) != -1; lua_settop(state, table))
+		{
+			const std::optional<std::string_view> key = Utils::ReadStringKey(state, -2);
+			if (!key.has_value())
+				continue;
+			members.Add(Utils::ReadInstanceValue(state, -1, std::string(*key)));
+			if (*key != ScriptLiveValuesKey || lua_type(state, -1) != LUA_TTABLE)
+				continue;
+			const int values = lua_gettop(state);
+			for (int entry = 0; (entry = lua_rawiter(state, values, entry)) != -1; lua_settop(state, values))
+			{
+				if (const std::optional<std::string_view> name = Utils::ReadStringKey(state, -2); name.has_value())
+					live.Add(Utils::ReadInstanceValue(state, -1, std::string(*name)));
+			}
+		}
+		lua_settop(state, top);
+		ScriptInstanceValues result;
+		result.Members = members.Finish();
+		result.LiveValues = live.Finish();
+		result.Truncated = members.Truncated || live.Truncated;
+		return result;
 	}
 
 }

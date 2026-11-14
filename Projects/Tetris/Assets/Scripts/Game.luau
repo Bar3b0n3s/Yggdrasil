@@ -1,13 +1,16 @@
 --!strict
--- The Tetris behaviour: feeds the player's input to a Match every tick and mirrors the match into the pooled
--- cells of the well, the hold and next previews, the HUD texts and one-shot sounds. Every cell is created once
--- in OnStart and only shown, hidden or recoloured afterwards, and every write happens only on a change.
+-- The Tetris behaviour on /Game: feeds the player's input to a Match every tick and mirrors the match into the scene:
+-- the 200 pooled SpriteRenderer cells of the well (each showing the empty, ghost or a piece's colour), the 16 UiImage
+-- cells of the hold and next previews, the HUD's UiText values and clear banner, the game-over panel, and one-shot
+-- sounds. The well cells are instantiated once in OnStart and only recoloured afterwards, and every write happens
+-- only on a change. A click on the panel's RESTART button restarts like the Restart action, once per tick whichever
+-- way: the click arrives in OnUiClick, before OnFixedUpdate in the same tick.
 local Match = require("./Match")
+local Palette = require("./Palette")
 local Pieces = require("./Pieces")
 
 export type Game = ScriptInstance & {
 	CellPrefab: AssetRef?,
-	Materials: { AssetRef? },
 	MoveSound: AssetRef?,
 	RotateSound: AssetRef?,
 	LockSound: AssetRef?,
@@ -22,23 +25,24 @@ export type Game = ScriptInstance & {
 	Cells: { Entity },
 	Display: { string },
 	ShownName: { string },
-	ShownMaterial: { string },
 	Previews: { Entity },
 	PreviewName: { string },
 	Texts: { [string]: Entity },
 	TextShown: { [string]: string },
+	Panel: Entity?,
+	PanelShown: boolean,
 	HudScore: number,
 	HudLevel: number,
 	HudLines: number,
 	ClearTimer: number,
+	RestartClicked: boolean,
+	Restarts: number,
 }
 
 local Game = {}
 
 Game.Fields = {
 	CellPrefab = Field.Asset("Prefab"),
-	-- The materials of the I, O, T, S, Z, J and L blocks, then of the ghost piece and of any other block.
-	Materials = Field.Array(Field.Asset("Material")),
 	MoveSound = Field.Asset("AudioClip"),
 	RotateSound = Field.Asset("AudioClip"),
 	LockSound = Field.Asset("AudioClip"),
@@ -51,23 +55,17 @@ Game.Fields = {
 }
 
 local Columns, Rows = 10, 20
-local CellScale = 0.94
-local PreviewScale = 0.75
--- World centres (x, y) of the preview slots: the hold, then the three next pieces.
-local PreviewSlots: { { number } } = { { -7.5, 7.5 }, { 7.5, 7.5 }, { 7.5, 4.5 }, { 7.5, 1.5 } }
-local MaterialIndex: { [string]: number } = { I = 1, O = 2, T = 3, S = 4, Z = 5, J = 6, L = 7, Ghost = 8 }
-local OtherMaterial = 9
+-- A preview cell's size and the size of the hold and next boxes, in canvas units (reference pixels).
+local CellPixels = 16
+local BoxWidth, BoxHeight = 80, 48
+-- Preview slot 1 is the hold box, slots 2 to 4 the three next boxes; each has four cells, Preview<slot>_<i>.
+local PreviewSlots = 4
 local ClearNames = { "SINGLE", "DOUBLE", "TRIPLE", "TETRIS!" }
 local ClearShowTicks = 120
-local HudTexts = { "ScoreText", "LevelText", "LinesText", "ClearText", "StatusText" }
-local GameOverMessage = "GAME OVER\nPress Enter to restart"
+local HudTexts = { "ScoreText", "LevelText", "LinesText", "ClearText" }
 
 local function cellPosition(column: number, row: number): vector
 	return vector.create(column - 5.5, row - 10.5, 0)
-end
-
-local function materialFor(self: Game, name: string): AssetRef?
-	return self.Materials[MaterialIndex[name] or OtherMaterial]
 end
 
 local function play(clip: AssetRef?)
@@ -81,10 +79,16 @@ local function setText(self: Game, key: string, value: string)
 		return
 	end
 	local entity = self.Texts[key]
-	local text = if entity then entity.Text else nil
+	local text = if entity then entity.UiText else nil
 	if text then
 		text.Text = value
 		self.TextShown[key] = value
+	end
+end
+
+local function setActive(entity: Entity, active: boolean)
+	if entity:IsActiveSelf() ~= active then
+		entity:SetActive(active)
 	end
 end
 
@@ -117,7 +121,7 @@ local function onEvent(self: Game, event: string)
 	end
 end
 
--- Shows the locked blocks, the ghost and the falling piece in the visible rows, touching only changed cells.
+-- Shows the locked blocks, the ghost and the falling piece in the visible rows, recolouring only changed cells.
 local function refreshWell(self: Game)
 	local match = self.Match
 	local display = self.Display
@@ -144,25 +148,16 @@ local function refreshWell(self: Game)
 	for i = 1, Columns * Rows do
 		local name = display[i]
 		if name ~= self.ShownName[i] then
-			local cell = self.Cells[i]
-			if name == "" then
-				cell:SetActive(false)
-			else
-				if name ~= self.ShownMaterial[i] then
-					local renderer = cell.MeshRenderer
-					if renderer then
-						renderer:SetMaterial(1, materialFor(self, name))
-					end
-					self.ShownMaterial[i] = name
-				end
-				cell:SetActive(true)
+			local renderer = self.Cells[i].SpriteRenderer
+			if renderer then
+				renderer.Color = Palette.ForCell(name)
 			end
 			self.ShownName[i] = name
 		end
 	end
 end
 
--- Shows a piece (or nothing) centred in a preview slot.
+-- Shows a piece (or nothing) centred in its 80 x 48 preview box: whole-pixel offsets for every piece.
 local function showPreview(self: Game, slot: number, name: string)
 	if self.PreviewName[slot] == name then
 		return
@@ -171,7 +166,7 @@ local function showPreview(self: Game, slot: number, name: string)
 	local base = (slot - 1) * 4
 	if name == "" then
 		for i = 1, 4 do
-			self.Previews[base + i]:SetActive(false)
+			setActive(self.Previews[base + i], false)
 		end
 		return
 	end
@@ -186,21 +181,20 @@ local function showPreview(self: Game, slot: number, name: string)
 		minY = math.min(minY, block.Y)
 		maxY = math.max(maxY, block.Y)
 	end
-	local centreX: number = (minX + maxX) / 2
-	local centreY: number = (minY + maxY) / 2
-	local slotX: number = PreviewSlots[slot][1]
-	local slotY: number = PreviewSlots[slot][2]
-	local material = materialFor(self, name)
+	local left = (BoxWidth - (maxX - minX + 1) * CellPixels) // 2
+	local top = (BoxHeight - (maxY - minY + 1) * CellPixels) // 2
+	local color = Palette.ForCell(name)
 	for i, block in blocks do
 		local cell = self.Previews[base + i]
-		local x = slotX + (block.X - centreX) * PreviewScale
-		local y = slotY - (block.Y - centreY) * PreviewScale
-		cell.Transform:Teleport(vector.create(x, y, 0))
-		local renderer = cell.MeshRenderer
-		if renderer then
-			renderer:SetMaterial(1, material)
+		local rect = cell.UiRect
+		if rect then
+			rect.Position = vector.create(left + (block.X - minX) * CellPixels, top + (block.Y - minY) * CellPixels, 0)
 		end
-		cell:SetActive(true)
+		local image = cell.UiImage
+		if image then
+			image.Color = color
+		end
+		setActive(cell, true)
 	end
 end
 
@@ -208,24 +202,30 @@ local function refreshHud(self: Game)
 	local match = self.Match
 	if match.Score ~= self.HudScore then
 		self.HudScore = match.Score
-		setText(self, "ScoreText", `SCORE\n{match.Score}`)
+		setText(self, "ScoreText", tostring(match.Score))
 	end
 	if match.Level ~= self.HudLevel then
 		self.HudLevel = match.Level
-		setText(self, "LevelText", `LEVEL\n{match.Level}`)
+		setText(self, "LevelText", tostring(match.Level))
 	end
 	if match.Lines ~= self.HudLines then
 		self.HudLines = match.Lines
-		setText(self, "LinesText", `LINES\n{match.Lines}`)
+		setText(self, "LinesText", tostring(match.Lines))
 	end
-	setText(self, "StatusText", if match.GameOver then GameOverMessage else "")
+	if match.GameOver ~= self.PanelShown then
+		self.PanelShown = match.GameOver
+		local panel = self.Panel
+		if panel then
+			setActive(panel, match.GameOver)
+		end
+	end
 end
 
 local function refresh(self: Game)
 	refreshWell(self)
 	local match = self.Match
 	showPreview(self, 1, match.Hold)
-	for i = 1, #PreviewSlots - 1 do
+	for i = 1, PreviewSlots - 1 do
 		showPreview(self, i + 1, match.Queue[i] or "")
 	end
 	refreshHud(self)
@@ -237,22 +237,37 @@ function Game.OnStart(self: Game)
 	self.Cells = {}
 	self.Display = table.create(Columns * Rows, "")
 	self.ShownName = table.create(Columns * Rows, "")
-	self.ShownMaterial = table.create(Columns * Rows, "")
 	self.Previews = {}
-	self.PreviewName = {}
+	self.PreviewName = table.create(PreviewSlots, "")
 	self.Texts = {}
 	self.TextShown = {}
 	self.HudScore = -1
 	self.HudLevel = -1
 	self.HudLines = -1
 	self.ClearTimer = 0
+	self.RestartClicked = false
+	self.Restarts = 0
 
 	for _, key in HudTexts do
 		local found = Scene.FindByName(key)
 		if found then
 			self.Texts[key] = found
-			local text = found.Text
+			local text = found.UiText
 			self.TextShown[key] = if text then text.Text else ""
+		end
+	end
+	local panel = Scene.FindByName("GameOverPanel")
+	self.Panel = panel
+	self.PanelShown = if panel then panel:IsActiveSelf() else false
+
+	for slot = 1, PreviewSlots do
+		for i = 1, 4 do
+			local cell = Scene.FindByName(`Preview{slot}_{i}`)
+			if cell == nil then
+				Log.Error(`Game: Main.scene has no Preview{slot}_{i}`)
+				return
+			end
+			table.insert(self.Previews, cell)
 		end
 	end
 
@@ -266,23 +281,19 @@ function Game.OnStart(self: Game)
 		for column = 1, Columns do
 			local cell = Scene.Instantiate(prefab, cellPosition(column, row), nil, cellsParent)
 			cell.Name = string.format("Cell%02d_%02d", row, column)
-			cell:SetActive(false)
 			table.insert(self.Cells, cell)
 		end
 	end
-	local previewParent = self.Entity:FindChild("Previews") or self.Entity
-	local previewSize = CellScale * PreviewScale
-	for slot, centre in PreviewSlots do
-		for i = 1, 4 do
-			local cell = Scene.Instantiate(prefab, vector.create(centre[1], centre[2], 0), nil, previewParent)
-			cell.Name = string.format("Preview%d_%d", slot, i)
-			cell.Transform.Scale = vector.create(previewSize, previewSize, previewSize)
-			cell:SetActive(false)
-			table.insert(self.Previews, cell)
-		end
-		self.PreviewName[slot] = ""
-	end
 	refresh(self)
+end
+
+-- The RESTART button on the game-over panel; the click bubbles here from the button through the HUD.
+function Game.OnUiClick(self: Game, element: Entity): boolean?
+	if element.Name ~= "RestartButton" then
+		return nil
+	end
+	self.RestartClicked = true
+	return true
 end
 
 function Game.OnFixedUpdate(self: Game, _dt: number)
@@ -290,8 +301,11 @@ function Game.OnFixedUpdate(self: Game, _dt: number)
 		return
 	end
 	local match = self.Match
-	if Input.IsActionPressed("Restart") then
+	local restart = Input.IsActionPressed("Restart") or self.RestartClicked
+	self.RestartClicked = false
+	if restart then
 		match:Reset()
+		self.Restarts += 1
 	else
 		local controls = self.Controls
 		controls.Left = Input.IsActionDown("MoveLeft")

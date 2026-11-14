@@ -14,585 +14,441 @@
 			"Path": "Assets/Audio/Clear.sfx",
 			"XXH64": "30437b2399ff6bba",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Clear.sfx.meta",
-			"XXH64": "b49115fc7fccd514",
+			"XXH64": "e4959ee40c80b78e",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Drop.sfx",
 			"XXH64": "f5355a11af4933c1",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Drop.sfx.meta",
-			"XXH64": "27228c63a0c2c8ea",
+			"XXH64": "63803a9b589f1b2d",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/GameOver.sfx",
 			"XXH64": "0d9780faa44602be",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/GameOver.sfx.meta",
-			"XXH64": "1f4efc13035cc562",
+			"XXH64": "ebb11e96186d670a",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Hold.sfx",
 			"XXH64": "1c3272becfa49625",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Hold.sfx.meta",
-			"XXH64": "9e8c112084e5db11",
+			"XXH64": "426297a61bc0fde3",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/LevelUp.sfx",
 			"XXH64": "c2b2abc67646c716",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/LevelUp.sfx.meta",
-			"XXH64": "45cf69015d43dbad",
+			"XXH64": "022a23c1ff58c686",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Lock.sfx",
 			"XXH64": "c3f8ec35f4291a17",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Lock.sfx.meta",
-			"XXH64": "0b0736fd8edf35ee",
+			"XXH64": "ef2340960bdf78af",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Move.sfx",
 			"XXH64": "df9dff670a4a01c2",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Move.sfx.meta",
-			"XXH64": "11eb002323f92c81",
+			"XXH64": "a12c5fa6ddf43a71",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Rotate.sfx",
 			"XXH64": "31045e31cb82e977",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Rotate.sfx.meta",
-			"XXH64": "3a7986cff0b0ee97",
+			"XXH64": "9c28d343e0a3ae73",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Tetris.sfx",
 			"XXH64": "96b9a00b7e24a029",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Audio/Tetris.sfx.meta",
-			"XXH64": "1bb8953436af6a99",
+			"XXH64": "108b951080505b2d",
 			"Method": "edit.batch",
-			"RequestId": 46,
+			"RequestId": 20,
 			"Client": "engine-mcp",
-			"TranscriptLine": 87
-		},
-		{
-			"Path": "Assets/Materials/Accent.material",
-			"XXH64": "c6ac9e9215ccd59e",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/Accent.material.meta",
-			"XXH64": "3e6402c6ec3a9aeb",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/Backboard.material",
-			"XXH64": "411aba44baac57a8",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/Backboard.material.meta",
-			"XXH64": "4500c45456c8d64d",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/Backdrop.material",
-			"XXH64": "d9cb9216f04eb568",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/Backdrop.material.meta",
-			"XXH64": "d47994b3334dea7d",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/Frame.material",
-			"XXH64": "b4a5e64f47a48494",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/Frame.material.meta",
-			"XXH64": "9f50ca9ec49e8628",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/Garbage.material",
-			"XXH64": "55a193ec1daf9dff",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/Garbage.material.meta",
-			"XXH64": "432a8781c5b49fa8",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/Ghost.material",
-			"XXH64": "88302bd2ad6fbd03",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/Ghost.material.meta",
-			"XXH64": "c0e2ee662e094811",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/PieceI.material",
-			"XXH64": "6f8311beb5e0c0ad",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/PieceI.material.meta",
-			"XXH64": "e60bc8d71abe83d1",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/PieceJ.material",
-			"XXH64": "c8015c429148393b",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/PieceJ.material.meta",
-			"XXH64": "96c312b067b78b38",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/PieceL.material",
-			"XXH64": "13e6585e6db34984",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/PieceL.material.meta",
-			"XXH64": "d84c4f8e8efaccf4",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/PieceO.material",
-			"XXH64": "674c2b7d9878243d",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/PieceO.material.meta",
-			"XXH64": "10c1d23a18ae5cc6",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/PieceS.material",
-			"XXH64": "ce25a284fe0a0c6a",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/PieceS.material.meta",
-			"XXH64": "c0530460e4ba93a8",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/PieceT.material",
-			"XXH64": "0dceda4a7c869c3c",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/PieceT.material.meta",
-			"XXH64": "4817a96afd3a2ca9",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
-		},
-		{
-			"Path": "Assets/Materials/PieceZ.material",
-			"XXH64": "e841050238eb72d3",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 577
-		},
-		{
-			"Path": "Assets/Materials/PieceZ.material.meta",
-			"XXH64": "6acee73f010a816c",
-			"Method": "edit.batch",
-			"RequestId": 45,
-			"Client": "engine-mcp",
-			"TranscriptLine": 85
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Prefabs/Cell.prefab",
-			"XXH64": "54e4bdf4f54ee3b2",
+			"XXH64": "23451d0ee2d9ed06",
 			"Method": "edit.batch",
-			"RequestId": 51,
+			"RequestId": 34,
 			"Client": "engine-mcp",
-			"TranscriptLine": 97
+			"TranscriptLine": 65
 		},
 		{
 			"Path": "Assets/Prefabs/Cell.prefab.meta",
-			"XXH64": "f8d14f72bede762c",
+			"XXH64": "45b49c4c0d1d5a22",
 			"Method": "edit.batch",
-			"RequestId": 51,
+			"RequestId": 34,
 			"Client": "engine-mcp",
-			"TranscriptLine": 97
+			"TranscriptLine": 65
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene",
-			"XXH64": "8c92f2209bec2fe4",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 521
+			"XXH64": "1e991d8d0188055d",
+			"Method": "scene.save",
+			"RequestId": 10,
+			"Client": "engine-mcp",
+			"TranscriptLine": 209
 		},
 		{
 			"Path": "Assets/Scenes/Main.scene.meta",
-			"XXH64": "3f5605a77159450e",
+			"XXH64": "cec7ad2d6be73f4f",
 			"Method": "edit.batch",
-			"RequestId": 51,
+			"RequestId": 34,
 			"Client": "engine-mcp",
-			"TranscriptLine": 97
+			"TranscriptLine": 65
 		},
 		{
 			"Path": "Assets/Scripts/Bag.luau",
 			"XXH64": "c7a6aa891cb421a8",
 			"Method": "script.write",
-			"RequestId": 36,
+			"RequestId": 26,
 			"Client": "engine-mcp",
-			"TranscriptLine": 67
+			"TranscriptLine": 49
 		},
 		{
 			"Path": "Assets/Scripts/Bag.luau.meta",
-			"XXH64": "a48a1086a7b01beb",
-			"Method": "script.write",
-			"RequestId": 36,
+			"XXH64": "516faadd26a55975",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 67
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Scripts/Board.luau",
 			"XXH64": "d346ee4dbc6293a3",
 			"Method": "script.write",
-			"RequestId": 55,
+			"RequestId": 25,
 			"Client": "engine-mcp",
-			"TranscriptLine": 409
+			"TranscriptLine": 47
 		},
 		{
 			"Path": "Assets/Scripts/Board.luau.meta",
-			"XXH64": "5fddac9f702b7f8b",
-			"Method": "script.write",
-			"RequestId": 35,
+			"XXH64": "d88d2d7951b0c762",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 65
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Scripts/Game.luau",
-			"XXH64": "4d06812497c51b92",
+			"XXH64": "e12993eaf9687a18",
 			"Method": "script.write",
-			"RequestId": 49,
+			"RequestId": 29,
 			"Client": "engine-mcp",
-			"TranscriptLine": 93
+			"TranscriptLine": 55
 		},
 		{
 			"Path": "Assets/Scripts/Game.luau.meta",
-			"XXH64": "b38396146ea8c255",
-			"Method": "script.write",
-			"RequestId": 47,
+			"XXH64": "3a0efcac6cd1b8cd",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 89
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Scripts/Match.luau",
 			"XXH64": "db3c61d9cf821dd1",
 			"Method": "script.write",
-			"RequestId": 56,
+			"RequestId": 27,
 			"Client": "engine-mcp",
-			"TranscriptLine": 411
+			"TranscriptLine": 51
 		},
 		{
 			"Path": "Assets/Scripts/Match.luau.meta",
-			"XXH64": "76c3c4c227991b7b",
-			"Method": "script.write",
-			"RequestId": 37,
+			"XXH64": "b29200f2f1d93053",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 69
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Scripts/Palette.luau",
+			"XXH64": "79a087a8e9dbcd6e",
+			"Method": "script.write",
+			"RequestId": 28,
+			"Client": "engine-mcp",
+			"TranscriptLine": 53
+		},
+		{
+			"Path": "Assets/Scripts/Palette.luau.meta",
+			"XXH64": "7d03d3b2f9c351f9",
+			"Method": "edit.batch",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Scripts/Pieces.luau",
 			"XXH64": "f921dd87e16113fa",
 			"Method": "script.write",
-			"RequestId": 34,
+			"RequestId": 24,
 			"Client": "engine-mcp",
-			"TranscriptLine": 63
+			"TranscriptLine": 45
 		},
 		{
 			"Path": "Assets/Scripts/Pieces.luau.meta",
-			"XXH64": "cfd6566493a2429c",
-			"Method": "script.write",
-			"RequestId": 34,
+			"XXH64": "c62d07fdfe8fa81c",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 63
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Sheets/Blocks.spritesheet",
+			"XXH64": "62a60faf3ba30ba2",
+			"Method": "edit.batch",
+			"RequestId": 20,
+			"Client": "engine-mcp",
+			"TranscriptLine": 37
+		},
+		{
+			"Path": "Assets/Sheets/Blocks.spritesheet.meta",
+			"XXH64": "b3a64cf92e1b22a9",
+			"Method": "edit.batch",
+			"RequestId": 20,
+			"Client": "engine-mcp",
+			"TranscriptLine": 37
 		},
 		{
 			"Path": "Assets/Tests/Board.test.luau",
 			"XXH64": "8d36fd2a07a651c8",
 			"Method": "script.write",
-			"RequestId": 53,
+			"RequestId": 33,
 			"Client": "engine-mcp",
-			"TranscriptLine": 405
+			"TranscriptLine": 63
 		},
 		{
 			"Path": "Assets/Tests/Board.test.luau.meta",
-			"XXH64": "b565fbf1b8da4a51",
-			"Method": "script.write",
-			"RequestId": 38,
+			"XXH64": "d2f007b326bf1067",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 71
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Tests/Lib/Autopilot.luau",
 			"XXH64": "d850dba9940e2483",
 			"Method": "script.write",
-			"RequestId": 85,
+			"RequestId": 30,
 			"Client": "engine-mcp",
-			"TranscriptLine": 165
+			"TranscriptLine": 57
 		},
 		{
 			"Path": "Assets/Tests/Lib/Autopilot.luau.meta",
-			"XXH64": "8ec3667f4f49dcca",
-			"Method": "script.write",
-			"RequestId": 85,
+			"XXH64": "791f7702fba8a883",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 165
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Tests/Record/LineClear.test.luau",
 			"XXH64": "7d513c3a10576e91",
 			"Method": "script.write",
-			"RequestId": 86,
+			"RequestId": 32,
 			"Client": "engine-mcp",
-			"TranscriptLine": 167
+			"TranscriptLine": 61
 		},
 		{
 			"Path": "Assets/Tests/Record/LineClear.test.luau.meta",
-			"XXH64": "dddd7b740a4a2541",
-			"Method": "script.write",
-			"RequestId": 86,
+			"XXH64": "859ee79c02ce97f8",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 167
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Tests/Record/Opening.test.luau",
 			"XXH64": "1ece27f6cf4067e2",
 			"Method": "script.write",
-			"RequestId": 88,
+			"RequestId": 31,
 			"Client": "engine-mcp",
-			"TranscriptLine": 171
+			"TranscriptLine": 59
 		},
 		{
 			"Path": "Assets/Tests/Record/Opening.test.luau.meta",
-			"XXH64": "271b209e492b421b",
-			"Method": "script.write",
-			"RequestId": 87,
+			"XXH64": "872fa2321b7930c3",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 169
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Tests/Record/Restart.test.luau",
+			"XXH64": "851adce68eba7c1c",
+			"Method": "script.write",
+			"RequestId": 45,
+			"Client": "engine-mcp",
+			"TranscriptLine": 87
+		},
+		{
+			"Path": "Assets/Tests/Record/Restart.test.luau.meta",
+			"XXH64": "db354c743d1c472f",
+			"Method": "edit.batch",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay",
-			"XXH64": "a0829fd985f2df5c",
+			"XXH64": "da48a8845dccdda0",
 			"Method": "test.run",
 			"RequestId": 12,
 			"Client": "engine-mcp",
-			"TranscriptLine": 543
+			"TranscriptLine": 213
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay.meta",
-			"XXH64": "98e6d53956d1ff5b",
+			"XXH64": "e60d8dd07219f59d",
 			"Method": "test.run",
-			"RequestId": 92,
+			"RequestId": 59,
 			"Client": "engine-mcp",
-			"TranscriptLine": 179
+			"TranscriptLine": 111
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay",
-			"XXH64": "8e17ad7e93ceacf8",
+			"XXH64": "64da0885957bc39f",
 			"Method": "test.run",
 			"RequestId": 11,
 			"Client": "engine-mcp",
-			"TranscriptLine": 541
+			"TranscriptLine": 211
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay.meta",
-			"XXH64": "7212d5a0c0c60e2c",
+			"XXH64": "5e5b0220e206329b",
 			"Method": "test.run",
-			"RequestId": 91,
+			"RequestId": 58,
 			"Client": "engine-mcp",
-			"TranscriptLine": 177
+			"TranscriptLine": 109
+		},
+		{
+			"Path": "Assets/Tests/Replays/Restart.replay",
+			"XXH64": "98c958d76ffff452",
+			"Method": "test.run",
+			"RequestId": 13,
+			"Client": "engine-mcp",
+			"TranscriptLine": 215
+		},
+		{
+			"Path": "Assets/Tests/Replays/Restart.replay.meta",
+			"XXH64": "03c5bea94eef61b1",
+			"Method": "test.run",
+			"RequestId": 60,
+			"Client": "engine-mcp",
+			"TranscriptLine": 113
 		},
 		{
 			"Path": "Assets/Tests/Tetris.test.luau",
-			"XXH64": "d899e5ba3cdd11e9",
+			"XXH64": "d4597efa64dca2ac",
 			"Method": "script.write",
-			"RequestId": 57,
+			"RequestId": 7,
 			"Client": "engine-mcp",
-			"TranscriptLine": 413
+			"TranscriptLine": 359
 		},
 		{
 			"Path": "Assets/Tests/Tetris.test.luau.meta",
-			"XXH64": "10053b7922d4dd2b",
-			"Method": "script.write",
-			"RequestId": 82,
+			"XXH64": "0661dbac7ff0fdac",
+			"Method": "edit.batch",
+			"RequestId": 23,
 			"Client": "engine-mcp",
-			"TranscriptLine": 159
+			"TranscriptLine": 43
 		},
 		{
 			"Path": "Tetris.eproj",
-			"XXH64": "3b5bc64fbdb23f91",
-			"Method": "project.upgrade",
-			"RequestId": 2,
-			"Client": "cli",
-			"TranscriptLine": 573
+			"XXH64": "7b50e8480509cc09",
+			"Method": "project.setSettings",
+			"RequestId": 19,
+			"Client": "engine-mcp",
+			"TranscriptLine": 35
 		}
 	]
 }

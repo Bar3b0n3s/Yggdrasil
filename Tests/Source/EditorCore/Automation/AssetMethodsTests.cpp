@@ -235,6 +235,54 @@ namespace Engine {
 			CHECK(created->IsDirectory);
 		}
 
+		// M25's friction F08 (Docs/Decisions/0036-m25-tetris-pixel-art.md) documents that a Scene, a Prefab and a Folder take no
+		// values (asset.create's description, its values field and the prefab page): each refuses them at /values and writes
+		// nothing, while null values are the same as none (the milestone review).
+		TEST_CASE("AssetMethods: asset.create refuses values for a Scene, a Prefab and a Folder and writes nothing")
+		{
+			Test::AutomationFixture setup("AssetCreateNoValues");
+			const VirtualFileSystem& vfs = setup.GetEditor().GetVfs();
+			const size_t undoCount = setup.GetEditor().GetHistory().GetUndoCount();
+			const std::vector<std::pair<std::string, std::string>> cases = { { "Scene", "Assets/Scenes/Level.scene" }, { "Prefab", "Assets/Prefabs/Cell.prefab" },
+				{ "Folder", "Assets/Levels" } };
+			for (const auto& [type, path] : cases)
+			{
+				CAPTURE(type);
+				const Json refused = setup.Request("asset.create", Json{ { "type", type }, { "path", path }, { "values", Json{ { "X", 1 } } } });
+				REQUIRE(refused.contains("error"));
+				CHECK(refused["error"]["code"] == Json(-32602));
+				CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json("/values"));
+				CHECK_FALSE(vfs.Exists(VfsPath::Create("project", path).value_or(VfsPath())));
+			}
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == undoCount);
+
+			// Without values, or with null ones, each is created.
+			CHECK(CallOrFail(setup, "asset.create", Json{ { "type", "Prefab" }, { "path", "Assets/Prefabs/Cell.prefab" }, { "values", nullptr } })["path"]
+				== Json("Assets/Prefabs/Cell.prefab"));
+			CHECK(CallOrFail(setup, "asset.create", Json{ { "type", "Scene" }, { "path", "Assets/Scenes/Level.scene" } })["path"] == Json("Assets/Scenes/Level.scene"));
+			CHECK(vfs.Exists(VfsPath::Create("project", "Assets/Prefabs/Cell.prefab").value_or(VfsPath())));
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 20; ADR 0028's amendment "M25's milestone review"): a Heightfield joins
+		// the types that take no values, refused as the case above refuses a Scene's, a Prefab's and a Folder's.
+		TEST_CASE("AssetMethods: asset.create refuses values for a Heightfield as for a Scene, a Prefab and a Folder, and writes nothing")
+		{
+			Test::AutomationFixture setup("AssetCreateHeightfieldNoValues");
+			const VirtualFileSystem& vfs = setup.GetEditor().GetVfs();
+			const size_t undoCount = setup.GetEditor().GetHistory().GetUndoCount();
+			const std::string path = "Assets/Terrain/Ground.heightfield";
+			const Json refused = setup.Request("asset.create", Json{ { "type", "Heightfield" }, { "path", path }, { "values", Json{ { "Resolution", 33 } } } });
+			REQUIRE(refused.contains("error"));
+			CHECK(refused["error"]["code"] == Json(-32602));
+			CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json("/values"));
+			CHECK_FALSE(vfs.Exists(VfsPath::Create("project", path).value_or(VfsPath())));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == undoCount);
+
+			// With null values, it is created.
+			CHECK(CallOrFail(setup, "asset.create", Json{ { "type", "Heightfield" }, { "path", path }, { "values", nullptr } })["path"] == Json(path));
+			CHECK(vfs.Exists(VfsPath::Create("project", path).value_or(VfsPath())));
+		}
+
 		// M17 friction F07: new projects already have the template's folders (ProjectManager), so asset.create {type: Folder}
 		// of Assets/Materials failed with AlreadyExists and rolled back the whole edit.batch it was the first op of. A folder
 		// that is already there now succeeds without a command (created: false); a file at the path is still refused.

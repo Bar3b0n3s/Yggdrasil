@@ -71,6 +71,18 @@ export type GamepadAxis = "LeftX" | "LeftY" | "RightX" | "RightY" | "LeftTrigger
 -- Gamepad button positions.
 export type GamepadButton = "South" | "East" | "West" | "North" | "LeftBumper" | "RightBumper" | "Back" | "Start" | "Guide" | "LeftThumb" | "RightThumb" | "DPadUp" | "DPadRight" | "DPadDown" | "DPadLeft"
 
+-- Where the graph editor's node menu lists a node kind.
+export type GraphNodeCategory = "Event" | "Flow" | "Member" | "Operator" | "Call" | "Property" | "Constant"
+
+-- Whether a graph pin takes or gives its value.
+export type GraphPinDirection = "Input" | "Output"
+
+-- What a graph pin carries.
+export type GraphPinType = "Exec" | "Any" | "Bool" | "Number" | "String" | "Vector" | "Color" | "Quat" | "Entity" | "Asset" | "Enum" | "Object"
+
+-- The kind of a graph field or variable: its Luau Field constructor.
+export type GraphValueKind = "Number" | "Integer" | "Bool" | "String" | "Vector" | "Color" | "Quat" | "Entity" | "Asset" | "Enum" | "Array"
+
 -- How an input action reads its controls.
 export type InputActionType = "Button" | "Axis"
 

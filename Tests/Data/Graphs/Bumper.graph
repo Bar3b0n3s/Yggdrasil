@@ -1,0 +1,314 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Bumper",
+	"Fields": [
+		{
+			"Name": "Strength",
+			"Kind": "Number",
+			"Default": 5,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		},
+		{
+			"Name": "Threshold",
+			"Kind": "Number",
+			"Default": 1,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		}
+	],
+	"Variables": [],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnCollisionEnter",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Get.Entity.RigidBody",
+			"Position": [240, 160],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Flow.IfNotNil",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Call.RigidBody.AddImpulse",
+			"Position": [720, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Vector.Scale",
+			"Position": [480, 320],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Get.CollisionContact.Normal",
+			"Position": [240, 320],
+			"Values": {}
+		},
+		{
+			"Id": 7,
+			"Kind": "Self.Get.Strength",
+			"Position": [240, 480],
+			"Values": {}
+		},
+		{
+			"Id": 8,
+			"Kind": "Flow.Branch",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 9,
+			"Kind": "Compare.Less",
+			"Position": [720, 320],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Get.CollisionContact.RelativeSpeed",
+			"Position": [480, 480],
+			"Values": {}
+		},
+		{
+			"Id": 11,
+			"Kind": "Self.Get.Threshold",
+			"Position": [480, 640],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Call.Log.Info",
+			"Position": [1200, 0],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Text.Concat",
+			"Position": [960, 320],
+			"Values": {
+				"B": " bumped softly"
+			}
+		},
+		{
+			"Id": 14,
+			"Kind": "Get.Entity.Name",
+			"Position": [720, 480],
+			"Values": {}
+		},
+		{
+			"Id": 15,
+			"Kind": "Call.Log.Info",
+			"Position": [720, 800],
+			"Values": {
+				"Values": "no rigid body"
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "contact"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "contact"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "other"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "other"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "False"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "impulse"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "Factor"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "Values"
+			}
+		},
+		{
+			"From": {
+				"Node": 14,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "A"
+			}
+		}
+	]
+}

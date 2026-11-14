@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Editor/FileDialog.h"
+#include "EditorCore/Graph/GraphEditorTarget.h"
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/AssetType.h"
 #include "Engine/Core/Result.h"
@@ -9,7 +10,9 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -18,7 +21,10 @@ namespace Engine {
 	struct EditorPanelContext;
 
 	// Project folder tree/grid, type icons, cached thumbnails and import-error badges. Create folder/scene/material/
-	// prefab/sound effect/sprite sheet through existing asset/prefab methods, and scripts through the registered templates.
+	// prefab/sound effect/sprite sheet through existing asset/prefab methods, scripts through the registered templates, and a
+	// graph through graph.create (M24, Docs/Decisions/0035-m24-contract.md decision 15: the create list's "Graph", after M22's
+	// string table). Double-clicking a graph (a Script asset of the Graph importer, drawn with the Graph glyph) opens it in the
+	// Graph Editor, which EditorLayer draws: the panel only records the request (TakeGraphRequest).
 	// Rename/move preserve handles; delete uses undoable trash. OS drops use asset.import, preview audio uses AudioPreview.
 	// The import's source file is chosen through the FileDialog API (Editor/FileDialog.h: the native dialog when the panel
 	// context has a backend, the ImGui picker otherwise), which only fills the path asset.import takes (M18).
@@ -35,6 +41,8 @@ namespace Engine {
 	{
 	public:
 		[[nodiscard]] Status Draw(EditorPanelContext& context);
+		// The graph a double-click or Open graph asked the Graph Editor to open since the last call, once.
+		[[nodiscard]] std::optional<GraphEditorTarget> TakeGraphRequest() { return std::exchange(m_GraphRequest, std::nullopt); }
 	private:
 		struct Tile
 		{
@@ -44,7 +52,8 @@ namespace Engine {
 			std::string TypeLabel{};
 			std::string Path{}; // the reference path, for search, tooltips and scene.open
 			std::string SearchKey{};
-			std::string Issue{}; // the first import diagnostic of the source, empty without one
+			std::string Issue{};    // the first import diagnostic of the source, empty without one
+			std::string Importer{}; // the record's importer id ("Graph" for a graph)
 			bool SubAsset = false;
 		};
 		void DetectChanges(EditorContext& editor);
@@ -88,6 +97,7 @@ namespace Engine {
 		bool m_OpenDropPrompt = false;
 		std::string m_PendingScene{};
 		bool m_OpenScenePrompt = false;
+		std::optional<GraphEditorTarget> m_GraphRequest{}; // TakeGraphRequest's
 	};
 
 }

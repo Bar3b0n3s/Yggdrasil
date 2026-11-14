@@ -7,11 +7,13 @@
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -31,6 +33,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace Engine {
@@ -729,6 +732,87 @@ namespace Engine {
 			}
 			CHECK(FileSystem::ReadText(root / "Assets/Text/Typo.stringtable").value_or(std::string()) == typoText);
 			CHECK(provenance->Find("Assets/Text/Typo.stringtable") == nullptr);
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 10): graphs are canonical authored files too, so project.upgrade
+		// rewrites them as it rewrites string tables: a minified graph gets the editor's bytes back, one that leaves its lists
+		// out gets them written, both are recorded, and a graph with an unknown member, or whose nodes are not in their
+		// canonical order (a rule of the format, which its importer applies), fails at its pointer, unchanged.
+		TEST_CASE("ProjectMethods: project.upgrade rewrites .graph files canonically and fails at an unknown member or a noncanonical order")
+		{
+			Test::AutomationFixture setup("ProjectUpgradeGraphs", false);
+			const TypeRegistry& registry = setup.GetEditor().GetTypeRegistry();
+			GraphDocument counter;
+			counter.Name = "Counter";
+			counter.Fields = { GraphField{ .Name = "Step", .Kind = GraphValueKind::Integer, .Default = VariantValue(Json(1)) } };
+			counter.Variables = { GraphVariable{ .Name = "Count", .Kind = GraphValueKind::Integer, .Default = VariantValue(Json(0)) } };
+			counter.Nodes = { GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Call.Log.Info", .Position = glm::vec2(240.0f, 0.0f), .Values = { { "Values", VariantValue(Json("Started")) } } } };
+			counter.Links = { GraphLink{ .From = { .Node = 1, .Pin = "Then" }, .To = { .Node = 2, .Pin = "In" } } };
+			const Result<std::string> canonical = GraphToText(counter, registry);
+			REQUIRE_MESSAGE(canonical.has_value(), canonical.error().ToString());
+			const std::filesystem::path root = setup.GetEditor().GetProject().GetRoot();
+			REQUIRE(FileSystem::CreateDirectories(root / "Assets/Scripts").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Scripts/Counter.graph", AsBytes(ParseProjectJson(*canonical).dump()), { .KeepBackup = false })
+					.has_value());
+			// A valid graph written by hand with its lists left out.
+			const std::string sparse = R"({"Format": "Graph", "Version": 1, "Name": "Sparse"})";
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Scripts/Sparse.graph", AsBytes(sparse), { .KeepBackup = false }).has_value());
+
+			const Json expected = ParseProjectJson(R"([
+				{"path": "Assets/Scripts/Counter.graph", "reason": "canonical form"},
+				{"path": "Assets/Scripts/Sparse.graph", "reason": "canonical form"}])");
+			Result<Json> dryRun = setup.Call("project.upgrade", Json{ { "dryRun", true } });
+			REQUIRE_MESSAGE(dryRun.has_value(), dryRun.error().ToString());
+			CHECK((*dryRun)["changes"] == expected);
+			CHECK(FileSystem::ReadText(root / "Assets/Scripts/Sparse.graph").value_or("") == sparse);
+			Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			CHECK((*upgraded)["changes"] == expected);
+			CHECK(FileSystem::ReadText(root / "Assets/Scripts/Counter.graph").value_or("") == *canonical);
+			const Json rewritten = ParseProjectJson(FileSystem::ReadText(root / "Assets/Scripts/Sparse.graph").value_or("{}"));
+			for (const std::string_view member : { "Fields", "Variables", "Nodes", "Links" })
+				CHECK_MESSAGE(rewritten.contains(member), member);
+			const ProvenanceRecorder* provenance = setup.GetEditor().GetProvenance();
+			REQUIRE(provenance != nullptr);
+			for (const std::string_view file : { "Assets/Scripts/Counter.graph", "Assets/Scripts/Sparse.graph" })
+			{
+				CAPTURE(std::string(file));
+				const ProvenanceEntry* entry = provenance->Find(file);
+				REQUIRE(entry != nullptr);
+				CHECK(entry->Method == "project.upgrade");
+			}
+			Result<Json> again = setup.Call("project.upgrade", Json::object());
+			REQUIRE(again.has_value());
+			CHECK((*again)["changes"] == Json::array());
+
+			// An unknown member, and nodes out of their order, fail the upgrade at their pointers, as the importer refuses the
+			// graph; nothing is rewritten.
+			Json typo = ParseProjectJson(*canonical);
+			typo["Nodez"] = Json::array();
+			Json unsorted = ParseProjectJson(*canonical);
+			std::swap(unsorted["Nodes"][0], unsorted["Nodes"][1]);
+			for (const auto& [file, document, pointer] : { std::tuple{ "Assets/Scripts/Typo.graph", typo, "/Nodez" },
+					 std::tuple{ "Assets/Scripts/Unsorted.graph", unsorted, "/Nodes/1/Id" } })
+			{
+				CAPTURE(file);
+				const std::string text = document.dump(1, '\t');
+				REQUIRE(FileSystem::WriteFileAtomic(root / file, AsBytes(text), { .KeepBackup = false }).has_value());
+				for (const bool isDryRun : { true, false })
+				{
+					CAPTURE(isDryRun);
+					const Json response = setup.Request("project.upgrade", isDryRun ? Json{ { "dryRun", true } } : Json::object());
+					REQUIRE_MESSAGE(response.contains("error"), response.dump());
+					const Json& data = response["error"]["data"];
+					CAPTURE(data.dump());
+					CHECK(data["errorCode"] == Json("Validation"));
+					CHECK(data["location"]["file"] == Json(file));
+					CHECK(data["location"]["pointer"] == Json(pointer));
+				}
+				CHECK(FileSystem::ReadText(root / file).value_or(std::string()) == text);
+				CHECK(provenance->Find(file) == nullptr);
+				REQUIRE(FileSystem::Remove(root / file).has_value());
+			}
 		}
 
 		TEST_CASE("ProjectMethods: project.refreshAssets registers an externally written file")

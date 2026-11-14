@@ -9,26 +9,48 @@
 #include "Engine/Graphics/GraphicsSpecification.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Engine/Renderer/TextLayout.h"
+#include "Engine/Renderer/UiPass.h"
+#include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
+#include "Engine/Scene/Components/TextComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiCanvasComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiTextComponent.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderExtraction.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Shared/ViewConstants.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/InMemoryAssetManager.h"
+#include "Support/SceneTestFixture.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 // The text pass (Architecture §8.10, §8.3 pass 14; Docs/Decisions/0013-m8-decisions.md decision 11) with the Default font
-// (Inter, M6's FontImporter through the engine resources), and M22's glyph runs with a font of their own.
+// (Inter, M6's FontImporter through the engine resources), and M22's glyph runs with a font of their own. M25's friction F01
+// (Docs/Decisions/0036-m25-tetris-pixel-art.md): small UI text and screen text under a pixel-perfect camera keep every stroke.
 
 namespace Engine {
 
@@ -158,6 +180,38 @@ namespace Engine {
 			return font;
 		}
 
+		// The milestone review of M25's F01 (Docs/Decisions/0036-m25-tetris-pixel-art.md): a font whose 32 x 32 atlas holds
+		// FlatFieldValue everywhere, 16 below the outline's 128, with the distance range `spread`. Its field is flat, so its
+		// screen-space derivative is 0 and the Text shader's edge width is its floor alone: the outline's value over `spread` per
+		// atlas pixel times the atlas pixels a screen pixel spans (Passes/Text.slang). Its glyph 'A' spans the whole atlas and
+		// one em, so a glyph drawn 16 pixels square spans 2 atlas pixels per screen pixel.
+		constexpr std::byte FlatFieldValue{ 112 };
+		Ref<FontData> MakeFlatFieldFont(float spread)
+		{
+			auto font = CreateRef<FontData>();
+			font->Spread = spread;
+			font->Ascent = 0.8f;
+			font->Descent = -0.2f;
+			font->AtlasWidth = 32;
+			font->AtlasHeight = 32;
+			font->AtlasPixels.assign(32 * 32, FlatFieldValue);
+			font->Glyphs = { FontGlyph{ .Codepoint = 'A', .Advance = 1.0f, .PlaneMax = glm::vec2(1.0f), .AtlasMin = glm::vec2(0.0f), .AtlasMax = glm::vec2(1.0f) } };
+			REQUIRE(ValidateFontData(*font).has_value());
+			return font;
+		}
+
+		// The red byte a white glyph of a MakeFlatFieldFont(spread) font gives where it spans 2 atlas pixels per screen pixel:
+		// the floor's half-width w = 2 * 128 / 255 / spread (at most 128 / 255) and coverage smoothstep(e - w, e + w, 112 / 255),
+		// e the outline's 128 / 255, blended over black. Spread 4: w = e / 2, coverage 0.316 (81); spread 8: w = e / 4, 0.156
+		// (40); spread 16: w = e / 8 = e - 112 / 255, so 0.
+		int ExpectedFlatFieldCoverage(float spread)
+		{
+			constexpr float Edge = 128.0f / 255.0f;
+			const float width = std::min(2.0f * Edge / spread, Edge);
+			const float t = std::clamp((static_cast<float>(std::to_integer<int>(FlatFieldValue)) / 255.0f - (Edge - width)) / (2.0f * width), 0.0f, 1.0f);
+			return static_cast<int>(std::lround(255.0f * t * t * (3.0f - 2.0f * t)));
+		}
+
 		// A glyph of the solid font over [min, max) in pixels.
 		TextPixelGlyph MakeSolidGlyph(glm::vec2 min, glm::vec2 max)
 		{
@@ -181,6 +235,107 @@ namespace Engine {
 					count += std::to_integer<int>(image.GetRow(y)[static_cast<size_t>(x) * 4]) > 128 ? 1U : 0U;
 			}
 			return count;
+		}
+
+		// M25's F01: Tetris's HUD geometry, a 360 x 450 reference under a PixelPerfectCamera at scale 2 in a 720 x 900 view.
+		constexpr uint32_t PixelArtViewWidth = 720;
+		constexpr uint32_t PixelArtViewHeight = 900;
+		constexpr uint32_t PixelArtSceneWidth = 360;
+		constexpr uint32_t PixelArtSceneHeight = 450;
+		constexpr uint32_t PixelArtScale = 2;
+		// The shortest stretch of a stroke along a row or a column of pixel centres that the stroke check asks coverage of, in
+		// scene pixels, and the least coverage such a stroke keeps: a quarter, 64 of 255 for white text on black.
+		constexpr float MinCheckedStroke = 0.5f;
+		constexpr int MinStrokeCoverage = 64;
+		// The atlas value of an outline (FontData: 128 is the outline, larger values inside).
+		constexpr float AtlasOutline = 128.0f;
+
+		// The atlas value of `font` at normalized coordinates `uv`, 0 to 255, interpolated bilinearly between texel centres and
+		// clamped at the atlas's edges, as the text sampler reads it.
+		float SampleAtlas(const FontData& font, glm::vec2 uv)
+		{
+			const glm::vec2 texel = uv * glm::vec2(static_cast<float>(font.AtlasWidth), static_cast<float>(font.AtlasHeight)) - 0.5f;
+			const glm::vec2 base = glm::floor(texel);
+			const glm::vec2 fraction = texel - base;
+			const auto at = [&font](float x, float y)
+			{
+				const auto column = static_cast<size_t>(std::clamp(x, 0.0f, static_cast<float>(font.AtlasWidth - 1)));
+				const auto row = static_cast<size_t>(std::clamp(y, 0.0f, static_cast<float>(font.AtlasHeight - 1)));
+				return static_cast<float>(std::to_integer<int>(font.AtlasPixels[row * font.AtlasWidth + column]));
+			};
+			const float top = glm::mix(at(base.x, base.y), at(base.x + 1.0f, base.y), fraction.x);
+			const float bottom = glm::mix(at(base.x, base.y + 1.0f), at(base.x + 1.0f, base.y + 1.0f), fraction.x);
+			return glm::mix(top, bottom, fraction.y);
+		}
+
+		// The red byte of scene pixel (x, y) in `image`, the view image at PixelArtScale view pixels per scene pixel.
+		int GetScenePixel(const Image& image, int x, int y)
+		{
+			return std::to_integer<int>(image.GetRow(static_cast<uint32_t>(y) * PixelArtScale)[static_cast<size_t>(x) * PixelArtScale * 4]);
+		}
+
+		// The strokes the stroke check found, and those it found without coverage.
+		struct StrokeCheck
+		{
+			uint32_t Strokes = 0;
+			std::vector<std::string> Misses{}; // one line per stroke without coverage
+		};
+
+		// Checks every stroke of `glyph` (in scene pixels, its atlas rectangle in `font`) that a row (axis 0) or a column
+		// (axis 1) of pixel centres crosses, against `image` (white text on black): each stretch of the line inside the outline
+		// (SampleAtlas at least AtlasOutline, found in 1/32-pixel steps) at least MinCheckedStroke long is a stroke, and one of
+		// the scene pixels it passes through must keep MinStrokeCoverage. A stretch of a pixel or more holds a pixel centre, so
+		// it is covered whatever the shading; a shorter one is a stem or a bar under a pixel wide, which lies between two pixel
+		// centres when its pixels are dropped.
+		void CheckStrokes(const Image& image, const FontData& font, const TextPixelGlyph& glyph, std::string_view label, StrokeCheck& check)
+		{
+			constexpr float Step = 1.0f / 32.0f;
+			const glm::vec2 size = glyph.Max - glyph.Min;
+			const auto toAtlas = [&glyph, size](glm::vec2 point)
+			{
+				return glyph.AtlasMin + (point - glyph.Min) / size * (glyph.AtlasMax - glyph.AtlasMin);
+			};
+			for (glm::length_t along = 0; along < 2; ++along)
+			{
+				const glm::length_t across = 1 - along;
+				const int firstLine = static_cast<int>(std::ceil(glyph.Min[across] - 0.5f));
+				const int lastLine = static_cast<int>(std::floor(glyph.Max[across] - 0.5f));
+				const int steps = static_cast<int>(std::floor(size[along] / Step));
+				for (int line = firstLine; line <= lastLine; ++line)
+				{
+					glm::vec2 point(0.0f);
+					point[across] = static_cast<float>(line) + 0.5f;
+					std::optional<float> start;
+					for (int step = 0; step <= steps; ++step)
+					{
+						point[along] = glyph.Min[along] + (static_cast<float>(step) + 0.5f) * Step;
+						const bool inside = step < steps && SampleAtlas(font, toAtlas(point)) >= AtlasOutline;
+						if (inside && !start.has_value())
+							start = point[along] - 0.5f * Step;
+						if (inside || !start.has_value())
+							continue;
+						const float end = point[along] - 0.5f * Step;
+						if (end - *start >= MinCheckedStroke)
+						{
+							++check.Strokes;
+							int coverage = 0;
+							for (int pixel = static_cast<int>(std::floor(*start)); pixel < static_cast<int>(std::ceil(end)); ++pixel)
+							{
+								const int x = along == 0 ? pixel : line;
+								const int y = along == 0 ? line : pixel;
+								if (x >= 0 && y >= 0 && x < static_cast<int>(PixelArtSceneWidth) && y < static_cast<int>(PixelArtSceneHeight))
+									coverage = std::max(coverage, GetScenePixel(image, x, y));
+							}
+							if (coverage < MinStrokeCoverage)
+							{
+								check.Misses.push_back(std::format("{}: {} {} from {:.2f} to {:.2f}: at most {} of 255", label, along == 0 ? "row" : "column", line,
+									*start, end, coverage));
+							}
+						}
+						start.reset();
+					}
+				}
+			}
 		}
 
 	}
@@ -512,6 +667,193 @@ namespace Engine {
 				setup.RenderGlyphRuns({ .Glyphs = glyphs, .Runs = empty, .Assets = &assets }, drawn, none);
 				CHECK(drawn == 0);
 				CHECK(none.DrawCalls == 0);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("TextRenderer: UI text and screen text of 9 and 10 pixels keep every stroke under a pixel-perfect camera at scale 2"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M25's F01 (Docs/Decisions/0036-m25-tetris-pixel-art.md): Tetris's HUD labels in the Default font at 9 and 10 scene
+			// pixels per em, as UiText in a Screen canvas and as Screen Text, drawn at the 360 x 450 reference and upscaled
+			// twice. Their stems and bars are under a pixel wide, and every one of them keeps coverage (CheckStrokes) wherever
+			// it falls between the pixel centres; "HOLD" read "IIOLD" when coverage followed the field's own screen-space
+			// derivative, which vanishes across a stroke that two pixels of one 2 x 2 quad straddle.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets({ .EngineResources = true });
+			assets.OpenProject(false);
+			const Result<AssetRef<Asset>> loaded = assets.GetManager().Load(BuiltinAssetHandles::DefaultFont);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<FontData> font = AssetCast<FontData>(*loaded);
+			REQUIRE(font != nullptr);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu, PixelArtViewWidth, PixelArtViewHeight);
+				setup.Assets().Publish(BuiltinAssetHandles::DefaultFont, *loaded);
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				Entity camera = scene.CreateEntity("Camera");
+				camera.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+				});
+				camera.AddComponent<CameraComponent>(
+					CameraComponent{ .Projection = ProjectionType::Orthographic, .Primary = true, .Clear = ClearMode::Color, .ClearColor = glm::vec3(0.0f) });
+				camera.AddComponent<PixelPerfectCameraComponent>(
+					PixelPerfectCameraComponent{ .ReferenceWidth = PixelArtSceneWidth, .ReferenceHeight = PixelArtSceneHeight, .PixelsPerUnit = 16.0f });
+				Entity canvas = scene.CreateEntity("HUD");
+				canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+
+				// Each label at 9 and at 10 pixels per em, as UiText in rows from y 20 and as Screen Text in rows from y 120 (a
+				// Text's Size and Offset are at the 1080p reference: 2.4 of them per scene pixel of the 450-pixel scene).
+				constexpr std::array<std::string_view, 2> Labels = { "HOLD LEVEL LINES PRESS RESTART", "SCORE NEXT ROTATE BACK" };
+				constexpr std::array<float, 2> Sizes = { 9.0f, 10.0f };
+				constexpr float TextReferencePerScenePixel = TextReferenceHeight / static_cast<float>(PixelArtSceneHeight);
+				float row = 20.0f;
+				for (const std::string_view label : Labels)
+				{
+					for (const float size : Sizes)
+					{
+						Entity element = scene.CreateEntity(std::format("UiText{}", row), canvas);
+						element.AddComponent<UiRectComponent>(UiRectComponent{
+							.AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Position = glm::vec2(8.0f, row), .Size = glm::vec2(344.0f, 16.0f) });
+						element.AddComponent<UiTextComponent>(UiTextComponent{ .Text = std::string(label), .Size = size, .Wrap = false, .RaycastTarget = false });
+						Entity text = scene.CreateEntity(std::format("Text{}", row));
+						text.AddComponent<TextComponent>(TextComponent{ .Text = std::string(label),
+							.Font = {},
+							.Size = size * TextReferencePerScenePixel,
+							.Anchor = glm::vec2(0.0f),
+							.Pivot = glm::vec2(0.0f),
+							.Offset = glm::vec2(8.0f, row + 100.0f) * TextReferencePerScenePixel,
+							.Alignment = TextAlignment::Left });
+						row += 20.0f;
+					}
+				}
+				TransformSystem::Update(scene);
+
+				Result<RenderSnapshot> extracted = ExtractRenderSnapshot(scene, { .Width = PixelArtViewWidth, .Height = PixelArtViewHeight });
+				REQUIRE_MESSAGE(extracted.has_value(), extracted.error().ToString());
+				const RenderSnapshot snapshot = std::move(*extracted);
+				REQUIRE(snapshot.Ui.Items.size() == 4);
+				REQUIRE(snapshot.Texts.size() == 4);
+				const Image image = setup.Render(snapshot);
+				const RenderOutputMapping mapping = setup.Renderer().GetOutputMapping();
+				REQUIRE(mapping.Scale == PixelArtScale);
+				REQUIRE(mapping.OffsetX == 0);
+				REQUIRE(mapping.OffsetY == 0);
+
+				// The UI's glyphs where the Ui pass places them, and the screen texts' where the Text pass does (Size and Offset
+				// scaled by the scene's height over TextReferenceHeight, the block placed by PlaceScreenText).
+				StrokeCheck check;
+				const UiPassPlan plan = PlanUiPass(snapshot.Ui, setup.Assets());
+				for (size_t index = 0; index < plan.Glyphs.size(); ++index)
+					CheckStrokes(image, *font, plan.Glyphs[index], std::format("UiText glyph {}", index), check);
+				const float pixelScale = static_cast<float>(PixelArtSceneHeight) / TextReferenceHeight;
+				size_t textGlyphs = 0;
+				for (const TextItem& item : snapshot.Texts)
+				{
+					const TextLayoutResult layout = LayoutText(*font, item.Text, item.Alignment);
+					const float pixelsPerEm = item.Size * pixelScale;
+					const glm::vec2 topLeft = PlaceScreenText(item, layout.Size * pixelsPerEm, PixelArtSceneWidth, PixelArtSceneHeight);
+					for (const TextGlyphQuad& quad : layout.Quads)
+					{
+						const TextPixelGlyph glyph{ .Min = topLeft + quad.PositionMin * pixelsPerEm,
+							.Max = topLeft + quad.PositionMax * pixelsPerEm,
+							.AtlasMin = quad.AtlasMin,
+							.AtlasMax = quad.AtlasMax };
+						CheckStrokes(image, *font, glyph, std::format("Text \"{}\" at {} glyph {}", item.Text, pixelsPerEm, textGlyphs++), check);
+					}
+				}
+				// 90 glyphs of each kind (the labels' 45 letters at both sizes), each crossed by several strokes.
+				CHECK(plan.Glyphs.size() == 90);
+				CHECK(textGlyphs == 90);
+				CHECK(check.Strokes > 2 * (plan.Glyphs.size() + textGlyphs));
+				std::string misses;
+				for (size_t index = 0; index < std::min<size_t>(check.Misses.size(), 20); ++index)
+					misses += std::format("\n  {}", check.Misses[index]);
+				const std::string summary = std::format("{} of {} strokes keep no coverage, the first {}:{}", check.Misses.size(), check.Strokes,
+					std::min<size_t>(check.Misses.size(), 20), misses);
+				CHECK_MESSAGE(check.Misses.empty(), summary);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("TextRenderer: glyph runs and screen texts are shaded with the Spread of their own font, batch by batch"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// The milestone review of M25's F01 (Docs/Decisions/0036-m25-tetris-pixel-art.md): the Text program's push constants
+			// carry the drawn font's FontData::Spread to each batch, the Ui pass's glyph runs and the Text pass's texts alike.
+			// Flat-field fonts of spreads 4, 16 and 8 (MakeFlatFieldFont) draw where only that floor shades them, alternating so
+			// that consecutive batches change spread; a constant 8, or a batch keeping the previous batch's constants, gives
+			// another coverage.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			constexpr AssetHandle Spread4{ 0xF048 };
+			constexpr AssetHandle Spread16{ 0xF049 };
+			constexpr AssetHandle Spread8{ 0xF04A };
+			Test::InMemoryAssetManager assets;
+			assets.Publish(Spread4, MakeFlatFieldFont(4.0f));
+			assets.Publish(Spread16, MakeFlatFieldFont(16.0f));
+			assets.Publish(Spread8, MakeFlatFieldFont(8.0f));
+			CHECK(ExpectedFlatFieldCoverage(4.0f) == 81);
+			CHECK(ExpectedFlatFieldCoverage(8.0f) == 40);
+			CHECK(ExpectedFlatFieldCoverage(16.0f) == 0);
+			{
+				TextSetup setup(gpu);
+				// Glyph runs (the Ui pass's path): four 16-pixel glyphs, one run each, of spreads 4, 16, 8, then 4 again.
+				const std::vector<TextPixelGlyph> glyphs = {
+					MakeSolidGlyph(glm::vec2(8.0f), glm::vec2(24.0f)),
+					MakeSolidGlyph(glm::vec2(40.0f, 8.0f), glm::vec2(56.0f, 24.0f)),
+					MakeSolidGlyph(glm::vec2(72.0f, 8.0f), glm::vec2(88.0f, 24.0f)),
+					MakeSolidGlyph(glm::vec2(104.0f, 8.0f), glm::vec2(120.0f, 24.0f)),
+				};
+				const std::array<std::pair<AssetHandle, float>, 4> fonts = { std::pair{ Spread4, 4.0f }, std::pair{ Spread16, 16.0f }, std::pair{ Spread8, 8.0f },
+					std::pair{ Spread4, 4.0f } };
+				std::vector<TextGlyphRun> runs;
+				for (uint32_t index = 0; index < fonts.size(); ++index)
+					runs.push_back(TextGlyphRun{ .Font = fonts[index].first, .Color = glm::vec4(1.0f), .FirstGlyph = index, .GlyphCount = 1 });
+				uint32_t drawn = 0;
+				RenderPassCounters counters;
+				const Image image = setup.RenderGlyphRuns({ .Glyphs = glyphs, .Runs = runs, .Assets = &assets }, drawn, counters);
+				CHECK(drawn == 4);
+				CHECK(counters.DrawCalls == 4);
+				for (size_t index = 0; index < fonts.size(); ++index)
+				{
+					CAPTURE(index);
+					CAPTURE(fonts[index].second);
+					const uint32_t x = 16 + static_cast<uint32_t>(index) * 32;
+					CHECK(std::abs(GetPixel(image, x, 16).x - ExpectedFlatFieldCoverage(fonts[index].second)) <= 2);
+				}
+
+				// Screen texts (the Text pass's path): an 'A' at 16 pixels per em (270 at the 1080p reference on this 64-pixel
+				// target) in each half of the target, of spreads 4 and 8, then 8 and 4.
+				constexpr float Size = 16.0f * TextReferenceHeight / static_cast<float>(Height);
+				const std::array<std::pair<AssetHandle, AssetHandle>, 2> orders = { std::pair{ Spread4, Spread8 }, std::pair{ Spread8, Spread4 } };
+				for (const auto& [left, right] : orders)
+				{
+					const std::vector<TextItem> texts = {
+						TextItem{ .Text = "A", .Font = left, .Size = Size, .Color = glm::vec4(1.0f), .Anchor = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Offset = glm::vec2(8.0f * TextReferenceHeight / static_cast<float>(Height)) },
+						TextItem{ .Text = "A", .Font = right, .Size = Size, .Color = glm::vec4(1.0f), .Anchor = glm::vec2(0.5f, 0.0f), .Pivot = glm::vec2(0.0f), .Offset = glm::vec2(8.0f * TextReferenceHeight / static_cast<float>(Height)) },
+					};
+					const Image textImage = setup.Render({ .Texts = texts, .DebugDraw = nullptr, .Assets = &assets }, drawn);
+					CHECK(drawn == 2);
+					// The brightest pixel of each half: every pixel a glyph covers takes the one coverage of its flat field.
+					const auto brightest = [&textImage](uint32_t x0, uint32_t x1)
+					{
+						int value = 0;
+						for (uint32_t y = 0; y < Height; ++y)
+						{
+							for (uint32_t x = x0; x < x1; ++x)
+								value = std::max(value, GetPixel(textImage, x, y).x);
+						}
+						return value;
+					};
+					const float leftSpread = left == Spread4 ? 4.0f : 8.0f;
+					const float rightSpread = right == Spread4 ? 4.0f : 8.0f;
+					CAPTURE(leftSpread);
+					CHECK(std::abs(brightest(0, Width / 2) - ExpectedFlatFieldCoverage(leftSpread)) <= 2);
+					CHECK(std::abs(brightest(Width / 2, Width) - ExpectedFlatFieldCoverage(rightSpread)) <= 2);
+				}
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

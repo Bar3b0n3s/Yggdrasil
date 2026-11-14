@@ -310,6 +310,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Graphs.jsonl",
+			"IdSeed": 2201,
+			"Renderer": "none"
+		},
+		{
+			"File": "GraphReplay.jsonl",
+			"IdSeed": 2202,
+			"Renderer": "none"
+		},
+		{
 			"File": "Particles.jsonl",
 			"IdSeed": 2401,
 			"Renderer": "none"

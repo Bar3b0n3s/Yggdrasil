@@ -33,12 +33,13 @@ serves its skills and generated reference through automation (`docs.get {}` list
   record `TextInput.replay` and `UiWorld.replay` with `test.run {record}` from their recording suites in
   `Assets/Tests/Record/`, which `Testing.Suites` keeps in the Editor mode, so re-recording one is that one call; M22's
   landing's `Combined2DUiReplay.jsonl` records `Combined2DUi.replay` with `input.record` around a `play.step` of its
-  planned pointer input, and so do M23's `AnimationReplays.jsonl` for `Animation.replay` and M26's `TerrainReplays.jsonl`
-  for `Terrain.replay`, each with its planned action input). M26's `Probes.jsonl` and `GoldenProbes.jsonl` run in a
-  rendering editor (`Renderer` `vulkan`), whose `lighting.bake` writes their probes' bakes under `Assets/Lighting/`; its
-  `PostProcessV2.jsonl` and `GoldenLut.jsonl` import a `.cube` LUT into `Assets/Luts/`, and `Terrain.jsonl` converts a
-  16-bit heightmap with `terrain.importHeightmap` into `Assets/Heightfields/Terrain/` and sculpts and paints it with
-  `terrain.edit`.
+  planned pointer input, and so do M23's `AnimationReplays.jsonl` for `Animation.replay`, M24's `GraphReplay.jsonl` for
+  `Graphs.replay` and M26's `TerrainReplays.jsonl` for `Terrain.replay`, each with its planned action input). M24's
+  `Graphs.jsonl` builds its graph behaviours under `Assets/Scripts/Graphs/` through the `graph.*` methods alone. M26's
+  `Probes.jsonl` and `GoldenProbes.jsonl` run in a rendering editor (`Renderer` `vulkan`), whose `lighting.bake` writes
+  their probes' bakes under `Assets/Lighting/`; its `PostProcessV2.jsonl` and `GoldenLut.jsonl` import a `.cube` LUT
+  into `Assets/Luts/`, and `Terrain.jsonl` converts a 16-bit heightmap with `terrain.importHeightmap` into
+  `Assets/Heightfields/Terrain/` and sculpts and paints it with `terrain.edit`.
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte
   for byte. To change the content, change a scaffold and regenerate; a changed setting, scene or id re-records the replays.

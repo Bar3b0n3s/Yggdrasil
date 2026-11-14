@@ -106,7 +106,7 @@
 		"BuildScenes": ["Assets/Scenes/Main.scene"],
 		"Exclude": ["Assets/Tests/**"],
 		"Icon": "",
-		"Version": "1.0.0",
+		"Version": "2.0.0",
 		"Company": "Engine Demos",
 		"PruneUnreferenced": false
 	},
@@ -167,6 +167,20 @@
 				},
 				"ExpectQuit": -1,
 				"Modes": ["Editor"]
+			},
+			{
+				"Script": "Assets/Tests/Record/Restart.test.luau",
+				"Scene": "Assets/Scenes/Main.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor"]
 			}
 		],
 		"Replays": ["Assets/Tests/Replays/*.replay"],
@@ -175,7 +189,7 @@
 		"CoverageGates": false
 	},
 	"SortingLayers": {
-		"Layers": ["Default"]
+		"Layers": ["Default", "Board", "Frame"]
 	},
 	"Physics2D": {
 		"Gravity": [0, -9.81]
@@ -184,7 +198,7 @@
 		"Locale": ""
 	},
 	"Ui": {
-		"Navigation": true,
+		"Navigation": false,
 		"Submit": ["Key.Enter", "Key.Space", "Gamepad.South"],
 		"Cancel": ["Key.Escape", "Gamepad.East"],
 		"Up": ["Key.Up", "Gamepad.DPadUp"],

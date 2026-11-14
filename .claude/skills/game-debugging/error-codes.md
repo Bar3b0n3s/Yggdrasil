@@ -62,7 +62,7 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 |---|---|
 | `EditorCrashed {exitCode, lastLogLines, crashReportPath, autosaveAvailable}` | Read the crash report and the last log lines; relaunch with `editor_launch {recover: true}` when an autosave exists. |
 | `EditorAlreadyOpen {pid}` | An editor without automation holds the project: enable "Allow AI automation" in its Automation panel, then `editor_attach`. |
-| `LockUnavailable` | A gate (`CI.py`) runs, or, for `renderer: "vulkan"`, another GPU run holds the machine-wide GPU lock (the message names its pid, worktree and command; `python Scripts/Locks.py` lists the holders): call `editor_launch` again once it has ended, or launch with `renderer: "none"` when no screenshot or smoke test is needed and no gate runs. |
+| `LockUnavailable` | `editor_launch` waited 25 min while a gate (`CI.py`) ran or, for `renderer: "vulkan"`, another GPU run held the machine-wide GPU lock (the result names the lock and its holders' pid, worktree and command, as the call's progress notifications did while it waited; `python Scripts/Locks.py` lists the holders): call `editor_launch` again to keep waiting, or launch with `renderer: "none"` when no screenshot or smoke test is needed and no gate runs (the `hint` says which applies). |
 | `NotConnected` | Call `editor_launch` or `editor_attach` first; unconnected, `editor_status` lists the editors running with automation (pid, project, renderer) that `editor_attach {pid}` reaches. |
 | `ConnectionClosed` | The editor closed the connection: check `editor_status`, then relaunch or reattach. |
 | `Timeout` | The call exceeded the method's `timeoutSeconds`: retry with less work. |

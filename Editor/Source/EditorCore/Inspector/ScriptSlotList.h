@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string_view>
 
 namespace Engine {
 
@@ -33,6 +34,15 @@ namespace Engine {
 	// InvalidArgument when an entity has no slot at `slot` (Remove, MoveUp, MoveDown), or no slot before it (MoveUp) or
 	// after it (MoveDown).
 	[[nodiscard]] Result<Json> MakeScriptSlotChange(const Scene& scene, std::span<const UUID> entities, ScriptSlotChange change, size_t slot,
+		SceneTarget target);
+
+	// M24 (Docs/Decisions/0035-m24-contract.md decision 15, the graph editor's CreateGraphInSlot): the edit.batch params ({label
+	// "New Graph", ops}) of a script slot's New Graph: graph.create of the graph at `path` (named "graph", the behaviour named
+	// after the file's stem), then, as MakeScriptSlotChange's, one entity.update per entity of `entities` writing its whole list,
+	// whose slot `slot` holds the new graph ({"$ref": "graph.graph.id"}) with no field values and keeps its ExecutionOrder, so
+	// creating the graph and assigning it is one undo step. Errors: as MakeScriptSlotChange's, InvalidArgument when an entity
+	// has no slot `slot`.
+	[[nodiscard]] Result<Json> MakeScriptSlotGraph(const Scene& scene, std::span<const UUID> entities, size_t slot, std::string_view path,
 		SceneTarget target);
 
 }

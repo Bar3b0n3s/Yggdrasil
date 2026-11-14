@@ -127,7 +127,7 @@
 		{
 			"name": "asset.create",
 			"domain": "asset",
-			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a one-entity prefab, a flat heightfield or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
+			"description": "Creates a material, a sound effect, a sprite sheet, a tilemap or a string table (with values over the defaults), an empty scene, a prefab of one empty root entity (no values: prefab.create saves a built entity as a prefab), a flat heightfield (no values: terrain.importHeightmap converts a heightmap into one and terrain.edit sculpts it) or a folder below Assets/, with its .meta and any missing parent folders, as one undoable command. A folder that already exists succeeds without a command (created: false), so a Folder op is needed only for an empty folder.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -151,7 +151,7 @@
 						"type": "string"
 					},
 					"values": {
-						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed); absent for other types."
+						"description": "A Material's, a SoundEffect's, a SpriteSheet's, a Tilemap's or a StringTable's fields over the defaults (registry names, such as Roughness, Layers, which a sound effect needs, a sheet's Texture, Frames and Clips, whose frames must lie inside a texture that loads, a tilemap's CellSize, ChunkSize, Palette and Chunks, or a table's Locales and Entries; a material's maps, a sheet's Texture and a palette entry's Sheet take any asset reference: a handle, an Assets/ path or an engine:// path; a sheet's imported Texture is set to Compression None in the same step, so sprite art is never block-compressed). A Scene, a Prefab, a Heightfield and a Folder take no values and refuse them: a prefab is created with one empty root entity, and prefab.create saves an entity built in a scene, its components and children, as a prefab; a heightfield is created flat, and terrain.importHeightmap converts a heightmap into one and terrain.edit sculpts it."
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",
@@ -10716,6 +10716,1848 @@
 			]
 		},
 		{
+			"name": "graph.addNode",
+			"domain": "graph",
+			"description": "Adds a node of a kind to a graph, with literals for its inputs, as one undoable edit; returns its id.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph", "kind"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphAddNodeParams",
+				"description": "The params of graph.addNode.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"kind": {
+						"description": "The node's kind (graph.nodes lists them).",
+						"type": "string"
+					},
+					"position": {
+						"description": "The node's place on the canvas; absent: right of the rightmost node.",
+						"type": "array",
+						"prefixItems": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "number"
+							}
+						],
+						"minItems": 2,
+						"maxItems": 2
+					},
+					"values": {
+						"description": "Literals of the node's inputs, by pin name.",
+						"type": "object",
+						"additionalProperties": {}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "kind"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphAddNodeResult",
+				"description": "The node graph.addNode added.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"node": {
+						"description": "The new node's id.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run or a batch.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Add a start event.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"kind": "Event.OnStart"
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.connect",
+			"domain": "graph",
+			"description": "Links an output pin to a compatible input pin of a graph as one undoable edit; a data input or exec output already linked loses its old link.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph", "from", "to"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphConnectParams",
+				"description": "The params of graph.connect.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"from": {
+						"description": "An output pin: {Node, Pin}.",
+						"$ref": "#/$defs/GraphPinRef"
+					},
+					"to": {
+						"description": "An input pin: {Node, Pin}.",
+						"$ref": "#/$defs/GraphPinRef"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "from", "to"],
+				"$defs": {
+					"GraphPinRef": {
+						"description": "One pin of one node: an end of a link.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphConnectResult",
+				"description": "The outcome of a graph.connect.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"replaced": {
+						"description": "The link the new one replaced, if any.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLink"
+						}
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run or a batch.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLink": {
+						"description": "A link from an output pin of one node to an input pin of another.",
+						"type": "object",
+						"properties": {
+							"From": {
+								"description": "The output pin.",
+								"$ref": "#/$defs/GraphPinRef"
+							},
+							"To": {
+								"description": "The input pin.",
+								"$ref": "#/$defs/GraphPinRef"
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphPinRef": {
+						"description": "One pin of one node: an end of a link.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Continue the start event at node 2.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"from": {
+							"Node": 1,
+							"Pin": "Then"
+						},
+						"to": {
+							"Node": 2,
+							"Pin": "In"
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.create",
+			"domain": "graph",
+			"description": "Creates an empty visual-scripting graph, a behaviour transpiled to Luau at import, as one undoable edit.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["path"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphCreateParams",
+				"description": "The params of graph.create.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"description": "The new graph's \"Assets/....graph\" path.",
+						"type": "string"
+					},
+					"name": {
+						"description": "The behaviour's name (a Luau identifier); empty takes the file's stem.",
+						"type": "string"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["path"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphCreateResult",
+				"description": "The graph graph.create made.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The new graph, a Script asset.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"name": {
+						"description": "The behaviour's name.",
+						"type": "string"
+					},
+					"undoIndex": {
+						"description": "The creation's undo step; 0 in a dry run or a batch.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Create the Door behaviour.",
+					"params": {
+						"path": "Assets/Scripts/Door.graph",
+						"name": "Door"
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.disconnect",
+			"domain": "graph",
+			"description": "Removes a link of a graph as one undoable edit.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph", "from", "to"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphDisconnectParams",
+				"description": "The params of graph.disconnect.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"from": {
+						"description": "The link's output pin.",
+						"$ref": "#/$defs/GraphPinRef"
+					},
+					"to": {
+						"description": "The link's input pin.",
+						"$ref": "#/$defs/GraphPinRef"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "from", "to"],
+				"$defs": {
+					"GraphPinRef": {
+						"description": "One pin of one node: an end of a link.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphEditResult",
+				"description": "The outcome of a graph edit.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run, in a batch or when nothing changed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Remove the start event's link.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"from": {
+							"Node": 1,
+							"Pin": "Then"
+						},
+						"to": {
+							"Node": 2,
+							"Pin": "In"
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.liveValues",
+			"domain": "graph",
+			"description": "Reads, during play (a test run's included) and without changing the session, a graph behaviour's last node values, its fields and variables and the script errors its code raised, mapped to nodes.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphLiveValuesParams",
+				"description": "The params of graph.liveValues.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene: its id, a unique id prefix or its path.",
+						"type": "string"
+					},
+					"script": {
+						"description": "The slot's behaviour name, matched against the graph's current Name (of two such slots, the first); empty: the entity's first slot holding a graph.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphLiveValuesResult",
+				"description": "A graph behaviour's live values in play.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph the slot holds.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"entity": {
+						"description": "The entity.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"slot": {
+						"description": "The slot's index in its Script list.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"tick": {
+						"description": "The play session's tick.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"values": {
+						"description": "The nodes' last output values, by node and pin.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLiveValue"
+						}
+					},
+					"members": {
+						"description": "The graph's fields and variables, by name.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLiveMember"
+						}
+					},
+					"errors": {
+						"description": "The instance's retained script errors raised by the graph's own code, each mapped to its node.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLiveError"
+						}
+					},
+					"truncated": {
+						"description": "Whether a list was cut at its limit.",
+						"type": "boolean"
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLiveValue": {
+						"description": "A node output's last value.",
+						"type": "object",
+						"properties": {
+							"node": {
+								"description": "The node's id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"pin": {
+								"description": "The output pin.",
+								"type": "string"
+							},
+							"type": {
+								"description": "The value's Luau or engine type name.",
+								"type": "string"
+							},
+							"value": {
+								"description": "The value in reflection's JSON spelling; null for a table, a function, a proxy, a non-finite number or a string that is not UTF-8, whose type still names it."
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLiveMember": {
+						"description": "A field's or variable's value.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The member's name.",
+								"type": "string"
+							},
+							"type": {
+								"description": "The value's Luau or engine type name.",
+								"type": "string"
+							},
+							"value": {
+								"description": "The value in reflection's JSON spelling; null while the instance holds none, and for a table, a function, a proxy, a non-finite number or a string that is not UTF-8, whose type still names it."
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLiveError": {
+						"description": "A retained script error of the instance.",
+						"type": "object",
+						"properties": {
+							"node": {
+								"description": "The node whose code raised it; 0 when its line maps to none.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"line": {
+								"description": "Its line of the transpiled text.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"message": {
+								"description": "The error's message.",
+								"type": "string"
+							},
+							"count": {
+								"description": "How many times it was raised.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Read the door's live values.",
+					"params": {
+						"entity": "/Door"
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.moveNodes",
+			"domain": "graph",
+			"description": "Moves nodes on a graph's canvas (layout only) as one undoable edit.",
+			"exposeAsTool": false,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph", "positions"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphMoveNodesParams",
+				"description": "The params of graph.moveNodes.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"positions": {
+						"description": "The nodes' new places.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphNodePosition"
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "positions"],
+				"$defs": {
+					"GraphNodePosition": {
+						"description": "A node's new place on the canvas.",
+						"type": "object",
+						"properties": {
+							"node": {
+								"description": "The node's id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"position": {
+								"description": "Its top-left corner in canvas units.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphEditResult",
+				"description": "The outcome of a graph edit.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run, in a batch or when nothing changed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Move node 3.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"positions": [
+							{
+								"node": 3,
+								"position": [240, 0]
+							}
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.nodes",
+			"domain": "graph",
+			"description": "Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own Self.Get and Self.Set kinds.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphNodesParams",
+				"description": "The params of graph.nodes.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "A graph whose Self.Get and Self.Set kinds to add; empty for none.",
+						"type": "string"
+					},
+					"prefix": {
+						"description": "Only the kinds that start with it (\"Call.Input.\", \"Flow.\").",
+						"type": "string"
+					},
+					"kinds": {
+						"description": "Only these kinds.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphNodesResult",
+				"description": "Node kinds of the node library.",
+				"type": "object",
+				"properties": {
+					"nodes": {
+						"description": "The kinds, sorted by kind.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphNodeInfo"
+						}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"GraphNodeInfo": {
+						"description": "One graph node kind of the node library.",
+						"type": "object",
+						"properties": {
+							"kind": {
+								"description": "The kind a node names (\"Flow.Branch\", \"Call.Input.GetAxis\").",
+								"type": "string"
+							},
+							"title": {
+								"description": "The graph editor's caption.",
+								"type": "string"
+							},
+							"category": {
+								"description": "Where the node menu lists it.",
+								"enum": ["Event", "Flow", "Member", "Operator", "Call", "Property", "Constant"]
+							},
+							"description": {
+								"description": "What the node does: its script API member's description, or the built-in's.",
+								"type": "string"
+							},
+							"pure": {
+								"description": "Whether it has no exec pins and is evaluated where each statement needs its outputs.",
+								"type": "boolean"
+							},
+							"pins": {
+								"description": "Its pins: the exec input, the data inputs, the exec outputs, the data outputs.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/GraphPinInfo"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphPinInfo": {
+						"description": "One pin of a graph node kind.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The pin's name, which links and values use.",
+								"type": "string"
+							},
+							"direction": {
+								"description": "Input or Output.",
+								"enum": ["Input", "Output"]
+							},
+							"type": {
+								"description": "What the pin carries.",
+								"enum": ["Exec", "Any", "Bool", "Number", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Object"]
+							},
+							"typeName": {
+								"description": "Enum and Object: the type's name; Asset: its AssetType, or empty; otherwise empty.",
+								"type": "string"
+							},
+							"optional": {
+								"description": "An input that may stay unlinked and unset, passing nil; an output that may give nil, which feeds only an optional or Any input (Flow.IfNotNil checks it).",
+								"type": "boolean"
+							},
+							"default": {
+								"description": "The literal an unlinked, unset required input takes; null when it must be linked or set."
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "List the flow nodes.",
+					"params": {
+						"prefix": "Flow."
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.read",
+			"domain": "graph",
+			"description": "Reads a graph's document and its findings mapped to nodes, and optionally its transpiled Luau with each line's node.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphReadParams",
+				"description": "The params of graph.read.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph: its id, its \"Assets/...\" path or another asset reference.",
+						"type": "string"
+					},
+					"luau": {
+						"description": "Also return the transpiled Luau text and its line map.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphReadResult",
+				"description": "A graph as its file holds it, with its findings.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"document": {
+						"description": "The graph document, in the .graph file's spelling.",
+						"$ref": "#/$defs/Graph"
+					},
+					"diagnostics": {
+						"description": "Its findings, each mapped to its node.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphDiagnostic"
+						}
+					},
+					"luau": {
+						"description": "With luau: the transpiled text; empty while the graph does not transpile.",
+						"type": "string"
+					},
+					"lineNodes": {
+						"description": "With luau: the node of each line of the text (0 for none).",
+						"type": "array",
+						"items": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"Graph": {
+						"description": "A visual-scripting graph (.graph): one behaviour's fields, variables, nodes and links, transpiled to Luau at import.",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "The behaviour's Script.Define name: a Luau identifier of 1 to 64 bytes that is not a reserved word and does not start with \"__\".",
+								"type": "string"
+							},
+							"Fields": {
+								"description": "At most 128 fields, sorted by Name.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/GraphField"
+								}
+							},
+							"Variables": {
+								"description": "At most 128 variables, sorted by Name.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/GraphVariable"
+								}
+							},
+							"Nodes": {
+								"description": "At most 4096 nodes, sorted by Id.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/GraphNode"
+								}
+							},
+							"Links": {
+								"description": "At most 16384 links, sorted by (From.Node, From.Pin, To.Node, To.Pin) byte-wise, each once, joining two different nodes.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/GraphLink"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphDiagnostic": {
+						"description": "One finding of a graph, mapped to its node.",
+						"type": "object",
+						"properties": {
+							"severity": {
+								"description": "Error or Warning.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "GRAPH_INVALID, GRAPH_UNREACHABLE_NODE, SCRIPT_TYPE_ERROR or SCRIPT_COMPILE_ERROR.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What is wrong.",
+								"type": "string"
+							},
+							"node": {
+								"description": "The node it concerns; 0 for the graph's name or members.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"jsonPointer": {
+								"description": "Where in the .graph document; empty for a finding of the transpiled text.",
+								"type": "string"
+							},
+							"line": {
+								"description": "The transpiled text's line of a script check's finding; 0 otherwise.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"incomplete": {
+								"description": "A finding of an unfinished graph the edits accept (a required input not linked yet).",
+								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphField": {
+						"description": "A behaviour field, set per script slot (§6.11).",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"type": "string"
+							},
+							"Kind": {
+								"description": "Its Luau Field constructor.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"Default": {
+								"description": "Its default, in its Kind's JSON spelling (§6.11)."
+							},
+							"Element": {
+								"description": "An Array's element kind; Number otherwise.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"AssetType": {
+								"description": "An Asset's AssetType; empty otherwise.",
+								"type": "string"
+							},
+							"EnumValues": {
+								"description": "An Enum's choices; empty otherwise.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Options": {
+								"description": "Its Luau FieldOptions: Min, Max, Step, Tooltip (§6.11).",
+								"type": "object",
+								"additionalProperties": {}
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphVariable": {
+						"description": "Instance state, set to its Default at OnCreate (§6.11).",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"type": "string"
+							},
+							"Kind": {
+								"description": "Its kind, as a field's.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"Default": {
+								"description": "Its default, in its Kind's JSON spelling (§6.11)."
+							},
+							"Element": {
+								"description": "An Array's element kind; Number otherwise.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"AssetType": {
+								"description": "An Asset's AssetType; empty otherwise.",
+								"type": "string"
+							},
+							"EnumValues": {
+								"description": "An Enum's choices; empty otherwise.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphNode": {
+						"description": "One node: a node kind of the library at a place on the canvas, with literals of its input pins.",
+						"type": "object",
+						"properties": {
+							"Id": {
+								"description": "From 1 to 2147483647, unique in the graph and stable for the node's life.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Kind": {
+								"description": "Its node kind: 1 to 256 bytes of dot-separated parts of letters, digits and '_' (Flow.Branch, Call.Input.GetAxis, Self.Get.Speed; graph.nodes lists them).",
+								"type": "string"
+							},
+							"Position": {
+								"description": "The canvas place of its top-left corner, each component finite and within 1000000 of the origin; layout only.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 2,
+								"maxItems": 2
+							},
+							"Values": {
+								"description": "At most 64 literals of its input pins by pin name: null, a boolean, a finite number, a string of at most 4096 bytes of UTF-8, or an array of 3 or 4 finite numbers (a vector, a colour, a quaternion). A linked input keeps its literal, and the link wins.",
+								"type": "object",
+								"additionalProperties": {}
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLink": {
+						"description": "A link from an output pin of one node to an input pin of another.",
+						"type": "object",
+						"properties": {
+							"From": {
+								"description": "The output pin.",
+								"$ref": "#/$defs/GraphPinRef"
+							},
+							"To": {
+								"description": "The input pin.",
+								"$ref": "#/$defs/GraphPinRef"
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphPinRef": {
+						"description": "One pin of one node: an end of a link.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Read the Door graph and its Luau.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"luau": true
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.removeNodes",
+			"domain": "graph",
+			"description": "Removes nodes and their links from a graph as one undoable edit.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph", "nodes"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphRemoveNodesParams",
+				"description": "The params of graph.removeNodes.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"nodes": {
+						"description": "The ids of the nodes to remove.",
+						"type": "array",
+						"items": {
+							"type": "integer",
+							"minimum": 0,
+							"maximum": 4294967295
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "nodes"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphRemoveNodesResult",
+				"description": "The outcome of a graph.removeNodes.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"removedLinks": {
+						"description": "The links removed with the nodes.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphLink"
+						}
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run or a batch.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphLink": {
+						"description": "A link from an output pin of one node to an input pin of another.",
+						"type": "object",
+						"properties": {
+							"From": {
+								"description": "The output pin.",
+								"$ref": "#/$defs/GraphPinRef"
+							},
+							"To": {
+								"description": "The input pin.",
+								"$ref": "#/$defs/GraphPinRef"
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphPinRef": {
+						"description": "One pin of one node: an end of a link.",
+						"type": "object",
+						"properties": {
+							"Node": {
+								"description": "The node's Id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"Pin": {
+								"description": "The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Remove node 3.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"nodes": [3]
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.setMembers",
+			"domain": "graph",
+			"description": "Renames the behaviour and renames, removes, adds or replaces its fields and variables as one undoable edit.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphSetMembersParams",
+				"description": "The params of graph.setMembers.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"name": {
+						"description": "The behaviour's new name; empty keeps it.",
+						"type": "string"
+					},
+					"rename": {
+						"description": "Fields and variables to rename, with their Self nodes.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphMemberRename"
+						}
+					},
+					"remove": {
+						"description": "Fields and variables to remove; refused while a node uses one.",
+						"type": "array",
+						"items": {
+							"type": "string"
+						}
+					},
+					"fields": {
+						"description": "Fields to add or replace, by name.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphField"
+						}
+					},
+					"variables": {
+						"description": "Variables to add or replace, by name.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphVariable"
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph"],
+				"$defs": {
+					"GraphMemberRename": {
+						"description": "One field or variable to rename.",
+						"type": "object",
+						"properties": {
+							"from": {
+								"description": "Its name.",
+								"type": "string"
+							},
+							"to": {
+								"description": "Its new name.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphField": {
+						"description": "A behaviour field, set per script slot (§6.11).",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"type": "string"
+							},
+							"Kind": {
+								"description": "Its Luau Field constructor.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"Default": {
+								"description": "Its default, in its Kind's JSON spelling (§6.11)."
+							},
+							"Element": {
+								"description": "An Array's element kind; Number otherwise.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"AssetType": {
+								"description": "An Asset's AssetType; empty otherwise.",
+								"type": "string"
+							},
+							"EnumValues": {
+								"description": "An Enum's choices; empty otherwise.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"Options": {
+								"description": "Its Luau FieldOptions: Min, Max, Step, Tooltip (§6.11).",
+								"type": "object",
+								"additionalProperties": {}
+							}
+						},
+						"additionalProperties": false
+					},
+					"GraphVariable": {
+						"description": "Instance state, set to its Default at OnCreate (§6.11).",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"type": "string"
+							},
+							"Kind": {
+								"description": "Its kind, as a field's.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"Default": {
+								"description": "Its default, in its Kind's JSON spelling (§6.11)."
+							},
+							"Element": {
+								"description": "An Array's element kind; Number otherwise.",
+								"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+							},
+							"AssetType": {
+								"description": "An Asset's AssetType; empty otherwise.",
+								"type": "string"
+							},
+							"EnumValues": {
+								"description": "An Enum's choices; empty otherwise.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphSetMembersResult",
+				"description": "The outcome of a graph.setMembers.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"renamedNodes": {
+						"description": "The Self.Get and Self.Set nodes the renames rewrote.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run, in a batch or when nothing changed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Add a Speed field.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"fields": [
+							{
+								"Name": "Speed",
+								"Kind": "Number",
+								"Default": 2,
+								"Element": "Number",
+								"AssetType": "",
+								"EnumValues": [],
+								"Options": {
+									"Min": 0,
+									"Max": 10
+								}
+							}
+						]
+					}
+				}
+			]
+		},
+		{
+			"name": "graph.setValues",
+			"domain": "graph",
+			"description": "Sets or removes literals of graph nodes' inputs as one undoable edit.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": true,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["graph", "values"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphSetValuesParams",
+				"description": "The params of graph.setValues.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"type": "string"
+					},
+					"values": {
+						"description": "The literals, in order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/GraphValueEdit"
+						}
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["graph", "values"],
+				"$defs": {
+					"GraphValueEdit": {
+						"description": "One input literal to set.",
+						"type": "object",
+						"properties": {
+							"node": {
+								"description": "The node's id.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"pin": {
+								"description": "The data input's name.",
+								"type": "string"
+							},
+							"value": {
+								"description": "The literal in its pin type's JSON spelling; null removes it."
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "GraphEditResult",
+				"description": "The outcome of a graph edit.",
+				"type": "object",
+				"properties": {
+					"graph": {
+						"description": "The graph.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"undoIndex": {
+						"description": "The edit's undo step; 0 in a dry run, in a batch or when nothing changed.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Log a message.",
+					"params": {
+						"graph": "Assets/Scripts/Door.graph",
+						"values": [
+							{
+								"node": 2,
+								"pin": "Values",
+								"value": "Opened"
+							}
+						]
+					}
+				}
+			]
+		},
+		{
 			"name": "input.inject",
 			"domain": "input",
 			"description": "Queues input events for the play session: each is applied at step 1 of its tick (an offset from the session's next tick), like real input and replays. Every event is checked before any is queued.",
@@ -11292,7 +13134,7 @@
 						"maximum": 4294967295
 					},
 					"checkpointFailed": {
-						"description": "A checkpoint's hash differed. Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick and firstFailedCheckpointTick names the first.",
+						"description": "A checkpoint's hash differed (checkpointsFailed counts them, firstFailedCheckpointTick names the first). Without continuePastCheckpoint playback stopped at its tick (finalTick), and stateHash and expectedStateHash are the observed and recorded hashes there; with it, playback went on to the final tick.",
 						"type": "boolean"
 					},
 					"withoutInput": {
@@ -11300,13 +13142,13 @@
 						"type": "boolean"
 					},
 					"checkpointsFailed": {
-						"description": "continuePastCheckpoint: the checkpoints whose hash differed; 0 otherwise.",
+						"description": "The checkpoints whose hash differed: with continuePastCheckpoint every one, without it 1 when the first that differed stopped playback; 0 when none differed.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
 					},
 					"firstFailedCheckpointTick": {
-						"description": "continuePastCheckpoint: the tick of the first checkpoint whose hash differed; 0 when none differed or without continuePastCheckpoint.",
+						"description": "The tick of the first checkpoint whose hash differed (without continuePastCheckpoint the one where playback stopped, finalTick); 0 when none differed.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -20782,7 +22624,7 @@
 		{
 			"name": "project.upgrade",
 			"domain": "project",
-			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet, tilemap and string table under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet, tilemap or string table fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
+			"description": "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, material, sound effect, replay, sprite sheet, tilemap, string table and graph under Assets/), records each rewrite in provenance and reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, sound effect, replay, sprite sheet, tilemap, string table or graph fails the upgrade at its file and pointer, as its importer refuses it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene whose file it rewrote.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,
@@ -23601,7 +25443,7 @@
 						"type": "string"
 					},
 					"build": {
-						"description": "The server's build id, semantic-versioning build metadata: the engine's version, then \"+<commit>\" (12 lowercase hex digits of the commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.3.0+3f2a9c1d4e5b.dirty\"; the version alone for a build without a commit.",
+						"description": "The server's build id, semantic-versioning build metadata: the engine's version, then \"+<commit>\" (12 lowercase hex digits of the commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.4.0+3f2a9c1d4e5b.dirty\"; the version alone for a build without a commit.",
 						"type": "string"
 					},
 					"clientId": {
@@ -24056,6 +25898,14 @@
 					},
 					"scriptHardLimitBytes": {
 						"description": "Approximate script heap hard limit in bytes when available.",
+						"type": "number"
+					},
+					"processHeapAvailable": {
+						"description": "Whether the host measured the heap the C runtime allocates from: false on Linux and macOS, which have no measure, and when the query fails.",
+						"type": "boolean"
+					},
+					"processHeapCommittedBytes": {
+						"description": "Approximate committed bytes of the heap the C runtime allocates from (malloc and new: the engine's own memory and that of every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. What a graphics driver keeps in allocations of its own is not in it, nor, in an AddressSanitizer build, what the C runtime or HeapAlloc allocates, which the sanitizer's allocator serves. The hardening soak's memory rule measures it.",
 						"type": "number"
 					},
 					"memoryAllocationCount": {
@@ -25338,7 +27188,7 @@
 		{
 			"name": "ui.tree",
 			"domain": "ui",
-			"description": "Shows the scene's UI laid out in scene pixels: every canvas and element with its rectangle, clip, visibility, components, text and widget, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
+			"description": "Shows the scene's UI laid out in scene pixels: every active canvas and element (with includeInactive the inactive ones too, laid out as if active and marked inactive) with its rectangle, its canvas's scale, clip, visibility, components, text and widget, the box each text is laid out in and whether it overflows its rectangle, and in the play scene the session's focus, hover and press, as a compact text outline or a flat JSON list, optionally for one canvas and to a depth.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -25364,7 +27214,7 @@
 						"maximum": 4294967295
 					},
 					"format": {
-						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
+						"description": "Text: a compact outline (widgets as UiButton, UiToggle(on|off), UiSlider(<value>), UiScrollView(<x>,<y>) and UiTextInput(\"<text>\"), an inactive canvas or element that includeInactive lists marked inactive, a text that reaches beyond its rectangle marked overflows, widgets marked disabled, focused, hovered or pressed); Json: a flat list of entries.",
 						"enum": ["Text", "Json"]
 					},
 					"width": {
@@ -25382,6 +27232,10 @@
 					"target": {
 						"description": "The scene to read; omitted: the play scene while playing, else the edit scene.",
 						"enum": ["Edit", "Play"]
+					},
+					"includeInactive": {
+						"description": "Also list the inactive canvases and elements (a hidden panel and its texts), each laid out, and its text measured, as if it were active, and marked inactive (active false); a copy of the scene as it is now is laid out at the scene resolution, the play scene's too, and the scene itself is only read. Omitted: only the active ones.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -25521,7 +27375,7 @@
 								"maximum": 2147483647
 							},
 							"scale": {
-								"description": "A canvas's scale: the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement into UiRect's canvas units; 0 for an element.",
+								"description": "The scale of the entry's canvas (a canvas's own, an element's its canvas's): the scene pixels per canvas unit at the resolution laid out at, which turns a pixel measurement of the entry into UiRect's canvas units.",
 								"type": "number"
 							},
 							"clipped": {
@@ -25563,6 +27417,18 @@
 							"worldCanvas": {
 								"description": "True for a World canvas and its elements, whose rect and clip are in the canvas's own pixels.",
 								"type": "boolean"
+							},
+							"textBounds": {
+								"description": "The box of the text the element draws, where it is laid out in rect: from its lines' leftmost pen start to their rightmost advance end, and from the block's top to its bottom, in rect's pixels; all 0 when it draws none (no UiText, an empty text, or hidden).",
+								"$ref": "#/$defs/UiPixelRect"
+							},
+							"textOverflows": {
+								"description": "Whether textBounds reaches beyond rect on a side (by more than 0.01 pixel).",
+								"type": "boolean"
+							},
+							"active": {
+								"description": "Whether the entity is active now, it and every ancestor; false for an inactive canvas or element that includeInactive lists, laid out and measured as if it were active.",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -25597,6 +27463,13 @@
 					"description": "Outline every canvas.",
 					"params": {
 						"format": "Text"
+					}
+				},
+				{
+					"description": "List every canvas and element as JSON, the inactive ones (a hidden panel and its texts) included.",
+					"params": {
+						"format": "Json",
+						"includeInactive": true
 					}
 				}
 			]

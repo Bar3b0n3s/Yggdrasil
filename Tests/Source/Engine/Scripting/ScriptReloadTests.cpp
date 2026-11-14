@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 #include "Engine/Scripting/ScriptEngine.h"
 
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scripting/ScriptCompiler.h"
@@ -10,6 +11,7 @@
 #include <doctest/doctest.h>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -610,6 +612,58 @@ return Test.Suite("Chain", function() Test.Case("value", function() Test.Expect(
 			REQUIRE_FALSE(invalid.has_value());
 			CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
 			CHECK(fixture.Errors.empty());
+		}
+
+		TEST_CASE("HotReload: a behaviour under a .graph origin extracts, instantiates and hot-reloads as a .luau one, and no script requires it")
+		{
+			// M24 (C24.1, Docs/Decisions/0035-m24-contract.md decision 9, stream G-B): a graph's cooked script is its transpiled
+			// Luau text under the .graph path (IsScriptSourcePath), which the load-time extraction, the module cache, every
+			// instance's module entry and hot reload take as they take a .luau source's; a require still names .luau only.
+			Test::ScriptTestFixture fixture;
+			const AssetHandle graph(940), requirer(941);
+			const auto counter = [](std::string_view step)
+			{
+				return std::string(R"(--!strict
+local Graph = {}
+
+Graph.Fields = {
+	Step = Field.Integer()")
+					+ std::string(step)
+					+ R"(),
+}
+
+function Graph.OnCreate(self: any)
+	self.__GraphLive = {}
+	self.Count = 0
+end
+
+return Script.Define("Counter", Graph)
+)";
+			};
+			const Result<AssetRef<ScriptData>> added = fixture.AddScript(graph, "Assets/Scripts/Counter.graph", counter("1"));
+			REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+			CHECK((*added)->Kind == ScriptKind::Behaviour);
+			CHECK((*added)->SourceMap.Path == "Assets/Scripts/Counter.graph");
+			const Entity entity = fixture.GetScene().CreateEntity("Counter");
+			entity.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = TypedAssetHandle<AssetType::Script>(graph), .Fields = {}, .ExecutionOrder = 0 });
+			REQUIRE(fixture.Start().has_value());
+			REQUIRE(EvaluateReload(fixture, "self.Count = 5", entity.GetUUID()).has_value());
+
+			REQUIRE(fixture.AddScript(graph, "Assets/Scripts/Counter.graph", counter("2")).has_value());
+			const auto reloaded = fixture.GetEngine()->Reload(graph);
+			REQUIRE_MESSAGE(reloaded.has_value(), (reloaded ? "" : reloaded.error().ToString()));
+			CHECK(reloaded->Scripts == std::vector<AssetHandle>{ graph });
+			const auto state = EvaluateReload(fixture, "return {self.Count, self.Step}", entity.GetUUID());
+			REQUIRE(state.has_value());
+			CHECK(state->Value.Get() == Json::array({ 5, 1 }));
+			CHECK(fixture.Errors.empty());
+
+			// A graph is never a module of another script (decision 23's kept limit), though its source is readable.
+			CHECK_FALSE(fixture.AddScript(requirer, "Assets/Scripts/Requirer.luau", R"(
+local Counter = require("./Counter.graph")
+return {}
+)")
+					.has_value());
 		}
 	}
 

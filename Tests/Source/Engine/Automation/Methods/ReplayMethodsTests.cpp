@@ -601,6 +601,9 @@ namespace Engine {
 			CHECK(outcome["checkpointFailed"] == Json(true));
 			CHECK(outcome["checkpointsChecked"] == Json(2));
 			CHECK(outcome["finalTick"] == Json(120));
+			// M25's friction F12: the checkpoint that stopped it counts as failed.
+			CHECK(outcome["checkpointsFailed"] == Json(1));
+			CHECK(outcome["firstFailedCheckpointTick"] == Json(120));
 			CHECK(outcome["stateHash"] == Json(recorded));
 			CHECK(outcome["expectedStateHash"] == Json(replay.Checkpoints[1].StateHash));
 			CHECK(CallReplayMethod(fixture, "play.state")["tick"] == Json(120));
@@ -886,6 +889,9 @@ namespace Engine {
 			CHECK(verification["withoutInput"] == Json(false));
 			CHECK(verification["checkpointFailed"] == Json(true));
 			CHECK(verification["finalTick"] == Json(60));
+			// M25's friction F12: the checkpoint that stopped the verification counts as failed.
+			CHECK(verification["checkpointsFailed"] == Json(1));
+			CHECK(verification["firstFailedCheckpointTick"] == Json(60));
 			const std::string observed = JsonReader(verification).ReadMember<std::string>("stateHash").value_or("");
 			const std::string recorded = JsonReader(verification).ReadMember<std::string>("expectedStateHash").value_or("");
 			CHECK_FALSE(observed.empty());
@@ -1262,6 +1268,42 @@ namespace Engine {
 			CHECK(noStrict["error"]["data"]["errorCode"] == Json("InvalidArgument"));
 			REQUIRE(noStrict["error"]["data"].contains("location"));
 			CHECK(noStrict["error"]["data"]["location"]["pointer"] == Json("/continuePastCheckpoint"));
+		}
+
+		// M25's friction F12 (Docs/Decisions/0036-m25-tetris-pixel-art.md): a playback that a checkpoint stops counts that
+		// checkpoint as continuePastCheckpoint counts it, so its failure data agrees with itself: checkpointsFailed 1 and
+		// firstFailedCheckpointTick the checkpoint's tick, the first tick the same playback continuing past it names. A playback
+		// that passes reports 0 for both.
+		TEST_CASE("ReplayMethods: input.replay counts the checkpoint that stopped it as continuePastCheckpoint counts it")
+		{
+			Test::AutomationFixture fixture("ReplayStoppedCheckpoint");
+			SaveInputScene(fixture);
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			// A is held from tick 50: checkpoints 60 and 120 and the final hash differ from an input-free run.
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 50 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Held.replay" } });
+			REQUIRE(saved["checkpoints"] == Json(2));
+
+			const Json passed = CallReplayMethod(fixture, "input.replay", Json{ { "path", "Assets/Tests/Held.replay" }, { "verify", true }, { "strictHash", true } });
+			CHECK(passed["passed"] == Json(true));
+			CHECK(passed["checkpointFailed"] == Json(false));
+			CHECK(passed["checkpointsFailed"] == Json(0));
+			CHECK(passed["firstFailedCheckpointTick"] == Json(0));
+
+			const Json stopped = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/Held.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } });
+			REQUIRE_MESSAGE(stopped.contains("error"), stopped.dump());
+			REQUIRE_MESSAGE(stopped["error"]["data"].contains("replay"), stopped.dump());
+			const Json& outcome = stopped["error"]["data"]["replay"];
+			CHECK(outcome["checkpointFailed"] == Json(true));
+			CHECK(outcome["finalTick"] == Json(60));
+			CHECK(outcome["checkpointsChecked"] == Json(1));
+			CHECK(outcome["checkpointsFailed"] == Json(1));
+			CHECK(outcome["firstFailedCheckpointTick"] == Json(60));
+
+			const Json continued = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/Held.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true }, { "continuePastCheckpoint", true } });
+			REQUIRE_MESSAGE(continued.contains("error"), continued.dump());
+			REQUIRE_MESSAGE(continued["error"]["data"].contains("replay"), continued.dump());
+			CHECK(continued["error"]["data"]["replay"]["firstFailedCheckpointTick"] == outcome["firstFailedCheckpointTick"]);
 		}
 
 		// Decision 3 (A-F29; ADR 0026 friction F29): a recording whose input shows at its checkpoints but whose end state a

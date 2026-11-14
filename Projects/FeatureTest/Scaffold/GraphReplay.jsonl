@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Graphs.scene"}}
+{"method": "play.step", "params": {"ticks": 201, "input": [{"tick": 6, "type": "Action", "name": "MoveX", "value": 1}, {"tick": 70, "type": "Action", "name": "MoveX", "value": 0}, {"tick": 90, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 120, "type": "Action", "name": "MoveX", "value": -0.5}, {"tick": 150, "type": "Action", "name": "MoveX", "value": 0}, {"tick": 170, "type": "Action", "name": "Jump", "state": "Tap"}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Graphs.replay", "expect": [{"tick": 200, "luau": "local rover = Scene.FindByName(\"Rover\")\nreturn rover:GetScript(\"Steering\").Jumps == 2 and rover.Transform.Translation.x > 0"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

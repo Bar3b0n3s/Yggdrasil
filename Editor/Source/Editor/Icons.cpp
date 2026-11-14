@@ -1,6 +1,8 @@
 #include "EditorPCH.h"
 #include "Editor/Icons.h"
 
+#include "Engine/AssetPipeline/Importers/GraphImporter.h"
+
 #include <array>
 #include <cmath>
 #include <numbers>
@@ -135,6 +137,14 @@ namespace Engine {
 					circle({ 0.5f, 0.5f }, 0.04f);
 					circle({ 0.85f, 0.25f }, 0.04f);
 					break;
+				case EditorIcon::Graph:
+					// Two nodes, the upper left one's output linked to the lower right one's input.
+					path({ { 0.1f, 0.15f }, { 0.42f, 0.15f }, { 0.42f, 0.45f }, { 0.1f, 0.45f }, { 0.1f, 0.15f } });
+					path({ { 0.58f, 0.55f }, { 0.9f, 0.55f }, { 0.9f, 0.85f }, { 0.58f, 0.85f }, { 0.58f, 0.55f } });
+					path({ { 0.42f, 0.3f }, { 0.5f, 0.3f }, { 0.5f, 0.7f }, { 0.58f, 0.7f } });
+					circle({ 0.42f, 0.3f }, 0.035f);
+					circle({ 0.58f, 0.7f }, 0.035f);
+					break;
 				case EditorIcon::IrradianceVolume:
 					// A box with a probe sphere at four of its grid points: a baked irradiance volume.
 					path({ { 0.15f, 0.15f }, { 0.85f, 0.15f }, { 0.85f, 0.85f }, { 0.15f, 0.85f }, { 0.15f, 0.15f } });
@@ -202,6 +212,13 @@ namespace Engine {
 			case AssetType::Heightfield:      return EditorIcon::Heightfield;
 		}
 		return EditorIcon::Folder;
+	}
+
+	EditorIcon AssetToEditorIcon(AssetType type, std::string_view importer)
+	{
+		if (type == AssetType::Script && importer == GraphImporter::Id)
+			return EditorIcon::Graph;
+		return AssetTypeToEditorIcon(type);
 	}
 
 }

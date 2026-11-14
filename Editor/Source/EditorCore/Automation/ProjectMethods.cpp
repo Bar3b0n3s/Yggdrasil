@@ -18,6 +18,7 @@
 #include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/FileSystem.h"
@@ -188,9 +189,10 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(const AssetMetadata metadata, ParseAssetMetadata(text, source));
 				return CanonicalProjectFile{ .Text = SerializeAssetMetadata(metadata), .Reason = DescribeUpgrade(ReadFileVersion(text), AssetMetadata::CurrentVersion, false) };
 			}
-			// Materials, sound effects, replays, sprite sheets and string tables are read with unknown members refused, as their
-			// importers read them: the canonical writer would drop a member the reader does not know, and the rewrite would make
-			// a file the importer refuses importable. Such a file fails the upgrade at the member's pointer instead.
+			// Materials, sound effects, replays, sprite sheets, tilemaps, string tables and graphs are read with unknown members
+			// refused, as their importers read them: the canonical writer would drop a member the reader does not know, and the
+			// rewrite would make a file the importer refuses importable. Such a file fails the upgrade at the member's pointer
+			// instead.
 			const auto locate = [&source](Error error) -> Error
 			{
 				Error located = std::move(error).WithLocation({ .File = source, .JsonPointer = std::nullopt, .Entity = {} });
@@ -255,13 +257,26 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(std::string canonical, StringTableToText(*table, registry));
 				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, StringTableFormatVersion, false) };
 			}
+			// M24 (Docs/Decisions/0035-m24-contract.md decision 10): graphs, every field written, through GraphFromJson, which
+			// reads every older version as the current one. A graph whose lists are not in their canonical order is refused at
+			// its pointer, as its importer refuses it: the order is a rule of the format, not a formatting choice.
+			if (extension == GraphFileExtension)
+			{
+				GraphLoadReport report;
+				Result<GraphDocument> graph = GraphFromText(text, registry, report, true);
+				if (!graph)
+					return std::unexpected(locate(std::move(graph).error()));
+				ENGINE_TRY_ASSIGN(std::string canonical, GraphToText(*graph, registry));
+				return CanonicalProjectFile{ .Text = std::move(canonical), .Reason = DescribeUpgrade(report.FileVersion, GraphFormatVersion, false) };
+			}
 			return std::optional<CanonicalProjectFile>();
 		}
 
 		// Whether project.upgrade rewrites files with `extension` below Assets/ (MakeCanonicalFile has their canonical form).
 		static bool IsUpgradedAssetExtension(std::string_view extension)
 		{
-			constexpr std::string_view Extensions[] = { ".scene", ".prefab", ".meta", ".material", ".sfx", ".replay", ".spritesheet", ".tilemap", ".stringtable" };
+			constexpr std::string_view Extensions[] = { ".scene", ".prefab", ".meta", ".material", ".sfx", ".replay", ".spritesheet", ".tilemap", ".stringtable",
+				GraphFileExtension };
 			return std::ranges::find(Extensions, extension) != std::end(Extensions);
 		}
 
@@ -304,7 +319,7 @@ namespace Engine {
 		}
 
 		// The project files project.upgrade rewrites: the .eproj, then every .scene, .prefab, .meta, .material, .sfx, .replay,
-		// .spritesheet, .tilemap and .stringtable file under Assets/ (IsUpgradedAssetExtension), sorted.
+		// .spritesheet, .tilemap, .stringtable and .graph file under Assets/ (IsUpgradedAssetExtension), sorted.
 		static Result<std::vector<VfsPath>> ListUpgradeFiles(const EditorContext& editor)
 		{
 			std::vector<VfsPath> files;
@@ -799,10 +814,10 @@ namespace Engine {
 			{
 				.Name = "project.upgrade",
 				.Description = "Applies migrations and canonical re-saves to every project file (the .eproj, and every scene, prefab, .meta, "
-							   "material, sound effect, replay, sprite sheet, tilemap and string table under Assets/), records each rewrite in provenance and "
+							   "material, sound effect, replay, sprite sheet, tilemap, string table and graph under Assets/), records each rewrite in provenance and "
 							   "reports the changed files, each with its reason (changes: \"format version 1 to 2\", \"canonical form\"). Run it "
 							   "after an engine change to canonical output; dryRun: true lists what it would rewrite. An unknown member in a material, "
-							   "sound effect, replay, sprite sheet, tilemap or string table fails the upgrade at its file and pointer, as its importer refuses "
+							   "sound effect, replay, sprite sheet, tilemap, string table or graph fails the upgrade at its file and pointer, as its importer refuses "
 							   "it. Not undoable; refuses while an open scene has unsaved changes (save them first), and reloads every open scene "
 							   "whose file it rewrote.",
 				.ExposeAsTool = true,

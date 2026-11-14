@@ -14,6 +14,7 @@
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/StringTableData.h"
 #include "Engine/Asset/TilemapData.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
 #include "Engine/AssetPipeline/Importers/SoundEffectImporter.h"
@@ -128,6 +129,18 @@ namespace Engine {
 		constexpr std::string_view StringTableExample = R"({"Format": "StringTable", "Version": 1, "Locales": ["en", "fr", "pt-BR"],
 "Entries": [{"Key": "Menu.Start", "Values": {"en": "Start", "fr": "Commencer", "pt-BR": "Iniciar"}}, {"Key": "Menu.Quit", "Values": {"en": "Quit"}}]})";
 
+		constexpr std::string_view GraphExample = R"({"Format": "Graph", "Version": 1, "Name": "Door",
+"Fields": [{"Name": "Player", "Kind": "Entity", "Default": null, "Element": "Number", "AssetType": "", "EnumValues": [], "Options": {}},
+{"Name": "Speed", "Kind": "Number", "Default": 2, "Element": "Number", "AssetType": "", "EnumValues": [], "Options": {"Max": 10, "Min": 0}}],
+"Variables": [{"Name": "Opened", "Kind": "Bool", "Default": false, "Element": "Number", "AssetType": "", "EnumValues": []}],
+"Nodes": [{"Id": 1, "Kind": "Event.OnTriggerEnter", "Position": [0, 0], "Values": {}}, {"Id": 2, "Kind": "Compare.Equal", "Position": [240, 120], "Values": {}},
+{"Id": 3, "Kind": "Self.Get.Player", "Position": [0, 160], "Values": {}}, {"Id": 4, "Kind": "Flow.Branch", "Position": [480, 0], "Values": {}},
+{"Id": 5, "Kind": "Self.Set.Opened", "Position": [720, 0], "Values": {"Value": true}},
+{"Id": 6, "Kind": "Call.Log.Info", "Position": [960, 0], "Values": {"Values": "Door opened"}}],
+"Links": [{"From": {"Node": 1, "Pin": "Then"}, "To": {"Node": 4, "Pin": "In"}}, {"From": {"Node": 1, "Pin": "other"}, "To": {"Node": 2, "Pin": "A"}},
+{"From": {"Node": 2, "Pin": "Result"}, "To": {"Node": 4, "Pin": "Condition"}}, {"From": {"Node": 3, "Pin": "Value"}, "To": {"Node": 2, "Pin": "B"}},
+{"From": {"Node": 4, "Pin": "True"}, "To": {"Node": 5, "Pin": "In"}}, {"From": {"Node": 5, "Pin": "Then"}, "To": {"Node": 6, "Pin": "In"}}]})";
+
 		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 3, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
 "Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.1.0", "Config": "Editor",
 "Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
@@ -150,7 +163,7 @@ namespace Engine {
 
 		constexpr std::string_view BatchRequestExample = R"({"method": "entity.create", "params": {"name": "Ball", "components": {"Transform": {"Translation": [0, 2, 0]}}}})";
 
-		constexpr std::array<AuthoredFormat, 13> AuthoredFormats = {
+		constexpr std::array<AuthoredFormat, 14> AuthoredFormats = {
 			AuthoredFormat{ "AssetMeta", ".meta", AssetMetadata::CurrentVersion,
 				"The sidecar of every asset file (§6.4): its handle, type, importer, import settings and sub-assets; or, for a file a glTF references, a dependency meta naming its owner.",
 				AssetMetaExample },
@@ -160,6 +173,21 @@ namespace Engine {
 			AuthoredFormat{ "GameManifest", "Game.json", GameManifest::CurrentVersion,
 				"The exported game's manifest next to its executable (§14.1): name, engine version, build id, start scene, paks, window and simulation settings.",
 				GameManifestExample },
+			AuthoredFormat{ "Graph", ".graph", GraphFormatVersion,
+				"A visual-scripting graph (§6.11): one behaviour, whose fields, variables, nodes and links GraphImporter transpiles to Luau and "
+				"compiles into a Script asset, so a graph fills a script slot as a `.luau` behaviour does. A node is a node kind of the library "
+				"(`graph.nodes` lists them) with literals of its input pins; a link joins an output pin to an input pin of another node. Every "
+				"list is in its canonical order (fields and variables by Name, nodes by Id, links by From and To), so each write of a graph is "
+				"byte-identical; the `graph.*` methods edit it. A field's or variable's `Name` is a Luau identifier of 1 to 64 bytes, not a "
+				"reserved word, not starting with `__` and not a reserved script field name (`Entity`, `Fields`, the callbacks), unique across "
+				"both lists; its `Default` has its `Kind`'s spelling (a Number a finite number, an Integer an int32, a Bool a boolean, a String "
+				"a string of at most 4,096 bytes, a Vector `[x, y, z]`, a Color `[r, g, b, a]`, a Quat `[x, y, z, w]`, nonzero and, for a "
+				"field, of unit length, an Entity or Asset null, an Enum one of `EnumValues`, an Array `[]`); `Element` is an Array's element "
+				"kind (not Array; Number for other kinds), `AssetType` an Asset's type, `EnumValues` an Enum's 1 to 64 unique choices of 1 to "
+				"64 bytes (an Array of Asset or of Enum has them too); a field's `Options` are its Luau `FieldOptions` (Number, Integer, Bool, "
+				"String, Vector, Color and Quat only): `Min`, `Max` and `Step` for Number, Integer and Vector (`Min <= Max`, `Step > 0`, the "
+				"default within them) and a `Tooltip` of at most 256 bytes. The tables below list every field and the limits.",
+				GraphExample, "Graph" },
 			AuthoredFormat{ "Material", ".material", MaterialData::CurrentVersion,
 				"A PBR metallic-roughness material (§6.5).", MaterialExample },
 			AuthoredFormat{ "Prefab", ".prefab", Migrations::CurrentVersion,
@@ -1189,10 +1217,13 @@ namespace Engine {
 			const StructInfo* spriteSheet = types.FindStruct("SpriteSheet");
 			const StructInfo* tilemap = types.FindStruct("Tilemap");
 			const StructInfo* stringTable = types.FindStruct("StringTable");
-			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr || tilemap == nullptr || stringTable == nullptr)
+			const StructInfo* graph = types.FindStruct("Graph");
+			if (project == nullptr || material == nullptr || soundEffect == nullptr || spriteSheet == nullptr || tilemap == nullptr || stringTable == nullptr
+				|| graph == nullptr)
 			{
 				return MakeError(ErrorCode::InvalidArgument,
-					"the type registry lacks ProjectSettings, Material, SoundEffect, SpriteSheet, Tilemap or StringTable, which the file format schemas use");
+					"the type registry lacks ProjectSettings, Material, SoundEffect, SpriteSheet, Tilemap, StringTable or Graph, which the file format schemas "
+					"use");
 			}
 
 			std::map<std::string, Json> schemas;
@@ -1200,6 +1231,7 @@ namespace Engine {
 			schemas.emplace("BatchRequest", BatchRequestSchema(*sources.Methods));
 			ENGINE_TRY_ASSIGN(Json manifest, GameManifestSchema(types));
 			schemas.emplace("GameManifest", std::move(manifest));
+			schemas.emplace("Graph", StructDocumentSchema(*graph, GraphFormatName, GraphFormatVersion, "A visual-scripting graph file (§6.11)."));
 			schemas.emplace("Material", StructDocumentSchema(*material, MaterialData::FormatName, MaterialData::CurrentVersion, "A material file (§6.5)."));
 			ENGINE_TRY_ASSIGN(Json prefab, PrefabSchema(types));
 			schemas.emplace("Prefab", std::move(prefab));

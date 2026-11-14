@@ -15,6 +15,7 @@
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -162,6 +163,68 @@ namespace Engine {
 		const Result<OpenSceneId> added = editor.AddScene(std::move(scene), *file);
 		REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
 		return *added;
+	}
+
+	// One node of MakeValidatorGraph: its id, kind and input literals (a JSON object).
+	struct ValidatorGraphNode
+	{
+		uint32_t Id = 0;
+		std::string_view Kind{};
+		std::string_view Values = "{}";
+	};
+
+	// One link of MakeValidatorGraph: (from node, output pin) to (to node, input pin).
+	struct ValidatorGraphLink
+	{
+		uint32_t From = 0;
+		std::string_view Output{};
+		uint32_t To = 0;
+		std::string_view Input{};
+	};
+
+	// The text of a .graph document named `name` without fields or variables (Docs/Decisions/0035-m24-contract.md decision 4):
+	// `nodes` and `links`, each given in the canonical order.
+	static std::string MakeValidatorGraph(std::string_view name, std::initializer_list<ValidatorGraphNode> nodes, std::initializer_list<ValidatorGraphLink> links)
+	{
+		std::string text = std::format(R"({{"Format": "Graph", "Version": 1, "Name": "{}", "Fields": [], "Variables": [], "Nodes": [)", name);
+		std::string_view separator;
+		for (const ValidatorGraphNode& node : nodes)
+		{
+			text += std::format(R"({}{{"Id": {}, "Kind": "{}", "Position": [0, 0], "Values": {}}})", separator, node.Id, node.Kind, node.Values);
+			separator = ", ";
+		}
+		text += R"(], "Links": [)";
+		separator = {};
+		for (const ValidatorGraphLink& link : links)
+		{
+			text += std::format(R"({}{{"From": {{"Node": {}, "Pin": "{}"}}, "To": {{"Node": {}, "Pin": "{}"}}}})", separator, link.From, link.Output, link.To, link.Input);
+			separator = ", ";
+		}
+		return text + "]}\n";
+	}
+
+	// Writes the graph `text` at `path` (project-relative), refreshes the assets so it is a registered Script asset of the Graph
+	// importer, and returns its handle.
+	static AssetHandle WriteValidatorGraph(EditorContext& editor, std::string_view path, std::string_view text)
+	{
+		WriteValidatorFile(editor, path, text);
+		REQUIRE(editor.GetAssets().Refresh().has_value());
+		const std::optional<AssetHandle> handle = editor.GetAssets().Resolve(path);
+		REQUIRE(handle.has_value());
+		REQUIRE(editor.GetAssets().GetAssetType(*handle) == AssetType::Script);
+		return *handle;
+	}
+
+	// The diagnostics of `code` on the project file `file`, in report order.
+	static std::vector<ProjectDiagnostic> FindFileDiagnostics(const ValidationReport& report, std::string_view file, std::string_view code)
+	{
+		std::vector<ProjectDiagnostic> found;
+		for (const ProjectDiagnostic& diagnostic : report.Diagnostics)
+		{
+			if (diagnostic.File == file && diagnostic.Code == code)
+				found.push_back(diagnostic);
+		}
+		return found;
 	}
 
 	TEST_SUITE("EditorCore")
@@ -1309,8 +1372,9 @@ end
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7,
 			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
 			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, M23's
-			// RENDER_POINT_SHADOW_BUDGET and two animation codes, and M26's PROBE_NOT_BAKED and two terrain codes.
-			CHECK(codes.size() == 53 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, and M26's PROBE_NOT_BAKED and two terrain
+			// codes.
+			CHECK(codes.size() == 55 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1350,11 +1414,12 @@ end
 			CHECK(position("UI_WIDGET_PART_INVALID") + 1 == position(RenderPointShadowBudgetCode));
 			CHECK(position(RenderPointShadowBudgetCode) + 1 == position(AnimationNoAnimatorCode));
 			CHECK(position(AnimationNoAnimatorCode) + 1 == position(AnimationSkeletonMismatchCode));
-			// Phase 3's blocks follow M23's in landing order, M26's last (ADR 0028's phase-3 ledger;
-			// Docs/Decisions/0037-m26-contract.md decision 9): M26's block is checked by its relative order and its own chain
-			// only, since M24's codes come between at M26's merge. It starts with PROBE_NOT_BAKED, and the terrain codes follow
-			// it and end the list.
-			CHECK(position(AnimationSkeletonMismatchCode) < position(ProbeNotBakedCode));
+			// Phase 3's blocks follow M23's in landing order (ADR 0028's phase-3 ledger): M24's graph codes right after M23's
+			// (Docs/Decisions/0035-m24-contract.md decision 5), then M26's, which lands last (Docs/Decisions/0037-m26-contract.md
+			// decision 9): PROBE_NOT_BAKED, then the terrain codes, which end the list.
+			CHECK(position(AnimationSkeletonMismatchCode) + 1 == position(GraphInvalidCode));
+			CHECK(position(GraphInvalidCode) + 1 == position(GraphUnreachableNodeCode));
+			CHECK(position(GraphUnreachableNodeCode) + 1 == position(ProbeNotBakedCode));
 			CHECK(position(ProbeNotBakedCode) + 1 == position(TerrainNoHeightfieldCode));
 			CHECK(position(TerrainNoHeightfieldCode) + 1 == position(TerrainSplatNotRawCode));
 			CHECK(codes.back() == TerrainSplatNotRawCode);
@@ -2577,6 +2642,198 @@ end
 				return std::find(codes.begin(), codes.end(), code) - codes.begin();
 			};
 			CHECK(position(Physics2DOffPlaneCode) + 1 == position(TilemapFrameOutOfRangeCode));
+		}
+
+		// M24 (Docs/Decisions/0035-m24-contract.md decision 5, stream G-D): the graph checks of the validator's own read of a
+		// graph source. A graph naming a kind the library lacks and linking a Number output into a Bool input is one
+		// GRAPH_INVALID error per issue, at its JSON pointer and naming its node; its import fails for that cause, which this
+		// code reports, never a second ASSET_IMPORT_FAILED.
+		TEST_CASE("ProjectValidator: a graph that does not validate is a GRAPH_INVALID error per issue, and its failed import no ASSET_IMPORT_FAILED")
+		{
+			Test::EditorTestFixture fixture("ValidatorGraphInvalid");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const std::string file = "Assets/Scripts/Broken.graph";
+			AssetHandle handle{};
+			{
+				Test::ExpectLog failed(LogLevel::Error, AssetImportFailedCode);
+				handle = WriteValidatorGraph(editor, file,
+					MakeValidatorGraph("Broken",
+						{ { 1, "Event.OnStart" }, { 2, "Flow.Branchh" }, { 3, "Flow.Branch" }, { 4, "Number.Add", R"({"A": 1, "B": 2})" } },
+						{ { 1, "Then", 3, "In" }, { 4, "Result", 3, "Condition" } }));
+				CHECK_FALSE(editor.GetAssets().Load(handle).has_value());
+				editor.GetAssets().WaitIdle();
+			}
+			// The asset manager holds the failed import, which the validator reports as the graph's own findings instead.
+			CHECK(std::ranges::any_of(editor.GetAssets().GetDiagnostics(), [&handle](const AssetDiagnostic& diagnostic)
+			{
+				return diagnostic.Asset == handle && diagnostic.Code == AssetImportFailedCode;
+			}));
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const std::vector<ProjectDiagnostic> invalid = FindFileDiagnostics(*report, file, GraphInvalidCode);
+			REQUIRE(invalid.size() == 2);
+			std::set<std::string> pointers;
+			for (const ProjectDiagnostic& diagnostic : invalid)
+			{
+				pointers.insert(diagnostic.Field);
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Error);
+				CHECK_FALSE(diagnostic.AutoFixable);
+				CHECK(diagnostic.Asset == handle.ToString());
+				CHECK_FALSE(diagnostic.Hint.empty());
+			}
+			CHECK(pointers == std::set<std::string>{ "/Links/1", "/Nodes/1/Kind" });
+			const auto unknown = std::ranges::find(invalid, std::string("/Nodes/1/Kind"), &ProjectDiagnostic::Field);
+			REQUIRE(unknown != invalid.end());
+			CHECK(unknown->Message.contains("node 2"));
+			CHECK(FindFileDiagnostic(*report, file, AssetImportFailedCode) == nullptr);
+			// A blocking issue leaves the reachability unchecked (graph.read's rule).
+			CHECK(FindFileDiagnostic(*report, file, GraphUnreachableNodeCode) == nullptr);
+		}
+
+		TEST_CASE("ProjectValidator: a graph source that does not read is GRAPH_INVALID at its line")
+		{
+			Test::EditorTestFixture fixture("ValidatorGraphUnreadable");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const std::string file = "Assets/Scripts/Torn.graph";
+			{
+				Test::ExpectLog failed(LogLevel::Error, AssetImportFailedCode);
+				const AssetHandle handle = WriteValidatorGraph(editor, file, "{\n\t\"Format\": \"Graph\",\n\t\"Version\": 1,\n\t\"Name\": \n");
+				CHECK_FALSE(editor.GetAssets().Load(handle).has_value());
+				editor.GetAssets().WaitIdle();
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const std::vector<ProjectDiagnostic> invalid = FindFileDiagnostics(*report, file, GraphInvalidCode);
+			REQUIRE(invalid.size() == 1);
+			CHECK(invalid.front().Line == 5);
+			CHECK(invalid.front().Severity == DiagnosticSeverity::Error);
+			CHECK(FindFileDiagnostic(*report, file, AssetImportFailedCode) == nullptr);
+		}
+
+		TEST_CASE("ProjectValidator: a graph statement no event's flow reaches is a GRAPH_UNREACHABLE_NODE warning, and a finished graph reports nothing")
+		{
+			Test::EditorTestFixture fixture("ValidatorGraphUnreachable");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const std::string file = "Assets/Scripts/Stray.graph";
+			const AssetHandle handle = WriteValidatorGraph(editor, file,
+				MakeValidatorGraph("Stray", { { 1, "Event.OnStart" }, { 2, "Call.Log.Info", R"({"Values": "started"})" }, { 3, "Call.Log.Info", R"({"Values": "never"})" } },
+					{ { 1, "Then", 2, "In" } }));
+			Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			const std::vector<ProjectDiagnostic> unreachable = FindFileDiagnostics(*report, file, GraphUnreachableNodeCode);
+			REQUIRE(unreachable.size() == 1);
+			CHECK(unreachable.front().Field == "/Nodes/2");
+			CHECK(unreachable.front().Message.contains("node 3"));
+			CHECK(unreachable.front().Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(unreachable.front().AutoFixable);
+			CHECK(unreachable.front().Asset == handle.ToString());
+			CHECK(FindFileDiagnostic(*report, file, GraphInvalidCode) == nullptr);
+
+			// Linked into the start event's flow, the graph is finished and reports nothing.
+			WriteValidatorGraph(editor, file,
+				MakeValidatorGraph("Stray", { { 1, "Event.OnStart" }, { 2, "Call.Log.Info", R"({"Values": "started"})" }, { 3, "Call.Log.Info", R"({"Values": "never"})" } },
+					{ { 1, "Then", 2, "In" }, { 2, "Then", 3, "In" } }));
+			report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			CHECK(std::ranges::none_of(report->Diagnostics, [&file](const ProjectDiagnostic& diagnostic)
+			{
+				return diagnostic.File == file;
+			}));
+		}
+
+		// Docs/Decisions/0035-m24-contract.md decision 5 and its review's finding 5: the Scene scope took every script slot's
+		// source to the script service's Luau check, which refuses a .graph path, failing the whole report. A slot's source now
+		// goes through the script source rule: a .luau to the Luau check, a .graph to the graph checks.
+		TEST_CASE("ProjectValidator: the Scene scope checks a scene's graph slots with the graph checks and its Luau slots with the Luau check")
+		{
+			Test::EditorTestFixture fixture("ValidatorGraphScene");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			REQUIRE(editor.GetScriptService() != nullptr);
+			const Result<VfsPath> luauPath = VfsPath::Create("project", "Assets/Scripts/Typed.luau");
+			REQUIRE(luauPath.has_value());
+			const auto typed = editor.GetScriptService()->Write(*luauPath, "--!strict\nlocal count: number = \"bad\"\nreturn Script.Define(\"Typed\", {})\n");
+			REQUIRE_MESSAGE(typed.has_value(), typed.error().ToString());
+			const std::string strayFile = "Assets/Scripts/Stray.graph";
+			const AssetHandle stray = WriteValidatorGraph(editor, strayFile,
+				MakeValidatorGraph("Stray", { { 1, "Event.OnStart" }, { 2, "Call.Log.Info", R"({"Values": "started"})" }, { 3, "Call.Log.Info", R"({"Values": "never"})" } },
+					{ { 1, "Then", 2, "In" } }));
+			const std::string brokenFile = "Assets/Scripts/Broken.graph";
+			AssetHandle broken{};
+			{
+				// The broken graph's slot loads it during the scene checks; its failed import is logged once, here.
+				Test::ExpectLog failed(LogLevel::Error, AssetImportFailedCode);
+				broken = WriteValidatorGraph(editor, brokenFile, MakeValidatorGraph("Broken", { { 1, "Event.OnStart" }, { 2, "Flow.Branchh" } }, {}));
+				CHECK_FALSE(editor.GetAssets().Load(broken).has_value());
+				editor.GetAssets().WaitIdle();
+			}
+			const Entity holder = editor.GetScene().CreateEntity("Holder");
+			ScriptSlot graphSlot;
+			graphSlot.Script = TypedAssetHandle<AssetType::Script>(stray);
+			ScriptSlot luauSlot;
+			luauSlot.Script = TypedAssetHandle<AssetType::Script>(typed->Script);
+			holder.AddComponent<ScriptComponent>(ScriptComponent{ { std::move(graphSlot), std::move(luauSlot) } });
+			ScriptSlot brokenSlot;
+			brokenSlot.Script = TypedAssetHandle<AssetType::Script>(broken);
+			editor.GetScene().CreateEntity("Other").AddComponent<ScriptComponent>(ScriptComponent{ { std::move(brokenSlot) } });
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			// The Luau slot's type error, from the Luau check.
+			const ProjectDiagnostic* type = FindFileDiagnostic(*report, "Assets/Scripts/Typed.luau", "SCRIPT_TYPE_ERROR");
+			REQUIRE(type != nullptr);
+			CHECK(type->Line == 2);
+			// The graph slots' findings, from the graph checks alone.
+			CHECK(FindFileDiagnostics(*report, strayFile, GraphUnreachableNodeCode).size() == 1);
+			CHECK(FindFileDiagnostics(*report, brokenFile, GraphInvalidCode).size() == 1);
+			for (const std::string& file : { strayFile, brokenFile })
+			{
+				CAPTURE(file);
+				CHECK(std::ranges::all_of(report->Diagnostics, [&file](const ProjectDiagnostic& diagnostic)
+				{
+					return diagnostic.File != file || diagnostic.Code.starts_with("GRAPH_");
+				}));
+			}
+		}
+
+		// Docs/Decisions/0035-m24-contract.md decisions 5 and 24: a graph's loads are its transpiled text's, scanned as the
+		// exporter scans them. A Load whose reference a Text.Concat computes is named at its node; a literal one is not.
+		TEST_CASE("ProjectValidator: with Export.PruneUnreferenced a graph's computed Assets.Load is a SCRIPT_COMPUTED_ASSET_LOAD warning at its node")
+		{
+			Test::EditorTestFixture fixture("ValidatorGraphComputedLoads");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			const std::string file = "Assets/Scripts/Loader.graph";
+			WriteValidatorGraph(editor, file,
+				MakeValidatorGraph("Loader",
+					{ { 1, "Event.OnStart" }, { 2, "Call.Assets.Load" }, { 3, "Text.Concat", R"({"A": "Assets/Textures/", "B": "Grey.png"})" }, { 4, "Call.Log.Info" },
+						{ 5, "Call.Assets.Load", R"({"reference": "Assets/Textures/Grey.png"})" }, { 6, "Call.Log.Info" } },
+					{ { 1, "Then", 4, "In" }, { 2, "Result", 4, "Values" }, { 3, "Result", 2, "reference" }, { 4, "Then", 6, "In" }, { 5, "Result", 6, "Values" } }));
+			Result<Scope<ProjectSettingsCommand>> settings = ProjectSettingsCommand::CreateFromPatch(editor,
+				ParseValidatorJson(R"({"Export":{"PruneUnreferenced":true}})"), "Prune unreferenced assets");
+			REQUIRE_MESSAGE(settings.has_value(), settings.error().ToString());
+			REQUIRE(editor.Execute(std::move(*settings)).has_value());
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Project);
+			REQUIRE_MESSAGE(report.has_value(), report.error().ToString());
+			INFO(DescribeDiagnostics(*report));
+			CHECK(FindFileDiagnostic(*report, file, GraphInvalidCode) == nullptr);
+			const std::vector<ProjectDiagnostic> computed = FindFileDiagnostics(*report, file, ScriptComputedAssetLoadCode);
+			REQUIRE(computed.size() == 1);
+			CHECK(computed.front().Field == "/Nodes/1");
+			CHECK(computed.front().Message.contains("node 2 (Call.Assets.Load)"));
+			CHECK(computed.front().Line > 0);
+			CHECK(computed.front().Severity == DiagnosticSeverity::Warning);
+			CHECK_FALSE(computed.front().AutoFixable);
 		}
 	}
 

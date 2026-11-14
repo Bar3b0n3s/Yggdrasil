@@ -1,0 +1,545 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Vectors",
+	"Fields": [
+		{
+			"Name": "Direction",
+			"Kind": "Vector",
+			"Default": [1, 2, 2],
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Max": 10,
+				"Min": -10
+			}
+		},
+		{
+			"Name": "Spin",
+			"Kind": "Quat",
+			"Default": [0, 0, 0, 1],
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Tooltip": "The rotation the entity takes"
+			}
+		},
+		{
+			"Name": "Tint",
+			"Kind": "Color",
+			"Default": [1, 0.5, 0.25, 1],
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Mixed",
+			"Kind": "Vector",
+			"Default": [0, 0, 0],
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "Shade",
+			"Kind": "Color",
+			"Default": [0, 0, 0, 1],
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "Turn",
+			"Kind": "Number",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnStart",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Flow.Sequence",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Vector.Make",
+			"Position": [480, 0],
+			"Values": {
+				"X": 1,
+				"Y": 2,
+				"Z": 3
+			}
+		},
+		{
+			"Id": 4,
+			"Kind": "Self.Get.Direction",
+			"Position": [720, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Vector.Add",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Vector.Cross",
+			"Position": [1200, 0],
+			"Values": {}
+		},
+		{
+			"Id": 7,
+			"Kind": "Vector.Subtract",
+			"Position": [0, 160],
+			"Values": {}
+		},
+		{
+			"Id": 8,
+			"Kind": "Vector.Scale",
+			"Position": [240, 160],
+			"Values": {
+				"Factor": 2
+			}
+		},
+		{
+			"Id": 9,
+			"Kind": "Vector.Normalize",
+			"Position": [480, 160],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Vector.Dot",
+			"Position": [720, 160],
+			"Values": {}
+		},
+		{
+			"Id": 11,
+			"Kind": "Vector.Length",
+			"Position": [960, 160],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Vector.Split",
+			"Position": [1200, 160],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Vector.Make",
+			"Position": [0, 320],
+			"Values": {}
+		},
+		{
+			"Id": 14,
+			"Kind": "Self.Set.Mixed",
+			"Position": [240, 320],
+			"Values": {}
+		},
+		{
+			"Id": 15,
+			"Kind": "Self.Entity",
+			"Position": [480, 320],
+			"Values": {}
+		},
+		{
+			"Id": 16,
+			"Kind": "Get.Entity.Transform",
+			"Position": [720, 320],
+			"Values": {}
+		},
+		{
+			"Id": 17,
+			"Kind": "Get.Transform.Translation",
+			"Position": [960, 320],
+			"Values": {}
+		},
+		{
+			"Id": 18,
+			"Kind": "Vector.Add",
+			"Position": [1200, 320],
+			"Values": {}
+		},
+		{
+			"Id": 19,
+			"Kind": "Set.Transform.Translation",
+			"Position": [0, 480],
+			"Values": {}
+		},
+		{
+			"Id": 20,
+			"Kind": "Self.Get.Spin",
+			"Position": [240, 480],
+			"Values": {}
+		},
+		{
+			"Id": 21,
+			"Kind": "Set.Transform.Rotation",
+			"Position": [480, 480],
+			"Values": {}
+		},
+		{
+			"Id": 22,
+			"Kind": "Self.Get.Tint",
+			"Position": [720, 480],
+			"Values": {}
+		},
+		{
+			"Id": 23,
+			"Kind": "Self.Set.Shade",
+			"Position": [960, 480],
+			"Values": {}
+		},
+		{
+			"Id": 24,
+			"Kind": "Const.Math.Pi",
+			"Position": [1200, 480],
+			"Values": {}
+		},
+		{
+			"Id": 25,
+			"Kind": "Self.Set.Turn",
+			"Position": [0, 640],
+			"Values": {}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then1"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then2"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then3"
+			},
+			"To": {
+				"Node": 23,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then4"
+			},
+			"To": {
+				"Node": 25,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "X"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "Y"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Y"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "Z"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 15,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 16,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 21,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 17,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 18,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 19,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 21,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 20,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 21,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 22,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 23,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 24,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 25,
+				"Pin": "Value"
+			}
+		}
+	]
+}

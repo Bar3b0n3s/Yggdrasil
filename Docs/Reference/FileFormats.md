@@ -11,6 +11,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | AssetMeta | `.meta` | 1 | [Schemas/AssetMeta.schema.json](Schemas/AssetMeta.schema.json) |
 | BatchRequest | `.jsonl` | none | [Schemas/BatchRequest.schema.json](Schemas/BatchRequest.schema.json) |
 | GameManifest | `Game.json` | 2 | [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json) |
+| Graph | `.graph` | 1 | [Schemas/Graph.schema.json](Schemas/Graph.schema.json) |
 | Material | `.material` | 2 | [Schemas/Material.schema.json](Schemas/Material.schema.json) |
 | Prefab | `.prefab` | 1 | [Schemas/Prefab.schema.json](Schemas/Prefab.schema.json) |
 | Project | `.eproj` | 1 | [Schemas/Project.schema.json](Schemas/Project.schema.json) |
@@ -96,6 +97,241 @@ Header: `"Format": "GameManifest", "Version": 2`. Schema: [Schemas/GameManifest.
 	"Testing": false
 }
 ```
+
+### Graph (`.graph`)
+
+A visual-scripting graph (§6.11): one behaviour, whose fields, variables, nodes and links GraphImporter transpiles to Luau and compiles into a Script asset, so a graph fills a script slot as a `.luau` behaviour does. A node is a node kind of the library (`graph.nodes` lists them) with literals of its input pins; a link joins an output pin to an input pin of another node. Every list is in its canonical order (fields and variables by Name, nodes by Id, links by From and To), so each write of a graph is byte-identical; the `graph.*` methods edit it. A field's or variable's `Name` is a Luau identifier of 1 to 64 bytes, not a reserved word, not starting with `__` and not a reserved script field name (`Entity`, `Fields`, the callbacks), unique across both lists; its `Default` has its `Kind`'s spelling (a Number a finite number, an Integer an int32, a Bool a boolean, a String a string of at most 4,096 bytes, a Vector `[x, y, z]`, a Color `[r, g, b, a]`, a Quat `[x, y, z, w]`, nonzero and, for a field, of unit length, an Entity or Asset null, an Enum one of `EnumValues`, an Array `[]`); `Element` is an Array's element kind (not Array; Number for other kinds), `AssetType` an Asset's type, `EnumValues` an Enum's 1 to 64 unique choices of 1 to 64 bytes (an Array of Asset or of Enum has them too); a field's `Options` are its Luau `FieldOptions` (Number, Integer, Bool, String, Vector, Color and Quat only): `Min`, `Max` and `Step` for Number, Integer and Vector (`Min <= Max`, `Step > 0`, the default within them) and a `Tooltip` of at most 256 bytes. The tables below list every field and the limits.
+
+Header: `"Format": "Graph", "Version": 1`. Schema: [Schemas/Graph.schema.json](Schemas/Graph.schema.json).
+
+```json
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Door",
+	"Fields": [
+		{
+			"Name": "Player",
+			"Kind": "Entity",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		},
+		{
+			"Name": "Speed",
+			"Kind": "Number",
+			"Default": 2,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Max": 10,
+				"Min": 0
+			}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Opened",
+			"Kind": "Bool",
+			"Default": false,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnTriggerEnter",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Compare.Equal",
+			"Position": [240, 120],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Self.Get.Player",
+			"Position": [0, 160],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Flow.Branch",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Self.Set.Opened",
+			"Position": [720, 0],
+			"Values": {
+				"Value": true
+			}
+		},
+		{
+			"Id": 6,
+			"Kind": "Call.Log.Info",
+			"Position": [960, 0],
+			"Values": {
+				"Values": "Door opened"
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "other"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "In"
+			}
+		}
+	]
+}
+```
+
+#### Fields of Graph
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `""` |  |  |  | The behaviour's Script.Define name: a Luau identifier of 1 to 64 bytes that is not a reserved word and does not start with "__". |
+| `Fields` | `Array<GraphField>` | `[]` |  |  |  | At most 128 fields, sorted by Name. |
+| `Variables` | `Array<GraphVariable>` | `[]` |  |  |  | At most 128 variables, sorted by Name. |
+| `Nodes` | `Array<GraphNode>` | `[]` |  |  |  | At most 4096 nodes, sorted by Id. |
+| `Links` | `Array<GraphLink>` | `[]` |  |  |  | At most 16384 links, sorted by (From.Node, From.Pin, To.Node, To.Pin) byte-wise, each once, joining two different nodes. |
+
+#### Fields of GraphField
+
+A behaviour field, set per script slot (§6.11).
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields and variables (§6.11). |
+| `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its Luau Field constructor. |
+| `Default` | `Variant` | `null` |  |  |  | Its default, in its Kind's JSON spelling (§6.11). |
+| `Element` | `GraphValueKind` | `"Number"` |  |  |  | An Array's element kind; Number otherwise. |
+| `AssetType` | `String` | `""` |  |  |  | An Asset's AssetType; empty otherwise. |
+| `EnumValues` | `Array<String>` | `[]` |  |  |  | An Enum's choices; empty otherwise. |
+| `Options` | `Map<Variant>` | `{}` |  |  |  | Its Luau FieldOptions: Min, Max, Step, Tooltip (§6.11). |
+
+#### Fields of GraphVariable
+
+Instance state, set to its Default at OnCreate (§6.11).
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields and variables (§6.11). |
+| `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its kind, as a field's. |
+| `Default` | `Variant` | `null` |  |  |  | Its default, in its Kind's JSON spelling (§6.11). |
+| `Element` | `GraphValueKind` | `"Number"` |  |  |  | An Array's element kind; Number otherwise. |
+| `AssetType` | `String` | `""` |  |  |  | An Asset's AssetType; empty otherwise. |
+| `EnumValues` | `Array<String>` | `[]` |  |  |  | An Enum's choices; empty otherwise. |
+
+#### Fields of GraphNode
+
+One node: a node kind of the library at a place on the canvas, with literals of its input pins.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Id` | `UInt32` | `0` |  |  |  | From 1 to 2147483647, unique in the graph and stable for the node's life. |
+| `Kind` | `String` | `""` |  |  |  | Its node kind: 1 to 256 bytes of dot-separated parts of letters, digits and '_' (Flow.Branch, Call.Input.GetAxis, Self.Get.Speed; graph.nodes lists them). |
+| `Position` | `Vec2` | `[0,0]` |  |  |  | The canvas place of its top-left corner, each component finite and within 1000000 of the origin; layout only. |
+| `Values` | `Map<Variant>` | `{}` |  |  |  | At most 64 literals of its input pins by pin name: null, a boolean, a finite number, a string of at most 4096 bytes of UTF-8, or an array of 3 or 4 finite numbers (a vector, a colour, a quaternion). A linked input keeps its literal, and the link wins. |
+
+#### Fields of GraphLink
+
+A link from an output pin of one node to an input pin of another.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `From` | `GraphPinRef` | `{"Node":0,"Pin":""}` |  |  |  | The output pin. |
+| `To` | `GraphPinRef` | `{"Node":0,"Pin":""}` |  |  |  | The input pin. |
+
+#### Fields of GraphPinRef
+
+One pin of one node: an end of a link.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Node` | `UInt32` | `0` |  |  |  | The node's Id. |
+| `Pin` | `String` | `""` |  |  |  | The pin's name, a Luau identifier of 1 to 64 bytes (graph.nodes lists each kind's pins). |
+
+#### Values of GraphValueKind
+
+The kind of a graph field or variable: its Luau Field constructor.
+
+| Value | Description |
+|---|---|
+| `Number` | A finite f32 number (Field.Number); Default a number. |
+| `Integer` | An exact signed 32-bit integer (Field.Integer); Default an integer. |
+| `Bool` | A boolean (Field.Bool); Default true or false. |
+| `String` | A string (Field.String); Default a string. |
+| `Vector` | A native three-component vector (Field.Vector); Default [x, y, z]. |
+| `Color` | A linear RGBA colour (Field.Color); Default [r, g, b, a]. |
+| `Quat` | A quaternion (Field.Quat); Default [x, y, z, w], nonzero, and of unit length for a field. |
+| `Entity` | An Entity (Field.Entity); Default null. |
+| `Asset` | An asset reference of one AssetType (Field.Asset); Default null. |
+| `Enum` | One of EnumValues (Field.Enum); Default one of them. |
+| `Array` | An array of Element values (Field.Array); Default []. |
 
 ### Material (`.material`)
 
@@ -764,6 +1000,7 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Font | `.ttf` | Font | 5 | `FontImportSettings` | yes |
 | Gltf | `.glb` | Prefab | 3 | `GltfImportSettings` | yes |
 | Gltf | `.gltf` | Prefab | 3 | `GltfImportSettings` | yes |
+| Graph | `.graph` | Script | 1 | none | yes |
 | Heightfield | `.heightfield` | Heightfield | 1 | none | yes |
 | IrradianceVolume | `.irradiance` | IrradianceVolume | 1 | none | yes |
 | Lut | `.cube` | Lut | 1 | none | yes |

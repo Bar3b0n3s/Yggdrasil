@@ -7,6 +7,7 @@
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Log.h"
@@ -184,6 +185,12 @@ namespace Engine {
 			if (!opened)
 				report(opened.error());
 		};
+		// A graph's finding opens the Graph Editor at its node (decision 15), not its .graph JSON at a line of its text.
+		const auto openGraph = [this](GraphEditorTarget target)
+		{
+			m_GraphRequest = std::move(target);
+		};
+		const AssetRegistry& registry = context.Editor.GetAssets().GetRegistry();
 		size_t visibleCount = 0;
 		const bool showFindings = ImGui::BeginChild("DiagnosticEntries", ImVec2(0.0f, 0.0f));
 		if (!showFindings)
@@ -201,6 +208,7 @@ namespace Engine {
 			if (!check || !check->Performed)
 				continue;
 			checkedFiles.emplace(record->SourcePath.GetPath());
+			const bool graph = IsGraphAsset(registry, record->Metadata.Handle);
 			for (const ScriptDiagnostic& diagnostic : check->Diagnostics)
 			{
 				const std::string text = std::format("{} | {}:{}:{}–{}:{} | {}", diagnostic.Code, diagnostic.File, diagnostic.Line, diagnostic.Column,
@@ -211,9 +219,24 @@ namespace Engine {
 				ImGui::PushID(static_cast<int>(FNV1a32(text)));
 				Utils::DrawDiagnosticMessage(diagnostic.Severity, diagnostic.Message);
 				Utils::DrawDiagnosticLocation(diagnostic.File, diagnostic.Line, diagnostic.Column);
-				if (ImGui::SmallButton("Open source"))
-					openScript(diagnostic.File, diagnostic.Line);
-				ImGui::SetItemTooltip("Open the script at the reported line.");
+				if (graph && diagnostic.File == record->SourcePath.GetPath())
+				{
+					// A GRAPH_INVALID finding names its pointer and node in its message (line 0); a type or compile finding is at a
+					// line of the graph's transpiled text.
+					if (ImGui::SmallButton("Open in Graph Editor"))
+						openGraph(GraphEditorTarget{ .Graph = record->Metadata.Handle,
+							.Node = 0,
+							.Line = diagnostic.Line,
+							.JsonPointer = {},
+							.Finding = diagnostic.Code == GraphInvalidCode ? diagnostic.Message : std::string() });
+					ImGui::SetItemTooltip("Open the graph at the node the finding is about.");
+				}
+				else
+				{
+					if (ImGui::SmallButton("Open source"))
+						openScript(diagnostic.File, diagnostic.Line);
+					ImGui::SetItemTooltip("Open the script at the reported line.");
+				}
 				if (ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_SpanAvailWidth))
 				{
 					ImGui::TextWrapped("Code: %s", diagnostic.Code.c_str());
@@ -239,7 +262,13 @@ namespace Engine {
 				Utils::DrawDiagnosticMessage(DiagnosticSeverity::Error, error.Message);
 				Utils::DrawDiagnosticLocation(error.Script, error.Line, error.Column);
 				ImGui::TextWrapped("%s", std::format("{} / {} ({} occurrences)", error.EntityName, error.Callback, error.Count).c_str());
-				if (!error.Script.empty() && ImGui::SmallButton("Open source"))
+				if (const std::optional<AssetHandle> graph = FindGraphAsset(registry, error.Script); graph.has_value())
+				{
+					// A graph's runtime error is at a line of its transpiled text.
+					if (ImGui::SmallButton("Open in Graph Editor"))
+						openGraph(GraphEditorTarget{ .Graph = *graph, .Node = 0, .Line = error.Line, .JsonPointer = {}, .Finding = {} });
+				}
+				else if (!error.Script.empty() && ImGui::SmallButton("Open source"))
 					openScript(error.Script, error.Line);
 				if (ImGui::TreeNodeEx("Details", ImGuiTreeNodeFlags_SpanAvailWidth))
 				{
@@ -286,7 +315,14 @@ namespace Engine {
 				ImGui::EndDisabled();
 				ImGui::SetItemTooltip("Check this issue, then use Fix selected. All selected fixes form one undo step.");
 			}
-			if (!diagnostic.File.empty() && ImGui::SmallButton("Open source"))
+			if (const std::optional<AssetHandle> graph = FindGraphAsset(registry, diagnostic.File); graph.has_value())
+			{
+				// A graph's own finding is at its JSON pointer (Field); a script finding of its text at the text's line.
+				const bool own = diagnostic.Code == GraphInvalidCode || diagnostic.Code == GraphUnreachableNodeCode;
+				if (ImGui::SmallButton("Open in Graph Editor"))
+					openGraph(GraphEditorTarget{ .Graph = *graph, .Node = 0, .Line = own ? 0 : diagnostic.Line, .JsonPointer = own ? diagnostic.Field : std::string(), .Finding = {} });
+			}
+			else if (!diagnostic.File.empty() && ImGui::SmallButton("Open source"))
 			{
 				const auto path = context.Editor.GetProject().GetRoot() / FileSystem::PathFromUtf8(diagnostic.File);
 				const Status opened = context.OpenSource ? context.OpenSource(path, diagnostic.Line)

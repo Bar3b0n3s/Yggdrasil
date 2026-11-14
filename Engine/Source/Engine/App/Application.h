@@ -93,6 +93,11 @@ namespace Engine {
 		// imgui.ini while no project is open, relative to the user-data folder (user://, §8.11): the editor's
 		// "Editor/imgui.ini". Run resolves it to the native path under ProcessContext's user-data root. Empty: no ini file.
 		std::string ImGuiIniPath{};
+		// M24 (C24.1, E-VIEWPORTS; Docs/Decisions/0035-m24-contract.md decisions 17 and 18; stream V): ask the ImGuiLayer for
+		// Dear ImGui's platform windows (ImGuiLayerSpecification::PlatformWindows), which it turns on only on Windows in a
+		// windowed process; the frame then draws them after the main window's submission (ImGuiLayer::RenderPlatformWindows).
+		// The editor sets it from the user's PlatformWindows preference; the Runtime never does.
+		bool ImGuiPlatformWindows = false;
 #endif
 		// M7: the exported game's Engine.pak (EngineContextSpecification::EnginePak): mounted as engine:// instead of
 		// EngineResourcesDirectory, and its Shaders/ are the ShaderLibrary's root in every configuration, so an exported game
@@ -183,12 +188,19 @@ namespace Engine {
 	//      (§8.2): FramePacer::BeginFrame and GpuProfiler::BeginFrame, the swapchain image or the offscreen target, a command
 	//      list cleared to FrameClearColor (Graphics/RenderContext.h), OnRender, then with ImGui ImGuiLayer::BeginFrame (with
 	//      the time since the last UI frame), OnImGuiRender, EndFrame and Render into the same target; the submission (the
-	//      swapchain's semaphores queued before it), Present, FramePacer::EndFrame and GraphicsDevice::RunGarbageCollection.
+	//      swapchain's semaphores queued before it), Present, with ImGui ImGuiLayer::RenderPlatformWindows (M24: the UI's
+	//      platform windows with ImGuiPlatformWindows, each its own submission and present, on the frames whose main window
+	//      is not minimized; a frame forced while it is draws none), FramePacer::EndFrame and
+	//      GraphicsDevice::RunGarbageCollection.
 	//      A frame the swapchain skips (minimized or just recreated) records and submits nothing, calls neither OnRender nor
 	//      OnImGuiRender, and passes GraphicsDevice::GetLastSubmissionID to FramePacer::EndFrame. A headless frame target
 	//      replaced by a resize stays alive until every frame that cleared it has completed. A Gpu error from
 	//      ImGuiLayer::Render (a pipeline, buffer or binding set could not be created) ends the process through
-	//      FatalError(OutOfMemory) (§8.14 item 7); other Render errors are logged once per run of failing frames.
+	//      FatalError(OutOfMemory) (§8.14 item 7); other Render errors are logged once per run of failing frames. The same
+	//      holds for ImGuiLayer::RenderPlatformWindows' errors, whose OutOfMemory (a recording's creation failure) ends the
+	//      process through FatalError(OutOfMemory) and whose Gpu error (a platform window's swapchain or target failure, never
+	//      out of memory) through FatalError(Gpu), as the main window's swapchain recreation does, while a platform window
+	//      whose target runs out of memory after its trim and retry only draws nothing (ImGui/ImGuiPlatformWindows.h).
 	//   2b. M18 (C18.3, Docs/Decisions/0029-m18-contract.md decisions 28, 29 and 33): device loss. A frame on a lost
 	//      device (GraphicsDevice::IsLost) renders nothing: no BeginFrame wait, no OnRender, no OnImGuiRender, no
 	//      submission or Present, as for a frame the swapchain skips (the simulation, its scripts and its audio still

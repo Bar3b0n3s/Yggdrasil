@@ -1440,6 +1440,20 @@
 				},
 				"ExpectQuit": -1,
 				"Modes": ["Editor"]
+			},
+			{
+				"Script": "Assets/Tests/Graphs/Graphs.test.luau",
+				"Scene": "Assets/Scenes/Graphs.scene",
+				"Parameters": null,
+				"Isolation": "Case",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
 			}
 		],
 		"Replays": ["Assets/Tests/Replays/*.replay"],

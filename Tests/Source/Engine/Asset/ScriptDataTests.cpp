@@ -5,6 +5,7 @@
 #include "Engine/Core/BinaryReader.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Core/VfsPath.h"
 #include "Engine/Reflection/EnumInfo.h"
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Support/AssetTestFixture.h"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string_view>
 
 namespace Engine {
 
@@ -436,6 +438,41 @@ namespace Engine {
 			CHECK(CookScript(script, 1).has_value());
 			script.SourceMap.ChunkName.clear();
 			CHECK_FALSE(CookScript(script, 1));
+		}
+
+		TEST_CASE("ScriptData: the reserved script field names hold Entity, Fields, the callbacks and every name starting with two underscores")
+		{
+			// M24 (C24.1, Docs/Decisions/0035-m24-contract.md decision 4): a graph's fields and variables become instance members,
+			// so they follow the script fields' rule.
+			CHECK(IsReservedScriptFieldName("Entity"));
+			CHECK(IsReservedScriptFieldName("Fields"));
+			CHECK(IsReservedScriptFieldName("OnStart"));
+			CHECK(IsReservedScriptFieldName("OnAnimationEvent"));
+			CHECK(IsReservedScriptFieldName("__GraphLive"));
+			CHECK_FALSE(IsReservedScriptFieldName("Speed"));
+			CHECK_FALSE(IsReservedScriptFieldName("Opened"));
+		}
+
+		TEST_CASE("ScriptData: a script source path is a project Assets path of a Luau source or a graph")
+		{
+			// M24 (C24.1, Docs/Decisions/0035-m24-contract.md decision 9, stream G-B): a graph's cooked script keeps its .graph
+			// path, which every site that accepts a script's origin takes as it takes a .luau one.
+			const auto source = [](std::string_view scheme, std::string_view path)
+			{
+				const Result<VfsPath> parsed = VfsPath::Create(scheme, path);
+				REQUIRE_MESSAGE(parsed.has_value(), parsed.error().ToString());
+				return IsScriptSourcePath(*parsed);
+			};
+			CHECK(source("project", "Assets/Scripts/Door.luau"));
+			CHECK(source("project", "Assets/Tests/Door.test.luau"));
+			CHECK(source("project", "Assets/Scripts/Door.graph"));
+			CHECK(source("project", "Assets/Door.graph"));
+			CHECK_FALSE(source("project", "Assets/Scripts/Door.lua"));
+			CHECK_FALSE(source("project", "Assets/Scripts/Door.graph.meta"));
+			CHECK_FALSE(source("project", "Scripts/Door.luau"));
+			CHECK_FALSE(source("project", "Library/Door.graph"));
+			CHECK_FALSE(source("engine", "Assets/Door.luau"));
+			CHECK_FALSE(source("user", "Assets/Door.graph"));
 		}
 	}
 

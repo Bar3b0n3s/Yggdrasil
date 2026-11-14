@@ -7,6 +7,7 @@ capture dimensions and private capture frame identities must not replace the dis
 from __future__ import annotations
 
 import math
+import sys
 import time
 from typing import Any
 
@@ -74,6 +75,10 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         self.assertLessEqual(stats["scriptHeapBytes"], stats["scriptHardLimitBytes"])
         self.assertEqual(stats["memoryAllocationCount"], 0)
         self.assertEqual(stats["maxMemoryAllocationCount"], 0)
+        # ADR 0036, "The soak": the Runtime reports the C runtime heap's committed bytes too (Windows only).
+        self.assertIs(stats["processHeapAvailable"], sys.platform == "win32")
+        if sys.platform == "win32":
+            self.assertGreater(stats["processHeapCommittedBytes"], 1 << 20)
         view = stats["views"][0]
         self.assertFalse(view["available"])
         self.assertFalse(view["gpuAvailable"])

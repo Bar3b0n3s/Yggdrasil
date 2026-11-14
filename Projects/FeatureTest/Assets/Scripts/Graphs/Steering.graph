@@ -1,0 +1,263 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Steering",
+	"Fields": [
+		{
+			"Name": "Speed",
+			"Kind": "Number",
+			"Default": 2,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Max": 10,
+				"Min": 0
+			}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Jumps",
+			"Kind": "Integer",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnFixedUpdate",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Self.Entity",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Get.Entity.Transform",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Call.Input.GetAxis",
+			"Position": [720, 0],
+			"Values": {
+				"name": "MoveX"
+			}
+		},
+		{
+			"Id": 5,
+			"Kind": "Vector.Make",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Self.Get.Speed",
+			"Position": [1200, 0],
+			"Values": {}
+		},
+		{
+			"Id": 7,
+			"Kind": "Number.Multiply",
+			"Position": [0, 160],
+			"Values": {}
+		},
+		{
+			"Id": 8,
+			"Kind": "Vector.Scale",
+			"Position": [240, 160],
+			"Values": {}
+		},
+		{
+			"Id": 9,
+			"Kind": "Call.Transform.Translate",
+			"Position": [480, 160],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Call.Input.IsActionPressed",
+			"Position": [720, 160],
+			"Values": {
+				"name": "Jump"
+			}
+		},
+		{
+			"Id": 11,
+			"Kind": "Flow.Branch",
+			"Position": [960, 160],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Self.Get.Jumps",
+			"Position": [1200, 160],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Number.Add",
+			"Position": [0, 320],
+			"Values": {
+				"B": 1
+			}
+		},
+		{
+			"Id": 14,
+			"Kind": "Self.Set.Jumps",
+			"Position": [240, 320],
+			"Values": {}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "dt"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "X"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "Factor"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "delta"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "Value"
+			}
+		}
+	]
+}
