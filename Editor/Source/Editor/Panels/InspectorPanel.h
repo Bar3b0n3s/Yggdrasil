@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Editor/Tools/TerrainHeightmapImport.h"
 #include "EditorCore/Inspector/PrefabInstanceView.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
 #include "Engine/Asset/AssetHandle.h"
@@ -56,6 +57,8 @@ namespace Engine {
 	// and the fields of its one selected element (picked in the list or by its index); each of that element's gestures,
 	// Add element (the element type's default, appended) and Remove element (the selected one) submits asset.setProperties
 	// with the whole array, so no frame draws or converts every element. Smaller arrays draw every element as before.
+	// M26 (Docs/Decisions/0037-m26-contract.md decision 20): a Terrain of one selected edit-scene entity shows the Import Heightmap
+	// action above its fields (Editor/Tools/TerrainHeightmapImport.h: terrain.importHeightmap, then the assignment).
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
 	class InspectorPanel
 	{
@@ -159,6 +162,7 @@ namespace Engine {
 		UUID m_ApplyInstance{}; // the instance the level picker belongs to
 		UUID m_ApplyLevel{};    // the picked level's root; reset to the outermost for another instance
 		bool m_CommitQueued = false;
+		TerrainHeightmapImport m_TerrainHeightmapImport{}; // M26
 		friend class EditorLayer;
 	};
 

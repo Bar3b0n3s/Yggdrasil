@@ -98,12 +98,12 @@ namespace Engine {
 			CHECK(view->Set == 0);
 			CHECK(view->Binding == 256); // b0 shifted by NVRHI's CBV offset (§8.4)
 			CHECK(view->ArraySize == 1);
-			CHECK(view->ByteSize == 400); // ViewConstants with the light count M8 appended
+			CHECK(view->ByteSize == 480); // ViewConstants with the light count M8 appended and M26's temporal inputs
 			CHECK(view->StructName == "ViewConstants");
 			CHECK(view->Used);
 			const ShaderStruct* constants = reflection->FindStruct("ViewConstants");
 			REQUIRE(constants != nullptr);
-			CHECK(constants->Size == 400);
+			CHECK(constants->Size == 480);
 			REQUIRE_FALSE(constants->Fields.empty());
 			CHECK(constants->Fields.front().Name == "View");
 			CHECK(constants->Fields.front().Offset == 0);

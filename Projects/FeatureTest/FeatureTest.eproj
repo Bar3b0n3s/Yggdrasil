@@ -134,6 +134,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/PostProcess/PostProcessV2.test.luau",
+				"Scene": "Assets/Scenes/PostProcessV2.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Physics/Physics.test.luau",
 				"Scene": "Assets/Scenes/Physics.scene",
 				"Parameters": null,
@@ -276,6 +290,20 @@
 			{
 				"Script": "Assets/Tests/Formats/AssetFormats.test.luau",
 				"Scene": "Assets/Scenes/Formats.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Terrain/Terrain.test.luau",
+				"Scene": "Assets/Scenes/Terrain.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],
@@ -568,6 +596,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Api/IrradianceVolume.test.luau",
+				"Scene": "Assets/Scenes/Probes.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Api/Light2D.test.luau",
 				"Scene": "Assets/Scenes/Lights2D.scene",
 				"Parameters": null,
@@ -628,6 +670,20 @@
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/ParticleEmitter.test.luau",
+				"Scene": "Assets/Scenes/Particles.scene",
+				"Parameters": null,
+				"Isolation": "Case",
 				"Clock": [],
 				"Overrides": {
 					"CallbackBudgetMs": 0,
@@ -752,6 +808,20 @@
 			{
 				"Script": "Assets/Tests/Api/RandomGenerator.test.luau",
 				"Scene": "Assets/Scenes/Scripting.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/ReflectionProbe.test.luau",
+				"Scene": "Assets/Scenes/Probes.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
 				"Clock": [],
@@ -894,6 +964,20 @@
 				"Scene": "Assets/Scenes/Scripting.scene",
 				"Parameters": null,
 				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
+				"Script": "Assets/Tests/Api/Terrain.test.luau",
+				"Scene": "Assets/Scenes/Terrain.scene",
+				"Parameters": null,
+				"Isolation": "Case",
 				"Clock": [],
 				"Overrides": {
 					"CallbackBudgetMs": 0,

@@ -29,6 +29,7 @@ namespace Engine {
 			stats.Height = 240;
 			stats.ShadowMapSize = 1024;
 			stats.SsaoHalfResolution = true;
+			stats.HistoryFrames = 7;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -37,6 +38,7 @@ namespace Engine {
 			CHECK(summary.Width == 320);
 			CHECK(summary.ShadowMapSize == 1024);
 			CHECK(summary.SsaoHalfResolution);
+			CHECK(summary.HistoryFrames == 7);
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
@@ -56,6 +58,7 @@ namespace Engine {
 			CHECK(unavailable.Width == 0);
 			CHECK(unavailable.ShadowMapSize == 0);
 			CHECK_FALSE(unavailable.SsaoHalfResolution);
+			CHECK(unavailable.HistoryFrames == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")

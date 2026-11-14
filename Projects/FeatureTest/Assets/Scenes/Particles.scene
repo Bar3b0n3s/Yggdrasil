@@ -1,0 +1,203 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Particles",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"ParticleEmitter": 1
+	},
+	"Entities": [
+		{
+			"ID": "d037002548c558a5",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 9],
+					"Rotation": [-0.06975647, 0, 0, 0.9975641],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.025, 0.035]
+				}
+			}
+		},
+		{
+			"ID": "df2edf2c9d0a4309",
+			"Name": "Fountain",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0, 0],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 40,
+					"Burst": 0,
+					"MaxParticles": 200,
+					"Seed": 11,
+					"Lifetime": [1.5, 2.5],
+					"Speed": [3, 4],
+					"Size": [0.15, 0.3],
+					"Shape": "Cone",
+					"ShapeRadius": 0.2,
+					"ConeAngle": 15,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, -4, 0],
+					"Drag": 0.2,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Alpha",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [1, 1, 1, 1]
+						},
+						{
+							"Time": 1,
+							"Color": [0.2, 0.5, 1, 0]
+						}
+					],
+					"SizeOverLife": [
+						{
+							"Time": 0,
+							"Size": 0.5
+						},
+						{
+							"Time": 1,
+							"Size": 1.5
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "7cb246b35eab07ec",
+			"Name": "Sparks",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": false,
+					"Duration": 1.5,
+					"Rate": 0,
+					"Burst": 48,
+					"MaxParticles": 64,
+					"Seed": 23,
+					"Lifetime": [2, 3],
+					"Speed": [0.5, 1.5],
+					"Size": [0.1, 0.2],
+					"Shape": "Sphere",
+					"ShapeRadius": 0.5,
+					"ConeAngle": 25,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "Local",
+					"Texture": "000000000000018a",
+					"Blend": "Additive",
+					"ColorOverLife": [],
+					"SizeOverLife": []
+				}
+			}
+		},
+		{
+			"ID": "b869a2d45e160bcc",
+			"Name": "Puff",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": false,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 10,
+					"Burst": 0,
+					"MaxParticles": 256,
+					"Seed": 0,
+					"Lifetime": [3, 4],
+					"Speed": [0.2, 0.4],
+					"Size": [0.1, 0.2],
+					"Shape": "Box",
+					"ShapeRadius": 0.25,
+					"ConeAngle": 25,
+					"BoxHalfExtents": [1, 0.25, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Alpha",
+					"ColorOverLife": [],
+					"SizeOverLife": []
+				}
+			}
+		},
+		{
+			"ID": "49619db1befabbe5",
+			"Name": "Flare",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 3, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 20,
+					"Burst": 0,
+					"MaxParticles": 256,
+					"Seed": 3,
+					"Lifetime": [1, 2],
+					"Speed": [0.5, 1],
+					"Size": [0.05, 0.1],
+					"Shape": "Point",
+					"ShapeRadius": 0.25,
+					"ConeAngle": 25,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [],
+					"SizeOverLife": []
+				}
+			}
+		}
+	]
+}

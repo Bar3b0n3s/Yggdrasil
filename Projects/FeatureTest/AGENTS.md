@@ -33,7 +33,12 @@ serves its skills and generated reference through automation (`docs.get {}` list
   record `TextInput.replay` and `UiWorld.replay` with `test.run {record}` from their recording suites in
   `Assets/Tests/Record/`, which `Testing.Suites` keeps in the Editor mode, so re-recording one is that one call; M22's
   landing's `Combined2DUiReplay.jsonl` records `Combined2DUi.replay` with `input.record` around a `play.step` of its
-  planned pointer input).
+  planned pointer input, and so do M23's `AnimationReplays.jsonl` for `Animation.replay` and M26's `TerrainReplays.jsonl`
+  for `Terrain.replay`, each with its planned action input). M26's `Probes.jsonl` and `GoldenProbes.jsonl` run in a
+  rendering editor (`Renderer` `vulkan`), whose `lighting.bake` writes their probes' bakes under `Assets/Lighting/`; its
+  `PostProcessV2.jsonl` and `GoldenLut.jsonl` import a `.cube` LUT into `Assets/Luts/`, and `Terrain.jsonl` converts a
+  16-bit heightmap with `terrain.importHeightmap` into `Assets/Heightfields/Terrain/` and sculpts and paints it with
+  `terrain.edit`.
   `python Scripts/Scaffold.py`, run from the engine repository's root with every editor on the project closed, restores
   `Scaffold/Baseline/` and runs them all; `python Scripts/Scaffold.py --check` proves that they reproduce the project byte
   for byte. To change the content, change a scaffold and regenerate; a changed setting, scene or id re-records the replays.
@@ -56,6 +61,12 @@ serves its skills and generated reference through automation (`docs.get {}` list
   `Assets/Fonts/GoldenUiScripts/`, `Scaffold/UiWorldGolden.jsonl` (M22) writes the World canvas golden scene under
   `Assets/Scenes/GoldenUiWorld/`, and `Scaffold/Combined2DUiGolden.jsonl` (M22's landing, the combined 2D/UI test) writes
   its scene under `Assets/Scenes/Combined2DUiGolden/` and its behaviour under `Assets/Scripts/Combined2DUiGolden/`.
+  M23's `GoldenPointShadows.jsonl`, `GoldenTextured.jsonl`, `GoldenClusteredLights.jsonl` and `GoldenSkinnedPose.jsonl`
+  and M26's `GoldenParticles.jsonl`, `GoldenProbes.jsonl` (its bake under `Assets/Lighting/Scenes/GoldenProbes/`),
+  `GoldenAutoExposure.jsonl`, `GoldenLut.jsonl` (its LUT under `Assets/Luts/GoldenLut/`), `GoldenTaa.jsonl`,
+  `GoldenSsr.jsonl` and `GoldenTerrain.jsonl` (its heightfield and splat map under `Assets/Heightfields/GoldenTerrain/`)
+  write their scenes under `Assets/Scenes/Golden<Name>/` and their materials, textures or models under the matching
+  `Assets/<Kind>/Golden<Name>/`, each exactly its `GoldenDirectories`.
   `asset.import` reads only project paths and absolute ones, so imported files come from `Scaffold/Sources/`,
   byte-identical copies of the `Tests/Data/Assets` fixtures (`Tests/Data/Generate`), which a unit test keeps in step. The
   editor's `.bak` backups of rewritten files are not committed (`.gitignore` leaves them out).

@@ -92,8 +92,13 @@ namespace Engine {
 		// request's size into its own command list, submits it, reads the renderer's final image back (SceneRenderer::
 		// GetFinalTexture at the request's size: the scene image, or with a snapshot whose output stage scales the scene the
 		// upscaled scene image in its letterbox, M18; RGBA8_UNORM, display-encoded values, §8.9; Readback::ReadTexture, which
-		// waits for the copy with WaitForSubmission) and applies MaxDimension. Blocks until the image is on the CPU, so it
-		// serves screenshots and tests, never per-frame work. Errors: InvalidArgument for a zero
+		// waits for the copy with WaitForSubmission) and applies MaxDimension. M26 (Docs/Decisions/0037-m26-contract.md decision
+		// 10, the temporal-state section): the snapshot is rendered from a reset view history (Renderer/TemporalHistory.h), its
+		// temporal inputs filled by a RenderViewHistory of the capture's own; one that NeedsTemporalWarmup (TAA or
+		// auto-exposure in a Lit view outside the wireframe and pixel-art mode) renders CaptureWarmupFrames times with delta
+		// time 0, each render submitted, and the last image is read back, so two captures of one snapshot are byte-identical.
+		// Blocks until the image is on the CPU, so it serves screenshots and tests, never per-frame work. Errors:
+		// InvalidArgument for a zero
 		// Width or Height or one above MaxViewportScreenshotDimension; those of SceneRenderer::Resize and Render,
 		// Readback::ReadTexture and DownscaleImage.
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decisions 42, 44 and 45): the capture's OutOfMemory. A capture is

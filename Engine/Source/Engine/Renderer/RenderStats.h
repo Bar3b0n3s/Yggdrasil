@@ -36,6 +36,13 @@ namespace Engine {
 		// ProjectSettings.Rendering in every host); 0 and false while unavailable.
 		uint32_t ShadowMapSize = 0;
 		bool SsaoHalfResolution = false;
+		// M26 (W26.2's review; Docs/Decisions/0037-m26-contract.md decision 10): the renders since the view's temporal
+		// history (Renderer/TemporalHistory.h: its motion, TAA's jitter and history, auto-exposure's adaptation) last started
+		// afresh: 0 for a render whose snapshot's history was reset (no camera or no CameraData::PreviousViewProjection: a
+		// view's first render, a scene change, a camera cut, a capture's first render), else one more than this renderer's
+		// previous render's, saturating. A host that applies its view's history on every render counts up; 0 every frame
+		// means it does not.
+		uint32_t HistoryFrames = 0;
 		double CpuMilliseconds = 0.0;
 		std::vector<RenderPassStats> Passes{};
 		uint32_t VisibleMeshes = 0;

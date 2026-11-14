@@ -22,6 +22,7 @@
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -434,6 +435,54 @@ namespace Engine {
 			}
 		}
 
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22; stream T-C): the drawing of `terrain` (whose
+		// Heightfield is set) at the rendered world matrix `world`, with its first MaxTerrainLayers layers; its PickId is
+		// assigned after the canonical loop (AssignTerrainPickIds).
+		static TerrainItem MakeTerrainItem(const TerrainComponent& terrain, const glm::mat4& world, UUID id)
+		{
+			TerrainItem item;
+			item.World = world;
+			item.Heightfield = terrain.Heightfield.GetHandle();
+			item.Size = terrain.Size;
+			item.HeightScale = terrain.HeightScale;
+			const size_t layerCount = std::min<size_t>(terrain.Layers.size(), MaxTerrainLayers);
+			item.Layers.reserve(layerCount);
+			for (size_t index = 0; index < layerCount; ++index)
+			{
+				const TerrainLayer& layer = terrain.Layers[index];
+				item.Layers.push_back(TerrainLayerItem{
+					.BaseColorMap = layer.BaseColorMap.GetHandle(),
+					.NormalMap = layer.NormalMap.GetHandle(),
+					.Tint = layer.Tint,
+					.Tiling = layer.Tiling,
+					.Roughness = layer.Roughness,
+					.Metallic = layer.Metallic,
+				});
+			}
+			item.SplatMap = terrain.SplatMap.GetHandle();
+			item.ReceiveShadows = terrain.ReceiveShadows;
+			item.LodBias = terrain.LodBias;
+			item.Entity = id;
+			return item;
+		}
+
+		// M26 (decision 22): each terrain's PickId after the meshes' (RenderSnapshot::Terrains): its entity's entry when its
+		// MeshRenderer made one, so the table never lists an entity twice, else a new entry appended in the terrains' order.
+		static void AssignTerrainPickIds(RenderSnapshot& snapshot)
+		{
+			for (TerrainItem& terrain : snapshot.Terrains)
+			{
+				const auto found = std::find(snapshot.PickTable.begin(), snapshot.PickTable.end(), terrain.Entity);
+				if (found == snapshot.PickTable.end())
+				{
+					snapshot.PickTable.push_back(terrain.Entity);
+					terrain.PickId = static_cast<uint32_t>(snapshot.PickTable.size());
+				}
+				else
+					terrain.PickId = static_cast<uint32_t>(found - snapshot.PickTable.begin()) + 1;
+			}
+		}
+
 		// The camera of `request` in `snapshot`. Errors: those of ExtractRenderSnapshot for Entity and Explicit requests.
 		static Status ExtractCamera(const Scene& scene, const RenderExtractionRequest& request, RenderSnapshot& snapshot)
 		{
@@ -743,7 +792,12 @@ namespace Engine {
 			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16): the baked probes, in canonical order, in
 			// every view (an edit scene's included: baked lighting shows while editing).
 			Utils::AddProbeItems(entity, id, getWorld, snapshot);
+			// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22): a terrain with a heightfield, in canonical
+			// order, in every view (an edit scene's included: terrain is edited in the scene view).
+			if (const TerrainComponent* terrain = entity.TryGetComponent<TerrainComponent>(); terrain != nullptr && terrain->Heightfield.IsValid())
+				snapshot.Terrains.push_back(Utils::MakeTerrainItem(*terrain, getWorld(), id));
 		});
+		Utils::AssignTerrainPickIds(snapshot);
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
 		Utils::SortSpritesForDrawing(snapshot.Sprites);

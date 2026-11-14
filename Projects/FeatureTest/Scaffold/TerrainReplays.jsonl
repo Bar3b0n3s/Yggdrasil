@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Terrain.scene"}}
+{"method": "play.step", "params": {"ticks": 256, "input": [{"tick": 8, "type": "Action", "name": "MoveX", "value": 1}, {"tick": 136, "type": "Action", "name": "MoveX", "value": 0}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Terrain.replay", "expect": [{"tick": 255, "luau": "local ball = Scene.FindByName(\"Ball\")\nlocal p = ball.Transform.WorldPosition\nlocal h = Scene.FindByName(\"Ground\").Terrain:SampleHeight(p)\nreturn ball:GetScript(\"TerrainRoller\").Pushes == 128 and h ~= nil and p.y > h and p.x > 0"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

@@ -14,11 +14,12 @@
 #include <vector>
 
 // Terrain sculpting and painting (M26, C26.1, C-TERR-EDIT; Docs/Decisions/0037-m26-contract.md decision 23): the one
-// implementation of a terrain stroke, which terrain.edit and the editor's sculpt and paint tools (a tool of their own,
-// Editor/Tools/TerrainTool, that SceneViewportPanel and GizmoOverlay only call; ADR 0028's phase-3 ledger) both run, so a
-// stroke through terrain.edit is byte-identical to the same stroke made in the editor (the acceptance): the editor's tool
-// collects the cursor's points along the terrain (a ray through the output mapping onto the surface, SampleTerrainHeight)
-// into one TerrainStroke and calls EditTerrain once per mouse release, exactly what terrain.edit {points} does.
+// implementation of a terrain stroke, which terrain.edit and the editor's sculpt and paint tool (a tool of its own,
+// Editor/Tools/TerrainBrush, that SceneViewportPanel only calls; ADR 0028's phase-3 ledger) both run, so a stroke through
+// terrain.edit is byte-identical to the same stroke made in the editor (the acceptance): the editor's tool collects the
+// cursor's points along the terrain (a ray through the output mapping onto the surface, SampleTerrainHeight) into one stroke
+// and queues terrain.edit {points} with them once per mouse release, so EditTerrain runs once for it, exactly as for an
+// agent's call.
 //   - The brush: each point of the stroke, in order, is one dab of radius Radius (metres in the terrain's local XZ plane)
 //     with the falloff w(d) = (1 - (d / Radius)^2)^2 inside it (0 outside) at a sample's or texel's local distance d,
 //     scaled by Strength; IEEE-exact operations only, every sample rounded to nearest (ties to even) and clamped, so the

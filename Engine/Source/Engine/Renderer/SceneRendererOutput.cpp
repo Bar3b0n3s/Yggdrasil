@@ -229,7 +229,7 @@ namespace Engine {
 				.DebugDraw = nullptr,
 				.Assets = Assets,
 				.Framebuffer = Targets.OverlayFramebuffers[frame.SceneTarget],
-				.ViewConstants = ViewConstantsBuffer,
+				.ViewConstants = frame.OverlayView, // M26: unjittered (SceneRenderer.cpp's temporal anti-aliasing)
 				.HasCamera = frame.HasCamera,
 				.CameraView = frame.HasCamera ? std::optional<glm::mat4>(frame.Camera.View) : std::nullopt };
 			auto result = Pipelines->Text->RecordCounted(commandList, TextBindings, inputs, counters);
@@ -268,7 +268,7 @@ namespace Engine {
 			.Resources = Cache,
 			.Assets = Assets,
 			.Framebuffer = Targets.OverlayFramebuffers[frame.SceneTarget],
-			.ViewConstants = ViewConstantsBuffer,
+			.ViewConstants = frame.OverlayView, // M26: unjittered
 			// C22.3 (decision 51): the view's camera, for the World canvases (none is drawn without one).
 			.HasCamera = frame.HasCamera,
 			.View = frame.Camera.View,
@@ -294,7 +294,7 @@ namespace Engine {
 			}
 			frame.ViewColor = Targets.Ldr[frame.SceneTarget];
 			frame.ViewOverlayFramebuffer = Targets.OverlayFramebuffers[frame.SceneTarget];
-			frame.ViewOverlayConstants = ViewConstantsBuffer;
+			frame.ViewOverlayConstants = frame.OverlayView; // M26: unjittered
 			return;
 		}
 

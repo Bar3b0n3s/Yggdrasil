@@ -70,7 +70,7 @@ namespace Engine {
 		if (!ray)
 			return result;
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 14): sprites draw over meshes without writing depth, so the sprite
-		// the pixel shows comes first, in the project's sorting layers; without one, the nearest mesh triangle.
+		// the pixel shows comes first, in the project's sorting layers; without one, the nearest mesh or terrain triangle (M26).
 		ENGINE_TRY_ASSIGN(std::optional<SceneRaycastHit> hit,
 			PickSprite(*scene, *assets, { .Ray = ray->Ray, .MaxDistance = ray->MaxDistance, .MinDistance = ray->MinDistance, .Alpha = snapshot.Alpha, .SortingLayers = settings->SortingLayers.Layers }));
 		if (!hit)
@@ -111,12 +111,12 @@ namespace Engine {
 			.Field("height", &ViewportPickResult::Height, "Actual framebuffer height used for the projection.")
 			.Field("raycast", &ViewportPickResult::Raycast,
 				"The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is "
-				"reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval.");
+				"reported as its tilemap's entity), else the nearest mesh or terrain triangle, in the camera's near-to-far interval.");
 	}
 
 	void RegisterViewportPickMethods(MethodRegistry& methods)
 	{
-		methods.Add({ .Name = "viewport.pick", .Description = "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.", .RequiredParams = { "x", "y", "view" }, .SupportsDryRun = true, .AllowedInBatch = true, .Examples = { { .Description = "Query the centre of the default scene viewport.", .Params = Json{ { "x", 320 }, { "y", 180 }, { "view", "scene" } } } } },
+		methods.Add({ .Name = "viewport.pick", .Description = "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh or terrain triangle. Returns the hit without changing selection.", .RequiredParams = { "x", "y", "view" }, .SupportsDryRun = true, .AllowedInBatch = true, .Examples = { { .Description = "Query the centre of the default scene viewport.", .Params = Json{ { "x", 320 }, { "y", 180 }, { "view", "scene" } } } } },
 			&Automation::ViewportPick);
 	}
 

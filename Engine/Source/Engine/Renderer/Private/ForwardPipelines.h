@@ -17,15 +17,27 @@
 // layouts. Every variant draws MeshVertex (§6.8; the overdraw variants only its position and texture coordinates) from
 // vertex binding 0 and MeshVertexAttributes (M23, MeshData version 2) from binding 1 (MakeMeshAttributeStreamAttributes),
 // with frontCounterClockwise = true (§8.3) and reverse-Z depth (GreaterOrEqual). A variant is an alpha mode and a cull mode:
-//   - prepass (pass 4, SceneNormals with SceneDepth written): {Opaque, Mask} x {CullBack, CullFront, CullNone};
+//   - prepass (pass 4, SceneNormals, SceneVelocity and SceneRoughness with SceneDepth written; the picking prepass
+//     SceneNormals, EntityId, SceneVelocity and SceneRoughness, SceneTargetFormats.h's order since M26):
+//     {Opaque, Mask} x {CullBack, CullFront, CullNone};
 //   - forward opaque (pass 7, SceneColor, depth tested without writes): the same six;
 //   - forward transparent (pass 9, SceneColor, depth tested without writes, straight alpha blending): Blend x the three.
 // Mask variants use the ALPHA_MASK = 1 permutation. A mirroring draw takes CullFront (its front faces turned clockwise on
 // screen) and a double-sided material CullNone. The forward variants exist once per debug view, specialized with the
 // view's value (SceneDebugViewConstantId); a debug view shares its Lit variant's layout description.
 //
+// M26 (C26.1, R-TAA-VEL; Docs/Decisions/0037-m26-contract.md decisions 11 and 14; stream X-C): the 12 prepass and picking
+// prepass variants also bind vertex binding 2 (PreviousPositionSlot): PREVIOUSPOSITION (RGB32_FLOAT at offset 0, stride 16,
+// location 6), a deformed item's previous positions (SkinningPass::GetPreviousPositionsDesc's float4 elements), which the
+// motion vectors read for an instance with DrawFlagPreviousPositions; any other draw binds its own vertex buffer there,
+// which the shaders never read as positions (the flag is clear) and whose every fetch stays inside it (a MeshVertex is 48
+// bytes, the binding's stride 16).
+//
 // Binding layouts (§8.4), shared through PipelineFactory::CreateBindingLayouts so one binding set serves every variant:
-//   - prepass set 0: b0 ViewConstants, t10 Instances, s2 AnisoWrap and the DrawConstants push constants;
+//   - prepass set 0: b0 ViewConstants, t5 BRDFLut, t10 Instances, s0 LinearClamp, s2 AnisoWrap and the DrawConstants push
+//     constants (M26: the DFG LUT and its sampler for SceneRoughness's specular inputs);
+//   - overdraw set 0 (the Overdraw data view's pipelines, M26: the prepass's before M26): b0 ViewConstants, t10 Instances,
+//     s2 AnisoWrap and the push constants;
 //   - forward set 0: b0 ViewConstants, b1 ShadowConstants, b2 EnvironmentConstants, b3 LightClusterConstants, b4
 //     ProbeConstants (M26), t0 Lights, t1 ShadowCascades, t2 ShadowAtlas, t3 EnvSpecular, t5 BRDFLut, t6 AmbientOcclusion,
 //     t8 ViewDepth, t9 SceneNormals, t10 Instances, t11 the light cluster masks (M23, Renderer/LightClusterPass.h), t12
@@ -98,6 +110,9 @@ namespace Engine {
 		// reads them: a Mask material's alpha test samples the base colour's UV set and multiplies the vertex colour's alpha.
 		inline constexpr uint32_t MeshAttributeStreamSlot = 1;
 		[[nodiscard]] std::array<nvrhi::VertexAttributeDesc, 2> MakeMeshAttributeStreamAttributes();
+		// M26 (stream X-C): vertex binding 2 of the prepass and picking prepass variants (see the file comment).
+		inline constexpr uint32_t PreviousPositionSlot = 2;
+		inline constexpr uint32_t PreviousPositionStride = 16;
 
 		// The cull mode of a draw: CullNone for a double-sided material, else CullFront for a mirroring world, else CullBack.
 		[[nodiscard]] MeshCullMode SelectCullMode(bool mirrored, bool doubleSided);
@@ -112,12 +127,18 @@ namespace Engine {
 		// variants, the 9 forward variants, the 6 picking prepass variants, then the 3 overdraw variants.
 		[[nodiscard]] std::vector<PipelineLayoutDescription> GetMeshLayoutDescriptions();
 
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22, stream T-C): the forward variants' set-0 layout
+		// (see the file comment), which the terrain's forward pipeline shares (Renderer/TerrainPass.h), so one forward set of
+		// a view serves the meshes and the terrains.
+		[[nodiscard]] nvrhi::BindingLayoutDesc GetForwardViewLayout();
+
 		// The binding layouts every mesh pipeline shares (see the file comment).
 		struct MeshBindingLayouts
 		{
 			nvrhi::BindingLayoutHandle PrepassView{};
 			nvrhi::BindingLayoutHandle ForwardView{};
 			nvrhi::BindingLayoutHandle Material{};
+			nvrhi::BindingLayoutHandle OverdrawView{}; // M26 (stream X-C): the overdraw variants' set 0
 		};
 
 		// Creates the shared binding layouts after checking the descriptions against the reflection. Errors: those of

@@ -16,6 +16,7 @@ namespace Engine {
 
 	class ConstEntity;
 	class IScriptHost;
+	class TypeInfo;
 	struct ScriptCall;
 
 	// The entire Entity userdata payload: no Scene*, Entity, EnTT handle, engine pointer or component address. Generation
@@ -79,12 +80,21 @@ namespace Engine {
 		// Writes check call.CheckWritable BEFORE mutation, validate against FieldMeta/resolved schemas and type-level
 		// rules, then call PrepareHostMutation immediately before ComponentAccess::SetFieldValue (patch + notifications).
 		// Rejected validation leaves the scene, recording and counters unchanged; a fault after mutation notification
-		// cannot make an external write recordable again. Read-only fields return InvalidState; invalid values Validation;
-		// missing data NotFound.
+		// cannot make an external write recordable again. Read-only fields return InvalidState; invalid values Validation
+		// (an asset of another type than its reference's included, ValidateAssetTypes); missing data NotFound.
 		// Transform fast paths obey these same validation, patch, interpolation and coverage rules.
 		[[nodiscard]] static Result<Value> ReadField(ScriptCall& call, ScriptProxyIdentity proxy, std::string_view field);
 		[[nodiscard]] static Status WriteField(ScriptCall& call, ScriptProxyIdentity proxy, std::string_view field,
 			const Value& value);
+
+		// Whether every asset reference in `value`, a value of `component`'s field `field`, names an asset of its
+		// reference's type (a TypedAssetHandle's AssetType, at any depth of arrays, maps and structs; an untyped reference
+		// takes any type). Validation naming the field's path and both types for an asset `host`'s asset service registers
+		// with another type (M26: a probe's Data assigned an Environment where it takes an IrradianceVolume); a handle the
+		// service does not know, and every handle without a service, is left to the readers and project.validate, as
+		// before. Proxy writes (WriteField) and Entity:AddComponent's initial values call this before any mutation.
+		[[nodiscard]] static Status ValidateAssetTypes(IScriptHost& host, std::string_view component, std::string_view field,
+			const TypeInfo& type, const Value& value);
 
 		// Whether TransformSystem::SetWorldPosition can store `position` for a child of `parent`: the translation relative to
 		// the parent, computed exactly as SetWorldPosition computes it, must be finite. It is not when the position lies

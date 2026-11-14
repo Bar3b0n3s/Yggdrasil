@@ -4,6 +4,7 @@
 #include "Editor/Drawers/ReflectedDrawers.h"
 #include "Editor/Drawers/UiRectDrawer.h"
 #include "Editor/EditorPanelContext.h"
+#include "Editor/Tools/TerrainHeightmapImport.h"
 #include "Editor/Ui/EditorStyle.h"
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
@@ -1175,6 +1176,13 @@ namespace Engine {
 						CancelEdit(context);
 						queue(preset->Method, preset->Params);
 					}
+				}
+				// M26 (Docs/Decisions/0037-m26-contract.md decision 20): the Terrain's Import Heightmap action, for one entity of the
+				// edit scene (Editor/Tools/TerrainHeightmapImport.h).
+				if (component->GetName() == "Terrain" && selection.size() == 1 && sceneTarget == SceneTarget::Edit)
+				{
+					if (const Status imported = m_TerrainHeightmapImport.Draw(context, selection.front()); !imported)
+						ReportFailure(imported.error());
 				}
 				const void* object = ops->GetConst(first);
 				ResolveContext resolve{ .Registry = &editor.GetTypeRegistry(), .Owner = object, .OwnerType = component, .Key = {} };

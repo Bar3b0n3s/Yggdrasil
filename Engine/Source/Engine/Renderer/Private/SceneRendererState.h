@@ -30,6 +30,9 @@
 #include "Engine/Renderer/SkinningPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
+#include "Engine/Renderer/SsrPass.h"
+#include "Engine/Renderer/TaaPass.h"
+#include "Engine/Renderer/TerrainPass.h"
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
 #include "Engine/Renderer/UpscalePass.h"
@@ -79,6 +82,11 @@ namespace Engine {
 			// vertices; for a deformed item's draw, the VertexStream of its SceneRendererDeformedMesh, whose Vertices it binds
 			// (MeshInstanceKey::VertexStream, so a deformed draw never shares an instanced draw with another item's).
 			uint32_t VertexStream = 0;
+			// M26 (C26.1, R-TAA-VEL; Docs/Decisions/0037-m26-contract.md decision 11; stream X-C): a deformed item's draw's
+			// previous positions (its SceneRendererDeformedMesh's PreviousPositions, held by the renderer for the render), which
+			// the prepass variants bind as vertex binding 2 (Utils::PreviousPositionSlot); null for every other draw, which
+			// binds VertexBuffer there instead (ForwardPipelines.h).
+			nvrhi::IBuffer* PreviousPositions = nullptr;
 			// Sort keys (§8.3 pass 1).
 			AssetHandle MaterialHandle{};
 			AssetHandle Mesh{};
@@ -163,6 +171,11 @@ namespace Engine {
 			uint32_t Height = 0;
 			nvrhi::TextureHandle SceneDepth{};
 			nvrhi::TextureHandle SceneNormals{};
+			// M26 (C26.1, R-TAA-VEL, R-SSR-IN; Docs/Decisions/0037-m26-contract.md decision 14; stream X-C): the prepass's motion
+			// vectors and SSR's specular inputs (SceneTargetFormats.h), attachments of PrepassFramebuffer and
+			// PickingFramebuffer after SceneNormals (and EntityId), cleared to zero by RecordViewSetup.
+			nvrhi::TextureHandle SceneVelocity{};
+			nvrhi::TextureHandle SceneRoughness{};
 			nvrhi::TextureHandle SceneColor{};
 			std::array<nvrhi::TextureHandle, 2> Ldr{}; // LdrColor and its FXAA ping-pong partner
 			nvrhi::TextureHandle EntityId{};
@@ -194,6 +207,18 @@ namespace Engine {
 			nvrhi::TextureHandle Lights2DLight{};                  // Lights2DLightFormat
 			nvrhi::FramebufferHandle Lights2DNormalsFramebuffer{}; // Lights2DNormals with SceneDepth (tested, not written)
 			nvrhi::FramebufferHandle Lights2DLightFramebuffer{};   // Lights2DLight alone
+			// M26 (C26.1, R-TAA; Docs/Decisions/0037-m26-contract.md decisions 17 and 29; stream X-C): TAA's history, the
+			// declaration's TaaHistory (TaaPass::GetHistoryDesc), two images the Taa pass ping-pongs between (it reads the
+			// previous resolved image from one and writes the new one into the other), created by the first render with TAA at
+			// this size and kept like the other lazily created targets (the placement rule's place 2); SceneRenderer::State's
+			// TaaHistoryValid says which one holds the view's history.
+			std::array<nvrhi::TextureHandle, 2> TaaHistory{};
+			// M26 (C26.1, R-SSR; Docs/Decisions/0037-m26-contract.md decisions 18 and 29, stream X-D): SSR's traced reflections
+			// (SsrPass::GetTargetDesc) and the composite's framebuffer (SceneColor alone, SsrPass::GetCompositeFramebufferInfo),
+			// created by the first render with SSR (SceneRenderer::State::EnsureSsrTargets) and kept like the other lazily created
+			// targets until the size changes or a device loss's release drops them.
+			nvrhi::TextureHandle SsrColor{};
+			nvrhi::FramebufferHandle SsrFramebuffer{};
 		};
 
 		// M18 (C18.1, Docs/Decisions/0029-m18-contract.md decision 6): the output stage's per-view objects at the renderer's
@@ -264,6 +289,10 @@ namespace Engine {
 			// black cube without a map) and the blue noise of the dither (null without one).
 			bool Ao = false;
 			bool HalfAo = false;
+			// M26 (C26.1, R-SSR; decision 18, stream X-D): SSR records this render (PostProcessSettings::SsrEnabled in a Lit view
+			// with a camera outside the wireframe), so the Ambient stage records the depth pyramid it traces over even without
+			// GTAO; cleared when its targets or the pyramid fail (their error kept), so the Forward stage records no SSR pass.
+			bool Ssr = false;
 			ViewConstants View{};
 			EnvironmentConstants Environment{};
 			ShadowConstants Shadow{};
@@ -280,9 +309,20 @@ namespace Engine {
 			nvrhi::TextureHandle EnvironmentSpecular{};
 			nvrhi::TextureHandle EnvironmentSkybox{};
 			nvrhi::TextureHandle BlueNoise{};
-			// Set by the DepthNormal stage: the view's prepass set (null without a camera or when it cannot be created), which
-			// the Overdraw data view draws with.
+			// Set by the DepthNormal stage: the view's prepass set (null without a camera or when it cannot be created), and
+			// (M26: the overdraw pipelines' own set 0, Private/ForwardPipelines.h) the set the Overdraw data view draws with
+			// (null outside it).
 			nvrhi::IBindingSet* PrepassSet = nullptr;
+			nvrhi::IBindingSet* OverdrawSet = nullptr;
+			// M26 (C26.1, R-TAA; Docs/Decisions/0037-m26-contract.md decisions 10 and 17; stream X-C): set by the Prepare stage.
+			// Taa: the Taa pass resolves this render (PostProcessSettings::AntiAliasing Taa in a Lit view with a camera, outside
+			// the wireframe and pixel-art mode), so the scene passes' matrices in View include the snapshot's jitter
+			// (ViewConstants::Jitter); OverlayView: the unjittered ViewConstants the passes after the HDR post chain draw with
+			// (game Text, the Ui, and the editor overlays at the identity output mapping), the view's ViewConstantsBuffer when
+			// nothing is jittered, else its UnjitteredViewConstantsBuffer, which RecordViewSetup writes with OverlayConstants.
+			bool Taa = false;
+			nvrhi::IBuffer* OverlayView = nullptr;
+			ViewConstants OverlayConstants{};
 			// Set by the Ambient stage: the occlusion and linear depth the forward pass and the data views read (the neutral
 			// white AO and far depth when GTAO did not run).
 			nvrhi::ITexture* Occlusion = nullptr;
@@ -369,6 +409,12 @@ namespace Engine {
 		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decisions 15 and 29, stream X-A): histogram auto-exposure's
 		// Exposure pass (place 1).
 		Scope<ExposurePass> Exposure{};
+		// M26 (C26.1, R-SSR; decisions 18 and 29, stream X-D): the SSR pass's trace and composite (place 1).
+		Scope<SsrPass> Ssr{};
+		// M26 (C26.1, R-TAA; decisions 17 and 29, stream X-C): the Taa pass (place 1).
+		Scope<TaaPass> Taa{};
+		// M26 (C26.1, C-TERR; decisions 22 and 29, stream T-C): the terrain passes' pipelines and layouts (place 1).
+		Scope<TerrainPass> Terrain{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -417,6 +463,9 @@ namespace Engine {
 		// M26 (C26.1, R-AEX; decision 15, stream X-A): the Exposure pass's two sets (its view's SceneColor, bloom chain and
 		// exposure buffers).
 		PassBindingCache ExposureBindings{};
+		// M26 (C26.1, R-SSR; decision 18, stream X-D): the SSR pass's two sets (its view's prepass targets, pyramid, SsrColor and
+		// SceneColor).
+		PassBindingCache SsrBindings{};
 		Scope<RenderTargetPool> TargetPool{};
 		Scope<AsyncPicker> Picker{};
 		Scope<GpuProfiler> Profiler{};
@@ -476,6 +525,19 @@ namespace Engine {
 		nvrhi::BufferHandle ExposureHistogramBuffer{};
 		nvrhi::BufferHandle ExposureStateBuffer{};
 		bool ExposureValid = false;
+		// M26 (C26.1, R-TAA; Docs/Decisions/0037-m26-contract.md decisions 10, 17 and 29, stream X-C): the unjittered
+		// ViewConstants of a render with TAA's jitter (place 2), created by the first such render; the Taa pass's binding sets;
+		// and which of Targets.TaaHistory holds the view's resolved image of its previous render (TaaHistoryIndex), valid only
+		// while TaaHistoryValid: false until a render records the pass, after a render that did not (TAA off, a debug view,
+		// the wireframe, pixel-art mode, a failed record), whenever the history targets are created again (a new size, a
+		// device loss's release, ReleaseTargets), so the next pass starts afresh (a reset).
+		nvrhi::BufferHandle UnjitteredViewConstantsBuffer{};
+		PassBindingCache TaaBindings{};
+		uint32_t TaaHistoryIndex = 0;
+		bool TaaHistoryValid = false;
+		// M26 (W26.2's review): RenderStats::HistoryFrames of the last render, which the next continues; 0 in the new state a
+		// device loss's release makes.
+		uint32_t HistoryFrames = 0;
 		// M18 (C18.3, decision 26): the renderer's registration with its device's recreation registry (Create); kept by
 		// ReleaseGpuObjects like the back-references.
 		GpuRecreationRegistration Recreation{};
@@ -522,6 +584,10 @@ namespace Engine {
 		Utils::ProbeViewResources ProbeResources{};
 		bool ProbeLimitLogged = false;
 		bool ProbeFormatLogged = false;
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decisions 22 and 29; stream T-C): the view's terrain state
+		// (TerrainPass.h, the placement rule's place 2): its chunk meshes, its terrains' constants and sets, and the render's
+		// prepared terrains, which the DepthNormal stage prepares and the Forward stage draws again.
+		TerrainViewResources TerrainResources{};
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the deformed items' GPU state (place 2), the
 		// next VertexStream value to give a new entry (from 1), and the render count that stamps LastRender. A skinned item
 		// whose palette is shorter than its mesh's skin draws its bind pose, which is logged once per renderer
@@ -613,6 +679,11 @@ namespace Engine {
 		void RecordDeformStage(Detail::SceneRendererFrame& frame);
 		void RecordShadowsStage(Detail::SceneRendererFrame& frame);
 		void RecordDepthNormalStage(Detail::SceneRendererFrame& frame);
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22, stream T-C): the end of the DepthNormal stage,
+		// whenever the mesh prepass records: with terrains in the snapshot, prepares them (TerrainPass::Prepare into
+		// TerrainResources, its first error kept) and records the TerrainDepthNormal row into the prepass's framebuffer, or the
+		// picking prepass's when picking, with the view's terrain prepass set (ViewBindings).
+		void RecordTerrainDepthNormal(Detail::SceneRendererFrame& frame);
 		void RecordAmbientStage(Detail::SceneRendererFrame& frame);
 		// M23 (C23.1, decision 5; stream C): the end of the Ambient stage. Computes frame.Clusters at the scene resolution,
 		// makes LightClusterConstantsBuffer and grows LightClusterBuffer to the grid (EnsureLightClusterBuffers), then records
@@ -627,6 +698,16 @@ namespace Engine {
 		// Errors: those of GraphicsDevice::CreateBuffer (Gpu).
 		[[nodiscard]] Status EnsureLightClusterBuffers(uint32_t clusterCount);
 		void RecordForwardStage(Detail::SceneRendererFrame& frame);
+		// M26 (C26.1, R-SSR; Docs/Decisions/0037-m26-contract.md decision 18, stream X-D): the SSR row, after the skybox and before
+		// the transparent pass, with frame.Ssr: SsrPass::Record of the view's SceneDepth, SceneNormals, SceneRoughness, depth
+		// pyramid, SceneColor (with SsrFramebuffer) and SsrColor, and the forward passes' specular inputs (the view's
+		// constants, frame's occlusion, its depth and environment cube, and the reflection probes' cubes or the neutral array).
+		// A record error is the render's, and SceneColor keeps the forward passes' image.
+		void RecordSsr(Detail::SceneRendererFrame& frame);
+		// M26 (stream X-D): SsrColor and SsrFramebuffer at the scene resolution (Targets), and the depth pyramid's ViewDepth when
+		// GTAO did not create it, each created when missing. Errors: those of the pool and the framebuffer creation (Gpu,
+		// OutOfMemory after its trim and retry).
+		[[nodiscard]] Status EnsureSsrTargets();
 		// M21's Sprites pass (Docs/Decisions/0032-m21-contract.md decision 4): in a Lit view with a camera (not the wireframe),
 		// the snapshot's sprites in its draw order, one QuadBatcher quad each in world space (Asset/SpriteGeometry.h's quad of
 		// the frame or texture this stage resolves through the GpuResourceCache, the camera's view-projection, the Point
@@ -678,8 +759,18 @@ namespace Engine {
 		// C21.2, the Sprites row: SpriteQuads in their order, each run of one lit-ness one QuadBatcher record (Hdr, or HdrLit
 		// sampling `light`); a lit run without `light` is not drawn (RecordLights2D kept its error).
 		void RecordSpriteQuads(Detail::SceneRendererFrame& frame, const glm::mat4& viewProjection, nvrhi::ITexture* light);
-		// Bloom, then M26's Exposure pass (RecordExposure).
+		// M26's Taa pass (RecordTaa), then Bloom, then M26's Exposure pass (RecordExposure).
 		void RecordHdrPostStage(Detail::SceneRendererFrame& frame);
+		// M26 (C26.1, R-TAA; decisions 10 and 17, stream X-C): the TAA row, with frame.Taa: Targets.TaaHistory created when
+		// missing (EnsureTaaHistory), then the Taa pass resolving SceneColor against the view's history (from scratch when the
+		// snapshot's history was reset, CameraData::PreviousViewProjection empty, or TaaHistoryValid is false) into the other
+		// history image, which it copies back into SceneColor for bloom, exposure and the tonemap. Sets TaaHistoryIndex and
+		// TaaHistoryValid; without frame.Taa only clears TaaHistoryValid. A creation or record error is the render's, and the
+		// chain then reads the unresolved SceneColor.
+		void RecordTaa(Detail::SceneRendererFrame& frame);
+		// M26 (stream X-C): Targets.TaaHistory at the scene resolution when they are missing, clearing TaaHistoryValid.
+		// Errors: those of the pool (Gpu, OutOfMemory after its trim and retry).
+		[[nodiscard]] Status EnsureTaaHistory();
 		// M26 (C26.1, R-AEX; decisions 10 and 15, stream X-A): the Exposure row, with ExposureMode Auto in a Lit view outside the
 		// wireframe and pixel-art mode (where Auto acts as Manual), from the view's exposure buffers (EnsureExposureBuffers),
 		// resetting the adapted exposure when the snapshot's history was reset (CameraData::PreviousViewProjection empty) or

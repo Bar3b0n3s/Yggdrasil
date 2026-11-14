@@ -1,7 +1,11 @@
 #include "EnginePCH.h"
 #include "Engine/Scripting/ScriptProxy.h"
 
+#include "Engine/Asset/AssetManager.h"
+#include "Engine/Asset/AssetType.h"
 #include "Engine/Reflection/FuzzySuggest.h"
+#include "Engine/Reflection/StructInfo.h"
+#include "Engine/Reflection/TypeInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
@@ -49,6 +53,64 @@ namespace Engine {
 			return entity.ID.IsValid() && entity.SceneGeneration != 0 && entity.SceneGeneration == host.GetSceneGeneration()
 				&& host.GetScene().FindReadableEntityByID(entity.ID).IsReadable();
 		}
+		// ScriptProxy::ValidateAssetTypes' walk: `path` names the value being checked ("Terrain.Layers[1].BaseColorMap",
+		// array elements by Lua's 1-based index, map values by key), extended and restored around each element and member.
+		static Status CheckAssetTypes(const AssetManager& assets, const TypeInfo& type, const Value& value, std::string& path)
+		{
+			if (value.IsNull())
+				return {};
+			switch (type.GetKind())
+			{
+				case FieldType::AssetRef:
+				{
+					if (type.GetAssetTypeName().empty() || value.GetKind() != FieldType::AssetRef || !value.AsUUID().IsValid())
+						return {};
+					const AssetType actual = assets.GetAssetType(value.AsUUID());
+					if (actual == AssetType::None || AssetTypeToString(actual) == type.GetAssetTypeName())
+						return {};
+					return MakeError(ErrorCode::Validation, "field '{}' takes assets of type {}, not {}", path, type.GetAssetTypeName(), AssetTypeToString(actual));
+				}
+				case FieldType::Array:
+				case FieldType::Map:
+				{
+					const TypeInfo* element = type.GetElement();
+					if (element == nullptr || (value.GetKind() != FieldType::Array && value.GetKind() != FieldType::Map))
+						return {};
+					const size_t length = path.size();
+					const auto elements = value.GetElements();
+					const auto keys = value.GetKeys();
+					for (size_t index = 0; index < elements.size(); ++index)
+					{
+						path += index < keys.size() ? std::format("[\"{}\"]", keys[index]) : std::format("[{}]", index + 1);
+						const Status checked = CheckAssetTypes(assets, *element, elements[index], path);
+						path.resize(length);
+						ENGINE_TRY(checked);
+					}
+					return {};
+				}
+				case FieldType::Struct:
+				{
+					if (type.GetStruct() == nullptr || value.GetKind() != FieldType::Struct)
+						return {};
+					const size_t length = path.size();
+					for (const auto& member : type.GetStruct()->GetFields())
+					{
+						const Value* memberValue = value.FindMember(member->GetName());
+						if (memberValue == nullptr)
+							continue;
+						path += ".";
+						path += member->GetName();
+						const Status checked = CheckAssetTypes(assets, member->GetType(), *memberValue, path);
+						path.resize(length);
+						ENGINE_TRY(checked);
+					}
+					return {};
+				}
+				default:
+					return {};
+			}
+		}
+
 		// ValidateComponent's checks of the proxy's component on `entity`, an entity already validated.
 		static Status ValidateProxyComponent(IScriptHost& host, ScriptProxyIdentity proxy, ConstEntity entity)
 		{
@@ -144,6 +206,7 @@ namespace Engine {
 		ValidationContext validation;
 		descriptor->ValidateValue(value, resolve, validation);
 		ENGINE_TRY(Utils::StrictValidation(validation));
+		ENGINE_TRY(ValidateAssetTypes(host, info.GetName(), field, descriptor->GetType(), value));
 		if (info.GetName() == "Script" && field == "Scripts")
 		{
 			// Every slot's script must be a Behaviour (Docs/Decisions/0031-m20-contract.md decision 17).
@@ -169,6 +232,16 @@ namespace Engine {
 		ENGINE_TRY(ComponentAccess::SetFieldValue(entity, info.GetName(), field, value, host.GetFieldSchemas()));
 		ENGINE_TRY(call.Engine->GetApi().RecordProxyAccess(call, proxy.ComponentTypeIndex, field, true));
 		return {};
+	}
+
+	Status ScriptProxy::ValidateAssetTypes(IScriptHost& host, std::string_view component, std::string_view field, const TypeInfo& type,
+		const Value& value)
+	{
+		const AssetManager* assets = host.GetAssets();
+		if (assets == nullptr)
+			return {};
+		std::string path = std::format("{}.{}", component, field);
+		return Utils::CheckAssetTypes(*assets, type, value, path);
 	}
 
 	Status ScriptProxy::ValidateWorldPosition(ConstEntity parent, const glm::vec3& position)

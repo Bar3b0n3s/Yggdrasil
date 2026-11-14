@@ -1,0 +1,167 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Terrain",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"RigidBody": 1,
+		"SphereCollider": 1,
+		"Script": 2,
+		"Terrain": 1,
+		"TerrainCollider": 1
+	},
+	"Entities": [
+		{
+			"ID": "95c173329ad1ffb6",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 14, 30],
+					"Rotation": [-0.22495106, 0, 0, 0.97437006],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.42, 0.55, 0.72]
+				}
+			}
+		},
+		{
+			"ID": "72adb9cdc42184e7",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4082179, 0.23456971, 0.10938165, 0.8754261],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "d7927c66f409d14d",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-16, 0, -16],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Terrain": {
+					"Heightfield": "449197254b5d0af8",
+					"Size": [32, 32],
+					"HeightScale": 2,
+					"Layers": [
+						{
+							"BaseColorMap": "0000000000000184",
+							"NormalMap": "0000000000000183",
+							"Tint": [0.45, 0.62, 0.32],
+							"Tiling": 3,
+							"Roughness": 0.85,
+							"Metallic": 0.05
+						},
+						{
+							"BaseColorMap": null,
+							"NormalMap": null,
+							"Tint": [0.55, 0.47, 0.38],
+							"Tiling": 6,
+							"Roughness": 0.9,
+							"Metallic": 0
+						}
+					],
+					"SplatMap": "05c7e3f4de55ab9b",
+					"ReceiveShadows": false,
+					"LodBias": 1.5
+				},
+				"TerrainCollider": {
+					"Layer": "Track",
+					"Friction": 0.8,
+					"Restitution": 0.1
+				}
+			}
+		},
+		{
+			"ID": "4d8548f1e05a2497",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-8, 0.62, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Ball",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"SphereCollider": {
+					"Radius": 0.5,
+					"Offset": [0, 0, 0],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "d2c55c35633199ba",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

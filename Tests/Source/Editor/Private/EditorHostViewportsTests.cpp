@@ -483,6 +483,75 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 			CHECK(editor.GetViewportState().GetPixelSize(ViewportView::Game).value() == glm::uvec2(80, 80));
 		}
 
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 10; W26.2's review): each displayed view applies its history to
+		// every render, so its renders count up from its first (RenderStats::HistoryFrames), and starts it afresh when the shown
+		// scene changes (here play starting and stopping, whose scene keeps the camera's entity, so the history alone would
+		// continue) and when the view gets a new renderer (a view hidden while the scene changed, shown again).
+		TEST_CASE("EditorHostViewports: each view continues its temporal history between renders and starts it afresh when the shown scene changes"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::EditorTestFixture fixture("HostViewHistory");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			auto& editor = fixture.GetEditor();
+			Test::AutomationTestClient client(editor);
+			const Entity mesh = editor.GetScene().CreateEntity("Mesh");
+			mesh.AddComponent<MeshRendererComponent>(MeshRendererComponent{ .Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh), .Materials = {} });
+			Entity camera = editor.GetScene().CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 5.0f);
+			});
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::SceneViewport, true).has_value());
+			REQUIRE(editor.GetUiState().SetPanelOpen(EditorPanel::GameViewport, true).has_value());
+			{
+				HostGpuHarness harness(gpu, editor);
+				EditorHostViewports& host = harness.GetHost();
+				host.SetRectangle(ViewportView::Scene, { .Size = glm::vec2(96, 64) });
+				host.SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+				const auto historyFrames = [&host](ViewportView view) -> uint32_t
+				{
+					const SceneRenderer* renderer = host.GetRenderer(view);
+					REQUIRE(renderer != nullptr);
+					const RenderStats stats = renderer->GetRenderStats();
+					REQUIRE(stats.Available);
+					return stats.HistoryFrames;
+				};
+				uint64_t frame = 0;
+				for (uint32_t expected = 0; expected < 3; ++expected)
+				{
+					REQUIRE(harness.Frame(frame++).has_value());
+					CHECK(historyFrames(ViewportView::Scene) == expected);
+					CHECK(historyFrames(ViewportView::Game) == expected);
+				}
+
+				// Play starting replaces the shown scene: both views start afresh, then continue.
+				REQUIRE(client.Call("play.start", Json{ { "lockstep", true } }).has_value());
+				for (uint32_t expected = 0; expected < 2; ++expected)
+				{
+					REQUIRE(harness.Frame(frame++).has_value());
+					CHECK(historyFrames(ViewportView::Scene) == expected);
+					CHECK(historyFrames(ViewportView::Game) == expected);
+				}
+
+				// The game view hidden while play stops releases its renderer; shown again, its new renderer starts afresh.
+				host.SetRectangle(ViewportView::Game, {});
+				REQUIRE(client.Call("play.stop", Json::object()).has_value());
+				REQUIRE(harness.Frame(frame++).has_value());
+				CHECK(host.GetRenderer(ViewportView::Game) == nullptr);
+				CHECK(historyFrames(ViewportView::Scene) == 0);
+				host.SetRectangle(ViewportView::Game, { .Size = glm::vec2(80, 80) });
+				REQUIRE(harness.Frame(frame++).has_value());
+				CHECK(historyFrames(ViewportView::Game) == 0);
+				CHECK(historyFrames(ViewportView::Scene) == 1);
+				REQUIRE(harness.Frame(frame++).has_value());
+				CHECK(historyFrames(ViewportView::Game) == 1);
+			}
+		}
+
 		TEST_CASE("EditorHostViewports: ScriptedClock suites reject physical input and focus releases while retaining Test injection")
 		{
 			std::vector<uint64_t> baseline;

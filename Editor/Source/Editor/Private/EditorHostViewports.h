@@ -6,6 +6,7 @@
 #include "Engine/Graphics/GpuRecreation.h"
 #include "Engine/Platform/Events.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/TemporalHistory.h"
 
 #include <array>
 #include <optional>
@@ -149,6 +150,12 @@ namespace Engine {
 			// decision 24) its tilemaps placed among them (RenderSnapshot::Tilemaps), whose tiles a click picks as sprites.
 			std::vector<SpriteItem> Sprites{};
 			std::vector<TilemapItem> Tilemaps{};
+			// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 10, stream X-C): the view's history (TAA's jitter and
+			// motion, auto-exposure's delta time), reset when the shown scene changes (a scene opened, closed or swapped, play
+			// started or stopped) and when the view gets a new renderer; and when it last rendered (the steady clock's
+			// seconds), so its delta time is the time since its previous render.
+			RenderViewHistory History{};
+			std::optional<double> LastRenderSeconds{};
 		};
 		[[nodiscard]] static size_t Index(ViewportView view);
 		// The size view `index` (0 the Scene view, 1 the Game view) renders at: the forced Game view's (ForceGameView: the game

@@ -7,11 +7,12 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <cstdint>
+#include <limits>
 #include <set>
 #include <utility>
 
 // The temporal-state section's view history (M26, C26.1, R-TAA-VEL, R-TAA; Docs/Decisions/0037-m26-contract.md decisions 10
-// and 11, stream X-C): skipped until stream X-C implements it.
+// and 11, stream X-C): the jitter sequence, the history's previous camera and worlds, and the captures' warm-up rule.
 
 namespace Engine {
 
@@ -40,7 +41,7 @@ namespace Engine {
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("TemporalHistory: the jitter is the Halton (2, 3) sequence centred on the pixel" * doctest::skip(true))
+		TEST_CASE("TemporalHistory: the jitter is the Halton (2, 3) sequence centred on the pixel")
 		{
 			// Halton index 1: (1/2, 1/3); index 2: (1/4, 2/3); minus 0.5.
 			CHECK(GetTaaJitter(0) == glm::vec2(0.0f, 1.0f / 3.0f - 0.5f));
@@ -59,7 +60,7 @@ namespace Engine {
 			CHECK(distinct.size() == TaaJitterSequenceLength);
 		}
 
-		TEST_CASE("TemporalHistory: a view's history fills the previous camera and worlds by entity, and a reset or a cut empties them" * doctest::skip(true))
+		TEST_CASE("TemporalHistory: a view's history fills the previous camera and worlds by entity, and a reset or a cut empties them")
 		{
 			RenderViewHistory history;
 			RenderSnapshot first = MakeSnapshot(0.0f, 0.0f);
@@ -99,7 +100,7 @@ namespace Engine {
 			CHECK(pixelArt.Camera.Jitter == glm::vec2(0.0f));
 		}
 
-		TEST_CASE("TemporalHistory: captures warm up only with TAA or auto-exposure in a Lit view" * doctest::skip(true))
+		TEST_CASE("TemporalHistory: captures warm up only with TAA or auto-exposure in a Lit view")
 		{
 			RenderSnapshot snapshot = MakeSnapshot(0.0f, 0.0f);
 			CHECK(NeedsTemporalWarmup(snapshot));
@@ -118,6 +119,71 @@ namespace Engine {
 			snapshot.Post.AntiAliasing = RenderAntiAliasing::Fxaa;
 			CHECK_FALSE(NeedsTemporalWarmup(snapshot));
 			CHECK(CaptureWarmupFrames == TaaJitterSequenceLength);
+			// The renderer's temporal passes never run in the wireframe or without a camera, so neither warms up.
+			snapshot = MakeSnapshot(0.0f, 0.0f);
+			snapshot.Flags = RenderViewFlags::Wireframe;
+			CHECK_FALSE(NeedsTemporalWarmup(snapshot));
+			snapshot = MakeSnapshot(0.0f, 0.0f);
+			snapshot.HasCamera = false;
+			CHECK_FALSE(NeedsTemporalWarmup(snapshot));
+		}
+
+		// Stream X-C's rules beside the contract's: items of one entity match in order and an item the previous frame did not
+		// see has no previous world; a previous world that is not finite is not used; a delta time that is negative or not
+		// finite is 0; a snapshot without a camera resets the next frame too; and a camera of another projection kind or
+		// viewport size is a cut.
+		TEST_CASE("TemporalHistory: items match by entity in order, and what cannot be continued starts afresh")
+		{
+			RenderViewHistory history;
+			RenderSnapshot first = MakeSnapshot(0.0f, 1.0f);
+			MeshDrawItem twin;
+			twin.Entity = UUID(0xB2);
+			twin.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 7.0f, 0.0f));
+			first.Meshes.push_back(twin);
+			first.Meshes[0].World = glm::mat4(std::numeric_limits<float>::infinity());
+			history.Apply(first, 0.016f);
+
+			RenderSnapshot second = MakeSnapshot(0.0f, 3.0f);
+			MeshDrawItem newcomer;
+			newcomer.Entity = UUID(0xD4);
+			second.Meshes.push_back(twin);
+			second.Meshes.push_back(newcomer);
+			history.Apply(second, -1.0f);
+			CHECK_FALSE(second.Meshes[0].PreviousWorld.has_value()); // its previous world was not finite
+			REQUIRE(second.Meshes[1].PreviousWorld.has_value());
+			CHECK(*second.Meshes[1].PreviousWorld == glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f)));
+			REQUIRE(second.Meshes[2].PreviousWorld.has_value());
+			CHECK(*second.Meshes[2].PreviousWorld == twin.World);
+			CHECK_FALSE(second.Meshes[3].PreviousWorld.has_value());
+			CHECK(second.Camera.DeltaTime == 0.0f);
+			RenderSnapshot nonFinite = MakeSnapshot(0.0f, 3.0f);
+			history.Apply(nonFinite, std::numeric_limits<float>::quiet_NaN());
+			CHECK(nonFinite.Camera.DeltaTime == 0.0f);
+			CHECK(nonFinite.Camera.PreviousViewProjection.has_value());
+
+			// No camera: a reset, and so is the next frame.
+			RenderSnapshot cameraless = MakeSnapshot(0.0f, 3.0f);
+			cameraless.HasCamera = false;
+			history.Apply(cameraless, 0.016f);
+			CHECK_FALSE(cameraless.Camera.PreviousViewProjection.has_value());
+			RenderSnapshot after = MakeSnapshot(0.0f, 3.0f);
+			history.Apply(after, 0.016f);
+			CHECK_FALSE(after.Camera.PreviousViewProjection.has_value());
+			CHECK_FALSE(after.Meshes[1].PreviousWorld.has_value());
+
+			// Another projection kind or viewport size is a cut.
+			RenderSnapshot orthographic = MakeSnapshot(0.0f, 3.0f);
+			orthographic.Camera.ProjectionKind = RenderProjection::Orthographic;
+			history.Apply(orthographic, 0.016f);
+			CHECK_FALSE(orthographic.Camera.PreviousViewProjection.has_value());
+			RenderSnapshot resized = orthographic;
+			resized.Camera.ViewportWidth = 640;
+			history.Apply(resized, 0.016f);
+			CHECK_FALSE(resized.Camera.PreviousViewProjection.has_value());
+			RenderSnapshot continued = resized;
+			history.Apply(continued, 0.016f);
+			CHECK(continued.Camera.PreviousViewProjection.has_value());
+			CHECK(continued.Camera.DeltaTime == 0.016f);
 		}
 	}
 

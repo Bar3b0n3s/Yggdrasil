@@ -9,6 +9,7 @@
 #include "Engine/Asset/BuiltinTextures.h"
 #include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/FontData.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/IrradianceVolumeData.h"
 #include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MaterialData.h"
@@ -1763,6 +1764,115 @@ namespace Engine {
 				REQUIRE(again != nullptr);
 				CHECK(again->Texture != nullptr);
 				CHECK(cache.GetStats().LutCount == 1);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22, stream T-C): GetHeightfield keeps a heightfield
+		// as GetEnvironment keeps an environment: its samples as a Resolution^2 R16_UNORM texture per (handle, version), sample
+		// (x, z) at texel (x, z), no placeholder, each failure reported once, released by CollectStale, TrimUnused and the
+		// recreation protocol's Release.
+		TEST_CASE("GpuResourceCache: a heightfield's mirror is its samples as an R16 texture per version, and a null or unloadable one has none"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::InMemoryAssetManager assets;
+			const AssetHandle handle(0x9501);
+			// Every sample distinct and its bytes asymmetric, so a transposed or byte-swapped upload shows.
+			HeightfieldData heightfield = MakeFlatHeightfield(5);
+			for (uint32_t z = 0; z < 5; ++z)
+			{
+				for (uint32_t x = 0; x < 5; ++x)
+					heightfield.Heights[x + 5 * static_cast<size_t>(z)] = static_cast<uint16_t>(x * 4000 + z * 13 + 1);
+			}
+			assets.Publish(handle, CreateRef<HeightfieldData>(heightfield));
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets);
+				CHECK(cache.GetHeightfield(AssetHandle()) == nullptr);
+				const GpuHeightfield* mirror = cache.GetHeightfield(handle);
+				REQUIRE(mirror != nullptr);
+				REQUIRE(mirror->Heights != nullptr);
+				const nvrhi::TextureDesc& desc = mirror->Heights->getDesc();
+				CHECK(desc.dimension == nvrhi::TextureDimension::Texture2D);
+				CHECK(desc.width == 5);
+				CHECK(desc.height == 5);
+				CHECK(desc.mipLevels == 1);
+				CHECK(desc.format == nvrhi::Format::R16_UNORM);
+				CHECK(mirror->Resolution == 5);
+				CHECK(mirror->Version == assets.GetVersion(handle));
+				CHECK(cache.GetHeightfield(handle) == mirror);
+				CHECK(cache.GetStats().HeightfieldCount == 1);
+				{
+					Readback readback(gpu.GetDevice());
+					const Result<Image> texels = readback.ReadTexture(*mirror->Heights);
+					REQUIRE_MESSAGE(texels.has_value(), texels.error().ToString());
+					for (uint32_t z = 0; z < 5; ++z)
+					{
+						const std::span<const std::byte> row = texels->GetRow(z);
+						for (uint32_t x = 0; x < 5; ++x)
+						{
+							uint16_t sample = 0;
+							std::memcpy(&sample, row.data() + 2 * static_cast<size_t>(x), sizeof(sample));
+							CHECK(sample == heightfield.Heights[x + 5 * static_cast<size_t>(z)]);
+						}
+					}
+				}
+
+				// A new version is a new mirror; the replaced one is stale.
+				assets.Publish(handle, CreateRef<HeightfieldData>(MakeFlatHeightfield(9, 100)));
+				const GpuHeightfield* replaced = cache.GetHeightfield(handle);
+				REQUIRE(replaced != nullptr);
+				CHECK(replaced->Resolution == 9);
+				CHECK(replaced->Heights->getDesc().width == 9);
+				CHECK(cache.GetStats().HeightfieldCount == 2);
+				cache.CollectStale();
+				CHECK(cache.GetStats().HeightfieldCount == 1);
+
+				// An unknown handle and an asset of another type: no mirror, each reported once (GpuResourceCache.h).
+				{
+					Test::ExpectLog missing(LogLevel::Error, "ASSET_MISSING");
+					CHECK(cache.GetHeightfield(AssetHandle(0x9599)) == nullptr);
+					CHECK(cache.GetHeightfield(AssetHandle(0x9599)) == nullptr);
+					CHECK(missing.GetMatchCount() == 1);
+				}
+				CHECK(std::ranges::count_if(assets.GetDiagnostics(), [](const AssetDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == AssetMissingCode && diagnostic.Asset == AssetHandle(0x9599);
+				}) == 1);
+				{
+					Test::ExpectLog mismatch(LogLevel::Error, "ASSET_TYPE_MISMATCH");
+					CHECK(cache.GetHeightfield(BuiltinAssetHandles::CubeMesh) == nullptr);
+				}
+				// A heightfield whose samples disagree with its resolution (no loader makes one) is refused, never read past, and
+				// reported once.
+				const AssetHandle inconsistent(0x9502);
+				HeightfieldData shortHeightfield = MakeFlatHeightfield(5);
+				shortHeightfield.Heights.pop_back();
+				assets.Publish(inconsistent, CreateRef<HeightfieldData>(std::move(shortHeightfield)));
+				{
+					Test::ExpectLog failed(LogLevel::Error, "ASSET_UPLOAD_FAILED");
+					CHECK(cache.GetHeightfield(inconsistent) == nullptr);
+					CHECK(cache.GetHeightfield(inconsistent) == nullptr);
+					CHECK(failed.GetMatchCount() == 1);
+				}
+
+				// Unused mirrors go at a scene unload's collection; TrimUnused drops one whose asset was unloaded; the recreation
+				// protocol's Release drops every one, and the next GetHeightfield uploads it again.
+				CHECK(cache.GetHeightfield(handle) != nullptr);
+				cache.CollectStale(true);
+				cache.CollectStale(true);
+				CHECK(cache.GetStats().HeightfieldCount == 0);
+				CHECK(cache.GetHeightfield(handle) != nullptr);
+				cache.ReleaseGpuObjects();
+				CHECK(cache.GetStats().HeightfieldCount == 0);
+				const GpuHeightfield* again = cache.GetHeightfield(handle);
+				REQUIRE(again != nullptr);
+				CHECK(again->Heights != nullptr);
+				CHECK(cache.GetStats().HeightfieldCount == 1);
+				assets.Remove(handle);
+				cache.TrimUnused();
+				CHECK(cache.GetStats().HeightfieldCount == 0);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

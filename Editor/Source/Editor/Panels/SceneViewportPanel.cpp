@@ -266,6 +266,7 @@ namespace Engine {
 		// set is selected; its target is posed as the displayed image shows it.
 		const EditorViewportImage image = context.Viewports.GetImage(ViewportView::Scene);
 		m_TilemapBrush.DrawControls(context, image, toolbarRight);
+		m_TerrainBrush.DrawControls(context, toolbarRight); // M26: the terrain brush (Editor/Tools/TerrainBrush.h)
 		ImGui::Separator();
 		if (playing)
 			ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f), "Runtime scene: changes are discarded on Stop");
@@ -314,7 +315,7 @@ namespace Engine {
 		{
 			// An armed tile brush hides the gizmo, so its handles never stand over a cell the brush would paint; the UI preview
 			// (M22, decision 33) draws none either.
-			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, m_TilemapBrush.IsArmed() || previewFrame.has_value() ? EditorViewportRect{} : rectangle,
+			record(DrawGizmoOverlay(context.Editor, context.Gizmos, image.Camera, m_TilemapBrush.IsArmed() || m_TerrainBrush.IsArmed() || previewFrame.has_value() ? EditorViewportRect{} : rectangle,
 				m_GizmoSettings, gizmoOwnsPointer));
 		}
 		if (context.Gizmos.IsDragging() && !draggingAtStart)
@@ -374,7 +375,7 @@ namespace Engine {
 		// ImGuizmo::IsOver also reports the previous frame's hover: a press that leaves a handle in that frame still
 		// belongs to the gizmo, never to a background pick. An armed tile brush hides the gizmo, whose last handles then
 		// own nothing.
-		const bool gizmoShown = !m_TilemapBrush.IsArmed();
+		const bool gizmoShown = !m_TilemapBrush.IsArmed() && !m_TerrainBrush.IsArmed();
 		const bool inputCaptured = io.WantTextInput || otherItemActive
 			|| ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)
 			|| ImGui::GetDragDropPayload() != nullptr || draggingAtStart || context.Gizmos.IsDragging()
@@ -386,7 +387,13 @@ namespace Engine {
 			record(std::unexpected(std::move(stroke).error()));
 		else if (stroke->has_value())
 			record(QueueAction(context, "tilemap.paint", **stroke));
-		const bool brushStroking = m_TilemapBrush.IsStroking();
+		// M26: an armed terrain brush takes the image's left strokes; each finished stroke is one terrain.edit.
+		Result<std::optional<Json>> terrainStroke = m_TerrainBrush.Update(rectangle, image, { .ImageShown = imageShown, .Captured = inputCaptured || previewFrame.has_value() || m_TilemapBrush.IsArmed(), .LeftPressed = leftPressed });
+		if (!terrainStroke)
+			record(std::unexpected(std::move(terrainStroke).error()));
+		else if (terrainStroke->has_value())
+			record(QueueAction(context, "terrain.edit", **terrainStroke));
+		const bool brushStroking = m_TilemapBrush.IsStroking() || m_TerrainBrush.IsStroking();
 		if (imageShown && !inputCaptured && !previewFrame.has_value())
 		{
 			// Buttons navigate only while they hold the image item they pressed; the wheel zooms the hovered view.

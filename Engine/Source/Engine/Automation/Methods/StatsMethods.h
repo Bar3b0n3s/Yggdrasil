@@ -55,6 +55,8 @@ namespace Engine {
 		// the Editor and in an exported Runtime alike); 0 and false while unavailable.
 		uint32_t ShadowMapSize = 0;
 		bool SsaoHalfResolution = false;
+		// M26 (W26.2's review): RenderStats::HistoryFrames, the renders since the view's temporal history started afresh.
+		uint32_t HistoryFrames = 0;
 	};
 
 	struct StatsGetResult

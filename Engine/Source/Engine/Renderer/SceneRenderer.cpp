@@ -37,6 +37,9 @@
 #include "Engine/Renderer/RenderStage.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/SkyboxPass.h"
+#include "Engine/Renderer/SsrPass.h"
+#include "Engine/Renderer/TaaPass.h"
+#include "Engine/Renderer/TerrainPass.h"
 #include "Engine/Renderer/TextRenderer.h"
 #include "Engine/Renderer/TonemapPass.h"
 #include "Shared/DrawConstants.h"
@@ -48,6 +51,7 @@
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/matrix.hpp>
 
 #include <algorithm>
@@ -103,6 +107,15 @@
 // (the reference path), byte for byte; RenderPassStats::DrawCalls counts the instanced draws and SceneRenderStats::MeshDraws
 // the submesh draws.
 //
+// Temporal anti-aliasing (M26, C26.1, R-TAA-VEL, R-TAA; Docs/Decisions/0037-m26-contract.md decisions 10, 11, 14 and 17;
+// stream X-C). The prepass and picking prepass write SceneVelocity (the motion vectors, from the instance records'
+// PreviousWorld, a deformed item's previous positions and the view's previous unjittered view-projection) and
+// SceneRoughness (SSR's specular inputs) after SceneNormals and EntityId, cleared to zero first. A render with TAA (frame.Taa)
+// rasterizes its scene passes with the snapshot's jitter, which the Prepare stage folds into the ViewConstants' projection
+// (MakeViewConstants), while the passes after the HDR post chain (game Text, the Ui, the editor overlays at the identity
+// mapping) draw with the unjittered constants of frame.OverlayView, so they never shake; the Taa pass then resolves
+// SceneColor against the view's TaaHistory first in HdrPost (RecordTaa).
+//
 // Deformation (M23, C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27). The Prepare stage resolves each
 // item it looks at (ResolveItemDeform) from its mesh's mirror: an item is deformed when its mesh has a skin its JointPalette
 // covers, or morph targets with a resolved weight that is not 0 (MeshDrawItem's rule). A deformed item's submeshes are culled
@@ -121,7 +134,7 @@ namespace Engine {
 			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
 			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount
-			+ ExposurePass::PipelineCount);
+			+ ExposurePass::PipelineCount + TaaPass::PipelineCount + SsrPass::PipelineCount + TerrainPass::PipelineCount);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
 	static_assert(SceneRendererPipelines::DebugViewPipelineCount == Utils::ForwardVariantCount);
 	// The Scene program's specialization constant takes RenderDebugView's values (Shared/DrawConstants.h).
@@ -287,16 +300,32 @@ namespace Engine {
 			return pool.Acquire(desc);
 		}
 
-		// The ViewConstants of `camera` for a `width` x `height` target (§8.3, Shared/ViewConstants.h).
-		static ViewConstants MakeViewConstants(const CameraData& camera, uint32_t width, uint32_t height, float exposure)
+		// The ViewConstants of `camera` for a `width` x `height` target (§8.3, Shared/ViewConstants.h). M26 (stream X-C): its
+		// projection jittered by `jitter` scene pixels (+x right, +y down; (0, 0) without TAA) as the clip-space translation J,
+		// x' = x + 2 jitter.x / width * w and y' = y - 2 jitter.y / height * w, which moves every rasterized point by `jitter`
+		// pixels whatever the projection kind and leaves the diagonal (TanHalfFovY, OrthoHalfExtents) unchanged: Projection is
+		// J * Projection and ViewProjection J * (Projection * View), no product with J at all without a jitter; Jitter itself;
+		// and PreviousViewProjection, J times the camera's previous one when it has a finite one, else ViewProjection itself,
+		// so the motion vectors of what did not move are exactly zero (Common/Motion.slang).
+		static ViewConstants MakeViewConstants(const CameraData& camera, uint32_t width, uint32_t height, float exposure, glm::vec2 jitter = glm::vec2(0.0f))
 		{
 			const glm::vec2 viewportSize(static_cast<float>(width), static_cast<float>(height));
+			const bool jittered = jitter != glm::vec2(0.0f);
+			const glm::mat4 translation = glm::translate(glm::mat4(1.0f), glm::vec3(2.0f * jitter.x / viewportSize.x, -2.0f * jitter.y / viewportSize.y, 0.0f));
+			const auto jitterMatrix = [jittered, &translation](const glm::mat4& matrix)
+			{
+				return jittered ? translation * matrix : matrix;
+			};
 			ViewConstants view{};
 			view.View = camera.View;
-			view.Projection = camera.Projection;
-			view.ViewProjection = camera.Projection * camera.View;
-			view.InverseProjection = glm::inverse(camera.Projection);
+			view.Projection = jitterMatrix(camera.Projection);
+			view.ViewProjection = jitterMatrix(camera.Projection * camera.View);
+			view.InverseProjection = glm::inverse(view.Projection);
 			view.InverseViewProjection = glm::inverse(view.ViewProjection);
+			view.PreviousViewProjection = camera.PreviousViewProjection.has_value() && IsFinite(*camera.PreviousViewProjection)
+				? jitterMatrix(*camera.PreviousViewProjection)
+				: view.ViewProjection;
+			view.Jitter = jitter;
 			view.CameraPosition = camera.Position;
 			view.Near = camera.NearClip;
 			view.ViewportSize = viewportSize;
@@ -555,12 +584,17 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(created.Upscale, UpscalePass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Lights2D, Lights2DPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.Exposure, ExposurePass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.Ssr, SsrPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.Taa, TaaPass::Create(device, pipelines));
+		// M26 (C26.1, C-TERR; decision 22, stream T-C): its forward pipeline shares the mesh forward passes' set-0 layout.
+		ENGINE_TRY_ASSIGN(created.Terrain, TerrainPass::Create(device, pipelines, *created.Layouts.ForwardView));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
 			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
 			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount()
-			+ created.Exposure->GetPipelineCount();
+			+ created.Exposure->GetPipelineCount() + created.Taa->GetPipelineCount() + created.Ssr->GetPipelineCount()
+			+ created.Terrain->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -598,6 +632,9 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, UpscalePass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, Lights2DPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, ExposurePass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, SsrPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, TaaPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, TerrainPass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -617,6 +654,11 @@ namespace Engine {
 			Utils::CreateTarget(*TargetPool, width, height, SceneDepthFormat, Utils::TargetUsage::Attachment, "SceneDepth"));
 		ENGINE_TRY_ASSIGN(targets.SceneNormals,
 			Utils::CreateTarget(*TargetPool, width, height, SceneNormalsFormat, Utils::TargetUsage::Attachment, "SceneNormals"));
+		// M26 (C26.1, decision 14; stream X-C): the prepass's motion vectors and SSR's specular inputs.
+		ENGINE_TRY_ASSIGN(targets.SceneVelocity,
+			Utils::CreateTarget(*TargetPool, width, height, SceneVelocityFormat, Utils::TargetUsage::Attachment, "SceneVelocity"));
+		ENGINE_TRY_ASSIGN(targets.SceneRoughness,
+			Utils::CreateTarget(*TargetPool, width, height, SceneRoughnessFormat, Utils::TargetUsage::Attachment, "SceneRoughness"));
 		ENGINE_TRY_ASSIGN(targets.SceneColor,
 			Utils::CreateTarget(*TargetPool, width, height, SceneColorFormat, Utils::TargetUsage::Attachment, "SceneColor"));
 		ENGINE_TRY_ASSIGN(targets.Ldr[0], Utils::CreateTarget(*TargetPool, width, height, LdrColorFormat, Utils::TargetUsage::LdrColor, "LdrColor"));
@@ -624,7 +666,11 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(targets.Bloom, TargetPool->Acquire(BloomPass::GetChainDesc(width, height, Pipelines->Bloom->GetFormat())));
 
 		ENGINE_TRY_ASSIGN(targets.PrepassFramebuffer,
-			device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneNormals).setDepthAttachment(targets.SceneDepth)));
+			device.CreateFramebuffer(nvrhi::FramebufferDesc()
+					.addColorAttachment(targets.SceneNormals)
+					.addColorAttachment(targets.SceneVelocity)
+					.addColorAttachment(targets.SceneRoughness)
+					.setDepthAttachment(targets.SceneDepth)));
 		ENGINE_TRY_ASSIGN(targets.ForwardFramebuffer,
 			device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneColor).setDepthAttachment(targets.SceneDepth)));
 		// The overlays test against SceneDepth without writing it (their pipelines disable depth writes). The attachment is
@@ -650,7 +696,7 @@ namespace Engine {
 		}
 		if (picking && Targets.PickingFramebuffer == nullptr)
 		{
-			ENGINE_TRY_ASSIGN(Targets.PickingFramebuffer, Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.SceneNormals).addColorAttachment(Targets.EntityId).setDepthAttachment(Targets.SceneDepth)));
+			ENGINE_TRY_ASSIGN(Targets.PickingFramebuffer, Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.SceneNormals).addColorAttachment(Targets.EntityId).addColorAttachment(Targets.SceneVelocity).addColorAttachment(Targets.SceneRoughness).setDepthAttachment(Targets.SceneDepth)));
 		}
 		if (ao)
 		{
@@ -726,6 +772,8 @@ namespace Engine {
 		SpriteBindings.Clear();
 		Lights2DBindings.Clear();
 		ExposureBindings.Clear();
+		SsrBindings.Clear();
+		TaaBindings.Clear();
 	}
 
 	void SceneRenderer::State::ClearBindings()
@@ -736,6 +784,7 @@ namespace Engine {
 		UpscaleBindings.Clear();
 		UiQuadBindings.Clear();
 		ParticleBindings.Clear();
+		TerrainResources.Bindings.Clear(); // M26 (stream T-C): made for the terrain pass's set-1 layout
 		Materials.Clear();
 	}
 
@@ -758,9 +807,13 @@ namespace Engine {
 		SpriteBindings.ReleaseUnused();
 		Lights2DBindings.ReleaseUnused();
 		ExposureBindings.ReleaseUnused();
+		SsrBindings.ReleaseUnused();
+		TaaBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 		UiQuadBindings.ReleaseUnused();
 		ParticleBindings.ReleaseUnused();
+		// M26 (stream T-C): the chunk meshes and terrain sets the render did not use, and its prepared terrains.
+		TerrainPass::ReleaseUnused(TerrainResources);
 
 		Materials.ReleaseUnused();
 	}
@@ -855,8 +908,10 @@ namespace Engine {
 				const Detail::SceneRendererMaterial& material = found->second;
 				if (material.Set == nullptr)
 					continue; // its GPU objects are missing (reported)
-				// M23 (C23.3): a deformed item's draws bind its entry's deformed vertices and key its VertexStream.
+				// M23 (C23.3): a deformed item's draws bind its entry's deformed vertices and key its VertexStream; M26 (stream X-C):
+				// and its previous positions, which the prepass's motion vectors read.
 				nvrhi::IBuffer* drawVertices = vertexBuffer;
+				nvrhi::IBuffer* previousPositions = nullptr;
 				uint32_t vertexStream = 0;
 				if (deform.Deformed)
 				{
@@ -868,12 +923,14 @@ namespace Engine {
 						break; // the item's draws are skipped
 					}
 					drawVertices = DeformedMeshes[*entry].Vertices.Get();
+					previousPositions = DeformedMeshes[*entry].PreviousPositions.Get();
 					vertexStream = DeformedMeshes[*entry].VertexStream;
 				}
 
 				const Utils::MeshCullMode cullMode = Utils::SelectCullMode(mirrored, material.DoubleSided);
 				Detail::SceneRendererDraw draw;
 				draw.VertexBuffer = drawVertices;
+				draw.PreviousPositions = previousPositions;
 				draw.VertexStream = vertexStream;
 				draw.AttributeBuffer = attributeBuffer;
 				draw.IndexBuffer = indexBuffer;
@@ -941,7 +998,10 @@ namespace Engine {
 				const MeshDrawItem& item = snapshot.Meshes[draw.SnapshotIndex];
 				draw.Instance = static_cast<uint32_t>(Instances.size());
 				draw.Batch = 1;
-				Instances.push_back(MakeMeshInstanceRecord(item, item.ReceiveShadows ? DrawFlagReceiveShadows : 0U));
+				// M26 (stream X-C): a deformed item that continues its view's history (it has a PreviousWorld) moves from its
+				// previous deformation; otherwise its motion is its world matrix's alone (none after a reset).
+				const uint32_t previousPositions = draw.PreviousPositions != nullptr && item.PreviousWorld.has_value() ? DrawFlagPreviousPositions : 0U;
+				Instances.push_back(MakeMeshInstanceRecord(item, (item.ReceiveShadows ? DrawFlagReceiveShadows : 0U) | previousPositions));
 				keys.push_back({ .Pipeline = draw.ForwardVariant,
 					.Material = draw.MaterialHandle,
 					.Mesh = draw.Mesh,
@@ -998,6 +1058,13 @@ namespace Engine {
 				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.VertexBuffer).setSlot(0).setOffset(0));
 				// The attribute stream (M23, C-MESH2): the mesh's own, or the cache's shared default stream, read from offset 0.
 				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.AttributeBuffer).setSlot(Utils::MeshAttributeStreamSlot).setOffset(0));
+				// M26 (stream X-C): the prepass variants' previous positions (Private/ForwardPipelines.h): a deformed draw's, else
+				// its own vertices, which the shaders do not read as positions.
+				if (pass == Detail::SceneRendererMeshPass::Prepass || pass == Detail::SceneRendererMeshPass::Picking)
+				{
+					nvrhi::IBuffer* previous = draw.PreviousPositions != nullptr ? draw.PreviousPositions : draw.VertexBuffer;
+					state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(previous).setSlot(Utils::PreviousPositionSlot).setOffset(0));
+				}
 				state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.IndexBuffer).setFormat(nvrhi::Format::R32_UINT).setOffset(0));
 				commandList.setGraphicsState(state);
 				lastPipeline = pipeline.Pipeline.Get();
@@ -1203,7 +1270,10 @@ namespace Engine {
 		// A debug-view switch that failed alone is the render's first partial error (decision 44).
 		frame.FirstError = std::move(debugViewError);
 
-		RenderStats stats{ .Available = true, .FrameIndex = snapshot.FrameIndex, .Width = state.ViewWidth, .Height = state.ViewHeight, .ShadowMapSize = snapshot.Quality.ShadowMapSize, .SsaoHalfResolution = snapshot.Quality.SsaoHalfResolution };
+		// M26 (W26.2's review): the renders since the view's history started afresh (RenderStats::HistoryFrames).
+		const bool continuesHistory = snapshot.HasCamera && snapshot.Camera.PreviousViewProjection.has_value();
+		state.HistoryFrames = continuesHistory ? state.HistoryFrames + (state.HistoryFrames < std::numeric_limits<uint32_t>::max() ? 1U : 0U) : 0U;
+		RenderStats stats{ .Available = true, .FrameIndex = snapshot.FrameIndex, .Width = state.ViewWidth, .Height = state.ViewHeight, .ShadowMapSize = snapshot.Quality.ShadowMapSize, .SsaoHalfResolution = snapshot.Quality.SsaoHalfResolution, .HistoryFrames = state.HistoryFrames };
 		GpuProfiler* profiler = nullptr;
 		const uint32_t slot = state.NextTimingSlot;
 		state.NextTimingSlot = (slot + 1) % static_cast<uint32_t>(state.TimingSubmissions.size());
@@ -1363,6 +1433,9 @@ namespace Engine {
 	{
 		nvrhi::ICommandList& commandList = *frame.CommandList;
 		commandList.writeBuffer(ViewConstantsBuffer, &frame.View, sizeof(frame.View));
+		// M26 (stream X-C): the unjittered constants of the passes after the HDR post chain, when the scene passes' are jittered.
+		if (frame.OverlayView != ViewConstantsBuffer.Get())
+			commandList.writeBuffer(UnjitteredViewConstantsBuffer, &frame.OverlayConstants, sizeof(frame.OverlayConstants));
 		commandList.writeBuffer(EnvironmentConstantsBuffer, &frame.Environment, sizeof(frame.Environment));
 		commandList.writeBuffer(ShadowConstantsBuffer, &frame.Shadow, sizeof(frame.Shadow));
 		if (!Lights.empty())
@@ -1375,6 +1448,9 @@ namespace Engine {
 		commandList.clearTextureFloat(Targets.SceneColor, nvrhi::AllSubresources, nvrhi::Color(clearColor.r, clearColor.g, clearColor.b, 1.0f));
 		commandList.clearDepthStencilTexture(Targets.SceneDepth, nvrhi::AllSubresources, true, 0.0f, false, 0);
 		commandList.clearTextureFloat(Targets.SceneNormals, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+		// M26 (decision 14): no motion and no specular to replace where nothing is drawn.
+		commandList.clearTextureFloat(Targets.SceneVelocity, nvrhi::AllSubresources, nvrhi::Color(0.0f));
+		commandList.clearTextureUInt(Targets.SceneRoughness, nvrhi::AllSubresources, 0);
 		if (frame.Picking)
 		{
 			commandList.clearTextureUInt(Targets.EntityId, nvrhi::AllSubresources, 0);
@@ -1410,12 +1486,45 @@ namespace Engine {
 		const PostProcessSettings& post = snapshot.Post;
 		frame.Ao = hasCamera && ((frame.IsLit && !frame.Wireframe) || frame.DebugView == RenderDebugView::AO) && post.SsaoEnabled;
 		frame.HalfAo = snapshot.Quality.SsaoHalfResolution || post.SsaoQuality == RenderSsaoQuality::Low;
+		// M26 (stream X-D, decision 18): SSR in the Lit view's shaded image only.
+		frame.Ssr = hasCamera && frame.IsLit && !frame.Wireframe && post.SsrEnabled;
 		const bool shadows = hasCamera && ((frame.IsLit && !frame.Wireframe) || frame.DebugView == RenderDebugView::ShadowCascades);
 		// The Lit view follows Post; the debug views and the 2D colour path (decision 7) fix exposure 1 and no dither.
 		const bool tonemapped = frame.IsLit && !frame.PixelArt;
 
 		recording.BeginPass("Prepare");
-		frame.View = Utils::MakeViewConstants(camera, Targets.Width, Targets.Height, tonemapped ? Utils::GetExposure(post) : 1.0f);
+		// M26 (C26.1, R-TAA; decisions 10 and 17, stream X-C): TAA resolves a Lit view outside the wireframe and pixel-art mode
+		// (where Taa acts as None, as FXAA does), whose scene passes then rasterize with the snapshot's jitter; the passes after
+		// the HDR post chain draw with the unjittered constants (frame.OverlayView).
+		frame.Taa = hasCamera && frame.IsLit && !frame.Wireframe && !frame.PixelArt && post.AntiAliasing == RenderAntiAliasing::Taa;
+		const glm::vec2 jitter = frame.Taa && std::isfinite(camera.Jitter.x) && std::isfinite(camera.Jitter.y) ? camera.Jitter : glm::vec2(0.0f);
+		const float viewExposure = tonemapped ? Utils::GetExposure(post) : 1.0f;
+		frame.View = Utils::MakeViewConstants(camera, Targets.Width, Targets.Height, viewExposure, jitter);
+		frame.OverlayView = ViewConstantsBuffer.Get();
+		if (jitter != glm::vec2(0.0f))
+		{
+			if (UnjitteredViewConstantsBuffer == nullptr)
+			{
+				nvrhi::BufferDesc desc;
+				desc.byteSize = sizeof(ViewConstants);
+				desc.isConstantBuffer = true;
+				desc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+				desc.keepInitialState = true;
+				desc.debugName = "SceneRenderer.UnjitteredViewConstants";
+				Result<nvrhi::BufferHandle> created = Device->CreateBuffer(desc);
+				if (created.has_value())
+					UnjitteredViewConstantsBuffer = std::move(*created);
+				else
+					frame.KeepFirstError(std::unexpected(std::move(created).error()));
+			}
+			if (UnjitteredViewConstantsBuffer != nullptr)
+			{
+				frame.OverlayConstants = Utils::MakeViewConstants(camera, Targets.Width, Targets.Height, viewExposure);
+				frame.OverlayView = UnjitteredViewConstantsBuffer.Get();
+			}
+			else
+				frame.View = Utils::MakeViewConstants(camera, Targets.Width, Targets.Height, viewExposure); // no jitter without them
+		}
 		LightCullResult culled;
 		Lights.clear();
 		if (hasCamera)
@@ -1898,10 +2007,13 @@ namespace Engine {
 		frame.PrepassSet = nullptr;
 		if (frame.HasCamera)
 		{
+			// M26 (stream X-C): the DFG LUT and its sampler for SceneRoughness's specular inputs.
 			nvrhi::BindingSetDesc desc;
 			desc.bindings = {
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, ViewConstantsBuffer),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
+				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
 			};
@@ -1910,6 +2022,22 @@ namespace Engine {
 				frame.PrepassSet = *created;
 			else
 				frame.KeepFirstError(std::unexpected(std::move(created).error()));
+			// The Overdraw data view's pipelines bind a set 0 of their own (Private/ForwardPipelines.h).
+			if (frame.IsOverdraw)
+			{
+				nvrhi::BindingSetDesc overdraw;
+				overdraw.bindings = {
+					nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, ViewConstantsBuffer),
+					nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
+					nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
+					nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+				};
+				auto overdrawSet = ViewBindings.GetOrCreate(*Device, overdraw, *Pipelines->Layouts.OverdrawView);
+				if (overdrawSet)
+					frame.OverdrawSet = *overdrawSet;
+				else
+					frame.KeepFirstError(std::unexpected(std::move(overdrawSet).error()));
+			}
 		}
 		// The Overdraw data view draws its own pass in the Forward stage; with picking it still needs EntityId.
 		if (frame.PrepassSet == nullptr || (frame.IsOverdraw && !frame.Picking))
@@ -1919,19 +2047,67 @@ namespace Engine {
 		RecordMeshPass(commandList, frame.Picking ? Detail::SceneRendererMeshPass::Picking : Detail::SceneRendererMeshPass::Prepass, OpaqueDraws,
 			*frame.PrepassSet, frame.DebugView, counters);
 		frame.Recording->EndPass(counters);
+		RecordTerrainDepthNormal(frame);
+	}
+
+	void SceneRenderer::State::RecordTerrainDepthNormal(Detail::SceneRendererFrame& frame)
+	{
+		const RenderSnapshot& snapshot = *frame.Snapshot;
+		if (snapshot.Terrains.empty())
+			return;
+		ENGINE_CORE_ASSERT(Pipelines->Terrain != nullptr, "the pipeline set has no terrain pass");
+		if (Pipelines->Terrain == nullptr)
+		{
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no terrain pass; the terrains are not drawn"));
+			return;
+		}
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		const TerrainPassInputs inputs{ .Snapshot = &snapshot, .Camera = &frame.Camera, .DebugView = frame.DebugView };
+		frame.KeepFirstError(Pipelines->Terrain->Prepare(commandList, *Cache, TerrainResources, inputs));
+		if (TerrainResources.Draws.empty())
+			return;
+		// The terrain prepass's set 0 (TerrainPass.h): the view's constants, the DFG LUT its SceneRoughness reads and the samplers.
+		nvrhi::BindingSetDesc desc;
+		desc.bindings = {
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, ViewConstantsBuffer),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
+			nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
+			nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
+			nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(TerrainDrawConstants)),
+		};
+		auto set = ViewBindings.GetOrCreate(*Device, desc, Pipelines->Terrain->GetPrepassViewLayout());
+		if (!set)
+		{
+			frame.KeepFirstError(std::unexpected(std::move(set).error()));
+			return;
+		}
+		nvrhi::IFramebuffer* framebuffer = frame.Picking ? Targets.PickingFramebuffer.Get() : Targets.PrepassFramebuffer.Get();
+		frame.Recording->BeginPass("TerrainDepthNormal", &commandList);
+		RenderPassCounters counters;
+		Pipelines->Terrain->RecordDepthNormal(commandList, TerrainResources, *framebuffer, frame.Picking, **set, counters);
+		frame.Recording->EndPass(counters);
 	}
 
 	void SceneRenderer::State::RecordAmbientStage(Detail::SceneRendererFrame& frame)
 	{
 		frame.Occlusion = Pipelines->WhiteAo;
 		frame.LinearDepth = Pipelines->FarDepth;
-		if (frame.Ao)
+		// M26 (stream X-D, decision 18): SSR traces over the depth pyramid, which records for it without GTAO too; the
+		// forward passes keep the neutral occlusion and depth then.
+		if (frame.Ssr)
+		{
+			const Status ensured = EnsureSsrTargets();
+			frame.KeepFirstError(ensured);
+			frame.Ssr = ensured.has_value();
+		}
+		if (frame.Ao || frame.Ssr)
 		{
 			nvrhi::ICommandList& commandList = *frame.CommandList;
 			RenderRecordingContext& recording = *frame.Recording;
 			const Status depth = Pipelines->DepthPyramid->Record(commandList, recording, DepthBindings, { .SceneDepth = Targets.SceneDepth, .ViewDepth = Targets.ViewDepth, .Camera = frame.Camera });
 			frame.KeepFirstError(depth);
-			if (depth)
+			frame.Ssr = frame.Ssr && depth.has_value();
+			if (depth && frame.Ao)
 			{
 				auto result = Pipelines->Gtao->Record(commandList, recording, GtaoBindings, { .Camera = frame.Camera, .Post = frame.Snapshot->Post, .HalfResolution = frame.HalfAo, .ViewDepth = Targets.ViewDepth, .SceneNormals = Targets.SceneNormals, .Occlusion = Targets.Occlusion, .Scratch = Targets.AoScratch });
 				if (result)
@@ -2035,6 +2211,15 @@ namespace Engine {
 					RecordMeshPass(commandList, Detail::SceneRendererMeshPass::ForwardOpaque, OpaqueDraws, **forwardSet, frame.DebugView, counters);
 					recording.EndPass(counters);
 				}
+				// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22, stream T-C): the terrains the DepthNormal
+				// stage prepared, with the same forward set, before the skybox fills the pixels left at the cleared depth.
+				if (!TerrainResources.Draws.empty())
+				{
+					recording.BeginPass("TerrainForward", &commandList);
+					RenderPassCounters counters;
+					Pipelines->Terrain->RecordForward(commandList, TerrainResources, *Targets.ForwardFramebuffer, **forwardSet, counters);
+					recording.EndPass(counters);
+				}
 				if (frame.IsLit && frame.Camera.ClearToSkybox && frame.EnvironmentSkybox != nullptr && snapshot.Environment.ShowSkybox)
 				{
 					recording.BeginPass("Skybox", &commandList);
@@ -2042,6 +2227,9 @@ namespace Engine {
 					recording.EndPass({ .DrawCalls = drawn ? 1U : 0U, .Triangles = drawn ? 1U : 0U });
 					frame.KeepFirstError(drawn);
 				}
+				// M26 (stream X-D, decision 18): SSR over the opaque image and the skybox, before the transparent pass.
+				if (frame.Ssr)
+					RecordSsr(frame);
 				if (!TransparentDraws.empty())
 				{
 					// GTAO and its depth-aware upsample describe the prepass (Opaque and Mask) surface at each pixel, not the
@@ -2073,13 +2261,60 @@ namespace Engine {
 			recording.BeginPass("Overdraw", &commandList);
 			RenderPassCounters counters;
 			commandList.clearTextureFloat(Targets.Overdraw, nvrhi::AllSubresources, nvrhi::Color(0.0f));
-			if (frame.PrepassSet != nullptr)
+			if (frame.OverdrawSet != nullptr)
 			{
-				RecordMeshPass(commandList, Detail::SceneRendererMeshPass::Overdraw, OpaqueDraws, *frame.PrepassSet, frame.DebugView, counters);
-				RecordMeshPass(commandList, Detail::SceneRendererMeshPass::Overdraw, TransparentDraws, *frame.PrepassSet, frame.DebugView, counters);
+				RecordMeshPass(commandList, Detail::SceneRendererMeshPass::Overdraw, OpaqueDraws, *frame.OverdrawSet, frame.DebugView, counters);
+				RecordMeshPass(commandList, Detail::SceneRendererMeshPass::Overdraw, TransparentDraws, *frame.OverdrawSet, frame.DebugView, counters);
 			}
 			recording.EndPass(counters);
 		}
+	}
+
+	Status SceneRenderer::State::EnsureSsrTargets()
+	{
+		const uint32_t width = Targets.Width;
+		const uint32_t height = Targets.Height;
+		if (Targets.ViewDepth == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.ViewDepth, TargetPool->Acquire(DepthPyramidPass::GetTargetDesc(width, height)));
+		}
+		if (Targets.SsrColor == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.SsrColor, TargetPool->Acquire(SsrPass::GetTargetDesc(width, height)));
+		}
+		if (Targets.SsrFramebuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.SsrFramebuffer, Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.SceneColor)));
+		}
+		return {};
+	}
+
+	void SceneRenderer::State::RecordSsr(Detail::SceneRendererFrame& frame)
+	{
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		RenderRecordingContext& recording = *frame.Recording;
+		const SsrPassInputs inputs{
+			.ViewConstants = ViewConstantsBuffer,
+			.EnvironmentConstants = EnvironmentConstantsBuffer,
+			.ProbeConstants = ProbeResources.Constants,
+			.SceneDepth = Targets.SceneDepth,
+			.SceneNormals = Targets.SceneNormals,
+			.SceneRoughness = Targets.SceneRoughness,
+			.ViewDepth = Targets.ViewDepth,
+			.SceneColor = Targets.SceneColor,
+			.Framebuffer = Targets.SsrFramebuffer,
+			.SsrColor = Targets.SsrColor,
+			.AmbientOcclusion = frame.Occlusion,
+			.LinearViewDepth = frame.LinearDepth,
+			.EnvironmentSpecular = frame.EnvironmentSpecular,
+			.ReflectionProbeCubes = !frame.Probes.Cubes.empty() ? ProbeResources.Cubes.Get() : Pipelines->EmptyReflectionProbeCubes.Get(),
+			.Post = frame.Snapshot->Post,
+		};
+		recording.BeginPass("SSR", &commandList);
+		RenderPassCounters counters;
+		const Status recorded = Pipelines->Ssr->Record(commandList, SsrBindings, inputs, counters);
+		recording.EndPass(counters);
+		frame.KeepFirstError(recorded);
 	}
 
 	void SceneRenderer::State::RecordSpritesStage(Detail::SceneRendererFrame& frame)
@@ -2603,6 +2838,7 @@ namespace Engine {
 
 	void SceneRenderer::State::RecordHdrPostStage(Detail::SceneRendererFrame& frame)
 	{
+		RecordTaa(frame);
 		const PostProcessSettings& post = frame.Snapshot->Post;
 		frame.Bloom = nullptr;
 		frame.BloomIntensity = std::isfinite(post.BloomIntensity) ? std::clamp(post.BloomIntensity, 0.0f, 1.0f) : 0.0f;
@@ -2620,6 +2856,51 @@ namespace Engine {
 			frame.Recording->EndPass(counters);
 		}
 		RecordExposure(frame);
+	}
+
+	Status SceneRenderer::State::EnsureTaaHistory()
+	{
+		if (Targets.TaaHistory[0] != nullptr && Targets.TaaHistory[1] != nullptr)
+			return {};
+		TaaHistoryValid = false;
+		const nvrhi::TextureDesc desc = TaaPass::GetHistoryDesc(Targets.Width, Targets.Height);
+		std::array<nvrhi::TextureHandle, 2> history{};
+		for (nvrhi::TextureHandle& image : history)
+		{
+			ENGINE_TRY_ASSIGN(image, TargetPool->Acquire(desc));
+		}
+		Targets.TaaHistory = std::move(history);
+		TaaHistoryIndex = 0;
+		return {};
+	}
+
+	void SceneRenderer::State::RecordTaa(Detail::SceneRendererFrame& frame)
+	{
+		if (!frame.Taa)
+		{
+			TaaHistoryValid = false;
+			return;
+		}
+		if (const Status ensured = EnsureTaaHistory(); !ensured)
+		{
+			frame.KeepFirstError(ensured);
+			TaaHistoryValid = false;
+			return;
+		}
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		frame.Recording->BeginPass("TAA", &commandList);
+		RenderPassCounters counters;
+		// The temporal-state section (decision 10): a reset history resolves to the current image, as does a view without the
+		// resolved image of its previous render.
+		const bool reset = !TaaHistoryValid || !frame.Camera.PreviousViewProjection.has_value();
+		const uint32_t resolved = reset ? 0U : 1U - TaaHistoryIndex;
+		const Status recorded = Pipelines->Taa->Record(commandList, TaaBindings,
+			{ .SceneColor = Targets.SceneColor, .Velocity = Targets.SceneVelocity, .History = reset ? nullptr : Targets.TaaHistory[TaaHistoryIndex].Get(), .Resolved = Targets.TaaHistory[resolved], .Reset = reset },
+			counters);
+		frame.Recording->EndPass(counters);
+		TaaHistoryValid = recorded.has_value();
+		TaaHistoryIndex = resolved;
+		frame.KeepFirstError(recorded);
 	}
 
 	Status SceneRenderer::State::EnsureExposureBuffers()

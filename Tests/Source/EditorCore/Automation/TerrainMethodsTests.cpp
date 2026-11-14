@@ -10,6 +10,7 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Graphics/Image.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/TestData.h"
 
@@ -25,7 +26,9 @@
 
 // terrain.importHeightmap (M26, C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 20, stream T-A): its C++ round
 // trip (a 16-bit PNG and a RAW converted into one heightfield, a heightfield replaced in place, one undo step each) and its
-// refusals at their pointers.
+// refusals at their pointers. terrain.edit (decision 23, stream T-E): its refusals at their pointers and a stroke that changes
+// nothing, which writes nothing; its round trip against
+// EditTerrain and the editor's stroke is TerrainEditingTests.cpp's.
 
 namespace Engine {
 
@@ -201,6 +204,118 @@ namespace Engine {
 			REQUIRE(registered.has_value());
 			CHECK(*registered == texture->Handle);
 			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == history);
+		}
+
+		TEST_CASE("TerrainMethods: terrain.edit refuses a stroke outside its ranges, a terrain it cannot edit and a playing editor at their params, writing nothing")
+		{
+			Test::AutomationFixture setup("TerrainEditRefused");
+			CallTerrainOrFail(setup, "asset.create", Json{ { "type", "Heightfield" }, { "path", std::string(RampPath) } });
+			// A Color texture (the importer's default settings), which a splat map must not be.
+			const Result<Image> pixels = CreateImage(4, 4, nvrhi::Format::RGBA8_UNORM);
+			REQUIRE(pixels.has_value());
+			const Result<Buffer> png = EncodePng(*pixels);
+			REQUIRE(png.has_value());
+			WriteProjectBytes(setup, "Assets/Terrain/Colour.png", *png);
+			CallTerrainOrFail(setup, "project.refreshAssets", Json::object());
+			const Json terrain{ { "Heightfield", std::string(RampPath) } };
+			CallTerrainOrFail(setup, "entity.create", Json{ { "name", "Terrain" }, { "components", Json{ { "Terrain", terrain } } } });
+			CallTerrainOrFail(setup, "entity.create", Json{ { "name", "Plain" } });
+			CallTerrainOrFail(setup, "entity.create", Json{ { "name", "Bare" }, { "components", Json{ { "Terrain", Json::object() } } } });
+			Json coloured = terrain;
+			coloured["SplatMap"] = "Assets/Terrain/Colour.png";
+			CallTerrainOrFail(setup, "entity.create", Json{ { "name", "Coloured" }, { "components", Json{ { "Terrain", coloured } } } });
+			const Buffer before = ReadProjectBytes(setup, RampPath);
+			const size_t history = setup.GetEditor().GetHistory().GetUndoCount();
+
+			const auto refusedAt = [&setup](Json params, std::string_view code, std::string_view pointer)
+			{
+				CAPTURE(params.dump());
+				if (!params.contains("entity"))
+					params["entity"] = "/Terrain";
+				if (!params.contains("points"))
+					params["points"] = Json::array({ Json::array({ 32, 0, 32 }) });
+				const Json refused = setup.Request("terrain.edit", params);
+				REQUIRE(refused.contains("error"));
+				CHECK(refused["error"]["data"]["errorCode"] == Json(std::string(code)));
+				if (!pointer.empty())
+					CHECK(refused["error"]["data"]["location"]["pointer"] == Json(std::string(pointer)));
+			};
+			Json manyPoints = Json::array();
+			for (int index = 0; index < 4097; ++index)
+				manyPoints.push_back(Json::array({ 32, 0, 32 }));
+			refusedAt(Json{ { "points", Json::array() } }, "InvalidArgument", "/points");
+			refusedAt(Json{ { "points", std::move(manyPoints) } }, "InvalidArgument", "/points");
+			refusedAt(Json{ { "radius", 0 } }, "InvalidArgument", "/radius");
+			refusedAt(Json{ { "strength", 1.5 } }, "InvalidArgument", "/strength");
+			refusedAt(Json{ { "tool", "Flatten" }, { "height", 17 } }, "InvalidArgument", "/height");
+			refusedAt(Json{ { "tool", "Paint" }, { "layer", 4 } }, "InvalidArgument", "/layer");
+			refusedAt(Json{ { "entity", "/Missing" } }, "NotFound", "/entity");
+			refusedAt(Json{ { "entity", "/Plain" } }, "InvalidArgument", "/entity");
+			refusedAt(Json{ { "entity", "/Bare" } }, "NotFound", "/entity");
+			refusedAt(Json{ { "entity", "/Coloured" }, { "tool", "Paint" } }, "InvalidArgument", "/entity");
+			// No run-time edits: the edit scene's terrains wait for the play session to end.
+			CallTerrainOrFail(setup, "play.start", Json{ { "lockstep", true }, { "mode", "simulate" } });
+			refusedAt(Json::object(), "InvalidState", "");
+			CallTerrainOrFail(setup, "play.stop", Json::object());
+
+			CHECK(ReadProjectBytes(setup, RampPath) == before);
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == history);
+			// The edit succeeds once nothing stands in its way.
+			const Json edited = CallTerrainOrFail(setup, "terrain.edit", Json{ { "entity", "/Terrain" }, { "points", Json::array({ Json::array({ 32, 0, 32 }) }) } });
+			CHECK(edited["path"] == Json(std::string(RampPath)));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == history + 1);
+		}
+
+		// Architecture §13.5 (W26.2's review): a stroke that changes no sample or texel writes nothing, reimports nothing and
+		// records no undo step and no provenance: a Lower on flat ground, and a Paint of the layer a splat map already holds
+		// everywhere.
+		TEST_CASE("TerrainMethods: terrain.edit's stroke that changes nothing writes nothing and records no step")
+		{
+			Test::AutomationFixture setup("TerrainEditNothing");
+			CallTerrainOrFail(setup, "asset.create", Json{ { "type", "Heightfield" }, { "path", std::string(RampPath) } });
+			CallTerrainOrFail(setup, "entity.create",
+				Json{ { "name", "Terrain" }, { "components", Json{ { "Terrain", Json{ { "Heightfield", std::string(RampPath) } } } } } });
+			EditorContext& editor = setup.GetEditor();
+			const auto provenance = [&editor]()
+			{
+				const ProvenanceRecorder* recorder = editor.GetProvenance();
+				REQUIRE(recorder != nullptr);
+				return ProvenanceRecorder::ToText(recorder->GetEntries());
+			};
+			const Json points = Json::array({ Json::array({ 32, 0, 32 }), Json::array({ 40, 0, 30 }) });
+			const Buffer flat = ReadProjectBytes(setup, RampPath);
+			const std::optional<AssetHandle> ramp = editor.GetAssets().Resolve(RampPath);
+			REQUIRE(ramp.has_value());
+			const uint64_t version = editor.GetAssets().GetVersion(*ramp);
+			size_t history = editor.GetHistory().GetUndoCount();
+			std::string recorded = provenance();
+			const Json lowered = CallTerrainOrFail(setup, "terrain.edit", Json{ { "entity", "/Terrain" }, { "tool", "Lower" }, { "points", points }, { "strength", 1 } });
+			CHECK(lowered["changed"] == Json(0));
+			CHECK(lowered["createdSplatMap"] == Json(false));
+			CHECK(lowered["path"] == Json(std::string(RampPath)));
+			CHECK(ReadProjectBytes(setup, RampPath) == flat);
+			CHECK(editor.GetAssets().GetVersion(*ramp) == version);
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			CHECK(provenance() == recorded);
+
+			// The first paint makes the splat map (one step), every texel layer 0's; painting layer 0 again changes nothing.
+			const Json paint{ { "entity", "/Terrain" }, { "tool", "Paint" }, { "layer", 0 }, { "points", points }, { "strength", 1 } };
+			const Json made = CallTerrainOrFail(setup, "terrain.edit", paint);
+			REQUIRE(made["createdSplatMap"] == Json(true));
+			const Result<std::string> madePath = JsonReader(made).ReadMember<std::string>("path");
+			REQUIRE(madePath.has_value());
+			const std::string splatPath = *madePath;
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			const Buffer splat = ReadProjectBytes(setup, splatPath);
+			history = editor.GetHistory().GetUndoCount();
+			recorded = provenance();
+			const Json repainted = CallTerrainOrFail(setup, "terrain.edit", paint);
+			CHECK(repainted["changed"] == Json(0));
+			CHECK(repainted["createdSplatMap"] == Json(false));
+			CHECK(repainted["path"] == Json(splatPath));
+			CHECK(ReadProjectBytes(setup, splatPath) == splat);
+			CHECK(editor.GetHistory().GetUndoCount() == history);
+			CHECK(provenance() == recorded);
 		}
 	}
 

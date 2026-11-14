@@ -1,0 +1,166 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Terrain",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 2,
+		"Terrain": 1
+	},
+	"Entities": [
+		{
+			"ID": "b022c96994fd14be",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.3, 0.36, 0.44]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Fxaa"
+				}
+			}
+		},
+		{
+			"ID": "b0cf147e7a4e339a",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 14, -4],
+					"Rotation": [-0.04663738, -0.9169931, -0.11259259, 0.37983096],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.45, 0.6, 0.8]
+				}
+			}
+		},
+		{
+			"ID": "442a718455512b85",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.26041886, -0.47685847, -0.1503529, 0.8259431],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "aced4324efb59a54",
+			"Name": "Hills",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Terrain": {
+					"Heightfield": "b823863288580eda",
+					"Size": [64, 64],
+					"HeightScale": 12,
+					"Layers": [
+						{
+							"BaseColorMap": "0000000000000184",
+							"NormalMap": null,
+							"Tint": [0.3, 0.48, 0.18],
+							"Tiling": 8,
+							"Roughness": 0.9,
+							"Metallic": 0
+						},
+						{
+							"BaseColorMap": null,
+							"NormalMap": null,
+							"Tint": [0.3, 0.26, 0.22],
+							"Tiling": 4,
+							"Roughness": 0.95,
+							"Metallic": 0
+						},
+						{
+							"BaseColorMap": null,
+							"NormalMap": null,
+							"Tint": [0.76, 0.66, 0.45],
+							"Tiling": 4,
+							"Roughness": 0.9,
+							"Metallic": 0
+						},
+						{
+							"BaseColorMap": null,
+							"NormalMap": null,
+							"Tint": [0.92, 0.94, 0.96],
+							"Tiling": 4,
+							"Roughness": 0.6,
+							"Metallic": 0
+						}
+					],
+					"SplatMap": "801fdc378adf372b",
+					"ReceiveShadows": true,
+					"LodBias": 0.25
+				}
+			}
+		}
+	]
+}

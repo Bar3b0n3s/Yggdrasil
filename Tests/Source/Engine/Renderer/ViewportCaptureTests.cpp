@@ -6,10 +6,12 @@
 #include "Engine/Graphics/GpuResourceTracker.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
+#include "Engine/Graphics/Readback.h"
 #include "Engine/Graphics/RenderTargetPool.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/TemporalHistory.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -24,9 +26,11 @@
 #include <cstdlib>
 #include <span>
 #include <utility>
+#include <vector>
 
 // The viewport capture (Architecture §8.13): snapshots rendered through the capture's own SceneRenderer over shared
-// pipelines and read back at the requested size (Docs/Decisions/0012-m7-decisions.md decision 9).
+// pipelines and read back at the requested size (Docs/Decisions/0012-m7-decisions.md decision 9); from M26 each from a reset
+// view history, with the temporal warm-up (Docs/Decisions/0037-m26-contract.md decision 10).
 
 namespace Engine {
 
@@ -84,8 +88,8 @@ namespace Engine {
 				CaptureSetup setup(gpu, assets);
 				const RenderSnapshot snapshot = MakeCubeSnapshot(DefaultViewportScreenshotWidth, DefaultViewportScreenshotHeight);
 
-				// The default request is the golden-image size; two captures of one request are identical (§8.3: no temporal
-				// effects), and the cube covers the centre while the corners show the clear colour.
+				// The default request is the golden-image size; two captures of one request are identical (§8.3; M26: every
+				// capture renders from a reset history), and the cube covers the centre while the corners show the clear colour.
 				const Result<Image> first = setup.GetCapture().Capture({}, snapshot);
 				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
 				CHECK(first->Width == DefaultViewportScreenshotWidth);
@@ -114,6 +118,82 @@ namespace Engine {
 				REQUIRE_MESSAGE(small.has_value(), small.error().ToString());
 				CHECK(small->Width == 320);
 				CHECK(small->Height == 200);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// The acceptance (decision 10): a capture with TAA resets its history and renders the warm-up, so two captures of a
+		// scene are byte-identical whatever the capture rendered before, and the resolved image differs from the one without TAA.
+		TEST_CASE("ViewportCapture: two captures with TAA are byte-identical after the warm-up" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
+				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
+				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
+				Result<Scope<ViewportCapture>> capture = ViewportCapture::CreateForScenes(gpu.GetDevice(), **pipelines, cache, assets.GetManager());
+				REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+				constexpr uint32_t Width = 96;
+				constexpr uint32_t Height = 64;
+				RenderSnapshot snapshot;
+				snapshot.HasCamera = true;
+				snapshot.Camera.Position = glm::vec3(0.0f, 0.0f, 5.0f);
+				snapshot.Camera.View = glm::translate(glm::mat4(1.0f), -snapshot.Camera.Position);
+				snapshot.Camera.ViewportWidth = Width;
+				snapshot.Camera.ViewportHeight = Height;
+				snapshot.Camera.Projection = ComputeReverseZProjection(RenderProjection::Perspective, 60.0f, 10.0f, 0.1f, 1000.0f, Width, Height);
+				snapshot.Camera.ClearColor = glm::vec3(0.2f, 0.3f, 0.4f);
+				snapshot.Camera.ClearToSkybox = false;
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::rotate(glm::mat4(1.0f), 0.5f, glm::vec3(1.0f, 1.0f, 0.0f)), .Mesh = BuiltinAssetHandles::CubeMesh, .Entity = UUID(5) });
+				snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional, .Direction = glm::vec3(0.0f, 0.0f, -1.0f) });
+				snapshot.Post.AntiAliasing = RenderAntiAliasing::Taa;
+				CHECK(NeedsTemporalWarmup(snapshot));
+
+				const Result<Image> first = (*capture)->Capture({ .Width = Width, .Height = Height }, snapshot);
+				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+				// Another scene between the two captures leaves nothing behind.
+				RenderSnapshot other = snapshot;
+				other.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+				REQUIRE((*capture)->Capture({ .Width = Width, .Height = Height }, other).has_value());
+				const Result<Image> second = (*capture)->Capture({ .Width = Width, .Height = Height }, snapshot);
+				REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+				CHECK(first->Pixels == second->Pixels);
+
+				RenderSnapshot plain = snapshot;
+				plain.Post.AntiAliasing = RenderAntiAliasing::None;
+				CHECK_FALSE(NeedsTemporalWarmup(plain));
+				const Result<Image> unresolved = (*capture)->Capture({ .Width = Width, .Height = Height }, plain);
+				REQUIRE_MESSAGE(unresolved.has_value(), unresolved.error().ToString());
+				CHECK(unresolved->Pixels != first->Pixels);
+
+				// W26.2's review: the capture is the warm-up's last render, a view that renders the snapshot through a fresh
+				// history CaptureWarmupFrames times with delta time 0, never the reset render the warm-up starts from.
+				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(), { .Width = Width, .Height = Height });
+				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
+				RenderViewHistory history;
+				std::vector<Image> renders;
+				for (uint32_t index = 0; index < CaptureWarmupFrames; ++index)
+				{
+					RenderSnapshot view = snapshot;
+					history.Apply(view, 0.0f);
+					view.FrameIndex = 900 + index;
+					Result<nvrhi::CommandListHandle> list = gpu.GetDevice().CreateCommandList();
+					REQUIRE(list.has_value());
+					(*list)->open();
+					const Status rendered = (*renderer)->Render(**list, view);
+					(*list)->close();
+					(*renderer)->OnSubmitted(view.FrameIndex, gpu.GetDevice().ExecuteCommandList(**list));
+					REQUIRE_MESSAGE(rendered.has_value(), rendered.error().ToString());
+					Readback readback(gpu.GetDevice());
+					Result<Image> image = readback.ReadTexture(*(*renderer)->GetFinalTexture());
+					REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+					renders.push_back(std::move(*image));
+				}
+				CHECK(first->Pixels == renders.back().Pixels);
+				CHECK(first->Pixels != renders.front().Pixels);
+				gpu.GetDevice().WaitForIdle();
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

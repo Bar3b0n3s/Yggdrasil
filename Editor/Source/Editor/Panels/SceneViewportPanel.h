@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Editor/Tools/TerrainBrush.h"
 #include "Editor/Ui/UiAuthoringOverlay.h"
 #include "Editor/Viewport/TilemapBrush.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
@@ -32,7 +33,9 @@ namespace Engine {
 	// orthographic). A dropped sprite sheet or texture creates a sprite where the cursor's ray meets z = 0 (SpriteDrop.h; the
 	// camera's target when it meets no point of it), through entity.create. With one entity holding a TilemapRenderer whose
 	// Tilemap is set selected, the toolbar shows the tile brush's controls and an armed brush takes the image's left and
-	// right strokes, each one tilemap.paint (Editor/Viewport/TilemapBrush.h; M21, decision 26).
+	// right strokes, each one tilemap.paint (Editor/Viewport/TilemapBrush.h; M21, decision 26). M26 (Docs/Decisions/
+	// 0037-m26-contract.md decision 23): with one edit-scene entity holding a Terrain selected, the toolbar shows the terrain
+	// brush's controls and an armed brush takes the image's left strokes, each one terrain.edit (Editor/Tools/TerrainBrush.h).
 	// M22 (Docs/Decisions/0033-m22-contract.md decisions 33 and 34): the Overlays popup's "UI preview" (EditorViewportOptions::
 	// UiPreview) shows the game frame letterboxed in the view (UiPreview.h) under the UI authoring overlay (UiAuthoringOverlay.h),
 	// whose item takes the image's presses; the camera's controls, the gizmo, Frame and mesh picking are off meanwhile.
@@ -55,6 +58,7 @@ namespace Engine {
 	private:
 		GizmoSettings m_GizmoSettings{};
 		TilemapBrush m_TilemapBrush{};
+		TerrainBrush m_TerrainBrush{}; // M26
 		uint64_t m_ClickSequence = 0;
 		std::vector<uint64_t> m_ActionTickets{};
 		std::vector<UUID> m_DragSelection{};

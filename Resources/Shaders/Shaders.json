@@ -231,6 +231,10 @@
 					"Stage": "vertex"
 				},
 				{
+					"Name": "VSPrepass",
+					"Stage": "vertex"
+				},
+				{
 					"Name": "VSPicking",
 					"Stage": "vertex"
 				},
@@ -381,6 +385,60 @@
 					"1"
 				]
 			}
+		},
+		{
+			"Name": "Ssr",
+			"File": "Passes/Ssr.slang",
+			"Entries": [
+				{
+					"Name": "CSTrace",
+					"Stage": "compute"
+				},
+				{
+					"Name": "VSComposite",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSComposite",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
+			"Name": "Taa",
+			"File": "Passes/Taa.slang",
+			"Entries": [
+				{
+					"Name": "CSMain",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
+			"Name": "Terrain",
+			"File": "Passes/Terrain.slang",
+			"Entries": [
+				{
+					"Name": "VSPrepass",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSPrepass",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSPicking",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "VSForward",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSForward",
+					"Stage": "fragment"
+				}
+			]
 		},
 		{
 			"Name": "Text",

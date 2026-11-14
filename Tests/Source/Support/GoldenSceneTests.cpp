@@ -306,10 +306,11 @@ namespace Engine {
 		TEST_CASE("GoldenScene: the scaffold's sources and their imported copies are the Tests/Data fixtures")
 		{
 			// Projects/FeatureTest/Scaffold/Sources holds the files the scaffolds import, Golden.jsonl's, Formats.jsonl's, M21's
-			// 2D scaffolds' and later ones' such as GoldenTextured.jsonl's (asset.import takes project paths or absolute ones, so
-			// the committed scaffolds import from inside the project): a subset mirror of Tests/Data/Assets, never a deliberately
-			// invalid fixture (ADR 0022 decision 16). Every source and every copy the imports made under Assets/ must stay
-			// byte-identical to its generated or pinned fixture (Tests/Data/Generate, FetchAssets.py fixture).
+			// 2D scaffolds' and later ones' such as GoldenTextured.jsonl's, and the heightmap Terrain.jsonl converts (asset.import
+			// and terrain.importHeightmap take project paths or absolute ones, so the committed scaffolds import from inside the
+			// project): a subset mirror of Tests/Data/Assets, never a deliberately invalid fixture (ADR 0022 decision 16). Every
+			// source and every copy the imports made under Assets/ must stay byte-identical to its generated or pinned fixture
+			// (Tests/Data/Generate, FetchAssets.py fixture).
 			const std::filesystem::path sources = GetFeatureTestPath("Scaffold/Sources");
 			const Result<std::vector<std::filesystem::path>> entries = FileSystem::ListDirectory(sources, true);
 			REQUIRE_MESSAGE(entries.has_value(), entries.error().ToString());
@@ -348,10 +349,13 @@ namespace Engine {
 			const Result<std::vector<std::filesystem::path>> assetFiles = FileSystem::ListDirectory(assets, true);
 			REQUIRE_MESSAGE(assetFiles.has_value(), assetFiles.error().ToString());
 			std::vector<std::string> imported;
+			std::vector<std::string> heightfieldStems;
 			for (const std::filesystem::path& entry : *assetFiles)
 			{
 				const Result<FileInfo> info = FileSystem::GetInfo(entry);
 				REQUIRE(info.has_value());
+				if (!info->IsDirectory && entry.extension() == ".heightfield")
+					heightfieldStems.push_back(FileSystem::PathToUtf8(entry.stem()));
 				const auto source = sourceByName.find(FileSystem::PathToUtf8(entry.filename()));
 				if (info->IsDirectory || source == sourceByName.end())
 					continue;
@@ -394,11 +398,14 @@ namespace Engine {
 				CHECK(std::ranges::find(mirrored, relative) != mirrored.end());
 				imported.push_back(relative);
 			}
-			// No source is unused.
+			// No source is unused. A heightmap (Heightmaps/, M26's Terrain.jsonl) is converted, not copied: terrain.importHeightmap
+			// writes a .heightfield of its stem, whose samples the Terrain suite checks, so that file uses it.
 			for (const std::string& relative : mirrored)
 			{
 				CAPTURE(relative);
-				CHECK(std::ranges::find(imported, relative) != imported.end());
+				const std::string stem = FileSystem::PathToUtf8(FileSystem::PathFromUtf8(relative).stem());
+				const bool converted = relative.starts_with("Heightmaps/") && std::ranges::find(heightfieldStems, stem) != heightfieldStems.end();
+				CHECK((converted || std::ranges::find(imported, relative) != imported.end()));
 			}
 		}
 

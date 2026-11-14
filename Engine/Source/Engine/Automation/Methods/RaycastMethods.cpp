@@ -39,7 +39,7 @@ namespace Engine {
 			.Field("origin", &SceneRaycastParams::Origin, "Finite world-space ray origin in metres.")
 			.Field("direction", &SceneRaycastParams::Direction, "Finite nonzero world direction; normalized by the query.")
 			.Field("maxDistance", &SceneRaycastParams::MaxDistance, "Positive finite maximum distance in metres, inclusive.", { .Min = 0 })
-			.Field("layerMask", &SceneRaycastParams::LayerMask, "Physics-layer bits inherited from the nearest rigid-body ancestor, or the entity's character, else Default.")
+			.Field("layerMask", &SceneRaycastParams::LayerMask, "Physics-layer bits inherited from the nearest rigid-body ancestor, or the entity's character, or a terrain's own TerrainCollider, else Default.")
 			.Field("target", &SceneRaycastParams::Target, "Scene to query; defaults to play while playing and edit otherwise.");
 		registry.Struct<SceneRaycastResult>("SceneRaycastResult", "The nearest visual triangle, or an explicit miss with empty entity and zero values.")
 			.Field("hit", &SceneRaycastResult::Hit, "Whether a triangle intersects the ray interval.")
@@ -48,14 +48,14 @@ namespace Engine {
 			.Field("normal", &SceneRaycastResult::Normal, "Unit geometric normal facing against the ray.")
 			.Field("barycentric", &SceneRaycastResult::Barycentric, "Weights of the triangle's three indexed vertices.")
 			.Field("distance", &SceneRaycastResult::Distance, "World distance along the normalized ray.")
-			.Field("submesh", &SceneRaycastResult::Submesh, "Zero-based submesh index.")
-			.Field("triangle", &SceneRaycastResult::Triangle, "Zero-based triangle index within the submesh.");
+			.Field("submesh", &SceneRaycastResult::Submesh, "Zero-based submesh index; 0 for a terrain.")
+			.Field("triangle", &SceneRaycastResult::Triangle, "Zero-based triangle index within the submesh; for a terrain, 2 * (z * (resolution - 1) + x) for cell (x, z)'s triangle on its (x, z + 1) side, plus 1 for the one on its (x + 1, z) side.");
 	}
 
 	void RegisterRaycastMethods(MethodRegistry& methods)
 	{
 		methods.Add({ .Name = "scene.raycast",
-						.Description = "Finds the nearest visible mesh triangle on a CPU ray, including both faces and Mask/Blend geometry without texture alpha testing. Does not step physics or change selection.",
+						.Description = "Finds the nearest visible mesh or terrain triangle on a CPU ray, including both faces and Mask/Blend geometry without texture alpha testing; a terrain is hit on the surface it draws and collides with. Does not step physics or change selection.",
 						.RequiredParams = { "origin", "direction", "maxDistance" },
 						.SupportsDryRun = true,
 						.SupportsSceneTarget = true,

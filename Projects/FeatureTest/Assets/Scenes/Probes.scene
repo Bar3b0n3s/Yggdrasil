@@ -1,0 +1,148 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Probes",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"PointLight": 2,
+		"IrradianceVolume": 1,
+		"ReflectionProbe": 1
+	},
+	"Entities": [
+		{
+			"ID": "59f2393d69646625",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.6, 5],
+					"Rotation": [-0.087155744, 0, 0, 0.9961947],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.025, 0.035]
+				}
+			}
+		},
+		{
+			"ID": "4bd9dfa3cc435dc4",
+			"Name": "Floor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 1, 4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "1fe771b41bb7b4b5",
+			"Name": "Block",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0.5, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "6f7f5a7ddfe54a18",
+			"Name": "Lamp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.8, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 12,
+					"Range": 8,
+					"CastShadows": false,
+					"SourceRadius": 0.05
+				}
+			}
+		},
+		{
+			"ID": "b73d7c47fdf24aef",
+			"Name": "Volume",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"IrradianceVolume": {
+					"Data": "02bdb8186bdc7d50",
+					"Size": [4, 2, 4],
+					"ProbeCountX": 2,
+					"ProbeCountY": 2,
+					"ProbeCountZ": 3,
+					"Intensity": 0.8,
+					"BlendDistance": 0.5
+				}
+			}
+		},
+		{
+			"ID": "ca696813656be018",
+			"Name": "Mirror",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ReflectionProbe": {
+					"Data": "7a7c4d01e744e1b5",
+					"Size": [4, 2, 4],
+					"BoxProjection": false,
+					"Resolution": 64,
+					"Intensity": 0.9,
+					"BlendDistance": 0.5
+				}
+			}
+		}
+	]
+}

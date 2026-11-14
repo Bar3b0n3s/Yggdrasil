@@ -32,6 +32,7 @@
 #include "Shared/ShadowCasterConstants.h"
 #include "Shared/ShadowProbeConstants.h"
 #include "Shared/SkinningConstants.h"
+#include "Shared/SsrConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
 #include "Shared/Private/UpscaleConstants.h"
@@ -39,6 +40,8 @@
 #include "Shared/ShadowConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/SmokeConstants.h"
+#include "Shared/TaaConstants.h"
+#include "Shared/TerrainConstants.h"
 #include "Shared/TonemapConstants.h"
 #include "Shared/ViewConstants.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -290,6 +293,11 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding1),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding2),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding3),
+					// M26 (Docs/Decisions/0037-m26-contract.md decisions 11 and 17, stream X-C): the temporal inputs.
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, PreviousViewProjection),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, Jitter),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding4),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding5),
 				},
 				.Program = "Triangle",
 				.Entry = "VSMain",
@@ -338,6 +346,21 @@ namespace Engine {
 				.Program = "Exposure",
 				.Entry = "CSAdapt",
 			},
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 17, stream X-C): the Taa pass's push constants.
+			{
+				.Name = "TaaConstants",
+				.Size = sizeof(TaaConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(TaaConstants, ImageSize),
+					ENGINE_TEST_SHARED_FIELD(TaaConstants, InverseImageSize),
+					ENGINE_TEST_SHARED_FIELD(TaaConstants, Feedback),
+					ENGINE_TEST_SHARED_FIELD(TaaConstants, Flags),
+					ENGINE_TEST_SHARED_FIELD(TaaConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(TaaConstants, Padding1),
+				},
+				.Program = "Taa",
+				.Entry = "CSMain",
+			},
 			{
 				.Name = "ExposureState",
 				.Size = sizeof(ExposureState),
@@ -349,6 +372,59 @@ namespace Engine {
 				},
 				.Program = "Tonemap",
 				.Entry = "CSMain",
+			},
+			// M26 (R-SSR, stream X-D): the Ssr program's push constants, which its trace and its composite share.
+			{
+				.Name = "SsrConstants",
+				.Size = sizeof(SsrConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, ImageSize),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, InverseImageSize),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, MaxDistance),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, Thickness),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, MaxRoughness),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, Intensity),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, PyramidLevels),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, Padding2),
+				},
+				.Program = "Ssr",
+				.Entry = "CSTrace",
+			},
+			// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22, stream T-C): the terrain passes' constants and
+			// push constants.
+			{
+				.Name = "TerrainConstants",
+				.Size = sizeof(TerrainConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, World),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, LayerTints),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, LayerSurfaces),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, CellSize),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, HeightScale),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, Resolution),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, InverseSize),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, LayerCount),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, Flags),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, PickId),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, DebugView),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(TerrainConstants, Padding1),
+				},
+				.Program = "Terrain",
+				.Entry = "PSForward",
+			},
+			{
+				.Name = "TerrainDrawConstants",
+				.Size = sizeof(TerrainDrawConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(TerrainDrawConstants, ChunkOrigin),
+					ENGINE_TEST_SHARED_FIELD(TerrainDrawConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(TerrainDrawConstants, Padding1),
+				},
+				.Program = "Terrain",
+				.Entry = "VSForward",
 			},
 			{
 				.Name = "BloomConstants",
@@ -616,7 +692,8 @@ namespace Engine {
 			// with the format the C++ pass creates (PipelineLayoutDescription::StorageImages). Beyond the per-pipeline check of
 			// "Shaders: LayoutsMatchReflection", this pins down which formats the M8 passes write as storage images, both
 			// Bloom permutations included: LdrColor RGBA8 (tonemap, FXAA), the bloom chain in R11G11B10 or its RGBA16 fallback
-			// (§8.1), the environment bake's RGBA16 cubes and the DFG LUT's RG16.
+			// (§8.1), the environment bake's RGBA16 cubes, the DFG LUT's RG16 and M26's SsrColor
+			// RGBA16 (stream X-D).
 			CompiledShaders shaders;
 			std::map<std::string, std::set<nvrhi::Format>> formatsByProgram;
 			for (const PipelineLayoutDescription& description : GetEnginePipelineLayouts())
@@ -634,6 +711,7 @@ namespace Engine {
 				{ "Bloom", nvrhi::Format::RGBA16_FLOAT },
 				{ "EnvironmentBake", nvrhi::Format::RGBA16_FLOAT },
 				{ "BrdfLut", nvrhi::Format::RG16_FLOAT },
+				{ "Ssr", nvrhi::Format::RGBA16_FLOAT },
 			};
 			for (const auto& [program, format] : expected)
 			{

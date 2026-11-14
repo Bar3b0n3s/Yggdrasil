@@ -13,9 +13,9 @@
 
 // terrain.edit and terrain.importHeightmap (M26, C26.1, C-TERR, C-TERR-EDIT; Docs/Decisions/0037-m26-contract.md decisions
 // 20 and 23): the editor's terrain tools as methods (Roadmap rule 5).
-//   - terrain.edit is the sculpt and paint tools' one action (EditorCore/Terrain/TerrainEditing.h's EditTerrain, which the
-//     tools call with the stroke they collected), so a stroke through it is byte-identical to the same stroke made in the
-//     editor. It rewrites an asset source and records one undo step: Mutates, no dry run (a stroke's result is its files),
+//   - terrain.edit is the sculpt and paint tool's one action (EditorCore/Terrain/TerrainEditing.h's EditTerrain behind it;
+//     the scene view's terrain brush queues it with the stroke it collected), so a stroke through it is byte-identical to
+//     the same stroke made in the editor. It rewrites an asset source and records one undo step: Mutates, no dry run (a stroke's result is its files),
 //     not a batch op (it writes files directly); it addresses an open edit scene's entity, so it takes M20's scene target
 //     (the scene-target inventory's relation "the target scene's entity"). Stream T-E.
 //   - terrain.importHeightmap converts a 16-bit PNG or RAW heightmap into a `.heightfield` source (ConvertHeightmap,

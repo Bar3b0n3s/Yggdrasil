@@ -1,7 +1,7 @@
 """Terrain through automation (Docs/Decisions/0037-m26-contract.md decisions 20 and 23; Roadmap M26's terrain with
 sculpt and paint tools): asset.create makes a flat heightfield, terrain.importHeightmap converts a 16-bit PNG or RAW
 heightmap, and terrain.edit, the terrain tools' one action, sculpts and paints with a stroke whose bytes equal the
-editor's and which one undo restores."""
+editor's and which one undo restores; viewport.pick and scene.raycast hit the surface a terrain draws."""
 
 from __future__ import annotations
 
@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from harness import AutomationTestCase, engine_client, read_json
-
-SKIP_EDIT = "contract stub: terrain.edit (ADR 0037 decision 23, stream T-E)"
 
 
 def ramp_raw(side: int) -> bytes:
@@ -85,10 +83,10 @@ class TerrainTests(AutomationTestCase):
             import_heightmap(client, root, "Odd", ramp_raw(33)[:-2])
         self.assert_engine_error(refused.exception, engine_client.INVALID_PARAMS, "InvalidArgument")
 
-    @unittest.skip(SKIP_EDIT)
     def test_a_stroke_rewrites_the_heightfield_and_one_undo_restores_it(self) -> None:
         # Decision 23: terrain.edit applies one stroke through EditTerrain, the editor tools' one call, rewriting the
-        # heightfield's source; the same stroke twice from the same bytes gives the same bytes, and undo restores them.
+        # heightfield's source, recorded in provenance under its request; the same stroke twice from the same bytes
+        # gives the same bytes, and undo restores them.
         client, root = self.open_editor_with_scene()
         import_heightmap(client, root, "Flat", bytes(33 * 33 * 2))
         client.call("entity.create", {"name": "Terrain", "components": {
@@ -97,9 +95,15 @@ class TerrainTests(AutomationTestCase):
         before = source.read_bytes()
         stroke = {"entity": "/Terrain", "tool": "Raise", "points": [[16, 0, 16], [18, 0, 16]], "radius": 4,
                   "strength": 0.5}
-        edited = client.call("terrain.edit", stroke)
+        response = client.request("terrain.edit", stroke, transcript_line=9)
+        self.assertIn("result", response, response)
+        edited = response["result"]
         self.assertEqual(edited["path"], "Assets/Terrain/Flat.heightfield")
         self.assertGreater(edited["changed"], 0)
+        entries = {entry["Path"]: entry for entry in read_json(root / "Automation" / "Provenance.json")["Entries"]}
+        entry = entries["Assets/Terrain/Flat.heightfield"]
+        self.assertEqual((entry["Method"], entry["RequestId"], entry["TranscriptLine"]),
+                         ("terrain.edit", response["id"], 9))
         after = source.read_bytes()
         self.assertNotEqual(after, before)
         client.call("edit.undo")
@@ -107,7 +111,38 @@ class TerrainTests(AutomationTestCase):
         client.call("terrain.edit", stroke)
         self.assertEqual(source.read_bytes(), after)
 
-    @unittest.skip(SKIP_EDIT)
+    def test_viewport_pick_and_scene_raycast_hit_the_terrain_a_pixel_shows(self) -> None:
+        # W26.2's review (ADR 0037): the CPU visual queries test terrains on the triangles the renderer draws and the
+        # collider shapes, so a pixel that shows a terrain reports it, as the editor's click selects it, and a mesh
+        # buried below the surface is not what the pixel shows.
+        client, root = self.open_editor_with_scene()
+        import_heightmap(client, root, "Flat", bytes(17 * 17 * 2))
+        client.call("entity.create", {"name": "Terrain", "components": {
+            "Transform": {"Translation": [-8, 0, -8]},
+            "Terrain": {"Heightfield": "Assets/Terrain/Flat.heightfield", "Size": [16, 16]}}})
+        client.call("entity.create", {"name": "Rock", "components": {
+            "Transform": {"Translation": [0, -1, 0]}, "MeshRenderer": {"Mesh": "engine://Meshes/Cube"}}})
+        # A camera 10 m above the origin looking straight down (-90 degrees about X).
+        client.call("entity.create", {"name": "Camera", "components": {
+            "Transform": {"Translation": [0, 10, 0], "Rotation": [-0.70710678, 0, 0, 0.70710678]},
+            "Camera": {"Primary": True}}})
+        hit = client.call("scene.raycast", {"origin": [0.5, 10, 0.25], "direction": [0, -1, 0], "maxDistance": 100})
+        self.assertTrue(hit["hit"])
+        self.assertEqual(hit["entity"]["name"], "Terrain")
+        self.assertAlmostEqual(hit["distance"], 10, places=5)
+        for actual, expected in zip(hit["position"], [0.5, 0, 0.25]):
+            self.assertAlmostEqual(actual, expected, places=5)
+        for actual, expected in zip(hit["normal"], [0, 1, 0]):
+            self.assertAlmostEqual(actual, expected, places=5)
+        self.assertEqual(hit["submesh"], 0)
+        picked = client.call("viewport.pick", {"view": "game", "x": 320, "y": 180})["raycast"]
+        self.assertTrue(picked["hit"])
+        self.assertEqual(picked["entity"]["name"], "Terrain")
+        self.assertAlmostEqual(picked["position"][1], 0, places=5)
+        # Past the terrain's edge the ray reaches nothing.
+        self.assertFalse(client.call("scene.raycast", {"origin": [8.5, 10, 0], "direction": [0, -1, 0],
+                                                       "maxDistance": 100})["hit"])
+
     def test_painting_makes_a_linear_uncompressed_splat_map(self) -> None:
         # Decisions 20 and 23: the first paint of a terrain without a splat map makes one beside its heightfield,
         # named after the terrain's entity, imported as a data texture (Usage Linear and Compression None, so its

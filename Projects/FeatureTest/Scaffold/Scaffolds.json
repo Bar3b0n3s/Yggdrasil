@@ -310,6 +310,95 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Particles.jsonl",
+			"IdSeed": 2401,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenParticles.jsonl",
+			"IdSeed": 2402,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/GoldenParticles"
+			]
+		},
+		{
+			"File": "Probes.jsonl",
+			"IdSeed": 2403,
+			"Renderer": "vulkan"
+		},
+		{
+			"File": "GoldenProbes.jsonl",
+			"IdSeed": 2404,
+			"Renderer": "vulkan",
+			"GoldenDirectories": [
+				"Assets/Lighting/Scenes/GoldenProbes",
+				"Assets/Materials/GoldenProbes",
+				"Assets/Scenes/GoldenProbes"
+			]
+		},
+		{
+			"File": "PostProcessV2.jsonl",
+			"IdSeed": 2405,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenAutoExposure.jsonl",
+			"IdSeed": 2406,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenAutoExposure",
+				"Assets/Scenes/GoldenAutoExposure"
+			]
+		},
+		{
+			"File": "GoldenLut.jsonl",
+			"IdSeed": 2407,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Luts/GoldenLut",
+				"Assets/Materials/GoldenLut",
+				"Assets/Scenes/GoldenLut"
+			]
+		},
+		{
+			"File": "GoldenTaa.jsonl",
+			"IdSeed": 2408,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenTaa",
+				"Assets/Scenes/GoldenTaa"
+			]
+		},
+		{
+			"File": "GoldenSsr.jsonl",
+			"IdSeed": 2409,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenSsr",
+				"Assets/Scenes/GoldenSsr"
+			]
+		},
+		{
+			"File": "Terrain.jsonl",
+			"IdSeed": 2410,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenTerrain.jsonl",
+			"IdSeed": 2411,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Heightfields/GoldenTerrain",
+				"Assets/Scenes/GoldenTerrain"
+			]
+		},
+		{
+			"File": "TerrainReplays.jsonl",
+			"IdSeed": 2412,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

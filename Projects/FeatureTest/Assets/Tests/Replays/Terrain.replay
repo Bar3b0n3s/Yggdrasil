@@ -1,0 +1,117 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "ba7f8869da69c215",
+		"Path": "Assets/Scenes/Terrain.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.1.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "4d8548f1e05a2497",
+				"Path": "/Ball",
+				"Hash": "0e25b33430b81563",
+				"Components": {
+					"Transform": "08ce156a3c782f42",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"RigidBody": "c26816b31cfc553f",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"Script": "8e8aa6113e8182c6"
+				}
+			},
+			{
+				"Id": "72adb9cdc42184e7",
+				"Path": "/Sun",
+				"Hash": "2b68c80fae859756",
+				"Components": {
+					"Transform": "b12cf37696743467",
+					"DirectionalLight": "8121abd1da7e7bfd"
+				}
+			},
+			{
+				"Id": "95c173329ad1ffb6",
+				"Path": "/Camera",
+				"Hash": "1581a56e72b50609",
+				"Components": {
+					"Transform": "0927dc3a8cfaf4f2",
+					"Camera": "847ee6196d14dc98"
+				}
+			},
+			{
+				"Id": "d7927c66f409d14d",
+				"Path": "/Ground",
+				"Hash": "d1e4d7824f0e5f45",
+				"Components": {
+					"Transform": "029f14141ee291b1",
+					"Terrain": "480483f26ebd71f9",
+					"TerrainCollider": "696e81ae0562b675"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "05c7e3f4de55ab9b",
+				"Path": "Assets/Heightfields/Terrain/Ramp16.d7927c66f409d14d.splat.png",
+				"Type": "Texture",
+				"Hash": "b029a4b2b575ccc5"
+			},
+			{
+				"Handle": "449197254b5d0af8",
+				"Path": "Assets/Heightfields/Terrain/Ramp16.heightfield",
+				"Type": "Heightfield",
+				"Hash": "e1d4ee321e614911"
+			},
+			{
+				"Handle": "d2c55c35633199ba",
+				"Path": "Assets/Scripts/Terrain/TerrainRoller.luau",
+				"Type": "Script",
+				"Hash": "b22cfc77b23c3738"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 8,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 1
+		},
+		{
+			"Tick": 136,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 255,
+			"Luau": "local ball = Scene.FindByName(\"Ball\")\nlocal p = ball.Transform.WorldPosition\nlocal h = Scene.FindByName(\"Ground\").Terrain:SampleHeight(p)\nreturn ball:GetScript(\"TerrainRoller\").Pushes == 128 and h ~= nil and p.y > h and p.x > 0"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "1a12fcf89d049e30"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "254835bd2d31b989"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "74d89b7c08aa2caf"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "1fdc2d7c1d055fd9"
+		}
+	],
+	"FinalTick": 256,
+	"FinalStateHash": "1fc4d7ae2ba0f82b"
+}

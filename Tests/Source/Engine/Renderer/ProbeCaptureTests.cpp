@@ -13,6 +13,8 @@
 #include "Support/InMemoryAssetManager.h"
 #include "Support/RenderReference.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -25,8 +27,8 @@
 // Probe captures (M26, C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 8, stream Q-A): the furnace and
 // colour-bleed oracles of an irradiance probe's SH9 projection, against the test support's double-precision reference
 // (Test::ProjectIrradianceSH9), the reflection probe's deterministic HDR image, and the GPU capture: a uniform background
-// captured as its radiance, each face looking along its cube direction (neither mirrored nor flipped), and the capture's
-// recovery from a device loss. The bake's byte-identical files are LightingBakeTests.cpp's, the shading's oracles stream
+// captured as its radiance, each face looking along its cube direction (neither mirrored nor flipped), the scene's SSR left
+// out, and the capture's recovery from a device loss. The bake's byte-identical files are LightingBakeTests.cpp's, the shading's oracles stream
 // Q-B's.
 
 namespace Engine {
@@ -78,10 +80,12 @@ namespace Engine {
 		} };
 
 		constexpr uint64_t QuadMeshHandle = 0x9B01000000000001ull;
+		constexpr uint64_t MirrorMaterialHandle = 0x9B01000000000002ull;
 		constexpr uint64_t FirstMarkerMaterialHandle = 0x9B01000000000010ull;
 
 		// The pipelines, the cache and a probe capture over the fixture's device and an in-memory asset manager holding a unit
-		// quad (the XY square [-1, 1]^2) and one double-sided black material per face, emitting its marker colour 4 times.
+		// quad (the XY square [-1, 1]^2), one double-sided black material per face, emitting its marker colour 4 times, and a
+		// white metal mirror of perceptual roughness 0.
 		class ProbeCaptureSetup
 		{
 		public:
@@ -109,6 +113,11 @@ namespace Engine {
 					material->DoubleSided = true;
 					m_Assets.Publish(UUID(FirstMarkerMaterialHandle + face), material);
 				}
+				auto mirror = CreateRef<MaterialData>();
+				mirror->BaseColor = glm::vec4(1.0f);
+				mirror->Metallic = 1.0f;
+				mirror->Roughness = 0.0f;
+				m_Assets.Publish(UUID(MirrorMaterialHandle), mirror);
 				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
 				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
 				m_Pipelines = std::move(*pipelines);
@@ -338,6 +347,34 @@ namespace Engine {
 					for (const glm::vec3 background : { texel(face, 3, 12), texel(face, 12, 3), texel(face, 8, 8) })
 						CHECK(glm::max(background.x, glm::max(background.y, background.z)) < 0.5f);
 				}
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// W26.2's review: SSR is a view's screen-space effect, which a 90-degree face would trace only within its own image
+		// (ProbeCapture.h), so a capture leaves it out: a mirror floor before a red-emitting wall, which SSR reflects in the -Z
+		// face's view, captures the same texels with the scene's SsrEnabled on as with it off.
+		TEST_CASE("ProbeCapture: a capture leaves the scene's SSR out, so SsrEnabled changes no texel" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				ProbeCaptureSetup setup(gpu);
+				RenderSnapshot snapshot = MakeProbeSnapshot(glm::vec3(0.0f, 0.05f, 0.1f));
+				// The floor: the quad turned into the XZ plane facing +Y, 12 m square at y = 0. The wall: the quad facing +Z, 6 m
+				// wide and 4 m high, standing on the floor at z = -3.
+				const glm::mat4 floor(glm::vec4(6.0f, 0.0f, 0.0f, 0.0f), glm::vec4(0.0f, 0.0f, -6.0f, 0.0f), glm::vec4(0.0f, 6.0f, 0.0f, 0.0f),
+					glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+				const glm::mat4 wall = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, -3.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f, 2.0f, 1.0f));
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = floor, .Mesh = UUID(QuadMeshHandle), .Materials = { UUID(MirrorMaterialHandle) }, .Entity = UUID(1) });
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = wall, .Mesh = UUID(QuadMeshHandle), .Materials = { UUID(FirstMarkerMaterialHandle) }, .Entity = UUID(2) });
+				const glm::vec3 position(0.0f, 1.0f, 0.0f);
+				const Result<ProbeCubeCapture> off = setup.GetCapture().Capture(snapshot, position, 32);
+				REQUIRE_MESSAGE(off.has_value(), off.error().ToString());
+				snapshot.Post.SsrEnabled = true;
+				const Result<ProbeCubeCapture> on = setup.GetCapture().Capture(snapshot, position, 32);
+				REQUIRE_MESSAGE(on.has_value(), on.error().ToString());
+				CHECK(ToBytes(*on) == ToBytes(*off));
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

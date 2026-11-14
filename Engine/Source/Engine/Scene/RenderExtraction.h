@@ -163,6 +163,11 @@ namespace Engine {
 	//     ReflectionProbe whose Data is set, in canonical order, at its rendered world matrix, with Size, Data, Intensity and
 	//     BlendDistance (and a reflection probe's BoxProjection) as they are, in every view and every scene, edit scenes
 	//     included, so baked lighting shows while editing; whether the data loads is the renderer's concern.
+	//   - Terrains (M26, decision 22): every effectively enabled entity's Terrain whose Heightfield is set, in canonical order,
+	//     at its rendered world matrix, with Heightfield, Size, HeightScale, SplatMap, ReceiveShadows and LodBias as they are
+	//     and its first MaxTerrainLayers Layers (their maps' handles, Tint, Tiling, Roughness, Metallic); each is pickable, its
+	//     PickId after the meshes' (the entity's mesh PickId when its MeshRenderer has one, else a PickTable entry appended
+	//     after every mesh's, in the terrains' order), in every view and every scene, edit scenes included.
 	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
 	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
 	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's

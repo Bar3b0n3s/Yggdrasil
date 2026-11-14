@@ -1,0 +1,14 @@
+{
+	"Format": "AssetMeta",
+	"Version": 1,
+	"Handle": "801fdc378adf372b",
+	"Type": "Texture",
+	"Importer": "Texture",
+	"ImporterVersion": 2,
+	"Settings": {
+		"Usage": "Linear",
+		"GenerateMips": true,
+		"Compression": "None"
+	},
+	"SubAssets": []
+}

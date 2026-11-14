@@ -2,12 +2,17 @@
 #include "Engine/Scripting/ScriptProxy.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/IrradianceVolumeData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -730,6 +735,125 @@ return true
 				CHECK(fixture.ExternalMutations.empty());
 				CHECK(root.GetComponent<ScriptComponent>().Scripts.front().Script.GetHandle() == AssetHandle(93));
 			}
+		}
+
+		// M26 (Docs/Decisions/0037-m26-contract.md decision 32): a typed asset field (TypedAssetHandle) takes only assets of
+		// its type through a proxy write, as the inspector's picker and the readers do; an Environment assigned to a probe's
+		// Data was accepted, and the renderer then reported AssetTypeMismatch and project.validate PROBE_NOT_BAKED.
+		TEST_CASE("ScriptProxy: a typed asset field refuses an asset of another type, naming the field and both types")
+		{
+			Test::ScriptTestFixture fixture;
+			fixture.GetAssetManager().Publish(AssetHandle(201), CreateRef<EnvironmentData>(), "Assets/Lighting/Room.hdr");
+			fixture.GetAssetManager().Publish(AssetHandle(202), CreateRef<IrradianceVolumeData>(), "Assets/Lighting/Room.irradiance");
+			const Entity volume = fixture.GetScene().CreateEntity("Volume");
+			volume.AddComponent<IrradianceVolumeComponent>();
+			REQUIRE(fixture.Start());
+			const auto revision = fixture.GetScene().GetRevision();
+			CheckProxyScript(fixture, R"(
+local volume = Scene.FindByName("Volume"):GetComponent("IrradianceVolume")
+local ok, message = pcall(function() volume.Data = Assets.Load("Assets/Lighting/Room.hdr") end)
+assert(not ok)
+message = tostring(message)
+assert(string.find(message, "IrradianceVolume.Data", 1, true) ~= nil, message)
+assert(string.find(message, "Environment", 1, true) ~= nil, message)
+assert(volume.Data == nil)
+return true
+)");
+			CHECK(fixture.GetScene().GetRevision() == revision);
+			CHECK(fixture.ExternalMutations.empty());
+			CHECK_FALSE(volume.GetComponent<IrradianceVolumeComponent>().Data.GetHandle().IsValid());
+
+			// An asset of the field's type, and null, are written as before.
+			CheckProxyScript(fixture, R"(
+local volume = Scene.FindByName("Volume"):GetComponent("IrradianceVolume")
+volume.Data = Assets.Load("Assets/Lighting/Room.irradiance")
+assert(Assets.GetPath(volume.Data) == "Assets/Lighting/Room.irradiance")
+return true
+)");
+			CHECK(volume.GetComponent<IrradianceVolumeComponent>().Data.GetHandle() == AssetHandle(202));
+			CheckProxyScript(fixture, R"(
+local volume = Scene.FindByName("Volume"):GetComponent("IrradianceVolume")
+volume.Data = nil
+return volume.Data == nil
+)");
+		}
+
+		// ScriptProxy.h (W26.2's review): a handle the asset service does not know is left to the readers and project.validate,
+		// as before the check, so a script may still copy one between typed fields.
+		TEST_CASE("ScriptProxy: a typed asset field still takes a handle the asset service does not know")
+		{
+			Test::ScriptTestFixture fixture;
+			const Entity source = fixture.GetScene().CreateEntity("Source");
+			source.AddComponent<IrradianceVolumeComponent>().Data = TypedAssetHandle<AssetType::IrradianceVolume>(AssetHandle(0x5ca1ab1e00000001ull));
+			const Entity target = fixture.GetScene().CreateEntity("Target");
+			target.AddComponent<IrradianceVolumeComponent>();
+			REQUIRE(fixture.Start());
+			CHECK(fixture.GetAssetManager().GetAssetType(AssetHandle(0x5ca1ab1e00000001ull)) == AssetType::None);
+			CheckProxyScript(fixture, R"(
+local unknown = Scene.FindByName("Source"):GetComponent("IrradianceVolume").Data
+assert(unknown ~= nil)
+local volume = Scene.FindByName("Target"):GetComponent("IrradianceVolume")
+volume.Data = unknown
+return volume.Data == unknown
+)");
+			CHECK(target.GetComponent<IrradianceVolumeComponent>().Data.GetHandle() == AssetHandle(0x5ca1ab1e00000001ull));
+		}
+
+		TEST_CASE("ScriptProxy: an asset reference inside an array of structs is checked against its member's type")
+		{
+			Test::ScriptTestFixture fixture;
+			fixture.GetAssetManager().Publish(AssetHandle(201), CreateRef<EnvironmentData>(), "Assets/Lighting/Room.hdr");
+			fixture.GetAssetManager().Publish(AssetHandle(203), CreateRef<TextureData>(), "Assets/Textures/Grass.png");
+			const Entity ground = fixture.GetScene().CreateEntity("Ground");
+			ground.AddComponent<TerrainComponent>().Layers.resize(2);
+			REQUIRE(fixture.Start());
+			const auto revision = fixture.GetScene().GetRevision();
+			CheckProxyScript(fixture, R"(
+local terrain = Scene.FindByName("Ground"):GetComponent("Terrain")
+local layers = terrain.Layers
+layers[2].BaseColorMap = Assets.Load("Assets/Lighting/Room.hdr")
+local ok, message = pcall(function() terrain.Layers = layers end)
+assert(not ok)
+message = tostring(message)
+assert(string.find(message, "Terrain.Layers[2].BaseColorMap", 1, true) ~= nil, message)
+assert(string.find(message, "Texture", 1, true) ~= nil, message)
+assert(string.find(message, "Environment", 1, true) ~= nil, message)
+assert(terrain.Layers[2].BaseColorMap == nil)
+return true
+)");
+			CHECK(fixture.GetScene().GetRevision() == revision);
+			CHECK(fixture.ExternalMutations.empty());
+			CheckProxyScript(fixture, R"(
+local terrain = Scene.FindByName("Ground"):GetComponent("Terrain")
+local layers = terrain.Layers
+layers[2].BaseColorMap = Assets.Load("Assets/Textures/Grass.png")
+terrain.Layers = layers
+return Assets.GetPath(terrain.Layers[2].BaseColorMap) == "Assets/Textures/Grass.png"
+)");
+			CHECK(ground.GetComponent<TerrainComponent>().Layers[1].BaseColorMap.GetHandle() == AssetHandle(203));
+		}
+
+		TEST_CASE("ScriptProxy: AddComponent's initial values refuse an asset of another type before the component is added")
+		{
+			Test::ScriptTestFixture fixture;
+			fixture.GetAssetManager().Publish(AssetHandle(201), CreateRef<EnvironmentData>(), "Assets/Lighting/Room.hdr");
+			const Entity probe = fixture.GetScene().CreateEntity("Probe");
+			REQUIRE(fixture.Start());
+			const auto revision = fixture.GetScene().GetRevision();
+			CheckProxyScript(fixture, R"(
+local probe = Scene.FindByName("Probe")
+local ok, message = pcall(function() probe:AddComponent("IrradianceVolume", {Data = Assets.Load("Assets/Lighting/Room.hdr")}) end)
+assert(not ok)
+message = tostring(message)
+assert(string.find(message, "IrradianceVolume.Data", 1, true) ~= nil, message)
+assert(string.find(message, "Environment", 1, true) ~= nil, message)
+assert(not probe:HasComponent("IrradianceVolume"))
+-- A reflection probe's Data is an Environment.
+local reflection = probe:AddComponent("ReflectionProbe", {Data = Assets.Load("Assets/Lighting/Room.hdr")})
+return Assets.GetPath(reflection.Data) == "Assets/Lighting/Room.hdr"
+)");
+			CHECK_FALSE(probe.HasComponent<IrradianceVolumeComponent>());
+			CHECK(fixture.GetScene().GetRevision() != revision);
 		}
 	}
 

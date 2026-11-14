@@ -2366,7 +2366,7 @@ Example: Find the cells with their transforms.
 
 ### scene.raycast
 
-Finds the nearest visible mesh triangle on a CPU ray, including both faces and Mask/Blend geometry without texture alpha testing. Does not step physics or change selection.
+Finds the nearest visible mesh or terrain triangle on a CPU ray, including both faces and Mask/Blend geometry without texture alpha testing; a terrain is hit on the surface it draws and collides with. Does not step physics or change selection.
 
 - Flags: dry run, runtime, batch, scene target
 - Timeout: 60 s
@@ -2377,7 +2377,7 @@ Finds the nearest visible mesh triangle on a CPU ray, including both faces and M
 | `origin` | `Vec3` | yes | `[0,0,0]` | Finite world-space ray origin in metres. |
 | `direction` | `Vec3` | yes | `[0,0,-1]` | Finite nonzero world direction; normalized by the query. |
 | `maxDistance` | `Float` | yes | `1000` | Positive finite maximum distance in metres, inclusive. |
-| `layerMask` | `UInt32` |  | `4294967295` | Physics-layer bits inherited from the nearest rigid-body ancestor, or the entity's character, else Default. |
+| `layerMask` | `UInt32` |  | `4294967295` | Physics-layer bits inherited from the nearest rigid-body ancestor, or the entity's character, or a terrain's own TerrainCollider, else Default. |
 | `target` | `SceneTarget` |  | `"Edit"` | Scene to query; defaults to play while playing and edit otherwise. |
 
 | Result | Type | Description |
@@ -2388,8 +2388,8 @@ Finds the nearest visible mesh triangle on a CPU ray, including both faces and M
 | `normal` | `Vec3` | Unit geometric normal facing against the ray. |
 | `barycentric` | `Vec3` | Weights of the triangle's three indexed vertices. |
 | `distance` | `Float` | World distance along the normalized ray. |
-| `submesh` | `UInt32` | Zero-based submesh index. |
-| `triangle` | `UInt32` | Zero-based triangle index within the submesh. |
+| `submesh` | `UInt32` | Zero-based submesh index; 0 for a terrain. |
+| `triangle` | `UInt32` | Zero-based triangle index within the submesh; for a terrain, 2 * (z * (resolution - 1) + x) for cell (x, z)'s triangle on its (x, z + 1) side, plus 1 for the one on its (x + 1, z) side. |
 
 Example: Query forward from the camera.
 
@@ -3037,7 +3037,7 @@ Example: Frame the board.
 
 ### viewport.pick
 
-Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.
+Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh or terrain triangle. Returns the hit without changing selection.
 
 - Flags: dry run, batch
 - Timeout: 60 s
@@ -3055,7 +3055,7 @@ Queries what a viewport pixel shows without a GPU, clipping to the camera's near
 | `view` | `ViewportView` | The viewport queried. |
 | `width` | `UInt32` | Actual framebuffer width used for the projection. |
 | `height` | `UInt32` | Actual framebuffer height used for the projection. |
-| `raycast` | `SceneRaycastResult` | The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval. |
+| `raycast` | `SceneRaycastResult` | The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is reported as its tilemap's entity), else the nearest mesh or terrain triangle, in the camera's near-to-far interval. |
 
 Example: Query the centre of the default scene viewport.
 

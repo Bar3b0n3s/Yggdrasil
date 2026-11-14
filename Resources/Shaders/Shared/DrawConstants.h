@@ -15,12 +15,17 @@ namespace Engine {
 	// clockwise on screen: the draw uses the CullFront (or, double-sided, CullNone) pipelines, and the shaders negate the
 	// normal matrix (the cofactor of World, which det < 0 turns inwards) and the bitangent sign, and take SV_IsFrontFace
 	// inverted. DrawFlagReceiveShadows: the forward passes sample the view's shadow maps for the instance's pixels.
+	// DrawFlagPreviousPositions (M26, R-TAA-VEL; Docs/Decisions/0037-m26-contract.md decision 11): the prepass's motion
+	// vectors take the instance's previous local positions from vertex binding 2 (a deformed item's previous deformation,
+	// M23's Skinning pass) instead of its current ones; set only for a deformed item that continues its view's history.
 #if defined(ENGINE_SHADER)
 	static const uint DrawFlagMirrored = 1;
 	static const uint DrawFlagReceiveShadows = 2;
+	static const uint DrawFlagPreviousPositions = 4;
 #else
 inline constexpr uint32_t DrawFlagMirrored = 1;
 inline constexpr uint32_t DrawFlagReceiveShadows = 2;
+inline constexpr uint32_t DrawFlagPreviousPositions = 4;
 #endif
 
 	// The Scene program's debug views (§8.5): Vulkan specialization constant SceneDebugViewConstantId of the forward

@@ -18,9 +18,15 @@
 //   - The capture renders `snapshot` six times through a SceneRenderer of FaceSize x FaceSize at the scene resolution, one
 //     90-degree perspective camera per face of Vulkan's cube face order (EnvironmentData.h's face directions and up vectors,
 //     as the point shadows' faces, M23), at `position`, with the snapshot's own quality but Probes false (one bounce: a bake
-//     never sees an earlier bake), no post-processing that is not linear (it reads SceneColor, linear HDR radiance, before
-//     bloom, exposure and the tonemap), no particles, sprites, UI or overlays, and every temporal input reset, then reads the
-//     six images back as linear RGBA32F texels, row 0 first, through SceneRenderer::GetSceneColorTexture.
+//     never sees an earlier bake), no particles, sprites, UI or overlays, and every temporal input reset, then reads the six
+//     images back as linear RGBA32F texels, row 0 first, through SceneRenderer::GetSceneColorTexture.
+//   - The scene's post-processing: the capture reads SceneColor, linear HDR radiance, before the HDR chain, so bloom,
+//     auto-exposure, the tonemap, the LUT and FXAA never reach it. Two settings that write SceneColor earlier are turned
+//     off: TAA (its resolve and jitter are a view's history) and SSR (W26.2's review): a view-dependent screen-space effect,
+//     which in a 90-degree face traces only that face's image and fades at its edges, so it would seam the cube, add a
+//     second specular bounce the views add again, and make a bake depend on a view toggle. GTAO (SsaoEnabled) is kept as
+//     the scene sets it: its occlusion only darkens the ambient light in the creases a face sees, the geometry's own
+//     occlusion the scene's views show too, so a bake keeps the look the scene is lit with.
 //   - Deterministic for a device class, as the environment bake is (no temporal noise, no atomics deciding a sum or an
 //     order): two captures of one snapshot give equal texels, and the CPU steps below are pure with IEEE-exact operations,
 //     sqrt and DetMath only, so two bakes of one scene write byte-identical files (the acceptance "two probe bakes are

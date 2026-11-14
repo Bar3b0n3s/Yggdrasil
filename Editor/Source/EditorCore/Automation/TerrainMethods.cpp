@@ -18,10 +18,15 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 
+#include <glm/gtc/matrix_inverse.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <format>
 #include <optional>
@@ -90,10 +95,48 @@ namespace Engine {
 
 	namespace Automation {
 
-		Result<TerrainEditMethodResult> TerrainEditMethod(EditorMethodContext& /*context*/, const TerrainEditParams& /*params*/)
+		Result<TerrainEditMethodResult> TerrainEditMethod(EditorMethodContext& context, const TerrainEditParams& params)
 		{
-			ENGINE_CONTRACT_STUB();
-			return MakeError(ErrorCode::Unsupported, "M26 terrain contract (Docs/Decisions/0037-m26-contract.md decision 23, stream T-E)");
+			EditorContext& editor = context.GetEditor();
+			ENGINE_TRY_ASSIGN(Scene * scene, context.ResolveRequestScene());
+			ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(*scene, params.Entity, "/entity"));
+			const EntitySummary summary = context.MakeEntitySummary(entity);
+
+			// The world points in the terrain's local space (the entity's world matrix as its transform gives it now), their
+			// local Y dropped: a point picked on the surface, as the editor's terrain brush picks it, works as is.
+			const glm::mat4 toLocal = glm::affineInverse(TransformSystem::ComputeWorldMatrix(entity));
+			TerrainStroke stroke{ .Tool = params.Tool, .Points = {}, .Radius = params.Radius, .Strength = params.Strength, .Height = params.Height, .Layer = params.Layer };
+			stroke.Points.reserve(params.Points.size());
+			for (size_t index = 0; index < params.Points.size(); ++index)
+			{
+				const glm::vec3 point = params.Points[index];
+				if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z))
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("/points/{}", index),
+						std::format("point {} of the stroke is not finite", index)));
+				}
+				const glm::vec4 local = toLocal * glm::vec4(point, 1.0f);
+				if (!std::isfinite(local.x) || !std::isfinite(local.z))
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/entity",
+						std::format("the transform of '{}' is not invertible, so no point reaches its terrain's local space", summary.Path),
+						"give the entity's Transform a scale without zeros"));
+				}
+				stroke.Points.emplace_back(local.x, local.z);
+			}
+
+			Result<TerrainEditResult> edited = EditTerrain(editor, editor.GetAddressedSceneId(), entity.GetUUID(), stroke);
+			if (!edited.has_value())
+			{
+				// EditTerrain locates a stroke's refusal at its param; what else it refuses with InvalidArgument or NotFound
+				// concerns the entity's Terrain (no Terrain, a missing heightfield, a splat map it cannot paint).
+				const Error& error = edited.error();
+				const ErrorCode code = error.GetCode();
+				if (!error.GetLocation().JsonPointer.has_value() && (code == ErrorCode::InvalidArgument || code == ErrorCode::NotFound))
+					return std::unexpected(Utils::LocateAtParam(error, "/entity"));
+				return std::unexpected(std::move(edited).error());
+			}
+			return TerrainEditMethodResult{ .Entity = summary, .Path = edited->Path, .CreatedSplatMap = edited->CreatedSplatMap, .Changed = edited->Changed };
 		}
 
 		Result<TerrainImportHeightmapResult> TerrainImportHeightmapMethod(EditorMethodContext& context, const TerrainImportHeightmapParams& params)

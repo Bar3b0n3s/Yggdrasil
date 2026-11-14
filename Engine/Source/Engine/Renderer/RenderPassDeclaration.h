@@ -70,6 +70,9 @@ namespace Engine {
 		// (SceneTargetFormats.h), created and written by stream X-C (the mesh prepass) and T-C (TerrainDepthNormal).
 		inline constexpr std::array<std::string_view, 5> DepthNormalTargets = { "SceneDepth", "SceneNormals", "EntityId", "SceneVelocity",
 			"SceneRoughness" };
+		// M26 (C26.1, C-TERR; decision 22, stream T-C): the Terrain program (Passes/Terrain.slang, Renderer/TerrainPass.h) of
+		// TerrainDepthNormal's and TerrainForward's pipelines.
+		inline constexpr std::array<std::string_view, 1> TerrainPrograms = { "Terrain" };
 		inline constexpr std::array<std::string_view, 1> TerrainDepthNormalRows = { "TerrainDepthNormal" };
 		inline constexpr std::array<std::string_view, 1> DepthPyramidPrograms = { "DepthPyramid" };
 		inline constexpr std::array<std::string_view, 1> DepthPyramidRows = { "DepthPyramid" };
@@ -85,6 +88,8 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> SceneColorTargets = { "SceneColor" };
 		inline constexpr std::array<std::string_view, 1> SkyboxPrograms = { "Skybox" };
 		inline constexpr std::array<std::string_view, 1> SkyboxRows = { "Skybox" };
+		// M26 (C26.1, R-SSR; decision 18, stream X-D): the Ssr program (Passes/Ssr.slang, Renderer/SsrPass.h).
+		inline constexpr std::array<std::string_view, 1> SsrPrograms = { "Ssr" };
 		inline constexpr std::array<std::string_view, 1> SsrRows = { "SSR" };
 		inline constexpr std::array<std::string_view, 1> SsrTargets = { "SsrColor" };
 		inline constexpr std::array<std::string_view, 1> ForwardTransparentRows = { "ForwardTransparent" };
@@ -97,6 +102,8 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> Lights2DRows = { "Lights2D" };
 		inline constexpr std::array<std::string_view, 2> Lights2DTargets = { "Lights2DNormals", "Lights2DLight" };
 		inline constexpr std::array<std::string_view, 1> ParticlesRows = { "Particles" };
+		// M26 (C26.1, R-TAA; decision 17, stream X-C): the Taa program (Passes/Taa.slang, Renderer/TaaPass.h).
+		inline constexpr std::array<std::string_view, 1> TaaPrograms = { "Taa" };
 		inline constexpr std::array<std::string_view, 1> TaaRows = { "TAA" };
 		inline constexpr std::array<std::string_view, 1> TaaTargets = { "TaaHistory" };
 		inline constexpr std::array<std::string_view, 1> BloomPrograms = { "Bloom" };
@@ -130,18 +137,19 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 67 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and the
-	// output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites records
-	// with the QuadBatcher's), the QuadBatcher's LdrDepth 1 (M22, C22.3, Docs/Decisions/0033-m22-contract.md decision 57;
-	// M22's Ui adds none of its own), M23's LightClusters 1 and Skinning 1, M26's QuadBatcher HdrAdditive 1 (stream P-B,
-	// Docs/Decisions/0037-m26-contract.md decision 7; M26's Particles adds none of its own) and M26's Exposure 2 (stream X-A,
-	// decision 15). M23's C23.1 adds PointShadows and LightClusters at the places phase 2's ledger fixes (ADR 0028), and C23.3
-	// Skinning, alone in Deform. M26's C26.1 adds TerrainDepthNormal, TerrainForward, Ssr, Particles, Taa and Exposure at the
-	// places phase 3's ledger fixes, without pipelines until their streams (37 stats rows). Their planned pipelines
-	// (Docs/Decisions/0037-m26-contract.md decision 13): TerrainDepthNormal 2 (the terrain prepass and picking prepass,
-	// program Terrain), TerrainForward 1 (Terrain), Ssr 2 (the trace and the composite, program Ssr), Taa 1 (Taa), Exposure 2
-	// (the histogram and the adaptation, program Exposure) and the QuadBatcher's HdrAdditive 1 for additive particles
-	// (Particles declares none): 73 at M26's landing.
+	// The pass list, in stats order (see the file comment). 73 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and
+	// the output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites
+	// records with the QuadBatcher's), the QuadBatcher's LdrDepth 1 (M22, C22.3, Docs/Decisions/0033-m22-contract.md
+	// decision 57; M22's Ui adds none of its own), M23's LightClusters 1 and Skinning 1, M26's QuadBatcher HdrAdditive 1
+	// (stream P-B, Docs/Decisions/0037-m26-contract.md decision 7; M26's Particles adds none of its own), M26's Exposure 2
+	// (stream X-A, decision 15), M26's Taa 1 (stream X-C, decision 17), M26's Ssr 2 (stream X-D, decision 18) and M26's
+	// TerrainDepthNormal 2 and TerrainForward 1 (stream T-C, decision 22). M23's C23.1 adds PointShadows and LightClusters
+	// at the places phase 2's ledger fixes (ADR 0028), and C23.3 Skinning, alone in Deform. M26's C26.1 adds
+	// TerrainDepthNormal, TerrainForward, Ssr, Particles, Taa and Exposure at the places phase 3's ledger fixes, without
+	// pipelines until their streams (37 stats rows). Their planned pipelines (Docs/Decisions/0037-m26-contract.md decision
+	// 13): TerrainDepthNormal 2 (the terrain prepass and picking prepass, program Terrain), TerrainForward 1 (Terrain),
+	// Ssr 2 (the trace and the composite, program Ssr), Taa 1 (Taa), Exposure 2 (the histogram and the adaptation, program
+	// Exposure) and the QuadBatcher's HdrAdditive 1 for additive particles (Particles declares none): 73 at M26's landing.
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27): the skinned and morphed meshes' vertices, deformed by
@@ -155,9 +163,9 @@ namespace Engine {
 		// The prepass and the picking prepass, {Opaque, Mask} x {CullBack, CullFront, CullNone} each.
 		{ .Name = "DepthNormal", .Stage = RenderStage::DepthNormal, .PipelineCount = 12, .Programs = Detail::ScenePrograms, .StatsRows = Detail::DepthNormalRows, .Targets = Detail::DepthNormalTargets },
 		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decisions 13 and 22): the terrains' prepass and picking prepass
-		// into DepthNormal's final targets (velocity and roughness included), so GTAO, SSR and picking see the terrain; its
-		// pipelines of the program Terrain join with stream T-C.
-		{ .Name = "TerrainDepthNormal", .Stage = RenderStage::DepthNormal, .StatsRows = Detail::TerrainDepthNormalRows },
+		// into DepthNormal's final targets (velocity and roughness included), so GTAO, SSR and picking see the terrain:
+		// TerrainPass's two pipelines of the program Terrain (stream T-C).
+		{ .Name = "TerrainDepthNormal", .Stage = RenderStage::DepthNormal, .PipelineCount = 2, .Programs = Detail::TerrainPrograms, .StatsRows = Detail::TerrainDepthNormalRows },
 		{ .Name = "DepthPyramid", .Stage = RenderStage::Ambient, .PipelineCount = 2, .Programs = Detail::DepthPyramidPrograms, .StatsRows = Detail::DepthPyramidRows, .Targets = Detail::DepthPyramidTargets },
 		{ .Name = "Gtao", .Stage = RenderStage::Ambient, .PipelineCount = 2, .Programs = Detail::GtaoPrograms, .StatsRows = Detail::GtaoRows, .Targets = Detail::GtaoTargets },
 		// M23 (C23.1, decision 5): the cluster masks of the clustered light loop, a per-view buffer (no target), written by
@@ -168,13 +176,14 @@ namespace Engine {
 		// The Lit forward variants, {Opaque, Mask} x the three cull modes; a material debug view adds its own lazily.
 		{ .Name = "ForwardOpaque", .Stage = RenderStage::Forward, .PipelineCount = 6, .Programs = Detail::ScenePrograms, .StatsRows = Detail::ForwardOpaqueRows, .Targets = Detail::SceneColorTargets },
 		// M26 (C26.1, C-TERR; decisions 13 and 22): the terrains shaded with M23's light loop and the probes' indirect term, into
-		// SceneColor, before Skybox; its pipelines of the program Terrain join with stream T-C.
-		{ .Name = "TerrainForward", .Stage = RenderStage::Forward, .StatsRows = Detail::TerrainForwardRows },
+		// SceneColor, before Skybox: TerrainPass's forward pipeline of the program Terrain (stream T-C).
+		{ .Name = "TerrainForward", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::TerrainPrograms, .StatsRows = Detail::TerrainForwardRows },
 		{ .Name = "Skybox", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::SkyboxPrograms, .StatsRows = Detail::SkyboxRows, .Targets = Detail::SceneColorTargets },
 		// M26 (C26.1, R-SSR; decisions 13 and 18): glossy reflections traced over the opaque image with the depth pyramid into
 		// SsrColor, falling back to the probes, composited into SceneColor before the transparent pass draws over them;
-		// recorded only with PostProcess's SsrEnabled. Its pipelines of the program Ssr join with stream X-D.
-		{ .Name = "Ssr", .Stage = RenderStage::Forward, .StatsRows = Detail::SsrRows, .Targets = Detail::SsrTargets },
+		// recorded only with PostProcess's SsrEnabled. SsrPass's two pipelines of the program Ssr (stream X-D): the trace and the
+		// composite.
+		{ .Name = "Ssr", .Stage = RenderStage::Forward, .PipelineCount = 2, .Programs = Detail::SsrPrograms, .StatsRows = Detail::SsrRows, .Targets = Detail::SsrTargets },
 		// Blend, for the three cull modes.
 		{ .Name = "ForwardTransparent", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::ForwardTransparentRows, .Targets = Detail::SceneColorTargets },
 		// The Overdraw data view's additive pass, for the three cull modes.
@@ -199,9 +208,9 @@ namespace Engine {
 		// additive emitters, its HdrAdditive one, so it declares none of its own.
 		{ .Name = "Particles", .Stage = RenderStage::Sprites, .StatsRows = Detail::ParticlesRows },
 		// M26 (C26.1, R-TAA; decisions 10, 13 and 17): the jittered HDR image resolved against its history (TaaHistory), first
-		// in HdrPost so bloom and exposure read the resolved image; recorded only with AntiAliasing Taa outside pixel-art mode.
-		// Its pipelines of the program Taa join with stream X-C.
-		{ .Name = "Taa", .Stage = RenderStage::HdrPost, .StatsRows = Detail::TaaRows, .Targets = Detail::TaaTargets },
+		// in HdrPost so bloom and exposure read the resolved image; recorded only with AntiAliasing Taa in a Lit view outside
+		// the wireframe and pixel-art mode. TaaPass's one compute pipeline of the program Taa (stream X-C).
+		{ .Name = "Taa", .Stage = RenderStage::HdrPost, .PipelineCount = 1, .Programs = Detail::TaaPrograms, .StatsRows = Detail::TaaRows, .Targets = Detail::TaaTargets },
 		{ .Name = "Bloom", .Stage = RenderStage::HdrPost, .PipelineCount = 3, .Programs = Detail::BloomPrograms, .StatsRows = Detail::BloomRows, .Targets = Detail::BloomTargets },
 		// M26 (C26.1, R-AEX; decisions 13 and 15): the luminance histogram of the image Tonemap exposes and the adapted exposure,
 		// ExposurePass's two compute pipelines of the program Exposure (the histogram and the adaptation, stream X-A) writing the

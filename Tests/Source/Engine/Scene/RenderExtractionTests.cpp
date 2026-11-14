@@ -21,6 +21,7 @@
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -1021,6 +1022,75 @@ namespace Engine {
 			CHECK(Test::ApproxEqual(glm::vec3(probe.World[3]), glm::vec3(1.0f, 2.0f, 3.0f), 1e-6f));
 			CHECK(snapshot->ReflectionProbes[1].Entity == hall.GetUUID());
 			CHECK(snapshot->ReflectionProbes[1].BoxProjection);
+		}
+
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22; stream T-C): terrains with a heightfield, in
+		// canonical order, every field mapped and at most four layers; each pickable after the meshes, sharing its entity's
+		// mesh entry when it has one.
+		TEST_CASE("RenderExtraction: terrains with a heightfield are extracted in canonical order, pickable after the meshes")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const TypedAssetHandle<AssetType::Heightfield> heights(AssetHandle(0x1a2c000000000001ull));
+			const TypedAssetHandle<AssetType::Texture> splat(AssetHandle(0x1a2c000000000002ull));
+			const TypedAssetHandle<AssetType::Texture> grass(AssetHandle(0x1a2c000000000003ull));
+			const TypedAssetHandle<AssetType::Texture> grassNormal(AssetHandle(0x1a2c000000000004ull));
+			Entity field = scene.CreateEntity("Field");
+			SetTranslation(field, glm::vec3(-4.0f, 1.0f, 2.0f));
+			TerrainComponent fieldTerrain{ .Heightfield = heights, .Size = glm::vec2(120.0f, 80.0f), .HeightScale = 30.0f, .SplatMap = splat, .ReceiveShadows = false, .LodBias = 2.0f };
+			fieldTerrain.Layers = {
+				TerrainLayer{ .BaseColorMap = grass, .NormalMap = grassNormal, .Tint = glm::vec3(0.5f, 0.75f, 0.25f), .Tiling = 6.0f, .Roughness = 0.7f, .Metallic = 0.1f },
+				TerrainLayer{ .Tiling = 2.0f },
+				TerrainLayer{},
+				TerrainLayer{},
+				TerrainLayer{ .Tiling = 9.0f }, // past MaxTerrainLayers (the registry refuses it; extraction drops it)
+			};
+			field.AddComponent<TerrainComponent>(std::move(fieldTerrain));
+			Entity rock = scene.CreateEntity("Rock");
+			rock.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+			Entity hill = scene.CreateEntity("Hill");
+			hill.AddComponent<MeshRendererComponent>().Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::SphereMesh);
+			hill.AddComponent<TerrainComponent>(TerrainComponent{ .Heightfield = heights });
+			Entity flat = scene.CreateEntity("Flat");
+			flat.AddComponent<TerrainComponent>();
+			Entity off = scene.CreateEntity("Off");
+			off.AddComponent<TerrainComponent>(TerrainComponent{ .Heightfield = heights });
+			off.SetActive(false);
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Terrains.size() == 2);
+			const TerrainItem& first = snapshot->Terrains[0];
+			CHECK(first.Entity == field.GetUUID());
+			CHECK(first.Heightfield == heights.GetHandle());
+			CHECK(first.Size == glm::vec2(120.0f, 80.0f));
+			CHECK(first.HeightScale == 30.0f);
+			CHECK(first.SplatMap == splat.GetHandle());
+			CHECK_FALSE(first.ReceiveShadows);
+			CHECK(first.LodBias == 2.0f);
+			CHECK(Test::ApproxEqual(glm::vec3(first.World[3]), glm::vec3(-4.0f, 1.0f, 2.0f), 1e-6f));
+			REQUIRE(first.Layers.size() == MaxTerrainLayers);
+			CHECK(first.Layers[0].BaseColorMap == grass.GetHandle());
+			CHECK(first.Layers[0].NormalMap == grassNormal.GetHandle());
+			CHECK(first.Layers[0].Tint == glm::vec3(0.5f, 0.75f, 0.25f));
+			CHECK(first.Layers[0].Tiling == 6.0f);
+			CHECK(first.Layers[0].Roughness == 0.7f);
+			CHECK(first.Layers[0].Metallic == 0.1f);
+			CHECK_FALSE(first.Layers[1].BaseColorMap.IsValid());
+			CHECK(first.Layers[1].Tiling == 2.0f);
+			const TerrainItem& second = snapshot->Terrains[1];
+			CHECK(second.Entity == hill.GetUUID());
+			CHECK(second.Layers.empty());
+			CHECK_FALSE(second.SplatMap.IsValid());
+			CHECK(second.ReceiveShadows);
+			// The meshes' entries first, in canonical order; the hill's terrain shares its mesh's, the field's follows them.
+			REQUIRE(snapshot->PickTable.size() == 3);
+			CHECK(snapshot->PickTable[0] == rock.GetUUID());
+			CHECK(snapshot->PickTable[1] == hill.GetUUID());
+			CHECK(snapshot->PickTable[2] == field.GetUUID());
+			CHECK(second.PickId == 2);
+			CHECK(first.PickId == 3);
 		}
 	}
 

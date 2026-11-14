@@ -43,6 +43,7 @@
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/StaleMirrorSchedule.h"
+#include "Engine/Renderer/TemporalHistory.h"
 #include "Engine/Renderer/ViewportCapture.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
@@ -256,6 +257,12 @@ namespace Engine {
 		uint64_t ReplayInputSerial = 0;
 		uint64_t RenderedSerial = 0;
 		uint64_t RenderedGeneration = 0;
+		// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 10, stream X-C): the game view's history (TAA's jitter and
+		// motion, auto-exposure's delta time), reset whenever the shown session or its scene changes (RenderedSerial,
+		// RenderedGeneration), and the unscaled seconds the frames ran since the view's last render (OnUpdate adds each frame's,
+		// OnRender hands them to the history and starts again), which the view's auto-exposure adapts over.
+		RenderViewHistory ViewHistory{};
+		double UnrenderedSeconds = 0.0;
 		FeatureTestRunner Runner{};
 		ReplayPlayer Player{};
 		ScriptApiCoverage CoverageStart{};
@@ -1254,6 +1261,7 @@ namespace Engine {
 	void RuntimeApp::OnUpdate(const FrameTime& frame)
 	{
 		State& state = *m_State;
+		state.UnrenderedSeconds += frame.UnscaledDeltaTime;
 		if (state.Options.FeatureTest || !state.Options.Replay.empty())
 		{
 			if (const auto max = GetSpecification().MaxFrames; max && frame.FrameIndex + 1 == *max && !state.TestsComplete && !state.ReplayComplete)
@@ -1320,6 +1328,7 @@ namespace Engine {
 			state.RenderedSerial = session->GetSerial();
 			state.RenderedGeneration = session->GetSceneGeneration();
 			state.Mirrors.NoteSceneChange();
+			state.ViewHistory.Reset();
 		}
 		GpuProfileScope scope(*context.Profiler, *context.CommandList, "GameView");
 
@@ -1385,6 +1394,8 @@ namespace Engine {
 		RenderSnapshot snapshot = session->GetLastExtraction();
 		snapshot.FrameIndex = context.FrameIndex;
 		snapshot.SceneRevision = session->GetScene().GetRevision();
+		state.ViewHistory.Apply(snapshot, static_cast<float>(state.UnrenderedSeconds));
+		state.UnrenderedSeconds = 0.0;
 		state.PendingRenderFrame = context.FrameIndex;
 		const Status rendered = state.Renderer->Render(*context.CommandList, snapshot);
 		state.Mirrors.NoteRendered();

@@ -1,0 +1,299 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "Taa",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 2
+	},
+	"Entities": [
+		{
+			"ID": "6a34ffd43d5f193c",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.2, 0.22]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Taa"
+				}
+			}
+		},
+		{
+			"ID": "d48da79218dd5b78",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.2, 6],
+					"Rotation": [-0.052335955, 0, 0, 0.9986295],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 45,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.025, 0.03]
+				}
+			}
+		},
+		{
+			"ID": "f49a83d63744d339",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.3339129, -0.20338671, -0.07402671, 0.9174182],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "94f78494123bd2ab",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [12, 1, 12]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["ac6cc8ceabfa4655"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "cec825c102847fe5",
+			"Name": "Pole0",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 1.3, 0],
+					"Rotation": [0, 0, -0.25881904, 0.9659258],
+					"Scale": [0.04, 2.4, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "bdbd67f09bcb02d5",
+			"Name": "Pole1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 1.3, 0],
+					"Rotation": [0, 0, -0.17364818, 0.9848077],
+					"Scale": [0.04, 2.4, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "6bcc73735d31e49b",
+			"Name": "Pole2",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 1.3, 0],
+					"Rotation": [0, 0, -0.087155744, 0.9961947],
+					"Scale": [0.04, 2.4, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "b97105bd22419e3a",
+			"Name": "Pole3",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.04, 2.4, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "cfb882eed3d011a3",
+			"Name": "Pole4",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 1.3, 0],
+					"Rotation": [0, 0, 0.087155744, 0.9961947],
+					"Scale": [0.04, 2.4, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "3914d7f0d73496db",
+			"Name": "Pole5",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 1.3, 0],
+					"Rotation": [0, 0, 0.17364818, 0.9848077],
+					"Scale": [0.04, 2.4, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "ae992b99dad5a145",
+			"Name": "Pole6",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 1.3, 0],
+					"Rotation": [0, 0, 0.25881904, 0.9659258],
+					"Scale": [0.04, 2.4, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "4f343b227fb996dd",
+			"Name": "Block",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.45, 1.5],
+					"Rotation": [0, 0.31730467, 0, 0.94832367],
+					"Scale": [0.9, 0.9, 0.9]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["dd4c06e418cfa343"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		}
+	]
+}

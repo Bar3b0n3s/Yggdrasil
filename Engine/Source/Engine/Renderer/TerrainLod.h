@@ -53,8 +53,10 @@ namespace Engine {
 	[[nodiscard]] TerrainLodLayout ComputeTerrainLodLayout(uint32_t resolution);
 
 	// Each chunk's level, row-major (cz * ChunksPerSide + cx), for a camera at `cameraLocal` (the terrain's local space) and
-	// `lodBias` (> 0): level floor(log2(max(1, distance / (TerrainChunkCells cell size * lodBias)))) through DetMath, at most
-	// MaxTerrainLod, then neighbouring levels limited to one apart. Pure; deterministic.
+	// `lodBias` (> 0): level floor(log2(max(1, distance / (TerrainChunkCells cell size * lodBias)))), the cell size the larger
+	// of its two sides and the distance the camera's to the chunk's cells under every height of [0, HeightScale], computed
+	// exactly by comparing the squared distance with squared powers of two, at most MaxTerrainLod, then neighbouring levels
+	// limited to one apart. Pure; deterministic (IEEE-exact operations only).
 	[[nodiscard]] std::vector<uint32_t> SelectTerrainLods(const TerrainLodLayout& layout, const TerrainExtent& extent, const glm::vec3& cameraLocal,
 		float lodBias);
 

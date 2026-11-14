@@ -3,7 +3,11 @@
 // position with NoContraction products (MultiplyExact), so the prepass and the forward passes compute bit-identical
 // positions and the forward pass's GreaterOrEqual test against the prepass depth (reverse-Z, writes off) keeps exactly the
 // visible surfaces:
-//   - PSPrepass (pass 4) writes the octahedral view-space shading normal (normal-mapped) into SceneNormals (RG16_FLOAT);
+//   - PSPrepass (pass 4) writes the octahedral view-space shading normal (normal-mapped) into SceneNormals (RG16_FLOAT)
+//     and, from M26 (Docs/Decisions/0037-m26-contract.md decisions 11 and 14), the pixel's motion vector into SceneVelocity
+//     (RG16_FLOAT, Common/Motion.slang) and the forward pass's specular inputs into SceneRoughness (RG32_UINT): word 0 the
+//     prefiltered radiance's multiplier before its specular occlusion and the roughness it is sampled at, word 1 the
+//     material's occlusion (Renderer/SceneTargetFormats.h), from the forward pass's own expressions (SpecularInputs);
 //   - PSForward (passes 7 and 9) writes linear HDR radiance into SceneColor (RGBA16_FLOAT): the glTF 2.0 metallic-roughness
 //     material (Shared/MaterialConstants.h) shaded with GGX, the height-correlated Smith visibility, Schlick's Fresnel,
 //     Lambert's diffuse and the multi-scatter energy compensation of the DFG LUT (Common/Brdf.slang, Renderer/BrdfLut.h),
@@ -27,12 +31,18 @@
 // Every draw is instanced (M23, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): instance i of a draw is
 // the view's instance record Instances[Draw.FirstInstance + i] (t10, Shared/InstanceRecord.h), whose world matrix places
 // it and whose draw flags (and, for the picking prepass, pick id) the vertex shader hands to the fragment shaders, flat.
-// Three vertex entries transform a vertex with the same NoContraction products, one per set of outputs its fragment
+// Four vertex entries transform a vertex with the same NoContraction products, one per set of outputs its fragment
 // shaders read, since the validation layer reports a flat integer output a fragment shader does not read
-// (WARNING-Shader-OutputNotConsumed): VSMain for PSPrepass and PSForward, VSPicking (with the pick id) for PSPicking and
-// VSOverdraw for PSOverdraw, which reads only the position and texture coordinates of MeshVertex and the attribute stream,
-// the attributes the overdraw pipelines bind (as the shadow casters' do), since the layer also reports a vertex attribute
-// the vertex shader does not read. The normal matrix is the
+// (WARNING-Shader-OutputNotConsumed): VSMain for PSForward, VSPrepass (with the current and previous clip positions, M26)
+// for PSPrepass,
+// VSPicking (with the clip positions and the pick id) for PSPicking and VSOverdraw for PSOverdraw, which reads only
+// the position and texture coordinates of MeshVertex and the attribute stream, the attributes the overdraw pipelines bind
+// (as the shadow casters' do), since the layer also reports a vertex attribute the vertex shader does not read. M26: the
+// prepass pipelines (VSPrepass and VSPicking) bind vertex binding 2, PREVIOUSPOSITION at location 6, which they read for a
+// deformed item's previous positions (an instance with DrawFlagPreviousPositions: M23's Skinning pass keeps them); a draw
+// without them binds its own vertex buffer there, never read as positions (Renderer/Private/ForwardPipelines.h). The
+// previous clip position is the previous local position through the instance record's PreviousWorld and
+// ViewConstants::PreviousViewProjection. The normal matrix is the
 // cofactor of the world matrix's upper 3x3 (§8.4), negated for a mirroring world (DrawFlagMirrored), whose draws use the
 // CullFront pipelines; front faces are SV_IsFrontFace, inverted when mirrored, and double-sided materials (CullNone) flip
 // the normals of back faces.
@@ -51,6 +61,7 @@ import Common.Brdf;
 import Common.Environment;
 import Common.Lighting;
 import Common.Gtao;
+import Common.Motion;
 
 #if !defined(ALPHA_MASK)
 	#define ALPHA_MASK 0
@@ -109,7 +120,15 @@ struct VertexInput
 	float4 Color : COLOR;
 };
 
-// VSMain's outputs, which PSPrepass and PSForward read.
+// M26: the prepass entries' inputs: VertexInput's, then the instance's previous local position (vertex binding 2, location
+// 6), read only with DrawFlagPreviousPositions.
+struct PrepassVertexInput
+{
+	VertexInput Vertex;
+	float3 PreviousPosition : PREVIOUSPOSITION;
+};
+
+// VSMain's outputs, which PSForward reads (and PSPrepass and PSPicking through their own entries' outputs).
 struct VertexOutput
 {
 	float4 Position : SV_Position;
@@ -123,10 +142,20 @@ struct VertexOutput
 	nointerpolation uint Flags : DRAWFLAGS;
 };
 
-// VSPicking's outputs, which PSPicking reads: VSMain's and the instance record's pick id.
+// VSPrepass's outputs, which PSPrepass reads: VSMain's and the surface point's current and previous clip positions (M26).
+struct PrepassVertexOutput
+{
+	VertexOutput Surface;
+	float4 CurrentClip : CURRENTCLIP;
+	float4 PreviousClip : PREVIOUSCLIP;
+};
+
+// VSPicking's outputs, which PSPicking reads: VSPrepass's and the instance record's pick id.
 struct PickingVertexOutput
 {
 	VertexOutput Surface;
+	float4 CurrentClip : CURRENTCLIP;
+	float4 PreviousClip : PREVIOUSCLIP;
 	nointerpolation uint EntityId : ENTITYID;
 };
 
@@ -298,6 +327,16 @@ VertexOutput TransformVertex(VertexInput input, InstanceRecord record)
 	return output;
 }
 
+// M26: the clip position the vertex had in the previous rendered frame (moved by this frame's jitter, as the current one
+// is): its previous local position (a deformed item's previous deformation with DrawFlagPreviousPositions, else its current
+// one) through the record's PreviousWorld and the view's PreviousViewProjection, with TransformVertex's NoContraction
+// products, so a vertex whose previous inputs equal its current ones gets exactly its SV_Position.
+float4 GetPreviousClip(PrepassVertexInput input, InstanceRecord record)
+{
+	const float3 local = (record.Flags & DrawFlagPreviousPositions) != 0 ? input.PreviousPosition : input.Vertex.Position;
+	return MultiplyExact(View.PreviousViewProjection, MultiplyExact(record.PreviousWorld, float4(local, 1.0)));
+}
+
 [shader("vertex")]
 VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 {
@@ -305,11 +344,24 @@ VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 }
 
 [shader("vertex")]
-PickingVertexOutput VSPicking(VertexInput input, uint instance : SV_VulkanInstanceID)
+PrepassVertexOutput VSPrepass(PrepassVertexInput input, uint instance : SV_VulkanInstanceID)
+{
+	const InstanceRecord record = GetInstance(instance);
+	PrepassVertexOutput output;
+	output.Surface = TransformVertex(input.Vertex, record);
+	output.CurrentClip = output.Surface.Position;
+	output.PreviousClip = GetPreviousClip(input, record);
+	return output;
+}
+
+[shader("vertex")]
+PickingVertexOutput VSPicking(PrepassVertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	const InstanceRecord record = GetInstance(instance);
 	PickingVertexOutput output;
-	output.Surface = TransformVertex(input, record);
+	output.Surface = TransformVertex(input.Vertex, record);
+	output.CurrentClip = output.Surface.Position;
+	output.PreviousClip = GetPreviousClip(input, record);
 	output.EntityId = record.EntityId;
 	return output;
 }
@@ -336,9 +388,12 @@ uint GetCoverage(Surface surface)
 #endif
 }
 
+// M26: the prepass's attachments (Renderer/SceneTargetFormats.h's order): SceneNormals, SceneVelocity, SceneRoughness.
 struct PrepassOutput
 {
 	float2 Normal : SV_Target0;
+	float2 Velocity : SV_Target1;
+	uint2 Roughness : SV_Target2;
 #if ALPHA_MASK
 	uint Coverage : SV_Coverage;
 #endif
@@ -352,12 +407,59 @@ struct ForwardOutput
 #endif
 };
 
-[shader("fragment")]
-PrepassOutput PSPrepass(VertexOutput input, bool isFrontFace : SV_IsFrontFace)
+// The view-dependent specular inputs of a shaded point (§8.5): the forward pass shades with them, and the prepass writes
+// the ones SSR's composite needs into SceneRoughness (M26), so both evaluate the same expressions.
+struct SpecularInputs
 {
-	const Surface surface = EvaluateSurface(input, isFrontFace);
+	float3 ToViewer;           // unit
+	float NDotV;               // max(n.v, 1e-4) with the shading normal
+	float Alpha;               // GGX alpha, widened by geometric specular anti-aliasing
+	float Roughness;           // sqrt(Alpha): the prefiltered cube's and the DFG LUT's roughness coordinate
+	float3 F0;                 // the specular reflectance at normal incidence
+	float3 SingleScatter;      // the DFG split sum's single-scatter specular albedo lerp(DFG1, DFG2, F0)
+	float3 EnergyCompensation; // the multi-scatter energy compensation 1 + F0 (1 / DFG2 - 1)
+	float3 Reflection;         // the view direction reflected about the shading normal
+};
+
+SpecularInputs EvaluateSpecularInputs(VertexOutput input, Surface surface)
+{
+	SpecularInputs inputs;
+	// Towards the viewer: per pixel for perspective cameras, the camera's backward axis (the view matrix's third row) for
+	// orthographic ones (§8.3).
+	inputs.ToViewer = View.ProjectionKind == ProjectionKindOrthographic ? SafeNormalize(View.View[2].xyz)
+																		: SafeNormalize(View.CameraPosition - input.WorldPosition);
+	inputs.NDotV = max(dot(surface.Normal, inputs.ToViewer), 1e-4);
+	inputs.Alpha = ApplySpecularAntiAliasing(surface.GeometricNormal, surface.PerceptualRoughness * surface.PerceptualRoughness);
+	inputs.Roughness = sqrt(inputs.Alpha);
+	inputs.F0 = lerp(float3(0.04), surface.BaseColor.rgb, surface.Metallic);
+	// The DFG LUT (Renderer/BrdfLut.h): single-scatter specular albedo lerp(DFG1, DFG2, f0) and the multi-scatter energy
+	// compensation 1 + f0 (1 / DFG2 - 1).
+	const float2 dfg = DfgLut.SampleLevel(LinearClamp, float2(inputs.NDotV, inputs.Roughness), 0.0);
+	inputs.SingleScatter = lerp(dfg.xxx, dfg.yyy, inputs.F0);
+	inputs.EnergyCompensation = float3(1.0) + inputs.F0 * (1.0 / max(dfg.y, 1e-4) - 1.0);
+	inputs.Reflection = reflect(-inputs.ToViewer, surface.Normal);
+	return inputs;
+}
+
+// M26 (decision 14): SceneRoughness's two words (Renderer/SceneTargetFormats.h): word 0 rgb the prefiltered radiance's
+// multiplier before its specular occlusion (multiScatter times HorizonOcclusion, as ShadeForward multiplies it) and a the
+// roughness the forward pass samples the prefiltered cube at; word 1 x the material's occlusion.
+uint2 EncodeSpecularInputs(VertexOutput input, Surface surface)
+{
+	const SpecularInputs specular = EvaluateSpecularInputs(input, surface);
+	const float3 multiScatter = specular.SingleScatter * specular.EnergyCompensation;
+	const float3 multiplier = multiScatter * HorizonOcclusion(specular.Reflection, surface.GeometricNormal);
+	return uint2(PackUnorm4x8(float4(multiplier, specular.Roughness)), PackUnorm4x8(float4(surface.Occlusion, 0.0, 0.0, 0.0)));
+}
+
+[shader("fragment")]
+PrepassOutput PSPrepass(PrepassVertexOutput input, bool isFrontFace : SV_IsFrontFace)
+{
+	const Surface surface = EvaluateSurface(input.Surface, isFrontFace);
 	PrepassOutput output;
 	output.Normal = EncodeOctahedral(SafeNormalize(mul((float3x3)View.View, surface.Normal)));
+	output.Velocity = ComputeMotionVector(input.CurrentClip, input.PreviousClip, View.ViewportSize);
+	output.Roughness = EncodeSpecularInputs(input.Surface, surface);
 #if ALPHA_MASK
 	output.Coverage = GetCoverage(surface);
 #endif
@@ -370,24 +472,18 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 	if (DebugView != SceneDebugViewLit)
 		return float4(GetDebugViewValue(surface), 1.0);
 
-	// Towards the viewer: per pixel for perspective cameras, the camera's backward axis (the view matrix's third row) for
-	// orthographic ones (§8.3).
-	const float3 view = View.ProjectionKind == ProjectionKindOrthographic ? SafeNormalize(View.View[2].xyz)
-																		 : SafeNormalize(View.CameraPosition - input.WorldPosition);
+	const SpecularInputs specular = EvaluateSpecularInputs(input, surface);
+	const float3 view = specular.ToViewer;
 	const float3 normal = surface.Normal;
-	const float nDotV = max(dot(normal, view), 1e-4);
-	const float alpha = ApplySpecularAntiAliasing(surface.GeometricNormal, surface.PerceptualRoughness * surface.PerceptualRoughness);
-	const float roughness = sqrt(alpha);
+	const float nDotV = specular.NDotV;
+	const float alpha = specular.Alpha;
+	const float roughness = specular.Roughness;
 	const float3 baseColor = surface.BaseColor.rgb;
 	const float3 diffuseColor = baseColor * (1.0 - surface.Metallic);
-	const float3 f0 = lerp(float3(0.04), baseColor, surface.Metallic);
-
-	// The DFG LUT (Renderer/BrdfLut.h): single-scatter specular albedo lerp(DFG1, DFG2, f0) and the multi-scatter energy
-	// compensation 1 + f0 (1 / DFG2 - 1).
-	const float2 dfg = DfgLut.SampleLevel(LinearClamp, float2(nDotV, roughness), 0.0);
-	const float3 singleScatter = lerp(dfg.xxx, dfg.yyy, f0);
-	const float3 energyCompensation = float3(1.0) + f0 * (1.0 / max(dfg.y, 1e-4) - 1.0);
-	const float3 reflection = reflect(-view, normal);
+	const float3 f0 = specular.F0;
+	const float3 singleScatter = specular.SingleScatter;
+	const float3 energyCompensation = specular.EnergyCompensation;
+	const float3 reflection = specular.Reflection;
 
 	// Receiver depth follows the triangle plane, not interpolated or normal-mapped shading normals. Evaluate
 	// derivatives before any per-light/cascade divergence, then orient the plane for the receiver normal offset.
@@ -436,10 +532,14 @@ ForwardOutput PSForward(VertexOutput input, bool isFrontFace : SV_IsFrontFace)
 	return output;
 }
 
+// M26: the picking prepass's attachments (Renderer/SceneTargetFormats.h's order): SceneNormals, EntityId, SceneVelocity,
+// SceneRoughness.
 struct PickingOutput
 {
 	float2 Normal : SV_Target0;
 	uint EntityId : SV_Target1;
+	float2 Velocity : SV_Target2;
+	uint2 Roughness : SV_Target3;
 	uint Coverage : SV_Coverage;
 };
 
@@ -450,6 +550,8 @@ PickingOutput PSPicking(PickingVertexOutput input, bool isFrontFace : SV_IsFront
 	PickingOutput output;
 	output.Normal = EncodeOctahedral(SafeNormalize(mul((float3x3)View.View, surface.Normal)));
 	output.EntityId = input.EntityId;
+	output.Velocity = ComputeMotionVector(input.CurrentClip, input.PreviousClip, View.ViewportSize);
+	output.Roughness = EncodeSpecularInputs(input.Surface, surface);
 	output.Coverage = GetCoverage(surface);
 	return output;
 }

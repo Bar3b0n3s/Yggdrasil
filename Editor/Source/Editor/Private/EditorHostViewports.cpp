@@ -24,6 +24,7 @@
 #include "Engine/Session/PlaySession.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <utility>
 
@@ -441,7 +442,11 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(view.Renderer, SceneRenderer::Create(*m_Device, *m_Pipelines, *m_Cache, m_Editor.GetAssets(), { .Width = size.x, .Height = size.y }));
 			view.FailedSize = glm::uvec2(0);
+			view.History.Reset();
 		}
+		// M26 (decision 10): a shown scene replaced, or a session started or stopped, starts the view's history afresh.
+		if (sceneChanged)
+			view.History.Reset();
 		// M18 (C18.4, decision 44): a new size is a request. When it runs out of memory after the renderer's trim and retry,
 		// the view goes on at its previous size, shown scaled into the panel, and the size is asked for again only once the
 		// requested size changes. Resizing cancels the renderer's picks (a new generation), as the size check below would.
@@ -480,6 +485,12 @@ namespace Engine {
 		view.Flags = snapshot.Flags;
 		ENGINE_TRY(Poll(view, kind, context.FrameIndex));
 		snapshot.FrameIndex = context.FrameIndex;
+		// M26 (decision 10): the view's temporal inputs, its delta time the seconds since its previous render (presentation
+		// only: auto-exposure's adaptation; captures render from a reset history of their own, ViewportCapture).
+		const double now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+		const double elapsed = view.LastRenderSeconds.has_value() ? std::max(now - *view.LastRenderSeconds, 0.0) : 0.0;
+		view.LastRenderSeconds = now;
+		view.History.Apply(snapshot, static_cast<float>(elapsed));
 		view.Recorded = true;
 		view.HoldsSceneResources = true;
 		Status recorded = view.Renderer->Render(*context.CommandList, snapshot);

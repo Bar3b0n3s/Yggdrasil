@@ -23,6 +23,17 @@ namespace Engine {
 		return m_State->ImageGeneration != 0 ? m_State->Targets.SceneColor.Get() : nullptr;
 	}
 
+	// M26 (C26.1, decision 14, stream X-C): the prepass's two targets of the last Render, as GetSceneColorTexture's.
+	nvrhi::ITexture* SceneRenderer::GetSceneVelocityTexture() const
+	{
+		return m_State->ImageGeneration != 0 ? m_State->Targets.SceneVelocity.Get() : nullptr;
+	}
+
+	nvrhi::ITexture* SceneRenderer::GetSceneRoughnessTexture() const
+	{
+		return m_State->ImageGeneration != 0 ? m_State->Targets.SceneRoughness.Get() : nullptr;
+	}
+
 	uint64_t SceneRenderer::GetViewGeneration() const
 	{
 		return m_State->Generation;

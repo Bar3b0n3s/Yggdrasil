@@ -20,12 +20,13 @@
 // One RenderViewHistory per view that renders over time: each editor view (scene and game), the Runtime's window, the
 // FeatureTest runner's view, and every capture (ViewportCapture, which resets it and renders the warm-up). Apply(snapshot,
 // deltaTime) is called on each extracted snapshot right before its Render:
-//   - when the history is empty or Reset was called since its last Apply, or the camera changed its projection kind, its
-//     viewport size or its entity (a cut), the snapshot's history is reset: CameraData::PreviousViewProjection and every
-//     MeshDrawItem::PreviousWorld stay empty and DeltaTime is 0;
+//   - when the history is empty or Reset was called since its last Apply, the snapshot has no camera, or the camera changed
+//     its projection kind, its viewport size or its entity (a cut), the snapshot's history is reset:
+//     CameraData::PreviousViewProjection and every MeshDrawItem::PreviousWorld are emptied and DeltaTime is 0;
 //   - otherwise PreviousViewProjection is the previous Apply's unjittered Projection * View, each mesh item's PreviousWorld
-//     is the previous Apply's World of the item with the same Entity (empty for an item it did not see; items of one entity
-//     matched in order), and DeltaTime is `deltaTime`;
+//     is the previous Apply's World of the item with the same Entity (empty for an item it did not see, or whose previous
+//     World is not finite; items of one entity matched in order), and DeltaTime is `deltaTime` (0 when it is negative or
+//     not finite);
 //   - Jitter is GetTaaJitter(frame) when the snapshot's Post.AntiAliasing is Taa and its Output is not PixelArt, else (0, 0),
 //     where frame counts the Applies since the last reset (0 at the reset);
 //   - then it records the snapshot's camera and items as the next Apply's previous frame.
@@ -38,7 +39,8 @@
 // after the reset), and two captures of one scene are byte-identical. A snapshot without temporal post-processing renders
 // once, as before M26.
 //
-// Frozen by the M26 contract C26.1; stream X-C implements it (and the hosts' calls).
+// Frozen by the M26 contract C26.1; stream X-C implements it (and the hosts' calls: ViewportCapture's warm-up, the Runtime's
+// game view, the editor's scene and game views, EditorHostViewports).
 
 namespace Engine {
 
@@ -52,8 +54,9 @@ namespace Engine {
 	// two and three in float, computed in integer arithmetic then divided once).
 	[[nodiscard]] glm::vec2 GetTaaJitter(uint32_t frame);
 
-	// Whether a capture of `snapshot` renders the warm-up: TAA or auto-exposure, in a Lit view outside pixel-art mode (which
-	// ignores both, M18's 2D colour path: RenderOutputSettings::PixelArt). Pure.
+	// Whether a capture of `snapshot` renders the warm-up: TAA or auto-exposure, in a Lit view with a camera outside the
+	// wireframe and pixel-art mode (which ignore both, as the renderer's temporal passes do; pixel-art mode is M18's 2D colour
+	// path: RenderOutputSettings::PixelArt). Pure.
 	[[nodiscard]] bool NeedsTemporalWarmup(const RenderSnapshot& snapshot);
 
 	class RenderViewHistory

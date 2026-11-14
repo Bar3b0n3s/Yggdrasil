@@ -22124,7 +22124,7 @@
 		{
 			"name": "scene.raycast",
 			"domain": "scene",
-			"description": "Finds the nearest visible mesh triangle on a CPU ray, including both faces and Mask/Blend geometry without texture alpha testing. Does not step physics or change selection.",
+			"description": "Finds the nearest visible mesh or terrain triangle on a CPU ray, including both faces and Mask/Blend geometry without texture alpha testing; a terrain is hit on the surface it draws and collides with. Does not step physics or change selection.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": true,
@@ -22179,7 +22179,7 @@
 						"minimum": 0
 					},
 					"layerMask": {
-						"description": "Physics-layer bits inherited from the nearest rigid-body ancestor, or the entity's character, else Default.",
+						"description": "Physics-layer bits inherited from the nearest rigid-body ancestor, or the entity's character, or a terrain's own TerrainCollider, else Default.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -22278,13 +22278,13 @@
 						"type": "number"
 					},
 					"submesh": {
-						"description": "Zero-based submesh index.",
+						"description": "Zero-based submesh index; 0 for a terrain.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
 					},
 					"triangle": {
-						"description": "Zero-based triangle index within the submesh.",
+						"description": "Zero-based triangle index within the submesh; for a terrain, 2 * (z * (resolution - 1) + x) for cell (x, z)'s triangle on its (x, z + 1) side, plus 1 for the one on its (x + 1, z) side.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -24180,6 +24180,12 @@
 							"ssaoHalfResolution": {
 								"description": "Whether the frame rendered with the project's Rendering.SsaoHalfResolution set.",
 								"type": "boolean"
+							},
+							"historyFrames": {
+								"description": "Renders since the view's temporal history (motion vectors, TAA's jitter and history, auto-exposure's adaptation) last started afresh: 0 at its first render, after a scene change, play starting or stopping, or a camera cut; one more each render after.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false
@@ -25890,7 +25896,7 @@
 		{
 			"name": "viewport.pick",
 			"domain": "viewport",
-			"description": "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh triangle. Returns the hit without changing selection.",
+			"description": "Queries what a viewport pixel shows without a GPU, clipping to the camera's near and far planes: the last-drawn sprite or tile whose quad covers it, in the project's sorting layers (a tile names its tilemap's entity), else the nearest mesh or terrain triangle. Returns the hit without changing selection.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": true,
@@ -25962,7 +25968,7 @@
 						"maximum": 4294967295
 					},
 					"raycast": {
-						"description": "The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is reported as its tilemap's entity), else the nearest mesh triangle, in the camera's near-to-far interval.",
+						"description": "The sprite or tile the pixel shows (the last drawn whose quad covers it: submesh 0, triangle 0 or 1 of the quad; a tile is reported as its tilemap's entity), else the nearest mesh or terrain triangle, in the camera's near-to-far interval.",
 						"$ref": "#/$defs/SceneRaycastResult"
 					},
 					"_meta": {
@@ -26044,13 +26050,13 @@
 								"type": "number"
 							},
 							"submesh": {
-								"description": "Zero-based submesh index.",
+								"description": "Zero-based submesh index; 0 for a terrain.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
 							},
 							"triangle": {
-								"description": "Zero-based triangle index within the submesh.",
+								"description": "Zero-based triangle index within the submesh; for a terrain, 2 * (z * (resolution - 1) + x) for cell (x, z)'s triangle on its (x, z + 1) side, plus 1 for the one on its (x + 1, z) side.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295

@@ -5,6 +5,7 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/IrradianceVolumeData.h"
 #include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MeshData.h"
@@ -45,7 +46,8 @@
 // into a new buffer. Every other constant depends on the material's version only, which is the key. Generations come from
 // one counter of the cache that only increases. Environments (M8)
 // have no placeholder (§7.2): an entry remembers a failed load or upload for its (handle, version), so the failure is
-// reported once and nothing is retried until the asset's version changes. LUTs (M26) are kept as environments are.
+// reported once and nothing is retried until the asset's version changes. LUTs and heightfields (M26) are kept as
+// environments are.
 
 namespace Engine {
 
@@ -421,6 +423,36 @@ namespace Engine {
 			mirror.DomainMin = lut.DomainMin;
 			mirror.DomainMax = lut.DomainMax;
 			return mirror;
+		}
+
+		// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22, stream T-C): the GPU mirror of `heightfield`
+		// (GpuHeightfield): its samples as a Resolution^2 R16_UNORM texture, sample (x, z) at texel (x, z), so a shader's texel
+		// is sample / MaxHeightfieldSample, as Asset/TerrainGeometry.h places it. A heightfield whose resolution is outside the
+		// format's limits or disagrees with its samples (one no loader made, since every loader validates it) is refused, so
+		// the shader never reads past the texture.
+		static Result<GpuHeightfield> UploadHeightfield(const UploadContext& context, const HeightfieldData& heightfield, const std::string& name)
+		{
+			const uint32_t resolution = heightfield.Resolution;
+			if (resolution < MinHeightfieldResolution || resolution > MaxHeightfieldResolution
+				|| heightfield.Heights.size() != static_cast<size_t>(resolution) * resolution)
+			{
+				return MakeError(ErrorCode::InvalidArgument, "the heightfield '{}' of {} samples a side holds {} samples", name, resolution,
+					heightfield.Heights.size());
+			}
+			nvrhi::TextureDesc desc;
+			desc.width = resolution;
+			desc.height = resolution;
+			desc.format = nvrhi::Format::R16_UNORM;
+			desc.isShaderResource = true;
+			desc.initialState = nvrhi::ResourceStates::ShaderResource;
+			desc.keepInitialState = true;
+			desc.debugName = name;
+			const std::array<TextureSubresourceData, 1> subresources = { { { .MipLevel = 0,
+				.ArraySlice = 0,
+				.Data = std::as_bytes(std::span<const uint16_t>(heightfield.Heights)),
+				.RowPitch = static_cast<size_t>(resolution) * sizeof(uint16_t) } } };
+			ENGINE_TRY_ASSIGN(TextureUpload upload, context.Device->GetHostImageUpload().CreateTexture(desc, subresources));
+			return GpuHeightfield{ .Heights = std::move(upload.Texture), .Resolution = resolution };
 		}
 
 	}
@@ -812,8 +844,17 @@ namespace Engine {
 			bool IsUsed = false;
 		};
 
-		// Removes the entries of `entries` (materials, environments, irradiance volumes or LUTs) whose version is no longer
-		// their asset's, and with `releaseUnused` those not used since the previous call, then starts the next period.
+		// One heightfield mirror (M26, stream T-C), or the remembered failure of its (handle, version), as an environment's.
+		struct HeightfieldEntry
+		{
+			GpuHeightfield Value{};
+			bool IsValid = false; // the height texture was uploaded
+			bool IsUsed = false;
+		};
+
+		// Removes the entries of `entries` (materials, environments, irradiance volumes, LUTs or heightfields) whose version is
+		// no longer their asset's, and with `releaseUnused` those not used since the previous call, then starts the next
+		// period.
 		template<typename Entry>
 		void CollectStaleEntries(std::map<MirrorKey, Entry>& entries, const AssetManager& assets, bool releaseUnused)
 		{
@@ -837,6 +878,7 @@ namespace Engine {
 		std::map<MirrorKey, EnvironmentEntry> Environments;
 		std::map<MirrorKey, IrradianceVolumeEntry> IrradianceVolumes; // M26 (stream Q-B)
 		std::map<MirrorKey, LutEntry> Luts;                           // M26, stream X-B
+		std::map<MirrorKey, HeightfieldEntry> Heightfields;           // M26, stream T-C
 		size_t UploadFailures = 0;
 		uint64_t NextGeneration = 1; // GpuMaterial::Generation: only increases
 		// M23 (decision 9): the shared default attribute stream of the meshes without one. Dropped with every mirror (Clear,
@@ -1131,6 +1173,7 @@ namespace Engine {
 		CollectStaleEntries(m_State->Environments, *m_State->Assets, releaseUnused);
 		CollectStaleEntries(m_State->IrradianceVolumes, *m_State->Assets, releaseUnused);
 		CollectStaleEntries(m_State->Luts, *m_State->Assets, releaseUnused);
+		CollectStaleEntries(m_State->Heightfields, *m_State->Assets, releaseUnused);
 		m_State->Meshes.CollectStale(*m_State->Assets, releaseUnused);
 		m_State->Textures.CollectStale(*m_State->Assets, releaseUnused);
 		m_State->ReleaseUnboundDefaultAttributes();
@@ -1142,6 +1185,7 @@ namespace Engine {
 		m_State->Environments.clear();
 		m_State->IrradianceVolumes.clear();
 		m_State->Luts.clear();
+		m_State->Heightfields.clear();
 		m_State->Meshes.Clear();
 		m_State->Textures.Clear();
 		m_State->DefaultAttributes = {};
@@ -1177,6 +1221,10 @@ namespace Engine {
 		{
 			return IsTrimmable(assets, item.first, false);
 		});
+		std::erase_if(m_State->Heightfields, [&assets](const auto& item)
+		{
+			return IsTrimmable(assets, item.first, false);
+		});
 		m_State->Meshes.TrimUnused(assets);
 		m_State->Textures.TrimUnused(assets);
 		m_State->ReleaseUnboundDefaultAttributes();
@@ -1192,7 +1240,7 @@ namespace Engine {
 			.EnvironmentCount = m_State->Environments.size(),
 			.IrradianceVolumeCount = m_State->IrradianceVolumes.size(),
 			.LutCount = m_State->Luts.size(),
-			.HeightfieldCount = 0,
+			.HeightfieldCount = m_State->Heightfields.size(),
 		};
 	}
 
@@ -1334,12 +1382,73 @@ namespace Engine {
 		return inserted.IsValid ? &inserted.Value : nullptr;
 	}
 
-	// M26 (C26.1): the heightfields' mirror (GpuResourceCache.h), a contract stub of Docs/Decisions/0037-m26-contract.md
-	// decision 22, implemented by stream T-C (W26.2): until then no heightfield is uploaded.
-	const GpuHeightfield* GpuResourceCache::GetHeightfield(AssetHandle /*handle*/)
+	const GpuHeightfield* GpuResourceCache::GetHeightfield(AssetHandle handle)
 	{
-		ENGINE_CONTRACT_STUB();
-		return nullptr;
+		// M26 (stream T-C, decision 22): kept as GetEnvironment keeps environments; a heightfield has no placeholder, so a
+		// failure draws no terrain.
+		if (!handle.IsValid())
+			return nullptr;
+		State& state = *m_State;
+		AssetManager& assets = *state.Assets;
+		// Load first: it publishes the first version (GetVersion is 0 before it), and remembers a failure itself (§7.2).
+		const Result<AssetRef<Asset>> loaded = assets.Load(handle);
+		const MirrorKey key = { .Handle = handle, .Version = assets.GetVersion(handle) };
+		if (const auto found = state.Heightfields.find(key); found != state.Heightfields.end())
+		{
+			found->second.IsUsed = true;
+			return found->second.IsValid ? &found->second.Value : nullptr;
+		}
+
+		HeightfieldEntry entry;
+		entry.IsUsed = true;
+		const std::string id = handle.ToString();
+		if (!loaded.has_value())
+		{
+			// GetOrPlaceholder's codes (AssetManager.h), so every manager reports alike.
+			const Error& error = loaded.error();
+			if (error.GetCode() == ErrorCode::NotFound)
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetMissingCode), std::format("heightfield {} is missing; its terrain is not drawn", id),
+					"restore the asset, or assign another heightfield");
+			}
+			else if (error.GetCode() == ErrorCode::InvalidArgument)
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
+					std::format("asset {} cannot be used as a Heightfield; its terrain is not drawn", id), "assign an asset of type Heightfield");
+			}
+			else
+			{
+				state.ReportMirrorFailure(handle, std::string(AssetImportFailedCode),
+					std::format("heightfield {} failed to load; its terrain is not drawn: {}", id, Error(error).WithHint(std::string()).ToString()),
+					error.GetHint());
+			}
+		}
+		else if (const AssetRef<HeightfieldData> heightfield = AssetCast<HeightfieldData>(*loaded))
+		{
+			const std::string name = Utils::GetAssetName(assets, handle);
+			Result<GpuHeightfield> uploaded = Utils::UploadHeightfield(state.GetContext(), *heightfield, name);
+			if (uploaded.has_value())
+			{
+				entry.Value = std::move(*uploaded);
+				entry.IsValid = true;
+			}
+			else if (Utils::IsUploadFailure(*state.Device))
+			{
+				++state.UploadFailures;
+				state.ReportMirrorFailure(handle, std::string(AssetUploadFailedCode),
+					std::format("cannot upload heightfield '{}' to the GPU: {}; its terrain is not drawn", name, uploaded.error().ToString()),
+					"the upload is tried again when the asset changes; when the device is out of memory, use a smaller heightfield");
+			}
+		}
+		else
+		{
+			state.ReportMirrorFailure(handle, std::string(AssetTypeMismatchCode),
+				std::format("asset {} is a {}, not a Heightfield; its terrain is not drawn", id, AssetTypeToString(assets.GetAssetType(handle))),
+				"assign an asset of type Heightfield");
+		}
+		entry.Value.Version = key.Version;
+		HeightfieldEntry& inserted = state.Heightfields.insert_or_assign(key, std::move(entry)).first->second;
+		return inserted.IsValid ? &inserted.Value : nullptr;
 	}
 
 }

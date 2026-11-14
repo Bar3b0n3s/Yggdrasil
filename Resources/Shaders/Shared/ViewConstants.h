@@ -51,13 +51,27 @@ inline constexpr uint32_t ProjectionKindOrthographic = 1;
 		uint32_t Padding1 = 0;
 		uint32_t Padding2 = 0;
 		uint32_t Padding3 = 0;
+		// M26 (C26.1, R-TAA-VEL, R-TAA; Docs/Decisions/0037-m26-contract.md decisions 10, 11, 14 and 17; stream X-C: appended,
+		// the members above are frozen): the view's temporal inputs (RenderSnapshot.h's CameraData). With TAA (a Lit view
+		// outside the wireframe and pixel-art mode whose PostProcessSettings::AntiAliasing is Taa) the scene passes' Projection
+		// and ViewProjection, and their inverses, include Jitter: the clip-space translation J that moves every rasterized
+		// point by Jitter scene pixels (+x right, +y down), ViewProjection = J * (Projection * View); otherwise Jitter is
+		// (0, 0) and the matrices are the camera's. PreviousViewProjection: J times the previous rendered frame's unjittered
+		// Projection * View (CameraData::PreviousViewProjection), or ViewProjection itself after a history reset (no camera
+		// motion), so the prepass's motion vectors (SceneVelocity, Common/Motion.slang), the difference of the current and
+		// previous clip positions both moved by J, are unjittered, and exactly zero for what did not move.
+		Float4x4 PreviousViewProjection;
+		Float2 Jitter;
+		uint32_t Padding4 = 0;
+		uint32_t Padding5 = 0;
 	};
 
 #if !defined(ENGINE_SHADER)
-	static_assert(sizeof(ViewConstants) == 400, "ViewConstants must match its 400-byte constant-buffer layout");
+	static_assert(sizeof(ViewConstants) == 480, "ViewConstants must match its 480-byte constant-buffer layout");
 	static_assert(offsetof(ViewConstants, CameraPosition) == 320 && offsetof(ViewConstants, OrthoHalfExtents) == 336
 			&& offsetof(ViewConstants, ViewportSize) == 352 && offsetof(ViewConstants, TanHalfFovY) == 368
-			&& offsetof(ViewConstants, LightCount) == 384,
+			&& offsetof(ViewConstants, LightCount) == 384 && offsetof(ViewConstants, PreviousViewProjection) == 400
+			&& offsetof(ViewConstants, Jitter) == 464,
 		"ViewConstants members must sit where the constant-buffer layout puts them");
 
 }

@@ -80,6 +80,7 @@ namespace Engine {
 		result.DroppedPointShadows = stats.DroppedPointShadows;
 		result.ShadowMapSize = stats.ShadowMapSize;
 		result.SsaoHalfResolution = stats.SsaoHalfResolution;
+		result.HistoryFrames = stats.HistoryFrames;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -124,7 +125,10 @@ namespace Engine {
 			.Field("droppedPointShadows", &StatsViewSummary::DroppedPointShadows,
 				"Visible shadow-casting point lights beyond the budget of four, lit without shadows.")
 			.Field("shadowMapSize", &StatsViewSummary::ShadowMapSize, "Shadow map size the frame rendered with (the project's Rendering.ShadowMapSize); 0 when unavailable.")
-			.Field("ssaoHalfResolution", &StatsViewSummary::SsaoHalfResolution, "Whether the frame rendered with the project's Rendering.SsaoHalfResolution set.");
+			.Field("ssaoHalfResolution", &StatsViewSummary::SsaoHalfResolution, "Whether the frame rendered with the project's Rendering.SsaoHalfResolution set.")
+			.Field("historyFrames", &StatsViewSummary::HistoryFrames,
+				"Renders since the view's temporal history (motion vectors, TAA's jitter and history, auto-exposure's adaptation) last started afresh: 0 at "
+				"its first render, after a scene change, play starting or stopping, or a camera cut; one more each render after.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

@@ -31,6 +31,10 @@
 //      at most four shadow-casting point lights, drawn with the shadow casters' pipelines.
 //   4. Depth/normal prepass: SceneDepth (reverse-Z) and SceneNormals (octahedral view-space normals, normal-mapped); Mask
 //      materials discard below AlphaCutoff here and in the forward pass. Picking adds the same visible surfaces to EntityId.
+//      M26 (Docs/Decisions/0037-m26-contract.md decisions 11 and 14): also SceneVelocity, the motion vectors (from the
+//      instance records' PreviousWorld, a deformed item's previous positions and CameraData::PreviousViewProjection), and
+//      SceneRoughness, the forward pass's specular inputs SSR's composite replaces (SceneTargetFormats.h).
+//      Then M26's TerrainDepthNormal (TerrainPass.h): the snapshot's terrains as LOD chunks into the same targets.
 //   5. Linear view-depth pyramid and 6. GTAO: projection-aware, with optional half resolution and edge-aware filtering.
 //      Then M23's light clusters (LightClusterPass.h): the masks of the lights each cluster of the view may receive.
 //   7. Forward opaque: SceneColor cleared to the camera's ClearColor; PBR (§8.5: GGX, height-correlated Smith, Schlick,
@@ -41,9 +45,16 @@
 //      FallbackColor * Intensity without an environment map; inside M26's baked probes' boxes (Private/ProbeShading.h,
 //      Common/Probes.slang; not with RenderQualitySettings::Probes false, as in a bake's captures) an irradiance volume's SH9
 //      replaces the diffuse term and a reflection probe's box-projected cube the prefiltered specular; emissive added.
+//      Then M26's TerrainForward (TerrainPass.h): the terrains' chunks shaded the same way, with their splatted layers.
 //   8. Skybox (SkyboxPass.h): when the camera clears to the skybox and the environment has a map and ShowSkybox.
+//      Then M26's SSR (SsrPass.h): with PostProcessSettings::SsrEnabled in a Lit view outside the wireframe, glossy
+//      reflections traced over the opaque image with the depth pyramid (recorded for it without GTAO too) and composited into
+//      SceneColor in place of the probes' or environment's specular, which stays where a ray misses.
 //   9. Forward transparent: the Blend draws sorted back to front, alpha blended, depth tested without writes.
-//  10. Bloom (BloomPass.h): when PostProcessSettings::BloomEnabled. Then M26's Exposure pass (ExposurePass.h): with
+//  10. M26's Taa pass (TaaPass.h): with PostProcessSettings::AntiAliasing Taa in a Lit view outside the wireframe and
+//      pixel-art mode, whose scene passes then rasterize with CameraData::Jitter, SceneColor resolved against the view's
+//      TaaHistory, reprojected by SceneVelocity. Bloom (BloomPass.h): when PostProcessSettings::BloomEnabled. Then M26's
+//      Exposure pass (ExposurePass.h): with
 //      PostProcessSettings::ExposureMode Auto in a Lit view outside the wireframe and pixel-art mode, the luminance histogram
 //      of the image the tonemap exposes and the adapted exposure, starting afresh when the snapshot's history was reset.
 //  11. Tonemap + encode (TonemapPass.h): exposure 2^ExposureEV (times the adapted exposure with Auto), the snapshot's
@@ -64,9 +75,9 @@
 // annotations (ADR0017); Overdraw uses a dedicated depth-independent additive pass, not the forward shading specialization.
 // A snapshot without a camera clears SceneColor to the default ClearColor and draws nothing but screen texts.
 // Rendering is deterministic for a snapshot on a given device (§8.3), which the golden images rely on. M26's temporal effects
-// keep a per-view state (auto-exposure's adapted exposure), which a snapshot whose history was reset (CameraData::
-// PreviousViewProjection empty: every capture's, Docs/Decisions/0037-m26-contract.md decision 10) starts afresh, so its
-// image never depends on the renders before it.
+// keep a per-view state (auto-exposure's adapted exposure, TAA's history), which a snapshot whose history was reset
+// (CameraData::PreviousViewProjection empty: every capture's first warm-up render, Docs/Decisions/0037-m26-contract.md
+// decision 10) starts afresh, so a capture's image never depends on the renders before it.
 //
 // Pipelines (§8.5, §8.12). SceneRendererPipelines holds every pipeline of the pass list, created once per device at startup
 // and shared by every SceneRenderer of that device (Docs/Decisions/0012-m7-decisions.md decision 7): the scene's own mesh
@@ -174,12 +185,13 @@ namespace Engine {
 		// their dedicated passes (ADR0017).
 		// Data-view pipelines are included in StartupPipelineCount.
 		static constexpr uint32_t DebugViewPipelineCount = 9;
-		// Every pipeline Create makes: the mesh pipelines plus SkinningPass (1, M23), SkyboxPass (1), BloomPass (3), TonemapPass
-		// (1), FxaaPass (1), DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid (2), GTAO (2),
-		// LightClusterPass (1, M23), Selection (8), the data-view composite (1), QuadBatcher (6: M18's 2, M21's HdrLit and
-		// Normals, M22's LdrDepth and M26's HdrAdditive), UpscalePass (2), M21's Lights2DPass (1) and M26's ExposurePass (2):
-		// 67, the declarations' sum (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against
-		// each pass's PipelineCount.
+		// Every pipeline Create makes: the mesh pipelines plus SkinningPass (1, M23), SkyboxPass (1), BloomPass (3),
+		// TonemapPass (1), FxaaPass (1), DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid
+		// (2), GTAO (2), LightClusterPass (1, M23), Selection (8), the data-view composite (1), QuadBatcher (6: M18's
+		// 2, M21's HdrLit and Normals, M22's LdrDepth and M26's HdrAdditive), UpscalePass (2), M21's Lights2DPass (1),
+		// M26's ExposurePass (2), M26's TaaPass (1), SsrPass (2) and TerrainPass (3: TerrainDepthNormal's prepass and
+		// picking prepass, TerrainForward's forward pass): 73, the declarations' sum (GetDeclaredPipelineCount,
+		// RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
@@ -410,6 +422,12 @@ namespace Engine {
 		// chain), at the scene resolution, borrowed until the next Render, Resize, ReleaseTargets or destruction; null before
 		// the first Render. ProbeCapture reads a bake's faces back from it.
 		[[nodiscard]] nvrhi::ITexture* GetSceneColorTexture() const;
+		// M26 (C26.1, R-TAA-VEL, R-SSR-IN; Docs/Decisions/0037-m26-contract.md decision 14, stream X-C): the last Render's
+		// SceneVelocity (SceneVelocityFormat: the prepass's motion vectors) and SceneRoughness (SceneRoughnessFormat: SSR's
+		// specular inputs), at the scene resolution, borrowed as GetSceneColorTexture's; null before the first Render. For
+		// tests and diagnostics: the renderer's own passes read them directly.
+		[[nodiscard]] nvrhi::ITexture* GetSceneVelocityTexture() const;
+		[[nodiscard]] nvrhi::ITexture* GetSceneRoughnessTexture() const;
 		// Monotonic, nonzero; increments after actual resize or CancelPicks, never wraps/reuses a generation.
 		// Host calls CancelPicks on camera change, scene replacement, play target switch and hidden/minimized transition.
 		// M10 image.Generation is exactly this value; options that change visible geometry also invalidate it.

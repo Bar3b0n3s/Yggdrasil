@@ -8,6 +8,7 @@
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/TemporalHistory.h"
 
 #include <format>
 #include <limits>
@@ -136,16 +137,26 @@ namespace Engine {
 			if (m_SceneRenderer->GetWidth() != request.Width || m_SceneRenderer->GetHeight() != request.Height)
 				m_SceneRenderer->ReleaseTargets();
 			ENGINE_TRY(m_SceneRenderer->Resize(request.Width, request.Height));
-			ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
+			// M26 (C26.1; Docs/Decisions/0037-m26-contract.md decision 10, stream X-C): every capture renders from a reset view
+			// history, and a snapshot with temporal post-processing (NeedsTemporalWarmup: TAA or auto-exposure) renders
+			// CaptureWarmupFrames times with delta time 0, the jitter sequence once, keeping the last image; any other renders
+			// once. So two captures of one snapshot are byte-identical, whatever the capture rendered before.
 			RenderSnapshot captured = snapshot;
-			captured.FrameIndex = ++m_FrameIndex;
-			// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
-			CommandListRecording recording(*m_Device, *m_CommandList);
-			const Status rendered = m_SceneRenderer->Render(*m_CommandList, captured);
-			const uint64_t submission = recording.Execute();
-			m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
-			// A debug view that stayed on another mode is OutOfMemory: never an image of another debug view (decision 44).
-			ENGINE_TRY(rendered);
+			RenderViewHistory history;
+			const uint32_t renders = NeedsTemporalWarmup(snapshot) ? CaptureWarmupFrames : 1;
+			for (uint32_t render = 0; render < renders; ++render)
+			{
+				history.Apply(captured, 0.0f);
+				ENGINE_CORE_VERIFY(m_FrameIndex < std::numeric_limits<uint64_t>::max(), "capture frame identity exhausted");
+				captured.FrameIndex = ++m_FrameIndex;
+				// The list is executed whatever Render reports (an error names a skipped draw; the rest rendered).
+				CommandListRecording recording(*m_Device, *m_CommandList);
+				const Status rendered = m_SceneRenderer->Render(*m_CommandList, captured);
+				const uint64_t submission = recording.Execute();
+				m_SceneRenderer->OnSubmitted(captured.FrameIndex, submission);
+				// A debug view that stayed on another mode is OutOfMemory: never an image of another debug view (decision 44).
+				ENGINE_TRY(rendered);
+			}
 
 			// The view-resolution image: the upscaled scene image in its letterbox when the snapshot's output stage scales it.
 			ENGINE_TRY_ASSIGN(Image read, m_Readback->ReadTexture(*m_SceneRenderer->GetFinalTexture()));

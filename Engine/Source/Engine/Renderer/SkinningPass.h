@@ -103,8 +103,9 @@ namespace Engine {
 		// The deformed vertices of `vertexCount` vertices (at least one): a vertex buffer of MeshVertex (48 bytes each) that is
 		// also a raw UAV, kept in VertexBuffer between command lists.
 		[[nodiscard]] static nvrhi::BufferDesc GetVerticesDesc(uint32_t vertexCount);
-		// The previous positions of `vertexCount` vertices (at least one): a structured buffer of float4 (w 1) with UAVs, kept in
-		// ShaderResource between command lists, which M26's motion vectors read.
+		// The previous positions of `vertexCount` vertices (at least one): a structured buffer of float4 (w 1) with UAVs that is
+		// also a vertex buffer, kept in VertexBuffer between command lists, which M26's motion vectors read as the prepass
+		// pipelines' vertex binding 2 (stream X-C, Private/ForwardPipelines.h).
 		[[nodiscard]] static nvrhi::BufferDesc GetPreviousPositionsDesc(uint32_t vertexCount);
 		// The palette of `jointCount` joints (at least one): a structured buffer of float4x4, kept in ShaderResource.
 		[[nodiscard]] static nvrhi::BufferDesc GetPaletteDesc(uint32_t jointCount);

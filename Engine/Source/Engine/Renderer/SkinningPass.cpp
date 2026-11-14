@@ -157,7 +157,9 @@ namespace Engine {
 		desc.byteSize = static_cast<uint64_t>(std::max(vertexCount, 1U)) * sizeof(glm::vec4);
 		desc.structStride = sizeof(glm::vec4);
 		desc.canHaveUAVs = true;
-		desc.initialState = nvrhi::ResourceStates::ShaderResource;
+		// M26 (stream X-C): the prepass pipelines read it as vertex binding 2 (Private/ForwardPipelines.h).
+		desc.isVertexBuffer = true;
+		desc.initialState = nvrhi::ResourceStates::VertexBuffer;
 		desc.keepInitialState = true;
 		desc.debugName = "SceneRenderer.PreviousPositions";
 		return desc;

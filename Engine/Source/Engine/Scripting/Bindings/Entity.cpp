@@ -226,6 +226,7 @@ namespace Engine {
 					if (!lua_isnil(call.State, -1))
 					{
 						const auto value = Lua::CheckValueForOwner(call, -1, *field, resolve);
+						EntityChecked(call, ScriptProxy::ValidateAssetTypes(call.Engine->GetHost(), info.GetName(), field->GetName(), field->GetType(), value));
 						EntityChecked(call, field->SetValue({ candidate.get(), nullptr }, value));
 					}
 					lua_pop(call.State, 1);

@@ -515,6 +515,134 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Heightfields/GoldenTerrain/Hills.aced4324efb59a54.splat.png",
+			"XXH64": "a5de51d29ab5eb93",
+			"Method": "terrain.edit",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/GoldenTerrain/Hills.aced4324efb59a54.splat.png.meta",
+			"XXH64": "8104662a00b87954",
+			"Method": "terrain.edit",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/GoldenTerrain/Hills.heightfield",
+			"XXH64": "563e116b732fba37",
+			"Method": "terrain.edit",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/GoldenTerrain/Hills.heightfield.meta",
+			"XXH64": "fa421b6bbe9306be",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/Terrain/Ramp16.d7927c66f409d14d.splat.png",
+			"XXH64": "9bb5f3b01d26c9d2",
+			"Method": "terrain.edit",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/Terrain/Ramp16.d7927c66f409d14d.splat.png.meta",
+			"XXH64": "8f5dd1f355a4ef6a",
+			"Method": "terrain.edit",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/Terrain/Ramp16.heightfield",
+			"XXH64": "db734b57829cff06",
+			"Method": "terrain.edit",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/Terrain/Ramp16.heightfield.meta",
+			"XXH64": "9f6a076e704c8897",
+			"Method": "terrain.importHeightmap",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/GoldenProbes/Probes/48ef89721215f626.hdr",
+			"XXH64": "40d611efdb3967e0",
+			"Method": "lighting.bake",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/GoldenProbes/Probes/48ef89721215f626.hdr.meta",
+			"XXH64": "a0db97623756d210",
+			"Method": "lighting.bake",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/GoldenProbes/Probes/b61479d674f9b43b.irradiance",
+			"XXH64": "ef5d5c1f3f628cdf",
+			"Method": "lighting.bake",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/GoldenProbes/Probes/b61479d674f9b43b.irradiance.meta",
+			"XXH64": "9ff02c94b632f3a6",
+			"Method": "lighting.bake",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/Probes/b73d7c47fdf24aef.irradiance",
+			"XXH64": "eb668af47448c685",
+			"Method": "lighting.bake",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/Probes/b73d7c47fdf24aef.irradiance.meta",
+			"XXH64": "d7f9e3d26cf0d269",
+			"Method": "lighting.bake",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/Probes/ca696813656be018.hdr",
+			"XXH64": "50ffee2e2791e3e6",
+			"Method": "lighting.bake",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Lighting/Scenes/Probes/ca696813656be018.hdr.meta",
+			"XXH64": "330b87a540852fff",
+			"Method": "lighting.bake",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Localization/Menu.stringtable",
 			"XXH64": "7845d9d7a60e3df0",
 			"Method": "asset.create",
@@ -526,6 +654,38 @@
 			"Path": "Assets/Localization/Menu.stringtable.meta",
 			"XXH64": "a4f17cbd3db878c3",
 			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Luts/GoldenLut/Warm.cube",
+			"XXH64": "1e8d1483f79859da",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Luts/GoldenLut/Warm.cube.meta",
+			"XXH64": "77f4adcdcbc78b0a",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Luts/PostProcessV2/Warm.cube",
+			"XXH64": "1e8d1483f79859da",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Luts/PostProcessV2/Warm.cube.meta",
+			"XXH64": "853b9c080b048b65",
+			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
@@ -1379,6 +1539,54 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Materials/GoldenAutoExposure/Ground.material",
+			"XXH64": "ccfa4b5bfb3effc0",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenAutoExposure/Ground.material.meta",
+			"XXH64": "6db5da4a1bab0d16",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenAutoExposure/Lamp.material",
+			"XXH64": "f1082bd5e02096d4",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenAutoExposure/Lamp.material.meta",
+			"XXH64": "cc43de8fb4beba82",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenAutoExposure/Pillar.material",
+			"XXH64": "70fa799eb4d98b2f",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenAutoExposure/Pillar.material.meta",
+			"XXH64": "6eb106f36cd441ad",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Materials/GoldenClusteredLights/Block.material",
 			"XXH64": "a87c0b4bdd5031f2",
 			"Method": "asset.create",
@@ -1421,6 +1629,70 @@
 		{
 			"Path": "Assets/Materials/GoldenClusteredLights/Orb.material.meta",
 			"XXH64": "e8922046e4df1332",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Blue.material",
+			"XXH64": "f09ed141b7b85d9d",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Blue.material.meta",
+			"XXH64": "fd4e66db3906e09d",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Green.material",
+			"XXH64": "80153dd0f7e69f79",
+			"Method": "asset.create",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Green.material.meta",
+			"XXH64": "b30ee60365ecaea7",
+			"Method": "asset.create",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Ground.material",
+			"XXH64": "8154b73ef150c3ea",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Ground.material.meta",
+			"XXH64": "5760be7f7ad5346e",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Red.material",
+			"XXH64": "6d76fcdf5844ac01",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenLut/Red.material.meta",
+			"XXH64": "341bf90de71c0d3c",
 			"Method": "asset.create",
 			"RequestId": 3,
 			"Client": "batch",
@@ -1475,6 +1747,54 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Materials/GoldenProbes/Chrome.material",
+			"XXH64": "4ed32a94dc7b5a85",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenProbes/Chrome.material.meta",
+			"XXH64": "40d819ad22b11728",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenProbes/Red.material",
+			"XXH64": "0d8c8d064eb162b0",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenProbes/Red.material.meta",
+			"XXH64": "fb5ae5a99a826d57",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenProbes/White.material",
+			"XXH64": "68ad6f20d2c84e7e",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenProbes/White.material.meta",
+			"XXH64": "e77f8e4aefb9cbd0",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Materials/GoldenRendererII/Blue.material",
 			"XXH64": "24a7692c03eb5980",
 			"Method": "asset.create",
@@ -1519,6 +1839,86 @@
 			"XXH64": "189952e192e1955e",
 			"Method": "asset.create",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSsr/Blue.material",
+			"XXH64": "374b29aa19efcb3d",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSsr/Blue.material.meta",
+			"XXH64": "cf13d5e62fc1d137",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSsr/Floor.material",
+			"XXH64": "52d3e3f54e2dcb59",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSsr/Floor.material.meta",
+			"XXH64": "0ef4acfddc37dab1",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSsr/Red.material",
+			"XXH64": "b8c41806710a4fec",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenSsr/Red.material.meta",
+			"XXH64": "c79cfec43955f9a6",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenTaa/Ground.material",
+			"XXH64": "54ad647cb97d409b",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenTaa/Ground.material.meta",
+			"XXH64": "2bbe1a5a6cd5c9a8",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenTaa/Pole.material",
+			"XXH64": "7c47379e4c55865b",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenTaa/Pole.material.meta",
+			"XXH64": "e7199a1335df9cc3",
+			"Method": "asset.create",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -1695,6 +2095,38 @@
 			"XXH64": "695f07382f4e770c",
 			"Method": "asset.create",
 			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PostProcessV2/Block.material",
+			"XXH64": "81c691c58dbd5dfd",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PostProcessV2/Block.material.meta",
+			"XXH64": "6fe5eca5ab39e79e",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PostProcessV2/Mirror.material",
+			"XXH64": "87fa1f6f9f472575",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PostProcessV2/Mirror.material.meta",
+			"XXH64": "88f199dc9b94bffd",
+			"Method": "asset.create",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2371,6 +2803,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/GoldenAutoExposure/AutoExposure.scene",
+			"XXH64": "8864308fb120098f",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenAutoExposure/AutoExposure.scene.meta",
+			"XXH64": "ca38c29daab7f5d3",
+			"Method": "edit.batch",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/GoldenClusteredLights/ClusteredLights.scene",
 			"XXH64": "535c7818af8d2ff9",
 			"Method": "scene.save",
@@ -2387,6 +2835,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/GoldenLut/Lut.scene",
+			"XXH64": "dc5435f3f699e9fa",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenLut/Lut.scene.meta",
+			"XXH64": "823d587e6b9fc383",
+			"Method": "edit.batch",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenParticles/Particles.scene",
+			"XXH64": "f28ee38218650c84",
+			"Method": "scene.save",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenParticles/Particles.scene.meta",
+			"XXH64": "ea4fb69e04390b8e",
+			"Method": "project.refreshAssets",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/GoldenPointShadows/PointShadows.scene",
 			"XXH64": "b178d0fe5297d99b",
 			"Method": "scene.save",
@@ -2397,6 +2877,22 @@
 		{
 			"Path": "Assets/Scenes/GoldenPointShadows/PointShadows.scene.meta",
 			"XXH64": "5d407e5a45fa1ba6",
+			"Method": "edit.batch",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenProbes/Probes.scene",
+			"XXH64": "5e58a2f1fac0a032",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenProbes/Probes.scene.meta",
+			"XXH64": "70ff3aa387c8c9f2",
 			"Method": "edit.batch",
 			"RequestId": 5,
 			"Client": "batch",
@@ -2559,6 +3055,54 @@
 			"XXH64": "f790df8dd3d47fcb",
 			"Method": "prefab.instantiate",
 			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenSsr/Ssr.scene",
+			"XXH64": "b54112b81eb65938",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenSsr/Ssr.scene.meta",
+			"XXH64": "97945cf08f94379c",
+			"Method": "edit.batch",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenTaa/Taa.scene",
+			"XXH64": "c1ad9d6f6f41a7ea",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenTaa/Taa.scene.meta",
+			"XXH64": "ed2e9dd6b4956beb",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenTerrain/Terrain.scene",
+			"XXH64": "79f6ad3591e2f07d",
+			"Method": "scene.save",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenTerrain/Terrain.scene.meta",
+			"XXH64": "7c41750a32a36f14",
+			"Method": "edit.batch",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2803,6 +3347,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Particles.scene",
+			"XXH64": "1c17a2068188523d",
+			"Method": "scene.save",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Particles.scene.meta",
+			"XXH64": "e9b34c1003b8fd53",
+			"Method": "project.refreshAssets",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Physics.scene",
 			"XXH64": "ccee29c1f251685b",
 			"Method": "scene.save",
@@ -2851,6 +3411,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/PostProcessV2.scene",
+			"XXH64": "07eeaa3509ce47f8",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/PostProcessV2.scene.meta",
+			"XXH64": "cd91bbe582160ef6",
+			"Method": "edit.batch",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Prefabs.scene",
 			"XXH64": "a50b6af767c9cd82",
 			"Method": "scene.save",
@@ -2863,6 +3439,22 @@
 			"XXH64": "841e5f4dd8c7da71",
 			"Method": "edit.batch",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Probes.scene",
+			"XXH64": "95fa0323d52a32a1",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Probes.scene.meta",
+			"XXH64": "0d860e09422f9ff8",
+			"Method": "project.refreshAssets",
+			"RequestId": 8,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2959,6 +3551,22 @@
 			"XXH64": "1b675690c8572faf",
 			"Method": "edit.batch",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Terrain.scene",
+			"XXH64": "dbb8a592ad233abf",
+			"Method": "scene.save",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Terrain.scene.meta",
+			"XXH64": "8a8944968ca86448",
+			"Method": "edit.batch",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3439,6 +4047,22 @@
 			"XXH64": "194b194dbc9afcc2",
 			"Method": "script.write",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Terrain/TerrainRoller.luau",
+			"XXH64": "aae3fc08b5b2cf3e",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Terrain/TerrainRoller.luau.meta",
+			"XXH64": "63f9bcc311a02772",
+			"Method": "script.write",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3971,6 +4595,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/IrradianceVolume.test.luau",
+			"XXH64": "a18c0c09224300f9",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/IrradianceVolume.test.luau.meta",
+			"XXH64": "abdb5adf683764ac",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/Light2D.test.luau",
 			"XXH64": "497cd12bcdc0c7e6",
 			"Method": "script.write",
@@ -4047,6 +4687,22 @@
 			"XXH64": "a1708f415c6e5db7",
 			"Method": "script.write",
 			"RequestId": 23,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/ParticleEmitter.test.luau",
+			"XXH64": "02261728cefaa54a",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/ParticleEmitter.test.luau.meta",
+			"XXH64": "93f8a7a56124f7bc",
+			"Method": "script.write",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4191,6 +4847,22 @@
 			"XXH64": "77e7010807a508c2",
 			"Method": "script.write",
 			"RequestId": 29,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/ReflectionProbe.test.luau",
+			"XXH64": "4d3cbdfd4a4fe4ca",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/ReflectionProbe.test.luau.meta",
+			"XXH64": "832b90f859344766",
+			"Method": "script.write",
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4367,6 +5039,22 @@
 			"XXH64": "7f3e0a63921da891",
 			"Method": "script.write",
 			"RequestId": 35,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Terrain.test.luau",
+			"XXH64": "a85ad213d25738ca",
+			"Method": "script.write",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/Terrain.test.luau.meta",
+			"XXH64": "3f59198e27412bcb",
+			"Method": "script.write",
+			"RequestId": 12,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4883,6 +5571,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/PostProcess/PostProcessV2.test.luau",
+			"XXH64": "bc8f785c339ccacd",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/PostProcess/PostProcessV2.test.luau.meta",
+			"XXH64": "1b737d45e556aba1",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Prefabs/Prefabs.test.luau",
 			"XXH64": "36ab0b53465bb915",
 			"Method": "script.write",
@@ -5107,6 +5811,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/Terrain.replay",
+			"XXH64": "6a2aca54a336717e",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Terrain.replay.meta",
+			"XXH64": "c65e5ca9b5d2fefd",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/TextInput.replay",
 			"XXH64": "8ce9bc4660bd550d",
 			"Method": "test.run",
@@ -5199,6 +5919,22 @@
 			"XXH64": "ab8cdc21fc19a9bf",
 			"Method": "script.write",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Terrain/Terrain.test.luau",
+			"XXH64": "1789a88313cd1dc4",
+			"Method": "script.write",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Terrain/Terrain.test.luau.meta",
+			"XXH64": "4cea372354143db4",
+			"Method": "script.write",
+			"RequestId": 11,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5748,7 +6484,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "31a3ebb397baf859",
+			"XXH64": "9d9edcca428c54af",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

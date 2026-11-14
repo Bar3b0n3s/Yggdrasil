@@ -42,6 +42,18 @@ namespace Engine {
 		{
 			return MakeSetLayout(0, {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
+										nvrhi::BindingLayoutItem::Texture_SRV(BrdfLutRegister),
+										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
+										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
+										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
+										nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)),
+									});
+		}
+
+		[[nodiscard]] static nvrhi::BindingLayoutDesc MakeOverdrawViewLayout()
+		{
+			return MakeSetLayout(0, {
+										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
 										nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)),
@@ -95,9 +107,25 @@ namespace Engine {
 			return {
 				.Name = std::format("Scene{}{}{}", picking ? "Picking" : "Prepass", mask ? "Mask" : "Opaque", CullModeNames[variant % MeshCullModeCount]),
 				.Program = std::string(SceneProgram),
-				.Entries = { picking ? "VSPicking" : "VSMain", picking ? "PSPicking" : "PSPrepass" },
+				.Entries = { picking ? "VSPicking" : "VSPrepass", picking ? "PSPicking" : "PSPrepass" },
 				.Permutation = MakeAlphaMaskPermutation(mask),
 				.BindingLayouts = { MakePrepassViewLayout(), MakeMaterialLayout() },
+				.ConstantBuffers = {
+					{ .Set = 0, .Register = ViewConstantsRegister, .ByteSize = sizeof(ViewConstants) },
+					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
+				},
+			};
+		}
+
+		// The overdraw variant of `cullMode` (VSOverdraw and PSOverdraw, the Opaque permutation) with the overdraw set 0.
+		[[nodiscard]] static PipelineLayoutDescription MakeOverdrawDescription(uint32_t cullMode)
+		{
+			return {
+				.Name = std::format("SceneOverdraw{}", CullModeNames[cullMode]),
+				.Program = std::string(SceneProgram),
+				.Entries = { "VSOverdraw", "PSOverdraw" },
+				.Permutation = MakeAlphaMaskPermutation(false),
+				.BindingLayouts = { MakeOverdrawViewLayout(), MakeMaterialLayout() },
 				.ConstantBuffers = {
 					{ .Set = 0, .Register = ViewConstantsRegister, .ByteSize = sizeof(ViewConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
@@ -158,8 +186,22 @@ namespace Engine {
 			return nvrhi::RasterCullMode::Back;
 		}
 
+		// M26 (stream X-C): the prepass variants' attributes: MakeMeshVertexAttributes', then PREVIOUSPOSITION from vertex
+		// binding 2 at location 6 (see the header's comment), the order of the Scene program's PrepassVertexInput.
+		[[nodiscard]] static std::vector<nvrhi::VertexAttributeDesc> MakePrepassVertexAttributes()
+		{
+			std::vector<nvrhi::VertexAttributeDesc> attributes = MakeMeshVertexAttributes();
+			attributes.push_back(nvrhi::VertexAttributeDesc()
+					.setName("PREVIOUSPOSITION")
+					.setFormat(nvrhi::Format::RGB32_FLOAT)
+					.setBufferIndex(PreviousPositionSlot)
+					.setOffset(0)
+					.setElementStride(PreviousPositionStride));
+			return attributes;
+		}
+
 		// A mesh pipeline: the variant's cull mode with counter-clockwise front faces (§8.3), reverse-Z depth tested with
-		// GreaterOrEqual and written or not, one colour target.
+		// GreaterOrEqual and written or not, one colour target (the prepass variants' attachments are CreatePrepassPipeline's).
 		[[nodiscard]] static GraphicsPipelineSpecification MakeMeshPipelineSpecification(PipelineLayoutDescription layout, const MeshBindingLayouts& layouts,
 			bool prepass, uint32_t variant)
 		{
@@ -243,13 +285,13 @@ namespace Engine {
 			for (uint32_t variant = 0; variant < PrepassVariantCount; ++variant)
 				descriptions.push_back(MakePrepassDescription(variant, true));
 			for (uint32_t variant = 0; variant < MeshCullModeCount; ++variant)
-			{
-				auto description = MakePrepassDescription(variant);
-				description.Name = std::format("SceneOverdraw{}", CullModeNames[variant]);
-				description.Entries = { "VSOverdraw", "PSOverdraw" };
-				descriptions.push_back(std::move(description));
-			}
+				descriptions.push_back(MakeOverdrawDescription(variant));
 			return descriptions;
+		}
+
+		nvrhi::BindingLayoutDesc GetForwardViewLayout()
+		{
+			return MakeForwardViewLayout();
 		}
 
 		PipelineLayoutDescription GetSceneDataViewLayout()
@@ -271,9 +313,11 @@ namespace Engine {
 			MeshBindingLayouts layouts;
 			ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> forward, pipelines.CreateBindingLayouts(MakeForwardDescription(0)));
 			ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> prepass, pipelines.CreateBindingLayouts(MakePrepassDescription(0)));
+			ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> overdraw, pipelines.CreateBindingLayouts(MakeOverdrawDescription(0)));
 			layouts.ForwardView = forward[0];
 			layouts.Material = forward[1];
 			layouts.PrepassView = prepass[0];
+			layouts.OverdrawView = overdraw[0];
 			return layouts;
 		}
 
@@ -281,17 +325,19 @@ namespace Engine {
 		{
 			ENGINE_CORE_ASSERT(variant < PrepassVariantCount, "prepass variant {} out of range", variant);
 			auto specification = MakeMeshPipelineSpecification(MakePrepassDescription(variant, picking), layouts, true, variant);
+			specification.VertexAttributes = MakePrepassVertexAttributes();
+			// M26 (decision 14): SceneTargetFormats.h's attachment order.
+			specification.Framebuffer = nvrhi::FramebufferInfo().addColorFormat(SceneNormalsFormat);
 			if (picking)
 				specification.Framebuffer.addColorFormat(EntityIdFormat);
+			specification.Framebuffer.addColorFormat(SceneVelocityFormat).addColorFormat(SceneRoughnessFormat).setDepthFormat(SceneDepthFormat);
 			return pipelines.CreateGraphicsPipeline(specification);
 		}
 
 		Result<GraphicsPipeline> CreateOverdrawPipeline(PipelineFactory& pipelines, const MeshBindingLayouts& layouts, uint32_t cullMode)
 		{
-			auto layout = MakePrepassDescription(cullMode);
-			layout.Name = std::format("SceneOverdraw{}", CullModeNames[cullMode]);
-			layout.Entries = { "VSOverdraw", "PSOverdraw" };
-			auto specification = MakeMeshPipelineSpecification(std::move(layout), layouts, true, cullMode);
+			auto specification = MakeMeshPipelineSpecification(MakeOverdrawDescription(cullMode), layouts, true, cullMode);
+			specification.SharedBindingLayouts = { layouts.OverdrawView, layouts.Material };
 			// VSOverdraw reads only MeshVertex's position and texture coordinates (Scene.slang's OverdrawVertexInput), then the
 			// attribute stream (M23) at locations 2 and 3.
 			constexpr uint32_t Stride = sizeof(MeshVertex);

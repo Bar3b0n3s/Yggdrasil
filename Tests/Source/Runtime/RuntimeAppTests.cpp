@@ -21,10 +21,15 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <charconv>
+#include <cstdint>
 #include <format>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 // The runtime executable as a whole process (Architecture §14.3; Roadmap M2, M6, M7) on test games written like exported
 // ones (Support/TestGame.h) and given with --manifest (Docs/Decisions/0012-m7-decisions.md decision 10). Runs that need no
@@ -705,6 +710,89 @@ namespace Engine {
 #else
 			MESSAGE("RuntimeApp per-frame out-of-memory: the Runtime's automation client in this file is implemented on Windows only "
 					"(RuntimeAutomationConnection); the editor's per-frame case is covered by the EditorHostViewports and EditorApp cases");
+#endif
+		}
+
+		TEST_CASE("RuntimeApp: the game view continues its temporal history between renders and starts it afresh in a new session"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M26 (Docs/Decisions/0037-m26-contract.md decision 10; W26.2's review): the Runtime applies the game view's
+			// history to every render, so stats.get's historyFrames counts the renders since it started afresh, and a new
+			// session (input.record's restart of the start scene) starts it afresh. A paused session shows its last extracted
+			// view, which a step makes, so each session is stepped once first. The game view renders every frame, so a
+			// render's frame minus its historyFrames is the frame its history last started at.
+			if (!Test::ProbeGpuForProcess())
+				return;
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			Test::TempDirectory userData("RuntimeViewHistory");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "HistoryGame", .Shaders = true });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			std::vector<std::string> arguments = Test::WithoutAudioDevice(
+				{ "--headless", "--automation", "--paused", ManifestArgument(*manifest), "--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) });
+			const std::vector<std::string> gpuArguments = Test::GetGpuApplicationArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			Result<Process> process = Process::Spawn({ .Executable = std::move(*runtime), .Arguments = std::move(arguments) });
+			REQUIRE_MESSAGE(process.has_value(), process.error().ToString());
+			const uint32_t pid = process->GetId();
+			const std::filesystem::path sessions = userData / "HistoryGame" / "Automation" / "Sessions";
+			REQUIRE(Test::WaitUntil([&sessions, pid]()
+			{
+				return FileSystem::Exists(SessionFile::GetPath(sessions, pid));
+			}));
+			Result<RuntimeAutomationConnection> connection = RuntimeAutomationConnection::Open(sessions, pid);
+			REQUIRE_MESSAGE(connection.has_value(), connection.error().ToString());
+
+			// The game view's last render: its frame and its historyFrames (0 before the first); the last stats read, for a
+			// failure's message.
+			std::string lastStats;
+			const auto readHistory = [&connection, &lastStats]() -> std::pair<uint64_t, uint32_t>
+			{
+				const Result<Json> stats = connection->Call("stats.get", Json::object());
+				REQUIRE_MESSAGE(stats.has_value(), stats.error().ToString());
+				lastStats = stats->dump();
+				const Result<JsonReader> views = JsonReader(*stats).GetMember("views");
+				REQUIRE_MESSAGE(views.has_value(), views.error().ToString());
+				for (size_t index = 0; index < views->GetArraySize().value_or(0); ++index)
+				{
+					const Result<JsonReader> view = views->GetElement(index);
+					if (!view.has_value() || view->ReadMember<std::string>("name").value_or("") != "game" || !view->ReadMember<bool>("available").value_or(false))
+						continue;
+					const std::string frame = view->ReadMember<std::string>("frame").value_or("");
+					uint64_t value = 0;
+					REQUIRE(std::from_chars(frame.data(), frame.data() + frame.size(), value).ec == std::errc());
+					return { value, view->ReadMember<uint32_t>("historyFrames").value_or(0) };
+				}
+				return { 0, 0 };
+			};
+			INFO("the last stats.get: ", lastStats);
+			REQUIRE(connection->Call("play.step", Json{ { "ticks", 1 } }).has_value());
+			CHECK(Test::WaitUntil([&readHistory]()
+			{
+				return readHistory().second >= 3;
+			}));
+			const auto [frame, history] = readHistory();
+			REQUIRE(history >= 3);
+			REQUIRE(frame >= history);
+			const Result<Json> restarted = connection->Call("input.record", Json{ { "action", "Start" }, { "restart", true } });
+			REQUIRE_MESSAGE(restarted.has_value(), restarted.error().ToString());
+			REQUIRE(connection->Call("play.step", Json{ { "ticks", 1 } }).has_value());
+			CHECK(Test::WaitUntil([&readHistory, start = frame]()
+			{
+				const auto [rendered, frames] = readHistory();
+				return rendered > start && rendered - frames > start && frames >= 2;
+			}));
+
+			REQUIRE(connection->Call("session.shutdown", Json::object()).has_value());
+			const Result<ProcessResult> result = process->Wait(std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(Test::FindGpuMessageLines(result->StandardError).empty());
+#else
+			MESSAGE("RuntimeApp view history: the Runtime's automation client in this file is implemented on Windows only "
+					"(RuntimeAutomationConnection); the editor's views are covered by the EditorHostViewports case");
 #endif
 		}
 
