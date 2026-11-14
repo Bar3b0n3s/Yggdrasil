@@ -1,0 +1,568 @@
+# 0038 — M27 Rolling Ball 3D, built through automation
+
+- **Status:** accepted; M27's build plan. M27 has no contract (ADR 0028 decision 11): it freezes no interface, and this record is what the builder sessions, the lead's triage, the friction fixes and the landing follow. It is committed on `milestone/m27` as a documentation-only checkpoint (ADR 0028 decision 11), together with the Roadmap's M27 sentences on this plan, its milestone end (decision 11) and its builder (decision 8). The lead's answers to "Points for the lead before session 1", the friction list, the session record, the "Hit as" column of the predicted friction and "Before milestone completion" are filled in as the milestone runs. Lead-owned.
+- **Date:** 2026-11-14.
+- **Base:** `89b8beff` (main once phase 3 landed and was pushed: M24, M25 and M26, with ADR 0037's record of phase 3's hardened gate), branch `milestone/m27`, milestone slot `D:/Engine/.claude/worktrees/m27`.
+- **Authority:** Roadmap "Rules for every milestone" (rule 1) and M27, whose features and acceptance are unchanged since it was M18; Architecture §1.1 G4, §5.2, §5.3, §9.2 to §9.6, §11.2, §13.4, §13.6, §13.8, §13.11 and §13.12; ADR 0028 decisions 4, 11, 12, 14 and 15; ADR 0023; ADR 0026 (the builder's rules: decisions 3, 4, 9, 15, 16 and 18, frictions F27 and F30, predicted P10); ADR 0027 (decisions 6 to 11, the session record); ADR 0036 (M25: the process as it last ran, the lead's decisions, the landing, the soak, friction F14); ADR 0014 decisions 7 and 13 (every query sees sensors; body control); ADR 0031 (M20's physics and session semantics); ADR 0033 (M22's UI); ADR 0035 (M24's graphs); ADR 0037 (M26's effects, post-processing and terrain). The lead's plans of M17 (`bin/Reviews/M17-Plan.md`) and of the backlog program (`bin/Reviews/Backlog-Plan.md`) and M25's builder prompts (`bin/Reviews/M25-Builder-S1.md` to `S4.md`) are kept under the ignored `bin/Reviews/`.
+
+## Context
+
+- **M27 is alone in phase 4.** Phase 3 landed on main at `89b8beff`, which was pushed, and the product owner gave the go-ahead for Rolling Ball (ADR 0028's completion checklist, last item). With no sibling there is no reservation ledger: every file a friction fix needs is M27's (decision 13), and nothing waits on another branch. ADR 0028 decision 12 leaves M27's gate to this plan (decision 11). The work is about 4 sessions (this plan, 1 or 2 friction-fix streams, the project's commit and the landing) plus 2 or 3 builder sessions.
+- **What Rolling Ball is** (Roadmap M27 "Features"; Architecture §13.11's Rolling Ball paragraph): the second demo of G4. An agent builds a three-level physics ball game through the editor automation alone, with a committed transcript and provenance. Like M16, M17 and M25 it is also meant to find gaps in the engine, the editor and their documents, each fixed by its owning module with tests, never worked around in the game.
+- **What the engine offers now,** checked against `Resources/Scripting/Engine.d.luau`, `Docs/Reference/*` and the code at `89b8beff`:
+
+  | Named by Roadmap M27 or §13.11 | At `89b8beff` | This plan |
+  |---|---|---|
+  | Layers `Ball`, `Track`, `Trigger` and a collision matrix | `Physics.Layers` (1 to 16 names, `Default` first) and `Physics.Collisions` (the pairs that collide) | decision 1 |
+  | Track pieces from scaled primitives with collider-only box colliders, one static compound under a `Static` level root | `engine://Meshes/Cube` (1 m edges, centred), `BoxCollider` (scale baked in), §5.3's gathering; `PHYSICS_ADJACENT_STATIC_BODIES` between separate implicit static trees | decision 2 |
+  | `EnhancedInternalEdgeRemoval`, `LinearCast`, `MaxAngularVelocity` 120 | `RigidBody` fields | the Ball prefab |
+  | Camera-relative torque and air control | `RigidBody:AddTorque`, `AddForce`; `Input.GetAxis` | decision 2 |
+  | A follow camera in `OnLateUpdate` toward `RenderPosition` with `Math.SmoothDamp` | `Transform.RenderPosition`, `Math.SmoothDamp` (number and vector), `Transform:LookAt` | decision 4 |
+  | Checkpoint and goal triggers "under the level root as implicit sensor bodies" | implicit sensor bodies exist, but take the layer of the nearest ancestor `RigidBody` (§5.3 "Gathering", `PhysicsComposition.cpp`), so under the level root they are on `Track`; and `Physics.Raycast` reports sensors ("Closest hit, including sensors") with no option to leave them out | explicit sensor bodies on `Trigger` (decision 2; P04) |
+  | `RigidBody:Teleport` with a zero velocity | `Teleport(position, rotation?)` keeps the velocity; `SetLinearVelocity`, `SetAngularVelocity` | decision 2 |
+  | Kinematic `MovingPlatform` driven by `MoveKinematic` | `RigidBody:MoveKinematic(position, rotation)` | decision 2 |
+  | `Scene.Load(next, {Time = ...})` | `Scene.Load(scene, parameters)`, `Scene.GetLoadParameters()`; a replay header stores the parameters as floats | whole ticks (decision 4) |
+  | Main-path support check: `Physics.Raycast` on `Track`, `Physics.GetColliderBounds` | both exist (`GetColliderBounds` also for a collider gathered into an ancestor's compound), with `Physics.LayerMask` | decision 10 |
+  | `PathNode` waypoints and `Gap` markers | no component of either name; tags (`entity.create {tags}`, `Scene.FindAllByTag`, `Entity:HasTag`) and a `Transform` carry them | tagged entities (decision 3) |
+  | HUD (time, level) | `UiCanvas`, `UiRect`, `UiText`, `UiImage` (M22); the legacy `Text` | UI (decision 4) |
+  | Synthesized sounds | `asset_create {type: "SoundEffect"}`; `AudioSource` `Clip`, `Loop`, `Volume`, `Pitch`; `Audio.PlayOneShot` | decision 4 |
+  | HDRI sky, PCSS sun, GTAO | built-in `engine://Environments/Sky` (Poly Haven "Kloofendal 48d Partly Cloudy (Pure Sky)", CC0, `Resources/LICENSES.md`); `DirectionalLight.LightAngle`; `PostProcess` SSAO | decision 6 |
+  | Per-level autopilot suites recorded with `test_run {record}`, Level 2 and 3 with `Parameters` | `Testing.Suites[].Parameters`, `Test.InjectAction(name, nil, value)` for analog actions, `test.run {record}` | decision 10 |
+  | `entity_bounds` for layout feedback | measures what an entity draws (meshes, sprites, tiles), never colliders or markers | decision 3; P09 |
+
+- **Nothing the acceptance requires is missing.** Every feature maps to an existing component, field, script API or method, so no engine work precedes session 1 (ADR 0026 decision 15's rule: predicted friction is not fixed in advance). `PathNode` and `Gap` are not components and need not be: decision 3 makes them tagged entities. Two of §13.11's and §11.2's own prescriptions would mislead the build, and this plan decides around them as content choices, not workarounds, with the documents corrected at the landing: implicit sensor bodies under the level root take the `Track` layer (P04), and §11.2's `Ball` example steers by the camera's pose, which a frame-phase follow camera writes, so live play would depend on the frame rate (P05).
+- **What automation offers.** `Tools/MCP/catalog.json` lists 82 proxied tools and the bridge adds 7, `engine_call` among them. The lead's Claude Code session lists all 89: this record's author, a background agent of that session, saw every one in its tool list on 2026-11-14. So M25's stale tool list (its P01) is gone, unless a friction fix changes the catalogue (P01 here). Methods with no tool go through `engine_call` (P02).
+- **Every deterministic session runs at the project's window size:** lockstep play, `test.run`, recording, replay and the Dist `--feature-test`. Rolling Ball's window is 1280 × 720 and not resizable, so the HUD's layout and every hash are the same in every run of every configuration.
+- **The audit and the games suite read the index** (ADR 0036's context, unchanged). `project.create` needs a missing or empty directory; `Projects/RollingBall` exists neither on main nor in `D:\Engine`'s working tree. `.gitattributes` already marks the engine-consumed files of every `Projects/*/` project `-text`, so it needs no change.
+- **The soak** plays every scene below `Assets/Scenes/` of every `Projects/*` project for 10,000 lockstep ticks without input, rendering its game view, and fails on growing counters, a growing heap or a new script error. Rolling Ball's three scenes join the subject list, 80 subjects where phase 3's hardened gate soaked 77 (FeatureTest's 75 scenes, Tetris's and the Runtime); phase 3's ledger sized the soak step's 6,000 s timeout so that phase 4's scenes fit.
+
+## Decisions
+
+### 1. The feature list, exactly, and the project's settings
+
+The acceptance is Roadmap M27's feature list, nothing added but par times on the HUD (decision 3) and nothing dropped. Each row keeps a test or a check.
+
+| Roadmap M27 feature | M27 form | Proved by |
+|---|---|---|
+| Three levels of tracks, ramps, curves, narrow beams, gaps and moving platforms built from track prefabs | `Level1.scene` (easy: wide decks, two ramps, four railed curves, no gap), `Level2.scene` (two kicker jumps, a drop and a lift), `Level3.scene` (four narrow beams, four curves, a shuttle across a gap), laid out from decision 2's kit by decision 3's tables | the `RollingBall` support cases; the three replays; `entity_bounds` against decision 3's extents |
+| Each level's track one static compound under a `Static` level-root body (no seam bumps) | `/Level` holds `RigidBody {Type: Static, Layer: "Track"}`; every track piece below it is collider-only | `project_validate {}` clean, with no `PHYSICS_ADJACENT_STATIC_BODIES`; the replays |
+| A physics ball (`EnhancedInternalEdgeRemoval`) steered by camera-relative torque with air control | `Ball.prefab` and `Ball.luau` (decision 2): torque about up × the move direction, taken relative to the ball's heading, which the camera follows; a small force in the air | the `Logic` heading case; the replays |
+| Follow camera on the interpolated `RenderPosition` | `FollowCamera.luau`: `OnLateUpdate`, `Math.SmoothDamp` toward a point behind the ball's `RenderPosition` along its heading, then `LookAt` | the look review; the soak's game view |
+| Checkpoints | `Checkpoint.prefab`: a Kinematic sensor body on `Trigger` below `/Level`, with `Checkpoint.graph` (decision 5) for its effects | the `RollingBall` respawn case |
+| Kill plane with respawn at the last checkpoint (`RigidBody:Teleport`) | below its level's `KillHeight` the ball is teleported to the furthest checkpoint it touched (or its spawn), both velocities zeroed | the `RollingBall` respawn case |
+| Goal trigger | `Goal.prefab`: a sensor like a checkpoint's; `Game.luau` stops the timer, shows the banner and loads the next level | the `RollingBall` goal case; every replay ends at its goal |
+| Level timer carried across levels through `Scene.Load` parameters | `{ElapsedTicks = <whole ticks>}` (decision 4) | the `RollingBall` timer case; the Level 2 and Level 3 replay headers |
+| HUD (time, level) | `HUD.prefab`: one Screen canvas of `UiText` and plain `UiImage` panels (decision 4) | the `RollingBall` cases read the `UiText`s; the look review |
+| Synthesized roll, checkpoint, fall and win sounds | four `.sfx` assets; the roll loops on the ball, its volume and pitch following the ball's speed (decision 4) | `engine_call {method: "audio.stats"}` in play (the builder); the soak's voices |
+| HDRI sky, PCSS sun, GTAO | the built-in Sky, a `DirectionalLight` with `LightAngle` 2.5, a `PostProcess` with SSAO (decision 6) | the look review |
+
+**Project settings,** set with `project_set_settings` (arrays replace whole):
+
+| Section | Value |
+|---|---|
+| `Name`, `StartScene` | `RollingBall`; `Assets/Scenes/Level1.scene` |
+| `Window` | Title `Rolling Ball`, 1280 × 720, `VSync` true, `Fullscreen` false, `Resizable` false |
+| `Simulation` | `FixedHz` 60, `MaxStepsPerFrame` 5, `Seed` 27, `MaxEntities` 65536. The game draws no random number; the seed only starts the hashed session stream |
+| `Physics` | `Gravity` (0, −9.81, 0); `Layers` [`Default`, `Ball`, `Track`, `Trigger`]; `Collisions` [[`Ball`, `Track`], [`Ball`, `Trigger`]] |
+| `Input.Actions` | `MoveX` Axis (`Positive` Key.D, Key.Right; `Negative` Key.A, Key.Left; `Gamepad` Gamepad.LeftX); `MoveZ` Axis, positive forward (`Positive` Key.W, Key.Up; `Negative` Key.S, Key.Down; `Gamepad` Gamepad.LeftY with `Invert` true); `Restart` Button (Key.R, Gamepad.Start) |
+| `Rendering` | `ShadowMapSize` 2048, `SsaoHalfResolution` false |
+| `Scripting` | `MemoryLimitMB` 256, `CallbackBudgetMs` 1000, `PauseOnError` true, `BlockPlayOnTypeErrors` true |
+| `Export` | `BuildScenes` [the three level scenes], `Exclude` [`Assets/Tests/**`], `Version` `1.0.0`, `Company` `Engine Demos`, no icon, `PruneUnreferenced` false |
+| `Testing` | decision 10's five suites; `Replays` [`Assets/Tests/Replays/*.replay`]; `CaseTimeoutTicks` 600, `SuiteTickLimit` 36000, `CoverageGates` false |
+| `Ui` | `Navigation` false, `StickNavigation` false: the HUD has no widget, and the left stick is `MoveX` and `MoveZ`, so nothing the UI reads may enter the hash (decision 4) |
+
+The other sections keep the `Empty` template's defaults; Physics2D, sorting layers and localization are unused. There are three scenes, one per level, and no menu: the game starts on Level 1, and three scenes are three soak subjects.
+
+### 2. Physics: the layers, the level root, the track kit, the ball, the triggers and the platforms
+
+- **Layers.** `Ball` holds the ball, `Track` every deck, rail, wall and moving platform, `Trigger` every checkpoint and goal. Only Ball–Track and Ball–Trigger collide: kinematic platforms never meet the static track, and no query on `Track` sees a trigger.
+- **The level root.** Each level's `/Level` entity holds `RigidBody {Type: Static, Layer: "Track", Friction: 0.8, Restitution: 0}` at the origin with an identity transform. Every track piece, rail and wall is a collider-only descendant, gathered into one `StaticCompoundShape`, so the ball crosses seams without bumps (§5.3, §9.2). Moving platforms, checkpoints and the goal carry their own `RigidBody` and stay separate bodies. Friction and restitution are the body's, so the level root sets the whole track's.
+- **The track kit** (`Assets/Prefabs/`). Every visible part is `engine://Meshes/Cube` with a `BoxCollider` of the default `HalfExtents` 0.5, so the collider is exactly the drawn box at any scale. Decks are 0.5 m thick; a piece's top surface is its deck. Two pivots, chosen so that one `prefab.instantiate` op places a piece:
+  - **Single-box pieces,** pivot at the box's centre, sized per instance by the instance's `Scale` (`prefab.instantiate` sets the root's transform and overrides only, P07): `Straight` (default scale (4, 0.5, 8), `Track` material), `Ramp` (the same box pitched by `EulerAngles` x, `Ramp` material) and `Narrow` (default (1.2, 0.5, 8), `Narrow` material). Decision 3's tables give each instance's `Translation`, `EulerAngles` and `Scale`.
+  - **Composite pieces,** an unscaled root whose pivot is the centre of the entry edge on the deck's top surface, heading local −Z, with fixed-size children:
+    - `CurveLeft`: a 90° left turn of centreline radius 6 m and width 4 m, as six deck boxes of 15° each and six outer rail boxes (`Rail` material). Deck *k* (1 to 6) at mid angle φ = 15*k* − 7.5°: local `Translation` (−6 + 6 cos φ, −0.25, −6 sin φ), `EulerAngles` (0, φ, 0), `Scale` (4, 0.5, 2.106) (the outer chord, so the outer corners meet and the inner ends overlap inside the compound). Rail *k*: (−6 + 8.1 cos φ, −0.05, −8.1 sin φ), (0, φ, 0), (0.2, 0.9, 2.159): 0.4 m above the deck, reaching down to its underside. Deck 1 is at (−0.051, −0.25, −0.783), deck 6 at (−5.217, −0.25, −5.949). Exit: (−6, 0, −6), heading +90°.
+    - `CurveRight`: `CurveLeft` mirrored, each child's x and yaw negated. Exit (6, 0, −6), heading −90°.
+    - `Gap` (a jump): a `Kicker` box at local (0, −0.045, −1.049), `EulerAngles` (11.31, 0, 0), `Scale` (4, 0.5, 2.04) (`Kicker` material: a run of 2 m rising 0.4 m), then a 3 m void, and the `GapMarker` child (decision 3) at (0, 0, −3.5) with `Scale` (4.4, 6, 3.2) and the tag `Gap`. Exit: (0, 0, −5), the landing deck being the next piece.
+  - **`MovingPlatform`:** one box at its root, sized per instance (4 × 0.5 × 4 in both levels), `RigidBody {Type: Kinematic, Layer: "Track", Friction: 1}`, `MovingPlatform.luau` (decision 4), `Platform` material.
+  - **`Checkpoint` and `Goal`** below. With `Ball` and `HUD` that is eleven prefabs, each built in a scratch entity and saved with `prefab_create` (`asset_create {type: "Prefab"}` takes no values).
+- **The ball** (`Ball.prefab`, tag `Ball`): `MeshRenderer` `engine://Meshes/Sphere` (radius 0.5) with the `Ball` material, `SphereCollider {Radius: 0.5}`, and `RigidBody {Type: Dynamic, Mass: 1, Friction: 0.8, Restitution: 0, LinearDamping: 0.1, AngularDamping: 0.4, MotionQuality: "LinearCast", AllowSleeping: false, Layer: "Ball", MaxAngularVelocity: 120, EnhancedInternalEdgeRemoval: true}`, plus the roll's `AudioSource` (decision 4) and `Ball.luau`.
+  - `LinearCast`, so a fast ball never tunnels through a 0.5 m deck; `EnhancedInternalEdgeRemoval` with the compound, so seams never bump; `MaxAngularVelocity` 120 rad/s, so the speed cap is the script's, not Jolt's default 47 rad/s (23 m/s for this ball, §9.6).
+  - `AllowSleeping` false: a ball under the player's control is never left asleep, and one active body costs nothing.
+  - Friction 0.8 against the track's 0.8 (their geometric mean): with the starting torque (below) a rolling ball never slips (it needs about 3.4 N of the 7.8 N available).
+- **Control** (`Ball.luau`, `OnFixedUpdate`; starting values the builder tunes and records in `AGENTS.md`, P10):
+  - **The heading** is the ball's own fixed-step state, `Heading` (degrees, 0 facing −Z, positive turning left, `Transform.EulerAngles` y's convention): while the ball is grounded and its horizontal speed exceeds `HeadingMinSpeed` (2.5 m/s), it turns towards the direction of the horizontal velocity by at most `HeadingRate` (120°/s) a tick (`Math.DeltaAngle`), and at a spawn it takes the checkpoint's yaw. The follow camera reads it; the simulation never reads the camera (P05: a heading taken from the camera's frame-phase pose would make live play depend on the frame rate, while every lockstep run stays deterministic, so no suite would catch it).
+  - **Steering.** `move` = right(Heading) × `MoveX` + forward(Heading) × `MoveZ`, its length clamped to 1. Grounded, the ball takes `AddTorque(vector.cross(up, move) × Torque)` (`Torque` 6 N·m: about 8.6 m/s² on the flat), the torque along the velocity fading to 0 between 80 % and 100 % of `MaxSpeed` (11 m/s) so that jumps stay calibrated, while braking against the velocity always applies. In the air, `AddForce(move × AirForce)` (`AirForce` 3 N).
+  - **Grounded** is a `Physics.Raycast` from the ball's centre straight down over 0.65 m on `Physics.LayerMask("Track")`, which sees the decks and the platforms, never the ball itself (`Ball`) or a trigger (`Trigger`).
+- **Checkpoints and the goal are explicit sensor bodies.** `Checkpoint.prefab`'s root (tag `Checkpoint`), at the deck's centreline on its top surface and facing along the track, holds `BoxCollider {HalfExtents: (2, 1.5, 0.5), Offset: (0, 1.5, 0), IsTrigger: true}` and `RigidBody {Type: Static, Layer: "Trigger"}`, which the engine creates as a Kinematic sensor that follows its entity (§9.2), plus `Checkpoint.graph` with its `Order` field. Its children only draw: two posts (`engine://Meshes/Cylinder`, (±2.3, 1.25, 0), scale (0.2, 2.5, 0.2), `Post` material), a `Bar` (Cube, (0, 2.6, 0), scale (4.8, 0.2, 0.2), `CheckpointIdle` material) and a `Burst` emitter (decision 5). `Goal.prefab` (tag `Goal`) is the same with `HalfExtents` (2, 1.5, 1), the `Goal` material on posts and bar, a flat `Pad` (Cube, (0, 0.01, 0), scale (4, 0.02, 2), no collider) and the `Sparkle` and `WinBurst` emitters.
+  - **Why not implicit sensor bodies,** as §13.11 and §9.6 say: an implicit sensor body takes the layer of the nearest `RigidBody` above it, which under the level root is `Track`. A trigger there would be on `Track`, the `Trigger` layer would hold nothing, and every `Track`-masked ray, the support check's and the ground probe's, would hit the trigger volumes, since every query sees sensors and `Physics.Raycast` cannot leave them out. A sensor `RigidBody` of Type Static is the engine's documented way to give a trigger its own layer; nothing is worked around. P04 records it, and the landing corrects §13.11 and §9.6.
+- **Kill plane and respawn.** When the ball's `WorldPosition.y` is below its level's `KillHeight` (a field of the Ball instance, decision 3), `Ball.luau` calls `body:Teleport(spawn, Quat.Identity())`, then `SetLinearVelocity(vector.zero)` and `SetAngularVelocity(vector.zero)` (`Teleport` keeps the velocity), resets `Heading` to the spawn's yaw, counts `Respawns` and plays the fall sound. The spawn is the furthest checkpoint the ball has touched (the highest `Order`, so rolling back never moves it backwards), at its root plus (0, 0.6, 0), or the level's start until then. The timer keeps running.
+- **Moving platforms** (`MovingPlatform.luau`, fields `Travel` (vector, metres), `MoveTicks`, `DwellTicks`, `PhaseTicks`): in `OnStart` it keeps its start pose; each `OnFixedUpdate` it counts a tick and calls `body:MoveKinematic(start + Travel × s, startRotation)`, where `s` (`Motion.Ease`, decision 4) dwells at 0 for `DwellTicks`, rises to 1 along (1 − cos(π t / `MoveTicks`)) / 2, dwells at 1 and returns the same way: a period of 2 × (`DwellTicks` + `MoveTicks`) ticks, counted in ticks and computed with the engine's deterministic `math.cos`. It exposes `AtStart`, `AtEnd` and `DwellLeft` (ticks) for the autopilot. Platforms have no rails; their tops are flush with the decks they serve at each end, 5 cm from them.
+
+### 3. The three levels
+
+- **Coordinates.** +Y up, metres. Each level starts at the origin heading −Z. A heading ψ (degrees) faces (−sin ψ, 0, −cos ψ); positive ψ turns left. The tables write negative numbers with a typographic minus: JSON takes them with an ASCII `-`. Every number below was computed by one script from the kit of decision 2 (the plan's scratch `levels.py`, not committed). The builder places pieces with these values as they stand, may adjust a value it can justify (it records each change and its reason in `AGENTS.md` and the friction log), and checks every level with `entity_bounds {entities: ["/Level"]}` against the extents given.
+- **One batch per level.** A level is laid out as about one `edit_batch` (§13.11): an op named `level` creating `/Level` with its body, then a `prefab.instantiate` per piece with `parent: {"$ref": "level.entity.id"}` (or `"/Level"`), its `name` (`P01`, ...), `transform` (`Translation`, `EulerAngles`, `Scale`) and, where a field differs, `components`; then the checkpoints, the goal, the platform, the markers and the path nodes. 60 to 90 ops; run it with `dryRun: true` first, and read an offloaded result with `result_read` (P30).
+- **Path nodes.** Each level holds an ordered polyline of path nodes: entities named `PathNode001`, `PathNode002`, ... (zero-padded, so their names sort in route order), each `entity.create {parent: "/Level/Path", tags: [...]}` with only a `Transform`, at the ball's centre height (deck top + 0.5 m): the spawn, each piece's entry, every 15° along a curve, a jump's lip, a drop's edge, a platform's boarding point and the goal. A node's tags are `PathNode` plus at most one hint for the autopilot about the segment that starts at it: `Fast` (a jump's run-up, at least 8 m/s), `Slow` (a narrow beam, at most 4.5 m/s) or `Board` (wait here for the nearest moving platform, ride it, then go on; decision 10). Nothing draws a node, and `entity_bounds` reports none (P08).
+- **Gap markers.** An entity tagged `Gap` with only a `Transform` whose box (its `Translation`, `EulerAngles` and `Scale`: a sample inside it has every coordinate of `marker.Transform:InverseTransformPoint(sample)` within ±0.5) covers a void the path crosses: each `Gap` piece's own `GapMarker` child, a drop's void and a platform's void. Each spans 0.1 m past the void's edges and at least 3 m above and below the path.
+- **Kill heights, pars and spawns.** The ball spawns at (0, 0.6, −3), heading 0. `KillHeight` is the level's lowest deck top less 8 m. The par is the level's design target for the level's own time (not the carried total), shown on the HUD and used as its autopilot case's `TimeoutTicks`: an autopilot run that misses par fails, which keeps the levels' pacing honest.
+- **Checkpoints, the goal and the backstop** are placed by their roots (deck top, centreline). The lift's `Backstop` is a `Straight` instance used as a wall under the upper deck's first metre, so a ball that rolls onto the lowered lift stops against it instead of rolling off its far edge.
+
+**Level 1** (`Level1.scene`), easy: wide decks, a ramp up and a ramp down, four railed curves, no gap. Path 140 m; deck tops 0 to 2.5 m (0 → 2.5 at P05, 2.5 → 0 at P08); nodes span x −42 to 0, z −82 to −3. `KillHeight` −8. Par 0:30.0 (1,800 ticks).
+
+| Piece | Prefab | Translation | EulerAngles | Scale | Note |
+|---|---|---|---|---|---|
+| P01 | Straight | (0, −0.25, −6) | (0, 0, 0) | (4, 0.5, 12) | the start deck |
+| P02 | Straight | (0, −0.25, −18) | (0, 0, 0) | (4, 0.5, 12) | |
+| P03 | CurveLeft | (0, 0, −24) | (0, 0, 0) | (1, 1, 1) | heading 0 → 90 |
+| P04 | Straight | (−11, −0.25, −30) | (0, 90, 0) | (4, 0.5, 10) | |
+| P05 | Ramp | (−21.061, 1.007, −30) | (14.036, 90, 0) | (4, 0.5, 10.308) | run 10 m, rise 2.5 m |
+| P06 | Straight | (−31, 2.25, −30) | (0, 90, 0) | (4, 0.5, 10) | |
+| P07 | CurveRight | (−36, 2.5, −30) | (0, 90, 0) | (1, 1, 1) | heading 90 → 0 |
+| P08 | Ramp | (−42, 1.005, −41.949) | (−11.768, 0, 0) | (4, 0.5, 12.258) | run 12 m, rise −2.5 m |
+| P09 | Straight | (−42, −0.25, −54) | (0, 0, 0) | (4, 0.5, 12) | |
+| P10 | CurveRight | (−42, 0, −60) | (0, 0, 0) | (1, 1, 1) | heading 0 → −90 |
+| P11 | Straight | (−32, −0.25, −66) | (0, −90, 0) | (4, 0.5, 8) | |
+| P12 | CurveLeft | (−28, 0, −66) | (0, −90, 0) | (1, 1, 1) | heading −90 → 0 |
+| P13 | Straight | (−22, −0.25, −80) | (0, 0, 0) | (4, 0.5, 16) | the goal deck |
+| Checkpoint1 | Checkpoint | (−28, 2.5, −30) | (0, 90, 0) | (1, 1, 1) | `Order` 1 |
+| Checkpoint2 | Checkpoint | (−42, 0, −50) | (0, 0, 0) | (1, 1, 1) | `Order` 2 |
+| Goal | Goal | (−22, 0, −82) | (0, 0, 0) | (1, 1, 1) | |
+
+Nodes (34): 001 (0, 0.5, −3); 002 (0, 0.5, −12); 003 (0, 0.5, −24); 004 (−0.204, 0.5, −25.553); 005 (−0.804, 0.5, −27); 006 (−1.757, 0.5, −28.243); 007 (−3, 0.5, −29.196); 008 (−4.447, 0.5, −29.796); 009 (−6, 0.5, −30); 010 (−16, 0.5, −30); 011 (−26, 3, −30); 012 (−36, 3, −30); 013 (−37.553, 3, −30.204); 014 (−39, 3, −30.804); 015 (−40.243, 3, −31.757); 016 (−41.196, 3, −33); 017 (−41.796, 3, −34.447); 018 (−42, 3, −36); 019 (−42, 0.5, −48); 020 (−42, 0.5, −60); 021 (−41.796, 0.5, −61.553); 022 (−41.196, 0.5, −63); 023 (−40.243, 0.5, −64.243); 024 (−39, 0.5, −65.196); 025 (−37.553, 0.5, −65.796); 026 (−36, 0.5, −66); 027 (−28, 0.5, −66); 028 (−26.447, 0.5, −66.204); 029 (−25, 0.5, −66.804); 030 (−23.757, 0.5, −67.757); 031 (−22.804, 0.5, −69); 032 (−22.204, 0.5, −70.447); 033 (−22, 0.5, −72); 034 (−22, 0.5, −82). No gap marker.
+
+**Level 2** (`Level2.scene`), gaps and a moving platform: a kicker jump, a drop of 1.5 m over a 3 m void, a lift of 4 m and a second jump. Path 122 m plus the lift's wait; deck tops −1.5 to 2.5 m; nodes span x 0 to 51.1, z −71 to −3. `KillHeight` −9.5. Par 0:45.0 (2,700 ticks).
+
+| Piece | Prefab | Translation | EulerAngles | Scale | Note |
+|---|---|---|---|---|---|
+| P01 | Straight | (0, −0.25, −6) | (0, 0, 0) | (4, 0.5, 12) | the start deck |
+| P02 | Straight | (0, −0.25, −17) | (0, 0, 0) | (4, 0.5, 10) | the run-up |
+| P03 | Gap | (0, 0, −22) | (0, 0, 0) | (1, 1, 1) | kicker to −24, void to −27 |
+| P04 | Straight | (0, −0.25, −32) | (0, 0, 0) | (4, 0.5, 10) | the landing |
+| P05 | CurveRight | (0, 0, −37) | (0, 0, 0) | (1, 1, 1) | heading 0 → −90 |
+| P06 | Straight | (11, −0.25, −43) | (0, −90, 0) | (4, 0.5, 10) | the run-up to the drop's edge at x 16 |
+| P07 | Straight | (25, −1.75, −43) | (0, −90, 0) | (4, 0.5, 12) | the lower deck, x 19 to 31 |
+| Backstop | Straight | (35.6, 0, −43) | (0, −90, 0) | (4, 4, 1) | the wall under the upper deck's first metre |
+| Lift | MovingPlatform | (33.05, −1.75, −43) | (0, −90, 0) | (4, 0.5, 4) | `Travel` (0, 4, 0), `MoveTicks` 180, `DwellTicks` 120, `PhaseTicks` 0 |
+| P08 | Straight | (40.1, 2.25, −43) | (0, −90, 0) | (4, 0.5, 10) | the upper deck, from x 35.1 |
+| P09 | CurveLeft | (45.1, 2.5, −43) | (0, −90, 0) | (1, 1, 1) | heading −90 → 0 |
+| P10 | Straight | (51.1, 2.25, −53) | (0, 0, 0) | (4, 0.5, 8) | the run-up |
+| P11 | Gap | (51.1, 2.5, −57) | (0, 0, 0) | (1, 1, 1) | |
+| P12 | Straight | (51.1, 2.25, −69) | (0, 0, 0) | (4, 0.5, 14) | the goal deck |
+| Checkpoint1 | Checkpoint | (0, 0, −30) | (0, 0, 0) | (1, 1, 1) | `Order` 1 |
+| Checkpoint2 | Checkpoint | (22, −1.5, −43) | (0, −90, 0) | (1, 1, 1) | `Order` 2 |
+| Checkpoint3 | Checkpoint | (37.1, 2.5, −43) | (0, −90, 0) | (1, 1, 1) | `Order` 3 |
+| Goal | Goal | (51.1, 2.5, −71) | (0, 0, 0) | (1, 1, 1) | |
+| DropGap | marker | (17.5, −0.75, −43) | (0, −90, 0) | (4.4, 7.5, 3.2) | tag `Gap` |
+| LiftShaft | marker | (33.05, 0.5, −43) | (0, −90, 0) | (4.4, 10, 4.3) | tag `Gap` |
+
+The two `Gap` pieces carry their own markers, at world (0, 0, −25.5) and (51.1, 2.5, −60.5). Nodes (27): 001 (0, 0.5, −3); 002 (0, 0.5, −12) `Fast`; 003 (0, 0.5, −22) `Fast`; 004 (0, 0.9, −24) `Fast`; 005 (0, 0.5, −27); 006 (0, 0.5, −37); 007 (0.204, 0.5, −38.553); 008 (0.804, 0.5, −40); 009 (1.757, 0.5, −41.243); 010 (3, 0.5, −42.196); 011 (4.447, 0.5, −42.796); 012 (6, 0.5, −43) `Fast`; 013 (16, 0.5, −43) `Fast`; 014 (19, −1, −43); 015 (30, −1, −43) `Board`; 016 (35.1, 3, −43); 017 (45.1, 3, −43); 018 (46.653, 3, −43.204); 019 (48.1, 3, −43.804); 020 (49.343, 3, −44.757); 021 (50.296, 3, −46); 022 (50.896, 3, −47.447); 023 (51.1, 3, −49) `Fast`; 024 (51.1, 3, −57) `Fast`; 025 (51.1, 3.4, −59) `Fast`; 026 (51.1, 3, −62); 027 (51.1, 3, −71).
+
+- **The jumps.** A ball leaving the 0.4 m lip at 11.3° clears the 3 m void from about 7.5 m/s (9 m/s carries it about 4.5 m), so a jump's run-up is 10 to 12 m of wide deck, tagged `Fast`.
+- **The drop** needs about 5.5 m/s to clear 3 m while falling 1.5 m.
+- **The lift** rises 4 m in 3 s (at most 2.1 m/s, accelerating at most 2.2 m/s², well below g, so the ball never leaves it) and dwells 2 s at each end, a 10 s period. Lowered, its top is flush with the lower deck at −1.5 m; raised, with the upper deck at 2.5 m. A ball that arrives while it is up falls into the shaft and respawns at Checkpoint2, 9 m back.
+
+**Level 3** (`Level3.scene`), narrow beams, curves and a moving platform: four 1.2 m beams, four wide curves, a ramp up to a high beam and a shuttle across a 12.1 m void. Path 162 m plus the shuttle's wait; deck tops 0 to 2 m; nodes span x −32 to 0, z −113.1 to −3. `KillHeight` −8. Par 1:00.0 (3,600 ticks).
+
+| Piece | Prefab | Translation | EulerAngles | Scale | Note |
+|---|---|---|---|---|---|
+| P01 | Straight | (0, −0.25, −5) | (0, 0, 0) | (4, 0.5, 10) | the start deck |
+| P02 | Narrow | (0, −0.25, −16) | (0, 0, 0) | (1.2, 0.5, 12) | |
+| P03 | Straight | (0, −0.25, −24) | (0, 0, 0) | (4, 0.5, 4) | |
+| P04 | CurveLeft | (0, 0, −26) | (0, 0, 0) | (1, 1, 1) | heading 0 → 90 |
+| P05 | Narrow | (−13, −0.25, −32) | (0, 90, 0) | (1.2, 0.5, 14) | |
+| P06 | Straight | (−23, −0.25, −32) | (0, 90, 0) | (4, 0.5, 6) | |
+| P07 | CurveRight | (−26, 0, −32) | (0, 90, 0) | (1, 1, 1) | heading 90 → 0 |
+| P08 | Straight | (−32, −0.25, −41) | (0, 0, 0) | (4, 0.5, 6) | the boarding deck, to z −44 |
+| Shuttle | MovingPlatform | (−32, −0.25, −46.05) | (0, 0, 0) | (4, 0.5, 4) | `Travel` (0, 0, −8), `MoveTicks` 240, `DwellTicks` 120, `PhaseTicks` 0 |
+| P09 | Straight | (−32, −0.25, −60.1) | (0, 0, 0) | (4, 0.5, 8) | the far deck, from z −56.1 |
+| P10 | Ramp | (−32, 0.755, −69.149) | (11.31, 0, 0) | (4, 0.5, 10.198) | run 10 m, rise 2 m |
+| P11 | Narrow | (−32, 1.75, −81.1) | (0, 0, 0) | (1.2, 0.5, 14) | the high beam |
+| P12 | Straight | (−32, 1.75, −90.1) | (0, 0, 0) | (4, 0.5, 4) | |
+| P13 | CurveRight | (−32, 2, −92.1) | (0, 0, 0) | (1, 1, 1) | heading 0 → −90 |
+| P14 | Narrow | (−21, 1.75, −98.1) | (0, −90, 0) | (1.2, 0.5, 10) | |
+| P15 | CurveLeft | (−16, 2, −98.1) | (0, −90, 0) | (1, 1, 1) | heading −90 → 0 |
+| P16 | Straight | (−10, 1.75, −111.1) | (0, 0, 0) | (4, 0.5, 14) | the goal deck |
+| Checkpoint1 | Checkpoint | (−23, 0, −32) | (0, 90, 0) | (1, 1, 1) | `Order` 1 |
+| Checkpoint2 | Checkpoint | (−32, 0, −59.1) | (0, 0, 0) | (1, 1, 1) | `Order` 2 |
+| Goal | Goal | (−10, 2, −113.1) | (0, 0, 0) | (1, 1, 1) | |
+| ShuttleGap | marker | (−32, 0, −50.05) | (0, 0, 0) | (4.4, 6, 12.3) | tag `Gap` |
+
+Nodes (38): 001 (0, 0.5, −3); 002 (0, 0.5, −10) `Slow`; 003 (0, 0.5, −22); 004 (0, 0.5, −26); 005 (−0.204, 0.5, −27.553); 006 (−0.804, 0.5, −29); 007 (−1.757, 0.5, −30.243); 008 (−3, 0.5, −31.196); 009 (−4.447, 0.5, −31.796); 010 (−6, 0.5, −32) `Slow`; 011 (−20, 0.5, −32); 012 (−26, 0.5, −32); 013 (−27.553, 0.5, −32.204); 014 (−29, 0.5, −32.804); 015 (−30.243, 0.5, −33.757); 016 (−31.196, 0.5, −35); 017 (−31.796, 0.5, −36.447); 018 (−32, 0.5, −38); 019 (−32, 0.5, −43) `Board`; 020 (−32, 0.5, −56.1); 021 (−32, 0.5, −64.1); 022 (−32, 2.5, −74.1) `Slow`; 023 (−32, 2.5, −88.1); 024 (−32, 2.5, −92.1); 025 (−31.796, 2.5, −93.653); 026 (−31.196, 2.5, −95.1); 027 (−30.243, 2.5, −96.343); 028 (−29, 2.5, −97.296); 029 (−27.553, 2.5, −97.896); 030 (−26, 2.5, −98.1) `Slow`; 031 (−16, 2.5, −98.1); 032 (−14.447, 2.5, −98.304); 033 (−13, 2.5, −98.904); 034 (−11.757, 2.5, −99.857); 035 (−10.804, 2.5, −101.1); 036 (−10.204, 2.5, −102.547); 037 (−10, 2.5, −104.1); 038 (−10, 2.5, −113.1).
+
+- **The beams.** A ball stays on a 1.2 m beam while its centre is within 0.6 m of the centreline, so the beams are slow segments, entered from wide decks.
+- **The shuttle** carries the ball 8 m in 4 s (at most 3.1 m/s, 2.5 m/s²) and dwells 2 s at each end, a 12 s period. A free ball on an accelerating platform rolls back relative to it (a solid sphere takes 2/7 of the platform's change of speed), so the rider steers to stay on it; the autopilot holds the platform's centre (decision 10).
+
+Every level's path keeps at least 8.4 m between nodes more than five apart, so no stretch of track passes near another.
+
+### 4. The scenes, the scripts, the HUD, the timer and the sounds
+
+- **Each level scene** holds, as roots: `/Camera` (`Camera {Projection: "Perspective", VerticalFov: 60, NearClip: 0.1, FarClip: 600, Primary: true, Clear: "Skybox"}` and `FollowCamera.luau`; it is also the audio listener, as the primary camera); `/Sun` (decision 6); `/Environment` (`Environment` and `PostProcess`, decision 6); `/Backdrop` (the terrain, decision 5); `/Level` (decision 2: the pieces, `Backstop`, the checkpoints, the goal, the platform, and `/Level/Path`, an empty group holding the path nodes and the explicit gap markers); `/Ball` (a `Ball.prefab` instance at the spawn, its `KillHeight` an instance override); `/Game` (`Game.luau`); and `/HUD` (a `HUD.prefab` instance). Entity fields name entities by path in the scene (`"/Ball"`, `"/HUD/TimeText"`), set with `entity_update` on `/Game` and `/Camera` in each scene.
+- **The scripts** (`script_create` from the template, then `script_write`; `script_check {}` without a diagnostic, lint warnings included):
+
+  | Script | Kind, on | What it does |
+  |---|---|---|
+  | `Assets/Scripts/Tuning.luau` | Module | The frozen constants: the ground probe, the heading's speed and rate, the roll sound's mapping, the speed cap's fade, the respawn lift |
+  | `Assets/Scripts/Clock.luau` | Module | `Clock.Format(ticks)`: whole ticks as `M:SS.t` (tenths, by integer arithmetic: `ticks * 10 // 60`) |
+  | `Assets/Scripts/Motion.luau` | Module | `Motion.Ease(tick, moveTicks, dwellTicks)` (decision 2); `Motion.Forward(heading)`, `Motion.Right(heading)`, `Motion.HeadingOf(velocity)` and `Motion.Turn(heading, target, maxStep)` |
+  | `Assets/Scripts/Track.luau` | Module | Pure path helpers over values the caller reads: `Track.Sample(points, step, offset)` (the polyline's samples), `Track.InsideBox(localPoint)`; the support check's and the autopilot's shared rules |
+  | `Assets/Scripts/Ball.luau` | Behaviour on `/Ball`, `ExecutionOrder` 0 | Decision 2's control, ground probe, heading, kill plane and respawn; the roll sound; `OnTriggerEnter`: a `Checkpoint` raises its spawn when its `Order` (read from the instance's `Checkpoint` graph, typed `any`) is higher, the `Goal` sets `ReachedGoal`. Fields `Torque`, `AirForce`, `MaxSpeed`, `KillHeight`, `FallSound`. State `Heading`, `Grounded`, `LastOrder`, `Respawns`, `ReachedGoal`, `Teleports` |
+  | `Assets/Scripts/FollowCamera.luau` | Behaviour on `/Camera` | `OnLateUpdate`: the target is the ball's `RenderPosition` less `Distance` (7 m) along forward(`Heading`) plus `Height` (2.8 m) up; `Math.SmoothDamp` (`SmoothTime` 0.15 s) toward it, then `LookAt` the ball's `RenderPosition` plus 0.6 m up. When the ball's `Teleports` count changed, it snaps instead of smoothing. Fields `Ball` (`Field.Entity()`), `Distance`, `Height`, `SmoothTime`. Presentation only: it writes the camera's `Transform` and nothing the simulation reads |
+  | `Assets/Scripts/MovingPlatform.luau` | Behaviour on each platform | Decision 2's motion |
+  | `Assets/Scripts/Game.luau` | Behaviour on `/Game`, `ExecutionOrder` 10 (after the ball, so it sees the tick's state) | The level's flow: the timer, the HUD, the banners, the win, `Scene.Load` and `Restart` (below). Fields `LevelNumber`, `LevelCount` (3), `ParTicks`, `NextLevel` and `FirstLevel` (`Field.Asset("Scene")`; `NextLevel` empty on Level 3), `WinSound`, `Ball`, `Goal`, `Hud`, `LoadDelayTicks` (120), `BannerTicks` (60) |
+  | `Assets/Scripts/Checkpoint.graph` | Graph behaviour on each checkpoint (decision 5) | Field `Order` (Integer), `ActiveMaterial` (Asset Material), `Chime` (Asset AudioClip); variable `Activated` (Bool) |
+
+- **The timer** counts whole ticks: `StartTicks` is `Scene.GetLoadParameters().ElapsedTicks or 0`, and every `OnFixedUpdate` before the goal adds one to `Ticks`, the level's own time; `TotalTicks` = `StartTicks` + `Ticks`, the run's time, which `TimeText` shows. Whole ticks are exact in the replay header's float `Parameters` (exact below 2^24) and need no rounding. The first `OnFixedUpdate` that sees `ReachedGoal` stops the timer before counting, plays the win sound, emits the goal's `WinBurst`, and shows the banner with the level's own time against its par. `LoadDelayTicks` later, on Levels 1 and 2, it builds `SentParameters = {ElapsedTicks = TotalTicks}`, calls `Scene.Load(NextLevel, SentParameters)` and sets `LoadRequested` in the same tick (the `RollingBall` suite waits for that flag, decision 10). On Level 3 the banner stays: `FINISHED  M:SS.t` with `PRESS R TO PLAY AGAIN`.
+- **Restart.** `Input.IsActionPressed("Restart")` calls `Scene.Reload()`, which keeps the level's parameters, so the level restarts with the time it was entered with; after Level 3's finish it calls `Scene.Load(FirstLevel, {})`, a new run. No suite, replay or soak presses it.
+- **The HUD is UI, not a Screen `Text` HUD,** as M25 decided for Tetris: the UI framework is the program's HUD path (M22), its rectangles, plain panels and `ui_tree` checks (`textBounds`, `textOverflows`) have no `Text` equivalent, `Text`'s frozen layout is unshaped (Backlog §6), and Rolling Ball is the first game to draw UI over a perspective 3D view with post-processing, where its gaps would show.
+- **The HUD's layout** (`HUD.prefab`): `/HUD` holds `UiCanvas {ScaleMode: "MatchHeight", ReferenceHeight: 720, PixelSnap: true, RenderMode: "Screen"}`, so one canvas unit is one pixel at the 720-pixel window and the HUD keeps its proportions in a differently sized view or capture. Every `UiText` has `Wrap` false and `RaycastTarget` false, and every `UiImage` `RaycastTarget` false, so the pointer, resting at (0, 0), touches nothing and the UI's hash block stays empty. No widget; `Ui.Navigation` and `StickNavigation` false (decision 1). The UI draws after tonemapping, so exposure and bloom never change it. A `UiText`'s line box is about 1.21 × its `Size`, so every rectangle below holds its text; the builder confirms with `ui_tree {format: "Json", includeInactive: true}` that no element reports `textOverflows`.
+
+  | Element | Kind | Anchors and pivot | Position, size | Text and style |
+  |---|---|---|---|---|
+  | `TopBar` | `UiImage` plain (no sheet) | `AnchorMin` (0, 0), `AnchorMax` (1, 0), `Pivot` (0, 0) | (0, 0), (0, 56): the full width | colour (0, 0, 0, 0.35) |
+  | `LevelText` | `UiText` | top-left: `AnchorMin` = `AnchorMax` = `Pivot` = (0, 0) | (24, 0), (320, 56) | `LEVEL 1/3`, size 28, Left, Middle, white |
+  | `TimeText` | `UiText` | top-right: `AnchorMin` = `AnchorMax` = `Pivot` = (1, 0) | (−24, 0), (240, 56) | `0:00.0`, size 36, Right, Middle, white (digits are proportional, so right-aligned in a fixed rectangle): the run's time |
+  | `ParText` | `UiText` | top-right, as `TimeText` | (−24, 56), (240, 26) | `PAR 0:30.0`, size 18, Right, grey (0.55, 0.57, 0.6, 1): the level's par |
+  | `Banner` | `UiImage` plain, inactive until shown | centre: (0.5, 0.5) | (0, −140), (640, 104) | colour (0, 0, 0, 0.5) |
+  | `BannerText` (in `Banner`) | `UiText`, stretched: `AnchorMin` (0, 0), `AnchorMax` (1, 1), `Size` (0, 0) | | (0, 0), (0, 0) | e.g. `CHECKPOINT`, size 40, Center, Middle, gold (1, 0.72, 0.18, 1); two lines with an explicit line feed |
+  | `HelpText` | `UiText` | bottom-left: `AnchorMin` = `AnchorMax` = (0, 1), `Pivot` (0, 1) | (24, −16), (720, 24) | `WASD / ARROWS / LEFT STICK  ROLL     R  RESTART`, size 16, grey |
+
+  `Game.luau` writes `LevelText` and `ParText` once in `OnStart`, `TimeText` only when the shown tenths change (every sixth tick), and the banner's text and active flag only on an event: `CHECKPOINT` for `BannerTicks` when the ball's `LastOrder` rises, `LEVEL COMPLETE` with the level's own time and its par at the goal, `FINISHED` with the run's time after Level 3. UI components are hashed, so the replays see the HUD.
+- **The sounds** (`asset_create {type: "SoundEffect"}`, below `Assets/Audio/`):
+
+  | Asset | Values | Plays |
+  |---|---|---|
+  | `Roll.sfx` | `Seed` 7, `Volume` 1; a `Noise` layer, `Duration` 2, `LowPass` 380, `Volume` 0.7, and a `Sine` layer, `Duration` 2, 55 Hz to 55 Hz, `Volume` 0.3, both with the envelope `Attack` 0, `Decay` 0, `Sustain` 1, `Release` 0 (a seamless loop) | looping on the ball: `AudioSource {Clip: Roll.sfx, Loop: true, PlayOnStart: true, Volume: 0, Pitch: 1, Spatial: true, MinDistance: 10, MaxDistance: 60, Group: "Sfx"}`. While grounded, `Volume` = 0.6 × clamp((speed − 0.5) / 10, 0, 1) and `Pitch` = clamp(0.7 + 0.05 × speed, 0.7, 1.6); in the air `Volume` 0. Each is quantized to steps of 0.05 and written only when its step changes, so one voice loops for the session and the writes stay few |
+  | `Checkpoint.sfx` | `Square`, `DutyCycle` 0.25, `Notes` [`E5:0.08`, `A5:0.16`], `Volume` 0.5, envelope 0.005 / 0.05 / 0.6 / 0.08 | `Checkpoint.graph`, once per checkpoint |
+  | `Fall.sfx` | `Saw`, `Duration` 0.6, 520 Hz to 90 Hz, `LowPass` 2400, `Volume` 0.5, envelope 0.01 / 0.1 / 0.7 / 0.2 | `Ball.luau` at each respawn |
+  | `Win.sfx` | `Square`, `DutyCycle` 0.5, `Notes` [`C5:0.1`, `E5:0.1`, `G5:0.1`, `C6:0.35`], `Volume` 0.5, and a `Triangle` layer an octave lower | `Game.luau` at the goal |
+
+### 5. Visual scripting and M26's features
+
+- **One behaviour is a graph: `Checkpoint.graph`** (the `graph_*` tools, M24; `skills/game-building/graphs`). On `Event.OnTriggerEnter`: when `other` has the tag `Ball` and `Activated` is false, set `Activated`, set the `Bar` child's material slot 0 to `ActiveMaterial`, `Emit(60)` on the `Burst` child's `ParticleEmitter`, and `Audio.PlayOneShot(Chime, <the checkpoint's position>)`. About twelve nodes in one `edit_batch` of named ops.
+  - **Why a graph.** No game has used one; the program built graphs (ADR 0035) for exactly this kind of behaviour, and a game is where their gaps show.
+  - **Why the checkpoint.** It is small and event-driven (one trigger event, one guard, three effects, one flag), and it is a prefab's behaviour, so it exercises a graph's per-instance field (`Order`), a graph reacting to a physics event, `graph_live_values` in play, and a Luau behaviour reading a graph's member (the ball reads `Order`, typed `any`).
+  - **Why not more.** The gameplay the replays prove stays in Luau: the ball decides its spawn from the trigger event it receives itself, and the goal drives the timer and `Scene.Load`, which belong with `Game.luau`. So a graph limit (the one-signature node library, `any`-typed access; Backlog §6) can cost an effect, never the acceptance.
+- **M26's features**, each used only where it serves the look without touching what the replays hash. A component's fields are hashed like any other component's, so each choice is set before the replays are recorded; particles, the adapted exposure and TAA's history are never hashed.
+
+  | Feature | Used | Reason |
+  |---|---|---|
+  | Particles | yes: each checkpoint's `Burst` (Additive, cyan, `Sphere` of 0.6 m, `Speed` 2 to 4, `Lifetime` 0.5 to 0.9 s, `Size` 0.08 to 0.16, `Acceleration` (0, −4, 0), `Playing` false, emitted by the graph); the goal's `Sparkle` (looping, `Rate` 24, Additive, gold, a `Cone` pointed up) and `WinBurst` (as `Burst`, gold, 150 emitted by `Game.luau`); each with its own `Seed` | Presentation only and seeded, so a replay shows the same particles in every build; feedback for the two triggers; a game's first use of M26's emitters in play |
+  | Auto-exposure | no: `ExposureMode` Manual | One sky and one sun per level: a fixed `ExposureEV` holds the look the review judges, where an adapting exposure would brighten and darken as the camera turns between sky and track, and every capture's reset converges it at once, so captures would not show what a player sees |
+  | TAA | no: FXAA, the default | Particles write no motion vectors and ghost under TAA (Backlog §6) behind a fast ball and a turning camera; FXAA suffices at 1280 × 720, and captures render once instead of eight times |
+  | SSR | no | Nothing in the levels is a flat glossy surface; the decks are rough, and the glossy ball already reflects the sky through the environment's light |
+  | Baked probes | no | Open sky with nothing enclosed: the sky's light reaches every surface, and a bake would commit GPU-baked files that only this device class reproduces (Backlog §6) for no visible gain |
+  | Colour-grading LUTs | no | No `.cube` asset exists, and none is downloaded |
+  | Terrain | yes, as a backdrop with no collider | A floating track over a valley reads its height and depth; static presentation data, set before recording; a game's first use of the terrain tools |
+
+- **The terrain backdrop.** One `Assets/Terrain/Valley.heightfield` (`asset_create {type: "Heightfield"}`, flat, 129 × 129), shaped with a few `terrain_edit` strokes (`Raise` rings of hills around the level's footprint, then `Smooth`), shared by the three scenes: a stroke made through Level 1's terrain rewrites the asset every level shows. `/Backdrop` in each scene: `Terrain {Heightfield: "Assets/Terrain/Valley.heightfield", Size: (400, 400), HeightScale: 30, Layers: [{Tint: (0.16, 0.24, 0.1), Tiling: 8, Roughness: 0.95, Metallic: 0}], ReceiveShadows: true}`, its entity's `Translation` centring the 400 m square under the level's nodes (a terrain spans its `Size` from its entity's origin): (−221, −45, −242.5) in Level 1, (−174.5, −45, −237) in Level 2 and (−216, −45, −258) in Level 3. The valley floor is at −45 m and the strokes keep every hill below −15 m, under every `KillHeight`. No splat map and no `TerrainCollider`: a falling ball respawns long before it would meet the ground, and nothing collides with it.
+
+### 6. The look and the look review
+
+- **The direction.** A bright, toy-like obstacle course hanging in a clear, partly cloudy sky over a dark green valley. Light grey decks with steel-blue ramps, amber narrow beams, slate rails and an orange moving platform; a red checker ball whose roll shows; cyan checkpoint bars that turn green when crossed; a gold goal arch with sparkles. Soft sun shadows fall ahead and to the left of the ball, GTAO darkens the creases where rails and posts meet the decks, and a restrained bloom touches only the emissive bars.
+- **The values.** Only the engine's own art: built-in meshes, the built-in `Checker` texture and sky, synthesized sounds and the default font. Colours are linear.
+
+  | Material | `BaseColor` (linear) | Other |
+  |---|---|---|
+  | `Track` (decks, backstop) | (0.62, 0.64, 0.68, 1) | `Roughness` 0.75 |
+  | `Ramp` | (0.36, 0.52, 0.72, 1) | `Roughness` 0.7 |
+  | `Narrow` | (0.85, 0.55, 0.12, 1) | `Roughness` 0.6 |
+  | `Rail` | (0.18, 0.2, 0.24, 1) | `Roughness` 0.5 |
+  | `Kicker` | (0.9, 0.78, 0.15, 1) | `BaseColorMap` `engine://Textures/Checker`, `UVScale` (1, 4): a yellow band; `Roughness` 0.6 |
+  | `Platform` | (0.95, 0.35, 0.08, 1) | `Roughness` 0.45 |
+  | `Ball` | (0.85, 0.08, 0.06, 1) | `BaseColorMap` `engine://Textures/Checker`, `UVScale` (2, 2): red and dark red squares that show the roll; `Roughness` 0.25 |
+  | `Post` | (0.85, 0.85, 0.88, 1) | `Metallic` 0.8, `Roughness` 0.3 |
+  | `CheckpointIdle` | (0.05, 0.6, 0.75, 1) | `Emissive` (0.1, 0.8, 1), `EmissiveStrength` 3 |
+  | `CheckpointActive` | (0.1, 0.75, 0.2, 1) | `Emissive` (0.2, 1, 0.3), `EmissiveStrength` 3 |
+  | `Goal` | (1, 0.7, 0.15, 1) | `Emissive` (1, 0.65, 0.1), `EmissiveStrength` 4, `Metallic` 1, `Roughness` 0.25 |
+
+  - **Sky:** `Environment {Environment: "engine://Environments/Sky", Intensity: 1, ShowSkybox: true, SkyboxBlur: 0}`, its `Rotation` turned so that the HDRI's sun lies behind and to the right of the start's view, where the sun light comes from; the builder finds it on the `L1-Start` capture and records it in `AGENTS.md`.
+  - **Sun:** `/Sun` with `EulerAngles` (−50, 35, 0) (light travelling along (−0.37, −0.77, −0.53): from behind-right of the start, 50° up) and `DirectionalLight {Color: (1, 0.95, 0.88), Intensity: 3.5, CastShadows: true, LightAngle: 2.5, ShadowDistance: 70, CascadeCount: 4, CascadeSplitLambda: 0.8}`. `LightAngle` 2.5 gives a visible PCSS penumbra under the gates and a soft contact shadow under the ball.
+  - **Post-processing:** `PostProcess {ExposureMode: "Manual", ExposureEV: 0, Tonemap: "AgX", SsaoEnabled: true, SsaoRadius: 1, SsaoIntensity: 1.2, SsaoQuality: "High", BloomEnabled: true, BloomIntensity: 0.06, AntiAliasing: "Fxaa", SsrEnabled: false}`; `ExposureEV` may be tuned between −0.5 and 0.5 on `L1-Start`.
+  - **Finish the look before recording.** Every component above is hashed (materials and sounds through their handles), so the replays are recorded after the look holds, and a later look change re-records all three (decision 10).
+- **The look screenshots,** each with `keep: true` from a `renderer: "vulkan"` editor, every game-view capture as `viewport_screenshot {view: "Game", target: "Play", width: 1280, height: 720, keep: true}` (without the size a capture is 640 × 360). The builder reports each kept path with its name; after the session the lead copies them to `bin/Reviews/M27-Look/S<n>/<Name>.png` before the next editor launch on the project (ADR 0027 decision 9's copy rule; kept files cannot be named, Backlog §6). Nothing is committed.
+
+  | Name | Taken |
+  |---|---|
+  | `L1-Start` | Level 1, `play_start {lockstep: true}`, `play_step {ticks: 1}`: the start, the sky, the sun, the HUD |
+  | `L1-Roll`, `L1-RollAO`, `L1-RollShadows` | the same session after `play_step {ticks: 150, input: [{tick: 0, type: "Action", name: "MoveZ", value: 1}]}`: the ball rolling down the first straight; again with `debugView: "AO"` and `"ShadowCascades"` |
+  | `L1-Checkpoint` | Level 1 in lockstep: the ball moved before `Checkpoint1` with `entity_update {target: "Play"}`, rolled through it, captured while its burst shows (the bar green, the banner up) |
+  | `L1-Goal` | at the end of `input_replay {path: "Assets/Tests/Replays/Level1.replay", verify: true, strictHash: true}`: the goal, the sparkles, `LEVEL COMPLETE` |
+  | `L2-Lift` | Level 2 in lockstep: the ball placed on the lowered lift, captured mid-rise |
+  | `L3-Beams` | Level 3 in lockstep: the ball placed at the start of `P05`, a few ticks of `MoveZ`, the narrow beam ahead |
+  | `L3-Finish` | at the end of `Level3.replay`'s verification: `FINISHED` with the total time |
+  | `Editor` | `editor_screenshot {keep: true}` during a lockstep session, for the lead's view of the authoring |
+
+- **The look review.** After each session the lead checks the kept captures; each failed check becomes a finding (L-01, ...) in the friction list, which the next session fixes.
+  - **L1 sky and sun.** The HDRI sky fills the background without seams; the shadows fall away from the sky's bright sun region (ahead and to the left at the start).
+  - **L2 shadows.** A soft PCSS penumbra under the gates and the ball, a contact shadow under the ball, no acne, no shadow detached from its caster; in `L1-RollShadows`, the cascades cover the track ahead of the camera.
+  - **L3 GTAO.** Visible in `L1-RollAO` where rails, posts and the backstop meet the decks, and not darkening open decks.
+  - **L4 materials.** Decks, ramps, beams, rails, platforms, checkpoints and goal are told apart at a glance; the ball's checker shows its roll; idle and crossed checkpoints differ.
+  - **L5 HUD.** Every text legible at 100 % zoom and inside its rectangle (`ui_tree` reports no `textOverflows`), the time right-aligned, the banner centred over the track, nothing covering the ball.
+  - **L6 effects.** The burst in `L1-Checkpoint`, the sparkles in `L1-Goal`, the valley below with no seam or crack between its chunks; decision 5's excluded features absent (decision 7's component check).
+  - **L7 framing.** The follow camera keeps the ball in the lower middle third with the track ahead in view, and never inside geometry in any capture.
+
+### 7. The project in `D:\Engine`, its backups and its commit
+
+- **The project lives in `D:\Engine`'s working tree,** because the bridge spawns `D:\Engine\bin\Release-windows-x86_64\Editor\Editor.exe` and writes the transcript into the project it launched. `D:\Engine` holds `milestone/m27` for the builder window and the M27 slot is detached. `Projects/RollingBall` stays untracked until its one commit (ADR 0027 decision 11's rule), so no gate, games-suite or audit run on any committed tree sees a half-built game. There is nothing to empty: the folder does not exist, and `project.create` makes it.
+- **Before session 1, the lead prepares `D:\Engine`** (Git Bash, from `D:\Engine`'s root unless a command names a path):
+  1. With this record committed and `git -C D:/Engine/.claude/worktrees/m27 status --short` clean (untracked build output aside), free the branch: `git -C D:/Engine/.claude/worktrees/m27 switch --detach`.
+  2. Check that no gate, GPU run, editor or bridge editor holds anything (`python Scripts/Locks.py`), that `git -C D:/Engine status --short` lists no tracked change, and that `Projects/RollingBall` does not exist (`test ! -e Projects/RollingBall && echo absent`). Then `git -C D:/Engine switch milestone/m27`.
+  3. Build what the bridge, the export and the triage run: `python Scripts/Generate.py`, then `python Scripts/Build.py --config Debug --lock-timeout 43200`, the same with `--config Release` and `--config Dist`, then `python Scripts/GenerateDocs.py --check --config Debug`.
+  4. The bridge: `milestone/m27` changes nothing in `Tools/MCP` or `catalog.json` relative to main, so a bridge started from `D:\Engine` at `89b8beff` serves the builder unchanged. If it was started from an older tree, the lead ends its `run.py` processes and the client starts it again at the next engine tool call (ADR 0027 decision 10).
+- **What must not happen during the window.** Until decision 7's commit, nobody runs `git add`, `git rm`, `git commit` or `git stash` touching `Projects/RollingBall` through `D:\Engine`'s own index (decision 9's scratch index is the one exception), nor `git clean`, `git checkout -- .`, `git restore` or `git reset --hard` in `D:\Engine`. Friction fixes reach the branch by fast-forward (decision 9) and never touch `Projects/RollingBall`. Builder sessions run by day: the rendering editor holds the GPU lock.
+- **Backups.** After each session, with the editor shut down, the lead copies the project without `Library/` and `Build/`, since the work has no history until its commit:
+  - `mkdir -p bin/Reviews/M27-Backup/S<n>`
+  - `tar -c --exclude=./Library --exclude=./Build -C Projects/RollingBall . | tar -x -C bin/Reviews/M27-Backup/S<n>`
+
+  and copies the kept screenshots (decision 6).
+- **The commit.** After the builder's last session, with that session's triage, look review and scratch-index games suite green, the lead commits the project in `D:\Engine` as one checkpoint, with no editor running:
+  1. Stage it: `git add Projects/RollingBall`.
+  2. Review `git status --short Projects/RollingBall`: only added files, and no `Library/`, `Build/` or `*.bak`.
+  3. Run the component check on the staged files, which the working tree equals after step 1: none of the components decision 5 and the HUD exclude, and decision 5's `PostProcess` choices.
+
+     ```
+     python -c "import json, pathlib, sys; banned = {'Text', 'SpriteRenderer', 'SpriteAnimator', 'PixelPerfectCamera', 'Light2D', 'TilemapRenderer', 'TilemapCollider', 'RigidBody2D', 'BoxCollider2D', 'CircleCollider2D', 'PolygonCollider2D', 'CharacterController', 'MeshCollider', 'TerrainCollider', 'IrradianceVolume', 'ReflectionProbe', 'Animator', 'SkinnedMesh'}; docs = {str(p): json.loads(p.read_text(encoding='utf-8')) for p in pathlib.Path('Projects/RollingBall/Assets').rglob('*') if p.suffix in ('.scene', '.prefab')}; found = sorted((f, c) for f, d in docs.items() for c in d['ComponentVersions'] if c in banned); post = sorted((f, e['Name'], k) for f, d in docs.items() for e in d['Entities'] for k, v in e['Components'].get('PostProcess', {}).items() if (k, v) in (('ExposureMode', 'Auto'), ('AntiAliasing', 'Taa'), ('SsrEnabled', True))); print(found + post or 'clean'); sys.exit(1 if found or post else 0)"
+     ```
+
+  4. Run `python Scripts/AuditProvenance.py --project Projects/RollingBall` (index mode) and `python Scripts/Test.py --suite games --config Debug,Release,Dist --junit --require-gpu --lock-timeout 43200`.
+  5. Take one review pass (the commit-review skill) over the game: scripts, graph, scenes, prefabs, materials, sounds, settings, `AGENTS.md`, transcript and provenance.
+  6. Commit "M27: Rolling Ball built through automation (sessions S1 to S<n>)", its trailer `Reviewed: approved; <n> findings (<n> fixed); checkpoint (games suite Debug, Release, Dist; AuditProvenance index; component check)` followed by the Co-Authored-By line.
+  7. Audit once from a fresh clone into an empty scratch directory outside the repository: `git clone --depth 1 --branch milestone/m27 file:///D:/Engine <scratch>/m27-clone`, then `python Scripts/AuditProvenance.py --project Projects/RollingBall` from the clone's root.
+  8. End the window: `git clean -fdX -- Projects/RollingBall` (only its ignored `Library/` and `Build/`), `git switch main`, and re-attach the slot with `git -C D:/Engine/.claude/worktrees/m27 switch milestone/m27`.
+
+### 8. The builder and the sessions
+
+- **The builder.** One agent per session: a background agent of the lead's Claude Code session in `D:\Engine`, as M17's and M25's builders were (ADR 0036 decision 6 and its lead's decision f), started after decision 7's preparation or decision 9's between-session work.
+  - **Tools.** It drives the editor only through the engine MCP tools of the lead's session (`mcp__engine__*`, loaded with ToolSearch), with `engine_call {method, params}` for every method without a tool (P02) and for any a later catalogue change adds (P01), and reads documentation only through `docs_get`. Its first step checks that `engine_call` and `docs_get` are among its tools, and stops and reports if either is missing. The bridge transcribes every request, `engine_call`'s included.
+  - **Reads and writes.** It may Read this record (decisions 1 to 6, 8 and 10 and "Predicted friction" are written for it), read-only. It may Read and Write exactly one file, `Projects/RollingBall/AGENTS.md`, and only after the project exists. It never reads engine source or any other file, never runs a shell command, and never writes anything else (ADR 0027 decision 6's one-file rule, widened only by this record, as ADR 0036's lead's decision a widened it for M25).
+  - **The friction log.** It keeps one as ADR 0027 decision 6 defines it (every awkward step, unclear error, missing method, documentation gap and workaround it was tempted to make, with evidence), maps each item to this record's P-numbers ("Hit as"), and returns it with its report; the lead stores it as `bin/Reviews/M27-Friction-S<n>.json`.
+  - **One bridge user.** No other agent uses the bridge while a builder runs, the lead's own session included.
+  - **Fix gaps in the engine, never work around them in the game.** A missing capability that automation cannot provide is friction: the builder records it and stops that part.
+- **The prompt.** The lead writes it to `bin/Reviews/M27-Builder-S<n>.md` and starts the session's background agent with it. It quotes Roadmap M27's "Features" and "Acceptance" verbatim, names this record's builder-facing decisions, and for S2 and S3 lists the triaged findings, each with its expected fix.
+- **Transcript and provenance** (ADR 0026, ADR 0027; game-building's ground rules).
+  - S1 starts it: `editor_launch {project: "Projects/RollingBall", create: true, template: "Empty", renderer: "vulkan"}`, so `Automation/BuildLog.jsonl` begins at line 1 with `project.create` and `Automation/Provenance.json` with its first write. S2 and S3 launch without `create`, through a transcribed `project.open` and `session.info`.
+  - Every engine-consumed file is written by an automation method, never by hand; the builder never edits or deletes the transcript or provenance.
+  - `editor_shutdown` ends every session, success or not, because the rendering editor holds the machine-wide GPU lock until it exits; a session that needs no rendering (no screenshot, no export) may launch with `renderer: "none"`.
+- **The sessions.**
+
+  | Session | Starts from | Goal | Time box |
+  |---|---|---|---|
+  | S1 | `D:\Engine` on `milestone/m27` with its Release build; `editor_launch {create: true}` | The complete game and decision 8's checklist. If it does not fit, in this order: the settings, the kit, the scripts, the HUD, the sounds and the look, then Level 1 and Level 2 complete with their suites and replays, the checklist on them, and Level 3 left to S2 | about 400 tool calls (M17's 3D S1 took about 150, M25's about 96; Rolling Ball has three levels and physics tuning) |
+  | S2 | S1's project, after the triage, the look review and the friction fixes (decision 9); `editor_launch` without `create` | Whatever S1 left (Level 3), every finding of the triage and the look review fixed, the replays recorded again when a hashed value changed, the checklist again | about 250 tool calls |
+  | S3 | As S2 | Only if S2's triage, or the milestone review's findings on the game (decision 12), leave work only automation can do | about 150 tool calls |
+
+  The lead may skip S2 only when S1 met the checklist and its triage and look review leave nothing to change in the game, and no fix after S1 changed what its files or hashes depend on; the session record notes the decision. A fourth session needs the product owner's decision, asked with the friction list.
+- **The session checklist** (the game-building skill's definition of done, through MCP):
+  1. `project_validate {}` and `script_check {}` report nothing, lint warnings included; no `PHYSICS_ADJACENT_STATIC_BODIES`.
+  2. `project_upgrade {dryRun: true}` rewrites nothing.
+  3. `test_run {}` is green: the five suites of decision 10 and the three replays.
+  4. Each replay comes from its autopilot suite, is verified twice with `input_replay {verify: true, strictHash: true}` with equal `stateHash`, ends with `ReachedGoal` true (`script_eval {context: "Play", entity: "/Ball", script: "Ball", code: "return self.ReachedGoal"}` right after a verification), and fails with `withoutInput: true` added.
+  5. `StartScene` is `Assets/Scenes/Level1.scene`, and `Export.BuildScenes` lists the three level scenes.
+  6. `project_export {config: "Dist", smokeTest: true}` gives `smokeTestRan: true` and `smokeTestExitCode: 0`.
+  7. The 10,000-tick check of each level scene from its saved file, without a seed: `play_start {lockstep: true}`, `play_step` to tick 10,000, `script_errors {}` before any `script_eval`, and `engine_call {method: "stats.get"}` past ticks 5,000 and 9,500: entities, bodies and voices must not grow between the two reads.
+  8. `ui_tree {format: "Json", includeInactive: true}` in each scene reports no `textOverflows`.
+  9. The look screenshots of decision 6 are kept and reported.
+  10. `AGENTS.md` describes the levels, the kit, the actions, the scripts and the graph, the suites, the replays (with their hashes) and the look, with every value this record set and every change the builder made to one; each `luau` fence is code already run through `script_write` and `script_check`, or carries `skip="notes"`.
+  11. Every scene is saved and the editor shut down.
+- **What ends a session:** the checklist holds, with the report and the friction log returned; or the time box is reached, at a consistent point (scenes saved, `AGENTS.md` status written); or a missing capability that automation cannot provide, recorded as friction.
+
+### 9. Between sessions: triage, friction fixes and the engine-change checklist
+
+- **After each session the lead:**
+  1. Makes the backup and copies the screenshots (decisions 6 and 7).
+  2. Triages the friction log into this record's friction list: each item resolves as a change with its regression test, or as a decision with its default in force; the lead fills in "Hit as" in the predicted friction.
+  3. Runs the look review (decision 6).
+  4. With no editor running, checks the build on a scratch index, as M25's triage did (every git call of the scripts inherits `GIT_INDEX_FILE`):
+     - `mkdir -p bin/Reviews/M27-Scratch && cp .git/index bin/Reviews/M27-Scratch/index`
+     - `GIT_INDEX_FILE=D:/Engine/bin/Reviews/M27-Scratch/index git add -A Projects/RollingBall`
+     - `GIT_INDEX_FILE=D:/Engine/bin/Reviews/M27-Scratch/index python Scripts/AuditProvenance.py --project Projects/RollingBall`
+     - `GIT_INDEX_FILE=D:/Engine/bin/Reviews/M27-Scratch/index python Scripts/Test.py --suite games --config Debug,Release,Dist --junit --require-gpu --lock-timeout 43200`, the first check of the Dist hashes, which the builder cannot run
+     - `python Scripts/Hardening.py --steps soak --soak-only "RollingBall:*" --lock-timeout 43200`, a development aid that ends as a warning and soaks the working tree with each scene's game view
+  5. Runs decision 7's component check on the working tree.
+- **Friction fixes.**
+  - Each fix is made in the engine by its module's owner (decision 13), never worked around in the game, and lands on `milestone/m27` as a checkpoint commit: one review pass, the targeted runs its change touches, and its regression test shown failing without the fix (run alone).
+  - Fix agents work in the M27 slot (detached at `milestone/m27`'s tip) or a fix slot on a `fix/m27-s<n>` branch, because `D:\Engine` holds the branch. The lead brings each fix in with `git -C D:/Engine merge --ff-only <commit>`, which works beside the untracked project since no fix touches it.
+  - Then the lead rebuilds `D:\Engine` (Debug, Release, Dist) and runs `GenerateDocs.py --check --config Debug`. A fix that changes a description, a method's parameters or the method set regenerates the references in its own commit, and the lead restarts the bridge when a fix changed its code or `catalog.json` (decision 7, step 4); the builders, who keep the lead's tool list, reach a new or changed method through `engine_call` (P01).
+- **The engine-change checklist** (ADR 0036 decision 7, unchanged but for the projects):
+  1. **Canonical output.** A fix that changes canonical output carries, in its own checkpoint, the recorded upgrade of every committed audited project, `Editor --headless --renderer none --audio-device none --user-data-dir <scratch> --project <P> --upgrade` from the slot's Release editor for `Projects/Tetris`, `Tests/Projects/Breakout` and `Tests/Projects/NativeTest`; with `Scaffold.py` and `Scaffold.py --check` when it changes FeatureTest. Rolling Ball's own upgrade is `project_upgrade` in its next session, which the session record notes.
+  2. **Simulation hashes.** A fix that changes simulation hashes (a physics or session fix) is avoided. If the lead decides one is needed, it is committed only with everything it forces (ADR 0027 decision 10): the fix's slot commit stays off the branch; the lead applies it in `D:\Engine` with `git cherry-pick --no-commit` and rebuilds; Breakout's `Opening`, NativeTest's replays and, if the change reaches them, Tetris's three replays are re-recorded through the bridge in `D:\Engine` between builder sessions by a driver with the builder's rules, as the only bridge user; FeatureTest's through `Scaffold.py` and `--check`; then the fix and the re-records are committed together in `D:\Engine` as one reviewed checkpoint that never stages `Projects/RollingBall`. Rolling Ball's replays are re-recorded in its next session.
+  3. **No restaging.** No fix commit stages `Projects/RollingBall`.
+
+### 10. Suites, replays and the games suite
+
+- **The suites** (`Testing.Suites`, in this order):
+
+  | Suite | Script | Scene | Isolation | Modes | What |
+  |---|---|---|---|---|---|
+  | `Logic` | `Assets/Tests/Logic.test.luau` | none | Suite | Editor, Release, Dist | Pure logic: `Clock.Format` (0 → `0:00.0`, 59 → `0:00.9`, 60 → `0:01.0`, 3,600 → `1:00.0`, 36,000 → `10:00.0`); `Motion.Ease` at each phase's edges and middle; `Motion.HeadingOf` and `Motion.Turn` (a turn never exceeds its step, wraps at ±180°); `Track.Sample` (count and positions over a three-point polyline, ends included); `Track.InsideBox` on each face |
+  | `RollingBall` | `Assets/Tests/RollingBall.test.luau` | `Level1.scene` | Suite | Editor, Release, Dist | The Roadmap's five behaviours in eight cases (below), across the three levels by `Scene.Load` |
+  | `Autopilot.Level1` | `Assets/Tests/Autopilot/Level1.test.luau` | `Level1.scene` | Suite | Editor | Recording suite of `Level1.replay` |
+  | `Autopilot.Level2` | `Assets/Tests/Autopilot/Level2.test.luau` | `Level2.scene`, `Parameters` `{ElapsedTicks: 1500}` | Suite | Editor | Recording suite of `Level2.replay` |
+  | `Autopilot.Level3` | `Assets/Tests/Autopilot/Level3.test.luau` | `Level3.scene`, `Parameters` `{ElapsedTicks: 3600}` | Suite | Editor | Recording suite of `Level3.replay` |
+
+  The carried times are plausible fixed values (about Level 1's and Levels 1 and 2's autopilot times): any value proves that the header carries it, and a fixed one never forces a later level's re-record when an earlier level's replay changes.
+- **`RollingBall`'s cases,** in order. A test case may move the ball (`Teleport` and zeroed velocities); only recording suites must not. The suite crosses levels as FeatureTest's `SceneLoad` suite does: the case during which a load is requested returns in that frame, and the next case runs in the new scene's VM.
+  1. **"Level 1: the main path is supported everywhere but inside its gaps"** (the main-path support check). It sorts `Scene.FindAllByTag("PathNode")` by name, samples the polyline every 0.25 m starting a half step in (0.125 m, 0.375 m, ...: never exactly on a piece's edge, where a ray could miss two abutting boxes), and for each sample outside every `Gap` marker requires `Physics.Raycast(sample + (0, 0.5, 0), (0, −1, 0), 3, Physics.LayerMask("Track"))` to hit. A miss fails with the sample, its distance along the path and the nearest piece by `Physics.GetColliderBounds` (the collider entity and its piece's name). It also requires at least 400 samples on Level 1, so a path that lost its nodes cannot pass.
+  2. **"Level 1: a fall respawns the ball at the last checkpoint with no velocity"**: the ball placed on `Checkpoint1`'s trigger (`LastOrder` becomes 1, the bar turns green), then over the void beside the track; once `Respawns` is 1, the ball is at `Checkpoint1` + (0, 0.6, 0) within 0.05 m, with linear and angular speed below 0.01, its `Heading` the checkpoint's yaw, and the timer still running.
+  3. **"Level 1: the goal stops the timer and loads Level 2 with it"**: the ball placed on the goal's trigger; once `ReachedGoal`, `TotalTicks` holds still for 10 ticks and the banner reads `LEVEL COMPLETE`; then it waits for `LoadRequested` (within `LoadDelayTicks` + 10), checks `SentParameters.ElapsedTicks` equals the stopped `TotalTicks`, and returns.
+  4. **"Level 2: the timer carried across Scene.Load continues"**: `Scene.GetName()` is `Level2` (the goal loaded the next level); `GetLoadParameters().ElapsedTicks` is above 0 and equals the game's `StartTicks`; after 60 ticks `TotalTicks` grew by exactly 60 and `TimeText` reads `Clock.Format(TotalTicks)`.
+  5. **"Level 2: the lift carries the ball up to the upper deck"**: once the lift is `AtStart`, the ball placed on its centre + (0, 0.6, 0) at rest; once `AtEnd`, the ball rose by 4 m within 0.1 m and lies within the lift's `Physics.GetColliderBounds` horizontally. Its `TimeoutTicks` is 1,200: up to a period's wait and a rise.
+  6. **"Level 2: the main path is supported everywhere but inside its gaps"**, then `Scene.Load(<Level3>, {ElapsedTicks = 3600})`.
+  7. **"Level 3: the main path is supported everywhere but inside its gaps"**.
+  8. **"Level 3: the goal shows the finish with the total time"**: on the goal's trigger the banner reads `FINISHED` with `Clock.Format(TotalTicks)`, and no load is requested.
+- **The autopilots** (`Assets/Tests/Lib/Autopilot.luau`, a Module the three suites require; §13.6's autopilot workflow):
+  - It reads only: the ball's position and velocity, the ball's `Heading` and `Grounded` (`GetScript("Ball")`), the path nodes and their tags, and a platform's `AtStart`, `AtEnd` and `DwellLeft`. It never moves an entity, writes a component or draws from the session's `Random`.
+  - Each tick it follows the polyline by pure pursuit: the target is the point 2.5 m ahead of the ball's projection on the polyline; the wanted velocity points at it, at most 7.5 m/s (11 on a `Fast` segment, 4.5 on a `Slow` one); the steering vector is the difference between the wanted and the actual horizontal velocity times a gain, clamped to length 1, and turned into the heading's frame: `MoveX` = steer · right(`Heading`), `MoveZ` = steer · forward(`Heading`) (the ball is steered relative to its heading, so world axes would steer it wrongly: P06).
+  - At a `Board` node it stops on the node, waits for the nearest platform to be `AtStart` with at least 60 ticks of `DwellLeft`, then targets the platform's top centre until the platform is `AtEnd`, then goes on along the polyline.
+  - It injects `Test.InjectAction("MoveX", nil, x)` and `("MoveZ", nil, z)` only when a value, quantized to 1/32, changes, so a replay holds a few events a tick at most (P14), and its first input comes in the first ticks, well inside the first 60.
+  - Each case ends when `ReachedGoal` holds, with `Test.Expect` that it does and that the level's own `Ticks` are below its `ParTicks`; its `TimeoutTicks` is the level's `ParTicks`.
+- **The replays** (`Assets/Tests/Replays/`), each recorded from tick 0 by its suite: `scene_save` every open scene, then `test_run {filter: "Autopilot.Level1", record: "Assets/Tests/Replays/Level1.replay"}`, and the same for Levels 2 and 3. No replay path contains a suite name.
+
+  | Replay | Recording suite | Header `Parameters` | Ends with | Proves |
+  |---|---|---|---|---|
+  | `Level1.replay` | `Autopilot.Level1` | none | the ball at the goal, the timer stopped, `LEVEL COMPLETE` | plain input reaches Level 1's goal over its ramps and curves |
+  | `Level2.replay` | `Autopilot.Level2` | `{ElapsedTicks: 1500}` | the same on Level 2, the time counted on from 1,500 | the jumps, the drop and the lift by plain input, and the carried timer |
+  | `Level3.replay` | `Autopilot.Level3` | `{ElapsedTicks: 3600}` | `FINISHED` and the total time | the beams, the curves and the shuttle by plain input |
+
+  - **Verification.** Each is verified twice with `input_replay {verify: true, strictHash: true}`, its two `stateHash` values equal in the transcript, and `ReachedGoal` is read true right after; each fails with `withoutInput: true` added (without input the ball rests at its spawn, so the first checkpoint, tick 60, already differs).
+  - **Re-recording.** Any change of a hashed value after recording re-records all three through their suites and verifies them again: a component of the scene (the look included), a prefab, a script that changes what is written, a material or sound handle, the layers, an input action, or an engine change that alters simulation.
+- **The proof is the games suite's three halves** (`Test.py --suite games --config Debug,Release,Dist --require-gpu`): each editor half runs the build-settings check, `script.check`, `project.validate`, the upgrade dry run, `test.run` with every replay at its committed hash and every checkpoint compared, and the input check of every replay; the Dist half runs the testing Dist export's `--feature-test` (`Logic`, `RollingBall` and the three replays) with its hashes compared with both editors', then the plain Dist export's smoke test. Three plays in three processes prove "repeated runs give identical state hashes" with the builder's two.
+
+### 11. The gate
+
+- **The decision** (Roadmap rule 1 and ADR 0028 decision 12 leave it to this plan). M27's milestone end runs `CI.py --milestone` when any of its friction fixes touches core systems, a reader of a fuzzed format or the renderer: a production change below `Engine/Source/Engine/` in `Core/`, `Platform/`, `Reflection/`, `Scene/`, `Physics/`, `Scripting/`, `Session/`, `Animation/` or `Audio/`, in a reader with a fuzz case in the hardening stage's fuzz step, or in `Renderer/`, `Graphics/` or `Resources/Shaders/`. Otherwise (fixes in the automation methods, the test runner's reports, the editor, the bridge, the tooling, the documents, the tests or the game) it runs `CI.py --require-clang-cl`, followed on the gated tree, before main fast-forwards, by a targeted `python Scripts/Hardening.py --steps soak --lock-timeout 43200` (the full subject list, under the GPU lock it takes), as M25 did. A soak failure is fixed on `milestone/m27`, and the fixed tree is gated again (ADR 0023 decision 5). The lead records at the landing which applied and why.
+- **Why.** ADR 0028 decision 12's criterion stays the program's: hardening reruns when engine code it guards changed. Phase 3's hardened gate passed at `89b8beff`, which M27 starts from, so a milestone whose fixes stay in the editor's automation, the bridge, the tooling, the documents and the game changes nothing ASan, the fuzz step or the debug heap would test again. The soak runs either way: Rolling Ball adds three soak subjects, and soak readiness is part of a demo's definition of done. The plain gate's export stage leaves the current exported Release FeatureTest that the soak's Runtime subject needs, which is why the soak follows the gate rather than preceding it.
+- The Roadmap's M27 section states it in the same change as this record.
+
+### 12. The landing and the end of the backlog program
+
+In the M27 slot, after decision 7's commit:
+1. **Merge main** with `git merge main` only if main moved since `89b8beff` (a hotfix); nothing else lands on main during phase 4. With a merge, run the targeted suites it touched, and redo main's canonical upgrades on Rolling Ball with `Editor --headless --renderer none --audio-device none --user-data-dir <scratch> --project Projects/RollingBall --upgrade` when the merge brought a recorded upgrade of another project, then `AuditProvenance.py --project Projects/RollingBall --files disk`.
+2. **One review pass** of the milestone's diff (`89b8beff...milestone/m27`: this record, the friction fixes, the game, a merge's resolution) in three lenses, as M25's: correctness and robustness; determinism, formats and integration; tests, parity and documentation. Every finding is fixed at once; a finding on the game goes to a builder session (S3, or the next under decision 8), with `D:\Engine` holding the branch again by decision 7's preparation steps 1 and 2.
+3. **Records,** in the review's commit: this record's friction list, session record and a landing section; Architecture §13.11's Rolling Ball paragraph rewritten as built (the kit and its pivots, explicit sensor bodies on `Trigger`, the heading, the HUD as UI, the graph, the terrain, the suites and the replays with their committed hashes), §9.6's ball bullet and §11.2's `Ball` example (the heading in the fixed step); the game-building skill's "Definition of done" gaining Rolling Ball's paragraph beside Tetris's, and `prefabs-and-levels`, `replays` and luau-gameplay's autopilot example and follow-camera idiom as built (the documentation stub `Tests/Data/TypeChecker/DocExamples/Assets/Scripts/Ball.luau` and its generator follow); the `Docs/Backlog.md` rows of any accepted limit or deferral, its status line, and §1's M27 row as landed.
+4. **Gate** under decision 11, then the soak when the gate was plain.
+5. **Fast-forward main:** `git -C D:/Engine merge --ff-only milestone/m27`, with `D:\Engine` on main and no bridge window open.
+6. **Phase end and program end:** main is pushed to `origin` as the off-site backup (`git -C D:/Engine push origin main`); the phase-end cleanup removes M27's worktrees and branches after a bundle backup (`git bundle create bin/Reviews/Backup-Phase4.bundle --all`, then `git worktree remove` of the M27 slot and every fix slot, `git branch -D` of `milestone/m27` and the `fix/m27-*` branches; main kept); and the work pauses for the product owner, as after every phase (ADR 0028 decision 14).
+7. **What the documents say once M27 lands.** This record: the landing, "Before milestone completion" ticked. ADR 0028: its "Before program completion" checklist ticked by the lead, each item with its evidence, which ends the backlog program. The Roadmap: M27 complete like every milestone before it. The Backlog: the status line names M27, §1's M27 row as landed, and §6 holds the limits M27 accepted. Architecture §1.1 G4: its proof, "Tetris and Rolling Ball 3D, built by an agent through automation with a committed transcript and a file-provenance audit", is then complete; §13.11 describes both games as built.
+
+### 13. Ownership and records
+
+- **No ledger.** M27 is alone in phase 4: it owns every file a friction fix touches, by module as Architecture §3 assigns it (a physics fix in `Physics/` and `Scene/PhysicsSystem*`, a test-runner fix in `Testing/`, a graph fix in `AssetPipeline/Graph/`, a method in its `*Methods.cpp`, the bridge in `Tools/MCP`), and appends to the shared integration files (`RegisterMethods.cpp`, `RegisterBindings.cpp`, validation codes in both tables of `ProjectValidator.cpp`, `Docs/Reference/*`) at their ends.
+- **Allocations:** this record is 0038 (ADR 0028 decision 15); a record outside a milestone takes the next free number (0042). A fix that needs FeatureTest coverage takes IdSeeds 2500 to 2599 (main's highest is 2412). M27 adds no component, format, asset type, built-in asset, settings section, phase or hash block of its own; one a fix needs is decided in this record first, with its migration, its FeatureTest coverage in every run mode and the upgrades of decision 9.
+- **Goldens.** M27 regenerates none. An unexpected golden change is a reviewed regeneration named here.
+- **The documents M27 owns at its landing** are decision 12's. No documentation checkpoint precedes session 1: this record carries the decisions on which Architecture and the served skills would mislead the build (P04 to P06), and the builder reads it.
+
+## Points for the lead before session 1
+
+Each has this plan's default, which holds unless the lead decides otherwise here.
+- **a. Checkpoints and the goal as explicit sensor bodies on `Trigger`** (decision 2), instead of §13.11's implicit sensor bodies on `Track`. Default: explicit. The alternative keeps §13.11's wording but drops the `Trigger` layer and makes the support check and the ground probe filter trigger hits out of `Physics.RaycastAll`.
+- **b. The builder's reads:** this record and `Projects/RollingBall/AGENTS.md` only (decision 8). Default: as stated; there is no reuse folder.
+- **c. The terrain backdrop** (decision 5). Default: built, within about 20 tool calls of S1; dropped, and recorded, if it costs more.
+- **d. Par times on the HUD** (decision 3), the one addition to the Roadmap's feature list. Default: shown, and used as the autopilot cases' timeouts.
+- **e. The gate rule** (decision 11). Default: conditional, as stated; the alternative is `CI.py --milestone` whatever the fixes touch (about 3.5 h on a quiet machine at night, ADR 0028 decision 12's measure for a hardened gate, instead of about 1 h plus a soak of about 55 min for 80 subjects).
+- **f. No documentation checkpoint before S1** (decision 13). Default: none; the alternative corrects luau-gameplay's autopilot example and follow-camera idiom (P05, P06) before S1, as ADR 0036's lead's decision c did for Tetris's text.
+- **g. The time boxes** (decision 8): about 400, 250 and 150 tool calls.
+
+## Acceptance
+
+Each line is followed by the run that proves it.
+1. **Roadmap M27's feature list.** Decision 1's table, each row by its case, check or capture: the `Logic` and `RollingBall` suites green in the games suite's three halves; the three replays; the look review's L1 to L7 on the last session's captures.
+2. **`RollingBall.test.luau` green with the Roadmap's five checks** (respawn at the last checkpoint, moving platform carries the ball, timer persists across `Scene.Load`, goal loads the next level, the main-path support check on every level). Proved by the games suite's three halves.
+3. **`Level1.replay`, `Level2.replay` and `Level3.replay`,** recorded by their autopilot suites through `test_run {record}`, Level 2 and 3 with the carried timer in the header, each reaching its goal under `input.replay {verify: true, strictHash: true}` in lockstep without the autopilot, each verified twice with equal `stateHash` in the transcript, each failing without its input. Proved by the transcript and the builder's report, then the games suite's three halves (each play at the committed `FinalStateHash` and equal to the others) on decision 7's commit and in the gate's games stage.
+4. **`StartScene` and `Export.BuildScenes` set.** Proved by the games suite's build-settings check in each editor half.
+5. **`project.validate` clean** (no `PHYSICS_ADJACENT_STATIC_BODIES`), with `script.check` and the upgrade dry run clean. Proved by each editor half.
+6. **The Dist export's smoke test exits 0.** Proved by the games suite's Dist half and by the builder's `project_export {config: "Dist", smokeTest: true}`.
+7. **`AuditProvenance.py --project Projects/RollingBall` passes from a fresh clone.** Proved in index mode on the committed tree (the games stage's audit step) and once from an actual fresh clone (decision 7, step 7).
+8. **The soak passes with Rolling Ball's three scenes.** Proved by the hardening stage of `CI.py --milestone`, or the targeted `Hardening.py --steps soak` on the gated tree (decision 11).
+9. **The gate.** Proved by decision 11's `CI.py` run, green on the final tree.
+10. **Every friction item closed or decided,** every predicted item with its "Hit as", and the look review signed off by the lead. Proved by this record at the milestone review.
+
+## Approvals
+
+None needed. Nothing is downloaded or vendored, and no new kind of dependency or licence is involved: the sky is the built-in `engine://Environments/Sky` (CC0, already committed with its licence), the meshes and textures are the engine's procedural built-ins, the sounds are synthesized, and the HUD uses the default font.
+
+## Risks
+
+1. **Friction volume and physics tuning.** M16 recorded 34 friction items, M17 14 and M25 15; a physics game adds tuning (torque, damping, jumps, beams) that only play measures. S1 may finish two levels; S2 and S3 are budgeted, and a fourth session goes to the product owner.
+2. **The autopilot on Level 3.** Narrow beams and the shuttle ask for precise control; an autopilot that cannot finish under par fails its case. Its gains are tuned in play, and a capability it lacks (a query, an event) is engine friction.
+3. **`D:\Engine` is pinned for days.** While a rendering editor holds the GPU lock, other GPU runs wait; sessions run by day and end with `editor_shutdown`. No sibling milestone needs main meanwhile.
+4. **The working tree holds an untracked project for the whole window.** An accidental `git clean` or stash would lose it; decision 7's forbidden commands, the backups after each session and the single commit bound it.
+5. **A hash-changing engine fix during the window** (a physics or session fix) forces re-records of Breakout, NativeTest, FeatureTest and possibly Tetris. It is avoided, and handled by decision 9's checklist when it cannot be.
+6. **Determinism traps in the game:** a gameplay read of the camera (P05), `pairs` over entity keys (the touched checkpoints), host queries, `^` with a computed exponent. The games suite's three plays catch a split, and the scratch-index run after each session finds it early.
+7. **Scene.Load inside a test suite.** The `RollingBall` suite relies on a case returning in the frame of a load the game requests (P12); if the runner does not support it, the suite's shape waits for a fix in the runner.
+8. **Long replays** (about 1,000 to 3,000 ticks each) lengthen the games suite in Debug and the input checks; P14 bounds their events.
+9. **Look subjectivity.** L1 to L7 are judged on captures; L5 is measured with `ui_tree`.
+10. **The soak's new subjects** carry physics, moving platforms forever and looping particles; the builder's 10,000-tick check and the lead's Rolling Ball soak after each session find growth early.
+
+## Verification plan (ADR 0023)
+
+- **This record:** a documentation-only checkpoint with the Roadmap's M27 sentences. `Docs/Decisions/` is read by no check; the Roadmap is one of the documents the `DocExamples` cases read, so this checkpoint runs them (`Test.py --suite unit --config Debug --filter "DocExamples*"`), with one review pass against `Docs/ReviewChecklist.md`.
+- **Friction-fix checkpoints:** the fix's targeted build and test cases, its regression test shown failing without the fix (run alone), and once the suites the change touches: the automation suite filtered to the method for a method change, the games suite when the exporter, the games tooling, a demo or the simulation changes. Agents never run `PreCommit.py` or `CI.py`.
+- **After each session:** decision 9's triage runs: the scratch-index audit, the games suite, and the Rolling Ball soak as a development aid.
+- **The project's commit:** decision 7's checks, then the fresh-clone audit.
+- **The landing:** the merge's targeted suites (if main moved), one review pass, one gate under decision 11, then the targeted soak after a plain gate. A red gate reruns only its failed stages unless the fix changed production code, build files or shared test support.
+
+## Predicted friction
+
+The lead fills "Hit as" from the friction list. Every handling fixes the engine or its documentation, never the game, and nothing here is fixed before session 1 (ADR 0026 decision 15).
+
+| Id | Predicted item (evidence) | Planned handling | Hit as |
+|---|---|---|---|
+| P01 | A friction fix that adds a method or changes one's parameters leaves the lead's session, and so every builder, with its cached tool list (ADR 0026 F27, F30, P10) | The new or changed method through `engine_call`; the bridge's string conversion covers stale schemas; the bridge restarted after a change to its code or `catalog.json` (decision 9) | – |
+| P02 | Methods without a tool that the build is likely to need: `physics.bodyInfo`, `scene.raycast`, `stats.get`, `play.state`, `audio.stats`, `viewport.camera`, `viewport.frame`, `viewport.pick`, `viewport.setOptions`, `project.refreshAssets`, `asset.setImportSettings`, `asset.info`, `prefab.revert`, `graph.moveNodes`, `events.read`, `test.list` | `engine_call`, as documented. A method the builder reports as costly may become a tool through its registration flag (P01's handling follows) | – |
+| P03 | `project.create` refuses a non-empty directory | `Projects/RollingBall` does not exist (decision 7, step 2); `AGENTS.md` is written only after the create | – |
+| P04 | Implicit sensor bodies under the level root take its `Track` layer, and `Physics.Raycast` reports sensors with no option to skip them, so §13.11's and §9.6's implicit checkpoints would sit on `Track` and in every `Track` ray | Decision 2's explicit sensor bodies on `Trigger`; §13.11 and §9.6 corrected at the landing. If the builder needs a trigger's own layer without its own body, or a query that leaves sensors out (an optional parameter of `Physics.Raycast`, additive, hash-neutral), it is Physics and Scripting friction | – |
+| P05 | §11.2's `Ball` example reads `camera.Transform:Forward()` in `OnFixedUpdate`, while the follow camera writes its pose in `OnLateUpdate`: live play would depend on the frame rate, and every lockstep run stays deterministic, so no suite catches it | Decision 2's heading in the fixed step; §11.2's example and luau-gameplay's follow-camera idiom corrected at the landing (or before S1 by the lead's decision f) | – |
+| P06 | luau-gameplay's autopilot example injects world-axis `MoveX` and `MoveZ`, which steers a heading-relative ball wrongly | Decision 10's conversion through the ball's heading; the example corrected at the landing (or before S1, decision f) | – |
+| P07 | `prefab.instantiate` overrides only the instance root at creation; a composite piece's member cannot be sized per instance | Decision 2's single-box pieces sized by `Scale` and fixed composite pieces; a later member change is an `entity_update` on the member's path, recorded as an override | – |
+| P08 | Path nodes and gap markers have no component and draw nothing: no gizmo shows them in the editor, and `entity_bounds` reports none | Their `Transform`s through `entity_get`/`scene_query`, the support check, and `Debug.DrawLine` from a test in play if needed. A marker gizmo or debug view is EditorCore friction if the builder reports the cost | – |
+| P09 | `entity_bounds` measures drawn meshes, not colliders; `physics.bodyInfo` needs a play session | The kit's meshes equal its colliders, so `entity_bounds` checks the layout; colliders in play through `physics.bodyInfo` | – |
+| P10 | No method samples a body's speed over ticks, so tuning the ball (torque, cap, damping, jumps) costs `play_step` and `script_eval` rounds | Decision 2's starting values and targets; a trace method is automation friction if the builder reports the cost | – |
+| P11 | The static track and a kinematic platform are separate bodies, so the seam between them may bump; edge removal works within one compound | 5 cm gaps and flush tops (decision 2). A bump that throws the ball is Physics friction, not a game workaround | – |
+| P12 | `RollingBall` case 3 waits while the game itself requests `Scene.Load`; FeatureTest's `SceneLoad` suite only loads from the case | The case returns in the requesting tick (decision 10). If the runner errors or drops a case across a game-requested load, it is Testing friction, fixed in the runner | – |
+| P13 | A replay header stores `Parameters` as floats | The timer as whole ticks (decision 4) | – |
+| P14 | Autopilot replays are long (about 1,000 to 3,000 ticks, up to two analog events a tick): file size, `test.run`'s 900 s and `input.replay`'s 600 s tool timeouts, the verification and input-check runs | Quantized inputs injected on change (decision 10). A size bound or a timeout hit is automation friction | – |
+| P15 | A suite's analog action holds until replaced, and `Test.InjectAction` refuses an unknown name | The autopilot writes both axes on change; action names as constants | – |
+| P16 | The soak plays each scene from its start for 10,000 ticks without input: the ball must rest, platforms move forever, the roll stays one voice, and a scene started directly has no parameters | A flat spawn, `ElapsedTicks or 0`, the roll's single looping voice; the builder's check per scene (decision 8, item 7) and the lead's soak (decision 9) | – |
+| P17 | Graph limits: one self-contained behaviour, `any`-typed access, one signature a member (`GetComponent`'s overloads have no node; the component shortcut properties do), no consuming of UI events | Decision 5's checkpoint graph uses property, `FindChild`, `HasTag`, `SetMaterial`, `Emit` and `PlayOneShot` nodes. A node the graph needs and the library lacks is graph friction (`AssetPipeline/Graph/`) | – |
+| P18 | `ParticleEmitter` is presentation: `GetParticleCount` raises in fixed-step code, edit scenes simulate none | Emit from the graph and `Game.luau` only; captures in play. If `Emit` itself refuses fixed-step code, it is Scripting friction | – |
+| P19 | The terrain is shaped only by `terrain_edit` strokes (no heightmap source can be authored), in edit scenes, and one heightfield serves three scenes | A few strokes through Level 1's backdrop (decision 5); a stroke-cost problem is terrain friction, or the backdrop is dropped by the lead's decision c | – |
+| P20 | UI over a 3D view: `RaycastTarget` and `Wrap` default to true, the line box is 1.21 × `Size`, canvases scale in scene pixels | Decision 4's settings and heights; `ui_tree`'s `textBounds` and `textOverflows` with `includeInactive` | – |
+| P21 | Look values are hashed: a change after recording breaks all three replays | Finish the look first; S2 re-records after look fixes; the divergence hint names the changed component (decisions 6 and 10) | – |
+| P22 | `viewport_screenshot` defaults to 640 × 360; kept captures cannot be named (Backlog §6) | Always 1280 × 720 with `keep: true`; the lead names the copies (decision 6) | – |
+| P23 | The builder cannot run the soak's game-view rendering, the games suite or the audit | The lead's runs after each session (decision 9) | – |
+| P24 | `Scene.FindAllByTag`'s order is not the route's | Nodes sorted by their zero-padded names (decision 3) | – |
+| P25 | `RigidBody:Teleport` keeps the velocity | Both velocities zeroed after it (decision 2) | – |
+| P26 | An `Entity` field in a prefab cannot name a scene entity outside it | `/Game`'s and `/Camera`'s entity fields set per scene with `entity_update` (decision 4); the ball's own fields hold no entity | – |
+| P27 | A solid collider outside the level root (a stray wall) forms a separate implicit static body, which validation reports beside the track | Every solid collider below `/Level`; `project_validate` after each level's batch | – |
+| P28 | Several open scenes in one editor: an op that addresses the wrong tab, `test_run` refusing any dirty scene a suite plays | `scene` targets on scene-addressing tools; `scene_save` of every tab before `test_run` | – |
+| P29 | Long levels: a batch of 60 to 90 ops, its result over 48 KB offloaded | `dryRun: true` first; `result_read` for the offloaded result | – |
+| P30 | `docs.get` needs a connected editor (Backlog §6) | Launch first | – |
+
+## Friction list
+
+Every awkward step, unclear error, missing method, documentation gap or tempted workaround a builder session reports, triaged by the lead, and every look-review finding (L-xx). Each resolves as a change with its regression test, or as a decision of this record with its default in force. The milestone review blocks on an open row.
+
+| Id | Session | Symptom and evidence (BuildLog line, tool error, screenshot) | Predicted | Owning module | Resolution |
+|---|---|---|---|---|---|
+
+No rows yet: session 1 has not run.
+
+## Session record
+
+At most three sessions; a fourth needs the product owner (decision 8).
+
+| Session | Date | Builder invocation | Reached | Friction ids | Backup, screenshots and what followed |
+|---|---|---|---|---|---|
+
+No rows yet.
+
+## Before milestone completion
+
+- [ ] Before session 1: this record committed; the lead's answers to "Points for the lead before session 1" recorded; the slot detached and `D:\Engine` on `milestone/m27`, rebuilt, with the references check clean (decision 7).
+- [ ] After each session: the backup in `bin/Reviews/M27-Backup/S<n>/`, the captures in `bin/Reviews/M27-Look/S<n>/`, the friction log stored, and the triage, the look review and the scratch-index runs recorded in the session record.
+- [ ] Every friction item closed or decided; every predicted item with its "Hit as"; the look review signed off by the lead on the last session's captures.
+- [ ] The project's commit is one checkpoint in `D:\Engine` with decision 7's checks green, the fresh-clone audit included; `D:\Engine` back on main and the slot re-attached.
+- [ ] Main merged if it moved; one review pass of the milestone diff with every finding fixed; Architecture §13.11, §9.6 and §11.2, the skills and the Backlog describe what landed (decision 12).
+- [ ] The gate of decision 11 green on the final tree, with the soak after a plain gate; which gate ran, and why, recorded.
+- [ ] Main fast-forwarded to `milestone/m27` and pushed; the phase-end cleanup done; ADR 0028's "Before program completion" ticked; the pause for the product owner.
