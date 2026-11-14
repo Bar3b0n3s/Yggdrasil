@@ -76,7 +76,7 @@ Callbacks run by execution order and canonical hierarchy order. Entity creation 
 
 Callback bodies cannot yield. Start a task from the callback with `Task.Spawn(function() ... end)` or `Task.Delay`; only the task or `Test.Case` body may call waits. Use `Task.WaitTicks` for exact stepping. Tasks belong to their instance and are cancelled when it is destroyed or disabled.
 
-For a follow camera, use `OnLateUpdate` and the target's `Transform.RenderPosition`/`RenderRotation`, which reflect interpolation. Move the camera's world pose or use `LookAt`; keep gameplay decisions in the fixed phase. Teleports use `Transform:Teleport` or the body's teleport method so interpolation does not sweep across the jump.
+For a follow camera, use `OnLateUpdate` and read only gameplay state the fixed step keeps: the target's `Transform.RenderPosition`/`RenderRotation`, which reflect interpolation, and a direction the gameplay itself keeps in `OnFixedUpdate`, such as a rolling ball's heading turned towards its velocity, to place the camera behind the target. Move the camera's world pose or use `LookAt`; keep gameplay decisions in the fixed phase. **Gameplay never reads the camera's pose** (`Scene.GetPrimaryCamera()`'s `Transform`, `Forward()` or `Right()`) in the fixed step, not even for a camera-relative control: the camera writes it in the frame phase, so the control would depend on how many frames ran between ticks and live play would change with the frame rate, while every lockstep session, test run and replay stays deterministic, so no suite catches it. Make the control relative to the gameplay's own state (the heading) and let the camera follow that. Teleports use `Transform:Teleport` or the body's teleport method so interpolation does not sweep across the jump.
 
 ## Idioms
 
@@ -353,7 +353,7 @@ return Test.Suite("Record.Opening", function()
 end)
 ```
 
-An **autopilot** steers where hand-written input is impractical, such as a physics ball following a level's `PathNode` waypoints with a PD controller:
+An **autopilot** steers where hand-written input is impractical, such as a physics ball following a level's `PathNode` waypoints with a PD controller. It injects what a player would press, so its input is relative to whatever the game's control is relative to: this ball rolls relative to its own heading (`Ball.Heading`, kept in the fixed step, which the follow camera also reads), so the autopilot turns its world steering vector into the heading's frame. Injecting world axes as `MoveX` and `MoveZ` steers such a ball wrongly as soon as its heading turns; read the steered object's own fixed-step state, never the camera's pose.
 
 ```luau path=Assets/Tests/Autopilot/Level1.test.luau
 --!strict
@@ -381,9 +381,19 @@ return Test.Suite("Autopilot.Level1", function()
 			if vector.magnitude(vector.create(offset.x, 0, offset.z)) < Reach and target < #waypoints then
 				target += 1
 			end
+			-- The steering vector in world space, its length at most 1, like the ball's own move vector.
 			local velocity = body:GetLinearVelocity()
-			Test.InjectAction("MoveX", nil, math.clamp(offset.x * Gain - velocity.x * Damping, -1, 1))
-			Test.InjectAction("MoveZ", nil, math.clamp(offset.z * Gain - velocity.z * Damping, -1, 1))
+			local steer = vector.create(offset.x * Gain - velocity.x * Damping, 0, offset.z * Gain - velocity.z * Damping)
+			if vector.magnitude(steer) > 1 then
+				steer = vector.normalize(steer)
+			end
+			-- The same vector in the frame of the ball's heading (degrees, 0 facing -Z, positive turning left), which its
+			-- control is relative to: MoveX along the heading's right, MoveZ along its forward.
+			local heading = math.rad(ball.Heading)
+			local forward = vector.create(-math.sin(heading), 0, -math.cos(heading))
+			local right = vector.create(math.cos(heading), 0, -math.sin(heading))
+			Test.InjectAction("MoveX", nil, math.clamp(vector.dot(steer, right), -1, 1))
+			Test.InjectAction("MoveZ", nil, math.clamp(vector.dot(steer, forward), -1, 1))
 			Test.WaitTicks(1)
 		end
 	end, { TimeoutTicks = 3600 })

@@ -133,6 +133,9 @@ return Script.Define("Game", Game)
 -- A stub of the rolling-ball behaviour the documentation's examples require; only its types matter.
 export type Ball = ScriptInstance & {
 \tTorque: number,
+\t-- Degrees, 0 facing -Z and positive turning left (Transform.EulerAngles y), kept in the fixed step; the control is
+\t-- relative to it, and the follow camera reads it.
+\tHeading: number,
 \tReachedGoal: boolean,
 }
 
@@ -143,6 +146,7 @@ Ball.Fields = {
 }
 
 function Ball.OnStart(self: Ball)
+\tself.Heading = 0
 \tself.ReachedGoal = false
 end
 
