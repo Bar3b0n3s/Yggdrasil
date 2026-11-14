@@ -40,7 +40,9 @@ rendered game view fails (soak_game_view_errors; Docs/Decisions/0030-m19-contrac
 Release FeatureTest (bin/Exports/Release/FeatureTest, which the export stage leaves) runs
 its start scene for as many frames headless, its memory sampled from outside every SOAK_RUNTIME_SAMPLE_SECONDS, so the
 Runtime-only paths (the pak mounts, the Runtime's asset manager and frame loop) are soaked too. evaluate_soak applies
-the rules of decision 15 to each, the script heap's floors-to-floors rule included (evaluate_script_heap).
+the rules of decision 15 to each, the script heap's floors-to-floors rule included (evaluate_script_heap); its memory
+rule measures an editor subject's C runtime heap (stats.get's processHeapCommittedBytes), whose growth is bounded by 1 %
+of its baseline private bytes, and the Runtime's private bytes (SOAK_MEASURE_HEAP, ADR 0036's "The soak").
 """
 
 from __future__ import annotations
@@ -158,7 +160,17 @@ SOAK_HEAP_FINAL_WINDOW = (0.75, 1.00)  # inclusive
 # about 530 bytes per tick).
 SOAK_HEAP_TOLERANCE_BYTES = 128 * 1024
 SOAK_HEAP_TOLERANCE_FRACTION = 0.10
-SOAK_GROWTH_LIMIT = 0.01  # private-memory growth must stay below 1 %
+SOAK_GROWTH_LIMIT = 0.01  # memory growth must stay below 1 %
+# What the memory rule measures (Docs/Decisions/0036-m25-tetris-pixel-art.md, "Landing", "The soak", A-prime): the C
+# runtime heap's committed bytes (stats.get's processHeapCommittedBytes) for a subject whose every sample has them, an
+# editor on Windows, whose growth in bytes must stay below SOAK_GROWTH_LIMIT of the baseline private bytes, the private
+# rule's absolute bound, so the private memory a graphics driver commits in heaps of its own (its one-off background
+# shader compilation, about 12 MiB) fails nothing while the part it allocates from the process heap (0.2 to 1.9 MiB)
+# stays within the bound; private bytes otherwise (the Runtime soak, which has no automation, and an editor without the
+# heap measure). A heap-measured subject's private growth of SOAK_GROWTH_LIMIT or more is a warning line that fails
+# nothing.
+SOAK_MEASURE_HEAP = "heap"
+SOAK_MEASURE_PRIVATE = "private"
 # The project directory, scene directory and project file the soak reads.
 SOAK_PROJECTS_DIRECTORY = "Projects"
 SOAK_SCENES_DIRECTORY = "Assets/Scenes"
@@ -188,14 +200,22 @@ class SoakSample:
     voices: int | None = None
     script_heap_bytes: int | None = None
     memory_allocation_count: int | None = None
+    # stats.get's processHeapCommittedBytes when its processHeapAvailable is true: the committed bytes of the heap the
+    # C runtime allocates from (the process heap on Windows), which the memory rule measures when every sample has it.
+    heap_committed_bytes: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class SoakResult:
     subject: str  # "<project>:<scene>" for an editor soak, "Runtime:<project>" for the Runtime soak
-    growth: float  # (final - baseline) / baseline of private bytes; 0.0 when it could not be computed
+    # (final - baseline) of the memory rule's measure over the baseline private bytes (for private bytes, their own
+    # growth); 0.0 when it could not be computed
+    growth: float
     passed: bool
     failures: tuple[str, ...]  # one line per broken rule
+    measure: str = SOAK_MEASURE_PRIVATE  # what the memory rule measured: SOAK_MEASURE_HEAP or SOAK_MEASURE_PRIVATE
+    private_growth: float = 0.0  # (final - baseline) / baseline of private bytes, whatever the rule measured
+    warnings: tuple[str, ...] = ()  # lines that fail nothing: a private growth beside a heap that held
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -706,10 +726,47 @@ def evaluate_script_heap(heap: list[tuple[float, int]]) -> str | None:
     return None
 
 
+def _memory_growth(label: str, baseline: list[int], final: list[int]) -> tuple[float, str | None, str | None]:
+    """(growth, the line naming the growth with its window values, or None when the baseline is not positive, and the
+    failure line of a baseline that is not positive, else None) of the memory values of `baseline` and `final` (both
+    not empty): the median of the baseline window against the maximum of the final window."""
+    baseline_value = statistics.median(baseline)
+    final_value = max(final)
+    if baseline_value <= 0:
+        return 0.0, None, f"the baseline window's {label} is {baseline_value} bytes, so its growth cannot be computed"
+    growth = (final_value - baseline_value) / baseline_value
+    line = (f"{label} grew {growth * 100:.2f} % (baseline median {int(baseline_value)} bytes in "
+            f"{_describe_window(SOAK_BASELINE_WINDOW)}, final maximum {final_value} bytes in "
+            f"{_describe_window(SOAK_FINAL_WINDOW)}; the limit is < {SOAK_GROWTH_LIMIT * 100:.0f} %)")
+    return growth, line, None
+
+
+def _heap_growth(baseline: list[int], final: list[int], private_baseline: float) -> tuple[float, str]:
+    """(growth, the line naming it with its window values and bound) of the process heap values of `baseline` and
+    `final` (both not empty) under the heap measure (ADR 0036, "The soak", A-prime): the final window's maximum less
+    the baseline window's median, in bytes, over `private_baseline` (the baseline window's median private bytes,
+    positive), so its bound is SOAK_GROWTH_LIMIT of the private bytes whatever the heap's own size."""
+    baseline_value = statistics.median(baseline)
+    final_value = max(final)
+    grown = final_value - baseline_value
+    line = (f"process heap grew {int(grown)} bytes (baseline median {int(baseline_value)} bytes in "
+            f"{_describe_window(SOAK_BASELINE_WINDOW)}, final maximum {final_value} bytes in "
+            f"{_describe_window(SOAK_FINAL_WINDOW)}; the bound is < {private_baseline * SOAK_GROWTH_LIMIT:.0f} bytes, "
+            f"{SOAK_GROWTH_LIMIT * 100:.0f} % of the baseline median private memory, {int(private_baseline)} bytes)")
+    return grown / private_baseline, line
+
+
 def evaluate_soak(subject: str, samples: list[SoakSample]) -> SoakResult:
     """The soak rules of decision 15 over `samples`:
-      - private memory: the baseline is the median private_bytes of the samples in SOAK_BASELINE_WINDOW, the final value
-        the maximum in SOAK_FINAL_WINDOW, and growth must stay below SOAK_GROWTH_LIMIT;
+      - memory: the baseline is the median of the samples in SOAK_BASELINE_WINDOW, the final value the maximum in
+        SOAK_FINAL_WINDOW, and growth must stay below SOAK_GROWTH_LIMIT of the baseline private bytes. The rule
+        measures heap_committed_bytes when every sample has it (an editor on Windows: the C runtime's heap, so the
+        memory a graphics driver commits in heaps of its own fails nothing; ADR 0036, "The soak", A-prime): its
+        growth in bytes over the baseline private bytes (_heap_growth), and then a private_bytes growth of
+        SOAK_GROWTH_LIMIT or more is a warning line (SoakResult.warnings), which fails nothing; without the heap value
+        in any sample (the Runtime soak, an editor without the measure) it measures private_bytes. A subject with the
+        heap value in some samples but not all fails, naming how many lack it, since its rule would measure two things
+        (its private growth is then reported as its growth);
       - script heap (a garbage-collected sawtooth): floors compared with floors, evaluate_script_heap (the lowest
         post-collection trough of the last quarter against that of 0.25 to 0.75, within soak_heap_tolerance(); a
         window without a collection is inconclusive, a failure, unless its samples bound the growth within it);
@@ -726,19 +783,35 @@ def evaluate_soak(subject: str, samples: list[SoakSample]) -> SoakResult:
         if not chosen:
             failures.append(f"no sample in the {name} window ({_describe_window(window)} of the soak; "
                             f"{len(samples)} sample(s) in all)")
+    warnings: list[str] = []
+    measured = sum(1 for sample in samples if sample.heap_committed_bytes is not None)
+    measure = SOAK_MEASURE_HEAP if samples and measured == len(samples) else SOAK_MEASURE_PRIVATE
+    if 0 < measured < len(samples):
+        failures.append(f"the process heap was measured in {measured} of {len(samples)} sample(s): the memory rule "
+                        f"measures it in every sample or in none")
+    private_growth = 0.0
     if baseline and final:
-        baseline_private = statistics.median(sample.private_bytes for sample in baseline)
-        final_private = max(sample.private_bytes for sample in final)
-        if baseline_private <= 0:
-            failures.append(f"the baseline window's private memory is {baseline_private} bytes, so its growth cannot "
-                            f"be computed")
+        private_growth, private_line, private_failure = _memory_growth(
+            "private memory", [sample.private_bytes for sample in baseline], [sample.private_bytes for sample in final])
+        if measure == SOAK_MEASURE_HEAP:
+            if private_failure is not None:
+                failures.append(private_failure)  # the heap's bound derives from the baseline private bytes
+            else:
+                growth, heap_line = _heap_growth(
+                    [int(sample.heap_committed_bytes or 0) for sample in baseline],
+                    [int(sample.heap_committed_bytes or 0) for sample in final],
+                    statistics.median(sample.private_bytes for sample in baseline))
+                if growth >= SOAK_GROWTH_LIMIT:
+                    failures.append(heap_line)
+            if private_line is not None and private_growth >= SOAK_GROWTH_LIMIT:
+                warnings.append(f"{private_line}, outside the process heap that the rule measures (a graphics "
+                                f"driver's own allocation, for one)")
         else:
-            growth = (final_private - baseline_private) / baseline_private
-            if growth >= SOAK_GROWTH_LIMIT:
-                failures.append(f"private memory grew {growth * 100:.2f} % (baseline median {int(baseline_private)} "
-                                f"bytes in {_describe_window(SOAK_BASELINE_WINDOW)}, final maximum {final_private} "
-                                f"bytes in {_describe_window(SOAK_FINAL_WINDOW)}; the limit is < "
-                                f"{SOAK_GROWTH_LIMIT * 100:.0f} %)")
+            growth = private_growth
+            if private_failure is not None:
+                failures.append(private_failure)
+            elif growth >= SOAK_GROWTH_LIMIT and private_line is not None:
+                failures.append(private_line)
 
         def values(window: list[SoakSample], attribute: str) -> list[int]:
             return [value for value in (getattr(sample, attribute) for sample in window) if value is not None]
@@ -761,21 +834,26 @@ def evaluate_soak(subject: str, samples: list[SoakSample]) -> SoakResult:
             elif max(after) > max(before):
                 failures.append(f"{label} grew: the final window's maximum {max(after)} exceeds the baseline window's "
                                 f"maximum {max(before)}")
-    return SoakResult(subject, growth, not failures, tuple(failures))
+    return SoakResult(subject, growth, not failures, tuple(failures), measure, private_growth, tuple(warnings))
 
 
 def soak_report(results: list[SoakResult], samples: dict[str, list[SoakSample]],
                 frames: int = SOAK_FRAMES) -> dict[str, object]:
-    """bin/TestResults/Soak.json's document ({"Format": "SoakReport", "Version": 1, "Frames": <frames>, "Subjects":
-    [{"Subject", "Samples", "Growth", "Passed", "Failures"}]}), one subject per result in order, with its samples;
-    `frames` is the soak's length (Hardening.py --soak-frames)."""
+    """bin/TestResults/Soak.json's document ({"Format": "SoakReport", "Version": 2, "Frames": <frames>, "Subjects":
+    [{"Subject", "Samples", "Measure", "Growth", "PrivateGrowth", "Passed", "Failures", "Warnings"}]}), one subject per
+    result in order, with its samples; `frames` is the soak's length (Hardening.py --soak-frames). Version 2 (M25's
+    soak, ADR 0036): each sample's heap_committed_bytes, and each subject's Measure (what its memory rule measured,
+    "heap" or "private"), PrivateGrowth and Warnings; Growth is the measure's growth over the baseline private bytes."""
     subjects = []
     for result in results:
         subjects.append({
             "Subject": result.subject,
             "Samples": [dataclasses.asdict(sample) for sample in samples.get(result.subject, [])],
+            "Measure": result.measure,
             "Growth": result.growth,
+            "PrivateGrowth": result.private_growth,
             "Passed": result.passed,
             "Failures": list(result.failures),
+            "Warnings": list(result.warnings),
         })
-    return {"Format": "SoakReport", "Version": 1, "Frames": frames, "Subjects": subjects}
+    return {"Format": "SoakReport", "Version": 2, "Frames": frames, "Subjects": subjects}

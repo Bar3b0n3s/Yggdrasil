@@ -48,6 +48,10 @@ namespace Engine {
 		// can still allocate (the lock is recursive). For a crash child that crashes right after. Errors: Io.
 		[[nodiscard]] Status LockProcessHeap();
 
+		// Whether the C runtime allocates from the process heap: _get_heap_handle, the heap malloc and operator new use, is
+		// GetProcessHeap, the heap ProcessHeap measures (Docs/Decisions/0036-m25-tetris-pixel-art.md, "The soak").
+		[[nodiscard]] bool IsCrtHeapTheProcessHeap();
+
 		// The content of `file`, read through a handle that denies writers (FILE_SHARE_READ), as .NET's File.ReadAllText
 		// and _wfsopen with _SH_DENYWR do, so opening it fails while any other handle to the file has write access.
 		// Errors: Io.

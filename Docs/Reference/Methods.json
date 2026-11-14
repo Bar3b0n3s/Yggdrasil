@@ -22109,6 +22109,14 @@
 						"description": "Approximate script heap hard limit in bytes when available.",
 						"type": "number"
 					},
+					"processHeapAvailable": {
+						"description": "Whether the host measures the heap the C runtime allocates from; false on Linux and macOS, which have no measure.",
+						"type": "boolean"
+					},
+					"processHeapCommittedBytes": {
+						"description": "Approximate committed bytes of the heap the C runtime allocates from (malloc and new: the engine's own memory and that of every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. What a graphics driver keeps in allocations of its own is not in it. The hardening soak's memory rule measures it.",
+						"type": "number"
+					},
 					"memoryAllocationCount": {
 						"description": "Current Vulkan device memory allocation count.",
 						"type": "integer",

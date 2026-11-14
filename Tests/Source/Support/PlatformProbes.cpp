@@ -7,6 +7,8 @@
 
 #if defined(ENGINE_PLATFORM_WINDOWS)
 	#include <windows.h>
+
+	#include <malloc.h>
 #elif defined(ENGINE_PLATFORM_LINUX) || defined(ENGINE_PLATFORM_MACOS)
 	#include <fcntl.h>
 	#include <spawn.h>
@@ -103,6 +105,12 @@ namespace Engine {
 			if (HeapLock(GetProcessHeap()) == FALSE)
 				return MakeError(ErrorCode::Io, "cannot lock the process heap: {}", Utils::DescribeLastError());
 			return {};
+		}
+
+		bool IsCrtHeapTheProcessHeap()
+		{
+			// _get_heap_handle gives the C runtime heap's HANDLE as an intptr_t, so comparing it needs the cast (CodeStyle §8).
+			return reinterpret_cast<HANDLE>(_get_heap_handle()) == GetProcessHeap();
 		}
 
 		Result<std::string> ReadFileDenyingWriters(const std::filesystem::path& file)
