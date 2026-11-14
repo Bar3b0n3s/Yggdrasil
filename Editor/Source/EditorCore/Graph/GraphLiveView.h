@@ -3,6 +3,7 @@
 #include "EditorCore/Automation/GraphMethods.h"
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Reflection/VariantValue.h"
 
@@ -40,6 +41,14 @@ namespace Engine {
 	// first entity in the play scene's canonical order with such a slot; nullopt without a play session that runs behaviours
 	// (a simulation runs none) or without such an entity.
 	[[nodiscard]] std::optional<GraphLiveTarget> FindGraphLiveTarget(const EditorContext& editor, AssetHandle graph, std::string_view behaviour);
+
+	// The behaviour name the graph asset `graph` has now, its source's document Name, which graph.liveValues matches a slot's
+	// `script` against (decision 14), and not its last import's (a rename during a lockstep, recording, replay or test session
+	// is reimported only after it ends): the inspector names a graph slot by it (M24's review). Read through the editor's
+	// GraphLiveCache, where graph.liveValues keeps the same reads, so a panel may call it once a frame: the source's bytes are
+	// read every call and parsed only when they, the path or the asset's version changed. Errors: NotFound for a handle that
+	// names no project asset; the source's read errors; ImportFailed for a source that does not read as a graph.
+	[[nodiscard]] Result<std::string> ReadGraphBehaviourName(EditorContext& editor, AssetHandle graph);
 
 	// One live value as a short line of text: a number as Luau writes it in its shortest form ("2", "0.25"), a boolean, a string
 	// quoted and cut after MaxGraphLiveTextBytes bytes at a UTF-8 boundary ("\"door\"", ending in "..." when cut), a vector,

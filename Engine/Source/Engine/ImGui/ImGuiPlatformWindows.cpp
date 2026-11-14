@@ -185,8 +185,11 @@ namespace Engine {
 		// The window's target, created through the factory: a target the specification's factory creates is a request after
 		// startup (RetryAfterTrim, with every Gpu error on a healthy device out of memory, as the factory's errors are), while
 		// the default target applies that rule itself with the swapchain's own classification (Swapchain::CreateForNativeWindow).
-		// A creation that ran out of memory after its trim and retry leaves the window without a target, logged at Warn, until
-		// its size changes. Errors: any other failure of the creation.
+		// A creation that fails on a healthy device leaves the window without a target until its size changes, so a creation
+		// that cannot succeed is not tried again every frame, each failed swapchain waiting for the device to go idle (M24's
+		// review): one that ran out of memory after its trim and retry is logged at Warn and is no error. Errors: any other
+		// failure of the creation (a swapchain's as Gpu, never out of memory; Unsupported or InvalidArgument for a window the
+		// device cannot present to), once for each size it fails at.
 		[[nodiscard]] Status CreateTarget(PlatformWindow& window)
 		{
 			const ImGuiPlatformWindowTargetRequest request = MakeRequest(window);
@@ -211,13 +214,28 @@ namespace Engine {
 				window.FailedSize.reset();
 				return {};
 			}
-			if (created.error().GetCode() == ErrorCode::OutOfMemory && !Device->IsLost())
+			// On a lost device the failure is the loss: the recovery's Recreate creates the target again.
+			if (Device->IsLost())
+				return created;
+			window.FailedSize = window.Size;
+			if (created.error().GetCode() == ErrorCode::OutOfMemory)
 			{
 				ENGINE_CORE_WARN("The platform window of viewport {:08X} draws nothing until its size changes: {}", window.Viewport->ID, created.error());
-				window.FailedSize = window.Size;
 				return {};
 			}
 			return created;
+		}
+
+		// A recording's failure to create what it records with (the window's command list, the renderer's pipeline for the
+		// target's format, a geometry buffer, a binding set) is the device out of memory, the main UI's rule (decision 18,
+		// Application's ImGuiLayer::Render): its Gpu error on a healthy device comes back as OutOfMemory, so the application
+		// tells it from a target's (a swapchain's) failure, which stays Gpu, as the main window's swapchain's does (M24's
+		// review).
+		[[nodiscard]] Status AsRecordingError(Status status) const
+		{
+			if (status.has_value() || status.error().GetCode() != ErrorCode::Gpu || Device->IsLost())
+				return status;
+			return MakeError(ErrorCode::OutOfMemory, "cannot record a platform window, out of GPU memory: {}", status.error().ToString());
 		}
 
 		// Draws one platform window (Render).
@@ -234,7 +252,10 @@ namespace Engine {
 			// The command list before the acquire: an acquired image is always submitted and presented.
 			if (window.CommandList == nullptr)
 			{
-				ENGINE_TRY_ASSIGN(window.CommandList, Device->CreateCommandList());
+				Result<nvrhi::CommandListHandle> commandList = Device->CreateCommandList();
+				if (!commandList)
+					return AsRecordingError(std::unexpected(std::move(commandList).error()));
+				window.CommandList = std::move(*commandList);
 			}
 
 			Result<nvrhi::IFramebuffer*> acquired = window.Target->Acquire(frameSlot);
@@ -265,7 +286,7 @@ namespace Engine {
 			window.Target->QueueFrameSemaphores();
 			static_cast<void>(recording.Execute());
 			window.Target->Present();
-			return rendered;
+			return AsRecordingError(rendered);
 		}
 
 		// The recreation protocol's Release (decision 19): every target's GPU objects and every command list.

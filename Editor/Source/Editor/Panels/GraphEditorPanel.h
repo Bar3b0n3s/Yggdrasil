@@ -48,7 +48,10 @@ namespace Engine {
 	// graph.disconnect, a link dragged off its input onto another input an edit.batch of graph.disconnect and graph.connect
 	// (one undo step, which a refused connect leaves undone), the literal fields graph.setValues, the members panel
 	// graph.setMembers, Ctrl+D and paste an edit.batch of graph.addNode and graph.connect, and Undo and Redo edit.undo and
-	// edit.redo (Ctrl+Z and Ctrl+Y are the editor's own, the same methods).
+	// edit.redo (Ctrl+Z and Ctrl+Y are the editor's own, the same methods). A link or literal on a pin the node's kind no longer
+	// has (a binding's parameter renamed or removed, decision 10) shows as a pin of its own in the error colour, its tooltip
+	// saying why, and goes as any link or literal does (graph.disconnect, or the side panel's Clear literal through
+	// graph.setValues with null; M24's review); a field being edited keeps its text or drag across a read that arrives meanwhile.
 	// Its presentation (opening and closing, panning with the middle or right button, zooming with the wheel, framing with F,
 	// hovering and selecting by click or box, Ctrl+C) changes no graph and has no method (decision 16's exemption).
 	//
@@ -107,11 +110,16 @@ namespace Engine {
 			Link  // a link from m_LinkFrom (or m_Detached's output) follows the mouse
 		};
 
-		// A literal or member default being edited: its candidate until the field is released and the next read shows it.
+		// A literal or member default being edited: its candidate until the field is released and the next read shows it. A
+		// read that arrives while its field is still active keeps it (M24's review), so the text typed or the drag in progress
+		// survives and its release still submits it; a read after its submission, or after the field let go without one, drops
+		// it, and the field shows the stored value.
 		struct FieldEdit
 		{
 			std::string Key{};
 			Json Value{};
+			bool Active = false;    // the field's widget was active in the last frame that drew it
+			bool Submitted = false; // the field returned its value for its method (DrawValueField)
 		};
 
 		void Reset();
@@ -193,6 +201,9 @@ namespace Engine {
 		std::vector<GraphNodeLayout> m_Layouts{};    // m_Shapes' layouts, in graph units
 		std::map<uint32_t, size_t> m_NodeFindings{}; // node -> its worst finding: 2 an error, 1 an incomplete input or a warning
 		std::set<GraphPinRef> m_LinkedPins{};
+		// M24's review: the pins a link or literal names that its node's kind no longer has (a binding's parameter renamed or
+		// removed, decision 10), drawn as pins of their own marked as errors, each with the reason its tooltip shows.
+		std::map<GraphPinRef, std::string> m_StalePins{};
 		bool m_LayoutStale = true;
 		GraphNodeMetrics m_Metrics{};
 		glm::vec2 m_CanvasMinimum = glm::vec2(0.0f); // the canvas's top-left corner on screen, as last drawn

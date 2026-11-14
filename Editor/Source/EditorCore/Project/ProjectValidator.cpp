@@ -389,8 +389,9 @@ namespace Engine {
 			ValidationCodeInfo{ GraphInvalidCode, "Error", false,
 				"A visual-scripting graph (a .graph source) does not read or breaks a rule of the node library: an unknown kind or pin, a link "
 				"between incompatible pins, a second link into a data input, a cycle, a literal its input does not take, an input left "
-				"unlinked, a Flow.IfNotNil Result read where it may be nil, a flow nested more than 64 blocks deep or a transpiled text "
-				"larger than 8 MiB; it does not import.",
+				"unlinked, a Flow.IfNotNil Result read where it may be nil, a loop's Index or Element read off its Body flow into an "
+				"input that needs a value, a flow nested more than 64 blocks deep or a transpiled text larger than 8 MiB; it does not "
+				"import.",
 				"Correct the graph at the node and JSON pointer the finding names with the graph edit methods; graph.read lists the same "
 				"findings." },
 			ValidationCodeInfo{ GraphUnreachableNodeCode, "Warning", false,
@@ -2128,8 +2129,9 @@ namespace Engine {
 			return record.Metadata.Kind == AssetMetaKind::Asset && record.Metadata.Importer == GraphImporter::Id;
 		}
 
-		// The node library of the editor's frozen script API registry, the declarations the importer's and the exporter's
-		// libraries are built from (decisions 9 and 24), built once per validation at the first graph that needs it.
+		// The node library of the engine's frozen script API registry, the library the exporter builds too and the same library
+		// (equal fingerprint) the importer builds from the editor's load-time pure script API (decisions 9 and 24; ADR 0041
+		// decision 3), built once per validation at the first graph that needs it.
 		static Result<const GraphNodeLibrary*> GetGraphLibrary(const EditorContext& editor, GraphChecks& checks)
 		{
 			if (!checks.Library)

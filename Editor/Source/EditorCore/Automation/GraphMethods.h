@@ -225,9 +225,11 @@ namespace Engine {
 		VariantValue Value{};
 	};
 
-	// graph.setValues {graph, values} (label "Set Graph Values"): input literals, in order (a later one of a pin winning). Refused
-	// at /values/<i>/node, /values/<i>/pin or /values/<i>/value: an unknown node, a pin that is not a data input of its node, a
-	// value its pin's type does not take (ValidateGraph's literal rule).
+	// graph.setValues {graph, values} (label "Set Graph Values"): input literals, in order (a later one of a pin winning). A null
+	// value removes a literal the node holds, also on a pin its kind no longer has (a binding's parameter renamed or removed),
+	// which leaves the graph GRAPH_INVALID until it goes (M24's review). Refused at /values/<i>/node, /values/<i>/pin or
+	// /values/<i>/value: an unknown node, a pin that is not a data input of its node (but for that removal), a value its pin's
+	// type does not take (ValidateGraph's literal rule).
 	struct GraphSetValuesParams
 	{
 		std::string Graph{};                  // required

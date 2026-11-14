@@ -28,6 +28,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
 #include "Engine/ImGui/ImGuiLayer.h"
+#include "Engine/ImGui/ImGuiPlatformWindows.h"
 #include "Engine/ImGui/ImGuiRenderer.h"
 #include "Engine/ImGui/ImGuiScreenshot.h"
 #include "Engine/Platform/ProjectLock.h"
@@ -470,14 +471,17 @@ namespace Engine {
 		}
 	};
 
-	static ApplicationSpecification LayerCaptureSpecification(bool windowed)
+	// `platformWindows`: Dear ImGui's platform windows, which a windowed editor asks for by default (EditorApp) and Windows
+	// allows (M24).
+	static ApplicationSpecification LayerCaptureSpecification(bool windowed, bool platformWindows)
 	{
 		ApplicationSpecification specification;
 		specification.Name = "LayerScreenshotTests";
 		specification.Window = windowed ? WindowMode::Windowed : WindowMode::Headless;
 		specification.WindowSettings = { .Title = "Editor layer capture", .Width = 900, .Height = 600 };
 		specification.Clock = ClockKind::Manual;
-		specification.MaxFrames = 12;
+		specification.MaxFrames = platformWindows ? 24 : 12;
+		specification.ImGuiPlatformWindows = platformWindows;
 		specification.WorkerCount = 0;
 		specification.ThrottleHeadless = false;
 		specification.EnableImGui = true;
@@ -489,16 +493,21 @@ namespace Engine {
 		return specification;
 	}
 
-	// Drives the real application frame loop, ImGui layer, screenshot method and readback. No cached image provider.
+	// Drives the real application frame loop, ImGui layer, screenshot method and readback. No cached image provider. With
+	// `platformWindows` (M24's review), the minimized editor first renders a few forced UI frames that show a window outside its
+	// main window, which Dear ImGui gives a platform window of its own, then takes its screenshot.
 	class LayerCaptureApplication final : public Application
 	{
 	public:
-		LayerCaptureApplication(Test::EditorTestFixture& fixture, bool windowed)
-			: Application(LayerCaptureSpecification(windowed)), m_Fixture(fixture), m_Windowed(windowed)
+		LayerCaptureApplication(Test::EditorTestFixture& fixture, bool windowed, bool platformWindows = false)
+			: Application(LayerCaptureSpecification(windowed, platformWindows)), m_Fixture(fixture), m_Windowed(windowed), m_PlatformWindows(platformWindows)
 		{
 		}
 		uint32_t Completed = 0;
 		bool CapturedWhileMinimized = false;
+		bool PlatformWindowsOn = false;       // the layer had platform windows when the minimized editor's screenshot was taken
+		size_t UndockedPlatformWindows = 0;   // the platform windows Dear ImGui opened, at the end
+		size_t UndockedWindowsWithTarget = 0; // of them, those whose target was created, so drawn, at the end
 	protected:
 		Status OnInitialize() override
 		{
@@ -521,6 +530,7 @@ namespace Engine {
 				{
 					CapturedWhileMinimized = GetContext().GetWindow()->IsMinimized();
 					CHECK(CapturedWhileMinimized);
+					PlatformWindowsOn = GetImGuiLayer()->GetPlatformWindows() != nullptr;
 				}
 				return CaptureImGuiScreenshot(*GetContext().GetGraphicsDevice(), *GetImGuiLayer(), {});
 			};
@@ -563,10 +573,18 @@ namespace Engine {
 				return;
 			if (Completed == 1)
 			{
-				if (m_Windowed)
+				if (m_Windowed && !m_Minimized)
 				{
 					GetContext().GetWindow()->Minimize();
 					REQUIRE(Test::WaitUntilMinimized(*GetContext().GetWindow(), true));
+					m_Minimized = true;
+				}
+				// Forced UI frames of the minimized editor, which show the window outside its main window (OnImGuiRender).
+				if (m_PlatformWindows && m_MinimizedUiFrames < 4)
+				{
+					++m_MinimizedUiFrames;
+					REQUIRE(RequestOffscreenUiFrame());
+					return;
 				}
 				REQUIRE(m_Client->Call("entity.create", Json{ { "name", "Fresh hierarchy entry" } }));
 			}
@@ -582,6 +600,15 @@ namespace Engine {
 		void OnImGuiRender() override
 		{
 			REQUIRE(m_Ui->Layer.OnImGuiRender());
+			if (m_PlatformWindows && m_Minimized)
+			{
+				const ImGuiViewport* main = ImGui::GetMainViewport();
+				ImGui::SetNextWindowPos(ImVec2(main->Pos.x + main->Size.x + 64.0f, main->Pos.y));
+				ImGui::SetNextWindowSize(ImVec2(200.0f, 120.0f));
+				ImGui::Begin("Outside the minimized window");
+				ImGui::TextUnformatted("A platform window");
+				ImGui::End();
+			}
 		}
 
 		void OnRenderSubmitted(uint64_t /*frameIndex*/, uint64_t submissionId) override
@@ -594,12 +621,26 @@ namespace Engine {
 		void OnShutdown() override
 		{
 			CHECK(Completed == 2);
+			if (m_PlatformWindows)
+			{
+				if (ImGuiPlatformWindows* windows = GetImGuiLayer()->GetPlatformWindows())
+					UndockedWindowsWithTarget = windows->GetWindowCount();
+				const ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+				for (int index = 1; index < platform.Viewports.Size; ++index)
+				{
+					if (platform.Viewports[index]->PlatformHandle != nullptr)
+						++UndockedPlatformWindows;
+				}
+			}
 			m_Ui.reset();
 			m_Client.reset();
 		}
 	private:
 		Test::EditorTestFixture& m_Fixture; // borrowed for Run
 		bool m_Windowed = false;
+		bool m_PlatformWindows = false;
+		bool m_Minimized = false;
+		uint32_t m_MinimizedUiFrames = 0;
 		Scope<Test::AutomationTestClient> m_Client{};
 		Scope<LayerCaptureServices> m_Ui{};
 		uint64_t m_AdmittedFrame = 0;
@@ -1765,6 +1806,20 @@ namespace Engine {
 			CHECK(child->ExitCode == 0);
 		}
 
+		// M24's review: with platform windows on (a windowed editor's default on Windows), Dear ImGui gives a minimized main
+		// window's draw data an empty display, which made editor.screenshot of a minimized editor fail; the forced frame keeps
+		// the UI's size, and the platform windows are drawn on no frame of the minimized window (decision 23).
+		TEST_CASE("EditorLayer: a minimized editor with platform windows on captures its UI and draws no platform window" * doctest::test_suite(Test::GpuSuite))
+		{
+			std::vector<std::string> arguments{ "--windowed-child=EditorLayer: native minimized screenshot child with platform windows" };
+			const auto gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const auto child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE(child);
+			INFO(child->StandardOutput, child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
 		TEST_CASE("EditorLayer: scene and game targets retire through ImGui texture registration" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -2365,6 +2420,23 @@ namespace Engine {
 		CHECK(application.Run() == ExitCode::Success);
 		CHECK(application.Completed == 2);
 		CHECK(application.CapturedWhileMinimized);
+	}
+
+	TEST_CASE("EditorLayer: native minimized screenshot child with platform windows" * doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+	{
+		if (!Test::ProbeGpuForProcess())
+			return;
+		Test::EditorTestFixture fixture("MinimizedLayerCapturePlatformWindows");
+		fixture.CreateAndOpenProject();
+		fixture.CreateAndOpenScene();
+		LayerCaptureApplication application(fixture, true, true);
+		CHECK(application.Run() == ExitCode::Success);
+		CHECK(application.Completed == 2);
+		CHECK(application.CapturedWhileMinimized);
+		CHECK(application.PlatformWindowsOn);
+		// The window outside the minimized main window got a platform window, but no frame of the minimized window drew it.
+		CHECK(application.UndockedPlatformWindows >= 1);
+		CHECK(application.UndockedWindowsWithTarget == 0);
 	}
 
 }

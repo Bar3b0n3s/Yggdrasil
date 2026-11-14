@@ -7,15 +7,20 @@
 #include <glm/common.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <format>
 #include <map>
 #include <utility>
+#include <vector>
 
 // The requests the graph canvas submits (Docs/Decisions/0035-m24-contract.md decision 15, W24.2's stream A).
 
 namespace Engine {
 
 	namespace Utils {
+
+		// The method of every composed action's request.
+		static constexpr std::string_view BatchMethod = "edit.batch";
 
 		// `params` written through its registered struct.
 		template<typename Params>
@@ -49,6 +54,31 @@ namespace Engine {
 			return Json{ { "$ref", std::format("{}.node", name) } };
 		}
 
+		// The action `action`'s request for `params`, whose list `items` (the nodes to remove, the positions to set) may hold
+		// more items than one call of its method takes (MaxGraphMethodItems): one call while it fits, else one edit.batch
+		// labelled `label` of calls of at most that many items each, in order, so the canvas's edit of a large selection is
+		// still one undo step (M24's review: a graph holds up to MaxGraphNodes nodes, which a box selection may take).
+		template<typename Params, typename Item>
+		static Result<GraphEditorRequest> MakeSplitGraphRequest(const TypeRegistry& types, GraphEditorAction action, std::string_view label, const Params& params,
+			std::vector<Item> Params::* items)
+		{
+			const std::vector<Item>& all = params.*items;
+			if (all.size() <= MaxGraphMethodItems)
+				return MakeGraphRequest(types, action, params);
+			if ((all.size() + MaxGraphMethodItems - 1) / MaxGraphMethodItems > MaxGraphEditorBatchOps)
+				return MakeError(ErrorCode::InvalidArgument, "{} items are more than one edit can take ({} at most)", all.size(), MaxGraphMethodItems * MaxGraphEditorBatchOps);
+			const std::string_view method = GetGraphEditorActionMethod(action);
+			Json ops = Json::array();
+			for (size_t first = 0; first < all.size(); first += MaxGraphMethodItems)
+			{
+				Params part = params;
+				(part.*items).assign(all.begin() + static_cast<std::ptrdiff_t>(first), all.begin() + static_cast<std::ptrdiff_t>(std::min(all.size(), first + MaxGraphMethodItems)));
+				ENGINE_TRY_ASSIGN(Json json, WriteGraphParams(types, part));
+				ops.push_back(MakeBatchOp(method, "", std::move(json)));
+			}
+			return GraphEditorRequest{ .Action = action, .Method = std::string(BatchMethod), .Params = Json{ { "label", std::string(label) }, { "ops", std::move(ops) } } };
+		}
+
 	}
 
 	Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphCreateParams& params)
@@ -63,12 +93,12 @@ namespace Engine {
 
 	Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphRemoveNodesParams& params)
 	{
-		return Utils::MakeGraphRequest(types, GraphEditorAction::RemoveNodes, params);
+		return Utils::MakeSplitGraphRequest(types, GraphEditorAction::RemoveNodes, "Remove Graph Nodes", params, &GraphRemoveNodesParams::Nodes);
 	}
 
 	Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphMoveNodesParams& params)
 	{
-		return Utils::MakeGraphRequest(types, GraphEditorAction::MoveNodes, params);
+		return Utils::MakeSplitGraphRequest(types, GraphEditorAction::MoveNodes, "Move Graph Nodes", params, &GraphMoveNodesParams::Positions);
 	}
 
 	Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphConnectParams& params)

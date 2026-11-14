@@ -1563,25 +1563,31 @@ namespace Engine {
 				};
 
 				std::vector<std::vector<const Link*>> dataInputs(count);
-				// The node each Flow.IfNotNil's True flow enters: its Result is its Value, which is not nil only there.
+				// The node each Flow.IfNotNil's True flow enters: its Result is its Value, which is not nil only there. And the node
+				// each loop's Body flow enters: its Index and Element are set only there (M24's review), so a loop that ran zero times
+				// leaves them nil on its Completed flow and after it.
 				std::vector<std::optional<size_t>> trueTargets(count);
+				std::vector<std::optional<size_t>> bodyTargets(count);
 				for (const Link& link : m_Links)
 				{
 					if (link.FromPin->Type != GraphPinType::Exec)
 						dataInputs[link.To].push_back(&link);
 					else if (IsCheckedValue(link.From) && link.FromPin->Name == "True")
 						trueTargets[link.From] = link.To;
+					else if (IsLoop(link.From) && link.FromPin->Name == "Body")
+						bodyTargets[link.From] = link.To;
 				}
-				// A Flow.IfNotNil's Result read by `statement`: only where the True flow alone enters, so that the Value is not nil
-				// there (decision 6). The True link must be the only exec link into its target (a merge that the False flow, or
-				// another flow, enters too reads nil on that path), and the target must dominate the statement.
-				const auto readsNonNil = [&trueTargets, &predecessors, &dominates](size_t check, size_t statement)
+				// An output that has a value only on one flow (a Flow.IfNotNil's Result on True, a loop's Index and Element on
+				// Body), read by `statement`: only where that flow alone enters (decision 6). Its link must be the only exec link
+				// into its target (a merge that another flow enters too reads nil on that path), and the target must dominate the
+				// statement.
+				const auto readsOnFlow = [&predecessors, &dominates](const std::optional<size_t>& target, size_t statement)
 				{
-					const std::optional<size_t> target = trueTargets[check];
 					return target.has_value() && predecessors[*target].size() == 1 && dominates(*target, statement);
 				};
 				std::set<size_t> late;
 				std::set<size_t> maybeNil;
+				std::set<size_t> loopNil;
 				std::vector<size_t> visited(count, None);
 				std::vector<size_t> walk;
 				for (size_t statement = 0; statement < count; ++statement)
@@ -1607,8 +1613,10 @@ namespace Engine {
 							}
 							if (!reached[link->From] || dominator[link->From] == None || !dominates(link->From, statement))
 								late.insert(link->Index);
-							else if (IsCheckedValue(link->From) && link->FromPin->Name == "Result" && !readsNonNil(link->From, statement))
+							else if (IsCheckedValue(link->From) && link->FromPin->Name == "Result" && !readsOnFlow(trueTargets[link->From], statement))
 								maybeNil.insert(link->Index);
+							else if (IsLoop(link->From) && IsLoopValue(*link->FromPin) && NeedsValue(*link->ToPin) && !readsOnFlow(bodyTargets[link->From], statement))
+								loopNil.insert(link->Index);
 						}
 					}
 				}
@@ -1632,12 +1640,42 @@ namespace Engine {
 							link.From.Node),
 						true);
 				}
+				for (const size_t index : loopNil)
+				{
+					if (late.contains(index))
+						continue;
+					const GraphLink& link = m_Graph.Links[index];
+					const GraphNode* loop = FindGraphNode(m_Graph, link.From.Node);
+					AddLinkIssue(index, link.To.Node,
+						std::format("output '{}' of node {} ({}) is read where it is nil when the loop runs zero times (only nodes that its Body flow alone "
+									"enters may read it into an input that needs a value; elsewhere link it to an optional or Any input)",
+							link.From.Pin, link.From.Node, loop != nullptr ? loop->Kind : std::string()),
+						true);
+				}
 			}
 
 			// Whether `node` is a Flow.IfNotNil node, whose Result is its Value on its True flow.
 			[[nodiscard]] bool IsCheckedValue(size_t node) const
 			{
 				return m_Descriptions[node].has_value() && m_Descriptions[node]->Kind == "Flow.IfNotNil";
+			}
+
+			// Whether `node` is a loop (Flow.ForRange, Flow.ForEach), whose Index and Element are set on its Body flow alone.
+			[[nodiscard]] bool IsLoop(size_t node) const
+			{
+				return m_Descriptions[node].has_value() && (m_Descriptions[node]->Kind == "Flow.ForRange" || m_Descriptions[node]->Kind == "Flow.ForEach");
+			}
+
+			// Whether `pin` is a loop's per-iteration output (Index, Element), not one of its exec outputs.
+			[[nodiscard]] static bool IsLoopValue(const GraphPinDescription& pin)
+			{
+				return pin.Type != GraphPinType::Exec && (pin.Name == "Index" || pin.Name == "Element");
+			}
+
+			// Whether an input `pin` needs a value: nil reaches only an optional or an Any input (decision 6's optional rule).
+			[[nodiscard]] static bool NeedsValue(const GraphPinDescription& pin)
+			{
+				return !pin.Optional && pin.Type != GraphPinType::Any;
 			}
 
 			const GraphDocument& m_Graph;      // borrowed for the analysis

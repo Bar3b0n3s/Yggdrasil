@@ -4,8 +4,11 @@
 
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Graph/GraphLiveCache.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
 
@@ -15,6 +18,7 @@
 #include <chrono>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -169,6 +173,40 @@ namespace Engine {
 			CHECK(FormatGraphLiveValue("string", VariantValue(Json(longText))) == "\"" + std::string(MaxGraphLiveTextBytes - 1, 'a') + "...\"");
 			CHECK(GraphLiveView::FormatMemberLine({ .Name = "Count", .Type = "number", .Value = VariantValue(Json(3)) }) == "Count = 3");
 			CHECK(GraphLiveView::FormatMemberLine({ .Name = "Target", .Type = "nil", .Value = {} }) == "Target = nil");
+		}
+
+		// M24's review: the inspector names a graph slot by the graph's current name, as graph.liveValues matches it, read through
+		// the editor's GraphLiveCache, so a rename the session has not reimported yet already shows.
+		TEST_CASE("GraphLiveView: a graph's behaviour name is read from its current source, and a source that does not read or a handle of no asset is refused")
+		{
+			Test::AutomationFixture setup("GraphBehaviourName");
+			const Json graph = std::string(CounterPath);
+			REQUIRE(setup.Call("graph.create", Json{ { "path", graph } }));
+			EditorContext& editor = setup.GetEditor();
+			const std::optional<AssetHandle> handle = editor.GetAssets().Resolve(CounterPath);
+			REQUIRE(handle.has_value());
+			const Result<std::string> created = ReadGraphBehaviourName(editor, *handle);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			CHECK(*created == "Counter");
+			CHECK(editor.GetGraphLiveCache().GetSize() == 1);
+
+			// Renamed while reimports are deferred: the source's current name, not its last import's.
+			editor.GetAssets().SetReloadsDeferred(true);
+			REQUIRE(setup.Call("graph.setMembers", Json{ { "graph", graph }, { "name", "Tally" } }));
+			const Result<std::string> renamed = ReadGraphBehaviourName(editor, *handle);
+			REQUIRE_MESSAGE(renamed.has_value(), renamed.error().ToString());
+			CHECK(*renamed == "Tally");
+
+			// A source that does not read as a graph, and a handle that names no asset.
+			const VfsPath path = VfsPath::Create("project", CounterPath).value_or(VfsPath());
+			constexpr std::string_view Broken = R"({"Format": "Graph", "Version": 1, "Name": "Tally", "Nodes": [{"Id": 0}]})";
+			REQUIRE(editor.WriteProjectFile(path, std::as_bytes(std::span(Broken))).has_value());
+			const Result<std::string> unreadable = ReadGraphBehaviourName(editor, *handle);
+			REQUIRE_FALSE(unreadable.has_value());
+			CHECK(unreadable.error().GetCode() == ErrorCode::ImportFailed);
+			const Result<std::string> missing = ReadGraphBehaviourName(editor, AssetHandle(0x0123456789abcdefull));
+			REQUIRE_FALSE(missing.has_value());
+			CHECK(missing.error().GetCode() == ErrorCode::NotFound);
 		}
 
 		TEST_CASE("GraphLiveView: the canvas polls graph.liveValues once a frame between frames, for the selected or the first instance of its graph")

@@ -976,7 +976,13 @@ namespace Engine {
 						std::format("'{}' has no node {}", graph.Path, edit.Node), "graph.read lists the nodes"));
 				}
 				ENGINE_TRY_ASSIGN(const GraphNodeDescription description, ResolveNodeKind(*library, graph.Document, *node, std::format("/values/{}/node", index)));
-				ENGINE_TRY(CheckDataInput(description, node->Id, edit.Pin, std::format("/values/{}/pin", index)));
+				// Null removes a literal the node holds even on a pin its kind no longer has (a binding's parameter renamed or
+				// removed, decision 10), which leaves the graph GRAPH_INVALID until it goes (M24's review); a value, or a null on
+				// a pin that holds none, needs a data input of the kind.
+				const GraphNode* original = FindGraphNode(graph.Document, edit.Node);
+				const bool removesHeldLiteral = edit.Value.Get().is_null() && original != nullptr && original->Values.contains(edit.Pin);
+				if (!removesHeldLiteral)
+					ENGINE_TRY(CheckDataInput(description, node->Id, edit.Pin, std::format("/values/{}/pin", index)));
 				if (edit.Value.Get().is_null())
 					node->Values.erase(edit.Pin);
 				else

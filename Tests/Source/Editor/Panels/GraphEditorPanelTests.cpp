@@ -7,7 +7,9 @@
 #include "EditorCore/Graph/GraphEditorRequests.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VfsPath.h"
 #include "Support/ExpectLog.h"
 
 #include <doctest/doctest.h>
@@ -19,6 +21,7 @@
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -72,6 +75,14 @@ namespace Engine {
 				fixture.Pump();
 			}
 			return fixture.Draw(panel);
+		}
+
+		// Makes the Graph Editor window fill the fixture's display, so its side panel shows every row of a node's details.
+		void EnlargeGraphWindow(Test::UtilityPanelFixture& fixture, GraphEditorPanel& panel)
+		{
+			ImGui::SetWindowPos("Graph Editor", ImVec2(0.0f, 0.0f));
+			ImGui::SetWindowSize("Graph Editor", ImVec2(1200.0f, 900.0f));
+			static_cast<void>(fixture.Draw(panel));
 		}
 
 		void MoveMouse(Test::UtilityPanelFixture& fixture, GraphEditorPanel& panel, const glm::vec2& point)
@@ -636,6 +647,124 @@ namespace Engine {
 			fixture.Pump();
 			// The float 0.1f, whose double is 0.100000001490116..., is written as 0.1.
 			CHECK(ReadDocument(fixture)["Nodes"][0]["Values"] == Json{ { "A", 0.1 } });
+		}
+
+		// M24's review: a read that arrives while a literal's field is being edited (another edit's, an agent's, a reimport's)
+		// applies to the rest of the window and leaves the field's drag or typed text, which its release still submits whole.
+		TEST_CASE("GraphEditorPanel: a field being edited keeps its drag or text across a read that arrives meanwhile, and its release submits it")
+		{
+			Test::UtilityPanelFixture fixture;
+			GraphEditorPanel panel;
+			static_cast<void>(OpenDoor(fixture, panel));
+			const uint32_t add = AddNode(fixture, "Number.Add", 0.0f, 0.0f);
+			const uint32_t log = AddNode(fixture, "Call.Log.Info", 0.0f, 240.0f);
+			static_cast<void>(Settle(fixture, panel));
+			EnlargeGraphWindow(fixture, panel);
+			// An agent's edit meanwhile: the window reads the graph again, and shows the move, while the field stays active.
+			const auto readDuringEdit = [&fixture, &panel](uint32_t node, float y)
+			{
+				const auto before = panel.GetNodeScreenRect(node);
+				REQUIRE(before.has_value());
+				CallOrFail(fixture, "graph.moveNodes", Json{ { "graph", std::string(DoorPath) }, { "positions", Json::array({ Json{ { "node", node }, { "position", Json::array({ 0, y }) } } }) } });
+				for (int round = 0; round < 6; ++round)
+				{
+					static_cast<void>(fixture.Draw(panel));
+					fixture.Pump();
+				}
+				const auto after = panel.GetNodeScreenRect(node);
+				REQUIRE(after.has_value());
+				CHECK(after->first.y != doctest::Approx(before->first.y));
+			};
+
+			// Number.Add's A (a drag, 0.05 a pixel, its label drawn right of it), dragged 100 pixels, then a read, then 20 more.
+			Click(fixture, panel, TitlePoint(panel, add));
+			REQUIRE(Selected(panel) == std::vector<uint32_t>{ add });
+			static_cast<void>(fixture.Draw(panel));
+			const std::optional<ImVec2> number = Test::SupportingPanelTestUi::FindText(fixture, panel, "A (Number)");
+			REQUIRE(number.has_value());
+			const glm::vec2 grab(number->x - 60.0f, number->y);
+			MoveMouse(fixture, panel, grab);
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+			static_cast<void>(fixture.Draw(panel));
+			for (int step = 1; step <= 10; ++step)
+				MoveMouse(fixture, panel, grab + glm::vec2(10.0f * static_cast<float>(step), 0.0f));
+			readDuringEdit(add, 80.0f);
+			CHECK(ReadDocument(fixture)["Nodes"][0]["Values"] == Json::object());
+			for (int step = 1; step <= 2; ++step)
+				MoveMouse(fixture, panel, grab + glm::vec2(100.0f + 10.0f * static_cast<float>(step), 0.0f));
+			ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+			static_cast<void>(fixture.Draw(panel));
+			fixture.Pump();
+			// The whole drag, about 6, not the 1 dragged after the read.
+			const double dragged = JsonReader(ReadDocument(fixture)["Nodes"][0]["Values"]["A"]).ReadDouble().value_or(0.0);
+			CHECK(dragged > 4.5);
+			static_cast<void>(Settle(fixture, panel));
+
+			// Log.Info's Values (an optional Any, a text field showing its stored null): "Door" typed, a read, then Enter.
+			Click(fixture, panel, TitlePoint(panel, log));
+			REQUIRE(Selected(panel) == std::vector<uint32_t>{ log });
+			static_cast<void>(fixture.Draw(panel));
+			const std::optional<ImVec2> text = Test::SupportingPanelTestUi::FindText(fixture, panel, "Values (");
+			REQUIRE(text.has_value());
+			fixture.ClickAt(panel, text->x - 60.0f, text->y);
+			PressChord(fixture, panel, ImGuiMod_Ctrl, ImGuiKey_A);
+			TypeText(fixture, panel, "Door");
+			readDuringEdit(log, 320.0f);
+			CHECK(ReadDocument(fixture)["Nodes"][1]["Values"] == Json::object());
+			fixture.Press(panel, ImGuiKey_Enter);
+			fixture.Pump();
+			CHECK(ReadDocument(fixture)["Nodes"][1]["Values"] == Json{ { "Values", "Door" } });
+		}
+
+		// M24's review: a link or literal on a pin the node's kind no longer has (a binding's parameter renamed or removed,
+		// decision 10) shows as a pin of its own marked as an error, its tooltip saying why, and goes through its method: the
+		// link by Alt+click (graph.disconnect), the literal by the side panel's Clear literal (graph.setValues with null).
+		TEST_CASE("GraphEditorPanel: a link or literal on a pin its node's kind no longer has shows as an error pin and is removed through its method")
+		{
+			Test::UtilityPanelFixture fixture;
+			GraphEditorPanel panel;
+			static_cast<void>(OpenDoor(fixture, panel));
+			// Log.Info (node 2) has no "volume" input, which node 3's Result is linked to, and no "clip" input, which holds a literal.
+			GraphDocument document;
+			document.Name = "Door";
+			document.Nodes = { GraphNode{ .Id = 1, .Kind = "Event.OnStart", .Position = glm::vec2(0.0f, 0.0f), .Values = {} },
+				GraphNode{ .Id = 2, .Kind = "Call.Log.Info", .Position = glm::vec2(320.0f, 0.0f), .Values = { { "clip", VariantValue(Json("Assets/Old.wav")) } } },
+				GraphNode{ .Id = 3, .Kind = "Number.Add", .Position = glm::vec2(0.0f, 200.0f), .Values = {} } };
+			document.Links = { GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } }, GraphLink{ .From = { 3, "Result" }, .To = { 2, "volume" } } };
+			REQUIRE(ValidateGraphStructure(document).has_value());
+			const Result<std::string> text = GraphToText(document, fixture.GetEditor().GetTypeRegistry());
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const VfsPath path = VfsPath::Create("project", DoorPath).value_or(VfsPath());
+			REQUIRE(fixture.GetEditor().WriteProjectFile(path, std::as_bytes(std::span(*text))).has_value());
+			static_cast<void>(Settle(fixture, panel));
+			EnlargeGraphWindow(fixture, panel);
+
+			// Both stale pins are on the canvas; the reason shows in a stale pin's tooltip.
+			const glm::vec2 volume = PinPosition(panel, 2, "volume");
+			CHECK(panel.GetPinScreenPosition(GraphPinRef{ .Node = 2, .Pin = "clip" }).has_value());
+			MoveMouse(fixture, panel, volume);
+			CHECK(fixture.Draw(panel).contains("has no input 'volume' now"));
+
+			// Alt+click on the stale link removes it through graph.disconnect.
+			const auto curve = GetGraphLinkCurve(PinPosition(panel, 3, "Result"), volume);
+			const glm::vec2 middle = 0.125f * curve[0] + 0.375f * curve[1] + 0.375f * curve[2] + 0.125f * curve[3];
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
+			Click(fixture, panel, middle);
+			ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
+			fixture.Pump();
+			CHECK(ReadDocument(fixture)["Links"] == Json::array({ Link(1, "Then", 2, "In") }));
+
+			// The side panel lists the stale literal; its Clear literal removes it through graph.setValues with null.
+			static_cast<void>(Settle(fixture, panel));
+			CHECK_FALSE(panel.GetPinScreenPosition(GraphPinRef{ .Node = 2, .Pin = "volume" }).has_value());
+			Click(fixture, panel, TitlePoint(panel, 2));
+			REQUIRE(Selected(panel) == std::vector<uint32_t>{ 2 });
+			CHECK(fixture.Draw(panel).contains("has no input clip now"));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Clear literal");
+			fixture.Pump();
+			CHECK(ReadDocument(fixture)["Nodes"][1]["Values"] == Json::object());
+			static_cast<void>(Settle(fixture, panel));
+			CHECK_FALSE(panel.GetPinScreenPosition(GraphPinRef{ .Node = 2, .Pin = "clip" }).has_value());
 		}
 
 		// W24.2's integration (decision 14): stream B's live values in stream A's window.

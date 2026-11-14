@@ -32,8 +32,10 @@
 // resize: an out-of-memory creation is trimmed and retried once (RetryAfterTrim; the default target with the swapchain's own
 // out-of-memory classification, as Swapchain::AcquireNextImage's recreation passes it), and a second one leaves that window
 // without a target, logged at Warn and never fatal: it draws nothing, the other windows and the frame go on, and its
-// creation is tried again at its next size change. A target creation that fails otherwise is Render's Gpu error. In a
-// recovery's Recreate an out-of-memory creation is a second startup's, which fails the recovery, as every owner's.
+// creation is tried again at its next size change. A target creation that fails otherwise also leaves that window without a
+// target until its next size change (M24's review: never a creation every frame), and is Render's error once: a swapchain's
+// failure its Gpu error, which the application reports as the main window's swapchain failure, a GPU error. In a recovery's
+// Recreate an out-of-memory creation is a second startup's, which fails the recovery, as every owner's.
 //
 // Synchronization: each target owns its acquire and present semaphores (Swapchain's), so a window's frame waits only for its own
 // image, and FramePacer covers the windows' submissions with the frame's (ImGuiLayer::RenderPlatformWindows runs before the
@@ -124,8 +126,11 @@ namespace Engine {
 		// it. Call after ImGui::UpdatePlatformWindows (ImGuiLayer::EndFrame) and the main window's submission, before the
 		// frame's FramePacer::EndFrame. Does nothing on a lost device. A target's out-of-memory creation or recreation (an
 		// Acquire's OutOfMemory included) is never an error here: that window draws nothing (the class comment). Errors: the
-		// first Gpu error of a window's recording, submission or target, and an out-of-memory of its recording (the main UI's
-		// rule, decision 18); the other windows are still drawn.
+		// first of the windows' failures, the other windows still drawn: a target's (its creation's once per size, or its
+		// Acquire's: Gpu for a swapchain's, never out of memory, as the main window's swapchain's; Unsupported or
+		// InvalidArgument for a window the device cannot present to), or a recording's failure to create what it records with
+		// (its command list, the renderer's pipeline, buffers or binding sets) as OutOfMemory, the main UI's rule (decision 18;
+		// M24's review: the application tells the two apart by their codes).
 		[[nodiscard]] Status Render(uint32_t frameSlot);
 
 		// The platform windows that have a target now (a window whose target creation ran out of memory has none).

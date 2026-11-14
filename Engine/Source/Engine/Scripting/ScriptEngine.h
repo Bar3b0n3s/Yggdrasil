@@ -92,7 +92,8 @@ namespace Engine {
 								// engine type's ("Color", "Quat", "Entity", "AssetRef", a component proxy's type)
 		// The value in reflection's JSON spelling (§6): a boolean, a finite number, a string, [x, y, z] for a vector,
 		// [r, g, b, a] for a Color, [x, y, z, w] for a Quat, 16 hex digits for an Entity or an AssetRef; null for a value of
-		// another type (a table, a function, a proxy) and for a non-finite number, whose TypeName still names it.
+		// another type (a table, a function, a proxy), for a non-finite number and for a string that is not valid UTF-8, whose
+		// TypeName still names it.
 		VariantValue Value{};
 
 		bool operator==(const ScriptInstanceValue&) const = default;

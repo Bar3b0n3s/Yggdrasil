@@ -4,6 +4,7 @@
 
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VfsPath.h"
 #include "Engine/Core/VirtualFileSystem.h"
@@ -12,8 +13,12 @@
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 // The requests the graph canvas submits (M24, W24.2's stream A; Docs/Decisions/0035-m24-contract.md decision 15): each action's
 // method with its params, run here through automation's own client, so the canvas edits a graph exactly as an agent does and
@@ -247,6 +252,72 @@ namespace Engine {
 			CHECK_FALSE(setup.Call(refused->Method, refused->Params).has_value());
 			CHECK(ReadDoorText(setup) == before);
 			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps);
+		}
+
+		// M24's review: a graph holds up to MaxGraphNodes nodes, which a box selection may take, while one graph.moveNodes or
+		// graph.removeNodes takes MaxGraphMethodItems; a larger selection's move or removal is one edit.batch of such calls.
+		TEST_CASE("GraphEditorRequests: moving or removing more nodes than one call takes is one edit.batch of calls, one undo step")
+		{
+			Test::AutomationFixture setup("GraphEditorRequestsLarge");
+			const TypeRegistry& types = setup.GetEditor().GetTypeRegistry();
+			const std::string graph(DoorPath);
+			REQUIRE(setup.Call("graph.create", Json{ { "path", graph } }));
+			constexpr uint32_t Count = MaxGraphMethodItems + 6;
+			GraphDocument document;
+			document.Name = "Door";
+			std::vector<uint32_t> ids;
+			for (uint32_t id = 1; id <= Count; ++id)
+			{
+				document.Nodes.push_back(GraphNode{ .Id = id, .Kind = "Number.Add", .Position = glm::vec2(static_cast<float>(id), 0.0f), .Values = {} });
+				ids.push_back(id);
+			}
+			REQUIRE(ValidateGraphStructure(document).has_value());
+			const Result<std::string> text = GraphToText(document, types);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const VfsPath path = VfsPath::Create("project", DoorPath).value_or(VfsPath());
+			REQUIRE(setup.GetEditor().WriteProjectFile(path, std::as_bytes(std::span(*text))).has_value());
+			const std::string written = ReadDoorText(setup);
+
+			// One call while the list fits.
+			const Result<GraphEditorRequest> one = MakeGraphEditorRequest(types, GraphRemoveNodesParams{ .Graph = graph, .Nodes = { 1 } });
+			REQUIRE(one.has_value());
+			CHECK(one->Method == "graph.removeNodes");
+
+			GraphMoveNodesParams move{ .Graph = graph, .Positions = {} };
+			for (const uint32_t id : ids)
+				move.Positions.push_back(GraphNodePosition{ .Node = id, .Position = glm::vec2(static_cast<float>(id), 100.0f) });
+			const size_t steps = setup.GetEditor().GetHistory().GetUndoCount();
+			for (const GraphEditorAction action : { GraphEditorAction::MoveNodes, GraphEditorAction::RemoveNodes })
+			{
+				CAPTURE(std::to_underlying(action));
+				const Result<GraphEditorRequest> request = action == GraphEditorAction::MoveNodes
+					? MakeGraphEditorRequest(types, move)
+					: MakeGraphEditorRequest(types, GraphRemoveNodesParams{ .Graph = graph, .Nodes = ids });
+				REQUIRE_MESSAGE(request.has_value(), request.error().ToString());
+				CHECK(request->Action == action);
+				CHECK(request->Method == "edit.batch");
+				REQUIRE(request->Params["ops"].size() == 2);
+				CHECK(request->Params["ops"][0]["method"] == std::string(GetGraphEditorActionMethod(action)));
+				const Result<Json> result = setup.Call(request->Method, request->Params);
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps + 1);
+				// The file itself, read directly: this graph is too large for a convenient graph.read.
+				const Json file = Json::parse(ReadDoorText(setup), nullptr, false);
+				REQUIRE_FALSE(file.is_discarded());
+				const Json& nodes = file["Nodes"];
+				if (action == GraphEditorAction::MoveNodes)
+				{
+					REQUIRE(nodes.size() == Count);
+					CHECK(std::ranges::all_of(nodes, [](const Json& node)
+					{
+						return node["Position"][1] == 100;
+					}));
+				}
+				else
+					CHECK(nodes.empty());
+				REQUIRE(setup.Call("edit.undo", Json::object()));
+				CHECK(ReadDoorText(setup) == written);
+			}
 		}
 	}
 

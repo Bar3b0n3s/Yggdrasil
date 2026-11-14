@@ -154,6 +154,7 @@ namespace Engine {
 				: ImVec2(static_cast<float>(std::max(m_Window->GetWidth(), 1u)), static_cast<float>(std::max(m_Window->GetHeight(), 1u)));
 			io.DisplayFramebufferScale = previousScale;
 		}
+		m_RetainedDisplaySize = retainDisplaySize;
 		// After the backend, which sets its own wall-clock delta (see the declaration).
 		ImGui::GetIO().DeltaTime = static_cast<float>(std::max(deltaSeconds, MinimumDeltaSeconds));
 		ImGui::NewFrame();
@@ -163,6 +164,17 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(ImGui::GetCurrentContext() == m_Context, "ImGuiLayer::EndFrame with another Dear ImGui context current");
 		ImGui::Render();
+		if (m_PlatformWindows != nullptr && m_RetainedDisplaySize)
+		{
+			// M24's review: with platform windows on, Dear ImGui asks the platform side whether the main viewport is minimized
+			// and then gives its draw data an empty display (0 x 0), which BeginFrame's retained io.DisplaySize does not reach.
+			// A frame forced while the window is minimized (Application::RequestOffscreenUiFrame) renders the main window's UI
+			// at the size it was laid out at, the main viewport's, which Dear ImGui keeps while the window is minimized, so
+			// editor.screenshot captures it as it does without platform windows.
+			const ImGuiViewport* main = ImGui::GetMainViewport();
+			if (ImDrawData* drawData = ImGui::GetDrawData(); drawData != nullptr && main != nullptr)
+				drawData->DisplaySize = main->Size;
+		}
 		if (m_PlatformWindows != nullptr)
 		{
 			// The GLFW backend creates a platform window with GLFW's current window hints, and a window the swapchain's Vulkan

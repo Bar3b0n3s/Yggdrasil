@@ -55,6 +55,9 @@ namespace Engine {
 		constexpr std::array<std::string_view, 11> GraphValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity",
 			"Asset", "Enum", "Array" };
 
+		// A pin the node's kind no longer has, and its label (M24's review): the error outline's colour.
+		constexpr ImU32 StalePinColor = IM_COL32(236, 86, 86, 255);
+
 	}
 
 	namespace Utils {
@@ -296,12 +299,6 @@ namespace Engine {
 			// target needs): its result is dropped, and the read the next frame submits is the target's.
 			m_AbandonedReads.push_back(std::exchange(m_ReadTicket, 0));
 		}
-		else if (m_ReadTicket != 0)
-		{
-			// The graph is open and a read of it is in flight, asked before this target (without the text and line map a line
-			// target needs): its result is dropped, and the read the next frame submits is the target's.
-			m_AbandonedReads.push_back(std::exchange(m_ReadTicket, 0));
-		}
 		m_Target = target.Graph.IsValid() ? std::optional<GraphEditorTarget>(target) : std::nullopt;
 		// The read held is older than the target, so the target resolves against the next one (ApplyRead).
 		m_TargetRead = false;
@@ -345,6 +342,7 @@ namespace Engine {
 		m_Layouts.clear();
 		m_NodeFindings.clear();
 		m_LinkedPins.clear();
+		m_StalePins.clear();
 		m_LayoutStale = true;
 		m_Selection.clear();
 		m_PendingPositions.clear();
@@ -451,7 +449,9 @@ namespace Engine {
 		m_TargetRead = true; // submitted after any target Open set, since Open drops an older read in flight
 		m_ReadError.clear();
 		m_PendingPositions.clear();
-		m_FieldEdit.reset();
+		// The field being edited keeps its candidate (its text, or its drag) across the read; the read applies to the rest.
+		if (m_FieldEdit.has_value() && (m_FieldEdit->Submitted || !m_FieldEdit->Active))
+			m_FieldEdit.reset();
 		std::erase_if(m_Selection, [this](uint32_t id)
 		{
 			return FindGraphNode(m_Read->Document, id) == nullptr;
@@ -635,6 +635,7 @@ namespace Engine {
 	{
 		m_Shapes.clear();
 		m_Layouts.clear();
+		m_StalePins.clear();
 		m_LayoutStale = false;
 		if (!m_Read.has_value())
 			return;
@@ -674,6 +675,42 @@ namespace Engine {
 						&& !m_LinkedPins.contains(GraphPinRef{ .Node = node->Id, .Pin = pin.Name }))
 						label += " = " + FormatGraphLiteral(literal->second.Get());
 					shape.Pins.push_back({ .Name = pin.Name, .Direction = pin.Direction, .Type = pin.Type, .Label = std::move(label) });
+				}
+				// M24's review: a link or literal on a pin the kind no longer has (a binding's parameter renamed or removed,
+				// decision 10) is a pin of its own, untyped and marked as an error, so it shows and can be removed: its link with
+				// Alt+click, the context menu or a drag off it (graph.disconnect), its literal with the side panel's Clear literal
+				// (graph.setValues with null). A name the kind uses for another pin is left to the side panel.
+				const auto addStale = [this, &shape, description, node](const std::string& name, GraphPinDirection direction, std::string label, std::string reason)
+				{
+					if (std::ranges::any_of(description->Pins, [&name](const GraphPinDescription& pin)
+					{
+						return pin.Name == name;
+					}))
+						return;
+					const GraphPinRef ref{ .Node = node->Id, .Pin = name };
+					if (m_StalePins.contains(ref))
+						return;
+					shape.Pins.push_back({ .Name = name, .Direction = direction, .Type = GraphPinType::Any, .Label = std::move(label) });
+					m_StalePins.emplace(ref, std::move(reason));
+				};
+				const std::string what = std::format("node {} ({})", node->Id, node->Kind);
+				for (const GraphLink& link : links)
+				{
+					if (link.To.Node == node->Id)
+					{
+						addStale(link.To.Pin, GraphPinDirection::Input, link.To.Pin,
+							std::format("{} has no input '{}' now, so this link is an error: Alt+click it, or drag it off the pin, to remove it.", what, link.To.Pin));
+					}
+					if (link.From.Node == node->Id)
+					{
+						addStale(link.From.Pin, GraphPinDirection::Output, link.From.Pin,
+							std::format("{} has no output '{}' now, so this link is an error: Alt+click it to remove it.", what, link.From.Pin));
+					}
+				}
+				for (const auto& [pin, value] : node->Values)
+				{
+					addStale(pin, GraphPinDirection::Input, std::format("{} = {}", pin, FormatGraphLiteral(value.Get())),
+						std::format("{} has no input '{}' now, so its literal is an error: Clear literal in the side panel removes it.", what, pin));
 				}
 			}
 			else
@@ -1041,7 +1078,10 @@ namespace Engine {
 				const GraphPinLayout& pin = layout.Pins[pinIndex];
 				const glm::vec2 center = toScreen(pin.Center + offset);
 				const float radius = m_Metrics.PinRadius * zoom;
-				const ImU32 color = Utils::GraphPinColor(pin.Type);
+				// A pin the node's kind no longer has (M24's review) is drawn in the error colour, its label too.
+				const bool stale = m_StalePins.contains(GraphPinRef{ .Node = layout.Node, .Pin = pin.Name });
+				const ImU32 color = stale ? StalePinColor : Utils::GraphPinColor(pin.Type);
+				const ImU32 labelColor = stale ? StalePinColor : IM_COL32(214, 214, 218, 255);
 				const bool linked = m_LinkedPins.contains(GraphPinRef{ .Node = layout.Node, .Pin = pin.Name });
 				if (pin.Type == GraphPinType::Exec)
 				{
@@ -1060,14 +1100,24 @@ namespace Engine {
 				const std::string& label = shape.Pins[pinIndex].Label;
 				const float labelY = center.y - fontSize * 0.5f;
 				if (pin.Direction == GraphPinDirection::Input)
-					Utils::DrawCanvasText(draw, glm::vec2(center.x + radius + m_Metrics.LabelGap * zoom, labelY), fontSize, IM_COL32(214, 214, 218, 255), label,
-						boxMaximum.x);
+					Utils::DrawCanvasText(draw, glm::vec2(center.x + radius + m_Metrics.LabelGap * zoom, labelY), fontSize, labelColor, label, boxMaximum.x);
 				else
 				{
 					const float width = Utils::MeasureCanvasText(fontSize, label);
-					Utils::DrawCanvasText(draw, glm::vec2(center.x - radius - m_Metrics.LabelGap * zoom - width, labelY), fontSize, IM_COL32(214, 214, 218, 255),
-						label, center.x);
+					Utils::DrawCanvasText(draw, glm::vec2(center.x - radius - m_Metrics.LabelGap * zoom - width, labelY), fontSize, labelColor, label, center.x);
 				}
+			}
+		}
+
+		// A stale pin's tooltip says why it is an error and how to remove what it holds.
+		if (hovered && m_Drag == CanvasDrag::None && !m_StalePins.empty())
+		{
+			const glm::vec2 mouse = CanvasToGraph(m_View, Utils::ToVec2(ImGui::GetIO().MousePos) - minimum);
+			const float pickRadius = std::max(m_Metrics.PinRadius * 2.0f, 6.0f / m_View.Zoom);
+			if (const std::optional<GraphPinHit> pin = FindGraphPinAt(m_Layouts, mouse, pickRadius))
+			{
+				if (const auto stale = m_StalePins.find(GraphPinRef{ .Node = pin->Node, .Pin = pin->Pin }); stale != m_StalePins.end())
+					ImGui::SetTooltip("%s", stale->second.c_str());
 			}
 		}
 
@@ -1574,27 +1624,35 @@ namespace Engine {
 					text = JsonReader(m_FieldEdit->Value).ReadString().value_or(std::string());
 				if (ImGui::InputText(widgetLabel.c_str(), &text))
 				{
-					m_FieldEdit = FieldEdit{ .Key = key, .Value = Json(text) };
+					m_FieldEdit = FieldEdit{ .Key = key, .Value = Json(text), .Active = ImGui::IsItemActive(), .Submitted = false };
 					ImGui::PopID();
 					return std::nullopt;
 				}
 				if (ImGui::IsItemDeactivatedAfterEdit() && editing)
 				{
 					const Json parsed = Utils::ParseAnyLiteral(text);
-					m_FieldEdit = FieldEdit{ .Key = key, .Value = parsed };
+					m_FieldEdit = FieldEdit{ .Key = key, .Value = parsed, .Active = false, .Submitted = true };
 					ImGui::PopID();
 					return parsed;
 				}
+				if (editing)
+					m_FieldEdit->Active = ImGui::IsItemActive();
 				ImGui::PopID();
 				return std::nullopt;
 			}
 		}
 		const bool released = ImGui::IsItemDeactivatedAfterEdit();
+		const bool active = ImGui::IsItemActive();
 		ImGui::PopID();
 		if (changed)
-			m_FieldEdit = FieldEdit{ .Key = key, .Value = value };
+			m_FieldEdit = FieldEdit{ .Key = key, .Value = value, .Active = active, .Submitted = false };
+		else if (editing)
+			m_FieldEdit->Active = active;
 		if ((commit || released) && m_FieldEdit.has_value() && m_FieldEdit->Key == key)
+		{
+			m_FieldEdit->Submitted = true;
 			return m_FieldEdit->Value;
+		}
 		return std::nullopt;
 	}
 
@@ -1886,6 +1944,23 @@ namespace Engine {
 					ImGui::SetItemTooltip("Remove the literal: the input takes its default, or must be linked.");
 				}
 			}
+			ImGui::PopID();
+		}
+		// M24's review: a literal on a pin the kind no longer has (a binding's parameter renamed or removed, decision 10) keeps the
+		// graph from importing until it goes, which Clear literal does through graph.setValues with null.
+		for (const auto& [pin, value] : node->Values)
+		{
+			const auto found = std::ranges::find(description->Pins, pin, &GraphPinDescription::Name);
+			if (found != description->Pins.end() && found->Direction == GraphPinDirection::Input && found->Type != GraphPinType::Exec)
+				continue;
+			ImGui::PushID(std::format("stale:{}", pin).c_str());
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.48f, 0.48f, 1.0f));
+			ImGui::TextWrapped("%s = %s: %s has no input %s now, so the graph does not import.", pin.c_str(), FormatGraphLiteral(value.Get()).c_str(),
+				node->Kind.c_str(), pin.c_str());
+			ImGui::PopStyleColor();
+			if (ImGui::SmallButton("Clear literal"))
+				SetLiteral(context, node->Id, pin, Json());
+			ImGui::SetItemTooltip("Remove the literal the node's kind no longer takes.");
 			ImGui::PopID();
 		}
 		ImGui::EndDisabled();

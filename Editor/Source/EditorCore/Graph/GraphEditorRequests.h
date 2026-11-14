@@ -20,9 +20,9 @@
 // GraphEditorAction that changes a graph, the method GetGraphEditorActionMethod names with its params, built UI-free so the
 // canvas's actions are tested headless against the methods themselves. A method's own params are its param struct (GraphMethods.h)
 // written through the editor's type registry, which holds the graph methods' types (RegisterGraphMethodTypes), so they are the
-// wire's spelling by construction; the actions that compose several edits (AddLinkedNode, DuplicateNodes, MoveLink) are one
-// edit.batch, whose later ops name the nodes the earlier ones add with M19's named "$ref" ({"$ref": "n4.node"}), so each is
-// one undo step and a refused op undoes the ones before it.
+// wire's spelling by construction; the actions that compose several edits (AddLinkedNode, DuplicateNodes, MoveLink, and a
+// RemoveNodes or MoveNodes of more nodes than one call takes) are one edit.batch, whose later ops name the nodes the earlier
+// ones add with M19's named "$ref" ({"$ref": "n4.node"}), so each is one undo step and a refused op undoes the ones before it.
 // The canvas submits every request through the editor's queued actions (EditorActions), as automation's in-process client.
 
 namespace Engine {
@@ -33,7 +33,7 @@ namespace Engine {
 	struct GraphEditorRequest
 	{
 		GraphEditorAction Action = GraphEditorAction::AddNode;
-		std::string Method{}; // GetGraphEditorActionMethod(Action)
+		std::string Method{}; // GetGraphEditorActionMethod(Action); edit.batch for a RemoveNodes or MoveNodes split into calls
 		Json Params{};
 	};
 
@@ -41,8 +41,12 @@ namespace Engine {
 	// refused before it is submitted.
 	inline constexpr size_t MaxGraphEditorBatchOps = 1000;
 
-	// The request of each single-method action, its params `params` (the method's param struct). Errors: InvalidState when
-	// `types` lacks the graph methods' types; the struct's ToJson errors (Validation for a non-finite position).
+	// The request of each single-method action, its params `params` (the method's param struct). RemoveNodes and MoveNodes of
+	// more nodes or positions than one call takes (MaxGraphMethodItems; a box selection of a large graph) are one edit.batch
+	// (labelled "Remove Graph Nodes" or "Move Graph Nodes") of calls of that method, each of at most that many in order, so the
+	// edit is one undo step, as one call is (M24's review). Errors: InvalidState when `types` lacks the graph methods' types;
+	// the struct's ToJson errors (Validation for a non-finite position); InvalidArgument for more items than one edit.batch of
+	// such calls takes (MaxGraphEditorBatchOps calls).
 	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphCreateParams& params);      // CreateGraph
 	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphAddNodeParams& params);     // AddNode
 	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphRemoveNodesParams& params); // RemoveNodes

@@ -822,16 +822,28 @@ namespace Engine {
 		EditorContext& editor = context.Editor;
 		const AssetRecord* record = script.IsValid() ? editor.GetAssets().GetRegistry().Find(script) : nullptr;
 		EditorScriptService* service = editor.GetScriptService();
-		if (record == nullptr || record->Metadata.Importer != GraphImporter::Id || service == nullptr)
+		if (record == nullptr || record->Metadata.Importer != GraphImporter::Id || service == nullptr || !service->GetFields(script))
 			return;
-		// graph.liveValues names a slot by its behaviour's name, as script.eval does.
-		const Result<AssetRef<ScriptData>> behaviour = service->GetFields(script);
-		if (!behaviour)
-			return;
+		// graph.liveValues names a slot by its behaviour's name, as script.eval does: the graph's current name, as the method
+		// matches it, not its last import's, which a rename during a lockstep, recording, replay or test session leaves behind
+		// until the session ends (M24's review).
+		const Result<std::string> behaviour = ReadGraphBehaviourName(editor, script);
 		GraphSlotLiveView& live = m_GraphLiveViews[slot];
 		live.Drawn = true;
-		live.View.Update(editor, context.Actions, GraphLiveTarget{ .Entity = entity, .Script = (*behaviour)->Name });
+		live.View.Update(editor, context.Actions,
+			behaviour ? std::optional<GraphLiveTarget>(GraphLiveTarget{ .Entity = entity, .Script = *behaviour }) : std::nullopt);
 		ImGui::TextDisabled("Live values");
+		if (!behaviour)
+		{
+			ImGui::TextWrapped("%s", behaviour.error().GetMessageText().c_str());
+			return;
+		}
+		if (!live.View.GetTarget().has_value())
+		{
+			// A simulation runs no behaviours (decision 14), so it has no live values to read.
+			ImGui::TextDisabled("None in a simulation, which runs no behaviours.");
+			return;
+		}
 		const std::optional<GraphLiveValuesResult>& values = live.View.GetValues();
 		if (!values.has_value())
 		{

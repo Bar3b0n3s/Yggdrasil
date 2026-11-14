@@ -410,6 +410,94 @@ namespace Engine {
 			CHECK(Describe(ValidateGraph(bothFlows, *setup.Library)) == std::vector<std::string>{ "/Links/3" });
 		}
 
+		// M24's review: a loop sets its Index and Element only in its Body flow, so a loop that runs zero times leaves them nil
+		// on its Completed flow and after it; read there into an input that needs a value they are incomplete, as
+		// Flow.IfNotNil's Result off its True flow is, while an optional or Any input takes the nil.
+		TEST_CASE("GraphNodeLibrary: a loop's Index or Element is read into an input that needs a value only where its Body flow alone leads, and elsewhere is incomplete")
+		{
+			const LibrarySetup setup;
+			// OnStart counts 1 to 3 into Total in the loop's Body (node 5 reads Index through node 4).
+			GraphDocument graph;
+			graph.Name = "Probe";
+			graph.Variables = { GraphVariable{ .Name = "Total", .Kind = GraphValueKind::Number, .Default = VariantValue(Json(0)) } };
+			graph.Nodes = {
+				GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Flow.ForRange", .Values = { { "First", VariantValue(Json(1)) }, { "Last", VariantValue(Json(3)) } } },
+				GraphNode{ .Id = 3, .Kind = "Self.Get.Total" },
+				GraphNode{ .Id = 4, .Kind = "Number.Add" },
+				GraphNode{ .Id = 5, .Kind = "Self.Set.Total" },
+			};
+			graph.Links = {
+				GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } },
+				GraphLink{ .From = { 2, "Body" }, .To = { 5, "In" } },
+				GraphLink{ .From = { 2, "Index" }, .To = { 4, "B" } },
+				GraphLink{ .From = { 3, "Value" }, .To = { 4, "A" } },
+				GraphLink{ .From = { 4, "Result" }, .To = { 5, "Value" } },
+			};
+			REQUIRE(ValidateGraphStructure(graph).has_value());
+			CHECK(ValidateGraph(graph, *setup.Library).empty());
+			CHECK(TranspileGraph(graph, *setup.Library, "Assets/Scripts/Probe.graph").has_value());
+
+			// The same sum on the Completed flow (node 6 reads Index through node 7): Index's link into node 7 (/Links/4) is
+			// incomplete, and the graph has no text.
+			GraphDocument completed = graph;
+			completed.Nodes.push_back(GraphNode{ .Id = 6, .Kind = "Self.Set.Total" });
+			completed.Nodes.push_back(GraphNode{ .Id = 7, .Kind = "Number.Add" });
+			completed.Links.push_back(GraphLink{ .From = { 2, "Completed" }, .To = { 6, "In" } });
+			completed.Links.push_back(GraphLink{ .From = { 2, "Index" }, .To = { 7, "B" } });
+			completed.Links.push_back(GraphLink{ .From = { 3, "Value" }, .To = { 7, "A" } });
+			completed.Links.push_back(GraphLink{ .From = { 7, "Result" }, .To = { 6, "Value" } });
+			CanonicalizeGraph(completed);
+			REQUIRE(ValidateGraphStructure(completed).has_value());
+			const std::vector<GraphIssue> onCompleted = ValidateGraph(completed, *setup.Library);
+			CHECK(Describe(onCompleted) == std::vector<std::string>{ "/Links/4" });
+			REQUIRE_FALSE(onCompleted.empty());
+			CHECK(onCompleted.front().Node == 7);
+			CHECK_FALSE(TranspileGraph(completed, *setup.Library, "Assets/Scripts/Probe.graph").has_value());
+
+			// On the Completed flow into an input that takes nil (Log.Info's optional Any Values): valid.
+			GraphDocument logged = graph;
+			logged.Nodes.push_back(GraphNode{ .Id = 6, .Kind = "Call.Log.Info" });
+			logged.Links.push_back(GraphLink{ .From = { 2, "Completed" }, .To = { 6, "In" } });
+			logged.Links.push_back(GraphLink{ .From = { 2, "Index" }, .To = { 6, "Values" } });
+			CanonicalizeGraph(logged);
+			REQUIRE(ValidateGraphStructure(logged).has_value());
+			CHECK(ValidateGraph(logged, *setup.Library).empty());
+
+			// The node the Body flow enters is entered by the Completed flow too (a merge): incomplete at Index's link (/Links/3).
+			GraphDocument merged = graph;
+			merged.Links.push_back(GraphLink{ .From = { 2, "Completed" }, .To = { 5, "In" } });
+			CanonicalizeGraph(merged);
+			REQUIRE(ValidateGraphStructure(merged).has_value());
+			CHECK(Describe(ValidateGraph(merged, *setup.Library)) == std::vector<std::string>{ "/Links/3" });
+
+			// Flow.ForEach's Element (Any) read on its Completed flow into Total's Number value: incomplete (/Links/2); in its Body,
+			// valid.
+			GraphDocument each;
+			each.Name = "Probe";
+			each.Variables = {
+				GraphVariable{ .Name = "Items", .Kind = GraphValueKind::Array, .Default = VariantValue(Json::array()), .Element = GraphValueKind::Number },
+				GraphVariable{ .Name = "Total", .Kind = GraphValueKind::Number, .Default = VariantValue(Json(0)) },
+			};
+			each.Nodes = {
+				GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Flow.ForEach" },
+				GraphNode{ .Id = 3, .Kind = "Self.Get.Items" },
+				GraphNode{ .Id = 4, .Kind = "Self.Set.Total" },
+			};
+			each.Links = {
+				GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } },
+				GraphLink{ .From = { 2, "Completed" }, .To = { 4, "In" } },
+				GraphLink{ .From = { 2, "Element" }, .To = { 4, "Value" } },
+				GraphLink{ .From = { 3, "Value" }, .To = { 2, "Array" } },
+			};
+			REQUIRE(ValidateGraphStructure(each).has_value());
+			CHECK(Describe(ValidateGraph(each, *setup.Library)) == std::vector<std::string>{ "/Links/2" });
+			each.Links[1] = GraphLink{ .From = { 2, "Body" }, .To = { 4, "In" } };
+			REQUIRE(ValidateGraphStructure(each).has_value());
+			CHECK(ValidateGraph(each, *setup.Library).empty());
+		}
+
 		// Quat.New refuses the zero quaternion at run time, so a Quat input's literal is a nonzero quaternion once rounded to
 		// float, as a member's Default is (W24.1's review).
 		TEST_CASE("GraphNodeLibrary: a Quat input's literal is a nonzero quaternion, which Quat.New takes")

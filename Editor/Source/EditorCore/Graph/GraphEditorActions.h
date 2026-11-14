@@ -19,7 +19,7 @@ namespace Engine {
 	enum class GraphEditorAction : uint8_t
 	{
 		CreateGraph,       // the content browser's New Graph: graph.create
-		CreateGraphInSlot, // the inspector's New Graph in a script slot's picker: graph.create and the slot's entity.update ops in one edit.batch
+		CreateGraphInSlot, // the inspector's New graph... button beside a script slot's Script picker: graph.create and the slot's entity.update ops in one edit.batch
 		AddNode,           // the node menu: graph.addNode
 		AddLinkedNode,     // a link dropped on empty canvas, then a kind chosen: graph.addNode and graph.connect ops in one edit.batch
 		RemoveNodes,       // Delete on the selected nodes: graph.removeNodes
@@ -41,7 +41,8 @@ namespace Engine {
 		GraphEditorAction::Undo, GraphEditorAction::Redo, GraphEditorAction::MoveLink };
 
 	// The method an action submits ("graph.addNode", "edit.batch", "edit.undo"); empty for a value outside the enumeration.
-	// Pure.
+	// RemoveNodes and MoveNodes of more nodes than one call takes submit their method's calls in one edit.batch (M24's review;
+	// EditorCore/Graph/GraphEditorRequests.h). Pure.
 	[[nodiscard]] std::string_view GetGraphEditorActionMethod(GraphEditorAction action);
 
 }

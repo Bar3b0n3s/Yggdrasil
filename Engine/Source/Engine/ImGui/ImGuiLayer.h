@@ -90,7 +90,9 @@ namespace Engine {
 		// A forced minimized frame retains the last usable display size and scale after updating backend input.
 		void BeginFrame(double deltaSeconds, uint32_t frameSlot, bool retainDisplaySize = false);
 
-		// ImGui::Render: finishes the frame's draw data.
+		// ImGui::Render: finishes the frame's draw data. M24: with platform windows on, a frame whose BeginFrame retained the
+		// display size keeps the main viewport's draw data at the size its UI was laid out at, which Dear ImGui would give an
+		// empty display while the window is minimized, so a forced minimized frame renders and editor.screenshot captures it.
 		void EndFrame();
 
 		// M18 (C18.3, Docs/Decisions/0029-m18-contract.md decision 26 and risk 10): ends a UI frame that BeginFrame started
@@ -126,8 +128,9 @@ namespace Engine {
 		// them off.
 		[[nodiscard]] Status GetPlatformWindowSupport() const;
 		// ImGuiPlatformWindows::Render for this frame; Ok, doing nothing, when platform windows are off. Application calls it
-		// after the main window's submission and before FramePacer::EndFrame, on every frame that rendered the UI. Errors: those
-		// of ImGuiPlatformWindows::Render, which the Application treats as ImGuiLayer::Render's.
+		// after the main window's submission and before FramePacer::EndFrame, on every frame that rendered the UI while the main
+		// window is not minimized. Errors: those of ImGuiPlatformWindows::Render, a recording's OutOfMemory, which the
+		// Application treats as ImGuiLayer::Render's Gpu error, and a target's Gpu error as the main window's swapchain's.
 		[[nodiscard]] Status RenderPlatformWindows(uint32_t frameSlot);
 		// The platform windows; nullptr when they are off.
 		[[nodiscard]] ImGuiPlatformWindows* GetPlatformWindows();
@@ -152,6 +155,7 @@ namespace Engine {
 		ImGuiContext* m_Context = nullptr;             // created by Create, destroyed by the destructor
 		bool m_UsesGlfwBackend = false;                // the vendored GLFW backend is initialized (native platforms)
 		bool m_UsesNullPlatform = false;               // InstallNullPlatform ran (GLFW's null platform)
+		bool m_RetainedDisplaySize = false;            // M24: the open frame's BeginFrame retained the display size (EndFrame)
 	};
 
 }

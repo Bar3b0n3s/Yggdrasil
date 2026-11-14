@@ -3,9 +3,15 @@
 
 #include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Graph/GraphLiveCache.h"
 #include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Asset/AssetRegistry.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Graph/GraphDocument.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Utf8.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
@@ -62,6 +68,24 @@ namespace Engine {
 				return GraphLiveTarget{ .Entity = id, .Script = std::string(behaviour) };
 		}
 		return std::nullopt;
+	}
+
+	Result<std::string> ReadGraphBehaviourName(EditorContext& editor, AssetHandle graph)
+	{
+		const AssetRecord* record = graph.IsValid() ? editor.GetAssets().GetRegistry().Find(graph) : nullptr;
+		if (record == nullptr)
+			return MakeError(ErrorCode::NotFound, "no project asset has the handle {}", graph.ToString());
+		ENGINE_TRY_ASSIGN(const std::string text, editor.GetVfs().ReadText(record->SourcePath));
+		// graph.liveValues' key (GraphMethods.cpp's LoadLiveGraph), so both share one kept read of the graph.
+		GraphLiveCacheKey key{ .Graph = graph, .Path = std::string(record->SourcePath.GetPath()), .SourceHash = XXH64(text), .Version = editor.GetAssets().GetVersion(graph) };
+		GraphLiveCache& cache = editor.GetGraphLiveCache();
+		if (const GraphLiveCacheEntry* kept = cache.Find(key))
+			return kept->Document.Name;
+		GraphLoadReport report;
+		Result<GraphDocument> document = GraphFromText(text, editor.GetTypeRegistry(), report, true);
+		if (!document)
+			return MakeError(ErrorCode::ImportFailed, "'{}' cannot be read as a graph: {}", key.Path, document.error().GetMessageText());
+		return cache.Insert(std::move(key), std::move(*document)).Document.Name;
 	}
 
 	std::string FormatGraphLiveValue(std::string_view type, const VariantValue& value)

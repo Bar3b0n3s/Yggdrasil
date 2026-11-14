@@ -17,7 +17,8 @@
 // whose signature it can model (the Behaviour callbacks' events, module functions, type methods, properties, constants and
 // constructors, and the record aliases' fields), and adds the hand-written built-ins of decision 6 (flow control, members,
 // operators). A binding added to the API therefore adds its node, and a binding's change changes its node; the importer's
-// cache follows through the script checker's environment hash, which the same registry's declarations make (decision 9).
+// cache follows through the script checker's environment hash, since the registry the checker's declarations come from and the
+// pure script API the importer builds its library from are made by the same bindings (RegisterBindings; decision 9).
 //
 // Kinds (decision 6):
 //   - Generated: "Event.<Callback>" (the Behaviour type's callbacks), "Call.<Group>.<Member>" (a function, method or
@@ -148,15 +149,17 @@ namespace Engine {
 		uint32_t Node = 0;         // the node it concerns; 0 for the graph's members or name
 		std::string Message{};
 		// An issue of an unfinished graph that the edit methods accept on the way to a finished one (a required input not
-		// linked yet; an output read where its statement may not have run, or Flow.IfNotNil's Result where its Value may be
-		// nil); every other issue is refused by the method that would make it. The import refuses both kinds.
+		// linked yet; an output read where its statement may not have run, Flow.IfNotNil's Result where its Value may be nil,
+		// or a loop's Index or Element where the loop may have run zero times); every other issue is refused by the method that
+		// would make it. The import refuses both kinds.
 		bool Incomplete = false;
 
 		bool operator==(const GraphIssue&) const = default;
 	};
 
 	// The node kinds of decision 6, built once from a frozen script API registry. Immutable after Create, so its const members
-	// are thread-safe (import workers share none: each import builds its own, as the load-time VM builds its registry).
+	// are thread-safe (import workers share none: each import builds its own library from the import context's shared, frozen
+	// pure script API, which its load-time VM also borrows: ADR 0041 decision 3).
 	class GraphNodeLibrary
 	{
 	public:
@@ -204,13 +207,15 @@ namespace Engine {
 	// (an exec input any number); no cycle of data links and no exec cycle; a member node names a member of the graph; and,
 	// as Incomplete issues, every required input without a Default is linked or holds a literal, every data link from a
 	// statement's output reaches only nodes that statement dominates in its event's flow (it has run whenever they do, in
-	// the same event function, Flow.Delay's later flow included), and Flow.IfNotNil's Result reaches only nodes its True
-	// flow alone enters (where its Value is not nil). When every other issue is Incomplete, no statement's code starts more
-	// than 64 blocks deep in the transpiled text (TranspileGraph's layout, where a branch, a loop's body, Flow.Delay's later
-	// flow and a statement's block of pure values each nest one level), reported at the statement that first passes the
-	// limit, and the text holds at most 8 MiB, reported at the statement whose code passes it, so a graph transpiles exactly
-	// when it validates (Docs/Decisions/0035-m24-contract.md decision 7 and risk 1). Several event nodes of one callback are
-	// valid and run in id order. The issues are in document order. Pure.
+	// the same event function, Flow.Delay's later flow included), Flow.IfNotNil's Result reaches only nodes its True flow
+	// alone enters (where its Value is not nil), and a loop's (Flow.ForRange's, Flow.ForEach's) Index or Element reaches an
+	// input that needs a value (neither optional nor Any) only in nodes its Body flow alone enters, since on its Completed flow
+	// and after it they are nil when the loop ran zero times (M24's review). When every other issue is Incomplete, no
+	// statement's code starts more than 64 blocks deep in the transpiled text (TranspileGraph's layout, where a branch, a
+	// loop's body, Flow.Delay's later flow and a statement's block of pure values each nest one level), reported at the
+	// statement that first passes the limit, and the text holds at most 8 MiB, reported at the statement whose code passes
+	// it, so a graph transpiles exactly when it validates (Docs/Decisions/0035-m24-contract.md decision 7 and risk 1).
+	// Several event nodes of one callback are valid and run in id order. The issues are in document order. Pure.
 	[[nodiscard]] std::vector<GraphIssue> ValidateGraph(const GraphDocument& graph, const GraphNodeLibrary& library);
 
 	// The statement nodes that no event's flow reaches (GRAPH_UNREACHABLE_NODE), sorted by id. Pure; `graph` validates.

@@ -1718,6 +1718,15 @@ namespace Engine {
 			REQUIRE(context.Editor.SetSelection({ counter }, SceneTarget::Play));
 			settle();
 
+			// M24's review: renamed during the lockstep play, which reimports the graph only after it ends, the slot is named by
+			// the graph's current name, as graph.liveValues matches it, so it keeps showing the instance's values.
+			call("graph.setMembers", Json{ { "graph", graph }, { "name", "Tally" } });
+			settle();
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("Count = 6"));
+			CHECK_FALSE(test.Text.contains("has no graph slot"));
+
 			// Stopped: the values go.
 			test.CaptureText = false;
 			call("play.stop", Json::object());
@@ -1726,6 +1735,18 @@ namespace Engine {
 			REQUIRE(test.Frame());
 			CHECK_FALSE(test.Text.contains("Live values"));
 			CHECK_FALSE(test.Text.contains("Count = 6"));
+
+			// M24's review: a simulation runs no behaviours, so the slot says it has no live values instead of reading.
+			test.CaptureText = false;
+			call("play.start", Json{ { "mode", "simulate" }, { "lockstep", true } });
+			REQUIRE(context.Editor.SetSelection({ counter }, SceneTarget::Play));
+			settle();
+			test.CaptureText = true;
+			REQUIRE(test.Frame());
+			CHECK(test.Text.contains("None in a simulation"));
+			CHECK_FALSE(test.Text.contains("Reading..."));
+			test.CaptureText = false;
+			call("play.stop", Json::object());
 		}
 
 		// Docs/Decisions/0031-m20-contract.md decision 19: an override of one slot shows beside that slot's member and in

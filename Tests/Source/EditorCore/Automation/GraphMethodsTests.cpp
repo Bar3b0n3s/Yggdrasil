@@ -4,6 +4,7 @@
 
 #include "EditorCore/EditorContext.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
 #include "Engine/AssetPipeline/Graph/GraphTranspiler.h"
@@ -626,6 +627,77 @@ namespace Engine {
 			const uint32_t node = JsonReader(finding["node"]).ReadUInt32().value_or(0);
 			CHECK(node >= 3);
 			CHECK(node == FindGraphNodeAtLine(*text, line));
+
+			// M24's review (decision 13, Architecture §13.5): the import's findings are reported only while that import is of the
+			// file's current bytes. A fixed graph written while reimports are deferred (as a lockstep or test session defers
+			// them) was never imported, so its read reports no compile error; the failed import's own bytes bring it back.
+			setup.GetEditor().GetAssets().SetReloadsDeferred(true);
+			GraphDocument fixed;
+			fixed.Name = "Door";
+			fixed.Nodes = { GraphNode{ .Id = 1, .Kind = "Event.OnStart" }, GraphNode{ .Id = 2, .Kind = "Call.Log.Info" } };
+			fixed.Links = { GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } } };
+			WriteDoor(setup, fixed);
+			const Json afterFix = CallOrFail(setup, "graph.read", Json{ { "graph", std::string(DoorPath) } });
+			CAPTURE(afterFix.dump());
+			CHECK(afterFix["diagnostics"].empty());
+			WriteDoor(setup, document);
+			const Json again = CallOrFail(setup, "graph.read", Json{ { "graph", std::string(DoorPath) } });
+			REQUIRE(again["diagnostics"].size() == 1);
+			CHECK(again["diagnostics"][0]["code"] == "SCRIPT_COMPILE_ERROR");
+			CHECK(again["diagnostics"][0]["node"] == node);
+		}
+
+		// M24's review: a literal on a pin the node's kind no longer has (a binding's parameter renamed or removed, decision 10)
+		// keeps the graph GRAPH_INVALID; graph.setValues with null removes it, as it removes one on a pin the kind has.
+		TEST_CASE("GraphMethods: graph.setValues with null removes a literal on a pin its node's kind no longer has, in one undo step")
+		{
+			Test::AutomationFixture setup("GraphStaleLiteral");
+			CallOrFail(setup, "graph.create", Json{ { "path", std::string(DoorPath) } });
+			const Json graph = std::string(DoorPath);
+			GraphDocument document;
+			document.Name = "Door";
+			document.Nodes = { GraphNode{ .Id = 1, .Kind = "Event.OnStart" },
+				GraphNode{ .Id = 2, .Kind = "Call.Log.Info", .Values = { { "Values", VariantValue(Json("Opened")) }, { "clip", VariantValue(Json("Assets/Old.wav")) } } } };
+			document.Links = { GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } } };
+			WriteDoor(setup, document);
+			const Json before = CallOrFail(setup, "graph.read", Json{ { "graph", graph } });
+			REQUIRE(before["diagnostics"].size() == 1);
+			CHECK(before["diagnostics"][0]["code"] == "GRAPH_INVALID");
+			CHECK(before["diagnostics"][0]["incomplete"] == false);
+			CHECK(before["diagnostics"][0]["jsonPointer"] == "/Nodes/1/Values/clip");
+			const std::string stale = ReadDoorText(setup);
+
+			// A value on that pin, and a null on a pin that holds no literal, are refused at the pin, writing nothing.
+			for (const Json& value : { Json("Assets/New.wav"), Json() })
+			{
+				const std::string pin = value.is_null() ? "nope" : "clip";
+				Json response = setup.Request("graph.setValues", Json{ { "graph", graph }, { "values", Json::array({ { { "node", 2 }, { "pin", pin }, { "value", value } } }) } });
+				REQUIRE(response.contains("error"));
+				CHECK(response["error"]["data"]["location"]["pointer"] == "/values/0/pin");
+			}
+			CHECK(ReadDoorText(setup) == stale);
+
+			const Json cleared = CallOrFail(setup, "graph.setValues", Json{ { "graph", graph }, { "values", Json::array({ { { "node", 2 }, { "pin", "clip" }, { "value", nullptr } } }) } });
+			CHECK(JsonReader(cleared["undoIndex"]).ReadUInt32().value_or(0) > 0);
+			const Json after = CallOrFail(setup, "graph.read", Json{ { "graph", graph } });
+			CHECK(after["diagnostics"].empty());
+			CHECK(FindNode(after["document"], 2)["Values"] == Json{ { "Values", "Opened" } });
+			CallOrFail(setup, "edit.undo", Json::object());
+			CHECK(ReadDoorText(setup) == stale);
+		}
+
+		// GraphMethods.h and Architecture §13.5: a later entry for the same pin (graph.setValues) or node (graph.moveNodes) wins.
+		TEST_CASE("GraphMethods: a later entry of graph.setValues for a pin, and of graph.moveNodes for a node, wins")
+		{
+			Test::AutomationFixture setup("GraphLaterEntry");
+			CallOrFail(setup, "graph.create", Json{ { "path", std::string(DoorPath) } });
+			const Json graph = std::string(DoorPath);
+			const uint32_t log = AddNode(setup, graph, "Call.Log.Info");
+			CallOrFail(setup, "graph.setValues", Json{ { "graph", graph }, { "values", Json::array({ { { "node", log }, { "pin", "Values" }, { "value", "first" } }, { { "node", log }, { "pin", "Values" }, { "value", "second" } } }) } });
+			CallOrFail(setup, "graph.moveNodes", Json{ { "graph", graph }, { "positions", Json::array({ { { "node", log }, { "position", Json::array({ 10, 10 }) } }, { { "node", log }, { "position", Json::array({ 20, 30 }) } } }) } });
+			const Json node = FindNode(CallOrFail(setup, "graph.read", Json{ { "graph", graph } })["document"], log);
+			CHECK(node["Values"] == Json{ { "Values", "second" } });
+			CHECK(node["Position"] == Json::array({ 20, 30 }));
 		}
 
 		// The documented refusals of a graph that holds the most nodes or has no id left, and of a graph reference that names a

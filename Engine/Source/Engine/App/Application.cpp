@@ -852,15 +852,21 @@ namespace Engine {
 #if !defined(ENGINE_DIST)
 		// M24 (Docs/Decisions/0035-m24-contract.md decision 18): the UI's platform windows, each on its own submission with its
 		// own swapchain's semaphores, after the main window's present and before the pacer's end, so the slot's wait covers
-		// them. Their errors follow the main UI's rule: a Gpu error on a healthy device ends the process, one on a lost device
-		// is the loss, which the frame boundary recovers, and any other is logged once per run of failing frames. A platform
-		// window whose target runs out of memory is no error here (ImGuiPlatformWindows: only that window draws nothing).
-		if (m_ImGuiLayer != nullptr)
+		// them, on the frames whose main window is not minimized: a frame forced while it is (RequestOffscreenUiFrame) draws
+		// the main window's UI offscreen alone, and the platform windows keep their last image (decision 23). On a healthy
+		// device a recording's failure to create what it records with (OutOfMemory) ends the process as the main UI's does,
+		// and a platform window's swapchain or target failure (Gpu, never out of memory) as the main window's swapchain's does
+		// (M24's review); on a lost device a failure is the loss, which the frame boundary recovers, and any other failure is
+		// logged once per run of failing frames. A platform window whose target runs out of memory is no error here
+		// (ImGuiPlatformWindows: only that window draws nothing).
+		if (m_ImGuiLayer != nullptr && !minimized)
 		{
 			const Status platform = m_ImGuiLayer->RenderPlatformWindows(frameSlot);
 			const bool isLost = device.IsLost();
-			if (!platform.has_value() && platform.error().GetCode() == ErrorCode::Gpu && !isLost)
+			if (!platform.has_value() && platform.error().GetCode() == ErrorCode::OutOfMemory && !isLost)
 				FatalError(FatalErrorKind::OutOfMemory, std::format("Cannot render the ImGui platform windows: {}", platform.error().ToString()));
+			if (!platform.has_value() && platform.error().GetCode() == ErrorCode::Gpu && !isLost)
+				FatalError(FatalErrorKind::Gpu, std::format("Cannot present the ImGui platform windows: {}", platform.error().ToString()));
 			if (!platform.has_value() && !isLost && !rendering.IsPlatformWindowsFailing)
 				ENGINE_CORE_ERROR("Cannot render the ImGui platform windows: {}", platform.error());
 			if (!isLost)
