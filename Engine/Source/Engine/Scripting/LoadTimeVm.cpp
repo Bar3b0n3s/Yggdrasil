@@ -27,6 +27,7 @@ namespace Engine {
 		sandboxSpecification.MemoryLimitMB = specification.MemoryLimitMB;
 		sandboxSpecification.SourceModules = request.Modules;
 		sandboxSpecification.ClockSeconds = specification.ClockSeconds;
+		sandboxSpecification.Api = specification.Api;
 		ENGINE_TRY_ASSIGN(auto sandbox, Sandbox::Create(sandboxSpecification));
 		ENGINE_TRY(Detail::SandboxAccess::EnterProtected(*sandbox, ScriptExecutionOrigin::Pure));
 		struct GraphScope

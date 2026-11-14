@@ -78,6 +78,7 @@ namespace Engine {
 			const AssetLoaderRegistry* Loaders = nullptr;
 			IEnvironmentBaker* EnvironmentBaker = nullptr;
 			IScriptDiagnosticsProvider* ScriptDiagnostics = nullptr;
+			ScriptApiRegistry* LoadTimeScriptApi = nullptr;
 			Ref<AssetCache> Cache{}; // null: no cache (a dry run never stores, but may read)
 			// M8: the importer needs a GPU bake this editor cannot run (an environment without an IEnvironmentBaker, §7.4), so
 			// the import is served from any cooked bake with the same cache key before the importer is called: the source's
@@ -430,6 +431,7 @@ namespace Engine {
 				.Assets = request.Assets,
 				.EnvironmentBaker = request.EnvironmentBaker,
 				.ScriptDiagnostics = request.ScriptDiagnostics,
+				.LoadTimeScriptApi = request.LoadTimeScriptApi,
 			});
 			Result<ImportResult> imported = request.Importer->Import(context, request.Metadata);
 			output.Import.Reads = context.GetDependencyReads();
@@ -1116,6 +1118,7 @@ namespace Engine {
 				.Loaders = Specification.Loaders,
 				.EnvironmentBaker = Specification.EnvironmentBaker,
 				.ScriptDiagnostics = Specification.ScriptDiagnostics,
+				.LoadTimeScriptApi = Specification.LoadTimeScriptApi,
 				.Cache = OpenProject->Cache,
 				.ReuseBakes = reuseBakes,
 				.EngineCache = std::move(engineCache),

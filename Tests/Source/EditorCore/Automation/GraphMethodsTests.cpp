@@ -501,7 +501,7 @@ namespace Engine {
 		}
 
 		// Decision 13 and the lead's decision (d) of W24.1's review: the graph methods share the editor's one library, built at its
-		// first use from the engine's frozen script API registry (the declarations the importer's library is built from) and
+		// first use from the engine's frozen script API registry (the library the importer builds from the load-time API) and
 		// kept for the editor's lifetime, instead of building one per request.
 		TEST_CASE("GraphMethods: the editor builds its graph node library once, from the engine's script API, and keeps it")
 		{
@@ -514,6 +514,12 @@ namespace Engine {
 			const Result<Scope<GraphNodeLibrary>> fresh = GraphNodeLibrary::Create(setup.GetEditor().GetEngine().GetScriptApiRegistry());
 			REQUIRE_MESSAGE(fresh.has_value(), fresh.error().ToString());
 			CHECK((*first)->GetFingerprint() == (*fresh)->GetFingerprint());
+			// The imports build theirs from the editor's load-time script API (Docs/Decisions/0041-script-check-performance.md
+			// decision 3), which gives the same library, so the text an import compiles is the text graph.read and the export's
+			// scan transpile (decision 24).
+			const Result<Scope<GraphNodeLibrary>> imports = GraphNodeLibrary::Create(setup.GetEditor().GetLoadTimeScriptApi());
+			REQUIRE_MESSAGE(imports.has_value(), imports.error().ToString());
+			CHECK((*first)->GetFingerprint() == (*imports)->GetFingerprint());
 			// graph.nodes lists the library's kinds.
 			const Json flow = CallOrFail(setup, "graph.nodes", Json{ { "prefix", "Flow." } });
 			CHECK(flow["nodes"].size() == static_cast<size_t>(std::ranges::count_if((*first)->GetNodes(), [](const GraphNodeDescription& node)

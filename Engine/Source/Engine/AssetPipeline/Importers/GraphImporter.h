@@ -15,12 +15,14 @@ namespace Engine {
 
 	// Imports .graph into ScriptData (Asset/ScriptData.h), as ScriptImporter imports .luau, in order:
 	//   1. GraphFromText strictly (the context's registry, on which RegisterGraphTypes ran), then a GraphNodeLibrary built
-	//      from a ScriptApiRegistry of its own (RegisterBindings over the context's frozen type registry, as the load-time VM
-	//      builds one per import), then ValidateGraph: any issue fails the import with Validation, each issue located (JSON
-	//      pointer, node) and published as one GRAPH_INVALID finding of the script check below.
+	//      from the context's shared pure script API (ImportContext::GetLoadTimeScriptApi, the PureScriptApi every script
+	//      import's load-time VM borrows: Docs/Decisions/0041-script-check-performance.md decision 3), or from a PureScriptApi
+	//      built for this import when the context has none, then ValidateGraph: any issue fails the import with Validation,
+	//      each issue located (JSON pointer, node) and published as one GRAPH_INVALID finding of the script check below.
 	//   2. TranspileGraph with the source's project-relative path, then the load-time extraction of that text
 	//      (LoadTimeVm::Extract with the .graph path and the text as the request's source, which the extraction accepts as a
-	//      script source path, IsScriptSourcePath in Asset/ScriptData.h), which must give a Behaviour named the graph's Name:
+	//      script source path, IsScriptSourcePath in Asset/ScriptData.h; its VM binds the API of step 1, as ScriptImporter's
+	//      binds the context's), which must give a Behaviour named the graph's Name:
 	//      the cooked ScriptData's source map describes the transpiled text under the .graph path, so a runtime error names
 	//      "<path>:<line>" of that text (decision 8), and the script engine instantiates, caches and hot-reloads it as a .luau
 	//      behaviour.

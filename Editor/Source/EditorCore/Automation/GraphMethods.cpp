@@ -294,8 +294,8 @@ namespace Engine {
 			return &cache.Insert(std::move(key), std::move(document));
 		}
 
-		// The node library of the editor's frozen script API registry: the declarations the importer's library is built from
-		// (decision 13), built once per editor (EditorContext::GetGraphNodeLibrary).
+		// The node library of the editor's frozen script API registry, the same library the importer builds from the editor's
+		// load-time script API (decision 13), built once per editor (EditorContext::GetGraphNodeLibrary).
 		Result<const GraphNodeLibrary*> GetLibrary(EditorContext& editor)
 		{
 			return editor.GetGraphNodeLibrary();

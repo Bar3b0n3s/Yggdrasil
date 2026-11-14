@@ -222,8 +222,7 @@ namespace Engine {
 		Scope<RequireResolver> ReloadResolver{}; // staged graph, then the original graph until FinalizeReload
 		Random LocalRandom{ 0 };
 		Random ReloadRandom{ 0 };
-		Scope<TypeRegistry> OwnedTypes{};
-		Scope<ScriptApiRegistry> OwnedApi{};
+		Scope<PureScriptApi> OwnedApi{};
 		uint64_t Generation = 0;
 		uint64_t NextChunk = 1;
 		uint32_t Budget = 0;
@@ -675,6 +674,25 @@ namespace Engine {
 			Luau::assertHandler() = s_PreviousAssertHandler;
 	}
 
+	PureScriptApi::PureScriptApi(ConstructionKey /*key*/)
+	{
+	}
+
+	PureScriptApi::~PureScriptApi() = default;
+
+	Result<Scope<PureScriptApi>> PureScriptApi::Create()
+	{
+		auto pure = CreateScope<PureScriptApi>(ConstructionKey{});
+		pure->m_Types = CreateScope<TypeRegistry>();
+		// The complete API includes reflected component types and enums even when runtime dispatch is unavailable.
+		// Registration creates immutable metadata only; it neither creates a scene nor borrows a runtime host.
+		RegisterBuiltinComponents(*pure->m_Types);
+		pure->m_Types->Freeze();
+		pure->m_Api = CreateScope<ScriptApiRegistry>();
+		ENGINE_TRY(RegisterBindings(*pure->m_Api, *pure->m_Types));
+		return pure;
+	}
+
 	Sandbox::Sandbox(ConstructionKey)
 		: m_State(CreateScope<State>())
 	{
@@ -722,14 +740,8 @@ namespace Engine {
 		state.Allocator = std::move(allocator);
 		if (!state.Specification.Api)
 		{
-			state.OwnedTypes = CreateScope<TypeRegistry>();
-			// The complete API includes reflected component types and enums even when runtime dispatch is unavailable.
-			// Registration creates immutable metadata only; it neither creates a scene nor borrows a runtime host.
-			RegisterBuiltinComponents(*state.OwnedTypes);
-			state.OwnedTypes->Freeze();
-			state.OwnedApi = CreateScope<ScriptApiRegistry>();
-			ENGINE_TRY(RegisterBindings(*state.OwnedApi, *state.OwnedTypes));
-			state.Specification.Api = state.OwnedApi.get();
+			ENGINE_TRY_ASSIGN(state.OwnedApi, PureScriptApi::Create());
+			state.Specification.Api = &state.OwnedApi->GetApi();
 		}
 		if (!state.Specification.Api->IsFrozen())
 			return MakeError(ErrorCode::InvalidState, "Sandbox requires a frozen script registry");

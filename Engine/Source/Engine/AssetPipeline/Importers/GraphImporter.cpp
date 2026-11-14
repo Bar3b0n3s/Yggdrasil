@@ -10,7 +10,7 @@
 #include "Engine/Platform/ThreadClock.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scripting/LoadTimeVm.h"
-#include "Engine/Scripting/RegisterBindings.h"
+#include "Engine/Scripting/Sandbox.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 
 #include <algorithm>
@@ -155,10 +155,17 @@ namespace Engine {
 			return located(std::move(graph).error());
 		}
 
-		// The library of the script API the load-time VMs and the checker see: RegisterBindings over the frozen types.
-		ScriptApiRegistry api;
-		ENGINE_TRY(RegisterBindings(api, types));
-		ENGINE_TRY_ASSIGN(const Scope<GraphNodeLibrary> library, GraphNodeLibrary::Create(api));
+		// The script API the library is built from and the load-time VM binds: the context's shared pure API, as a .luau import's
+		// VM borrows it (Docs/Decisions/0041-script-check-performance.md decision 3), or, in a context without one (a test or a
+		// tool), one built for this import, which both then use.
+		Scope<PureScriptApi> ownApi;
+		ScriptApiRegistry* api = context.GetLoadTimeScriptApi();
+		if (api == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(ownApi, PureScriptApi::Create());
+			api = &ownApi->GetApi();
+		}
+		ENGINE_TRY_ASSIGN(const Scope<GraphNodeLibrary> library, GraphNodeLibrary::Create(*api));
 		const std::vector<GraphIssue> issues = ValidateGraph(*graph, *library);
 		if (!issues.empty())
 		{
@@ -201,8 +208,8 @@ namespace Engine {
 				return located(std::move(error).WithContext(prefix.substr(0, prefix.size() - 2)));
 			return located(std::move(error));
 		};
-		// The load-time VM's budget counts this import thread's CPU time, as ScriptImporter's does.
-		Result<Ref<const ScriptData>> extracted = LoadTimeVm::Extract(request, LoadTimeVmSpecification{ .ClockSeconds = &ThreadClock::GetCpuSeconds });
+		// The load-time VM's budget counts this import thread's CPU time, as ScriptImporter's does, and it binds the API above.
+		Result<Ref<const ScriptData>> extracted = LoadTimeVm::Extract(request, LoadTimeVmSpecification{ .ClockSeconds = &ThreadClock::GetCpuSeconds, .Api = api });
 		if (!extracted.has_value())
 			return fail(std::move(extracted).error());
 		const ScriptData& script = **extracted;

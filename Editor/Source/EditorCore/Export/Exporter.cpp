@@ -1206,9 +1206,10 @@ namespace Engine {
 		}
 
 		// The transpiled text of a graph source (decision 24): read strictly with the editor's types, transpiled against one
-		// library per export, built from the editor's frozen script API registry (the declarations the importer's library and
-		// the checker's environment hash come from). A graph that does not read or transpile fails the export, located at its
-		// source, as a .luau source the Luau parser rejects does; its import has failed too (GRAPH_INVALID).
+		// library per export, built from the editor's frozen script API registry (the declarations the checker's environment
+		// hash comes from, giving the library the importer builds from the editor's load-time script API). A graph that does not
+		// read or transpile fails the export, located at its source, as a .luau source the Luau parser rejects does; its import
+		// has failed too (GRAPH_INVALID).
 		[[nodiscard]] Result<std::string> TranspileGraphSource(std::string_view source, std::string_view path)
 		{
 			if (!GraphLibrary)

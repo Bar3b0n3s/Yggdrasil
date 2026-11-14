@@ -122,8 +122,8 @@ namespace Engine {
 		};
 		// The load-time VM's 250 ms budget counts this import thread's own CPU time, not wall time, so an import never fails
 		// because other threads kept the machine busy or the thread waited (ADR 0022 "Integration"): importers are pure
-		// functions of their inputs (Architecture §7.4).
-		auto extracted = LoadTimeVm::Extract(request, LoadTimeVmSpecification{ .ClockSeconds = &ThreadClock::GetCpuSeconds });
+		// functions of their inputs (Architecture §7.4). It binds the context's shared pure API when the editor gave one.
+		auto extracted = LoadTimeVm::Extract(request, LoadTimeVmSpecification{ .ClockSeconds = &ThreadClock::GetCpuSeconds, .Api = context.GetLoadTimeScriptApi() });
 		if (!extracted)
 			return fail(std::move(extracted).error());
 		ScriptData script = **extracted;

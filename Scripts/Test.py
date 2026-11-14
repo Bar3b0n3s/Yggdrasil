@@ -36,9 +36,10 @@ suite named in --suite must take every configuration --config names (a usage err
 all, each suite runs in the requested configurations it takes and reports each other one as a "skipped" step ("not run
 in <Config>"), so `--config Debug` runs every suite that has a Debug run.
 A suite that does not exist yet is reported with the distinct status "not-available"; it neither passes nor fails.
-Without --timeout every run is bounded by 1800 s (SUITE_TIMEOUT_SECONDS), except the Debug unit and automation runs, by
-3600 s each (DEBUG_UNIT_TIMEOUT_SECONDS, DEBUG_AUTOMATION_TIMEOUT_SECONDS; Docs/Decisions/0039-script-budget-cpu-time.md
-decision 5); a bound only catches a hang.
+Without --timeout every run is bounded by 1800 s (SUITE_TIMEOUT_SECONDS), except the Debug unit run, by 3600 s, and the
+Debug automation run, by 7200 s, which took 3,210 s at the phase-3 setup gate on 2026-11-11 (DEBUG_UNIT_TIMEOUT_SECONDS,
+DEBUG_AUTOMATION_TIMEOUT_SECONDS; Docs/Decisions/0039-script-budget-cpu-time.md decision 5); a bound only catches a
+hang.
 
 GPU and golden runs (Docs/Decisions/0009-m5-decisions.md decision 14): a test case without a usable Vulkan device passes
 after logging that it found none, unless --require-gpu is given (CI.py and PreCommit.py pass it unless they get
@@ -88,9 +89,11 @@ decision 16):
     debug.* test hooks), and the run fails naming every registered method no Python test called. With --filter the
     gate is not checked, because a partial run cannot cover every method.
   - --filter takes comma-separated unittest -k patterns on test ids ("test_batch", "*Launcher*,test_client").
-  - Without --timeout, the Debug run is bounded by 3600 s (DEBUG_AUTOMATION_TIMEOUT_SECONDS, more than twice the
-    1,562 s it took on an unloaded machine; Docs/Decisions/0039-script-budget-cpu-time.md decision 5) and the Release
-    run, like every other run, by 1800 s (SUITE_TIMEOUT_SECONDS); the bound only catches a hang.
+  - Without --timeout, the Debug run is bounded by 7200 s (DEBUG_AUTOMATION_TIMEOUT_SECONDS: it took 1,562 s on an
+    unloaded machine and 3,210 s at the phase-3 setup gate on 2026-11-11, with the scaffold check's 1,800 s bound
+    inside it, so the bound stays above that test's own bound, now 3,600 s, plus the rest of the suite;
+    Docs/Decisions/0039-script-budget-cpu-time.md decision 5) and the Release run, like every other run, by 1800 s
+    (SUITE_TIMEOUT_SECONDS); the bound only catches a hang.
   - Tests that need a rendering editor (the screenshot methods, Docs/Decisions/0009-m5-decisions.md decision 33) probe
     for a Vulkan device first (Tests/Automation/harness.py, require_gpu). Without one they print the GPU suite's
     no-device line and pass without running, which ends the run with the status "warning" like a gpu run; with
@@ -298,10 +301,13 @@ from Lib.report import (
 )
 
 SUITE_TIMEOUT_SECONDS = 1800.0
-# The Debug automation suite's bound without --timeout (Docs/Decisions/0039-script-budget-cpu-time.md decision 5): that
-# run took 1,562 s on an unloaded machine, so SUITE_TIMEOUT_SECONDS timed it out beside PreCommit's other suites; this
-# is more than twice the unloaded time. Like every run's bound, it only catches a hang.
-DEBUG_AUTOMATION_TIMEOUT_SECONDS = 3600.0
+# The Debug automation suite's bound without --timeout (Docs/Decisions/0039-script-budget-cpu-time.md decision 5 and its
+# 2026-11-11 amendment): that run took 1,562 s on an unloaded machine, so SUITE_TIMEOUT_SECONDS timed it out beside
+# PreCommit's other suites. At the phase-3 setup gate (2026-11-11) it took 3,210 s, of which 1,800 s were the
+# byte-for-byte scaffold check reaching its own bound (SCAFFOLD_CHECK_TIMEOUT_SECONDS in
+# Tests/Automation/test_feature_test.py, now 3,600 s); this stays above that test's bound plus the rest of the suite,
+# about 1,410 s at that gate. Like every run's bound, it only catches a hang.
+DEBUG_AUTOMATION_TIMEOUT_SECONDS = 7200.0
 # The Debug unit suite's bound without --timeout (the same decision): that run took 1,212 s beside the phase's other
 # worktrees and passed SUITE_TIMEOUT_SECONDS under heavier load; this is three times its unloaded time of about 880 s.
 DEBUG_UNIT_TIMEOUT_SECONDS = 3600.0

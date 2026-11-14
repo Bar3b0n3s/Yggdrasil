@@ -2,11 +2,18 @@
 
 #include "Engine/AssetPipeline/Importers/GraphImporter.h"
 
+#include "EditorCore/Scripting/ScriptTypeChecker.h"
 #include "Engine/Asset/IScriptDiagnosticsProvider.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
+#include "Engine/AssetPipeline/Importers/ScriptImporter.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/RegisterBindings.h"
+#include "Engine/Scripting/Sandbox.h"
+#include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/SceneTestFixture.h"
 
 #include <doctest/doctest.h>
 
@@ -16,6 +23,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <utility>
 #include <vector>
 
 // GraphImporter (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decision 9, stream G-B), over stream G-A's document.
@@ -196,6 +205,110 @@ namespace Engine {
 			REQUIRE(check->Diagnostics.size() == 1);
 			CHECK(check->Diagnostics.front().Code == GraphInvalidCode);
 			CHECK(check->Diagnostics.front().Line == 0);
+		}
+
+		// Docs/Decisions/0041-script-check-performance.md decision 3, redone for graphs at M24's landing: a graph's import built a
+		// script API registry of its own for its node library and let its load-time VM build another. It borrows the context's
+		// shared pure API for both, as a .luau import's VM does, on any import thread, and its check by the same checker records
+		// the environment hash a .luau import records.
+		TEST_CASE("GraphImporter: a graph import borrows the context's pure script API and records the environment hash a .luau import records")
+		{
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Scripts/Jingle.graph", JingleGraph);
+			fixture.WriteProjectText("Assets/Scripts/Tune.luau", "--!strict\nlocal Tune = { Fields = { Volume = Field.Number(1) } }\nreturn Script.Define('Tune', Tune)\n");
+			const std::vector<ImportAssetLookupEntry> assets = {
+				{ .SourcePath = fixture.ProjectPath("Assets/Audio/Beep.sfx"), .Handle = BeepHandle, .Kind = AssetMetaKind::Asset, .Type = AssetType::AudioClip },
+			};
+			struct Imported
+			{
+				std::optional<ImportResult> Result{};
+				std::optional<ScriptImportCheck> Check{};
+			};
+			// Runs on worker threads too, so it makes no doctest assertion: its sources are read beforehand.
+			const auto import = [&fixture, &assets](const IAssetImporter& importer, const VfsPath& path, const Buffer& source, const AssetMetadata& metadata,
+									IScriptDiagnosticsProvider* provider, ScriptApiRegistry* api)
+			{
+				ImportContext context({ .Vfs = &fixture.GetVfs(), .SourcePath = path, .SourceBytes = source, .Registry = &fixture.GetRegistry(), .Assets = assets, .ScriptDiagnostics = provider, .LoadTimeScriptApi = api });
+				Result<ImportResult> result = importer.Import(context, metadata);
+				Imported imported{ .Check = context.GetScriptCheck() };
+				if (result)
+					imported.Result = std::move(*result);
+				return imported;
+			};
+			const VfsPath graphPath = fixture.ProjectPath("Assets/Scripts/Jingle.graph");
+			const Buffer graph = fixture.ReadProjectFile("Assets/Scripts/Jingle.graph");
+			const VfsPath tunePath = fixture.ProjectPath("Assets/Scripts/Tune.luau");
+			const Buffer tune = fixture.ReadProjectFile("Assets/Scripts/Tune.luau");
+			const AssetMetadata tuneMetadata{ .Handle = AssetHandle(0x6a7a000000000002ull), .Type = AssetType::Script, .Importer = std::string(ScriptImporter::Id), .ImporterVersion = ScriptImporter::Version };
+			const GraphImporter graphImporter;
+			auto pure = PureScriptApi::Create();
+			REQUIRE(pure);
+
+			// Two imports borrow the one API at the same time, each on its own thread, as import jobs do, and cook what an import
+			// with an API of its own cooks.
+			const Imported own = import(graphImporter, graphPath, graph, GraphMetadata(), nullptr, nullptr);
+			REQUIRE(own.Result.has_value());
+			std::array<Imported, 2> shared;
+			{
+				std::jthread first([&shared, &import, &graphImporter, &graphPath, &graph, &pure]()
+				{
+					shared[0] = import(graphImporter, graphPath, graph, GraphMetadata(), nullptr, &(*pure)->GetApi());
+				});
+				std::jthread second([&shared, &import, &graphImporter, &graphPath, &graph, &pure]()
+				{
+					shared[1] = import(graphImporter, graphPath, graph, GraphMetadata(), nullptr, &(*pure)->GetApi());
+				});
+			}
+			for (const Imported& borrowed : shared)
+			{
+				REQUIRE(borrowed.Result.has_value());
+				REQUIRE(borrowed.Result->Artifacts.size() == 1);
+				CHECK(borrowed.Result->Artifacts[0].Handle == own.Result->Artifacts[0].Handle);
+				CHECK(borrowed.Result->Artifacts[0].Cooked == own.Result->Artifacts[0].Cooked);
+				CHECK(borrowed.Result->Dependencies == own.Result->Dependencies);
+				REQUIRE(borrowed.Check.has_value());
+				REQUIRE(own.Check.has_value());
+				CHECK(borrowed.Check->SourceHash == own.Check->SourceHash);
+				CHECK(borrowed.Check->Diagnostics == own.Check->Diagnostics);
+			}
+
+			// One checker checks a .luau import and the graph's text, both borrowing the API: the two checks record the checker's
+			// environment hash, and the graph's check takes the frontend the checker prepared, as the .luau one does.
+			Scope<TypeRegistry> types = Test::CreateBuiltinRegistry();
+			ScriptApiRegistry declarations;
+			REQUIRE(RegisterBindings(declarations, *types));
+			Result<ScriptTypeCheckerConfiguration> configuration = ScriptTypeChecker::CaptureConfiguration(fixture.GetVfs());
+			REQUIRE(configuration);
+			Result<Scope<ScriptTypeChecker>> checker = ScriptTypeChecker::Create(declarations, std::move(*configuration));
+			REQUIRE(checker);
+			const Imported script = import(ScriptImporter(), tunePath, tune, tuneMetadata, checker->get(), &(*pure)->GetApi());
+			const Imported checked = import(graphImporter, graphPath, graph, GraphMetadata(), checker->get(), &(*pure)->GetApi());
+			REQUIRE(script.Result.has_value());
+			REQUIRE(checked.Result.has_value());
+			REQUIRE(script.Check.has_value());
+			REQUIRE(checked.Check.has_value());
+			CHECK(script.Check->Performed);
+			CHECK(checked.Check->Performed);
+			CHECK(script.Check->EnvironmentHash == (*checker)->GetEnvironmentHash());
+			CHECK(checked.Check->EnvironmentHash == script.Check->EnvironmentHash);
+			CHECK(checked.Check->Diagnostics.empty());
+			CHECK(checked.Result->Artifacts[0].Cooked == own.Result->Artifacts[0].Cooked);
+			CHECK((*checker)->GetStatistics().Checks == 2);
+			CHECK((*checker)->GetStatistics().DefinitionLoads == 1);
+
+			// The import builds its library from, and extracts its text with, the API it borrows: one without the bindings has no
+			// node of the graph's kinds, so the graph does not validate.
+			TypeRegistry bareTypes;
+			bareTypes.Freeze();
+			ScriptApiRegistry bare;
+			REQUIRE(bare.Freeze(bareTypes));
+			const Imported unbound = import(graphImporter, graphPath, graph, GraphMetadata(), nullptr, &bare);
+			CHECK_FALSE(unbound.Result.has_value());
+			REQUIRE(unbound.Check.has_value());
+			CHECK(std::ranges::any_of(unbound.Check->Diagnostics, [](const ScriptDiagnostic& diagnostic)
+			{
+				return diagnostic.Code == GraphInvalidCode;
+			}));
 		}
 
 		// Docs/Decisions/0035-m24-contract.md risk 1: a graph whose text exceeds a limit of Luau's (here a function's 200 locals,
