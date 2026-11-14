@@ -44,6 +44,15 @@ namespace Engine {
 					std::format("Could not start job worker thread {} of {}: {}", workerIndex + 1, workerCount, error.what()));
 			}
 		}
+
+		// Each worker names itself first, which registers its profiler ring outside Dist (Profiler::SetThreadName), so every
+		// ring is allocated here, when the system starts, and never later at a worker's first job, whose moment the
+		// operating system's wake order decides (Docs/Decisions/0036-m25-tetris-pixel-art.md, "The soak").
+		std::unique_lock lock(m_Mutex);
+		m_WorkerStarted.wait(lock, [this]()
+		{
+			return m_StartedWorkerCount == m_WorkerCount;
+		});
 	}
 
 	JobSystem::~JobSystem()
@@ -156,6 +165,11 @@ namespace Engine {
 		try
 		{
 			Profiler::SetThreadName(std::format("Job {}", workerIndex + 1));
+			{
+				std::scoped_lock lock(m_Mutex);
+				++m_StartedWorkerCount;
+				m_WorkerStarted.notify_all();
+			}
 			for (;;)
 			{
 				Scope<Detail::JobTask> task;

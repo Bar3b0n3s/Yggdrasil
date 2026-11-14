@@ -132,6 +132,26 @@ namespace Engine {
 				CHECK(zones[index - 1].BeginNs <= zones[index].BeginNs);
 		}
 
+		TEST_CASE("Profiler: a thread that names itself holds its ring before it records a zone")
+		{
+			// ADR 0036, "The soak": a long-lived thread's ring is allocated when the thread names itself, not at its first
+			// zone, whose moment the operating system's scheduling decides for a JobSystem worker.
+			const ScopedProfiler profiler;
+			const ProfilerCaptureMark before = Profiler::MarkCapture();
+			std::thread worker([]()
+			{
+				Profiler::SetThreadName("ProfilerTests named");
+			});
+			worker.join();
+
+			// The named thread's ring is held (an exited thread's ring stays, Profiler.h), last in registration order, with
+			// no zone recorded, and the export names it.
+			const ProfilerCaptureMark after = Profiler::MarkCapture();
+			REQUIRE(after.ThreadZones.size() == before.ThreadZones.size() + 1);
+			CHECK(after.ThreadZones.back().second == 0);
+			CHECK(Profiler::ExportChromeTrace().find("\"ProfilerTests named\"") != std::string::npos);
+		}
+
 		TEST_CASE("Profiler: zones of exited threads stay collectable")
 		{
 			constexpr size_t ThreadCount = 4;

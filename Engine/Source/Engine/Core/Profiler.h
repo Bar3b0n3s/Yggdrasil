@@ -63,8 +63,9 @@ namespace Engine {
 	};
 
 	// The profiler's buffers are process-level state, like the logger registry: ENGINE_PROFILE_SCOPE takes no context
-	// argument, so each thread records into its own thread-local ring, registered with the process-wide profiler on
-	// first use. ProcessContext (or the Tests main) initializes it.
+	// argument, so each thread records into its own thread-local ring, registered with the process-wide profiler when the
+	// thread names itself (SetThreadName, outside Dist) or else on its first zone. ProcessContext (or the Tests main)
+	// initializes it.
 	// Thread safety, with the same ordering rule as Log: Initialize and Shutdown create and free every ring, so they run
 	// only while no other thread records or calls the profiler (at process start and end, before the first and after
 	// the last worker thread; a test that cycles them does so on its only recording thread). Every other member is
@@ -86,7 +87,11 @@ namespace Engine {
 		static void Shutdown();
 		[[nodiscard]] static bool IsInitialized();
 
-		// Names the calling thread in exports ("Main", "Job 3"). The name is copied.
+		// Names the calling thread in exports ("Main", "Job 3"). The name is copied. Outside Dist, a thread without a ring
+		// of the current initialization also registers its ring now (ZonesPerThread zones, 2 MiB by default), so a
+		// long-lived thread that names itself when it starts (the main thread, each JobSystem worker) holds its ring
+		// from then on rather than from its first zone, whose moment the operating system's scheduling can decide. Dist
+		// records no zone, so there it only keeps the name.
 		static void SetThreadName(std::string_view name);
 
 		// Records a completed CPU zone on the calling thread; ProfileScope calls it. `name` must have static storage
