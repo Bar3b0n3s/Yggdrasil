@@ -113,6 +113,21 @@ namespace Engine {
 			return reinterpret_cast<HANDLE>(_get_heap_handle()) == GetProcessHeap();
 		}
 
+		void ProcessHeapBlockFreer::operator()(void* block) const
+		{
+			if (HeapFree(GetProcessHeap(), 0, block) == FALSE)
+				ENGINE_CORE_ERROR("Freeing a block of the process heap failed: {}", Utils::DescribeLastError());
+		}
+
+		Result<ProcessHeapBlock> AllocateOnProcessHeap(size_t bytes)
+		{
+			// HeapAlloc without HEAP_GENERATE_EXCEPTIONS reports a failure only by returning null, without a last error.
+			ProcessHeapBlock block(HeapAlloc(GetProcessHeap(), 0, bytes));
+			if (block == nullptr)
+				return MakeError(ErrorCode::Io, "cannot allocate {} bytes on the process heap", bytes);
+			return block;
+		}
+
 		Result<std::string> ReadFileDenyingWriters(const std::filesystem::path& file)
 		{
 			const HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,

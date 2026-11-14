@@ -12,7 +12,9 @@
 // the NVIDIA driver's one-off background shader compilation commits in heaps of its own fails no subject
 // (Docs/Decisions/0036-m25-tetris-pixel-art.md, "Landing", "The soak", A-prime). Windows backend only (ADR 0028
 // decision 10): HeapSummary on the process heap, the heap the Universal CRT allocates from, whose committed size includes
-// its large blocks; Linux and macOS report ErrorCode::Unsupported.
+// its large blocks; Linux and macOS report ErrorCode::Unsupported. In the hardening stage's AddressSanitizer build the
+// sanitizer's runtime serves malloc, operator new and HeapAlloc from its own allocator, so the measure leaves those
+// allocations out there (the soak never runs on that build).
 
 namespace Engine {
 

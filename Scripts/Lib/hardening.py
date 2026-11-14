@@ -171,6 +171,10 @@ SOAK_GROWTH_LIMIT = 0.01  # memory growth must stay below 1 %
 # nothing.
 SOAK_MEASURE_HEAP = "heap"
 SOAK_MEASURE_PRIVATE = "private"
+# What a memory line says its growth is held to: the rule's limit, or the threshold of a heap-measured subject's private
+# memory warning, which fails nothing.
+SOAK_LIMIT_TEXT = f"the limit is < {SOAK_GROWTH_LIMIT * 100:.0f} %"
+SOAK_WARNING_TEXT = f"it warns at {SOAK_GROWTH_LIMIT * 100:.0f} % or more"
 # The project directory, scene directory and project file the soak reads.
 SOAK_PROJECTS_DIRECTORY = "Projects"
 SOAK_SCENES_DIRECTORY = "Assets/Scenes"
@@ -726,10 +730,12 @@ def evaluate_script_heap(heap: list[tuple[float, int]]) -> str | None:
     return None
 
 
-def _memory_growth(label: str, baseline: list[int], final: list[int]) -> tuple[float, str | None, str | None]:
-    """(growth, the line naming the growth with its window values, or None when the baseline is not positive, and the
-    failure line of a baseline that is not positive, else None) of the memory values of `baseline` and `final` (both
-    not empty): the median of the baseline window against the maximum of the final window."""
+def _memory_growth(label: str, baseline: list[int], final: list[int],
+                   bound: str = SOAK_LIMIT_TEXT) -> tuple[float, str | None, str | None]:
+    """(growth, the line naming the growth with its window values and `bound`, what the growth is held to, or None when
+    the baseline is not positive, and the failure line of a baseline that is not positive, else None) of the memory
+    values of `baseline` and `final` (both not empty): the median of the baseline window against the maximum of the
+    final window."""
     baseline_value = statistics.median(baseline)
     final_value = max(final)
     if baseline_value <= 0:
@@ -737,7 +743,7 @@ def _memory_growth(label: str, baseline: list[int], final: list[int]) -> tuple[f
     growth = (final_value - baseline_value) / baseline_value
     line = (f"{label} grew {growth * 100:.2f} % (baseline median {int(baseline_value)} bytes in "
             f"{_describe_window(SOAK_BASELINE_WINDOW)}, final maximum {final_value} bytes in "
-            f"{_describe_window(SOAK_FINAL_WINDOW)}; the limit is < {SOAK_GROWTH_LIMIT * 100:.0f} %)")
+            f"{_describe_window(SOAK_FINAL_WINDOW)}; {bound})")
     return growth, line, None
 
 
@@ -765,7 +771,7 @@ def evaluate_soak(subject: str, samples: list[SoakSample]) -> SoakResult:
         growth in bytes over the baseline private bytes (_heap_growth), and then a private_bytes growth of
         SOAK_GROWTH_LIMIT or more is a warning line (SoakResult.warnings), which fails nothing; without the heap value
         in any sample (the Runtime soak, an editor without the measure) it measures private_bytes. A subject with the
-        heap value in some samples but not all fails, naming how many lack it, since its rule would measure two things
+        heap value in some samples but not all fails, naming how many have it, since its rule would measure two things
         (its private growth is then reported as its growth);
       - script heap (a garbage-collected sawtooth): floors compared with floors, evaluate_script_heap (the lowest
         post-collection trough of the last quarter against that of 0.25 to 0.75, within soak_heap_tolerance(); a
@@ -792,7 +798,8 @@ def evaluate_soak(subject: str, samples: list[SoakSample]) -> SoakResult:
     private_growth = 0.0
     if baseline and final:
         private_growth, private_line, private_failure = _memory_growth(
-            "private memory", [sample.private_bytes for sample in baseline], [sample.private_bytes for sample in final])
+            "private memory", [sample.private_bytes for sample in baseline], [sample.private_bytes for sample in final],
+            SOAK_WARNING_TEXT if measure == SOAK_MEASURE_HEAP else SOAK_LIMIT_TEXT)
         if measure == SOAK_MEASURE_HEAP:
             if private_failure is not None:
                 failures.append(private_failure)  # the heap's bound derives from the baseline private bytes

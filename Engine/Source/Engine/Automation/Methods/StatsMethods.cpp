@@ -145,11 +145,13 @@ namespace Engine {
 			.Field("scriptSoftLimitBytes", &StatsGetResult::ScriptSoftLimitBytes, "Approximate script heap soft limit in bytes when available.")
 			.Field("scriptHardLimitBytes", &StatsGetResult::ScriptHardLimitBytes, "Approximate script heap hard limit in bytes when available.")
 			.Field("processHeapAvailable", &StatsGetResult::ProcessHeapAvailable,
-				"Whether the host measures the heap the C runtime allocates from; false on Linux and macOS, which have no measure.")
+				"Whether the host measured the heap the C runtime allocates from: false on Linux and macOS, which have no measure, and "
+				"when the query fails.")
 			.Field("processHeapCommittedBytes", &StatsGetResult::ProcessHeapCommittedBytes,
 				"Approximate committed bytes of the heap the C runtime allocates from (malloc and new: the engine's own memory and that of "
 				"every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. "
-				"What a graphics driver keeps in allocations of its own is not in it. The hardening soak's memory rule measures it.")
+				"What a graphics driver keeps in allocations of its own is not in it, nor, in an AddressSanitizer build, what the C "
+				"runtime or HeapAlloc allocates, which the sanitizer's allocator serves. The hardening soak's memory rule measures it.")
 			.Field("memoryAllocationCount", &StatsGetResult::MemoryAllocationCount, "Current Vulkan device memory allocation count.")
 			.Field("maxMemoryAllocationCount", &StatsGetResult::MaxMemoryAllocationCount, "Vulkan device allocation limit, zero without a device.")
 			.Field("views", &StatsGetResult::Views,

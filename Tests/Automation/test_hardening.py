@@ -720,8 +720,9 @@ class SoakTests(unittest.TestCase):
         self.assertGreaterEqual(result.private_growth, hardening.SOAK_GROWTH_LIMIT)
         self.assertEqual(len(result.warnings), 1, result.warnings)
         for text in (f"private memory grew {result.private_growth * 100:.2f} %", "350000000 bytes in 0.50-0.55",
-                     f"{350_000_000 + (12 << 20)} bytes in 0.95-1.00"):
+                     f"{350_000_000 + (12 << 20)} bytes in 0.95-1.00", "warns at 1 % or more"):
             self.assertIn(text, result.warnings[0])
+        self.assertNotIn("the limit is", result.warnings[0])  # a passing subject broke no limit
         # A private growth below the limit warns of nothing.
         flat = [sample(tick, 350_000_000, heap=200_000_000) for tick in ticks]
         self.assertEqual(hardening.evaluate_soak("FeatureTest:Assets/Scenes/SceneLoadB.scene", flat).warnings, ())
@@ -780,6 +781,7 @@ class SoakTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.measure, hardening.SOAK_MEASURE_PRIVATE)
         self.assertIn("private memory grew", result.failures[0])
+        self.assertIn("the limit is < 1 %", result.failures[0])
         self.assertEqual(result.growth, result.private_growth)
         self.assertEqual(result.warnings, ())
 
@@ -1615,6 +1617,23 @@ class SoakDeadlineTests(unittest.TestCase):
         document = json.loads(report.read_text(encoding="utf-8"))
         self.assertEqual([entry["Measure"] for entry in document["Subjects"]], ["heap", "heap"])
         self.assertEqual(len(document["Subjects"][0]["Warnings"]), 1)
+        # The JUnit report keeps each subject's growth and its warning lines.
+        cases = {case.get("name"): case for case in ElementTree.parse(junit).getroot().iter("testcase")}
+        warned = cases["FeatureTest:A.scene"].findtext("system-out") or ""
+        self.assertIn("heap growth", warned)
+        self.assertIn("warning: private memory grew", warned)
+        self.assertNotIn("warning:", cases["FeatureTest:B.scene"].findtext("system-out") or "")
+        # A failed or timed-out step counts the warning too, and the warning leaves its status as it was.
+        grown = [sample(tick, 350_000_000, heap=200_000_000 + (10_000_000 if tick >= 9500 else 0)) for tick in ticks]
+        failed = hardening_script.SoakOutcome(
+            results=[*outcome.results, hardening.evaluate_soak("FeatureTest:C.scene", grown)])
+        timed_out = hardening_script.SoakOutcome(results=list(outcome.results), not_run=["Runtime:FeatureTest"],
+                                                 timed_out=True)
+        for name, other, status in (("failed", failed, Status.FAILED), ("timed out", timed_out, Status.TIMEOUT)):
+            with self.subTest(step=name):
+                step = hardening_script.soak_step("soak Release", other, 10.0, None, report, junit)
+                self.assertEqual(step.status, status)
+                self.assertIn("1 subject(s) with a private memory warning", step.detail)
 
     def test_the_reports_are_written_when_a_subject_raises(self) -> None:
         deadline = hardening_script.SoakDeadline(1000.0, FakeClock())

@@ -71,7 +71,7 @@ namespace Engine {
 		float ScriptHardLimitBytes = 0.0f;
 		// M25's soak (Docs/Decisions/0036-m25-tetris-pixel-art.md, "The soak"): the committed bytes of the heap the C runtime
 		// allocates from (ProcessHeap, Platform/ProcessHeap.h), which the hardening soak's memory rule measures; false and 0
-		// where the platform has no measure (Linux and macOS, ADR 0028 decision 10).
+		// where the platform has no measure (Linux and macOS, ADR 0028 decision 10) and when the query fails.
 		bool ProcessHeapAvailable = false;
 		float ProcessHeapCommittedBytes = 0.0f;
 		uint32_t MemoryAllocationCount = 0;

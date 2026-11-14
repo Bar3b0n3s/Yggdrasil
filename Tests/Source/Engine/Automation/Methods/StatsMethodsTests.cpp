@@ -144,7 +144,14 @@ namespace Engine {
 			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 #if defined(ENGINE_PLATFORM_WINDOWS)
 			CHECK((*result)["processHeapAvailable"] == Json(true));
+	#if defined(__SANITIZE_ADDRESS__)
+			// The AddressSanitizer build serves malloc, operator new and HeapAlloc from the sanitizer's allocator, so the
+			// process heap holds only what Windows allocates on it below those hooks, a few hundred KiB ("ProcessHeap: the
+			// AddressSanitizer build allocates outside the process heap").
+			CHECK((*result)["processHeapCommittedBytes"] > Json(0));
+	#else
 			CHECK((*result)["processHeapCommittedBytes"] > Json(1024 * 1024));
+	#endif
 #else
 			CHECK((*result)["processHeapAvailable"] == Json(false));
 			CHECK((*result)["processHeapCommittedBytes"] == Json(0));
