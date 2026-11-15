@@ -3601,6 +3601,44 @@
 			}
 		},
 		{
+			"ID": "3bcf349cea691130",
+			"Name": "TotalText",
+			"Parent": "2001858c639c69e9",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PrefabLink": {
+					"PrefabEntityID": "59a277b10d5104ce",
+					"InstanceRoot": "2001858c639c69e9",
+					"OuterPrefabEntityID": null
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 56],
+					"Size": [320, 26],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "TOTAL 0:00.0",
+					"Font": null,
+					"Size": 18,
+					"Color": [0.8, 0.82, 0.85, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": false
+				}
+			}
+		},
+		{
 			"ID": "bd351a6facef8f81",
 			"Name": "Banner",
 			"Parent": "2001858c639c69e9",

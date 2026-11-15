@@ -1,9 +1,10 @@
 --!strict
 -- Rolling Ball's integration suite (ADR 0038 decision 10): the main-path support check and the HUD's level and par on
 -- every level, the respawn at the last checkpoint, the CHECKPOINT banner, the goal and the timer carried across
--- Scene.Load, the lift carrying the ball, a platform's phased start, and Restart. The cases share one session and cross
--- the levels by Scene.Load: a transition requested in a fixed step applies after the requesting tick, so the case
--- during which one is requested returns in that tick, and the next case runs in the new scene's VM.
+-- Scene.Load, the HUD's clock (the level's own time, from 0:00.0 on every level) above its total (the run's time), the
+-- lift carrying the ball, a platform's phased start, and Restart. The cases share one session and cross the levels by
+-- Scene.Load: a transition requested in a fixed step applies after the requesting tick, so the case during which one
+-- is requested returns in that tick, and the next case runs in the new scene's VM.
 local Actions = require("../Scripts/Actions")
 local BallScript = require("../Scripts/Ball")
 local Clock = require("../Scripts/Clock")
@@ -202,6 +203,8 @@ return Test.Suite("RollingBall", function()
 		local stopped = current.TotalTicks
 		Test.WaitTicks(10)
 		Test.ExpectEqual(current.TotalTicks, stopped, "the timer stopped")
+		-- A run's first level: the run's time is the level's own, so the total reads the stopped level time.
+		Test.ExpectEqual(hudText("TotalText"), "TOTAL " .. Clock.Format(current.Ticks), "on Level 1 the HUD's total is the level's own time")
 		Test.Expect(string.sub(hudText("BannerText"), 1, 14) == "LEVEL COMPLETE", "the banner reads LEVEL COMPLETE: " .. hudText("BannerText"))
 		Test.WaitUntil(function()
 			return current.LoadRequested
@@ -219,7 +222,10 @@ return Test.Suite("RollingBall", function()
 		local before = current.TotalTicks
 		Test.WaitTicks(60)
 		Test.ExpectEqual(current.TotalTicks, before + 60, "the timer counts on")
-		Test.ExpectEqual(hudText("TimeText"), Clock.Format(current.TotalTicks), "the HUD shows the run's time")
+		-- The clock players watch is the level's own, so it compares with the par beneath it; the run's time, carried
+		-- across Scene.Load, is the total.
+		Test.ExpectEqual(hudText("TimeText"), Clock.Format(current.Ticks), "the HUD's clock shows the level's own time")
+		Test.ExpectEqual(hudText("TotalText"), "TOTAL " .. Clock.Format(current.TotalTicks), "the HUD's total shows the run's time")
 	end)
 
 	Test.Case("Level 2: the HUD shows the level and its par", function()
@@ -304,6 +310,8 @@ return Test.Suite("RollingBall", function()
 		Test.ExpectEqual(current.StartTicks, carried, "the timer starts again from the carried time")
 		Test.Expect(current.Ticks < 10, string.format("the level's own time starts again (%d ticks)", current.Ticks))
 		Test.ExpectEqual(current.TotalTicks, current.StartTicks + current.Ticks, "the run's time is the carried time plus the level's")
+		Test.Expect(string.sub(hudText("TimeText"), 1, 5) == "0:00.", "the HUD's clock starts again under one second: " .. hudText("TimeText"))
+		Test.ExpectEqual(hudText("TotalText"), "TOTAL " .. Clock.Format(current.StartTicks + current.Ticks), "the HUD's total is the time Level 2 was entered with plus its new ticks")
 		Test.ExpectEqual(ball.Respawns, 0, "the ball starts afresh")
 		Test.ExpectEqual(ball.LastOrder, 0, "no checkpoint is touched")
 		Test.ExpectNear(ballEntity.Transform.WorldPosition, ball.Spawn, 0.15, "the ball is back at the level's start")
@@ -320,7 +328,12 @@ return Test.Suite("RollingBall", function()
 	Test.Case("Level 3: the suite's load arrives with its carried time", function()
 		Test.ExpectEqual(Scene.GetName(), "Level3")
 		Test.ExpectEqual(Scene.GetLoadParameters().ElapsedTicks, 3600, "Level 3 was loaded with the suite's time")
-		Test.ExpectEqual(game().StartTicks, 3600, "the game starts from the carried time")
+		local current = game()
+		Test.ExpectEqual(current.StartTicks, 3600, "the game starts from the carried time")
+		-- The level's clock starts at 0:00.0 whatever the run carried; the carried minute shows in the total.
+		Test.Expect(current.Ticks < 60, string.format("the level has just started (%d ticks)", current.Ticks))
+		Test.Expect(string.sub(hudText("TimeText"), 1, 5) == "0:00.", "the HUD's clock starts under one second: " .. hudText("TimeText"))
+		Test.ExpectEqual(hudText("TotalText"), "TOTAL " .. Clock.Format(current.TotalTicks), "the HUD's total shows the run's time, past the carried minute")
 	end)
 
 	Test.Case("Level 3: the HUD shows the level and its par", function()
@@ -343,6 +356,7 @@ return Test.Suite("RollingBall", function()
 			return current.Finished
 		end, 5)
 		Test.ExpectEqual(hudText("BannerText"), "FINISHED  " .. Clock.Format(current.TotalTicks) .. "\nPRESS R TO PLAY AGAIN", "the banner shows the run's time")
+		Test.ExpectEqual(hudText("TimeText"), Clock.Format(current.Ticks), "the HUD's clock stopped at the level's own time")
 		Test.WaitTicks(current.LoadDelayTicks + 10)
 		Test.Expect(not current.LoadRequested and not current.Leaving, "the last level loads nothing")
 	end, { TimeoutTicks = 300 })
@@ -359,6 +373,7 @@ return Test.Suite("RollingBall", function()
 		local current = game()
 		Test.ExpectEqual(current.StartTicks, 0, "the new run's timer starts at 0")
 		Test.ExpectEqual(current.TotalTicks, current.Ticks, "the run's time is Level 1's own")
+		Test.ExpectEqual(hudText("TotalText"), "TOTAL " .. Clock.Format(current.Ticks), "the HUD's total is Level 1's own time")
 	end)
 
 	Test.Case("Level 1: a new checkpoint shows the CHECKPOINT banner for BannerTicks ticks", function()

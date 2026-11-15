@@ -1,6 +1,8 @@
 --!strict
--- The level's flow: the timer carried across levels in whole ticks, the HUD, the banners, the win, the next level's
--- Scene.Load and Restart (ADR 0038 decision 4). It runs after the ball (ExecutionOrder 10), so it sees the tick's state.
+-- The level's flow: the timer in whole ticks (the level's own time, which the HUD's clock shows from 0:00.0 on every
+-- level, and the run's time, carried across levels and shown as the HUD's total), the HUD, the banners, the win, the
+-- next level's Scene.Load and Restart (ADR 0038 decision 4). It runs after the ball (ExecutionOrder 10), so it sees the
+-- tick's state.
 local Actions = require("./Actions")
 local BallScript = require("./Ball")
 local Clock = require("./Clock")
@@ -28,6 +30,7 @@ export type Game = ScriptInstance & {
 	SeenOrder: number,
 	BannerLeft: number,
 	ShownTenths: number,
+	ShownTotalTenths: number,
 }
 
 local Game = {}
@@ -62,11 +65,19 @@ local function setText(self: Game, name: string, text: string)
 	end
 end
 
+-- The HUD's clock (TimeText) shows the level's own time, so that it compares with the par beneath it; the total
+-- (TotalText) shows the run's time. Each is written only when its own tenths change: the carried time need not be a
+-- multiple of 6 ticks, so the two change in different ticks.
 local function showTime(self: Game)
-	local tenths = self.TotalTicks * 10 // 60
+	local tenths = self.Ticks * 10 // 60
 	if tenths ~= self.ShownTenths then
 		self.ShownTenths = tenths
-		setText(self, "TimeText", Clock.Format(self.TotalTicks))
+		setText(self, "TimeText", Clock.Format(self.Ticks))
+	end
+	local totalTenths = self.TotalTicks * 10 // 60
+	if totalTenths ~= self.ShownTotalTenths then
+		self.ShownTotalTenths = totalTenths
+		setText(self, "TotalText", "TOTAL " .. Clock.Format(self.TotalTicks))
 	end
 end
 
@@ -128,6 +139,7 @@ function Game.OnStart(self: Game)
 	self.SeenOrder = 0
 	self.BannerLeft = 0
 	self.ShownTenths = -1
+	self.ShownTotalTenths = -1
 	setText(self, "LevelText", string.format("LEVEL %d/%d", self.LevelNumber, self.LevelCount))
 	setText(self, "ParText", "PAR " .. Clock.Format(self.ParTicks))
 	showTime(self)

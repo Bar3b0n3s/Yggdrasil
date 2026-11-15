@@ -207,6 +207,39 @@
 			}
 		},
 		{
+			"ID": "59a277b10d5104ce",
+			"Name": "TotalText",
+			"Parent": "088d4931ce9aaf36",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 56],
+					"Size": [320, 26],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "TOTAL 0:00.0",
+					"Font": null,
+					"Size": 18,
+					"Color": [0.8, 0.82, 0.85, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": false
+				}
+			}
+		},
+		{
 			"ID": "525435c11b3fd7b2",
 			"Name": "Banner",
 			"Parent": "088d4931ce9aaf36",

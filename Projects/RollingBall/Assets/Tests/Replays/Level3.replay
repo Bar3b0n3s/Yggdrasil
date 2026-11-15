@@ -522,7 +522,7 @@
 					"Transform": "82125f902860db21",
 					"PrefabLink": "102ef79c7b90b435",
 					"UiRect": "178d1fcd8a913513",
-					"UiText": "46b50f57ace9bdcc"
+					"UiText": "fd5ba75322b67766"
 				}
 			},
 			{
@@ -637,6 +637,17 @@
 				"Hash": "a011e6750c8296bb",
 				"Components": {
 					"Transform": "5ca694494b9f2832"
+				}
+			},
+			{
+				"Id": "6e063758129f1850",
+				"Path": "/HUD/TotalText",
+				"Hash": "199d5ee29c3dceb3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "42e46fd8aec9d525",
+					"UiRect": "4ed23bfb638f52f7",
+					"UiText": "843a99c0b182c93d"
 				}
 			},
 			{
@@ -1432,7 +1443,7 @@
 				"Handle": "0d39e8f65b7b6519",
 				"Path": "Assets/Scripts/Game.luau",
 				"Type": "Script",
-				"Hash": "fbcee3c4db08cbdd"
+				"Hash": "3f7167081c9a9892"
 			},
 			{
 				"Handle": "0e55e883241fed0b",
@@ -1492,7 +1503,7 @@
 				"Handle": "58e646c6b861e94e",
 				"Path": "Assets/Scenes/Level1.scene",
 				"Type": "Scene",
-				"Hash": "ea100c97c6f07e61"
+				"Hash": "19049dbd979c155a"
 			},
 			{
 				"Handle": "5ded5a12550e0e29",
@@ -1594,7 +1605,7 @@
 				"Handle": "f1e4678a07860796",
 				"Path": "Assets/Prefabs/HUD.prefab",
 				"Type": "Prefab",
-				"Hash": "a520dfd5b1e2df59"
+				"Hash": "c8c58ecd7fdd324c"
 			},
 			{
 				"Handle": "f79a3e48177d86bc",
@@ -6422,181 +6433,181 @@
 	"Checkpoints": [
 		{
 			"Tick": 60,
-			"StateHash": "cd273eb07bf78a43"
+			"StateHash": "904cc391002547bf"
 		},
 		{
 			"Tick": 120,
-			"StateHash": "0ddb766a4f06aee9"
+			"StateHash": "d9a101bc12a1d869"
 		},
 		{
 			"Tick": 180,
-			"StateHash": "092a972bc5192bf4"
+			"StateHash": "49598afe568a1a93"
 		},
 		{
 			"Tick": 240,
-			"StateHash": "ab98ee7043dad711"
+			"StateHash": "009d96f2310cb158"
 		},
 		{
 			"Tick": 300,
-			"StateHash": "e4b33d6d2123d6f8"
+			"StateHash": "5bd1f7ae3305719d"
 		},
 		{
 			"Tick": 360,
-			"StateHash": "26d92a377aa6c00b"
+			"StateHash": "bb6fe83e75210750"
 		},
 		{
 			"Tick": 420,
-			"StateHash": "c499fc846bd1f869"
+			"StateHash": "ef9e54c60a208038"
 		},
 		{
 			"Tick": 480,
-			"StateHash": "53a83e4efb74eb54"
+			"StateHash": "a3952d1eb284a2c6"
 		},
 		{
 			"Tick": 540,
-			"StateHash": "c93a07f8ff3b423e"
+			"StateHash": "838c4c7d09711295"
 		},
 		{
 			"Tick": 600,
-			"StateHash": "fc174e896119be1f"
+			"StateHash": "7669da9cf8378b93"
 		},
 		{
 			"Tick": 660,
-			"StateHash": "db23a9fce127ac89"
+			"StateHash": "35cff93012cb0446"
 		},
 		{
 			"Tick": 720,
-			"StateHash": "dfcde0fd660900ab"
+			"StateHash": "3949b816937409f2"
 		},
 		{
 			"Tick": 780,
-			"StateHash": "385a76106fcc0335"
+			"StateHash": "4bf30f3bbfdc5bd2"
 		},
 		{
 			"Tick": 840,
-			"StateHash": "d453c3a6ecb37d01"
+			"StateHash": "15df2d4ce20caa06"
 		},
 		{
 			"Tick": 900,
-			"StateHash": "66ead8e905973ed7"
+			"StateHash": "ef2d34114297973f"
 		},
 		{
 			"Tick": 960,
-			"StateHash": "78a81be3dc57e126"
+			"StateHash": "d07089f91f20ea5d"
 		},
 		{
 			"Tick": 1020,
-			"StateHash": "53338583470beb1f"
+			"StateHash": "c8cae67f14fd6a24"
 		},
 		{
 			"Tick": 1080,
-			"StateHash": "fccb30fbb3676b8c"
+			"StateHash": "8a598413cb678a03"
 		},
 		{
 			"Tick": 1140,
-			"StateHash": "2fecf03b8844ccce"
+			"StateHash": "f15ea8ba2bb2f0f8"
 		},
 		{
 			"Tick": 1200,
-			"StateHash": "8e6ee8f92303b6ea"
+			"StateHash": "0e998e1a9ba42cae"
 		},
 		{
 			"Tick": 1260,
-			"StateHash": "d2576bfc45228c91"
+			"StateHash": "f6d1f2011f1e7697"
 		},
 		{
 			"Tick": 1320,
-			"StateHash": "116b4e835af0853b"
+			"StateHash": "8c47dbfc40e452e4"
 		},
 		{
 			"Tick": 1380,
-			"StateHash": "b5412ba3c6c6002f"
+			"StateHash": "0f8210f0f9a8abd1"
 		},
 		{
 			"Tick": 1440,
-			"StateHash": "73433246b1a09122"
+			"StateHash": "835c68f3a1110e7a"
 		},
 		{
 			"Tick": 1500,
-			"StateHash": "967e8c95bdcfda0e"
+			"StateHash": "65c2121adae95925"
 		},
 		{
 			"Tick": 1560,
-			"StateHash": "fc97cba433648df3"
+			"StateHash": "3f73ea7034f1ce85"
 		},
 		{
 			"Tick": 1620,
-			"StateHash": "3b121059228f8f04"
+			"StateHash": "3ea0bab2c87a6ad8"
 		},
 		{
 			"Tick": 1680,
-			"StateHash": "acb2d5766cb0360e"
+			"StateHash": "91a28cbf9bb1bbbd"
 		},
 		{
 			"Tick": 1740,
-			"StateHash": "b29107a01ff7a379"
+			"StateHash": "5fd00febb7f254f7"
 		},
 		{
 			"Tick": 1800,
-			"StateHash": "32753af1abcf565d"
+			"StateHash": "e45389638dd84d0b"
 		},
 		{
 			"Tick": 1860,
-			"StateHash": "a0fb5c4d1bc1ba23"
+			"StateHash": "35e7bbbb001a883d"
 		},
 		{
 			"Tick": 1920,
-			"StateHash": "3b02d0f9429f2517"
+			"StateHash": "b6e6dfb4a1caff14"
 		},
 		{
 			"Tick": 1980,
-			"StateHash": "a26b1c9be01b35cf"
+			"StateHash": "eda58a9f0ed569c6"
 		},
 		{
 			"Tick": 2040,
-			"StateHash": "96eb8433ccc9d62a"
+			"StateHash": "02c6e9bdc45b4f3c"
 		},
 		{
 			"Tick": 2100,
-			"StateHash": "7d7580cd8b11d609"
+			"StateHash": "693112339ae74aa0"
 		},
 		{
 			"Tick": 2160,
-			"StateHash": "4edc1435c74f6b90"
+			"StateHash": "32eab1bcc1325cf2"
 		},
 		{
 			"Tick": 2220,
-			"StateHash": "03f4ee9a569c4343"
+			"StateHash": "2b6629e389b1953f"
 		},
 		{
 			"Tick": 2280,
-			"StateHash": "4c6d2e381d1454a6"
+			"StateHash": "e3127e55af87ea07"
 		},
 		{
 			"Tick": 2340,
-			"StateHash": "9beacf68f8e635d1"
+			"StateHash": "7ba1747bae7b6096"
 		},
 		{
 			"Tick": 2400,
-			"StateHash": "9f46d0db0f602508"
+			"StateHash": "6ec83aa1e72565ae"
 		},
 		{
 			"Tick": 2460,
-			"StateHash": "caf27b6fcc5f66a5"
+			"StateHash": "cd6c6bca6233e47a"
 		},
 		{
 			"Tick": 2520,
-			"StateHash": "089ece4b9f0c962d"
+			"StateHash": "5c170d0d04330e77"
 		},
 		{
 			"Tick": 2580,
-			"StateHash": "9bd17925381a0bc2"
+			"StateHash": "57d64abd2e274631"
 		},
 		{
 			"Tick": 2640,
-			"StateHash": "d6b3e9749534bfd4"
+			"StateHash": "924f2f86d2ca9bfe"
 		}
 	],
 	"FinalTick": 2693,
-	"FinalStateHash": "b09b5016a15c2064"
+	"FinalStateHash": "b70a032036ffd6bc"
 }
