@@ -197,7 +197,8 @@ namespace Engine {
 		// its next frame, after the response. Errors: those of the editor's save and its dirty-scene check.
 		[[nodiscard]] virtual Result<SessionShutdownResult> Shutdown(const SessionShutdownParams& params) = 0;
 
-		// scene.tree's summary of `scene`, a scene ResolveTargetScene returned: its file, name, revision (the "_meta"
+		// scene.tree's summary of `scene`, a scene ResolveTargetScene returned: its file (a play scene's: the file its current
+		// scene came from, PlaySession::GetCurrentSceneAsset's; ADR 0038, friction F25), name, revision (the "_meta"
 		// revision), dirty flag and entity count.
 		[[nodiscard]] virtual SceneSummary MakeSceneSummary(const Scene& scene) const = 0;
 

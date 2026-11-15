@@ -26,7 +26,7 @@ namespace Engine {
 	// Registry struct "SceneSummary": a scene as scene.* results report it (AutomationMethodContext::MakeSceneSummary).
 	struct SceneSummary
 	{
-		std::string Path{}; // project-relative; empty for a scene never saved
+		std::string Path{}; // project-relative; empty for a scene never saved; a play scene's: the file its current scene came from
 		std::string Name{};
 		uint32_t Revision = 0;
 		bool Dirty = false;

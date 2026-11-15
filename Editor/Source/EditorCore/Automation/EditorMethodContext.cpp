@@ -9,6 +9,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Asset/AssetRegistry.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
@@ -691,8 +692,11 @@ namespace Engine {
 	{
 		if (m_Editor->HasScene() && &m_Editor->GetScene() == &scene)
 			return Utils::MakeSceneSummary(*m_Editor);
-		// The play scene, a copy of an edit scene: that scene's file and revision (the open scene it was played from, M20
-		// decision 16, else the addressed one, as before M20), its own name, and never dirty, because it is never saved.
+		// The play scene: the revision of the open scene the session belongs to (the one it was played from, M20 decision
+		// 16, else the addressed one, as before M20), its own name, and never dirty, because it is never saved. Its file is
+		// the one its current scene came from (ADR 0038, friction F25): the source of the session's current scene asset
+		// (play.start's scene or the played open scene's file, until a Scene.Load names another), else, for a scene without
+		// a registered asset, that open scene's file.
 		SceneSummary summary;
 		// NotFound for NoOpenScene, a session that belongs to no open scene.
 		const Result<OpenSceneInfo> source = m_Editor->DescribeOpenScene(m_Editor->GetPlay().GetPlayedScene());
@@ -705,6 +709,13 @@ namespace Engine {
 		{
 			summary.Path = m_Editor->GetScenePath().has_value() ? Utils::ToProjectRelative(*m_Editor->GetScenePath()) : std::string();
 			summary.Revision = ToAutomationCounter(m_Editor->GetRevision());
+		}
+		// The ordinary session or a test run's, whichever reads reach (EditorPlayController::GetSession).
+		const PlaySession* session = m_Editor->GetPlay().GetSession();
+		if (session != nullptr && &session->GetScene() == &scene)
+		{
+			if (const AssetRecord* record = m_Editor->GetAssets().GetRegistry().Find(session->GetCurrentSceneAsset()))
+				summary.Path = Utils::ToProjectRelative(record->SourcePath);
 		}
 		summary.Name = scene.GetName();
 		summary.Dirty = false;

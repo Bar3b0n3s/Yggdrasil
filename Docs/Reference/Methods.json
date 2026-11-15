@@ -23132,7 +23132,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {
@@ -23246,7 +23246,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {
@@ -23544,7 +23544,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {
@@ -23665,7 +23665,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {
@@ -23811,7 +23811,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {
@@ -24390,7 +24390,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {
@@ -24513,7 +24513,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {
@@ -27487,7 +27487,7 @@
 						"type": "object",
 						"properties": {
 							"path": {
-								"description": "The project-relative path of its file; empty for a scene never saved.",
+								"description": "The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an unsaved scene played), the open scene's path.",
 								"type": "string"
 							},
 							"name": {

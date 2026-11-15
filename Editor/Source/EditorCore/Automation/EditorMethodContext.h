@@ -140,8 +140,12 @@ namespace Engine {
 		// edit scene (none before scene.open or scene.new);
 		// Shutdown saves the open scene with save (InvalidState for a dirty scene without save or force, PermissionDenied for
 		// save in a read-only editor) and requests the exit (EditorContext::RequestShutdown); MakeSceneSummary reports the
-		// edit scene's file and dirty flag (Utils::MakeSceneSummary), and for the play scene the file and revision of the open
-		// scene it was played from (the addressed scene's when it belongs to none), never dirty; GetAssets is the EditorAssetManager; GetWallClockTime is the server's AutomationServerSpecification::WallClock.
+		// edit scene's file and dirty flag (Utils::MakeSceneSummary), and for the play scene (the ordinary session's or a test
+		// run's) the revision of the open scene it was played from (the addressed scene's when it belongs to none), never
+		// dirty, and the file its current scene came from: the registry's source of PlaySession::GetCurrentSceneAsset
+		// (play.start's scene or the played open scene's file, until a Scene.Load names another; ADR 0038, friction F25),
+		// else, for a scene without a registered asset, that open scene's file; GetAssets is the EditorAssetManager;
+		// GetWallClockTime is the server's AutomationServerSpecification::WallClock.
 		[[nodiscard]] SessionHostDescription DescribeSession() const override;
 		[[nodiscard]] Result<SessionShutdownResult> Shutdown(const SessionShutdownParams& params) override;
 		[[nodiscard]] SceneSummary MakeSceneSummary(const Scene& scene) const override;

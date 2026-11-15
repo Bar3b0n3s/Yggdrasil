@@ -155,6 +155,28 @@ class PlayTests(AutomationTestCase):
         self.assertEqual(after["_meta"]["revision"], before["_meta"]["revision"])
         self.assertEqual(client.call("play.state")["state"], "Edit")
 
+    def test_a_play_scene_read_names_the_scene_file_play_start_played(self) -> None:
+        # ADR 0038, friction F25 (Rolling Ball S6): ui.tree's scene block named the addressed open scene's file with the
+        # play scene's name and entity count. A play scene's path is the file its scene came from, play.start's scene,
+        # while its revision stays the addressed open scene's.
+        client, _ = self.open_editor_with_scene()
+        level = "Assets/Scenes/Level2.scene"
+        client.call("scene.new", {"path": level, "keepOpen": True})
+        client.call("entity.create", {"name": "InLevel2"})
+        client.call("scene.close", {"save": True})
+        # The new scene file gets its .meta, so its asset, at the next refresh, as the game's saved levels had theirs.
+        client.call("project.refreshAssets")
+        edit = client.call("scene.tree", {"format": "json"})["scene"]
+        self.assertEqual((edit["path"], edit["name"]), ("Assets/Scenes/Main.scene", "Main"))
+        client.call("play.start", {"scene": level, "lockstep": True})
+        for method in ("scene.tree", "ui.tree"):
+            with self.subTest(method=method):
+                played = client.call(method, {"format": "json"})["scene"]
+                self.assertEqual((played["path"], played["name"], played["entityCount"], played["dirty"]),
+                                 (level, "Level2", 1, False))
+                self.assertEqual(played["revision"], edit["revision"])
+        client.call("play.stop")
+
     def test_play_start_rejects_invalid_script_options_before_starting(self) -> None:
         client, _ = self.open_editor_with_scene()
         for params, pointer in (({"parameters": []}, "/parameters"),
