@@ -16,6 +16,7 @@
 #include "Engine/Scene/Scene.h"
 #include "Support/AssetTestFixture.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExpectLog.h"
 #include "Support/TestData.h"
 
 #include <nlohmann/json.hpp>
@@ -25,6 +26,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -79,6 +81,73 @@ namespace Engine {
 		{
 			const Json base = CallOrFail(setup, "entity.get", Json{ { "entity", std::format("{}/Hierarchy/Base", room) }, { "components", Json::array({ "Transform" }) } });
 			return JsonReader(base["entity"]["components"]["Transform"]["Translation"][1]).ReadFloat().value_or(-1.0f);
+		}
+
+		// Tests/Data/Assets/Gltf/Replace/<version>/<file>, a native path: the two versions of Kit.gltf that World Tree brief 08's
+		// asset.import {replace: true} swaps (MakeGltfFixtures.py).
+		std::string ReplaceFixture(std::string_view version, std::string_view file = "Kit.gltf")
+		{
+			return (Test::GetTestDataPath("Assets/Gltf/Replace") / std::string(version) / std::string(file)).generic_string();
+		}
+
+		// asset.import's params for Replace/<version>/Kit.gltf into Assets/Kit, with replace when asked.
+		Json ImportKit(std::string_view version, bool replace)
+		{
+			Json params{ { "source", ReplaceFixture(version) }, { "destDir", "Assets/Kit" } };
+			if (replace)
+				params["replace"] = true;
+			return params;
+		}
+
+		// The bytes of the project file `path` (project-relative); empty when it cannot be read.
+		Buffer ReadProjectBytes(Test::AutomationFixture& setup, std::string_view path)
+		{
+			return FileSystem::ReadFile(setup.GetEditor().GetProject().GetProjectFile().parent_path() / FileSystem::PathFromUtf8(path)).value_or(Buffer());
+		}
+
+		// The bytes of Tests/Data/Assets/Gltf/Replace/<version>/<file>.
+		Buffer ReadReplaceFixture(std::string_view version, std::string_view file)
+		{
+			Result<Buffer> bytes = FileSystem::ReadFile(FileSystem::PathFromUtf8(ReplaceFixture(version, file)));
+			REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+			return std::move(*bytes);
+		}
+
+		// Whether the project file `path` (project-relative) exists.
+		bool ProjectFileExists(Test::AutomationFixture& setup, std::string_view path)
+		{
+			return setup.GetEditor().GetVfs().Exists(VfsPath::Create("project", std::string(path)).value_or(VfsPath()));
+		}
+
+		// The handles of the sub-assets of `asset` by key, as asset.info lists them.
+		std::map<std::string, std::string> ReadSubAssetIds(Test::AutomationFixture& setup, std::string_view asset)
+		{
+			const Json info = CallOrFail(setup, "asset.info", Json{ { "asset", asset } });
+			std::map<std::string, std::string> ids;
+			for (const Json& subAsset : info["subAssets"])
+			{
+				const std::string path = JsonReader(subAsset["path"]).ReadString().value_or(std::string());
+				ids[path.substr(path.find('#') + 1)] = JsonReader(subAsset["id"]).ReadString().value_or(std::string());
+			}
+			return ids;
+		}
+
+		// The keys of a replace's sub-asset list (keptSubAssets, addedSubAssets or removedSubAssets), in order.
+		std::vector<std::string> ReadKeys(const Json& list)
+		{
+			std::vector<std::string> keys;
+			for (const Json& entry : list)
+				keys.push_back(JsonReader(entry["key"]).ReadString().value_or(std::string()));
+			return keys;
+		}
+
+		// The key and id of each entry of a replace's sub-asset list.
+		std::map<std::string, std::string> ReadKeyIds(const Json& list)
+		{
+			std::map<std::string, std::string> ids;
+			for (const Json& entry : list)
+				ids[JsonReader(entry["key"]).ReadString().value_or(std::string())] = JsonReader(entry["id"]).ReadString().value_or(std::string());
+			return ids;
 		}
 
 	}
@@ -541,6 +610,312 @@ namespace Engine {
 			CHECK(FileSystem::ReadText(roomFile).value_or(std::string()) != *roomBefore);
 			CHECK(ReadBaseHeight(setup, "/Room") == doctest::Approx(2.0f));
 			CHECK(setup.GetEditor().GetHistory().GetUndoLabel().contains("Update Prefab Instances"));
+		}
+
+		// World Tree brief 08: once a file was imported, automation could not give the asset new bytes, and deleting and
+		// importing it again gave it a new handle, and so new sub-asset handles (Hash64(source handle, key)), which broke every
+		// prefab, scene and material referencing them. asset.import {replace: true} writes the new version over the asset's
+		// source, keeps its .meta, and the importer keeps every sub-asset handle whose key remains.
+		TEST_CASE("AssetMethods: asset.import with replace keeps the source handle and the kept sub-assets' handles")
+		{
+			Test::AutomationFixture setup("AssetReplaceHandles");
+			const Json imported = CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			const std::string handle = JsonReader(imported["asset"]["id"]).ReadString().value_or(std::string());
+			const std::map<std::string, std::string> before = ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf");
+			const Buffer binMeta = ReadProjectBytes(setup, "Assets/Kit/Kit.bin.meta");
+			const Json settings = CallOrFail(setup, "asset.getImportSettings", Json{ { "asset", "Assets/Kit/Kit.gltf" } })["settings"];
+			const size_t steps = setup.GetEditor().GetHistory().GetUndoCount();
+
+			const Json replaced = CallOrFail(setup, "asset.import", ImportKit("V2", true));
+			CHECK(replaced["asset"] == Json{ { "id", handle }, { "path", "Assets/Kit/Kit.gltf" }, { "type", "Prefab" } });
+			CHECK(ReadKeys(replaced["keptSubAssets"]) == std::vector<std::string>{ "animation:0:Wave", "material:0:StripMaterial", "mesh:0:Strip", "skin:0", "texture:0" });
+			for (const auto& [key, id] : ReadKeyIds(replaced["keptSubAssets"]))
+			{
+				CAPTURE(key);
+				CHECK(id == before.at(key));
+			}
+			CHECK(ReadKeys(replaced["addedSubAssets"]) == std::vector<std::string>{ "material:1:CapMaterial", "mesh:1:Cap" });
+			CHECK(ReadKeys(replaced["removedSubAssets"]) == std::vector<std::string>{ "material:1:PanelMaterial", "mesh:1:Panel" });
+			CHECK(ReadKeyIds(replaced["removedSubAssets"])["mesh:1:Panel"] == before.at("mesh:1:Panel"));
+			CHECK(replaced["removedSubAssets"][1]["type"] == Json("Mesh"));
+			// Only the changed files are written: the source, its buffer in place and the new image with its dependency meta.
+			CHECK(replaced["copiedFiles"] == ParseAssetMethodJson(R"(["Assets/Kit/Kit.bin", "Assets/Kit/Kit.gltf", "Assets/Kit/Textures/Cap.png",
+				"Assets/Kit/Textures/Cap.png.meta"])"));
+			CHECK(replaced["unreferencedFiles"] == ParseAssetMethodJson(R"(["Assets/Kit/Textures/Panel.png"])"));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps + 1);
+			CHECK(setup.GetEditor().GetHistory().GetUndoLabel().contains("Replace Asset 'Kit.gltf'"));
+
+			// The files hold V2's bytes; the asset, its settings and its buffer's dependency meta are unchanged, and the image V2
+			// no longer references stays.
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == ReadReplaceFixture("V2", "Kit.gltf"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.bin") == ReadReplaceFixture("V2", "Kit.bin"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.bin.meta") == binMeta);
+			CHECK(ProjectFileExists(setup, "Assets/Kit/Textures/Panel.png"));
+			const Json info = CallOrFail(setup, "asset.info", Json{ { "asset", "Assets/Kit/Kit.gltf" } });
+			CHECK(info["asset"]["id"] == Json(handle));
+			CHECK(info["settings"] == settings);
+			std::map<std::string, std::string> after = ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf");
+			CHECK_FALSE(after.contains("mesh:1:Panel"));
+			CHECK(after.at("mesh:0:Strip") == before.at("mesh:0:Strip"));
+			CHECK(after.at("mesh:1:Cap") == ReadKeyIds(replaced["addedSubAssets"])["mesh:1:Cap"]);
+		}
+
+		// Brief 08: a prefab (a kit piece) that references a kept mesh keeps working and shows the new version of the mesh, and
+		// the instances of the glTF itself follow its new content (asset.reimport's update of the instances, a step of its own).
+		TEST_CASE("AssetMethods: a prefab referencing a kept mesh of a replaced glTF shows the new mesh and the glTF's instances follow")
+		{
+			Test::AutomationFixture setup("AssetReplacePrefab");
+			CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			CallOrFail(setup, "entity.create", ParseAssetMethodJson(R"({"name": "Piece", "components": {"MeshRenderer": {"Mesh": "Assets/Kit/Kit.gltf#mesh:0:Strip"}}})"));
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Piece" }, { "path", "Assets/Prefabs/Piece.prefab" }, { "replaceWithInstance", true } });
+			CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Kit/Kit.gltf" } });
+			const auto width = [&setup]()
+			{
+				const Json bounds = CallOrFail(setup, "entity.bounds", Json{ { "entities", Json::array({ "/Piece" }) } });
+				REQUIRE(bounds["bounds"][0]["hasBounds"] == Json(true));
+				return JsonReader(bounds["bounds"][0]["size"][0]).ReadFloat().value_or(0.0f);
+			};
+			CHECK(width() == doctest::Approx(1.0f));
+			CHECK(setup.Call("entity.get", Json{ { "entity", "/Kit/Panel" } }).has_value());
+
+			CallOrFail(setup, "asset.import", ImportKit("V2", true));
+			// The same mesh handle, its new version: V2's strip is twice as wide.
+			CHECK(width() == doctest::Approx(2.0f));
+			CHECK(setup.Request("entity.get", Json{ { "entity", "/Kit/Panel" } })["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK(setup.Call("entity.get", Json{ { "entity", "/Kit/Cap" } }).has_value());
+			CHECK(setup.GetEditor().GetHistory().GetUndoLabel().contains("Update Prefab Instances"));
+		}
+
+		// Brief 08: a sub-asset whose key the new version lacks is reported by the replace, and what still references it by
+		// project.validate's existing code for a reference no registry knows (ASSET_MISSING).
+		TEST_CASE("AssetMethods: a replace lists the sub-assets it removed and project.validate reports their references")
+		{
+			Test::AutomationFixture setup("AssetReplaceRemoved");
+			CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			const std::string panel = ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf").at("mesh:1:Panel");
+			const Json old = CallOrFail(setup, "entity.create", ParseAssetMethodJson(R"({"name": "Old", "components": {"MeshRenderer": {"Mesh": "Assets/Kit/Kit.gltf#mesh:1:Panel"}}})"));
+			const auto missing = [&setup, &panel]()
+			{
+				std::vector<Json> found;
+				for (const Json& diagnostic : CallOrFail(setup, "project.validate", Json::object())["diagnostics"])
+				{
+					if (diagnostic["code"] == Json("ASSET_MISSING") && diagnostic["asset"] == Json(panel))
+						found.push_back(diagnostic);
+				}
+				return found;
+			};
+			CHECK(missing().empty());
+
+			// The reference to the removed mesh gets the Mesh placeholder from now on, which is logged once.
+			const Test::ExpectLog placeholder(LogLevel::Error, std::format("ASSET_MISSING: asset {} is missing", panel));
+			const Json replaced = CallOrFail(setup, "asset.import", ImportKit("V2", true));
+			REQUIRE(replaced["removedSubAssets"].size() == 2);
+			CHECK(replaced["removedSubAssets"][1] == Json{ { "key", "mesh:1:Panel" }, { "id", panel }, { "type", "Mesh" } });
+			const std::vector<Json> reported = missing();
+			REQUIRE(reported.size() == 1);
+			CHECK(reported[0]["entity"] == old["entity"]["id"]);
+			CHECK(reported[0]["component"] == Json("MeshRenderer"));
+		}
+
+		// Brief 08: one undo step restores the previous bytes of every file the replace wrote (and removes the file it added),
+		// and the reimport its restore schedules gives back the previous sub-assets with their handles; redo applies it again.
+		TEST_CASE("AssetMethods: undo of a replace restores the previous bytes and sub-assets and redo applies it again")
+		{
+			Test::AutomationFixture setup("AssetReplaceUndo");
+			CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			const std::map<std::string, std::string> before = ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf");
+			const Json replaced = CallOrFail(setup, "asset.import", ImportKit("V2", true));
+			const std::map<std::string, std::string> after = ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf");
+			const Buffer capMeta = ReadProjectBytes(setup, "Assets/Kit/Textures/Cap.png.meta");
+			REQUIRE_FALSE(capMeta.empty());
+
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == ReadReplaceFixture("V1", "Kit.gltf"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.bin") == ReadReplaceFixture("V1", "Kit.bin"));
+			CHECK_FALSE(ProjectFileExists(setup, "Assets/Kit/Textures/Cap.png"));
+			CHECK_FALSE(ProjectFileExists(setup, "Assets/Kit/Textures/Cap.png.meta"));
+			CHECK(ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf") == before);
+
+			REQUIRE(setup.Call("edit.redo", Json::object()).has_value());
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == ReadReplaceFixture("V2", "Kit.gltf"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.bin") == ReadReplaceFixture("V2", "Kit.bin"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Textures/Cap.png.meta") == capMeta);
+			CHECK(ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf") == after);
+			CHECK(after.at("mesh:1:Cap") == ReadKeyIds(replaced["addedSubAssets"])["mesh:1:Cap"]);
+		}
+
+		// Brief 08: a replace keeps the asset's import settings unless it is given settings, which then replace them as for a
+		// first import (merged over the importer's defaults) in the replace's undo step; a replace that changes no byte writes
+		// nothing and records no undo step.
+		TEST_CASE("AssetMethods: a replace keeps the import settings unless given new ones and writes only the files that change")
+		{
+			Test::AutomationFixture setup("AssetReplaceSettings");
+			Json first = ImportKit("V1", false);
+			first["settings"] = Json{ { "Scale", 2.0 } };
+			CallOrFail(setup, "asset.import", first);
+			const auto settings = [&setup]()
+			{
+				return CallOrFail(setup, "asset.getImportSettings", Json{ { "asset", "Assets/Kit/Kit.gltf" } })["settings"];
+			};
+			const Json kept = CallOrFail(setup, "asset.import", ImportKit("V2", true));
+			CHECK(settings()["Scale"] == Json(2.0f));
+			CHECK_FALSE(kept["copiedFiles"].dump().contains("Kit.gltf.meta"));
+
+			Json withSettings = ImportKit("V2", true);
+			withSettings["settings"] = Json{ { "GenerateMissingTangents", false } };
+			const Json changed = CallOrFail(setup, "asset.import", withSettings);
+			CHECK(changed["copiedFiles"] == ParseAssetMethodJson(R"(["Assets/Kit/Kit.gltf.meta"])"));
+			CHECK(changed["undoIndex"] != Json(0));
+			CHECK(settings()["Scale"] == Json(1.0f));
+			CHECK(settings()["GenerateMissingTangents"] == Json(false));
+
+			// The same bytes and settings again: nothing to write, no undo step, and every sub-asset kept.
+			const size_t steps = setup.GetEditor().GetHistory().GetUndoCount();
+			const Json same = CallOrFail(setup, "asset.import", withSettings);
+			CHECK(same["copiedFiles"] == Json::array());
+			CHECK(same["undoIndex"] == Json(0));
+			CHECK(same["addedSubAssets"] == Json::array());
+			CHECK(same["removedSubAssets"] == Json::array());
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps);
+
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			CHECK(settings()["Scale"] == Json(2.0f));
+			CHECK(settings()["GenerateMissingTangents"] == Json(true));
+		}
+
+		// The lead's review of brief 08: a replace never writes a file that does not import. It imports the new bytes in the
+		// dry-run sandbox first, as its dry run does, so a file whose import fails is refused with ImportFailed at /source and
+		// nothing changes: the files, the .meta, the handle, the sub-asset handles and the undo stack.
+		TEST_CASE("AssetMethods: a replace whose new file does not import is refused and writes nothing")
+		{
+			Test::AutomationFixture setup("AssetReplaceBroken");
+			const Json imported = CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			const std::map<std::string, std::string> before = ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf");
+			const Buffer meta = ReadProjectBytes(setup, "Assets/Kit/Kit.gltf.meta");
+			const size_t steps = setup.GetEditor().GetHistory().GetUndoCount();
+
+			// The import in the sandbox fails as any import does, logged once.
+			const Test::ExpectLog failed(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Kit/Kit.gltf");
+			const Json refused = setup.Request("asset.import", Json{ { "source", ReplaceFixture("Broken") }, { "destDir", "Assets/Kit" }, { "replace", true } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			const Json& data = refused["error"]["data"];
+			CHECK(data["errorCode"] == Json("ImportFailed"));
+			const bool atSource = data.contains("location") && data["location"].contains("pointer") && data["location"]["pointer"] == Json("/source");
+			CHECK_MESSAGE(atSource, refused.dump());
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == ReadReplaceFixture("V1", "Kit.gltf"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.bin") == ReadReplaceFixture("V1", "Kit.bin"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf.meta") == meta);
+			CHECK(CallOrFail(setup, "asset.info", Json{ { "asset", "Assets/Kit/Kit.gltf" } })["asset"]["id"] == imported["asset"]["id"]);
+			CHECK(ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf") == before);
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps);
+		}
+
+		// Brief 08: dryRun reports what a replace would do (the sub-assets kept, added and removed, the files it writes and those
+		// it leaves unreferenced) without writing anything or recording an undo step; the replace then reports the same.
+		TEST_CASE("AssetMethods: a dry run of a replace writes nothing and lists the changes the replace makes")
+		{
+			Test::AutomationFixture setup("AssetReplaceDryRun");
+			CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			const std::map<std::string, std::string> before = ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf");
+			const Buffer gltf = ReadProjectBytes(setup, "Assets/Kit/Kit.gltf");
+			const Buffer meta = ReadProjectBytes(setup, "Assets/Kit/Kit.gltf.meta");
+			const size_t steps = setup.GetEditor().GetHistory().GetUndoCount();
+
+			Json params = ImportKit("V2", true);
+			params["dryRun"] = true;
+			const Json dry = CallOrFail(setup, "asset.import", params);
+			CHECK(dry["dryRun"] == Json(true));
+			CHECK(dry["undoIndex"] == Json(0));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == gltf);
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf.meta") == meta);
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.bin") == ReadReplaceFixture("V1", "Kit.bin"));
+			CHECK_FALSE(ProjectFileExists(setup, "Assets/Kit/Textures/Cap.png"));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps);
+			CHECK(ReadSubAssetIds(setup, "Assets/Kit/Kit.gltf") == before);
+
+			const Json replaced = CallOrFail(setup, "asset.import", ImportKit("V2", true));
+			for (const std::string_view member : { "asset", "subAssets", "keptSubAssets", "addedSubAssets", "removedSubAssets", "copiedFiles", "unreferencedFiles" })
+			{
+				CAPTURE(member);
+				CHECK(dry[std::string(member)] == replaced[std::string(member)]);
+			}
+			CHECK(ReadKeys(dry["removedSubAssets"]) == std::vector<std::string>{ "material:1:PanelMaterial", "mesh:1:Panel" });
+		}
+
+		// Brief 08's refusals, each located at its param and writing nothing: no imported asset at the destination (NotFound),
+		// a new file another importer takes (a type change), a dependency file named as the asset, a closure file that belongs to
+		// another asset, a destination outside Assets/; and asset.import's own: a read-only editor refuses the replace and
+		// previews it.
+		TEST_CASE("AssetMethods: asset.import with replace refuses what it cannot replace and writes nothing")
+		{
+			Test::AutomationFixture setup("AssetReplaceRefusals");
+			CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			const size_t steps = setup.GetEditor().GetHistory().GetUndoCount();
+			const auto refuse = [&setup](const Json& params, std::string_view code, std::string_view pointer)
+			{
+				const Json refused = setup.Request("asset.import", params);
+				REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+				CHECK(refused["error"]["data"]["errorCode"] == Json(code));
+				CHECK(refused["error"]["data"]["issues"][0]["pointer"] == Json(pointer));
+				return refused;
+			};
+			const Json nothing = refuse(Json{ { "source", ReplaceFixture("V2") }, { "destDir", "Assets/Other" }, { "replace", true } }, "NotFound", "/destDir");
+			CHECK(nothing["error"]["data"]["issues"][0]["message"].dump().contains("Assets/Other/Kit.gltf"));
+			const Json typeChange = refuse(Json{ { "source", ReplaceFixture("V1", "Textures/Panel.png") }, { "destDir", "Assets/Kit/Kit.gltf" }, { "replace", true } },
+				"InvalidArgument", "/source");
+			CHECK(typeChange["error"]["data"]["issues"][0]["message"].dump().contains("takes the Texture importer"));
+			refuse(Json{ { "source", ReplaceFixture("V2", "Kit.bin") }, { "destDir", "Assets/Kit/Kit.bin" }, { "replace", true } }, "InvalidArgument", "/destDir");
+			refuse(Json{ { "source", ReplaceFixture("V2") }, { "destDir", "Library/Kit" }, { "replace", true } }, "InvalidArgument", "/destDir");
+			// Where V2's image goes, another asset's texture: a replace never changes another asset's file.
+			const VfsPath cap = VfsPath::Create("project", "Assets/Kit/Textures/Cap.png").value_or(VfsPath());
+			REQUIRE(setup.GetEditor().WriteProjectFile(cap, Test::MakeTestPng(4, 4)).has_value());
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			const Json foreign = refuse(ImportKit("V2", true), "AlreadyExists", "/source");
+			CHECK(foreign["error"]["data"]["issues"][0]["message"].dump().contains("Assets/Kit/Textures/Cap.png"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == ReadReplaceFixture("V1", "Kit.gltf"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.bin") == ReadReplaceFixture("V1", "Kit.bin"));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps);
+
+			// A read-only editor refuses the replace, as it refuses every import, and previews it.
+			CallOrFail(setup, "asset.delete", Json{ { "asset", "Assets/Kit/Textures/Cap.png" } });
+			EditorContext& editor = setup.GetEditor();
+			const std::filesystem::path projectFile = editor.GetProject().GetProjectFile();
+			REQUIRE(editor.CloseProject().has_value());
+			Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(projectFile,
+				{ .ReadOnly = true, .StrictUnknowns = false, .ReadOnlyCacheDirectory = setup.GetEditorFixture().GetDirectory().GetPath() / "Private" },
+				setup.GetEditorFixture().GetEngine().GetTypeRegistry());
+			REQUIRE(project.has_value());
+			REQUIRE(editor.OpenProject(std::move(*project)).has_value());
+			const Json denied = setup.Request("asset.import", ImportKit("V2", true));
+			CHECK(denied["error"]["data"]["errorCode"] == Json("PermissionDenied"));
+			Json preview = ImportKit("V2", true);
+			preview["dryRun"] = true;
+			const Json previewed = CallOrFail(setup, "asset.import", preview);
+			CHECK(ReadKeys(previewed["addedSubAssets"]) == std::vector<std::string>{ "material:1:CapMaterial", "mesh:1:Cap" });
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == ReadReplaceFixture("V1", "Kit.gltf"));
+			CHECK_FALSE(ProjectFileExists(setup, "Assets/Kit/Textures/Cap.png"));
+		}
+
+		// Brief 08 keeps asset.import without replace as it was: a destination that exists is AlreadyExists at /destDir (its
+		// hint now names replace: true), and a first import cannot be dry-run.
+		TEST_CASE("AssetMethods: asset.import without replace refuses an existing destination as before, its hint naming replace")
+		{
+			Test::AutomationFixture setup("AssetImportExisting");
+			CallOrFail(setup, "asset.import", ImportKit("V1", false));
+			const size_t steps = setup.GetEditor().GetHistory().GetUndoCount();
+			const Json again = setup.Request("asset.import", ImportKit("V2", false));
+			REQUIRE_MESSAGE(again.contains("error"), again.dump());
+			CHECK(again["error"]["data"]["errorCode"] == Json("AlreadyExists"));
+			CHECK(again["error"]["data"]["issues"][0]["pointer"] == Json("/destDir"));
+			CHECK(again["error"]["data"]["issues"][0]["message"].dump().contains("'Assets/Kit/Kit.gltf' already exists"));
+			CHECK(again["error"]["data"]["hint"].dump().contains("replace: true"));
+			CHECK(ReadProjectBytes(setup, "Assets/Kit/Kit.gltf") == ReadReplaceFixture("V1", "Kit.gltf"));
+
+			Json dry{ { "source", ReplaceFixture("V2") }, { "destDir", "Assets/Fresh" }, { "dryRun", true } };
+			const Json unsupported = setup.Request("asset.import", dry);
+			CHECK(unsupported["error"]["data"]["errorCode"] == Json("Unsupported"));
+			CHECK_FALSE(ProjectFileExists(setup, "Assets/Fresh"));
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == steps);
 		}
 
 		TEST_CASE("AssetMethods: asset.move refuses a standalone texture that a glTF finds by path")

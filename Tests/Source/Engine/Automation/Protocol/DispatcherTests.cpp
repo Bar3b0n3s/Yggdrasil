@@ -655,6 +655,36 @@ namespace Engine {
 			CHECK(messages[0].Message["result"]["dryRun"] == Json(true));
 			CHECK(std::count(setup.State.Calls.begin(), setup.State.Calls.end(), "handler test.read") == 1);
 		}
+
+		// World Tree brief 08: a pending method may support dry runs (asset.import {replace: true}) whose sandbox must not outlast
+		// the request's stretch, so its dry run resolves within the one pump that ran it: an operation that answers at its first
+		// poll is the dry run's result, and one that would need another poll is cancelled and fails, never left pending.
+		TEST_CASE("Dispatcher: a pending method's dry run resolves within its pump or is cancelled")
+		{
+			DispatcherSetup setup;
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.pend", Json{ { "polls", 1 }, { "dryRun", true } }));
+			std::vector<OutboundMessage> answered = setup.Calls->Pump(std::chrono::seconds(1));
+			REQUIRE(answered.size() == 1);
+			CHECK(answered[0].Message["result"]["polls"] == Json(1));
+			CHECK(answered[0].Message["result"]["dryRun"] == Json(true));
+			CHECK(setup.Calls->GetPendingCount(1) == 0);
+
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(2, "test.pend", Json{ { "polls", 2 }, { "dryRun", true } }));
+			std::vector<OutboundMessage> refused = setup.Calls->Pump(std::chrono::seconds(1));
+			REQUIRE(refused.size() == 1);
+			CHECK(refused[0].Message["error"]["data"]["errorCode"] == Json("Cancelled"));
+			CHECK(refused[0].Message["error"]["message"].dump().contains("did not resolve its dry run at once"));
+			CHECK(setup.Calls->GetPendingCount(1) == 0);
+			CHECK(std::count(setup.State.Calls.begin(), setup.State.Calls.end(), "cancel test.pend") == 1);
+			const std::vector<std::string> calls = setup.CallsOf("test.pend");
+			CHECK(std::count(calls.begin(), calls.end(), "finish") == 2);
+
+			// Without dryRun the same operation stays pending until its second poll.
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(3, "test.pend", Json{ { "polls", 2 } }));
+			CHECK(setup.Calls->Pump(std::chrono::seconds(1)).empty());
+			CHECK(setup.Calls->GetPendingCount(1) == 1);
+			REQUIRE(setup.PumpAll().size() == 1);
+		}
 	}
 
 }

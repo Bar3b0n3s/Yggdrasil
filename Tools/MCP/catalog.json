@@ -145,7 +145,7 @@
 		{
 			"name": "asset_import",
 			"method": "asset.import",
-			"description": "Copies a file (and a glTF's buffers and images) into a folder below Assets/ with its .meta files as one undoable command, then imports it; resolves when the import completed.",
+			"description": "Copies a file (and a glTF's buffers and images) into a folder below Assets/ with its .meta files as one undoable command, then imports it; resolves when the import completed. With replace: true it gives an imported asset the file's new bytes instead, keeping its handle, settings and every sub-asset handle whose key remains, and lists the sub-assets kept, added and removed; a new file that does not import is refused (ImportFailed) and nothing is written (dryRun previews a replace).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "AssetImportParams",
@@ -157,11 +157,19 @@
 						"type": "string"
 					},
 					"destDir": {
-						"description": "The project-relative folder below Assets/ to copy it into; created when missing.",
+						"description": "The project-relative folder below Assets/ to copy it into; created when missing. With replace, the folder holding the asset to replace (the file of the source's name there), or that asset's source file itself.",
 						"type": "string"
 					},
 					"settings": {
-						"description": "Import settings merged over the importer's defaults; null for the defaults."
+						"description": "Import settings merged over the importer's defaults; null for the defaults (with replace, null keeps the asset's settings)."
+					},
+					"replace": {
+						"description": "Give an imported asset this file's bytes instead of importing a new one: the file (and a glTF's changed buffers and images) is written over the asset's, which keeps its .meta, handle and settings, and is reimported; sub-assets keep their handles wherever their keys still exist. The new file is imported in memory first: one that does not import is refused (ImportFailed) and nothing is written. Only the files whose bytes change are written, as one undoable command; dryRun previews it.",
+						"type": "boolean"
+					},
+					"dryRun": {
+						"description": "Validate and return the would-be result without applying anything.",
+						"type": "boolean"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -173,7 +181,7 @@
 				"required": ["source", "destDir"]
 			},
 			"mutates": true,
-			"supportsDryRun": false,
+			"supportsDryRun": true,
 			"timeoutSeconds": 300
 		},
 		{

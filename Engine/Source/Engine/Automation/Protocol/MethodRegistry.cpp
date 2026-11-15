@@ -1260,7 +1260,6 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(!specification.Description.empty(), "Method '{}' needs a description", name);
 		ENGINE_CORE_ASSERT(!(specification.TestHook && specification.ExposeAsTool), "Test hook '{}' cannot be a tool", name);
 		ENGINE_CORE_ASSERT(!(pending && specification.AllowedInBatch), "Pending method '{}' cannot be an op of edit.batch", name);
-		ENGINE_CORE_ASSERT(!(pending && specification.SupportsDryRun), "Pending method '{}' cannot support dry runs", name);
 		ENGINE_CORE_ASSERT(!specification.RequiresSceneTarget || specification.SupportsSceneTarget, "Method '{}' requires a scene target it does not accept",
 			name);
 		// The host holds a scene target's scope for the request's one stretch on the main thread, which polls would outlast.
@@ -1297,6 +1296,21 @@ namespace Engine {
 			return method->Specification.Name < value;
 		});
 		m_Methods.insert(position, descriptor);
+	}
+
+	MethodResult MethodRegistry::ResolvePendingDryRun(Scope<PendingOperation> operation, MethodContext& context)
+	{
+		std::optional<Result<Json>> outcome = operation->Poll(context);
+		if (!outcome.has_value())
+		{
+			operation->Cancel(context);
+			const std::string& method = context.GetRequest().Method;
+			return Error(ErrorCode::Cancelled, std::format("'{}' did not resolve its dry run at once, so the dry run was cancelled", method))
+				.WithHint("a pending method that supports dryRun must answer a dry run from its first poll (MethodRegistry::AddPending)");
+		}
+		if (!*outcome)
+			return std::move(*outcome).error();
+		return std::move(**outcome);
 	}
 
 	std::string MethodNameToToolName(std::string_view method)

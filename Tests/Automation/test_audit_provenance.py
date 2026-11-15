@@ -754,6 +754,51 @@ class BridgeAuditTests(AutomationTestCase):
         self.assertEqual(exit_code, 0, output)
         self.assertEqual(provenance.audit_project(project, "disk").findings, [])
 
+    def test_an_imported_asset_replaced_through_automation_passes_the_audit(self) -> None:
+        """World Tree brief 08: a glTF imported, then given new bytes with asset.import {replace: true}, passes the
+        audit from the working tree and from the index. Provenance keeps each file's latest write, the replace's for the
+        files it wrote (with the new content's hash, and the .meta its import rewrites attributed to it), while the
+        image the new version no longer references keeps its first import's entry."""
+        from engine_mcp.launcher import Launcher, LaunchRequest  # Tools/MCP is on sys.path (setUp)
+
+        repository = self.directory / "Repository"
+        repository.mkdir()
+        project = repository / "Game"
+        fixtures = REPOSITORY_ROOT / "Tests" / "Data" / "Assets" / "Gltf" / "Replace"
+        launcher = Launcher(REPOSITORY_ROOT, self.user_data, engine_client.configurations_from_environment())
+        connection = launcher.launch(LaunchRequest(project=project, create=True))
+        try:
+            for version, replace in (("V1", False), ("V2", True)):
+                params = {"source": (fixtures / version / "Kit.gltf").as_posix(), "destDir": "Assets/Kit"}
+                if replace:
+                    params["replace"] = True
+                self.assertIn("result", connection.call("asset.import", params), version)
+        finally:
+            self.assertTrue(connection.shutdown(force=True)["shutDown"])
+
+        self.assertEqual(provenance.audit_project(project, "disk").findings, [])
+        entries = {entry.path: entry for entry in provenance.load_provenance(project / provenance.PROVENANCE_FILE)}
+        transcript = provenance.load_transcript(project / provenance.TRANSCRIPT_FILE)
+
+        def request_of(relative: str) -> dict:
+            line = entries[relative].transcript_line
+            self.assertIsNotNone(line, relative)
+            return transcript.lines[(line or 0) - 1].record or {}
+
+        for relative in ("Assets/Kit/Kit.gltf", "Assets/Kit/Kit.gltf.meta", "Assets/Kit/Kit.bin",
+                         "Assets/Kit/Textures/Cap.png"):
+            with self.subTest(relative=relative):
+                self.assertEqual(entries[relative].xxh64.lower(), xxh64.xxh64_hex((project / relative).read_bytes()))
+                self.assertEqual(request_of(relative).get("params", {}).get("replace"), True)
+        self.assertNotIn("replace", request_of("Assets/Kit/Textures/Panel.png").get("params", {}))
+
+        # From the index: the project staged, byte for byte, in a repository of its own.
+        git(repository, "init", "--quiet")
+        (repository / ".gitattributes").write_text("* -text\n", encoding="utf-8")
+        (repository / ".gitignore").write_text("Library/\n", encoding="utf-8")
+        git(repository, "add", "--all")
+        self.assertEqual(provenance.audit_project(project, "index").findings, [])
+
     def test_a_hand_edit_after_the_build_fails_with_hash_mismatch(self) -> None:
         project = self.build_project()
         material = project / "Assets" / "Red.material"

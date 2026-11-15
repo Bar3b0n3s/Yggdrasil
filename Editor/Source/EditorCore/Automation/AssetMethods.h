@@ -84,9 +84,9 @@ namespace Engine {
 		uint32_t Version = 0;                    // AssetManager::GetVersion (saturating, ADR 0008 decision 8)
 	};
 
-	// asset.import {source, destDir, settings?} (§13.2 "Paths", §13.5): copies `source` into project-relative `destDir`
-	// (created when missing) and registers it. `source` is a native path (absolute, read-only access) or a project path.
-	// For a .gltf the dependency closure is copied too: every buffer and image URI, as the decoded relative paths of
+	// asset.import {source, destDir, settings?, replace?} (§13.2 "Paths", §13.5): copies `source` into project-relative
+	// `destDir` (created when missing) and registers it. `source` is a native path (absolute, read-only access) or a project
+	// path. For a .gltf the dependency closure is copied too: every buffer and image URI, as the decoded relative paths of
 	// GltfImporter::ListExternalUris (percent-decoded once and validated by GltfImporter's URI rule: relative, inside the
 	// source's directory tree, no ':' or backslash), with its relative path preserved under destDir and a dependency meta
 	// (§6.4: the copy is one batch, so the closure's images are dependencies, EditorAssetManager.h); nothing else is copied.
@@ -94,21 +94,62 @@ namespace Engine {
 	// canonical path (std::filesystem::weakly_canonical) does not lie under the source's canonical directory, so no file
 	// outside that directory is ever read. `settings` is a partial object merged over the importer's defaults
 	// (EditorAssetManager::MergeImportSettings). The copies and their metas are one AssetEditCommand (undo removes them),
-	// then the asset is imported: a pending operation resolving when the import completed. Not dry-runnable (§13.4).
+	// then the asset is imported: a pending operation resolving when the import completed. A first import is not
+	// dry-runnable (Unsupported, §13.4).
+	//
+	// World Tree brief 08 (art made outside the editor, refined over many passes): `replace: true` gives an imported asset
+	// new bytes and keeps its handle. The destination, destDir/<the source's file name>, or destDir itself when it
+	// names a registered source, must be an imported asset's source, whose importer also takes the new file's extension.
+	// The new file is written over it; its .meta (handle, importer, sub-asset list) is kept, and its settings too unless
+	// `settings` is given, which then replaces them as for a first import (merged over the importer's defaults). A glTF's
+	// closure is copied as a first import copies it, relative to the destination: a file that is already this asset's
+	// dependency is overwritten in place, keeping its dependency meta and handle; a new one is copied with a new dependency
+	// meta; a file of the same bytes is left as it is; a different file that belongs to anything else (another asset, another
+	// owner's dependency, a file without a .meta) is refused, so a replace never changes another asset's file. The files the
+	// previous version referenced that the new one does not are left in place, never deleted (another asset may use them),
+	// and listed. The replace is imported in memory first, in the dry-run sandbox (§13.4: the writes go to the overlay, the
+	// import runs in memory, nothing is cached, published or recorded), where a dry run stops and reports it; a new file
+	// whose import fails is refused, nothing written (the lead's review of brief 08: a replace never writes a file that
+	// does not import). Only the files whose bytes change are written (with the .meta when the settings change), as one
+	// AssetEditCommand whose undo restores every previous byte and whose redo writes the new ones again, each write
+	// reimporting the asset; no file to change means no undo step. Then the asset is reimported as asset.reimport reimports
+	// it, so prefabs nesting it and instances in open scenes follow in an undo step of their own. The importer keeps every
+	// sub-asset handle whose key the new version still has (DeriveSubAssetHandle); the result lists the sub-assets kept,
+	// added and removed, and project.validate reports what still references a removed one (ASSET_MISSING). `dryRun: true`
+	// reports the same lists and files from the sandbox's import; it resolves at once.
 	struct AssetImportParams
 	{
 		std::string Source{};
 		std::string DestDir{};
 		VariantValue Settings{}; // an object or null
+		bool Replace = false;    // World Tree brief 08: replace an imported asset's source (see above)
+	};
+
+	// Registry struct "AssetSubAssetInfo": one sub-asset of a replaced source by its key (asset.import {replace: true}). A
+	// removed sub-asset is reported as the previous .meta listed it, since no registry knows its handle any more.
+	struct AssetSubAssetInfo
+	{
+		std::string Key{}; // "mesh:0:Strip" (GltfImporter.h's keys)
+		std::string Id{};  // its handle, 16 hex digits: DeriveSubAssetHandle(source handle, Key)
+		AssetType Type = AssetType::None;
 	};
 
 	struct AssetImportResult
 	{
 		AssetSummary Asset{};
 		std::vector<AssetSummary> SubAssets{};
-		std::vector<std::string> CopiedFiles{}; // project-relative, sorted (the .meta files included)
+		// Project-relative, sorted (the .meta files included). A replace: the files it wrote (would write in a dry run).
+		std::vector<std::string> CopiedFiles{};
 		std::vector<AssetDiagnosticInfo> Diagnostics{};
 		uint32_t UndoIndex = 0;
+		// A replace (empty otherwise), each sorted by key: the sub-assets whose keys the new version still has (their handles
+		// unchanged), those it adds, and those it no longer has.
+		std::vector<AssetSubAssetInfo> KeptSubAssets{};
+		std::vector<AssetSubAssetInfo> AddedSubAssets{};
+		std::vector<AssetSubAssetInfo> RemovedSubAssets{};
+		// A replace: the files the previous version referenced that the new one does not, left in place; project-relative,
+		// sorted.
+		std::vector<std::string> UnreferencedFiles{};
 	};
 
 	// asset.reimport {asset}: EditorAssetManager::ReimportAsync of a main asset, bypassing the cache; a pending operation.
@@ -313,7 +354,13 @@ namespace Engine {
 		// asset.import. Errors (immediate): InvalidArgument for a destDir outside Assets/, a source without an importer, or a
 		// settings value that is not an object; NotFound for a missing source; ImportFailed naming a rejected URI of the
 		// closure; PermissionDenied for a symbolic link, a reparse point or a closure file outside the source's directory;
-		// AlreadyExists when a destination file exists. Errors (when the operation resolves): the import's.
+		// AlreadyExists when a destination file exists (its hint names replace: true); Unsupported for a dry run without
+		// replace. With replace: NotFound at /destDir when no imported asset is at the destination; InvalidArgument at
+		// /destDir for a dependency file there, and at /source when the new file's importer is not the asset's (a type
+		// change); AlreadyExists at /source for a closure file whose bytes differ that is not this asset's dependency;
+		// ImportFailed at /source when the new file does not import in the sandbox (nothing written); the sandbox's errors.
+		// Errors (when the operation resolves): the import's, and for a replaced Prefab those of asset.reimport's update of
+		// the prefabs nesting it and of its instances.
 		[[nodiscard]] Result<Scope<PendingOperation>> AssetImport(EditorMethodContext& context, const AssetImportParams& params);
 		// asset.reimport. Errors: as asset.info; InvalidArgument for a sub-asset, dependency or built-in; when the operation
 		// resolves, the import's errors, and for a Prefab Validation PREFAB_CYCLE for a nesting cycle and those of the nesting
@@ -352,12 +399,14 @@ namespace Engine {
 
 	}
 
-	// Registers AssetDiagnosticInfo, the enums AssetState and AssetCreateType, and the params and result structs above.
+	// Registers AssetDiagnosticInfo, AssetSubAssetInfo, the enums AssetState and AssetCreateType, and the params and result
+	// structs above.
 	void RegisterAssetMethodTypes(TypeRegistry& registry);
 
 	// Registers the eleven methods. Tools (§13.8): asset.list, asset.import, asset.create, asset.setProperties, asset.move,
 	// asset.delete; the others through engine_call. Mutates: import, reimport, create, setProperties, setImportSettings, move,
-	// delete. SupportsDryRun: create and setProperties (§13.4). AllowedInBatch: list, info, getProperties, getImportSettings,
+	// delete. SupportsDryRun: create, setProperties and import (a replace only, resolved at once; MethodRegistry::AddPending,
+	// §13.4). AllowedInBatch: list, info, getProperties, getImportSettings,
 	// create, setProperties, setImportSettings, move and delete (every effect goes through EditorContext::Execute, so the
 	// Tetris scaffold's batch of asset.create ops is atomic, §13.11); import and reimport are pending operations and are not.
 	// None is available in the launcher state; asset.info and asset.list are not in the Runtime subset.

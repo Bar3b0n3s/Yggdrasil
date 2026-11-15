@@ -199,30 +199,41 @@ Example: Read a material.
 
 ### asset.import
 
-Copies a file (and a glTF's buffers and images) into a folder below Assets/ with its .meta files as one undoable command, then imports it; resolves when the import completed.
+Copies a file (and a glTF's buffers and images) into a folder below Assets/ with its .meta files as one undoable command, then imports it; resolves when the import completed. With replace: true it gives an imported asset the file's new bytes instead, keeping its handle, settings and every sub-asset handle whose key remains, and lists the sub-assets kept, added and removed; a new file that does not import is refused (ImportFailed) and nothing is written (dryRun previews a replace).
 
-- Flags: tool `asset_import`, mutates, pending
+- Flags: tool `asset_import`, mutates, dry run, pending
 - Timeout: 300 s
 - Required params: `source`, `destDir`
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `source` | `String` | yes | `""` | The file to import: an absolute native path, or a project path. |
-| `destDir` | `String` | yes | `""` | The project-relative folder below Assets/ to copy it into; created when missing. |
-| `settings` | `Variant` |  | `null` | Import settings merged over the importer's defaults; null for the defaults. |
+| `destDir` | `String` | yes | `""` | The project-relative folder below Assets/ to copy it into; created when missing. With replace, the folder holding the asset to replace (the file of the source's name there), or that asset's source file itself. |
+| `settings` | `Variant` |  | `null` | Import settings merged over the importer's defaults; null for the defaults (with replace, null keeps the asset's settings). |
+| `replace` | `Bool` |  | `false` | Give an imported asset this file's bytes instead of importing a new one: the file (and a glTF's changed buffers and images) is written over the asset's, which keeps its .meta, handle and settings, and is reimported; sub-assets keep their handles wherever their keys still exist. The new file is imported in memory first: one that does not import is refused (ImportFailed) and nothing is written. Only the files whose bytes change are written, as one undoable command; dryRun previews it. |
 
 | Result | Type | Description |
 |---|---|---|
 | `asset` | `AssetSummary` | The imported asset. |
 | `subAssets` | `Array<AssetSummary>` | Its sub-assets. |
-| `copiedFiles` | `Array<String>` | The files copied with their .meta files, project-relative, sorted. |
+| `copiedFiles` | `Array<String>` | The files copied with their .meta files, project-relative, sorted; with replace, the files written (in a dry run, those it would write). |
 | `diagnostics` | `Array<AssetDiagnosticInfo>` | The importer's warnings. |
-| `undoIndex` | `UInt32` | The undo index of the copy; 0 in a batch. |
+| `undoIndex` | `UInt32` | The undo index of the copy; 0 in a batch, in a dry run, and for a replace that changed no file. |
+| `keptSubAssets` | `Array<AssetSubAssetInfo>` | With replace: the sub-assets whose keys the new version still has, their handles unchanged, so references to them keep working. |
+| `addedSubAssets` | `Array<AssetSubAssetInfo>` | With replace: the sub-assets the new version adds. |
+| `removedSubAssets` | `Array<AssetSubAssetInfo>` | With replace: the sub-assets the new version no longer has; project.validate reports what still references them (ASSET_MISSING). |
+| `unreferencedFiles` | `Array<String>` | With replace: the files the previous version referenced that the new one does not, left in place (never deleted). |
 
 Example: Import a glTF model with its textures.
 
 ```json
 {"source":"C:/Downloads/Kart/Kart.gltf","destDir":"Assets/Models"}
+```
+
+Example: Replace the imported Assets/Models/Kart.gltf with a new version of the file.
+
+```json
+{"source":"C:/Downloads/Kart/Kart.gltf","destDir":"Assets/Models","replace":true}
 ```
 
 ### asset.info

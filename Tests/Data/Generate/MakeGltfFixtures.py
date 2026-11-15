@@ -64,6 +64,15 @@ no TANGENT (the importer generates tangents with MikkTSpace), texture coordinate
   SharedSkins.gltf             M23: two skins over shared joints, each with its own mesh and inverse bind matrices (the
                                second mesh authored one unit off), merged into one Skeleton; a static use of the first
                                mesh; and an animation "Sway" over joints of both skins
+  Replace/V1/Kit.gltf,         World Tree brief 08 (asset.import {replace: true}): two versions of one file name, each
+  Replace/V1/Kit.bin,          with an external buffer and image. V1: the skinned strip "Strip" (Skinned.gltf's chain
+  Replace/V1/Textures/         and animation "Wave") beside the quad "Panel", textured with Textures/Panel.png. V2: the
+    Panel.png                  strip twice as wide, and "Cap", textured with Textures/Cap.png, instead of "Panel"; the
+  Replace/V2/Kit.gltf,         skin and "Wave" kept. So a replace of V1 by V2 keeps mesh:0:Strip (changed), removes
+  Replace/V2/Kit.bin,          mesh:1:Panel, adds mesh:1:Cap, overwrites Kit.bin and leaves Panel.png unreferenced
+  Replace/V2/Textures/Cap.png
+  Replace/Broken/Kit.gltf      a third version that parses but does not import (its POSITION accessor claims more
+                               elements than its buffer view holds), which a replace refuses before writing anything
 
 Run from the repository root: `python Tests/Data/Generate/MakeGltfFixtures.py` writes the files (and removes files of
 the output directory it does not generate); `--check` compares a fresh generation with the committed files and writes
@@ -1013,6 +1022,72 @@ def make_shared_skins() -> dict[str, bytes]:
     return {"SharedSkins.gltf": gltf_text(builder.embedded_document(scene_nodes=[0]))}
 
 
+PANEL_PNG = checker_png(2, (40, 160, 90, 255), (220, 220, 220, 255))
+CAP_PNG = checker_png(2, (160, 40, 90, 255), (20, 20, 20, 255))
+
+
+def replace_version(strip_width: float, second: str, image: bytes) -> dict[str, bytes]:
+    """One version of Replace/<V>/Kit.gltf (World Tree brief 08's asset.import {replace: true}): the skinned strip
+    "Strip" (mesh 0, `strip_width` wide, rows at y 0, 1 and 2) with Skinned.gltf's two-joint chain under "Armature" and
+    its animation "Wave" turning Joint1, beside the mesh `second` (mesh 1, a quad at x 2 with the material
+    "<second>Material", whose base colour is Textures/<second>.png, `image`), every buffer in the external Kit.bin."""
+    builder = GltfBuilder()
+    strip_material = builder.add_material(plain_material("StripMaterial", (0.8, 0.5, 0.3, 1.0)))
+    texture = builder.add_image({"uri": f"Textures/{second}.png"})
+    second_material = builder.add_material(textured_material(f"{second}Material", texture))
+    rows = (((0, 0), (1.0, 0.0)), ((0, 1), (0.5, 0.5)), ((1, 0), (1.0, 0.0)))
+    geometry = strip_geometry(-strip_width / 2.0, 0.0, strip_width, 1.0)
+    strip = add_skinned_primitive(builder, geometry, strip_material, rows)
+    strip_mesh = builder.add_mesh("Strip", [strip])
+    second_mesh = builder.add_mesh(second, [builder.add_primitive(quad_geometry((2.0, 0.5, 0.0)), second_material)])
+
+    builder.add_node({"children": [1, 3], "name": "Armature"})
+    builder.add_node({"children": [2], "name": "Joint0"})
+    builder.add_node({"name": "Joint1", "translation": [0.0, 1.0, 0.0]})
+    builder.add_node({"mesh": strip_mesh, "name": "Body", "skin": 0})
+    builder.add_node({"mesh": second_mesh, "name": second})
+    worlds = world_matrices(builder.nodes)
+    inverse_binds = add_inverse_binds(builder, [rigid_inverse(worlds[1]), rigid_inverse(worlds[2])])
+
+    samplers: list[dict[str, Any]] = []
+    turned = axis_rotation((0.0, 0.0, 1.0), 45.0)
+    rest = (0.0, 0.0, 0.0, 1.0)
+    rotation = add_sampler(builder, samplers, (0.0, 0.5, 1.0), (rest, turned, rest), "VEC4")
+    builder.extra = {
+        "animations": [{"channels": [{"sampler": rotation, "target": {"node": 2, "path": "rotation"}}], "name": "Wave",
+                        "samplers": samplers}],
+        "skins": [{"inverseBindMatrices": inverse_binds, "joints": [1, 2]}],
+    }
+    document = builder.document("Kit.bin", scene_nodes=[0, 4])
+    return {"Kit.gltf": gltf_text(document), "Kit.bin": bytes(builder.data), f"Textures/{second}.png": image}
+
+
+def broken_replace_version() -> bytes:
+    """Replace/Broken/Kit.gltf: one triangle whose POSITION accessor claims six elements of a buffer view that holds
+    three, so the file parses (and lists no external file) but its import fails with ImportFailed naming the
+    accessor."""
+    builder = GltfBuilder()
+    positions = builder.add_floats([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)], "VEC3", with_bounds=True)
+    builder.accessors[positions]["count"] = 6
+    mesh = builder.add_mesh("Strip", [{"attributes": {"POSITION": positions}, "mode": MODE_TRIANGLES}])
+    builder.add_node({"mesh": mesh, "name": "Body"})
+    return gltf_text(builder.embedded_document())
+
+
+def make_replace() -> dict[str, bytes]:
+    """Replace/V1 and Replace/V2, the two versions of Kit.gltf that asset.import {replace: true} swaps: V2's strip is
+    twice as wide (mesh:0:Strip changed), its mesh "Panel" and material "PanelMaterial" (mesh 1, material 1) became
+    "Cap" and "CapMaterial" (removed and added), its image Textures/Panel.png became Textures/Cap.png (Panel.png
+    unreferenced; the sub-asset texture:0 kept with Cap.png's texels), Kit.bin holds other bytes, and the skin and the
+    animation "Wave" are kept."""
+    files: dict[str, bytes] = {}
+    for version, (width, second, image) in (("V1", (1.0, "Panel", PANEL_PNG)), ("V2", (2.0, "Cap", CAP_PNG))):
+        for name, content in replace_version(width, second, image).items():
+            files[f"Replace/{version}/{name}"] = content
+    files["Replace/Broken/Kit.gltf"] = broken_replace_version()
+    return files
+
+
 def build_fixtures() -> dict[str, bytes]:
     """Every fixture, keyed by its '/'-separated path relative to the output directory."""
     fixtures: dict[str, bytes] = {}
@@ -1039,6 +1114,7 @@ def build_fixtures() -> dict[str, bytes]:
         make_skinned,
         make_skinned_rigs,
         make_shared_skins,
+        make_replace,
     ):
         for name, content in make().items():
             if name in fixtures:

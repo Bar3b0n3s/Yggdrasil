@@ -38,9 +38,9 @@ namespace Engine {
 	// Changes project files by their bytes (Architecture §12.3: "AssetEditCommand (file bytes before/after, for materials,
 	// sound effects, scripts written through automation and import settings)"): asset.create (a new source and its .meta),
 	// asset.setProperties, asset.setImportSettings (the .meta), prefab.create and prefab.apply (the .prefab), asset.import
-	// (the copied files and their metas) and, from M13, script.write. Asset edits write through: Execute writes every After
-	// state and Undo every Before state at once, so there are no "dirty native assets" (project.save saves only the scene,
-	// ADR 0010) and the files always equal what the editor shows.
+	// (the copied files and their metas; with replace, the files whose bytes change) and, from M13, script.write. Asset
+	// edits write through: Execute writes every After state and Undo every Before state at once, so there are no "dirty
+	// native assets" (project.save saves only the scene, ADR 0010) and the files always equal what the editor shows.
 	//
 	// Files are written, removed and directories created through EditorContext's write path (WriteProjectFile,
 	// RemoveProjectFile, CreateProjectDirectory): provenance is recorded, dry runs go to the overlay, the AssetWriter keeps the

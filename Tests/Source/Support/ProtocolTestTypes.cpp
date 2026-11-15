@@ -220,8 +220,13 @@ namespace Engine {
 			methods.Add<TestHostContext, LargeParams, LargeResult>(
 				{ .Name = "test.large", .Description = "A large result.", .Examples = { MethodExample{ .Description = "Small.", .Params = Json{ { "count", 1 } } } } },
 				&Large);
+			// A pending method that supports dry runs, which resolve at once (MethodRegistry::AddPending): one of a single poll
+			// answers, one of more is cancelled and fails.
 			methods.AddPending<TestHostContext, PendParams, PendResult>(
-				{ .Name = "test.pend", .Description = "Resolves after some polls.", .Examples = { MethodExample{ .Description = "Two polls.", .Params = Json{ { "polls", 2 } } } } },
+				{ .Name = "test.pend",
+					.Description = "Resolves after some polls.",
+					.SupportsDryRun = true,
+					.Examples = { MethodExample{ .Description = "Two polls.", .Params = Json{ { "polls", 2 } } } } },
 				&Pend);
 			methods.Add<TestHostContext, ReadParams, ReadResult>(
 				{ .Name = "test.fail", .Description = "Always fails.", .AllowedInBatch = true, .Examples = { MethodExample{ .Description = "Fail.", .Params = Json::object() } } },

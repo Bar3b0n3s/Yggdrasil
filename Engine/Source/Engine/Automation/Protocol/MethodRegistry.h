@@ -121,7 +121,7 @@ namespace Engine {
 		// method accepts ifRevision, whatever this flag.
 		bool Mutates = false;
 		// Accepts "dryRun": true (§13.4). Usually a Mutates method; project.validate supports it without being one (it changes
-		// something only when asked to fix).
+		// something only when asked to fix). A pending method's dry run resolves at once (AddPending).
 		bool SupportsDryRun = false;
 		// Accepts the scene target "scene" (M20, E-SCENES; Docs/Decisions/0031-m20-contract.md decision 16): a reserved
 		// member, like dryRun, that names the open scene the request addresses (RequestOptions::Scene); absent, the request
@@ -220,9 +220,9 @@ namespace Engine {
 		// (EditorMethodContext), or a base of it that several hosts share (MethodContext::IsHostType). Params and Result are
 		// registered structs (asserted, naming the method). The registration is a programmer error and asserted when the
 		// name is malformed or taken, the description is empty, a required param is not a field of Params, the flags
-		// contradict each other (TestHook with ExposeAsTool, AllowedInBatch, SupportsDryRun or SupportsSceneTarget on a
-		// pending method, RequiresSceneTarget without SupportsSceneTarget), Params declares "scene" for a method with
-		// SupportsSceneTarget, or the registry is frozen.
+		// contradict each other (TestHook with ExposeAsTool, AllowedInBatch or SupportsSceneTarget on a pending method,
+		// RequiresSceneTarget without SupportsSceneTarget), Params declares "scene" for a method with SupportsSceneTarget, or
+		// the registry is frozen.
 		//     methods.Add<EditorMethodContext, EntityCreateParams, EntityCreateResult>({ .Name = "entity.create", ... },
 		//         &Automation::EntityCreate);
 		template<typename Host, typename Params, typename ResultType>
@@ -244,7 +244,11 @@ namespace Engine {
 		}
 
 		// Registers a method that resolves later (§13.2): the handler validates, starts the work and returns the operation,
-		// whose outcome is the JSON of ResultType. Same rules as Add; a pending method cannot support dry runs (asserted).
+		// whose outcome is the JSON of ResultType. Same rules as Add. A pending method may support dry runs (World Tree brief
+		// 08: asset.import {replace: true}) only with a dry run that resolves at once: the host's dry-run sandbox lasts for
+		// the request's one stretch on the main thread, which a pending operation's later polls would outlast. So in a dry
+		// run the operation is polled once inside the invocation (ResolvePendingDryRun) and its outcome is the request's
+		// immediate result; one that would need another poll is cancelled and the request fails with Cancelled.
 		template<typename Host, typename Params, typename ResultType>
 		void AddPending(MethodSpecification specification, Result<Scope<PendingOperation>> (*handler)(Host& context, const Params& params))
 		{
@@ -256,6 +260,8 @@ namespace Engine {
 				Result<Scope<PendingOperation>> operation = handler(static_cast<Host&>(context), *static_cast<const Params*>(params));
 				if (!operation)
 					return std::move(operation).error();
+				if (context.IsDryRun())
+					return ResolvePendingDryRun(std::move(*operation), context);
 				return std::move(*operation);
 			});
 		}
@@ -342,6 +348,9 @@ namespace Engine {
 	private:
 		// Registration internals of Add and AddPending (see their rules).
 		void AddEntry(MethodSpecification specification, TypeKey host, TypeKey params, TypeKey result, bool pending, Invoker invoker);
+		// A pending method's dry run (AddPending): `operation` polled once with `context`; its outcome (the result JSON or the
+		// error), or, when it would need another poll, Cancelled naming the method after Cancel, so no dry run stays open.
+		[[nodiscard]] static MethodResult ResolvePendingDryRun(Scope<PendingOperation> operation, MethodContext& context);
 	private:
 		struct Storage; // descriptors and invokers, owned (MethodRegistry.cpp)
 	private:

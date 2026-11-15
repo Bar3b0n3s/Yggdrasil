@@ -1207,6 +1207,310 @@ namespace Engine {
 			return result;
 		}
 
+		// asset.import's check that the destination `path` of the source is free: CheckAssetPathFree, its hint naming
+		// replace: true when a registered asset's source is there (World Tree brief 08).
+		Status CheckImportDestinationFree(const EditorAssetManager& assets, const VirtualFileSystem& vfs, const VfsPath& path)
+		{
+			Status free = Utils::CheckAssetPathFree(vfs, path, "/destDir");
+			const AssetRecord* record = assets.GetRegistry().FindBySourcePath(path);
+			if (free || record == nullptr || record->Metadata.Kind != AssetMetaKind::Asset)
+				return free;
+			return std::unexpected(Utils::MakeParamError(ErrorCode::AlreadyExists, "/destDir", std::format("'{}' already exists", Utils::ToProjectRelative(path)),
+				"choose another path, change the existing asset, or pass replace: true to give it this file's bytes and keep its handle"));
+		}
+
+		// The sub-assets of a replaced source by key (asset.import {replace: true}): the keys of `after` that `before` has
+		// (kept, their handles derived from the same source handle and key, so unchanged), those it lacks (added), and the
+		// keys of `before` that `after` lacks (removed, as `before` lists them). Each list sorted by key.
+		void DiffSubAssets(std::span<const SubAssetEntry> before, std::span<const SubAssetEntry> after, AssetImportResult& result)
+		{
+			const auto describe = [](const SubAssetEntry& entry)
+			{
+				return AssetSubAssetInfo{ .Key = entry.Key, .Id = entry.Handle.ToString(), .Type = entry.Type };
+			};
+			std::set<std::string_view> previous;
+			for (const SubAssetEntry& entry : before)
+				previous.insert(entry.Key);
+			std::set<std::string_view> current;
+			for (const SubAssetEntry& entry : after)
+			{
+				current.insert(entry.Key);
+				(previous.contains(entry.Key) ? result.KeptSubAssets : result.AddedSubAssets).push_back(describe(entry));
+			}
+			for (const SubAssetEntry& entry : before)
+			{
+				if (!current.contains(entry.Key))
+					result.RemovedSubAssets.push_back(describe(entry));
+			}
+			for (std::vector<AssetSubAssetInfo>* list : { &result.KeptSubAssets, &result.AddedSubAssets, &result.RemovedSubAssets })
+				std::ranges::sort(*list, {}, &AssetSubAssetInfo::Key);
+		}
+
+		// A replace's result once its import completed: the asset, its sub-assets, the importer's warnings and the sub-asset
+		// lists against `previous`, the sub-assets the .meta listed before the replace.
+		void CompleteReplaceResult(const EditorAssetManager& assets, const AssetImportOutcome& outcome, std::span<const SubAssetEntry> previous, AssetImportResult& result)
+		{
+			result.Asset = Utils::MakeAssetSummary(assets, outcome.Handle);
+			result.SubAssets = MakeSubAssetSummaries(assets, outcome.SubAssets);
+			result.Diagnostics = MakeDiagnosticInfos(outcome.Diagnostics);
+			DiffSubAssets(previous, outcome.SubAssets, result);
+		}
+
+		// asset.import {replace: true}'s operation: the reimport of the replaced source, then, as asset.reimport's operation
+		// does, for a Prefab an open scene instantiates or another prefab may nest, the update of the prefabs nesting it and
+		// of the instances as an undo step of its own (UpdateReimportedPrefab); then the sub-asset lists.
+		class AssetReplaceOperation final : public PendingOperation
+		{
+		public:
+			AssetReplaceOperation(EditorContext& editor, AssetHandle handle, JobHandle<AssetImportOutcome> reimport, std::vector<SubAssetEntry> previous,
+				AssetImportResult result)
+				: m_Editor(&editor), m_Handle(handle), m_Reimport(std::move(reimport)), m_Previous(std::move(previous)), m_Result(std::move(result))
+			{
+			}
+
+			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext& context) override
+			{
+				if (!m_Reimport.IsReady())
+					return std::nullopt;
+				EditorAssetManager& assets = m_Editor->GetAssets();
+				assets.WaitIdle();
+				Result<AssetImportOutcome> outcome = m_Reimport.Take();
+				if (!outcome)
+					return std::unexpected(std::move(outcome).error().WithContext(std::format("importing the replaced '{}'", m_Result.Asset.Path)));
+				if (Utils::UpdatesPrefabInstances(*m_Editor, m_Handle))
+				{
+					if (Status updated = UpdateReimportedPrefab(*m_Editor, m_Handle); !updated)
+						return std::unexpected(std::move(updated).error());
+				}
+				CompleteReplaceResult(assets, *outcome, m_Previous, m_Result);
+				return context.SerializeResult(m_Result);
+			}
+
+			[[nodiscard]] std::string GetPhase() const override { return std::format("Automation:asset.import {} (replace)", m_Result.Asset.Path); }
+		private:
+			EditorContext* m_Editor = nullptr; // documented back-reference: the editor outlives its requests
+			AssetHandle m_Handle{};
+			JobHandle<AssetImportOutcome> m_Reimport;
+			std::vector<SubAssetEntry> m_Previous; // the sub-assets the .meta listed before the replace
+			AssetImportResult m_Result;
+		};
+
+		// A replace's dry run (§13.4): the result the handler computed in the dry-run sandbox, returned by the first poll,
+		// which MethodRegistry::AddPending makes at once for a dry run.
+		class ResolvedImportOperation final : public PendingOperation
+		{
+		public:
+			explicit ResolvedImportOperation(AssetImportResult result)
+				: m_Result(std::move(result))
+			{
+			}
+
+			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext& context) override { return context.SerializeResult(m_Result); }
+		private:
+			AssetImportResult m_Result;
+		};
+
+		// The files a replaced source's previous version referenced that `copies` (the new version's, the source first) no
+		// longer write, and that exist: its closure as `previousBytes` lists it (a glTF's; nothing when it cannot be read)
+		// and the dependency files `handle` owns. Project-relative, sorted.
+		std::vector<std::string> FindUnreferencedFiles(const EditorAssetManager& assets, const VirtualFileSystem& vfs, AssetHandle handle, const VfsPath& source,
+			const std::optional<Buffer>& previousBytes, std::span<const ImportCopy> copies)
+		{
+			std::set<VfsPath> previous;
+			if (previousBytes.has_value() && GltfImporter().CanImport(source.GetExtension()))
+			{
+				if (const Result<std::vector<VfsPath>> files = GltfImporter().ListDependencyFiles(*previousBytes, source); files.has_value())
+					previous.insert(files->begin(), files->end());
+			}
+			for (const AssetRecord* dependency : assets.GetRegistry().GetDependencyRecords(handle))
+				previous.insert(dependency->SourcePath);
+			for (const ImportCopy& copy : copies)
+				previous.erase(copy.Destination);
+			std::vector<std::string> unreferenced;
+			for (const VfsPath& file : previous)
+			{
+				if (vfs.Exists(file))
+					unreferenced.push_back(Utils::ToProjectRelative(file));
+			}
+			std::ranges::sort(unreferenced);
+			return unreferenced;
+		}
+
+		// What a file at `path` is, for a refusal that names it: the source of another asset, another asset's dependency
+		// file, or a file without a .meta.
+		std::string DescribeExistingFile(const EditorAssetManager& assets, const VfsPath& path)
+		{
+			const AssetRecord* record = assets.GetRegistry().FindBySourcePath(path);
+			if (record == nullptr)
+				return "a file without a .meta";
+			if (record->Metadata.Kind == AssetMetaKind::Dependency)
+				return std::format("a dependency file of '{}'", assets.GetReferencePath(record->Metadata.Owner));
+			return std::format("the source of the {} {}", AssetTypeToString(record->Metadata.Type), record->Metadata.Handle.ToString());
+		}
+
+		// asset.import {replace: true} (World Tree brief 08; AssetMethods.h): `directory` is destDir resolved. The destination
+		// is `directory` itself when it is a registered source, else directory/<the source's file name>. Imports the replace in
+		// the dry-run sandbox first (a dry run stops there and resolves at once; a file that does not import is ImportFailed at
+		// /source, nothing written), then writes only the files whose bytes change, as one AssetEditCommand, and reimports
+		// through asset.reimport's path.
+		Result<Scope<PendingOperation>> ReplaceImportedSource(EditorMethodContext& context, const AssetImportParams& params, const VfsPath& directory)
+		{
+			EditorContext& editor = context.GetEditor();
+			EditorAssetManager& assets = editor.GetAssets();
+			VirtualFileSystem& vfs = editor.GetVfs();
+			const std::string fileName = FileSystem::PathToUtf8(FileSystem::PathFromUtf8(params.Source).filename());
+			VfsPath destination = directory;
+			if (assets.GetRegistry().FindBySourcePath(directory) == nullptr)
+			{
+				ENGINE_TRY_ASSIGN(destination, WithContext(directory.Join(fileName), std::format("replacing with '{}'", params.Source)));
+			}
+			const std::string relative = Utils::ToProjectRelative(destination);
+			const AssetRecord* record = assets.GetRegistry().FindBySourcePath(destination);
+			if (record == nullptr)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/destDir", std::format("no imported asset at '{}' to replace", relative),
+					"name the asset's source, or the folder that holds it with the same file name, in destDir; import a new file without replace"));
+			}
+			if (record->Metadata.Kind == AssetMetaKind::Dependency)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/destDir",
+					std::format("'{}' is a dependency file of '{}', not an asset", relative, assets.GetReferencePath(record->Metadata.Owner)),
+					"replace the asset that owns it: its new version brings the file with it"));
+			}
+			// Copied before anything is written: a write re-registers the record.
+			const AssetMetadata previous = record->Metadata;
+			const VfsPath metaPath = record->MetaPath;
+			const AssetHandle handle = previous.Handle;
+
+			// The new file's importer, by its own extension, must be the asset's: a replace never changes the asset's type.
+			ENGINE_TRY_ASSIGN(const VfsPath named, WithContext(destination.GetParent().Join(fileName), std::format("replacing with '{}'", params.Source)));
+			Result<AssetMetadata> fresh = assets.CreateMetadata(named);
+			if (!fresh)
+			{
+				if (fresh.error().GetCode() != ErrorCode::NotFound)
+					return std::unexpected(std::move(fresh).error());
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/source", fresh.error().GetMessageText(), fresh.error().GetHint()));
+			}
+			if (fresh->Importer != previous.Importer)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/source",
+					std::format("'{}' takes the {} importer, but '{}' is a {} of the {} importer: a replace keeps the asset's importer and type", fileName,
+						fresh->Importer, relative, AssetTypeToString(previous.Type), previous.Importer),
+					"replace it with a file of the same kind, or import this file as a new asset without replace"));
+			}
+
+			// Every file is read and checked before anything is written, as for a first import.
+			ENGINE_TRY_ASSIGN(std::vector<ImportCopy> copies, ReadImportFiles(context, params, destination));
+			AssetMetadata changed = previous;
+			if (!params.Settings.Get().is_null())
+			{
+				ENGINE_TRY_ASSIGN(const Json patch, PrepareSettingsPatch(editor.GetTypeRegistry(), previous.Importer, params.Settings, "/settings"));
+				ENGINE_TRY_ASSIGN(changed.Settings, MergeSettings(assets, previous.Importer, fresh->Settings, patch, "/settings"));
+			}
+			const auto readCurrent = [&vfs](const VfsPath& path) -> Result<std::optional<Buffer>>
+			{
+				Result<Buffer> bytes = vfs.ReadFile(path);
+				if (bytes)
+					return std::make_optional(std::move(*bytes));
+				if (bytes.error().GetCode() == ErrorCode::NotFound)
+					return std::optional<Buffer>();
+				return std::unexpected(Utils::ToEditorFileError(std::move(bytes).error()));
+			};
+			ENGINE_TRY_ASSIGN(const std::optional<Buffer> previousSource, readCurrent(destination));
+
+			AssetImportResult result;
+			result.Asset = AssetSummary{ .Id = handle.ToString(), .Path = relative, .Type = previous.Type };
+			result.UnreferencedFiles = FindUnreferencedFiles(assets, vfs, handle, destination, previousSource, copies);
+			std::vector<AssetFileEdit> edits;
+			std::set<VfsPath> directories;
+			for (size_t index = 1; index < copies.size(); ++index)
+			{
+				ImportCopy& copy = copies[index];
+				ENGINE_TRY_ASSIGN(std::optional<Buffer> current, readCurrent(copy.Destination));
+				if (current.has_value())
+				{
+					if (*current == copy.Bytes)
+						continue;
+					const AssetRecord* owned = assets.GetRegistry().FindBySourcePath(copy.Destination);
+					if (owned == nullptr || owned->Metadata.Kind != AssetMetaKind::Dependency || owned->Metadata.Owner != handle)
+					{
+						return std::unexpected(Utils::MakeParamError(ErrorCode::AlreadyExists, "/source",
+							std::format("'{}' already exists as {}, and the new '{}' references other bytes there: a replace never changes another asset's file",
+								Utils::ToProjectRelative(copy.Destination), DescribeExistingFile(assets, copy.Destination), fileName),
+							"give each glTF its own copy of the file, under its own name"));
+					}
+					result.CopiedFiles.push_back(Utils::ToProjectRelative(copy.Destination));
+					edits.push_back(AssetFileEdit{ .Path = copy.Destination, .Kind = AssetFileKind::File, .Before = std::move(current), .After = std::move(copy.Bytes) });
+					continue;
+				}
+				// A new file of the closure: copied with a dependency meta owned by the asset (§6.4), as a first import copies it.
+				ENGINE_TRY(Utils::CheckAssetPathFree(vfs, copy.Destination, "/source"));
+				std::vector<AssetFileEdit> missing;
+				Utils::AddMissingDirectoryEdits(vfs, copy.Destination.GetParent(), missing);
+				for (AssetFileEdit& edit : missing)
+				{
+					if (directories.insert(edit.Path).second)
+						edits.push_back(std::move(edit));
+				}
+				ENGINE_TRY_ASSIGN(const VfsPath dependencyMeta, GetMetaPath(copy.Destination));
+				result.CopiedFiles.push_back(Utils::ToProjectRelative(copy.Destination));
+				result.CopiedFiles.push_back(Utils::ToProjectRelative(dependencyMeta));
+				edits.push_back(AssetFileEdit{ .Path = copy.Destination, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = std::move(copy.Bytes) });
+				edits.push_back(AssetFileEdit{ .Path = dependencyMeta, .Kind = AssetFileKind::File, .Before = std::nullopt, .After = TextToBuffer(SerializeAssetMetadata(assets.CreateDependencyMetadata(handle))) });
+			}
+			if (changed.Settings != previous.Settings)
+			{
+				ENGINE_TRY_ASSIGN(std::optional<Buffer> currentMeta, readCurrent(metaPath));
+				Buffer meta = TextToBuffer(SerializeAssetMetadata(changed));
+				if (currentMeta != meta)
+				{
+					result.CopiedFiles.push_back(Utils::ToProjectRelative(metaPath));
+					edits.push_back(AssetFileEdit{ .Path = metaPath, .Kind = AssetFileKind::File, .Before = std::move(currentMeta), .After = std::move(meta) });
+				}
+			}
+			// The source last, so its write's reimport sees every other file already written.
+			if (previousSource != copies.front().Bytes)
+			{
+				result.CopiedFiles.push_back(relative);
+				edits.push_back(AssetFileEdit{ .Path = destination, .Kind = AssetFileKind::File, .Before = previousSource, .After = std::move(copies.front().Bytes) });
+			}
+			std::ranges::sort(result.CopiedFiles);
+
+			// The replace in memory first (the lead's review of brief 08): its files written and the asset imported in the
+			// dry-run sandbox (§13.4; the import runs in memory, EditorAssetManager::BeginDryRun), the one a dry run holds or one
+			// opened for this call. A dry run reports this import, and a replace whose new file does not import writes nothing.
+			const std::string label = std::format("Replace Asset '{}'", destination.GetFileName());
+			Result<AssetImportOutcome> trial;
+			{
+				Scope<EditorDryRunScope> sandbox;
+				if (!context.IsDryRun())
+				{
+					ENGINE_TRY_ASSIGN(sandbox, EditorDryRunScope::Begin(editor));
+				}
+				if (!edits.empty())
+					ENGINE_TRY(editor.Execute(CreateScope<AssetEditCommand>(label, edits)));
+				trial = assets.Reimport(handle);
+			}
+			if (!trial)
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::ImportFailed, "/source",
+					std::format("'{}' does not import, so '{}' was not replaced: {}", params.Source, relative, trial.error().GetMessageText()),
+					"fix the file and replace again (dryRun: true checks a file without writing it); nothing was written"));
+			}
+			if (context.IsDryRun())
+			{
+				CompleteReplaceResult(assets, *trial, previous.SubAssets, result);
+				return Scope<PendingOperation>(CreateScope<ResolvedImportOperation>(std::move(result)));
+			}
+			if (!edits.empty())
+			{
+				ENGINE_TRY_ASSIGN(const uint64_t undoIndex, editor.Execute(CreateScope<AssetEditCommand>(label, std::move(edits))));
+				result.UndoIndex = ToAutomationCounter(undoIndex);
+			}
+			ENGINE_INFO("asset.import replaced '{}' with '{}' ({} file(s) written)", relative, params.Source, result.CopiedFiles.size());
+			return Scope<PendingOperation>(CreateScope<AssetReplaceOperation>(editor, handle, assets.ReimportAsync(handle), previous.SubAssets, std::move(result)));
+		}
+
 	}
 
 	namespace Automation {
@@ -1310,6 +1614,11 @@ namespace Engine {
 		Result<Scope<PendingOperation>> AssetImport(EditorMethodContext& context, const AssetImportParams& params)
 		{
 			EditorContext& editor = context.GetEditor();
+			if (context.IsDryRun() && !params.Replace)
+			{
+				return std::unexpected(Error(ErrorCode::Unsupported, "asset.import supports dryRun only with replace: true; a first import cannot be validated without being applied")
+						.WithHint("import without dryRun (edit.undo removes the copies), or pass replace: true to preview a replace"));
+			}
 			ENGINE_TRY_ASSIGN(const VfsPath directory, Utils::ResolveAssetsPath(context, params.DestDir, "/destDir", {}, true));
 			if (!params.Settings.Get().is_null() && !params.Settings.Get().is_object())
 			{
@@ -1319,6 +1628,8 @@ namespace Engine {
 			if (params.Source.empty())
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/source", "the source must not be empty"));
 			ENGINE_TRY(Utils::RefreshAssets(editor));
+			if (params.Replace)
+				return ReplaceImportedSource(context, params, directory);
 
 			// Every file is read and checked before anything is written: a rejected URI refuses the whole import.
 			const std::string fileName = FileSystem::PathToUtf8(FileSystem::PathFromUtf8(params.Source).filename());
@@ -1357,7 +1668,10 @@ namespace Engine {
 			for (size_t index = 0; index < copies.size(); ++index)
 			{
 				ImportCopy& copy = copies[index];
-				ENGINE_TRY(Utils::CheckAssetPathFree(vfs, copy.Destination, "/destDir"));
+				if (index == 0)
+					ENGINE_TRY(CheckImportDestinationFree(assets, vfs, copy.Destination));
+				else
+					ENGINE_TRY(Utils::CheckAssetPathFree(vfs, copy.Destination, "/destDir"));
 				addDirectories(copy.Destination.GetParent());
 				// The source's .meta, then a dependency meta per closure file (§6.4), owned by the source.
 				const AssetMetadata meta = index == 0 ? metadata : assets.CreateDependencyMetadata(metadata.Handle);
@@ -1702,15 +2016,36 @@ namespace Engine {
 
 		registry.Struct<AssetImportParams>("AssetImportParams", "The params of asset.import.")
 			.Field("source", &AssetImportParams::Source, "The file to import: an absolute native path, or a project path.")
-			.Field("destDir", &AssetImportParams::DestDir, "The project-relative folder below Assets/ to copy it into; created when missing.")
-			.Field("settings", &AssetImportParams::Settings, "Import settings merged over the importer's defaults; null for the defaults.");
+			.Field("destDir", &AssetImportParams::DestDir,
+				"The project-relative folder below Assets/ to copy it into; created when missing. With replace, the folder holding the asset to replace "
+				"(the file of the source's name there), or that asset's source file itself.")
+			.Field("settings", &AssetImportParams::Settings,
+				"Import settings merged over the importer's defaults; null for the defaults (with replace, null keeps the asset's settings).")
+			.Field("replace", &AssetImportParams::Replace,
+				"Give an imported asset this file's bytes instead of importing a new one: the file (and a glTF's changed buffers and images) is written "
+				"over the asset's, which keeps its .meta, handle and settings, and is reimported; sub-assets keep their handles wherever their keys "
+				"still exist. The new file is imported in memory first: one that does not import is refused (ImportFailed) and nothing is written. "
+				"Only the files whose bytes change are written, as one undoable command; dryRun previews it.");
+
+		registry.Struct<AssetSubAssetInfo>("AssetSubAssetInfo", "A sub-asset of a replaced source, by its key.")
+			.Field("key", &AssetSubAssetInfo::Key, "Its stable key in the source, such as mesh:0:Strip.")
+			.Field("id", &AssetSubAssetInfo::Id, "Its handle, derived from the source's handle and the key.")
+			.Field("type", &AssetSubAssetInfo::Type, "Its type.");
 
 		registry.Struct<AssetImportResult>("AssetImportResult", "The imported asset.")
 			.Field("asset", &AssetImportResult::Asset, "The imported asset.")
 			.Field("subAssets", &AssetImportResult::SubAssets, "Its sub-assets.")
-			.Field("copiedFiles", &AssetImportResult::CopiedFiles, "The files copied with their .meta files, project-relative, sorted.")
+			.Field("copiedFiles", &AssetImportResult::CopiedFiles,
+				"The files copied with their .meta files, project-relative, sorted; with replace, the files written (in a dry run, those it would write).")
 			.Field("diagnostics", &AssetImportResult::Diagnostics, "The importer's warnings.")
-			.Field("undoIndex", &AssetImportResult::UndoIndex, "The undo index of the copy; 0 in a batch.");
+			.Field("undoIndex", &AssetImportResult::UndoIndex, "The undo index of the copy; 0 in a batch, in a dry run, and for a replace that changed no file.")
+			.Field("keptSubAssets", &AssetImportResult::KeptSubAssets,
+				"With replace: the sub-assets whose keys the new version still has, their handles unchanged, so references to them keep working.")
+			.Field("addedSubAssets", &AssetImportResult::AddedSubAssets, "With replace: the sub-assets the new version adds.")
+			.Field("removedSubAssets", &AssetImportResult::RemovedSubAssets,
+				"With replace: the sub-assets the new version no longer has; project.validate reports what still references them (ASSET_MISSING).")
+			.Field("unreferencedFiles", &AssetImportResult::UnreferencedFiles,
+				"With replace: the files the previous version referenced that the new one does not, left in place (never deleted).");
 
 		registry.Struct<AssetReimportParams>("AssetReimportParams", "The params of asset.reimport.")
 			.Field("asset", &AssetReimportParams::Asset, "The asset to import again (a source, not a sub-asset).");
@@ -1835,16 +2170,23 @@ namespace Engine {
 		Json importExample = Json::object();
 		importExample["source"] = "C:/Downloads/Kart/Kart.gltf";
 		importExample["destDir"] = "Assets/Models";
+		Json replaceExample = importExample;
+		replaceExample["replace"] = true;
 		methods.AddPending<EditorMethodContext, AssetImportParams, AssetImportResult>(
 			{
 				.Name = "asset.import",
 				.Description = "Copies a file (and a glTF's buffers and images) into a folder below Assets/ with its .meta files as one "
-							   "undoable command, then imports it; resolves when the import completed.",
+							   "undoable command, then imports it; resolves when the import completed. With replace: true it gives an imported "
+							   "asset the file's new bytes instead, keeping its handle, settings and every sub-asset handle whose key remains, and "
+							   "lists the sub-assets kept, added and removed; a new file that does not import is refused (ImportFailed) and nothing "
+							   "is written (dryRun previews a replace).",
 				.RequiredParams = { "source", "destDir" },
 				.ExposeAsTool = true,
 				.Mutates = true,
+				.SupportsDryRun = true,
 				.TimeoutSeconds = 300,
-				.Examples = { { .Description = "Import a glTF model with its textures.", .Params = importExample } },
+				.Examples = { { .Description = "Import a glTF model with its textures.", .Params = importExample },
+					{ .Description = "Replace the imported Assets/Models/Kart.gltf with a new version of the file.", .Params = replaceExample } },
 			},
 			&Automation::AssetImport);
 

@@ -126,6 +126,64 @@ class AssetTests(AutomationTestCase):
         client.call("edit.undo")
         self.assertFalse((root / "Assets" / "Models" / "Textured.gltf").exists())
 
+    def test_import_replace_gives_an_asset_new_bytes_and_keeps_its_handles(self) -> None:
+        """World Tree brief 08: asset.import {replace: true} through the protocol, in an editor run with --renderer
+        none. The dry run lists what the replace does and writes nothing; the replace writes the new version over the
+        imported glTF and the buffer it owns, copies its new image with a dependency meta, keeps the .meta's handle and
+        every sub-asset handle whose key remains, and lists the sub-assets kept, added and removed; without replace the
+        file is refused as before; one undo restores the previous bytes."""
+        client, root = self.open_editor_with_scene()
+        source_dir = self.directory / "Downloads"
+        shutil.copytree(GLTF_FIXTURES / "Replace", source_dir)
+        kit = root / "Assets" / "Kit"
+        imported = client.call("asset.import", {"source": str(source_dir / "V1" / "Kit.gltf"), "destDir": "Assets/Kit"})
+        handle = imported["asset"]["id"]
+        before = {item["path"].split("#", 1)[1]: item["id"]
+                  for item in client.call("asset.info", {"asset": handle})["subAssets"]}
+        bin_meta = (kit / "Kit.bin.meta").read_bytes()
+        params = {"source": str(source_dir / "V2" / "Kit.gltf"), "destDir": "Assets/Kit", "replace": True}
+
+        preview = client.call("asset.import", {**params, "dryRun": True})
+        self.assertTrue(preview["dryRun"])
+        self.assertEqual((kit / "Kit.gltf").read_bytes(), (source_dir / "V1" / "Kit.gltf").read_bytes())
+        self.assertFalse((kit / "Textures" / "Cap.png").exists())
+
+        replaced = client.call("asset.import", params)
+        for member in ("asset", "keptSubAssets", "addedSubAssets", "removedSubAssets", "copiedFiles",
+                       "unreferencedFiles"):
+            self.assertEqual(preview[member], replaced[member], member)
+        self.assertEqual(replaced["asset"], {"id": handle, "path": "Assets/Kit/Kit.gltf", "type": "Prefab"})
+        kept = {item["key"]: item["id"] for item in replaced["keptSubAssets"]}
+        self.assertEqual(sorted(kept), ["animation:0:Wave", "material:0:StripMaterial", "mesh:0:Strip", "skin:0",
+                                        "texture:0"])
+        self.assertEqual(kept, {key: before[key] for key in kept})
+        self.assertEqual([item["key"] for item in replaced["addedSubAssets"]], ["material:1:CapMaterial", "mesh:1:Cap"])
+        self.assertEqual(replaced["removedSubAssets"][1], {"key": "mesh:1:Panel", "id": before["mesh:1:Panel"],
+                                                          "type": "Mesh"})
+        self.assertEqual(replaced["copiedFiles"], ["Assets/Kit/Kit.bin", "Assets/Kit/Kit.gltf",
+                                                   "Assets/Kit/Textures/Cap.png", "Assets/Kit/Textures/Cap.png.meta"])
+        self.assertEqual(replaced["unreferencedFiles"], ["Assets/Kit/Textures/Panel.png"])
+        self.assertEqual((kit / "Kit.gltf").read_bytes(), (source_dir / "V2" / "Kit.gltf").read_bytes())
+        self.assertEqual((kit / "Kit.bin").read_bytes(), (source_dir / "V2" / "Kit.bin").read_bytes())
+        self.assertEqual((kit / "Kit.bin.meta").read_bytes(), bin_meta)
+        self.assertEqual(read_json(kit / "Kit.gltf.meta")["Handle"], handle)
+        self.assertEqual(read_json(kit / "Textures" / "Cap.png.meta")["Owner"], handle)
+        self.assertTrue((kit / "Textures" / "Panel.png").is_file())
+
+        # Without replace, the existing file is refused as before.
+        with self.assertRaises(engine_client.EngineError) as refused:
+            client.call("asset.import", {"source": str(source_dir / "V2" / "Kit.gltf"), "destDir": "Assets/Kit"})
+        self.assert_engine_error(refused.exception, engine_client.CONFLICT, "AlreadyExists")
+        self.assertIn("replace: true", str(refused.exception.data["hint"]))
+
+        # One undo restores the previous bytes, and the previous sub-assets come back with their handles.
+        client.call("edit.undo")
+        self.assertEqual((kit / "Kit.gltf").read_bytes(), (source_dir / "V1" / "Kit.gltf").read_bytes())
+        self.assertFalse((kit / "Textures" / "Cap.png").exists())
+        restored = {item["path"].split("#", 1)[1]: item["id"]
+                    for item in client.call("asset.info", {"asset": "Assets/Kit/Kit.gltf"})["subAssets"]}
+        self.assertEqual(restored, before)
+
     def test_material_uv_sets_and_gltf_attribute_stream(self) -> None:
         """M23 (Docs/Decisions/0034-m23-contract.md decisions 9, 10 and 18): Material version 2's UV sets through
         asset.*, and glTF importer version 2, which imports TEXCOORD_1 and COLOR_0 and warns only for a texture on
