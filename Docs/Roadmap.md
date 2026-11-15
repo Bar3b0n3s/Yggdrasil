@@ -627,7 +627,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 **Scope.** Phase 6, at any time. World Tree's brief 5 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
-- A per-entity material-parameter component: a tint, an emissive colour and strength, a texture-coordinate offset and a scroll by simulation time, and a dissolve with an edge colour; skinned meshes included, carried in the instance record so that instancing keeps its batches.
+- A per-entity material-parameter component: a tint, an emissive colour and strength, a texture-coordinate offset and a scroll by simulation time, a dissolve with an edge colour, and a dithered fade for walls that hide the player; skinned meshes included, carried in the instance record so that instancing keeps its batches.
 
 **Acceptance**
 - Golden images: a tinted, glowing, scrolled and half-dissolved copy of one mesh beside the untouched one.

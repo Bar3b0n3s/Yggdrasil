@@ -2218,7 +2218,7 @@ Every milestone ends with one `python Scripts/CI.py` green on Windows: every sta
 | M28 | Game services (phase 5) | display settings and a performance readout for scripts; save data for scripts (ADR 0042) |
 | M29 | Light limits (phase 5) | up to 2,048 shaded lights per view; 16 shadowed point and spot lights; static shadow caching |
 | M30 | Navigation (phase 5, lands last) | Recast and Detour: the navigation mesh bake, path queries in the fixed step, the debug view |
-| M31 | Material parameters (phase 6) | per-entity tint, emissive, texture scroll and dissolve |
+| M31 | Material parameters (phase 6) | per-entity tint, emissive, texture scroll, dissolve and a dithered fade |
 | M32 | Fog (phase 6) | distance and height fog, the sun glow |
 | M33 | Particle look (phase 6, lands last) | flipbooks, rotation, soft particles, alignment, HDR intensity, motion vectors |
 

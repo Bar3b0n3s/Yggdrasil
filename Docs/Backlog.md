@@ -19,10 +19,11 @@ Milestones run in phases: the milestones of a phase are developed in parallel, e
 | 3 | M25 Tetris rebuilt in place as pixel art (before M26) | `Projects/Tetris` rebuilt on the 2D path and the UI framework by builder sessions through the MCP tools only | Roadmap M25; ADR 0028 decision 8 |
 | 3 | M26 Effects, post-processing and terrain (lands last) | Particles and baked probes; auto-exposure, LUTs, TAA, SSR; terrain | Roadmap M26; ADR 0028 decisions 4 and 9 |
 | 4 | M27 Rolling Ball 3D | `Projects/RollingBall`, built by an agent through the MCP tools only, as Tetris was in M17; the engine and editor gaps it finds are fixed in their owning modules, never worked around in the game. Landed (2026-11-15): built by five builder sessions, its friction F01 to F24 and the review findings on the game fixed or decided, with decisions 14 and 15 on the start order and the scene transitions, the engine version 0.5.0, and the gate `CI.py --milestone` (ADR 0038, "Landing") | Roadmap M27, §13.11; ADR 0038 |
+| 5 | Phase 5 setup (before M28 to M30 fork) | `asset.import {replace: true}`: an imported source replaced through automation, its handles and references kept (World Tree's brief 08) | ADR 0042 decision 2 |
 | 5 | M28 Game services | Display settings and a performance readout for scripts; save data for scripts | Roadmap M28; ADR 0042 decisions 2 and 3 |
 | 5 | M29 Light limits | The shaded lights per view as a setting up to 2,048; 16 shadowed point and spot lights; static shadow caching | Roadmap M29; ADR 0042 decisions 2 and 3 |
 | 5 | M30 Navigation (lands last) | Recast and Detour: the navigation mesh bake, its components, path queries in the fixed step, the debug view | Roadmap M30; ADR 0042 decisions 2 to 4 |
-| 6 | M31 Material parameters | Per-entity tint, emissive, texture scroll and dissolve | Roadmap M31; ADR 0042 decisions 2 and 3 |
+| 6 | M31 Material parameters | Per-entity tint, emissive, texture scroll, dissolve and a dithered fade | Roadmap M31; ADR 0042 decisions 2 and 3 |
 | 6 | M32 Fog (before M33) | Distance and height fog, the sun glow | Roadmap M32; ADR 0042 decisions 2 and 3 |
 | 6 | M33 Particle look (lands last) | Flipbooks, rotation, soft particles, alignment, HDR intensity, motion vectors, fog on particles | Roadmap M33; ADR 0042 decisions 2 and 3 |
 
