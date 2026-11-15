@@ -45,11 +45,28 @@ namespace Engine {
 			CHECK((*info)["lockstepOwner"] == Json(""));
 			CHECK((*info)["readOnly"] == Json(false));
 			CHECK((*info)["headless"] == Json(true));
+			CHECK((*info)["headlessGameView"] == Json(false));
 			REQUIRE((*info)["clients"].size() == 1);
 			CHECK((*info)["clients"][0]["name"] == Json("test"));
 			CHECK((*info)["clients"][0]["inProcess"] == Json(true));
 			CHECK((*info)["stopped"] == Json(false));
 			CHECK((*info)["stopError"].is_null());
+		}
+
+		// ADR 0038, friction F15: an editor started with --headless-game-view (AutomationServerSpecification::HeadlessGameView)
+		// says so beside headless and renderer, so a launch can be checked without a play session.
+		TEST_CASE("SessionMethods: session.info reports whether the headless editor renders its Game view")
+		{
+			Test::EditorTestFixture fixture("SessionHeadlessGameView");
+			fixture.CreateAndOpenProject();
+			AutomationServerSpecification specification = Test::MakeTestServerSpecification();
+			specification.HeadlessGameView = true;
+			Test::AutomationTestClient client(fixture.GetEditor(), specification);
+			Result<Json> info = client.Call("session.info", Json::object());
+			REQUIRE_MESSAGE(info.has_value(), info.error().ToString());
+			CHECK((*info)["headless"] == Json(true));
+			CHECK((*info)["headlessGameView"] == Json(true));
+			CHECK((*info)["renderer"] == Json("none"));
 		}
 
 		// Docs/Decisions/0030-m19-contract.md decision 13 (B-BVER): session.hello and session.info name the build that answers,

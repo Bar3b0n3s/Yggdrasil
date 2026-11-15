@@ -320,8 +320,8 @@ namespace Engine {
 				.Function("GetPrimaryCamera", &Utils::SceneCamera, "() -> Entity?", "Returns the first active Primary camera in canonical order, or nil.", read)
 				.Function("GetName", &Utils::SceneName, "() -> string", "Returns the scene name.", read)
 				.Function("GetEntityCount", &Utils::SceneCount, "() -> number", "Returns the number of live entities, excluding pending destruction.", read)
-				.Function("Load", &Utils::SceneLoad, "(scene: AssetRef, parameters: {[string]: any}?) -> ()", "Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline.")
-				.Function("Reload", &Utils::SceneReload, "(parameters: {[string]: any}?) -> ()", "Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them.")
+				.Function("Load", &Utils::SceneLoad, "(scene: AssetRef, parameters: {[string]: any}?) -> ()", "Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline. Until then the frame's remaining fixed steps still run in the current scene and VM, and another Scene.Load or Scene.Reload raises InvalidState: keep a flag once a transition is requested and request nothing more.")
+				.Function("Reload", &Utils::SceneReload, "(parameters: {[string]: any}?) -> ()", "Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them. Until then the frame's remaining fixed steps still run in the current scene and VM, and another Scene.Load or Scene.Reload raises InvalidState: keep a flag once a transition is requested and request nothing more.")
 				.Function("GetCurrent", &Utils::SceneCurrent, "() -> AssetRef?", "Returns the scene asset the current scene came from, or nil for a scene without one.", read)
 				.Function("GetLoadParameters", &Utils::SceneParameters, "() -> {[string]: any}", "Returns a detached copy of the parameters passed to the current scene.", read);
 			return {};

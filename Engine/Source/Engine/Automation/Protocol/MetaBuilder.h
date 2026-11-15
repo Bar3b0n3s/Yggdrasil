@@ -60,7 +60,9 @@ namespace Engine {
 		//   logCursor       the log's next sequence number as a decimal string: the "cursor" log.read continues from
 		//   firstNew        the first MaxFirstNewDiagnostics of those entries (Warn and above, every logger), each
 		//                   {seq, level, logger, message, file?, line?, entity?}
-		// Entries overwritten before they were seen are counted in "dropped" when non-zero. Advances the cursor to logCursor.
+		// An entry answered to its caller (LogEntry::AnsweredToCaller: a failed script.eval's own failure, which its response
+		// already holds; ADR 0038, friction F13) is neither counted nor quoted. Entries overwritten before they were seen are
+		// counted in "dropped" when non-zero. Advances the cursor to logCursor.
 		[[nodiscard]] Json Build(ClientId client, const MetaState& state);
 	private:
 		struct State; // the log back-reference and each client's cursor (MetaBuilder.cpp)

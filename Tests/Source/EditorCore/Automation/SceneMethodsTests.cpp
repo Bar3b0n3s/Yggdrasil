@@ -239,6 +239,67 @@ namespace Engine {
 			CHECK((*appended)["scenes"][2]["id"] == (*opened)["id"]);
 		}
 
+		// ADR 0038, friction F14: a scene opened after a prefab it instantiates changed (here a BottomBar added to HUD.prefab
+		// through another level's instance) opens dirty with its instance rebuilt, and the result names that instance and its
+		// prefab, so a caller knows why the freshly opened scene is unsaved; a scene whose prefab is as it was saved opens
+		// clean and reports none, and so does the rebuilt scene once saved.
+		TEST_CASE("SceneMethods: scene.open reports the prefab instances its load rebuilt from a prefab changed since the scene was saved")
+		{
+			Test::AutomationFixture setup("SceneOpenRebuiltInstances");
+			const auto call = [&setup](std::string_view method, const Json& params)
+			{
+				Result<Json> result = setup.Call(method, params);
+				REQUIRE_MESSAGE(result.has_value(), (std::string(method) + ": " + (result ? std::string() : result.error().ToString())));
+				return std::move(*result);
+			};
+			const auto open = [&call](const Json& params)
+			{
+				Json opened = call("scene.open", params);
+				REQUIRE(opened.contains("rebuiltInstances"));
+				return opened;
+			};
+			call("entity.create", Json{ { "name", "HUD" } });
+			call("entity.create", Json{ { "name", "TopBar" }, { "parent", "/HUD" } });
+			const Json created = call("prefab.create", Json{ { "entity", "/HUD" }, { "path", "Assets/Prefabs/HUD.prefab" }, { "replaceWithInstance", true } });
+			call("entity.create", Json{ { "name", "Plain" } });
+			call("scene.save", Json::object());
+			call("scene.new", Json{ { "path", "Assets/Scenes/Level2.scene" } });
+			call("prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/HUD.prefab" }, { "name", "HUD" } });
+			call("scene.save", Json::object());
+
+			// Unchanged since the save: no instance rebuilt with a change, and the scene opens clean.
+			const Json unchanged = open(Json{ { "path", "Assets/Scenes/Main.scene" } });
+			CHECK(unchanged["rebuiltInstances"] == Json::array());
+			CHECK(unchanged["scene"]["dirty"] == Json(false));
+
+			// HUD.prefab gains a BottomBar through Main's instance, while Level2, which instantiates it too, is closed.
+			call("entity.create", Json{ { "name", "BottomBar" }, { "parent", "/HUD" } });
+			call("prefab.apply", Json{ { "instance", "/HUD" } });
+			call("scene.save", Json::object());
+			const Json rebuilt = open(Json{ { "path", "Assets/Scenes/Level2.scene" } });
+			CHECK(rebuilt["scene"]["dirty"] == Json(true));
+			REQUIRE(rebuilt["rebuiltInstances"].size() == 1);
+			const Json& instance = rebuilt["rebuiltInstances"][0];
+			CHECK(instance["instance"]["path"] == Json("/HUD"));
+			CHECK(instance["instance"]["name"] == Json("HUD"));
+			CHECK(instance["prefab"]["path"] == Json("Assets/Prefabs/HUD.prefab"));
+			CHECK(instance["prefab"]["id"] == created["prefab"]["id"]);
+			CHECK(instance["prefab"]["type"] == Json("Prefab"));
+			const Entity hud = setup.GetEditor().GetScene().FindEntityByPath("/HUD");
+			REQUIRE(hud.IsValid());
+			CHECK(instance["instance"]["id"] == Json(hud.GetUUID().ToString()));
+			CHECK(setup.GetEditor().GetScene().FindEntityByPath("/HUD/BottomBar").IsValid());
+
+			// Saved, it opens clean again; so does Main, whose instance the apply already rebuilt.
+			call("scene.save", Json::object());
+			const Json reloaded = open(Json{ { "path", "Assets/Scenes/Level2.scene" }, { "reload", true } });
+			CHECK(reloaded["rebuiltInstances"] == Json::array());
+			CHECK(reloaded["scene"]["dirty"] == Json(false));
+			const Json first = open(Json{ { "path", "Assets/Scenes/Main.scene" } });
+			CHECK(first["rebuiltInstances"] == Json::array());
+			CHECK(first["scene"]["dirty"] == Json(false));
+		}
+
 		// Decision 14: scene.activate switches the active scene by path or id, and scene.close closes the addressed scene with
 		// scene.open's save-or-discard rule, activating its neighbour. Unknown and malformed targets are refused at /scene.
 		TEST_CASE("SceneMethods: scene.activate and scene.close manage the open scenes")

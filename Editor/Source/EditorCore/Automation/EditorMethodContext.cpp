@@ -656,6 +656,7 @@ namespace Engine {
 		host.Renderer = specification.RendererName;
 		host.ReadOnly = m_Editor->HasProject() && m_Editor->IsReadOnly();
 		host.Headless = specification.Headless;
+		host.HeadlessGameView = specification.HeadlessGameView;
 		for (const AutomationClientInfo& client : m_Server->GetClients())
 		{
 			host.Clients.push_back(

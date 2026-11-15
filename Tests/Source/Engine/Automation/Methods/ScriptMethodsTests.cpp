@@ -310,6 +310,143 @@ namespace Engine {
 			CallScriptMethod(fixture, "play.stop", Json::object());
 		}
 
+		// ADR 0038, friction F13: a failed script.eval's own failure is answered in its error data and is not one of the game's
+		// script errors, so the response's "_meta" diagnostics neither count nor quote it, in either context, and agree with
+		// script.errors; a script error the game raised since the client's previous response is still counted and quoted.
+		TEST_CASE("ScriptMethods: a failed script.eval's own failure takes no part in _meta's diagnostics, the game's errors still do")
+		{
+			Test::AutomationFixture fixture("ScriptEvalMetaDiagnostics");
+			CreateFaultyBoard(fixture, "OnFixedUpdate", "error('game fault', 0)");
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true }, { "pauseOnError", false } });
+			const auto failEvaluation = [&fixture](std::string_view context)
+			{
+				const Json response = fixture.Request("script.eval",
+					Json{ { "context", context }, { "code", "local function fail() error('caller fault') end\nfail()" } });
+				REQUIRE(response.contains("error"));
+				CHECK(response["error"]["data"]["errorCode"] == Json("Script"));
+				return response["error"]["data"]["_meta"]["diagnostics"];
+			};
+			for (const std::string_view context : { "play", "edit" })
+			{
+				CAPTURE(context);
+				Test::ExpectLog expected(LogLevel::Error, "caller fault");
+				const Json diagnostics = failEvaluation(context);
+				CHECK(diagnostics["newScriptErrors"] == Json(0));
+				CHECK(diagnostics["newErrors"] == Json(0));
+				CHECK(diagnostics["firstNew"] == Json::array());
+			}
+			CHECK(CallScriptMethod(fixture, "script.errors", Json::object())["errors"].empty());
+
+			// The game's fault, raised by a tick run between two requests (as live play runs frames between them), is in the
+			// next response's diagnostics beside the evaluation's own failure, which still is not.
+			{
+				Test::ExpectLog expected(LogLevel::Error, "game fault");
+				fixture.GetEditor().GetPlay().GetSession()->Tick();
+			}
+			Test::ExpectLog expected(LogLevel::Error, "caller fault");
+			const Json diagnostics = failEvaluation("play");
+			CHECK(diagnostics["newScriptErrors"] == Json(1));
+			REQUIRE(diagnostics["firstNew"].size() == 1);
+			CHECK(JsonReader(diagnostics["firstNew"][0]["message"]).ReadString().value_or(std::string()).contains("game fault"));
+			CHECK(diagnostics["firstNew"][0]["logger"] == Json("Script"));
+			REQUIRE(CallScriptMethod(fixture, "script.errors", Json::object())["errors"].size() == 1);
+			CallScriptMethod(fixture, "play.stop", Json::object());
+		}
+
+		// ADR 0038, friction F16: a retained error's tick is the simulation tick its callback ran in, as Time.GetTick() reads it
+		// there (in the fixed step the zero-based index of the tick being run, which is the ticks completed before it; in the
+		// frame phase the ticks completed), and with pauseOnError false a faulting behaviour is disabled after its first error:
+		// it runs no further callback, so it never raises the error again, while play and the other behaviours run on. count
+		// counts the occurrences of the same error in the session, here one per faulting instance.
+		TEST_CASE("ScriptMethods: script.errors reports the tick an error's callback ran in, and a faulting behaviour runs no further callback")
+		{
+			Test::AutomationFixture fixture("ScriptErrorTicks");
+			// Ticks.luau: every instance counts its fixed steps in Steps, and `fault` adds the callbacks that raise.
+			const auto writeTicks = [&fixture](std::string_view fault)
+			{
+				const std::string source = std::format("local Ticks = {{}}\n"
+													   "function Ticks.OnCreate(self: any)\n"
+													   "\tself.Steps = 0\n"
+													   "end\n"
+													   "function Ticks.OnFixedUpdate(self: any)\n"
+													   "\tself.Steps += 1\n"
+													   "end\n"
+													   "{}\n"
+													   "return Script.Define('Ticks', Ticks)\n",
+					fault);
+				CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Ticks.luau" }, { "source", source } });
+			};
+			const auto attach = [&fixture](std::string_view name, std::string_view script)
+			{
+				CallScriptMethod(fixture, "entity.create", Json{ { "name", name }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", script } } }) } } } } } });
+			};
+			const auto steps = [&fixture](std::string_view entity)
+			{
+				return CallScriptMethod(fixture, "script.eval", Json{ { "context", "play" }, { "entity", entity }, { "code", "return self.Steps" } })["value"];
+			};
+			const std::string counter = "local Counter = {}\n"
+										"function Counter.OnCreate(self: any)\n"
+										"\tself.Steps = 0\n"
+										"end\n"
+										"function Counter.OnFixedUpdate(self: any)\n"
+										"\tself.Steps += 1\n"
+										"end\n"
+										"return Script.Define('Counter', Counter)\n";
+			CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Counter.luau" }, { "source", counter } });
+			attach("Counter", "Assets/Scripts/Counter.luau");
+
+			// A frame-phase fault: the first OnLateUpdate runs after tick 0, when one tick has completed.
+			writeTicks("function Ticks.OnLateUpdate(self: any)\n"
+					   "\terror('late fault', 0)\n"
+					   "end");
+			attach("Faulty", "Assets/Scripts/Ticks.luau");
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true }, { "pauseOnError", false } });
+			{
+				Test::ExpectLog late(LogLevel::Error, "late fault");
+				const Json stepped = CallScriptMethod(fixture, "play.step", Json{ { "ticks", 5 } });
+				CHECK(stepped["_meta"]["tick"] == Json(5));
+				CHECK(stepped["_meta"]["playState"] == Json("Play"));
+				CHECK(late.GetMatchCount() == 1);
+			}
+			const Json lateErrors = CallScriptMethod(fixture, "script.errors", Json::object());
+			REQUIRE(lateErrors["errors"].size() == 1);
+			CHECK(lateErrors["errors"][0]["callback"] == Json("OnLateUpdate"));
+			CHECK(lateErrors["errors"][0]["tick"] == Json(1));
+			CHECK(lateErrors["errors"][0]["count"] == Json(1));
+			CHECK(steps("/Faulty") == Json(1)); // tick 0's OnFixedUpdate only
+			CHECK(steps("/Counter") == Json(5));
+			CallScriptMethod(fixture, "play.stop", Json::object());
+
+			// A fixed-step fault from tick 2 on, in two instances: each raises it once, in the third tick being run (index 2),
+			// and runs none of its callbacks after it (its OnUpdate would raise another error from the frame after tick 2).
+			writeTicks("function Ticks.OnUpdate(self: any)\n"
+					   "\tif Time.GetTick() >= 3 then error('frame fault', 0) end\n"
+					   "end\n"
+					   "local step = Ticks.OnFixedUpdate\n"
+					   "function Ticks.OnFixedUpdate(self: any)\n"
+					   "\tstep(self)\n"
+					   "\tif Time.GetTick() >= 2 then error('fixed fault', 0) end\n"
+					   "end");
+			attach("Faulty2", "Assets/Scripts/Ticks.luau");
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true }, { "pauseOnError", false } });
+			{
+				Test::ExpectLog fixed(LogLevel::Error, "fixed fault");
+				const Json stepped = CallScriptMethod(fixture, "play.step", Json{ { "ticks", 6 } });
+				CHECK(stepped["_meta"]["tick"] == Json(6));
+				CHECK(stepped["_meta"]["playState"] == Json("Play"));
+				CHECK(fixed.GetMatchCount() == 2);
+			}
+			const Json fixedErrors = CallScriptMethod(fixture, "script.errors", Json::object());
+			REQUIRE(fixedErrors["errors"].size() == 1);
+			CHECK(fixedErrors["errors"][0]["callback"] == Json("OnFixedUpdate"));
+			CHECK(fixedErrors["errors"][0]["tick"] == Json(2));
+			CHECK(fixedErrors["errors"][0]["count"] == Json(2));
+			CHECK(steps("/Faulty") == Json(3)); // ticks 0, 1 and 2, the last one faulting
+			CHECK(steps("/Faulty2") == Json(3));
+			CHECK(steps("/Counter") == Json(6));
+			CallScriptMethod(fixture, "play.stop", Json::object());
+		}
+
 		// ADR 0038, friction F02: script.errors reports the current play session's errors. The errors of an earlier session
 		// stay listed after it stops, until a new session starts; a cursor taken before that start still reads exactly the new
 		// session's errors, and an error the new session raises again starts a new count.

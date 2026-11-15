@@ -1851,9 +1851,9 @@ declare Scene: {
 	GetPrimaryCamera: () -> Entity?,
 	-- Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created. [All modes; Runtime|Test; mutates]
 	Instantiate: (prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity,
-	-- Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline. [All modes; Runtime|Test; mutates]
+	-- Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline. Until then the frame's remaining fixed steps still run in the current scene and VM, and another Scene.Load or Scene.Reload raises InvalidState: keep a flag once a transition is requested and request nothing more. [All modes; Runtime|Test; mutates]
 	Load: (scene: AssetRef, parameters: {[string]: any}?) -> (),
-	-- Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them. [All modes; Runtime|Test; mutates]
+	-- Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them. Until then the frame's remaining fixed steps still run in the current scene and VM, and another Scene.Load or Scene.Reload raises InvalidState: keep a flag once a transition is requested and request nothing more. [All modes; Runtime|Test; mutates]
 	Reload: (parameters: {[string]: any}?) -> (),
 }
 

@@ -187,8 +187,9 @@ namespace Engine {
 		void Publish(ScriptError error, ScriptTaskOwner owner = {}, bool caseBody = false, bool alreadyLogged = false,
 			FaultPolicy policy = FaultPolicy::DisableInstance);
 		// The Script channel's Error entry of a published (or CallerOnly) error: its kind and message, then its callback,
-		// entity and traceback, with the error's tick, entity and location as the log context.
-		static void LogScriptError(const ScriptError& occurrence);
+		// entity and traceback, with the error's tick, entity and location as the log context. A CallerOnly error's entry is
+		// marked answeredToCaller (LogContext::AnsweredToCaller), so "_meta"'s diagnostics leave it out (ADR 0038, F13).
+		static void LogScriptError(const ScriptError& occurrence, bool answeredToCaller);
 		void Publish(const Error& error, InstanceKey instance = {}, std::string_view callback = {});
 		// Not in Dist. The changed script plus the loaded modules and attached behaviours that transitively require it,
 		// in dependency order. Loads published assets only; executes no script code and publishes nothing.

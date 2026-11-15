@@ -53,6 +53,29 @@ namespace Engine {
 			CHECK(meta["diagnostics"]["firstNew"][0]["message"] == Json("'speed' is unused"));
 		}
 
+		// ADR 0038, friction F13: a failed script.eval's own failure is answered in its error data, so its entry, marked
+		// AnsweredToCaller, is neither counted nor quoted, while the other entries since the cursor still are.
+		TEST_CASE("MetaBuilder: an entry answered to its caller is neither counted nor quoted")
+		{
+			RingBufferSink log(64);
+			MetaBuilder builder(log);
+			builder.AddClient(1);
+			AppendMetaEntry(log, LogLevel::Error, LogChannel::Script, "the game's fault");
+			log.Append(LogEntry{ .Seq = 0, .TimeNs = 0, .Tick = std::nullopt, .Level = LogLevel::Error, .Logger = LogChannel::Script, .Message = "the caller's fault", .File = {}, .Line = 0, .EntityId = UUID(), .ScriptFile = {}, .ScriptLine = 0, .AnsweredToCaller = true });
+			Json meta = builder.Build(1, MetaState{});
+			CHECK(meta["diagnostics"]["newScriptErrors"] == Json(1));
+			CHECK(meta["diagnostics"]["newErrors"] == Json(0));
+			REQUIRE(meta["diagnostics"]["firstNew"].size() == 1);
+			CHECK(meta["diagnostics"]["firstNew"][0]["message"] == Json("the game's fault"));
+			CHECK(meta["diagnostics"]["logCursor"] == Json(std::to_string(log.GetNextSeq())));
+
+			log.Append(LogEntry{ .Seq = 0, .TimeNs = 0, .Tick = std::nullopt, .Level = LogLevel::Error, .Logger = LogChannel::Script, .Message = "the caller's fault again", .File = {}, .Line = 0, .EntityId = UUID(), .ScriptFile = {}, .ScriptLine = 0, .AnsweredToCaller = true });
+			Json alone = builder.Build(1, MetaState{});
+			CHECK(alone["diagnostics"]["newScriptErrors"] == Json(0));
+			CHECK(alone["diagnostics"]["firstNew"] == Json::array());
+			CHECK(alone["diagnostics"]["logCursor"] == Json(std::to_string(log.GetNextSeq())));
+		}
+
 		TEST_CASE("MetaBuilder: firstNew quotes at most three entries")
 		{
 			RingBufferSink log(64);

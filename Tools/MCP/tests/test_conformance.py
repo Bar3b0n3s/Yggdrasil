@@ -140,6 +140,9 @@ class ConformanceTests(unittest.TestCase):
                               "values": {"Roughness": 0.25}}),
             ("asset_get_properties", {"asset": "Assets/Materials/Red.material"}),
         ])
+        # ADR 0038, friction F15: the launch's session (its session.info) says the editor renders no game view.
+        session = results[0]["structuredContent"]["session"]
+        self.assertEqual((session["headless"], session["renderer"], session["headlessGameView"]), (True, "none", False))
         self.assertIn("Board", results[3]["structuredContent"]["text"])
         self.assertIn("_meta", results[3]["text"])
         # Every registered method, read from the file the editor offloads the unfiltered catalogue to.
@@ -203,6 +206,8 @@ class ConformanceTests(unittest.TestCase):
         ])
         for result in results:
             self.assertFalse(result["isError"], result["text"])
+        # ADR 0038, friction F15: the launch's result says so (session.info's headlessGameView) before any play session.
+        self.assertTrue(results[0]["structuredContent"]["session"]["headlessGameView"])
         views = results[3]["structuredContent"]["views"]
         game = next(view for view in views if view["name"] == "game")
         self.assertTrue(game["available"], game)

@@ -673,6 +673,9 @@ namespace Engine {
 			CHECK(result["scene"]["entityCount"] == Json(2));
 			CHECK(result["readOnly"] == Json(true));
 			CHECK(result["headless"] == Json(true));
+			// The editor's --headless-game-view alone (ADR 0038, friction F15).
+			REQUIRE(result.contains("headlessGameView"));
+			CHECK(result["headlessGameView"] == Json(false));
 			CHECK(result["renderer"] == Json("none"));
 			CHECK(result["playState"] == Json("Play"));
 			CHECK(result["pid"] == Json(Process::GetCurrentId()));

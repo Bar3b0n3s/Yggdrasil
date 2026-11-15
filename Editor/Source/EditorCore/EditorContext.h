@@ -32,6 +32,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The editor's state (Architecture §12.1), frozen by the M4 contract: the open project, the open scenes (one before M20; M20
@@ -437,8 +438,12 @@ namespace Engine {
 		// SetScene, and the scene opens dirty when it changed something (like a repair). An instance whose prefab is missing
 		// is left as it is (PREFAB_MISSING_ASSET, ProjectValidator). Errors: those of PrefabInstantiator and of loading the
 		// prefab assets (LoadPrefabAsset); Validation PREFAB_CYCLE when the propagation from `prefabs` meets a nesting cycle
-		// (GetNestingPrefabs, below).
-		[[nodiscard]] Result<bool> UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs);
+		// (GetNestingPrefabs, below). `changed`, when given, receives the outermost instances the rebuild changed (their
+		// root IDs, each with the handle of the prefab it was rebuilt from), in canonical order: exactly those whose subtree
+		// differs after the rebuild and the refresh of its overrides, so empty when it returns false (ADR 0038, friction F14:
+		// scene.open reports them as rebuiltInstances). It is left unchanged on error.
+		[[nodiscard]] Result<bool> UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs,
+			std::vector<std::pair<UUID, AssetHandle>>* changed = nullptr);
 
 		// The undoable form for the open scene: a SceneEditCommand labelled "Update Prefab Instances" whose effect is
 		// UpdatePrefabInstances(GetScene(), prefabs), or nullptr when it would change nothing. The methods that give a

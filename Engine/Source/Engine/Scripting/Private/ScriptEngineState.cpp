@@ -232,7 +232,7 @@ namespace Engine {
 		return Lua::ProtectedCall(call, &State::InvokeNative);
 	}
 
-	void ScriptEngine::State::LogScriptError(const ScriptError& occurrence)
+	void ScriptEngine::State::LogScriptError(const ScriptError& occurrence, bool answeredToCaller)
 	{
 		// Physics logs before notifying its listener. Other errors log here; host histories are data-only copies.
 		LogContext context = LogContextScope::GetCurrent();
@@ -240,6 +240,7 @@ namespace Engine {
 		context.Entity = occurrence.Entity;
 		context.ScriptFile = occurrence.Script;
 		context.ScriptLine = occurrence.Line;
+		context.AnsweredToCaller = answeredToCaller;
 		const LogContextScope scope(context);
 		std::string message = std::format("{}: {}", ScriptErrorKindToString(occurrence.Kind), occurrence.Message);
 		if (!occurrence.Callback.empty())
@@ -305,16 +306,17 @@ namespace Engine {
 		const bool fatal = Vm != nullptr && Vm->IsStopped();
 		if (policy == FaultPolicy::CallerOnly && !fatal)
 		{
-			// The caller's own error (ADR 0038, friction F01): logged and returned to it, never the game's script error.
+			// The caller's own error (ADR 0038, friction F01): logged and returned to it, never the game's script error, and its
+			// entry marked so that the response's "_meta" diagnostics, which the error data already answers, leave it out (F13).
 			BoundScriptError(error);
 			if (!alreadyLogged)
-				LogScriptError(error);
+				LogScriptError(error, true);
 			CallerFailure = std::move(error);
 			return;
 		}
 		const ScriptError occurrence = Engine.m_Errors.Add(std::move(error));
 		if (!alreadyLogged)
-			LogScriptError(occurrence);
+			LogScriptError(occurrence, false);
 		// Only a nonfatal error outside the case body can be claimed. Past the cap it cannot, and the runner reports it as
 		// an unexpected error of the case.
 		const ScriptReference currentCase = !owner.Case.IsNull() ? owner.Case : ActiveCase;

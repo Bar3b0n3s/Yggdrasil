@@ -2805,7 +2805,7 @@
 		{
 			"name": "scene_open",
 			"method": "scene.open",
-			"description": "Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged file with reported repairs.",
+			"description": "Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged file with reported repairs. Prefab instances are rebuilt from their prefabs' current versions: a scene opened after its prefab changed opens unsaved, and rebuiltInstances lists each instance that changed with its prefab, so check them, then save the scene.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "SceneOpenParams",
@@ -3067,7 +3067,7 @@
 		{
 			"name": "script_errors",
 			"method": "script.errors",
-			"description": "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's.",
+			"description": "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's. An error's tick is the tick its callback ran in, as Time.GetTick() reads it there (0 in the first fixed step; in the frame phase the ticks completed). Whatever pauseOnError says, the faulting behaviour instance is disabled at its first error and runs no further callback (its tasks cancelled) until a hot reload of its script, so its error's count does not grow; other instances and the entity's other slots run on, and pauseOnError only decides whether the editor also pauses play.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ScriptErrorsParams",
@@ -3105,7 +3105,7 @@
 		{
 			"name": "script_eval",
 			"method": "script.eval",
-			"description": "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors.",
+			"description": "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors nor counted in the response's _meta diagnostics.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ScriptEvalParams",

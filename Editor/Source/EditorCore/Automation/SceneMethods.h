@@ -89,7 +89,9 @@ namespace Engine {
 	// structural repairs (§6) and reports them; the scene is then dirty until saved. Load warnings are reported and logged.
 	// From M6 the loaded scene's prefab instances are rebuilt from the current prefab versions before it opens
 	// (EditorContext::UpdatePrefabInstances, §5.5), so an externally changed prefab is adopted too; the scene then opens
-	// dirty when that changed it.
+	// dirty when that changed it. The result's rebuiltInstances (ADR 0038, friction F14) lists the outermost instances the
+	// rebuild changed, each with the prefab it was rebuilt from: their prefab, or a prefab it nests, changed since the
+	// scene was saved (or the records of their overrides no longer matched it), which is why the scene opens dirty.
 	// M20 (decision 14): without keepOpen the loaded scene replaces the active scene in its tab position, the other open
 	// scenes untouched. keepOpen (bool, default false) keeps every open scene open and adds the loaded one at the end of the
 	// tab order as the active scene (save and discardChanges are then not needed, and giving either is InvalidArgument;
@@ -108,6 +110,14 @@ namespace Engine {
 		bool KeepOpen = false;
 	};
 
+	// Registry struct "ScenePrefabRebuild" (ADR 0038, friction F14): an outermost prefab instance scene.open rebuilt with a
+	// change from the current version of its prefab.
+	struct ScenePrefabRebuild
+	{
+		EntitySummary Instance{}; // the instance root, its path in the opened scene
+		AssetSummary Prefab{};    // the prefab it was rebuilt from (the instance root's Prefab component)
+	};
+
 	struct SceneOpenResult
 	{
 		SceneSummary Scene{};
@@ -115,6 +125,9 @@ namespace Engine {
 		std::vector<SceneLoadIssue> Diagnostics{};
 		std::vector<SceneLoadRepair> Repairs{};
 		uint32_t Id = 0; // the opened scene's open-scene id (M20)
+		// The outermost instances the load's rebuild changed, in canonical order (EditorContext::UpdatePrefabInstances);
+		// empty when none, and when the rebuild failed (the instances then keep their saved state, with a warning).
+		std::vector<ScenePrefabRebuild> RebuiltInstances{};
 	};
 
 	// scene.save {path?}: writes the open scene to `path` (empty: its own path; required for a scene never saved) through

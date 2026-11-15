@@ -558,6 +558,7 @@ namespace Engine {
 			serverSpecification.TestHooks = options.AutomationTestHooks;
 			serverSpecification.Headless = headless;
 			serverSpecification.RendererName = std::string(RendererModeToCommandLine(app.GetSpecification().Renderer));
+			serverSpecification.HeadlessGameView = options.HeadlessGameView;
 			serverSpecification.Screenshots = std::move(captures);
 			serverSpecification.SystemErrors = std::move(systemErrors);
 			serverSpecification.SessionsDirectory = userData.Root / "Automation" / "Sessions";

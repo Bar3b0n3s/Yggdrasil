@@ -2596,7 +2596,7 @@ Example: Create the main scene.
 
 ### scene.open
 
-Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged file with reported repairs.
+Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged file with reported repairs. Prefab instances are rebuilt from their prefabs' current versions: a scene opened after its prefab changed opens unsaved, and rebuiltInstances lists each instance that changed with its prefab, so check them, then save the scene.
 
 - Flags: tool `scene_open`
 - Timeout: 60 s
@@ -2618,6 +2618,7 @@ Opens the scene at path in place of the active scene, which needs save or discar
 | `diagnostics` | `Array<SceneLoadIssue>` | The load warnings, also logged. |
 | `repairs` | `Array<SceneLoadRepair>` | The repairs a repair load applied. |
 | `id` | `UInt32` | The scene's open-scene id, which the scene target accepts. |
+| `rebuiltInstances` | `Array<ScenePrefabRebuild>` | The outermost prefab instances the load rebuilt with a change from their prefab's current version, in scene order: their prefab, or a prefab it nests, changed since the scene was saved (or their recorded overrides no longer matched it). The scene then opens unsaved (dirty): check these instances, then save the scene. Empty when the load changed none. |
 
 Example: Save the open scene, then open Level1.
 
@@ -2786,7 +2787,7 @@ Example: Create a behaviour.
 
 ### script.errors
 
-Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's.
+Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's. An error's tick is the tick its callback ran in, as Time.GetTick() reads it there (0 in the first fixed step; in the frame phase the ticks completed). Whatever pauseOnError says, the faulting behaviour instance is disabled at its first error and runs no further callback (its tasks cancelled) until a hot reload of its script, so its error's count does not grow; other instances and the entity's other slots run on, and pauseOnError only decides whether the editor also pauses play.
 
 - Flags: tool `script_errors`, runtime, batch, scene target
 - Timeout: 60 s
@@ -2810,7 +2811,7 @@ Example: Read errors from the beginning.
 
 ### script.eval
 
-Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors.
+Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors nor counted in the response's _meta diagnostics.
 
 - Flags: tool `script_eval`, runtime, scene target
 - Timeout: 60 s
@@ -2940,7 +2941,7 @@ Example: Open a session as the MCP bridge.
 
 ### session.info
 
-Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and scene, play state, renderer, lockstep owner, the read-only flag and the connected clients.
+Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and scene, play state, renderer, the headless and headless game view flags, lockstep owner, the read-only flag and the connected clients.
 
 - Flags: runtime, launcher, batch
 - Timeout: 60 s
@@ -2962,6 +2963,7 @@ Param: none.
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty when none. |
 | `readOnly` | `Bool` | Whether the host denies mutations: the editor with --read-only, the Runtime always. |
 | `headless` | `Bool` | Whether the host runs without a visible window (--headless). |
+| `headlessGameView` | `Bool` | Whether the headless editor renders its Game view every frame at the project's window size, as the soak's editors do (--headless-game-view, the bridge's editor_launch {headlessGameView: true}), so stats.get reports it; false otherwise and in the Runtime. |
 | `clients` | `Array<SessionClientSummary>` | The connected clients, by id. |
 | `scene` | `Variant` | The open scene as scene.* results report it ({path, name, revision, dirty, entityCount}; path is project-relative, empty for a scene never saved); null without one: the editor opens no scene with its project (scene.open {path} opens the project's StartScene). The Runtime reports its game scene. |
 

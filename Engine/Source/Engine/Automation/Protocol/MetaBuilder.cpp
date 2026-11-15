@@ -83,6 +83,9 @@ namespace Engine {
 			});
 			for (const LogEntry& entry : read.Entries)
 			{
+				// The caller's own error, already answered in its error data (a failed script.eval's; ADR 0038, friction F13).
+				if (entry.AnsweredToCaller)
+					continue;
 				const bool isError = entry.Level == LogLevel::Error || entry.Level == LogLevel::Critical;
 				if (isError && entry.Logger == LogChannel::Script)
 					++newScriptErrors;

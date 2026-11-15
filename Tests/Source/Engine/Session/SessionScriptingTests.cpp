@@ -681,6 +681,73 @@ return Script.Define("Second", T)
 			CHECK(session->GetScriptErrors().GetErrors().empty());
 		}
 
+		// ADR 0038, friction F17: a Scene.Load or Scene.Reload takes effect at the end of the frame (ConsumeRequests), so in a
+		// frame that runs several fixed steps the later ones still run in the current scene and VM, and a second request made
+		// in them is refused with InvalidState while the first one still applies (Rolling Ball's Restart and delayed load).
+		TEST_CASE("PlaySession: a scene transition waits for the frame's end, so the frame's later fixed steps run in the current scene and refuse another request")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle sourceScript(0x710012), targetScript(0x710013), targetScene(0x710014);
+			REQUIRE(fixture.AddScript(sourceScript, "Assets/Scripts/First.luau", R"(
+local T = {}
+function T:OnCreate()
+	self.Steps = 0
+end
+function T:OnFixedUpdate()
+	self.Steps += 1
+	self.Entity.Name = "Step" .. self.Steps
+	if self.Steps == 1 then
+		Scene.Load(Assets.Load("Assets/Scenes/Second.scene"), { From = 1 })
+	elseif self.Steps == 2 then
+		local ok, message = pcall(function() Scene.Reload({ From = 2 }) end)
+		if not ok and string.find(tostring(message), "InvalidState", 1, true) then
+			Scene.CreateEntity("Refused")
+		end
+	end
+end
+return Script.Define("First", T)
+)"));
+			REQUIRE(fixture.AddScript(targetScript, "Assets/Scripts/Second.luau", R"(
+local T = {}
+function T:OnCreate()
+	self.Entity.Name = "Loaded" .. Scene.GetLoadParameters().From
+end
+return Script.Define("Second", T)
+)"));
+			Test::SceneTestFixture target;
+			Test::AttachSessionScript(target.GetScene().CreateEntity("Second"), targetScript);
+			auto document = SceneSerializer::ToJson(target.GetScene());
+			REQUIRE(document);
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(std::move(*document));
+			fixture.GetAssetManager().Publish(targetScene, data, "Assets/Scenes/Second.scene");
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("First"), sourceScript);
+			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE(created);
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			const uint64_t vm = session->GetScripts()->GetGeneration();
+			const uint64_t sceneGeneration = session->GetSceneGeneration();
+
+			// One frame of two fixed steps: the load requested in the first waits, and the second runs in the same scene and VM.
+			session->FixedStep();
+			CHECK(session->GetScene().FindEntityByPath("/Step1").IsValid());
+			session->FixedStep();
+			CHECK(session->GetScene().FindEntityByPath("/Step2").IsValid());
+			CHECK(session->GetScene().FindEntityByPath("/Refused").IsValid());
+			CHECK(session->GetScripts()->GetGeneration() == vm);
+			CHECK(session->GetSceneGeneration() == sceneGeneration);
+			session->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 1.0, .FrameIndex = 0 });
+
+			// The first request applied at the frame's end; the refused one changed nothing.
+			CHECK(session->GetSceneGeneration() == sceneGeneration + 1);
+			CHECK(session->GetScripts()->GetGeneration() != vm);
+			CHECK(session->GetLoadParameters() == Json{ { "From", 1 } });
+			CHECK(session->GetScene().FindEntityByPath("/Loaded1").IsValid());
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/Refused").IsValid());
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+		}
+
 		TEST_CASE("PlaySession: error cursors survive scene replacement and external eval invalidates recording")
 		{
 			Test::ScriptTestFixture fixture;

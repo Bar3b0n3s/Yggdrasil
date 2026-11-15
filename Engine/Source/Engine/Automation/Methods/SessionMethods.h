@@ -95,6 +95,9 @@ namespace Engine {
 		std::string LockstepOwner{}; // the client name owning lockstep; empty: none (or an in-process driver)
 		bool ReadOnly = false;
 		bool Headless = false;
+		// ADR 0038, friction F15: the editor renders its Game view every frame without a window (--headless-game-view);
+		// false in the Runtime.
+		bool HeadlessGameView = false;
 		std::vector<SessionClientSummary> Clients{};
 		// M16 friction S2-03: the open scene as scene.* results report it (SessionHostDescription::Scene, a SceneSummary:
 		// path, name, revision, dirty, entityCount), null without one. The editor's edit scene (none in the launcher state,
@@ -111,6 +114,7 @@ namespace Engine {
 		std::string Renderer{}; // "vulkan" or "none"
 		bool ReadOnly = false;  // the host denies mutations: the editor with --read-only, the Runtime always
 		bool Headless = false;
+		bool HeadlessGameView = false;               // the editor's --headless-game-view; the Runtime has none
 		std::vector<SessionClientSummary> Clients{}; // in any order: session.info sorts them by id
 		std::optional<SceneSummary> Scene{};         // the open scene (AutomationMethodContext::MakeSceneSummary); none without one
 	};

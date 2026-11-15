@@ -46,6 +46,9 @@ namespace Engine {
 		// Reported by session.info and in the session file.
 		bool Headless = false;
 		std::string RendererName = "none"; // "vulkan" or "none" (--renderer, RendererModeToCommandLine)
+		// --headless-game-view (EditorLaunchOptions::HeadlessGameView): the headless editor renders its Game view every frame.
+		// Reported by session.info (ADR 0038, friction F15).
+		bool HeadlessGameView = false;
 		// The captures behind viewport.screenshot and editor.screenshot, which the editor injects when it has a
 		// GraphicsDevice (ScreenshotMethods.h); empty with --renderer none, which makes both methods Unsupported.
 		ScreenshotCaptures Screenshots{};

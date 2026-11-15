@@ -62,6 +62,7 @@ namespace Engine {
 				CHECK(entry.Message.find("Callback: Evaluate") != std::string::npos);
 				CHECK(entry.Message.find("Entity: Log owner") != std::string::npos);
 				CHECK(entry.Message.find("at Assets/Scripts/LogFault.luau:1") != std::string::npos);
+				CHECK_FALSE(entry.AnsweredToCaller); // the game's error, which "_meta"'s diagnostics count (ADR 0038, friction F13)
 			}
 			REQUIRE(copiedHistory.GetErrors().size() == 1);
 			CHECK(copiedHistory.GetErrors()[0].Count == 2);
@@ -109,6 +110,9 @@ namespace Engine {
 			CHECK(entries.Entries[0].EntityId == entity.GetUUID());
 			CHECK(entries.Entries[0].Tick == std::optional<uint64_t>{ 31 });
 			CHECK(entries.Entries[0].ScriptFile == "Assets/Scripts/CallerFault.luau");
+			// Its entry is marked as answered to its caller, so "_meta"'s diagnostics leave it out (ADR 0038, friction F13).
+			CHECK(entries.Entries[0].AnsweredToCaller);
+			CHECK_FALSE(LogContextScope::GetCurrent().AnsweredToCaller);
 			// The behaviour stays enabled, and a later evaluation that succeeds leaves `failure` empty.
 			REQUIRE(fixture.GetEngine()->GetInstances().size() == 1);
 			CHECK_FALSE(fixture.GetEngine()->GetInstances()[0].Disabled);

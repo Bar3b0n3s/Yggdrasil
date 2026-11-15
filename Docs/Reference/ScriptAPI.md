@@ -994,7 +994,7 @@ All modes; Runtime|Test; mutates.
 
 `(scene: AssetRef, parameters: {[string]: any}?) -> ()`
 
-Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline.
+Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline. Until then the frame's remaining fixed steps still run in the current scene and VM, and another Scene.Load or Scene.Reload raises InvalidState: keep a flag once a transition is requested and request nothing more.
 
 All modes; Runtime|Test; mutates.
 
@@ -1002,7 +1002,7 @@ All modes; Runtime|Test; mutates.
 
 `(parameters: {[string]: any}?) -> ()`
 
-Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them.
+Requests a restart of the current scene from the document it started from, at the end of the frame; parameters replace the load parameters, absent keeps them. Until then the frame's remaining fixed steps still run in the current scene and VM, and another Scene.Load or Scene.Reload raises InvalidState: keep a flag once a transition is requested and request nothing more.
 
 All modes; Runtime|Test; mutates.
 

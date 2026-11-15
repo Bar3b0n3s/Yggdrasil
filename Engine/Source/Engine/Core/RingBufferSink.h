@@ -60,6 +60,7 @@ namespace Engine {
 		UUID EntityId;          // invalid when there is no entity context
 		std::string ScriptFile; // empty when there is no script context
 		uint32_t ScriptLine = 0;
+		bool AnsweredToCaller = false; // LogContext::AnsweredToCaller: the "_meta" diagnostics delta leaves the entry out
 	};
 
 	// A read request. Entries with Seq >= Cursor are scanned in Seq order.

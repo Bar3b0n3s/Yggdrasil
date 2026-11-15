@@ -98,6 +98,7 @@ namespace Engine {
 				result.LockstepOwner = context.GetClientName(session->GetLockstepOwner());
 			result.ReadOnly = host.ReadOnly;
 			result.Headless = host.Headless;
+			result.HeadlessGameView = host.HeadlessGameView;
 			result.Clients = std::move(host.Clients);
 			std::sort(result.Clients.begin(), result.Clients.end(), [](const SessionClientSummary& left, const SessionClientSummary& right)
 			{
@@ -167,6 +168,10 @@ namespace Engine {
 			.Field("lockstepOwner", &SessionInfoResult::LockstepOwner, "The name of the client that owns lockstep; empty when none.")
 			.Field("readOnly", &SessionInfoResult::ReadOnly, "Whether the host denies mutations: the editor with --read-only, the Runtime always.")
 			.Field("headless", &SessionInfoResult::Headless, "Whether the host runs without a visible window (--headless).")
+			.Field("headlessGameView", &SessionInfoResult::HeadlessGameView,
+				"Whether the headless editor renders its Game view every frame at the project's window size, as the soak's editors do "
+				"(--headless-game-view, the bridge's editor_launch {headlessGameView: true}), so stats.get reports it; false otherwise and "
+				"in the Runtime.")
 			.Field("clients", &SessionInfoResult::Clients, "The connected clients, by id.")
 			.Field("scene", &SessionInfoResult::Scene,
 				"The open scene as scene.* results report it ({path, name, revision, dirty, entityCount}; path is project-relative, empty for a scene "
@@ -207,7 +212,8 @@ namespace Engine {
 			{
 				.Name = "session.info",
 				.Description = "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and "
-							   "scene, play state, renderer, lockstep owner, the read-only flag and the connected clients.",
+							   "scene, play state, renderer, the headless and headless game view flags, lockstep owner, the read-only flag and "
+							   "the connected clients.",
 				.AvailableInRuntime = true,
 				.AvailableInLauncher = true,
 				.AllowedInBatch = true,

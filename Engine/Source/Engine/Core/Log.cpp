@@ -187,6 +187,7 @@ namespace Engine {
 				entry.EntityId = context.Entity;
 				entry.ScriptFile = context.ScriptFile;
 				entry.ScriptLine = context.ScriptLine;
+				entry.AnsweredToCaller = context.AnsweredToCaller;
 
 				entry.Seq = m_RingBuffer->Append(entry);
 				Utils::GetListenerRegistry().Dispatch(entry);

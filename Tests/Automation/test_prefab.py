@@ -364,6 +364,37 @@ class PrefabTests(AutomationTestCase):
         self.assertEqual(prefab_file.read_bytes(), prefab_applied)
         self.assertEqual(client.call("entity.get", {"entity": "/HUD2/Banner"})["entity"]["id"], banner["id"])
 
+    def test_scene_open_reports_the_instances_rebuilt_from_a_changed_prefab(self) -> None:
+        # M27 friction F14 (Docs/Decisions/0038-m27-rolling-ball.md): after prefab_apply gave HUD.prefab a BottomBar in
+        # Level 1, scene_open of Level 2 returned dirty: true with no diagnostics or repairs, so nothing said why the
+        # freshly opened scene was unsaved. Its result now lists each instance the load rebuilt with a change, with its
+        # prefab; a scene opened with its prefabs as saved lists none and opens clean.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "HUD"})
+        client.call("entity.create", {"name": "TopBar", "parent": "/HUD"})
+        client.call("prefab.create", {"entity": "/HUD", "path": "Assets/Prefabs/HUD.prefab",
+                                      "replaceWithInstance": True})
+        client.call("scene.save")
+        client.call("scene.new", {"path": "Assets/Scenes/Level2.scene"})
+        client.call("prefab.instantiate", {"prefab": "Assets/Prefabs/HUD.prefab", "name": "HUD"})
+        client.call("scene.save")
+        unchanged = client.call("scene.open", {"path": "Assets/Scenes/Main.scene"})
+        self.assertEqual(unchanged["rebuiltInstances"], [])
+        self.assertFalse(unchanged["scene"]["dirty"])
+
+        client.call("entity.create", {"name": "BottomBar", "parent": "/HUD"})
+        client.call("prefab.apply", {"instance": "/HUD"})
+        client.call("scene.save")
+        opened = client.call("scene.open", {"path": "Assets/Scenes/Level2.scene"})
+        self.assertTrue(opened["scene"]["dirty"])
+        self.assertEqual([(rebuilt["instance"]["path"], rebuilt["prefab"]["path"])
+                          for rebuilt in opened["rebuiltInstances"]], [("/HUD", "Assets/Prefabs/HUD.prefab")])
+        self.assertEqual(tree_names(client.call("scene.tree", {"format": "json"})), ["HUD", "TopBar", "BottomBar"])
+        client.call("scene.save")
+        reloaded = client.call("scene.open", {"path": "Assets/Scenes/Level2.scene", "reload": True})
+        self.assertEqual(reloaded["rebuiltInstances"], [])
+        self.assertFalse(reloaded["scene"]["dirty"])
+
     def test_prefab_errors_and_dry_run(self) -> None:
         client, root = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Plain"})

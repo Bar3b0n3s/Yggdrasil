@@ -119,6 +119,35 @@ return Script.Define("Owner", Owner)
                                              "Tint = Color.New(1, 0.5, 0, 1)}"})
         self.assertEqual(values["value"], {"At": [1, 2, 3], "Pose": [[0, 0, 0, 1]], "Tint": [1, 0.5, 0, 1]})
 
+    def test_a_failed_eval_takes_no_part_in_meta_diagnostics(self) -> None:
+        # ADR 0038, friction F13: a failed script.eval's response reported its own failure under _meta.diagnostics
+        # (newScriptErrors 1, firstNew the eval's entry), while script.errors, rightly, never listed it. The failure is
+        # answered in the error's scriptError, so the diagnostics leave it out; the game's own script errors still
+        # count.
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Scripts/Faulty.luau"
+        client.call("script.write", {"path": path, "source": (
+            'local Faulty = {}\n'
+            'function Faulty:OnFixedUpdate() error("game fault", 0) end\n'
+            'return Script.Define("Faulty", Faulty)\n')})
+        client.call("entity.create", {"name": "Board", "components": {"Script": {"Scripts": [{"Script": path}]}}})
+        client.call("play.start", {"lockstep": True, "pauseOnError": False})
+        for context in ("play", "edit"):
+            with self.subTest(context=context):
+                with self.assertRaises(engine_client.EngineError) as failed:
+                    client.call("script.eval", {"context": context, "code": "local t = nil\nreturn t.delay"})
+                self.assert_engine_error(failed.exception, engine_client.SCRIPT_ERROR, "Script")
+                self.assertIn("scriptError", failed.exception.data)
+                diagnostics = failed.exception.data["_meta"]["diagnostics"]
+                self.assertEqual(diagnostics["newScriptErrors"], 0)
+                self.assertEqual(diagnostics["firstNew"], [])
+        self.assertEqual(client.call("script.errors")["errors"], [])
+        stepped = client.call("play.step", {"ticks": 1})
+        self.assertEqual(stepped["_meta"]["diagnostics"]["newScriptErrors"], 1)
+        self.assertIn("game fault", stepped["_meta"]["diagnostics"]["firstNew"][0]["message"])
+        self.assertEqual(len(client.call("script.errors")["errors"]), 1)
+        client.call("play.stop")
+
     def test_script_errors_keep_bounded_messages_and_report_evictions(self) -> None:
         client, _ = self.open_editor_with_scene()
         path = "Assets/Scripts/Fault.luau"

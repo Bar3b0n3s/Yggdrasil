@@ -291,10 +291,11 @@ namespace Engine {
 		// EditorContext::UpdatePrefabInstances without its atomicity: every outermost instance of `prefabs` (any prefab when
 		// empty), or of a prefab nesting one of them (Docs/Decisions/0031-m20-contract.md decision 8), rebuilt from the
 		// prefab's current version, its overrides refreshed afterwards; nested instances follow their outermost ones.
-		// Returns whether anything changed. Errors: Validation PREFAB_CYCLE when the propagation from `prefabs` meets a nesting
-		// cycle (EditorContext::GetNestingPrefabs); those of the rebuild.
+		// Returns whether anything changed, and appends each instance it changed to `changed` (its root ID and the prefab it
+		// was rebuilt from, in canonical order). Errors: Validation PREFAB_CYCLE when the propagation from `prefabs` meets a
+		// nesting cycle (EditorContext::GetNestingPrefabs); those of the rebuild.
 		static Result<bool> RebuildPrefabInstances(EditorContext& context, Scene& scene,
-			std::span<const AssetHandle> prefabs)
+			std::span<const AssetHandle> prefabs, std::vector<std::pair<UUID, AssetHandle>>& changed)
 		{
 			ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> rebuilt, AddNestingPrefabs(context, prefabs));
 			const std::vector<std::pair<UUID, AssetHandle>> instances = Utils::FindPrefabInstances(scene, rebuilt);
@@ -310,7 +311,7 @@ namespace Engine {
 			std::set<AssetHandle> missing;
 			const PrefabOptions options{ .Schemas = schemas.get() };
 			LoadReport report;
-			bool changed = false;
+			bool anyChanged = false;
 			for (const auto& [rootID, handle] : instances)
 			{
 				if (missing.contains(handle))
@@ -340,7 +341,11 @@ namespace Engine {
 				// diffing, ADR 0006 decision 17). A reference this cannot store keeps the records as they were.
 				if (Status refreshed = PrefabInstantiator::RefreshOverrides(root, prefab->second, options); !refreshed)
 					ENGINE_WARN("The overrides of the prefab instance '{}' were kept as recorded: {}", scene.GetEntityPath(root), refreshed.error().ToString());
-				changed = changed || Utils::CaptureSubtree(scene, rootID) != before;
+				if (Utils::CaptureSubtree(scene, rootID) != before)
+				{
+					changed.emplace_back(rootID, handle);
+					anyChanged = true;
+				}
 			}
 			for (const LoadDiagnostic& diagnostic : report.Diagnostics)
 			{
@@ -348,7 +353,7 @@ namespace Engine {
 					diagnostic.JsonPointer.empty() ? std::string() : std::format(" at {}", diagnostic.JsonPointer),
 					diagnostic.Code.empty() ? std::string() : std::format(" ({})", diagnostic.Code));
 			}
-			return changed;
+			return anyChanged;
 		}
 
 		// The overrides of `scene`'s outermost instances of the prefabs `versions` holds, recorded against the version it holds
@@ -867,18 +872,28 @@ namespace Engine {
 		return Utils::ToEditorFileStatus(m_Assets->GetWriter().CreateDirectories(directory));
 	}
 
-	Result<bool> EditorContext::UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs)
+	Result<bool> EditorContext::UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs,
+		std::vector<std::pair<UUID, AssetHandle>>* changed)
 	{
 		// Atomic for a caller that does not track the scene itself (scene.open's loaded scene): a failure restores every
 		// instance it already rebuilt. CreatePrefabUpdateCommand tracks and rolls back on its own.
+		std::vector<std::pair<UUID, AssetHandle>> rebuilt;
 		ChangeTracker& tracker = scene.GetChangeTracker();
+		Result<bool> updated = false;
 		if (tracker.IsTracking())
-			return Utils::RebuildPrefabInstances(*this, scene, prefabs);
-		tracker.Begin();
-		Result<bool> updated = Utils::RebuildPrefabInstances(*this, scene, prefabs);
-		const std::vector<EntityChange> tracked = tracker.End();
-		if (!updated)
-			Utils::RollBackTrackedChanges(scene, tracked, "Update Prefab Instances");
+		{
+			updated = Utils::RebuildPrefabInstances(*this, scene, prefabs, rebuilt);
+		}
+		else
+		{
+			tracker.Begin();
+			updated = Utils::RebuildPrefabInstances(*this, scene, prefabs, rebuilt);
+			const std::vector<EntityChange> tracked = tracker.End();
+			if (!updated)
+				Utils::RollBackTrackedChanges(scene, tracked, "Update Prefab Instances");
+		}
+		if (updated && changed != nullptr)
+			*changed = std::move(rebuilt);
 		return updated;
 	}
 

@@ -23,6 +23,8 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -292,16 +294,24 @@ namespace Engine {
 			// SceneChangedOnDisk also adopts the prefabs that changed; the scene then opens dirty. An update that fails (a prefab
 			// that no longer imports) leaves the instances as saved, with a warning, rather than refusing to open the scene.
 			bool dirty = params.Repair && !report.Repairs.empty();
-			if (Result<bool> updated = editor.UpdatePrefabInstances(*scene, {}); updated)
+			SceneOpenResult result;
+			std::vector<std::pair<UUID, AssetHandle>> rebuilt;
+			if (Result<bool> updated = editor.UpdatePrefabInstances(*scene, {}, &rebuilt); updated)
 			{
 				dirty = dirty || *updated;
+				// ADR 0038, friction F14: which instances changed, so a caller knows why a freshly opened scene is dirty.
+				for (const auto& [rootID, prefab] : rebuilt)
+				{
+					const ConstEntity root = scene->FindEntityByID(rootID);
+					if (root.IsValid())
+						result.RebuiltInstances.push_back({ .Instance = Utils::SummarizeEntity(root), .Prefab = Utils::MakeAssetSummary(editor.GetAssets(), prefab) });
+				}
 			}
 			else
 			{
 				ENGINE_WARN("'{}': the prefab instances keep their saved state because they could not be updated: {}", params.Path,
 					updated.error().ToString());
 			}
-			SceneOpenResult result;
 			if (params.KeepOpen)
 			{
 				Utils::LogLoadDiagnostics(Utils::ToProjectRelative(path), report);
@@ -543,12 +553,20 @@ namespace Engine {
 			.Field("repair", &SceneOpenParams::Repair, "Load with structural repairs and report them; the scene is then unsaved.")
 			.Field("keepOpen", &SceneOpenParams::KeepOpen, "Keep every open scene open and add this one as the active scene.");
 
+		registry.Struct<ScenePrefabRebuild>("ScenePrefabRebuild", "A prefab instance scene.open rebuilt with a change from the current version of its prefab.")
+			.Field("instance", &ScenePrefabRebuild::Instance, "The instance root, with its path in the opened scene.")
+			.Field("prefab", &ScenePrefabRebuild::Prefab, "The prefab it was rebuilt from.");
+
 		registry.Struct<SceneOpenResult>("SceneOpenResult", "The opened scene and what loading it reported.")
 			.Field("scene", &SceneOpenResult::Scene, "The open scene.")
 			.Field("migrated", &SceneOpenResult::Migrated, "The file was in an older format; saving it, or project.upgrade, rewrites it.")
 			.Field("diagnostics", &SceneOpenResult::Diagnostics, "The load warnings, also logged.")
 			.Field("repairs", &SceneOpenResult::Repairs, "The repairs a repair load applied.")
-			.Field("id", &SceneOpenResult::Id, "The scene's open-scene id, which the scene target accepts.");
+			.Field("id", &SceneOpenResult::Id, "The scene's open-scene id, which the scene target accepts.")
+			.Field("rebuiltInstances", &SceneOpenResult::RebuiltInstances,
+				"The outermost prefab instances the load rebuilt with a change from their prefab's current version, in scene order: their prefab, "
+				"or a prefab it nests, changed since the scene was saved (or their recorded overrides no longer matched it). The scene then "
+				"opens unsaved (dirty): check these instances, then save the scene. Empty when the load changed none.");
 
 		registry.Struct<SceneSaveParams>("SceneSaveParams", "The params of scene.save.")
 			.Field("path", &SceneSaveParams::Path, "Where to save, project-relative; empty for the scene's own file.");
@@ -618,7 +636,9 @@ namespace Engine {
 				.Name = "scene.open",
 				.Description = "Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved "
 							   "changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged "
-							   "file with reported repairs.",
+							   "file with reported repairs. Prefab instances are rebuilt from their prefabs' current versions: a scene opened "
+							   "after its prefab changed opens unsaved, and rebuiltInstances lists each instance that changed with its prefab, so "
+							   "check them, then save the scene.",
 				.RequiredParams = { "path" },
 				.ExposeAsTool = true,
 				.Examples = { { .Description = "Save the open scene, then open Level1.", .Params = openExample } },

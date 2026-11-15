@@ -17,6 +17,9 @@ namespace Engine {
 		UUID Entity;                 // invalid = none
 		std::string_view ScriptFile; // empty = none; must outlive every scope that carries it
 		uint32_t ScriptLine = 0;     // 0 = none
+		// The entry reports an error its caller is answered with, which the automation's "_meta" diagnostics delta leaves out:
+		// a failed script.eval's own failure, set by the script engine around its one log entry (ADR 0038, friction F13).
+		bool AnsweredToCaller = false;
 	};
 
 	// Replaces the calling thread's log context for its lifetime and restores the previous one on destruction. Scopes

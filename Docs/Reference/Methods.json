@@ -23642,7 +23642,7 @@
 		{
 			"name": "scene.open",
 			"domain": "scene",
-			"description": "Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged file with reported repairs.",
+			"description": "Opens the scene at path in place of the active scene, which needs save or discardChanges when it has unsaved changes; keepOpen adds it as another open scene instead. reload reads an open scene again; repair loads a damaged file with reported repairs. Prefab instances are rebuilt from their prefabs' current versions: a scene opened after its prefab changed opens unsaved, and rebuiltInstances lists each instance that changed with its prefab, so check them, then save the scene.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -23724,6 +23724,13 @@
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"rebuiltInstances": {
+						"description": "The outermost prefab instances the load rebuilt with a change from their prefab's current version, in scene order: their prefab, or a prefab it nests, changed since the scene was saved (or their recorded overrides no longer matched it). The scene then opens unsaved (dirty): check these instances, then save the scene. Empty when the load changed none.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/ScenePrefabRebuild"
+						}
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -23816,6 +23823,59 @@
 							},
 							"removed": {
 								"description": "The JSON of a component it dropped or reset; null otherwise."
+							}
+						},
+						"additionalProperties": false
+					},
+					"ScenePrefabRebuild": {
+						"description": "A prefab instance scene.open rebuilt with a change from the current version of its prefab.",
+						"type": "object",
+						"properties": {
+							"instance": {
+								"description": "The instance root, with its path in the opened scene.",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"prefab": {
+								"description": "The prefab it was rebuilt from.",
+								"$ref": "#/$defs/AssetSummary"
+							}
+						},
+						"additionalProperties": false
+					},
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
 							}
 						},
 						"additionalProperties": false
@@ -24758,7 +24818,7 @@
 		{
 			"name": "script.errors",
 			"domain": "script",
-			"description": "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's.",
+			"description": "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's. An error's tick is the tick its callback ran in, as Time.GetTick() reads it there (0 in the first fixed step; in the frame phase the ticks completed). Whatever pauseOnError says, the faulting behaviour instance is disabled at its first error and runs no further callback (its tasks cancelled) until a hot reload of its script, so its error's count does not grow; other instances and the entity's other slots run on, and pauseOnError only decides whether the editor also pauses play.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -24879,13 +24939,13 @@
 								"maximum": 4294967295
 							},
 							"tick": {
-								"description": "Simulation tick of the latest occurrence.",
+								"description": "The simulation tick the latest occurrence's callback ran in, as Time.GetTick() reads it there: in the fixed step the zero-based index of the tick being run (the ticks completed before it, so 0 in the first OnFixedUpdate), in the frame phase (OnUpdate, OnLateUpdate) the ticks completed.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
 							},
 							"count": {
-								"description": "Number of occurrences.",
+								"description": "Occurrences of this error (same script, line, message and jsonPointer) among the errors script.errors reads: a faulting behaviour instance is disabled at its first error, so each instance adds one until a hot reload of its script re-enables it.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -24956,7 +25016,7 @@
 		{
 			"name": "script.eval",
 			"domain": "script",
-			"description": "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors.",
+			"description": "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors nor counted in the response's _meta diagnostics.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -25542,7 +25602,7 @@
 		{
 			"name": "session.info",
 			"domain": "session",
-			"description": "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and scene, play state, renderer, lockstep owner, the read-only flag and the connected clients.",
+			"description": "Reports the host's session (the editor's or the exported game's): versions, capabilities, the open project and scene, play state, renderer, the headless and headless game view flags, lockstep owner, the read-only flag and the connected clients.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -25626,6 +25686,10 @@
 					},
 					"headless": {
 						"description": "Whether the host runs without a visible window (--headless).",
+						"type": "boolean"
+					},
+					"headlessGameView": {
+						"description": "Whether the headless editor renders its Game view every frame at the project's window size, as the soak's editors do (--headless-game-view, the bridge's editor_launch {headlessGameView: true}), so stats.get reports it; false otherwise and in the Runtime.",
 						"type": "boolean"
 					},
 					"clients": {
