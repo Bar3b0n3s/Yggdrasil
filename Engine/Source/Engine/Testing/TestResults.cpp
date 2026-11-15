@@ -199,6 +199,9 @@ namespace Engine {
 		registry.Struct<TestRecordingInputCheck>("TestRecordingInputCheck", "The input check of a written recording: the recording replayed without its input events.")
 			.Field("ran", &TestRecordingInputCheck::Ran, "The check ran; false for a recording without input events, which has nothing to check.")
 			.Field("divergedAtTick", &TestRecordingInputCheck::DivergedAtTick, "Where the run without input first differed from the recording: the first checkpoint whose state hash differed, else where that run ended (the final tick); 0 when the check did not run.");
+		registry.Struct<TestRecordingReplaced>("TestRecordingReplaced", "How a replay test.run {record} wrote over an existing file compares with the file it replaced, read before it was written over.")
+			.Field("checkpointsEqual", &TestRecordingReplaced::CheckpointsEqual, "The new replay holds the replaced file's state-hash checkpoints: the same ticks with the same hashes, in order. False when the replaced file does not read as a replay.")
+			.Field("finalHashEqual", &TestRecordingReplaced::FinalHashEqual, "The new replay's final state hash equals the replaced file's. False when the replaced file does not read as a replay.");
 		registry.Struct<TestRecordingResult>("TestRecordingResult", "The replay test.run {record} wrote.")
 			.Field("path", &TestRecordingResult::Path, "The written replay, project-relative (recordingPath).")
 			.Field("formatVersion", &TestRecordingResult::FormatVersion, "The Replay format version written.")
@@ -208,7 +211,8 @@ namespace Engine {
 			.Field("finalStateHash", &TestRecordingResult::FinalStateHash, "The state hash at the final tick (FinalStateHash).")
 			.Field("inputCheck", &TestRecordingResult::InputCheck, "The input check that let the recording through.")
 			.Field("expectations", &TestRecordingResult::Expectations, "The expectations written (test.run's expect), each verified with the recording's input before it was written.")
-			.Field("warnings", &TestRecordingResult::Warnings, "Notes on the written replay: the input check warns when its run without input differed only at checkpoints but reached the recorded final state hash, which then proves only the end state.");
+			.Field("warnings", &TestRecordingResult::Warnings, "Notes on the written replay: the input check warns when its run without input differed only at checkpoints but reached the recorded final state hash, which then proves only the end state.")
+			.Field("replaced", &TestRecordingResult::Replaced, "For a replay written over an existing file: {checkpointsEqual, finalHashEqual} (TestRecordingReplaced), whether its checkpoints and final state hash equal the replaced file's (both true: the re-recording changed nothing the state hash covers); null for a new file.");
 		registry.Struct<TestRunResult>("TestRunResult", "TestRunResult shared test report.")
 			.Field("mode", &TestRunResult::Mode, "Mode of the test report.")
 			.Field("passed", &TestRunResult::Passed, "Passed of the test report.")
@@ -221,7 +225,7 @@ namespace Engine {
 			.Field("jsonPath", &TestRunResult::JsonPath, "JsonPath of the test report.")
 			.Field("junitPath", &TestRunResult::JunitPath, "JunitPath of the test report.")
 			.Field("recordingPath", &TestRunResult::RecordingPath, "RecordingPath of the test report.")
-			.Field("recording", &TestRunResult::Recording, "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}, expectations, warnings} (TestRecordingResult); null for every other run.");
+			.Field("recording", &TestRunResult::Recording, "The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}, expectations, warnings, replaced: {checkpointsEqual, finalHashEqual} or null} (TestRecordingResult); null for every other run.");
 	}
 
 	Result<Json> TestRunResultToJson(const TestRunResult& result, const TypeRegistry& registry)

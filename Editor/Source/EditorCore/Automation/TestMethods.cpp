@@ -15,6 +15,7 @@
 #include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scripting/ScriptCompiler.h"
 #include "Engine/Session/ReplayPlayer.h"
@@ -25,6 +26,7 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -157,18 +159,49 @@ namespace Engine {
 				Cancel(context);
 				if (recording)
 				{
+					// Read before it is written over (ADR 0038, friction F20).
+					ENGINE_TRY_ASSIGN(const std::optional<TestRecordingReplaced> replaced, CompareWithReplaced(context, m_Record, *recording));
 					ENGINE_TRY_ASSIGN(result.RecordingPath, context.WriteReplay(m_Record, *recording));
-					ENGINE_TRY_ASSIGN(result.Recording, MakeRecordingBlock(context, result.RecordingPath, *recording, inputCheckTick, finalHashIndependentTick));
+					ENGINE_TRY_ASSIGN(result.Recording, MakeRecordingBlock(context, result.RecordingPath, *recording, inputCheckTick, finalHashIndependentTick, replaced));
 				}
 				return PublishReports(context, std::move(result), m_ReportCoverage);
 			}
 
-			// The result's recording block (TestRunResult::Recording, M16 friction S3-03): what the written replay holds, its
-			// expectations included (Docs/Decisions/0030-m19-contract.md decision 6), where its input check diverged, and the
-			// warning of an input check that reproduced the final hash only (decision 3, `finalHashIndependentTick`).
-			[[nodiscard]] static Result<VariantValue> MakeRecordingBlock(EditorMethodContext& context, const std::string& path, const ReplayDocument& recording,
-				std::optional<uint64_t> inputCheckTick, std::optional<uint64_t> finalHashIndependentTick)
+			// How `recording` compares with the replay it is about to replace at `path` (TestRecordingReplaced; ADR 0038,
+			// friction F20): nullopt when no file exists there; a file that does not read as a replay (any error of
+			// ReadReplayDocument's strict read: Parse, Validation, UnsupportedVersion, a read failure) equals it in neither. Errors: ValidateReplayOutput's, which Begin
+			// already passed.
+			[[nodiscard]] static Result<std::optional<TestRecordingReplaced>> CompareWithReplaced(EditorMethodContext& context, std::string_view path, const ReplayDocument& recording)
 			{
+				ENGINE_TRY_ASSIGN(const std::string canonical, context.ValidateReplayOutput(path));
+				ENGINE_TRY_ASSIGN(const VfsPath output, VfsPath::Parse(canonical));
+				if (!context.GetEditor().GetVfs().Exists(output))
+					return std::optional<TestRecordingReplaced>();
+				ReplayLoadReport report;
+				std::string replacedPath;
+				const Result<ReplayDocument> replaced = context.ReadReplayDocument(canonical, report, replacedPath);
+				if (!replaced)
+					return std::optional<TestRecordingReplaced>(TestRecordingReplaced{});
+				const bool checkpointsEqual = std::ranges::equal(recording.Checkpoints, replaced->Checkpoints, [](const ReplayCheckpoint& written, const ReplayCheckpoint& previous)
+				{
+					return written.Tick == previous.Tick && written.StateHash == previous.StateHash;
+				});
+				return std::optional<TestRecordingReplaced>(TestRecordingReplaced{ .CheckpointsEqual = checkpointsEqual, .FinalHashEqual = recording.FinalStateHash == replaced->FinalStateHash });
+			}
+
+			// The result's recording block (TestRunResult::Recording, M16 friction S3-03): what the written replay holds, its
+			// expectations included (Docs/Decisions/0030-m19-contract.md decision 6), where its input check diverged, the
+			// warning of an input check that reproduced the final hash only (decision 3, `finalHashIndependentTick`), and how
+			// it compares with the file it replaced (`replaced`, CompareWithReplaced).
+			[[nodiscard]] static Result<VariantValue> MakeRecordingBlock(EditorMethodContext& context, const std::string& path, const ReplayDocument& recording,
+				std::optional<uint64_t> inputCheckTick, std::optional<uint64_t> finalHashIndependentTick, const std::optional<TestRecordingReplaced>& replaced)
+			{
+				VariantValue replacedBlock;
+				if (replaced.has_value())
+				{
+					ENGINE_TRY_ASSIGN(Json serialized, context.SerializeResult(*replaced));
+					replacedBlock = VariantValue(std::move(serialized));
+				}
 				std::vector<std::string> warnings;
 				if (finalHashIndependentTick.has_value())
 					warnings.push_back(MakeFinalHashIndependentWarning(path, *finalHashIndependentTick, recording.FinalStateHash));
@@ -182,6 +215,7 @@ namespace Engine {
 					.InputCheck = { .Ran = inputCheckTick.has_value(), .DivergedAtTick = ToAutomationCounter(inputCheckTick.value_or(0)) },
 					.Expectations = ToAutomationCounter(recording.Expect.size()),
 					.Warnings = std::move(warnings),
+					.Replaced = std::move(replacedBlock),
 				};
 				ENGINE_TRY_ASSIGN(Json serialized, context.SerializeResult(block));
 				return VariantValue(std::move(serialized));
@@ -339,7 +373,7 @@ namespace Engine {
 		registry.Struct<TestRunParams>("TestRunParams", "Run selected suites, cases and replays without altering authored scene state.")
 			.Field("filter", &TestRunParams::Filter, "Case-insensitive substring of suite/case or replay path; a filtered run resolves and validates only the suites and replays it selects.")
 			.Field("timeoutTicks", &TestRunParams::TimeoutTicks, "Optional positive run-wide tick cap; omitted means no additional limit.")
-			.Field("record", &TestRunParams::Record, "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written.")
+			.Field("record", &TestRunParams::Record, "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written and, when it replaces an existing file, whether its checkpoints and final state hash equal that file's.")
 			.Field("coverage", &TestRunParams::Coverage, "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.")
 			.Field("expect", &TestRunParams::Expect, "With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written.");
 	}
@@ -348,7 +382,7 @@ namespace Engine {
 	{
 		methods.Add({ .Name = "test.list", .Description = "Collects test suite and case names and source locations without running case bodies.", .Examples = { { .Description = "List configured tests.", .Params = Json::object() } } }, &Automation::TestList);
 		methods.AddPending<EditorMethodContext, TestRunParams, TestRunMethodResult>(
-			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
+			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged, and for a replay written over an existing file whether its checkpoints and final hash equal the replaced file's); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
 	}
 
 }

@@ -5,8 +5,10 @@
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/Json/Json.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/AudioSystem.h"
+#include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -15,9 +17,11 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/ReplayRecorder.h"
 #include "Support/ExpectLog.h"
+#include "Support/PhysicsTestScene.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
+#include <glm/glm.hpp>
 
 #include <algorithm>
 #include <format>
@@ -798,6 +802,212 @@ return Script.Define("Second", T)
 			REQUIRE((*fresh)->GetRecorder()->Begin(header, **fresh));
 			REQUIRE((*fresh)->GetScripts()->Evaluate("pcall(function() Time.SetTimeScale(0.5); error('after write') end); Time.SetTimeScale(1)", {}));
 			CHECK_FALSE((*fresh)->GetRecorder()->Finish(**fresh));
+		}
+
+		// ADR 0038, friction F19: an entity's body is created at the first physics pre-step after the entity was created
+		// (§5.7 step 5), and its OnStart runs at the first start flush after it. One created before a tick's pre-step (in
+		// OnFixedUpdate or a task, as a test case does) has its body by its OnStart; one created after it (in a physics
+		// callback, in the frame phase, or between ticks by script.eval) starts and runs its first OnFixedUpdate at the next
+		// tick before that tick's pre-step creates its body, so its body methods raise there (Rolling Ball's S3 probe).
+		TEST_CASE("PlaySession: an entity created after a tick's physics pre-step gets its body only at the next tick's pre-step, after its OnStart and first OnFixedUpdate")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle spawnerScript(0x710070), probeScript(0x710071);
+			REQUIRE(fixture.AddScript(spawnerScript, "Assets/Scripts/Spawner.luau", R"(
+local T = {}
+function T.Spawn(name: string, x: number)
+	local entity = Scene.CreateEntity(name)
+	entity.Transform.Translation = vector.create(x, 0, 0)
+	entity:AddComponent("BoxCollider", {HalfExtents = vector.create(1, 0.25, 1)})
+	entity:AddComponent("RigidBody", {Type = "Kinematic"})
+	entity:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Probe.luau"), Fields = {}, ExecutionOrder = 0}}})
+end
+function T:OnStart()
+	self.Fixed = 0
+	self.Frames = 0
+	Task.Spawn(function()
+		Task.WaitTicks(1)
+		T.Spawn("InTask", 20)
+	end)
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	if self.Fixed == 1 then
+		T.Spawn("InFixedUpdate", 30)
+	end
+end
+function T:OnTriggerEnter(other)
+	if not self.Entered then
+		self.Entered = true
+		T.Spawn("InTriggerEnter", 40)
+	end
+end
+function T:OnUpdate()
+	self.Frames += 1
+	if self.Frames == 1 then
+		T.Spawn("InUpdate", 50)
+	end
+end
+return Script.Define("Spawner", T)
+)"));
+			REQUIRE(fixture.AddScript(probeScript, "Assets/Scripts/Probe.luau", R"(
+local T = {}
+local function record(self, phase: string, ok: boolean)
+	Scene.CreateEntity("trace:" .. self.Entity.Name .. ":" .. phase .. ":" .. (if ok then "body" else "none"))
+end
+function T:OnStart()
+	self.Fixed = 0
+	record(self, "start", Physics.GetBodyBounds(self.Entity) ~= nil)
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	if self.Fixed <= 2 then
+		local transform = self.Entity.Transform
+		local moved = pcall(function()
+			self.Entity.RigidBody:MoveKinematic(transform.WorldPosition, transform.WorldRotation)
+		end)
+		record(self, "fixed", moved)
+	end
+end
+return Script.Define("Probe", T)
+)"));
+			Scene& editScene = fixture.GetScene();
+			const Entity zone = Test::AddBoxBody(editScene, "Zone", glm::vec3(0.0f), glm::vec3(5.0f), BodyType::Static);
+			zone.Patch<BoxColliderComponent>([](BoxColliderComponent& collider)
+			{
+				collider.IsTrigger = true;
+			});
+			const Entity spawner = Test::AddSphereBody(editScene, "Spawner", glm::vec3(0.0f), 0.5f, BodyType::Dynamic);
+			Test::AttachSessionScript(spawner, spawnerScript);
+			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+
+			// Tick 0: InFixedUpdate in OnFixedUpdate, InTriggerEnter in PostStep's dispatch, InUpdate in the frame phase.
+			session->Tick();
+			// Between ticks, as script.eval {context: Play} runs in a lockstep session.
+			const auto evaluated = session->GetScripts()->Evaluate(R"(
+local entity = Scene.CreateEntity("InEval")
+entity.Transform.Translation = vector.create(60, 0, 0)
+entity:AddComponent("BoxCollider", {HalfExtents = vector.create(1, 0.25, 1)})
+entity:AddComponent("RigidBody", {Type = "Kinematic"})
+entity:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Probe.luau"), Fields = {}, ExecutionOrder = 0}}})
+)",
+				VfsPath{});
+			REQUIRE_MESSAGE(evaluated, (evaluated ? "" : evaluated.error().ToString()));
+			for (int tick = 0; tick < 4; ++tick)
+				session->Tick();
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+
+			const std::vector<std::string> trace = Test::SessionTrace(session->GetScene());
+			const auto traceOf = [&trace](std::string_view name)
+			{
+				std::vector<std::string> phases;
+				const std::string prefix = std::string(name) + ":";
+				for (const std::string& entry : trace)
+				{
+					if (entry.starts_with(prefix))
+						phases.push_back(entry.substr(prefix.size()));
+				}
+				return phases;
+			};
+			// Created before the tick's pre-step: the body exists by OnStart.
+			const std::vector<std::string> beforePreStep = { "start:body", "fixed:body", "fixed:body" };
+			CHECK(traceOf("InFixedUpdate") == beforePreStep);
+			CHECK(traceOf("InTask") == beforePreStep);
+			// Created after it: OnStart and the first OnFixedUpdate run before the next tick's pre-step creates the body.
+			const std::vector<std::string> afterPreStep = { "start:none", "fixed:none", "fixed:body" };
+			CHECK(traceOf("InTriggerEnter") == afterPreStep);
+			CHECK(traceOf("InUpdate") == afterPreStep);
+			CHECK(traceOf("InEval") == afterPreStep);
+		}
+
+		// ADR 0038, friction F18: RigidBody:MoveKinematic writes the entity's pose, and the tick's physics pre-step (§5.7 step
+		// 5, after OnFixedUpdate and the tasks, where test cases run) sweeps the body there with the velocities that reach it
+		// in one fixed step. A Kinematic body's velocities are those of its last sweep: in the tick of a MoveKinematic, the
+		// fixed step still reads the previous tick's, while the frame phase, an evaluation between ticks and the next tick's
+		// fixed step read the new sweep's.
+		TEST_CASE("PlaySession: a Kinematic body's velocities are those of its last physics step, so a MoveKinematic shows in them from its tick's physics step on")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle moverScript(0x710072);
+			REQUIRE(fixture.AddScript(moverScript, "Assets/Scripts/Mover.luau", R"(
+local T = {}
+function T:OnStart()
+	self.Fixed = 0
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	local body = self.Entity.RigidBody :: RigidBody
+	if self.Fixed == 3 then
+		self.BeforeMove = body:GetLinearVelocity()
+		body:MoveKinematic(vector.create(0, 2, 0), Quat.FromEuler(0, 6, 0))
+		self.AfterMove = body:GetLinearVelocity()
+		self.AfterMoveAngular = body:GetAngularVelocity()
+	elseif self.Fixed == 4 then
+		self.NextTick = body:GetLinearVelocity()
+		self.NextTickAngular = body:GetAngularVelocity()
+	end
+end
+function T:OnUpdate()
+	if self.Fixed == 3 then
+		self.FrameAfterMove = (self.Entity.RigidBody :: RigidBody):GetLinearVelocity()
+	end
+end
+return Script.Define("Mover", T)
+)"));
+			const Entity platform = Test::AddBoxBody(fixture.GetScene(), "Platform", glm::vec3(0.0f), glm::vec3(1.0f, 0.25f, 1.0f), BodyType::Kinematic);
+			Test::AttachSessionScript(platform, moverScript);
+			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			const UUID id = platform.GetUUID();
+			const auto read = [&session, id](std::string_view member)
+			{
+				const auto value = session->GetScripts()->Evaluate(std::format("return self.{}", member), VfsPath{}, id);
+				REQUIRE_MESSAGE(value, (value ? "" : value.error().ToString()));
+				const Json json = value->Value.Get();
+				REQUIRE_MESSAGE((json.is_array() && json.size() == 3), json.dump());
+				glm::vec3 velocity(0.0f);
+				for (int axis = 0; axis < 3; ++axis)
+				{
+					const auto component = JsonReader(json).GetElement(static_cast<size_t>(axis)).and_then([](const JsonReader& element)
+					{
+						return element.ReadFloat();
+					});
+					REQUIRE_MESSAGE(component, json.dump());
+					velocity[axis] = *component;
+				}
+				return velocity;
+			};
+			const auto near = [](const glm::vec3& actual, const glm::vec3& expected)
+			{
+				return glm::all(glm::lessThanEqual(glm::abs(actual - expected), glm::vec3(1.0e-3f * std::max(1.0f, glm::length(expected)))));
+			};
+			const float fixedHz = 1.0f / static_cast<float>(session->GetFixedDelta());
+			const glm::vec3 jump(0.0f, 2.0f * fixedHz, 0.0f);
+			const glm::vec3 turn(0.0f, glm::radians(6.0f) * fixedHz, 0.0f);
+
+			// Two resting ticks, then the tick that moves the platform 2 m up and turns it 6 degrees.
+			Test::RunTicks(*session, 3);
+			CHECK(near(read("BeforeMove"), glm::vec3(0.0f)));
+			// In its own tick's fixed step the body has not swept yet: it still reads its last (resting) step.
+			CHECK(near(read("AfterMove"), glm::vec3(0.0f)));
+			CHECK(near(read("AfterMoveAngular"), glm::vec3(0.0f)));
+			// From the tick's physics step on, the sweep that carried it there in one step.
+			CHECK(near(read("FrameAfterMove"), jump));
+			CHECK(near(session->GetPhysics().GetLinearVelocity(id).value_or(glm::vec3(0.0f)), jump));
+			CHECK(near(session->GetPhysics().GetAngularVelocity(id).value_or(glm::vec3(0.0f)), turn));
+			// The next tick's fixed step still reads that sweep; its own step, which does not move the body, rests it again.
+			session->Tick();
+			CHECK(near(read("NextTick"), jump));
+			CHECK(near(read("NextTickAngular"), turn));
+			CHECK(near(session->GetPhysics().GetLinearVelocity(id).value_or(glm::vec3(1.0f)), glm::vec3(0.0f)));
+			CHECK(near(session->GetPhysics().GetAngularVelocity(id).value_or(glm::vec3(1.0f)), glm::vec3(0.0f)));
+			CHECK(near(Test::GetWorldPosition(*session, "/Platform"), glm::vec3(0.0f, 2.0f, 0.0f)));
+			CHECK(session->GetScriptErrors().GetErrors().empty());
 		}
 
 		TEST_CASE("PlaySession: Simulate never initializes scripts or accepts a recorder")

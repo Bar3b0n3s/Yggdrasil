@@ -526,8 +526,8 @@ Script members of `RigidBody`:
 | `AngularDamping` | proxy field | `number` | read/write | All | How quickly angular velocity decays, per second. |
 | `EnhancedInternalEdgeRemoval` | proxy field | `boolean` | read/write | All | Removes ghost collisions with internal edges of compound shapes; set it on rolling bodies. |
 | `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. |
-| `GetAngularVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read current angular velocity. |
-| `GetLinearVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read current linear velocity. |
+| `GetAngularVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read the angular velocity the last physics step left, in radians per second; a Kinematic body's follows a MoveKinematic as GetLinearVelocity's does. |
+| `GetLinearVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read the linear velocity the last physics step left. A Kinematic body's is that of the sweep the step made to its Transform's pose, so a MoveKinematic shows here only once the next physics step has swept the body: the fixed step that called it (OnFixedUpdate, tasks, test cases) still reads the previous step's. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for this body (0 floats). |
 | `InitialAngularVelocity` | proxy field | `vector` | read/write | All | The world-space angular velocity the body starts with, in radians per second. |
 | `InitialLinearVelocity` | proxy field | `vector` | read/write | All | The world-space velocity the body starts with, in metres per second. |
@@ -540,7 +540,7 @@ Script members of `RigidBody`:
 | `MaxAngularVelocity` | proxy field | `number` | read/write | All | The angular speed the body is clamped to, in radians per second; raise it for fast rolling balls. |
 | `MaxLinearVelocity` | proxy field | `number` | read/write | All | The speed the body is clamped to, in metres per second. |
 | `MotionQuality` | proxy field | `MotionQuality` | read/write | All | Discrete or continuous (LinearCast) collision detection. |
-| `MoveKinematic` | method | `(self: RigidBody, position: vector, rotation: Quat) -> ()` |  | All | Set a Kinematic target for the next fixed step. |
+| `MoveKinematic` | method | `(self: RigidBody, position: vector, rotation: Quat) -> ()` |  | All | Set a Kinematic target: the entity's world pose changes at once, and the next physics pre-step (the same tick's when called from OnFixedUpdate, a task or a test case) sweeps the body there in one fixed step, with the velocities that take it there. |
 | `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. |
 | `SetAngularVelocity` | method | `(self: RigidBody, velocity: vector) -> ()` |  | All | Set a Dynamic body's angular velocity. |
 | `SetLinearVelocity` | method | `(self: RigidBody, velocity: vector) -> ()` |  | All | Set a Dynamic body's linear velocity. |

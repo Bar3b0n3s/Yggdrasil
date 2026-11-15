@@ -121,6 +121,17 @@ namespace Engine {
 		uint32_t DivergedAtTick = 0;
 	};
 
+	// How a replay test.run {record} wrote over an existing file compares with the file it replaced (Docs/Decisions/
+	// 0038-m27-rolling-ball.md, friction F20): CheckpointsEqual when both hold the same state-hash checkpoints (the same
+	// ticks with the same hashes, in order), FinalHashEqual when their final state hashes are equal. A replaced file that
+	// does not read as a replay (the editor's strict replay reader refuses it, or it cannot be read) equals the new one in
+	// neither.
+	struct TestRecordingReplaced
+	{
+		bool CheckpointsEqual = false;
+		bool FinalHashEqual = false;
+	};
+
 	// The replay a test.run {record} wrote (M16 friction S3-03), as TestRunResult::Recording reports it: the written path
 	// (TestRunResult::RecordingPath's), the replay's format version, its final tick, input events, state-hash checkpoints and
 	// final state hash, and its input check. Counters saturate to uint32 like every result counter.
@@ -138,6 +149,9 @@ namespace Engine {
 		// M19 (decision 3, A-F29): notes on the written replay: the input check's MakeFinalHashIndependentWarning when its run
 		// without input differed only at checkpoints and reproduced the recorded final hash.
 		std::vector<std::string> Warnings{};
+		// ADR 0038 (friction F20): a serialized TestRecordingReplaced when the replay was written over an existing file, read
+		// before it was replaced; null for a new file.
+		VariantValue Replaced{};
 	};
 
 	struct TestRunResult

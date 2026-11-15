@@ -1057,9 +1057,9 @@ declare extern type RigidBody with
 	EnhancedInternalEdgeRemoval: boolean
 	-- The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. [All modes; Runtime|Test; pure/read; setter mutates]
 	Friction: number
-	-- Read current angular velocity. [All modes; Runtime|Test; pure/read]
+	-- Read the angular velocity the last physics step left, in radians per second; a Kinematic body's follows a MoveKinematic as GetLinearVelocity's does. [All modes; Runtime|Test; pure/read]
 	GetAngularVelocity: (self: RigidBody) -> vector
-	-- Read current linear velocity. [All modes; Runtime|Test; pure/read]
+	-- Read the linear velocity the last physics step left. A Kinematic body's is that of the sweep the step made to its Transform's pose, so a MoveKinematic shows here only once the next physics step has swept the body: the fixed step that called it (OnFixedUpdate, tasks, test cases) still reads the previous step's. [All modes; Runtime|Test; pure/read]
 	GetLinearVelocity: (self: RigidBody) -> vector
 	-- The multiplier of the project's gravity for this body (0 floats). [All modes; Runtime|Test; pure/read; setter mutates]
 	GravityFactor: number
@@ -1085,7 +1085,7 @@ declare extern type RigidBody with
 	MaxLinearVelocity: number
 	-- Discrete or continuous (LinearCast) collision detection. [All modes; Runtime|Test; pure/read; setter mutates]
 	MotionQuality: MotionQuality
-	-- Set a Kinematic target for the next fixed step. [All modes; Runtime|Test; mutates]
+	-- Set a Kinematic target: the entity's world pose changes at once, and the next physics pre-step (the same tick's when called from OnFixedUpdate, a task or a test case) sweeps the body there in one fixed step, with the velocities that take it there. [All modes; Runtime|Test; mutates]
 	MoveKinematic: (self: RigidBody, position: vector, rotation: Quat) -> ()
 	-- Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. [All modes; Runtime|Test; pure/read; setter mutates]
 	Restitution: number
@@ -1821,7 +1821,7 @@ declare Random: {
 
 -- Active-scene operations; searches return canonical order and never expose pending destruction.
 declare Scene: {
-	-- Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. [All modes; Runtime|Test; mutates]
+	-- Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. A physics body it is given appears at the next physics pre-step: created in the fixed step before it (OnFixedUpdate, a task, a test case), the entity has its body by OnStart; created after it (a physics callback, OnDestroy, the frame phase, between ticks), its OnStart and first OnFixedUpdate run without one and body methods raise there. [All modes; Runtime|Test; mutates]
 	CreateEntity: (name: string?, parent: Entity?) -> Entity,
 	-- Marks the entity and descendants immediately; the session performs lifecycle teardown and destruction at its safe point. [All modes; Runtime|Test; mutates]
 	Destroy: (entity: Entity) -> (),
@@ -1849,7 +1849,7 @@ declare Scene: {
 	GetName: () -> string,
 	-- Returns the first active Primary camera in canonical order, or nil. [All modes; Runtime|Test; pure/read]
 	GetPrimaryCamera: () -> Entity?,
-	-- Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created. [All modes; Runtime|Test; mutates]
+	-- Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created. Its physics bodies appear at the next physics pre-step, as Scene.CreateEntity's do. [All modes; Runtime|Test; mutates]
 	Instantiate: (prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity,
 	-- Requests a scene/VM replacement at the end of the frame with copied JSON parameters; never destroys the calling VM inline. Until then the frame's remaining fixed steps still run in the current scene and VM, and another Scene.Load or Scene.Reload raises InvalidState: keep a flag once a transition is requested and request nothing more. [All modes; Runtime|Test; mutates]
 	Load: (scene: AssetRef, parameters: {[string]: any}?) -> (),

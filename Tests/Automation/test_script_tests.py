@@ -132,7 +132,7 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual(result["recording"], {
             "path": path, "formatVersion": recorded["Version"], "ticks": recorded["FinalTick"], "events": 0,
             "checkpoints": 0, "finalStateHash": recorded["FinalStateHash"],
-            "inputCheck": {"ran": False, "divergedAtTick": 0}, "expectations": 0, "warnings": []})
+            "inputCheck": {"ran": False, "divergedAtTick": 0}, "expectations": 0, "warnings": [], "replaced": None})
         plain = engine_client.load_offloaded(client.call("test.run", {"filter": "Recorded"}, timeout=120.0))
         self.assertIsNone(plain["recording"])
 
@@ -174,6 +174,37 @@ class ScriptTestRunnerTests(AutomationTestCase):
                          (path, len(events), len(recorded["Checkpoints"]), recorded["FinalTick"]))
         self.assertEqual(recording["finalStateHash"], recorded["FinalStateHash"])
         self.assertEqual(recording["inputCheck"], {"ran": True, "divergedAtTick": recorded["FinalTick"]})
+
+    def test_record_over_an_existing_replay_reports_whether_it_equals_the_replaced_file(self) -> None:
+        # ADR 0038, friction F20: re-recording gave no sign of whether the new replay differed from the file it
+        # replaced; the recording block's replaced says it.
+        client, root = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/Hopper.luau", "source":
+                    "local Hopper = {}\nfunction Hopper.OnFixedUpdate(self: any, dt: number)\n"
+                    "\tif Input.IsKeyDown(\"A\") then\n\t\tself.Entity.Transform:Translate(vector.create(0, 1, 0))\n"
+                    "\tend\nend\nreturn Script.Define(\"Hopper\", Hopper)\n"})
+        client.call("entity.create", {"name": "Hopper", "components": {
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Hopper.luau"}]}}})
+
+        def record(held: int) -> dict | None:
+            self.configure_suite(client, 'return Test.Suite("Hops", function()\n'
+                                 'Test.Case("hop", function()\n'
+                                 f'Test.InjectKey("A", "Down"); Test.WaitTicks({held})\n'
+                                 f'Test.InjectKey("A", "Up"); Test.WaitTicks({79 - held})\nend)\nend)')
+            result = engine_client.load_offloaded(client.call(
+                "test.run", {"record": "Assets/Tests/Replays/Hops.replay"}, timeout=120.0))
+            self.assertTrue(result["passed"], result)
+            self.assertEqual(result["recording"]["checkpoints"], 1)
+            return result["recording"]["replaced"]
+
+        self.assertIsNone(record(70))
+        self.assertEqual(record(70), {"checkpointsEqual": True, "finalHashEqual": True})
+        # The key held past the checkpoint at tick 60: the checkpoint is the same, the end is not.
+        self.assertEqual(record(75), {"checkpointsEqual": True, "finalHashEqual": False})
+        # The hopper starts higher: it differs at the checkpoint and at the end.
+        client.call("entity.update", {"entity": "/Hopper", "components": {"Transform": {"Translation": [0, 5, 0]}}})
+        self.assertEqual(record(75), {"checkpointsEqual": False, "finalHashEqual": False})
+        self.assertTrue((root / "Assets/Tests/Replays/Hops.replay").is_file())
 
     def test_a_recording_suite_moving_the_pointer_scrolling_and_typing_records_what_input_record_records(self) -> None:
         # M22 C22.3: Test.InjectMouseMove, Test.InjectScroll and Test.InjectText queue the events a slider drag, a

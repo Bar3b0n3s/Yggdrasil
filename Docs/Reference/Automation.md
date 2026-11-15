@@ -3143,7 +3143,7 @@ Example: List configured tests.
 
 ### test.run
 
-Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.
+Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged, and for a replay written over an existing file whether its checkpoints and final hash equal the replaced file's); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.
 
 - Flags: tool `test_run`, pending
 - Timeout: 900 s
@@ -3152,7 +3152,7 @@ Runs configured tests and returns every outcome (counts, failedCases and the cas
 |---|---|---|---|---|
 | `filter` | `String` |  | `""` | Case-insensitive substring of suite/case or replay path; a filtered run resolves and validates only the suites and replays it selects. |
 | `timeoutTicks` | `UInt32` |  | `0` | Optional positive run-wide tick cap; omitted means no additional limit. |
-| `record` | `String` |  | `""` | Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written. |
+| `record` | `String` |  | `""` | Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written and, when it replaces an existing file, whether its checkpoints and final state hash equal that file's. |
 | `coverage` | `Bool` |  | `false` | Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them. |
 | `expect` | `Array<InputRecordExpectation>` |  | `[]` | With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written. |
 
@@ -3169,7 +3169,7 @@ Runs configured tests and returns every outcome (counts, failedCases and the cas
 | `jsonPath` | `String` | JsonPath of the test report. |
 | `junitPath` | `String` | JunitPath of the test report. |
 | `recordingPath` | `String` | RecordingPath of the test report. |
-| `recording` | `Variant` | The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}, expectations, warnings} (TestRecordingResult); null for every other run. |
+| `recording` | `Variant` | The replay test.run {record} wrote: {path, formatVersion, ticks, events, checkpoints, finalStateHash, inputCheck: {ran, divergedAtTick}, expectations, warnings, replaced: {checkpointsEqual, finalHashEqual} or null} (TestRecordingResult); null for every other run. |
 
 Example: Run every configured test.
 

@@ -874,7 +874,7 @@ Active-scene operations; searches return canonical order and never expose pendin
 
 `(name: string?, parent: Entity?) -> Entity`
 
-Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself.
+Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. A physics body it is given appears at the next physics pre-step: created in the fixed step before it (OnFixedUpdate, a task, a test case), the entity has its body by OnStart; created after it (a physics callback, OnDestroy, the frame phase, between ticks), its OnStart and first OnFixedUpdate run without one and body methods raise there.
 
 All modes; Runtime|Test; mutates.
 
@@ -986,7 +986,7 @@ All modes; Runtime|Test; pure/read.
 
 `(prefab: AssetRef, position: vector?, rotation: Quat?, parent: Entity?) -> Entity`
 
-Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created.
+Instantiates through the shared prefab path and invokes OnCreate for the complete subtree before returning. A position that cannot be represented under the parent raises a located error before anything is created. Its physics bodies appear at the next physics pre-step, as Scene.CreateEntity's do.
 
 All modes; Runtime|Test; mutates.
 
@@ -3954,7 +3954,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: RigidBody) -> vector`
 
-Read current angular velocity.
+Read the angular velocity the last physics step left, in radians per second; a Kinematic body's follows a MoveKinematic as GetLinearVelocity's does.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3962,7 +3962,7 @@ All modes; Runtime|Test; pure/read.
 
 `(self: RigidBody) -> vector`
 
-Read current linear velocity.
+Read the linear velocity the last physics step left. A Kinematic body's is that of the sweep the step made to its Transform's pose, so a MoveKinematic shows here only once the next physics step has swept the body: the fixed step that called it (OnFixedUpdate, tasks, test cases) still reads the previous step's.
 
 All modes; Runtime|Test; pure/read.
 
@@ -4066,7 +4066,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: RigidBody, position: vector, rotation: Quat) -> ()`
 
-Set a Kinematic target for the next fixed step.
+Set a Kinematic target: the entity's world pose changes at once, and the next physics pre-step (the same tick's when called from OnFixedUpdate, a task or a test case) sweeps the body there in one fixed step, with the velocities that take it there.
 
 All modes; Runtime|Test; mutates.
 

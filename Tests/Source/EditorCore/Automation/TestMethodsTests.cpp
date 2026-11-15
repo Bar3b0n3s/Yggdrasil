@@ -30,6 +30,7 @@
 #include <chrono>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -581,6 +582,70 @@ namespace Engine {
 			const auto reportDocument = JsonReader::Parse(*report);
 			REQUIRE(reportDocument.has_value());
 			CHECK((*reportDocument)["recording"] == recording);
+		}
+
+		// ADR 0038, friction F20: re-recording gave no sign of whether the new replay differed from the file it replaced (Rolling
+		// Ball's S3 recorded its three replays again and compared them by hand). The recording block's replaced says it.
+		TEST_CASE("TestMethods: a recording written over an existing replay reports whether its checkpoints and final hash equal the replaced file's")
+		{
+			Test::AutomationFixture fixture("TestRecordReplaced");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
+																												"function Paddle.OnFixedUpdate(self: any, dt: number)\n"
+																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												"end\n"
+																												"return Script.Define(\"Paddle\", Paddle)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Paddle.luau" } } }) } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			const auto writeAutopilot = [&fixture](int heldTicks)
+			{
+				WriteSuite(fixture, std::format("return Test.Suite('Autopilot', function()\n"
+												"Test.Case('play across a checkpoint', function()\n"
+												"Test.InjectKey('Space', 'Down'); Test.WaitTicks({})\n"
+												"Test.InjectKey('Space', 'Up'); Test.WaitTicks({})\n"
+												"end)\nend)",
+										heldTicks, 79 - heldTicks));
+				CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+			};
+			const std::string path = "Assets/Tests/Replays/Autopilot.replay";
+			const auto record = [&fixture, &path]()
+			{
+				const Json result = CallTestMethod(fixture, "test.run", Json{ { "record", path } });
+				REQUIRE_MESSAGE(result["passed"] == Json(true), result.dump());
+				const Json& block = result["recording"];
+				REQUIRE(block["checkpoints"] == Json(1));
+				REQUIRE_MESSAGE(block.contains("replaced"), block.dump());
+				return block["replaced"];
+			};
+			const auto compared = [](bool checkpointsEqual, bool finalHashEqual)
+			{
+				return Json{ { "checkpointsEqual", checkpointsEqual }, { "finalHashEqual", finalHashEqual } };
+			};
+
+			// A new file replaces nothing.
+			writeAutopilot(70);
+			CHECK(record().is_null());
+			// The same scene and input again: the same checkpoint and final hash.
+			CHECK(record() == compared(true, true));
+			// Space held past the checkpoint at tick 60, for 75 ticks instead of 70: the checkpoint is equal, the end is not.
+			writeAutopilot(75);
+			CHECK(record() == compared(true, false));
+			// A changed scene: the paddle starts elsewhere, so it differs at the checkpoint and at the end.
+			CallTestMethod(fixture, "entity.update", Json{ { "entity", "/Paddle" }, { "components", Json{ { "Transform", Json{ { "Translation", Json::array({ 0.0, 2.0, 0.0 }) } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			CHECK(record() == compared(false, false));
+			// The result's JSON report holds the same block.
+			const Json again = CallTestMethod(fixture, "test.run", Json{ { "record", path } });
+			const auto report = FileSystem::ReadText(FileSystem::PathFromUtf8(JsonReader(again).ReadMember<std::string>("jsonPath").value_or("")));
+			REQUIRE_MESSAGE(report.has_value(), (report ? "" : report.error().ToString()));
+			const auto reportDocument = JsonReader::Parse(*report);
+			REQUIRE(reportDocument.has_value());
+			CHECK((*reportDocument)["recording"]["replaced"] == compared(true, true));
+			CHECK((*reportDocument)["recording"] == again["recording"]);
+			// A replaced file that does not read as a replay equals the new one in neither (the run's asset scan reports it).
+			const std::string_view garbage = "not a replay";
+			REQUIRE(FileSystem::WriteFileAtomic(fixture.GetEditorFixture().GetProjectRoot() / path, std::as_bytes(std::span(garbage))));
+			Test::ExpectLog unreadable(LogLevel::Error, "ASSET_IMPORT_FAILED");
+			CHECK(record() == compared(false, false));
 		}
 
 		// Docs/Decisions/0030-m19-contract.md decision 3 (A-F29; ADR 0026 friction F29): a recording whose input shows at its
