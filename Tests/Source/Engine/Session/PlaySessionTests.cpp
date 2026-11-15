@@ -323,7 +323,8 @@ namespace Engine {
 			// §5.7: the fixed step (0 to 10, TextLatch and UiInput after ApplyInput, UiEvents after StartFlush, M21's
 			// SpriteAnimation 4b and M23's AnimationSystem 4c after the gameplay code, TransformSystem::Update before
 			// PhysicsSystem::PreStep, M21's 2D phases 7a to 7c after the 3D post-step, UiLayout last), then the frame phase
-			// (FrameUiLayout after FrameTransformUpdate, M26's Particles right before RenderExtraction).
+			// (no start flush since ADR 0038 decision 14, FrameUiLayout after FrameTransformUpdate, M26's Particles right before
+			// RenderExtraction).
 			const std::vector<PlaySessionPhase> expected = {
 				PlaySessionPhase::InterpolationSnapshot,
 				PlaySessionPhase::ApplyInput,
@@ -346,7 +347,6 @@ namespace Engine {
 				PlaySessionPhase::PostStepTransformUpdate,
 				PlaySessionPhase::UiLayout,
 				PlaySessionPhase::LatchFrame,
-				PlaySessionPhase::FrameStartFlush,
 				PlaySessionPhase::Update,
 				PlaySessionPhase::LateUpdate,
 				PlaySessionPhase::FrameDestroyFlush,

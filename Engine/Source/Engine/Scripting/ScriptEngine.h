@@ -160,9 +160,9 @@ namespace Engine {
 		// list before creating instances. Nested OnCreate inherits the outer deadline; recursion beyond 16 is Script.
 		[[nodiscard]] Status NotifyCreated(std::span<const UUID> entities);
 
-		// The start flush (§5.7 step 2, the frame phase's, and the session setup's; ADR 0038 decision 14), in rounds: each
-		// round synchronizes the instances (SynchronizeInstances), then the host's physics bodies
-		// (IScriptHost::SynchronizePhysicsBodies), then snapshots the enabled, unstarted instances in (ExecutionOrder,
+		// The start flush (§5.7 step 2, and the startup of a session or a scene transition; the frame phase runs none; ADR
+		// 0038 decision 14), in rounds: each round synchronizes the instances (SynchronizeInstances), then the host's physics
+		// bodies (IScriptHost::SynchronizePhysicsBodies), then snapshots the enabled, unstarted instances in (ExecutionOrder,
 		// canonical entity) order and invokes OnStart exactly once on each, excluding pending destruction and fault-disabled
 		// owners. Rounds repeat until no instance waits, so an instance created or enabled during the flush (by an OnStart,
 		// or an OnCreate it runs) starts in the same flush, and when an entity first runs never depends on how ticks are

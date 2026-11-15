@@ -81,10 +81,11 @@ namespace Engine {
 								 //     Simulate, with or without a canvas (without one it reads no input and keeps the interaction
 								 //     state empty). C22.3 (decisions 47 and 50) adds the step's text and editing keys and, while
 								 //     the layout holds a World canvas, the pointer's ray through the primary camera
-		StartFlush,              // 2: the start flush (M13; empty): in rounds until no instance waits, the physics bodies of
-								 //    changed components synchronized (both worlds), then OnStart of the instances created or
-								 //    enabled since, canonical order, those the round's own callbacks create starting in the next
-								 //    round (ScriptEngine::StartPending; Docs/Decisions/0038-m27-rolling-ball.md decision 14)
+		StartFlush,              // 2: the start flush (M13; empty), the only one during a session (the frame phase runs none):
+								 //    in rounds until no instance waits, the physics bodies of changed components synchronized
+								 //    (both worlds), then OnStart of the instances created or enabled since the last flush,
+								 //    canonical order, those the round's own callbacks create starting in the next round
+								 //    (ScriptEngine::StartPending; Docs/Decisions/0038-m27-rolling-ball.md decision 14)
 		UiEvents,                // 2a: the queued UI events delivered to their callbacks, bubbling (ScriptEngine::DispatchUiEvents;
 								 //     M22 C22.2, decision 27): after OnStart, so a new instance starts before its first UI
 								 //     callback, and before FixedUpdate, which sees the interaction; Play only (Simulate drops
@@ -114,7 +115,6 @@ namespace Engine {
 								 //     the step left; in Play and Simulate
 		// Frame phase.
 		LatchFrame,           // 1: PlayInput::LatchFrame
-		FrameStartFlush,      // 1: start flush, as StartFlush's (M13; empty)
 		Update,               // 2: script OnUpdate(frameDt) (M13; empty)
 		LateUpdate,           // 2: script OnLateUpdate(frameDt) (M13; empty)
 		FrameDestroyFlush,    // 2: destroy flush, as DestroyFlush
@@ -200,7 +200,7 @@ namespace Engine {
 	// scene during FixedUpdate, Update, LateUpdate and PhysicsStep to exercise phase-dependent behavior
 	// ("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not").
 	// Production code installs none. Simulate mode skips the script and audio
-	// phases (StartFlush, UiEvents, FixedUpdate, Tasks, FrameStartFlush, Update, LateUpdate, AudioUpdate) entirely, so they are
+	// phases (StartFlush, UiEvents, FixedUpdate, Tasks, Update, LateUpdate, AudioUpdate) entirely, so they are
 	// not reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module. UiLayout and
 	// FrameUiLayout (M22), UiInput (M22 C22.2) and TextLatch (M22 C22.3), run, and are reported, in both modes, with or without
 	// a canvas.

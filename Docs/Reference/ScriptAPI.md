@@ -874,7 +874,7 @@ Active-scene operations; searches return canonical order and never expose pendin
 
 `(name: string?, parent: Entity?) -> Entity`
 
-Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. Its OnStart runs at the next start flush (the one running, when called from an OnStart or an OnCreate it runs), before its first update, and a physics body it is given (3D or 2D) exists from that OnStart on, wherever it was created; before that OnStart (in the creating callback, for example) it need not exist yet: Physics.GetBodyBounds is nil and the body methods raise 'has no physics body' (RigidBody2D's 'has no 2D physics body').
+Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. Its OnStart runs at the next start flush, before its first update: the running one when called from an OnStart or an OnCreate it runs, the scene's startup flush when called from a startup OnCreate, otherwise the next fixed step's, before that tick's OnFixedUpdate; never in the frame phase, so OnUpdate and OnLateUpdate pass it by until then, and a physics body it is given (3D or 2D) exists from that OnStart on, wherever it was created; before that OnStart (in the creating callback, for example) it need not exist yet: Physics.GetBodyBounds is nil and the body methods raise 'has no physics body' (RigidBody2D's 'has no 2D physics body').
 
 All modes; Runtime|Test; mutates.
 
@@ -1706,7 +1706,7 @@ All modes; Runtime|Test; mutates.
 
 `(self: ScriptInstance) -> ()`
 
-Called at the corresponding lifecycle transition.
+Called once when the instance is created: for a scene's entities when the session or a Scene.Load or Scene.Reload starts the scene, for a spawned entity before Scene.CreateEntity or Scene.Instantiate returns.
 
 All modes; Runtime|Test; mutates.
 
@@ -1762,7 +1762,7 @@ All modes; Runtime|Test; mutates.
 
 `(self: ScriptInstance) -> ()`
 
-Called at the corresponding lifecycle transition.
+Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before that tick's OnFixedUpdate (or in the running start flush, when an OnStart creates it), never in the frame phase, so it reads the tick's input and fixed delta whatever the frame rate. Its physics bodies exist from then on.
 
 All modes; Runtime|Test; mutates.
 

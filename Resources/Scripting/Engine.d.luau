@@ -369,7 +369,7 @@ declare extern type Behaviour with
 	OnCollisionExit: (self: ScriptInstance, other: Entity) -> ()
 	-- Called when the corresponding 2D collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnCollisionExit2D: (self: ScriptInstance, other: Entity) -> ()
-	-- Called at the corresponding lifecycle transition. [All modes; Runtime|Test; mutates]
+	-- Called once when the instance is created: for a scene's entities when the session or a Scene.Load or Scene.Reload starts the scene, for a spawned entity before Scene.CreateEntity or Scene.Instantiate returns. [All modes; Runtime|Test; mutates]
 	OnCreate: (self: ScriptInstance) -> ()
 	-- Called at the corresponding lifecycle transition. [All modes; Runtime|Test; mutates]
 	OnDestroy: (self: ScriptInstance) -> ()
@@ -383,7 +383,7 @@ declare extern type Behaviour with
 	OnHotReload: (self: ScriptInstance) -> ()
 	-- Called for the current fixed, presentation or late presentation phase. [All modes; Runtime|Test; mutates]
 	OnLateUpdate: (self: ScriptInstance, dt: number) -> ()
-	-- Called at the corresponding lifecycle transition. [All modes; Runtime|Test; mutates]
+	-- Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before that tick's OnFixedUpdate (or in the running start flush, when an OnStart creates it), never in the frame phase, so it reads the tick's input and fixed delta whatever the frame rate. Its physics bodies exist from then on. [All modes; Runtime|Test; mutates]
 	OnStart: (self: ScriptInstance) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
 	OnTriggerEnter: (self: ScriptInstance, other: Entity) -> ()
@@ -1821,7 +1821,7 @@ declare Random: {
 
 -- Active-scene operations; searches return canonical order and never expose pending destruction.
 declare Scene: {
-	-- Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. Its OnStart runs at the next start flush (the one running, when called from an OnStart or an OnCreate it runs), before its first update, and a physics body it is given (3D or 2D) exists from that OnStart on, wherever it was created; before that OnStart (in the creating callback, for example) it need not exist yet: Physics.GetBodyBounds is nil and the body methods raise 'has no physics body' (RigidBody2D's 'has no 2D physics body'). [All modes; Runtime|Test; mutates]
+	-- Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. Its OnStart runs at the next start flush, before its first update: the running one when called from an OnStart or an OnCreate it runs, the scene's startup flush when called from a startup OnCreate, otherwise the next fixed step's, before that tick's OnFixedUpdate; never in the frame phase, so OnUpdate and OnLateUpdate pass it by until then, and a physics body it is given (3D or 2D) exists from that OnStart on, wherever it was created; before that OnStart (in the creating callback, for example) it need not exist yet: Physics.GetBodyBounds is nil and the body methods raise 'has no physics body' (RigidBody2D's 'has no 2D physics body'). [All modes; Runtime|Test; mutates]
 	CreateEntity: (name: string?, parent: Entity?) -> Entity,
 	-- Marks the entity and descendants immediately; the session performs lifecycle teardown and destruction at its safe point. [All modes; Runtime|Test; mutates]
 	Destroy: (entity: Entity) -> (),

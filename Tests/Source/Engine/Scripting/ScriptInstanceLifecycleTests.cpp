@@ -528,8 +528,9 @@ return Script.Define("UiCoverage", T)
 				CAPTURE(label);
 				CHECK(Test::BehaviourTrace(scene, label) == std::vector<std::string>{ "create", "start", "fixed", "update", "late", "fixed", "update", "late" });
 			}
-			// Created during tick 1's fixed phase: not visited by it, started by the next start flush before its first update.
-			CHECK(Test::BehaviourTrace(scene, "Spawned") == std::vector<std::string>{ "create", "start", "update", "late", "fixed", "update", "late" });
+			// Created during tick 1's fixed phase: not visited by it, nor by the frame phase after it (which runs no start flush,
+			// ADR 0038 decision 14), and started by the next fixed step's start flush before its first OnFixedUpdate.
+			CHECK(Test::BehaviourTrace(scene, "Spawned") == std::vector<std::string>{ "create", "start", "fixed", "update", "late" });
 			// Destroyed during tick 2's fixed phase: OnDestroy in the destroy flush and no exit of its own.
 			CHECK(Test::BehaviourTrace(scene, "Doomed") == std::vector<std::string>{ "create", "start", "fixed", "trigger-enter", "update", "late", "fixed", "destroy" });
 			CHECK(Test::BehaviourTrace(scene, "Survivor") == std::vector<std::string>{ "create", "start", "fixed", "trigger-enter", "update", "late", "fixed", "trigger-exit", "update", "late" });
@@ -544,11 +545,13 @@ return Script.Define("UiCoverage", T)
 			CHECK(at("Child:fixed") < at("Spawner:fixed"));
 			CHECK(at("Spawner:fixed") < at("Spawned:create"));
 			CHECK(at("Spawned:create") < at("Doomed:fixed"));
-			// The fixed step that created it does not start it (its physics already ran); the frame's start flush does,
-			// before the Update phase.
+			// The fixed step that created it does not start it (its physics already ran), and the frame phase passes it by: the
+			// next fixed step's start flush starts it, before that tick's OnFixedUpdate.
 			CHECK(at("Survivor:trigger-enter") < at("Spawned:start"));
 			CHECK(at("Doomed:trigger-enter") < at("Spawned:start"));
-			CHECK(at("Spawned:start") < at("Early:update"));
+			CHECK(at("Early:update") < at("Spawned:start"));
+			CHECK(at("Early:late") < at("Spawned:start"));
+			CHECK(at("Spawned:start") < at("Spawned:fixed"));
 			// §5.7 step 8: OnDestroy runs before the synthesized exit to the surviving contact partner.
 			CHECK(at("Doomed:destroy") < at("Survivor:trigger-exit"));
 			// Stop tears down every remaining instance in reverse canonical order: children before parents.

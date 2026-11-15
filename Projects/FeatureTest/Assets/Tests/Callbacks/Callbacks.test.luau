@@ -184,7 +184,9 @@ return Test.Suite("Callbacks", function()
 		Test.Expect(component ~= nil, "the Script component was added")
 		ExpectSequence(Journal.Since(cursor, Of("Spawned")), { "Spawned:create" }, "OnCreate runs inside AddComponent")
 		Test.WaitTicks(1)
-		ExpectSequence(Journal.Since(cursor, Of("Spawned")), { "Spawned:create", "Spawned:start", "Spawned:update", "Spawned:late", "Spawned:fixed" }, "the first tick")
+		-- It starts at the next fixed step's start flush, never in the frame phase (ADR 0038 decision 14), so the frame
+		-- between passes it by: OnStart, then its first OnFixedUpdate.
+		ExpectSequence(Journal.Since(cursor, Of("Spawned")), { "Spawned:create", "Spawned:start", "Spawned:fixed" }, "the first tick")
 		-- ExecutionOrder 3 runs between the order-0 instances and Late (7).
 		local fixed = Journal.Since(cursor, function(entry: string): boolean
 			return string.find(entry, ":fixed$") ~= nil

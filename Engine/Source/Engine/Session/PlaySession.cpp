@@ -944,6 +944,11 @@ namespace Engine {
 			ApplyAudioRunState();
 		}
 		ReplacingScene = false;
+		// ADR 0038 decision 14: the new scene's startup callbacks run as a session's do, in the step view of the tick the
+		// frame ended with and with the fixed delta, so what they read does not depend on how the frame grouped its ticks;
+		// the frame's state comes back for what runs between frames (an evaluation).
+		const ScriptFrameState frameState = ScriptFrame;
+		ScriptFrame = { .Phase = InputPhase::Step, .Tick = Tick, .Frame = FrameIndex, .DeltaTime = FixedDelta, .FixedDeltaTime = FixedDelta, .TimeScale = TimeScale, .InterpolationAlpha = 1.0f };
 		const Status prepared = PrepareScripts();
 		if (!prepared)
 		{
@@ -952,6 +957,7 @@ namespace Engine {
 		}
 		else
 			StartScripts(transition);
+		ScriptFrame = frameState;
 		if (SceneAudio != nullptr)
 			SceneAudio->Start();
 		// M22 (decision 3): the new scene as its startup callbacks left it is the current layout before the next step, its
@@ -1036,10 +1042,11 @@ namespace Engine {
 		// recording replays with the frame views its ticks gave.
 		Input.SetFramePreview(!Lockstep && (Recorder == nullptr || !Recorder->IsRecording()));
 		Input.LatchFrame();
+		// No start flush here (ADR 0038 decision 14): an instance created since the last fixed step starts in the next fixed
+		// step's, so its OnStart reads that tick's input and delta and its requests flush there, however the frame grouped
+		// its ticks; until then OnUpdate and OnLateUpdate pass it by.
 		if (play)
 		{
-			EnterPhase(session, PlaySessionPhase::FrameStartFlush, tick);
-			Scripts->StartPending();
 			EnterPhase(session, PlaySessionPhase::Update, tick);
 			Scripts->Update();
 			EnterPhase(session, PlaySessionPhase::LateUpdate, tick);
@@ -1241,7 +1248,6 @@ namespace Engine {
 			case PlaySessionPhase::PostStepTransformUpdate: return "PostStepTransformUpdate";
 			case PlaySessionPhase::UiLayout:                return "UiLayout";
 			case PlaySessionPhase::LatchFrame:              return "LatchFrame";
-			case PlaySessionPhase::FrameStartFlush:         return "FrameStartFlush";
 			case PlaySessionPhase::Update:                  return "Update";
 			case PlaySessionPhase::LateUpdate:              return "LateUpdate";
 			case PlaySessionPhase::FrameDestroyFlush:       return "FrameDestroyFlush";

@@ -580,7 +580,16 @@ namespace Engine {
 				.Function("Enum", Utils::FieldConstructor<FieldType::Enum>, "(values: {string}, default: string?) -> FieldDescriptor", "Declare ordered unique string choices; the omitted default is the first choice.", pure)
 				.Function("Array", Utils::FieldConstructor<FieldType::Array>, "(element: FieldDescriptor) -> FieldDescriptor", "Declare an empty array whose element keeps its complete nested field schema.", pure);
 			auto behaviour = api.Type("Behaviour", "Optional behaviour lifecycle callbacks in execution order and canonical entity order.");
-			for (const char* name : { "OnCreate", "OnStart", "OnDestroy", "OnEnable", "OnDisable" })
+			behaviour.Callback("OnCreate", "(self: ScriptInstance) -> ()",
+				"Called once when the instance is created: for a scene's entities when the session or a Scene.Load or Scene.Reload starts the scene, for a "
+				"spawned entity before Scene.CreateEntity or Scene.Instantiate returns.");
+			// ADR 0038 decision 14: when OnStart runs.
+			behaviour.Callback("OnStart", "(self: ScriptInstance) -> ()",
+				"Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a "
+				"Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before "
+				"that tick's OnFixedUpdate (or in the running start flush, when an OnStart creates it), never in the frame phase, so it reads the tick's "
+				"input and fixed delta whatever the frame rate. Its physics bodies exist from then on.");
+			for (const char* name : { "OnDestroy", "OnEnable", "OnDisable" })
 				behaviour.Callback(name, "(self: ScriptInstance) -> ()", "Called at the corresponding lifecycle transition.");
 			for (const char* name : { "OnFixedUpdate", "OnUpdate", "OnLateUpdate" })
 				behaviour.Callback(name, "(self: ScriptInstance, dt: number) -> ()", "Called for the current fixed, presentation or late presentation phase.");
