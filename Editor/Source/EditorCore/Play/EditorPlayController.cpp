@@ -510,6 +510,11 @@ namespace Engine {
 			m_State->Session->AdvanceLoopStep();
 	}
 
+	bool EditorPlayController::EndsFixedSteps() const
+	{
+		return m_State->TestOwner == nullptr && m_State->Session != nullptr && m_State->Session->EndsFrameSteps();
+	}
+
 	void EditorPlayController::OnUpdate(const FrameTime& frame)
 	{
 		if (m_State->TestOwner == nullptr && m_State->Session != nullptr)

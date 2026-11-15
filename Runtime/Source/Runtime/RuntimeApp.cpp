@@ -1258,6 +1258,12 @@ namespace Engine {
 			m_State->Session->AdvanceLoopStep();
 	}
 
+	bool RuntimeApp::EndsFixedSteps() const
+	{
+		// ADR 0038 decision 15: a scene transition the session's tick requested ends the frame's steps.
+		return m_State->Session != nullptr && !m_State->Options.FeatureTest && m_State->Options.Replay.empty() && m_State->Session->EndsFrameSteps();
+	}
+
 	void RuntimeApp::OnUpdate(const FrameTime& frame)
 	{
 		State& state = *m_State;

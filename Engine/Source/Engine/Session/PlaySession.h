@@ -421,6 +421,14 @@ namespace Engine {
 		void FrameUpdate(const FrameTime& frame);
 		// FixedStep, then FrameUpdate with Alpha 1 and DeltaTime 1 / FixedHz: one lockstep tick.
 		void Tick();
+		// ADR 0038 decision 15 (§5.6 Scene.Load, §5.7): true when the frame must run no further fixed step,
+		// since a scene transition requested in a completed tick waits for the frame's end, as lockstep's next frame phase
+		// applies it after every tick. A transition requested in a fixed step belongs to that tick; one requested by a scene's
+		// startup callbacks to the next tick, so it ends the frame after that tick (a frame of no step leaves it pending); one
+		// requested in the frame phase or between frames applies at that frame's end and ends no steps. Every loop that runs a
+		// frame's fixed steps checks it after each step and gives the steps it did not run back to its scheduler
+		// (FixedStepScheduler::EndFrameAfter); a FixedStep called anyway runs nothing, as after a quit request.
+		[[nodiscard]] bool EndsFrameSteps() const;
 
 		// The host loop's drive: AdvanceLoopStep runs FixedStep and AdvanceLoopFrame runs FrameUpdate, each only while the
 		// session is running and not in lockstep (paused and lockstep sessions advance only through Tick, from play.step).

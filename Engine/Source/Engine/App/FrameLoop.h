@@ -34,6 +34,10 @@ namespace Engine {
 		virtual void OnFrameSafePoint() {}
 		// One fixed step; zero or more per frame (step.Tick increases by one per call).
 		virtual void OnFrameFixedStep(const SimStep& step) = 0;
+		// After a fixed step: true when the frame must run no further one (a play session's scene transition requested in a
+		// completed tick, PlaySession::EndsFrameSteps; ADR 0038 decision 15). The loop then gives the frame's other steps back
+		// to its scheduler (FixedStepScheduler::EndFrameAfter) and goes on to the update. False by default.
+		[[nodiscard]] virtual bool EndsFrameSteps() const { return false; }
 		// Once per frame, after the frame's steps.
 		virtual void OnFrameUpdate(const FrameTime& frame) = 0;
 		// Once per frame, after the update: render, ImGui, present (§4.2 step 7, §8.2). `frame` is the update's FrameTime.

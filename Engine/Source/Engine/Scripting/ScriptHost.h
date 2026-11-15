@@ -97,17 +97,19 @@ namespace Engine {
 		[[nodiscard]] virtual Status SetCursorMode(CursorMode mode) = 0;
 		[[nodiscard]] virtual CursorMode GetCursorMode() const = 0;
 
-		// Requests never destroy their own running VM. Scene.Load is consumed at the end of the frame, after protected
-		// calls unwind; it starts a fresh VM with the parameters and preserves the session's clock and replay owner.
+		// Requests never destroy their own running VM. Scene.Load is consumed at the end of a frame, after protected calls
+		// unwind: a fixed step's request after its tick (the frame runs no further step), a startup callback's after the
+		// next tick, a frame-phase request at that frame's end (ADR 0038 decision 15); it starts a fresh VM with the
+		// parameters and preserves the session's clock and replay owner.
 		// Takes ownership of the detached parameters. Callers and hosts move the tree into pending storage so accepted
 		// MaxJsonDepth values never require a recursive JSON copy at this boundary.
 		[[nodiscard]] virtual Status RequestSceneLoad(AssetHandle scene, Json parameters) = 0;
 		// Scene.Reload (M20, W-P06; Docs/Decisions/0031-m20-contract.md decision 5): requests, like RequestSceneLoad, the
-		// replacement of the current scene at the end of the frame, by the document the current scene was started from: the
+		// replacement of the current scene when a Scene.Load would apply, by the document the current scene was started from: the
 		// session's start document (in editor play the play copy, unsaved edits included) while the current scene is the
 		// one the session started with, otherwise the document of the scene asset the last Scene.Load loaded, as it was
 		// then. `parameters` replaces the load parameters; nullopt keeps the current scene's (GetLoadParameters). One
-		// transition per frame: a second Scene.Load or Scene.Reload in the same frame is refused with InvalidState, as a
+		// transition at a time: a second Scene.Load or Scene.Reload while one is pending is refused with InvalidState, as a
 		// second RequestSceneLoad is.
 		[[nodiscard]] virtual Status RequestSceneReload(std::optional<Json> parameters) = 0;
 		// Scene.GetCurrent (M20): the scene asset the current scene came from (the editor's open scene or the play.start

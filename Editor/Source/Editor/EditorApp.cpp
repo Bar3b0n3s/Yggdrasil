@@ -1318,6 +1318,13 @@ namespace Engine {
 			state.Editor->GetPlay().OnFixedStep();
 	}
 
+	bool EditorApp::EndsFixedSteps() const
+	{
+		// ADR 0038 decision 15: a scene transition the play session's tick requested ends the frame's steps.
+		const State& state = *m_State;
+		return state.Editor != nullptr && state.Editor->GetPlay().EndsFixedSteps();
+	}
+
 	void EditorApp::OnUpdate(const FrameTime& frame)
 	{
 		// Asset hot reload polls on the frame clock (a ManualClock when headless, so headless runs are deterministic).

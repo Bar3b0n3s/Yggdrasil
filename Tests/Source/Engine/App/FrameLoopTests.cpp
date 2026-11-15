@@ -446,6 +446,43 @@ namespace Engine {
 			CHECK(stepsPerFrame == expected);
 		}
 
+		// ADR 0038 decision 15: a client that ends the frame's steps after a step (a play session's scene transition requested
+		// in that tick) gets no further step that frame; the loop gives the steps it did not run back to its scheduler, and the
+		// next frames run them, so no tick is lost within the per-frame cap.
+		TEST_CASE("FrameLoop: a client that ends the frame's steps gets no further step that frame, and the next frames run them")
+		{
+			class EndingClient final : public IFrameLoopClient
+			{
+			public:
+				void OnFrameEvent(Event& /*event*/) override {}
+				void OnFrameFixedStep(const SimStep& step) override
+				{
+					Calls.push_back(std::format("step {}", step.Tick));
+					Ends = step.Tick == EndAfterTick;
+				}
+				[[nodiscard]] bool EndsFrameSteps() const override { return Ends; }
+				void OnFrameUpdate(const FrameTime& frame) override { Calls.push_back(std::format("update {}{}", frame.FrameIndex, frame.Alpha == 1.0 ? " alpha 1" : "")); }
+				void OnFrameRender(const FrameTime& /*frame*/) override {}
+
+				std::vector<std::string> Calls;
+				uint64_t EndAfterTick = 4;
+				bool Ends = false;
+			};
+			const std::array<double, 1> deltas = { 3.0 * FixedDelta };
+			Result<ScriptedClock> clock = ScriptedClock::Create(deltas);
+			REQUIRE(clock.has_value());
+			Scope<EngineContext> context = CreateContext();
+			EndingClient client;
+			FrameLoop loop(*context, client, CreateScope<ScriptedClock>(std::move(*clock)), {});
+			for (int frame = 0; frame < 4; ++frame)
+				loop.RunFrame();
+			// Frame 1 ends after tick 4 (its middle step) with a whole step left, so Alpha 1; frame 2 runs that step and its
+			// own three; frame 3 runs three: twelve ticks, as without the end.
+			const std::vector<std::string> expected = { "step 0", "step 1", "step 2", "update 0", "step 3", "step 4", "update 1 alpha 1",
+				"step 5", "step 6", "step 7", "step 8", "update 2", "step 9", "step 10", "step 11", "update 3" };
+			CHECK(client.Calls == expected);
+		}
+
 		TEST_CASE("FrameLoop: MaxFrames ends Run with Success after that many frames")
 		{
 			Scope<EngineContext> context = CreateContext();

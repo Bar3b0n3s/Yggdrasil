@@ -5,6 +5,8 @@
 -- Time.GetDeltaTime, Time.GetInterpolationAlpha, the extraction Alpha of Test.GetLastExtraction, exactly-once Pressed
 -- and Released edges in both phases, and the interpolated positions of a script-moved, a physics-moved and a
 -- teleported entity read with Test.GetExtractedPosition.
+-- Its last two cases request a Scene.Reload in the middle step of a frame of five steps and check that the reloaded
+-- scene's first tick follows the requesting tick (ADR 0038 decision 15: the frame runs no further step).
 local ProbeScript = require("../../Scripts/Timing/TimingProbe")
 
 local CLOCK = { 0.004, 0.016, 0.0334, 0.083, 0.5, 0.0 }
@@ -254,5 +256,31 @@ return Test.Suite("Timing", function()
 			Test.ExpectNear(record.Jumper :: vector, jumperExpected, POSITION_TOLERANCE, "teleported Jumper in frame " .. index)
 		end
 		Test.ExpectEqual(teleported, #probe.TeleportFrames, "every teleport frame was observed")
+	end)
+
+	-- A transition requested in a fixed step belongs to that tick (ADR 0038 decision 15): requested in the middle step of a
+	-- frame of five steps, it ends the frame's steps, and the frames after it run the steps left in the new scene.
+	Test.Case("a Scene.Reload requested in a frame's middle step applies after that tick", function()
+		local model = Schedule(Time.GetFixedDeltaTime(), FRAMES + 12)
+		local now = Time.GetTick()
+		local target = -1
+		for _, frame in model do
+			if frame.Steps == MAX_STEPS and frame.FirstTick > now then
+				target = frame.FirstTick + 2
+				break
+			end
+		end
+		Test.Expect(target > 0, "a frame of five steps follows")
+		Test.WaitUntil(function(): boolean
+			return Time.GetTick() >= target
+		end, 200)
+		Test.ExpectEqual(Time.GetTick(), target, "the requesting tick, the middle of its frame's five steps")
+		Scene.Reload({ RecordTiming = true, ReloadedAfter = target })
+	end)
+
+	Test.Case("the reloaded scene's first tick follows the requesting tick", function()
+		local after = Scene.GetLoadParameters().ReloadedAfter
+		Test.Expect(after ~= nil, "the previous case reloaded the scene")
+		Test.ExpectEqual(Time.GetTick(), (after :: number) + 1, "the reloaded scene's first tick")
 	end)
 end)

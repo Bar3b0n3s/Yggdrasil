@@ -1029,6 +1029,66 @@ end))");
 			CHECK(compared >= 2);
 		}
 
+		// ADR 0038 decision 15: a game's Scene.Load requested in a fixed step applies after that tick on a scripted clock too
+		// (the runner's frame runs no further step, keeping the rest for the next frames), so a replay recorded on a clock of
+		// three steps a frame across a load requested in a frame's middle step verifies in lockstep. Before it, the frame's
+		// third step ran in the old scene and the recording's new scene started a tick later than its lockstep verification's.
+		TEST_CASE("TestRunner: a recording on a scripted clock across a game's mid-frame Scene.Load verifies in lockstep")
+		{
+			RunnerHost host;
+			host.Behaviour(R"(local Driver={}
+function Driver.OnFixedUpdate(self)
+	if Input.IsKeyDown("Space") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end
+	if Time.GetTick() == 4 then Scene.Load(Assets.Load("Assets/Scenes/Next.scene")) end
+end
+return Script.Define("Driver",Driver))");
+			// The next scene holds the same Driver, whose load at tick 4 has passed there.
+			host.PublishScene("Assets/Scenes/Next.scene", UUID(402), host.SceneDocument);
+			host.Suite(R"(return Test.Suite("Across",function()
+	Test.Case("holds Space until the game's load",function()
+		Test.InjectKey("Space","Down"); Test.WaitTicks(4)
+		Test.ExpectEqual(Time.GetTick(), 4, "the case returns in the tick the game requests the load")
+	end)
+	Test.Case("drives the next scene",function()
+		Test.ExpectEqual(Time.GetTick(), 5, "the next scene's first tick follows the requesting tick")
+		Test.WaitTicks(6)
+	end)
+end))")
+				.Clock = { 3.0f / 60.0f };
+			const auto result = host.Run({ .Record = true });
+			CHECK(result.Passed);
+			CHECK(host.ReplaySessions == 2); // the verification reproduced the recording in lockstep, then the input check
+		}
+
+		// ADR 0038 decision 10's rule ("the case during which a transition is requested returns in that tick"): a case still
+		// waiting when the game's Scene.Load applies fails with the runner's located error, at the same tick on a scripted clock
+		// as in lockstep, since the transition applies after its requesting tick in both (decision 15).
+		TEST_CASE("TestRunner: a case still waiting when a game's Scene.Load applies fails at the same tick on a scripted clock as in lockstep")
+		{
+			RunnerHost host;
+			host.Behaviour(R"(local Driver={}
+function Driver.OnFixedUpdate(self)
+	if Time.GetTick() == 4 then Scene.Load(Assets.Load("Assets/Scenes/Next.scene")) end
+end
+return Script.Define("Driver",Driver))");
+			host.Suite(R"(return Test.Suite("Waiting",function()
+	Test.Case("waits past the load",function() Test.WaitTicks(10) end)
+end))");
+			const auto lockstep = host.Run();
+			host.Settings.Testing.Suites[0].Clock = { 3.0f / 60.0f };
+			const auto clocked = host.Run();
+			for (const TestRunResult* result : { &lockstep, &clocked })
+			{
+				CHECK_FALSE(result->Passed);
+				REQUIRE(result->Cases.size() == 1);
+				CHECK(result->Cases[0].Status == "error");
+				CHECK(result->Cases[0].Message.find("Scene.Load") != std::string::npos);
+				CHECK(result->Cases[0].Line > 0);
+			}
+			CHECK(clocked.Suites[0].Ticks == lockstep.Suites[0].Ticks);
+			CHECK(lockstep.Suites[0].Ticks == 5);
+		}
+
 		TEST_CASE("TestRunner: zero time scale times out without simulation progress and releases audio")
 		{
 			for (const bool pauseOnCreate : { false, true })

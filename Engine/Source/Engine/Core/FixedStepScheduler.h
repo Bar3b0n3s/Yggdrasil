@@ -60,6 +60,13 @@ namespace Engine {
 		// play.setTimeScale guarantee it); a time scale of 0 runs no steps and keeps Alpha.
 		[[nodiscard]] FrameSteps Advance(double realDeltaSeconds, double timeScale);
 
+		// The frame `steps` (the last Advance's result) ran only its first `ran` steps, ran < steps.StepCount: a play session
+		// ended the frame's steps (a scene transition requested in a completed tick, PlaySession::EndsFrameSteps; ADR 0038
+		// decision 15). The steps it did not run go back to the accumulator and the tick, so the following frames run them,
+		// within the per-frame cap of step 3 (beyond it step 4 drops them as any late frame's); the result is the frame as
+		// run, with Alpha from the accumulator (1 while a whole step is left in it).
+		[[nodiscard]] FrameSteps EndFrameAfter(const FrameSteps& steps, uint32_t ran);
+
 		// Runs exactly `stepCount` steps without touching the accumulator: Alpha = 1, nothing dropped. Used with
 		// ManualClock (one step per frame) and for lockstep play.step requests (§4.2, §13.6).
 		[[nodiscard]] FrameSteps StepExactly(uint32_t stepCount);

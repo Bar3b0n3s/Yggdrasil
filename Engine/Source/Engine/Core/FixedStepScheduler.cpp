@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace Engine {
@@ -59,6 +60,19 @@ namespace Engine {
 		steps.Alpha = std::clamp(m_Accumulator / m_FixedDelta, 0.0, 1.0);
 		m_Tick += steps.StepCount;
 		return steps;
+	}
+
+	FrameSteps FixedStepScheduler::EndFrameAfter(const FrameSteps& steps, uint32_t ran)
+	{
+		ENGINE_CORE_ASSERT(ran < steps.StepCount, "FixedStepScheduler::EndFrameAfter: {} of {} steps ran", ran, steps.StepCount);
+		ENGINE_CORE_ASSERT(m_Tick == steps.FirstTick + steps.StepCount, "FixedStepScheduler::EndFrameAfter needs the last frame's steps");
+		const uint32_t unrun = steps.StepCount - ran;
+		m_Accumulator += m_FixedDelta * static_cast<double>(unrun);
+		m_Tick -= unrun;
+		FrameSteps result = steps;
+		result.StepCount = ran;
+		result.Alpha = std::clamp(m_Accumulator / m_FixedDelta, 0.0, 1.0);
+		return result;
 	}
 
 	FrameSteps FixedStepScheduler::StepExactly(uint32_t stepCount)

@@ -197,9 +197,10 @@ namespace Engine {
 		// Cases run in declaration order as separate resumable threads; Suite isolation shares one session, Case
 		// isolation recollects in a fresh VM and identifies the selected case by declaration identity, never a stale handle.
 		// Never start the next case until the current frame finishes, even when it contains several fixed steps. A case
-		// requesting Scene.Load must return in that frame. In Suite isolation, re-require/recollect the same suite asset
-		// in the replacement VM, validate the suite name and full ordered case identities/options, then continue at the
-		// retained next index. Identity compares declaration ordinal/name/location and effective options, never handles.
+		// during which a transition is requested (by the case or the game) must return in the requesting tick, which ends its
+		// frame's steps (ADR 0038 decision 15). In Suite isolation, re-require/recollect the same suite asset in the
+		// replacement VM, validate the suite name and full ordered case identities/options, then continue at the retained
+		// next index. Identity compares declaration ordinal/name/location and effective options, never handles.
 		// A still-yielded case gets a located error with a next-case verification hint, never a stale resume. Recollection
 		// mismatch is a located suite error. Results, budgets and counters survive; earlier cases are never executed again.
 		// Case isolation still restarts the configured scene; Quit ends the suite without recollection. Approved M13 ADR

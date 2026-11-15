@@ -142,6 +142,33 @@ namespace Engine {
 			CHECK(next.FirstTick == 8);
 		}
 
+		// ADR 0038 decision 15: a frame that ran only part of its steps gives the rest back to the accumulator and the tick;
+		// the next frames run them, within the per-frame cap, beyond which they are dropped as any late frame's.
+		TEST_CASE("FixedStepScheduler: EndFrameAfter keeps the steps a frame did not run for the next frames")
+		{
+			FixedStepScheduler scheduler(FrameLoopConfig{});
+			const FrameSteps three = scheduler.Advance(3.0 * Fixed, 1.0);
+			REQUIRE(three.StepCount == 3);
+			const FrameSteps ended = scheduler.EndFrameAfter(three, 1);
+			CHECK(ended.StepCount == 1);
+			CHECK(ended.FirstTick == 0);
+			CHECK(ended.Alpha == 1.0);
+			CHECK(scheduler.GetTick() == 1);
+			// The two steps left and the next frame's three: five, within the cap.
+			const FrameSteps next = scheduler.Advance(3.0 * Fixed, 1.0);
+			CHECK(next.StepCount == 5);
+			CHECK(next.FirstTick == 1);
+			CHECK(next.DroppedSeconds == 0.0);
+			CHECK(scheduler.GetTick() == 6);
+			// Four left from a frame of five and five more: the cap runs five and drops four.
+			const FrameSteps five = scheduler.Advance(5.0 * Fixed, 1.0);
+			REQUIRE(five.StepCount == 5);
+			static_cast<void>(scheduler.EndFrameAfter(five, 1));
+			const FrameSteps capped = scheduler.Advance(5.0 * Fixed, 1.0);
+			CHECK(capped.StepCount == 5);
+			CHECK(capped.DroppedSeconds == doctest::Approx(4.0 * Fixed));
+		}
+
 		TEST_CASE("FixedStepScheduler: Reset returns to tick 0 with an empty accumulator")
 		{
 			FixedStepScheduler scheduler(FrameLoopConfig{});

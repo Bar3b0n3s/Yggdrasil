@@ -162,7 +162,21 @@ namespace Engine {
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "FixedStep");
 		const double delta = m_Clock->Delta();
 		const bool exactStep = m_Clock->GetKind() == ClockKind::Manual && m_TimeScale == 1.0;
-		const FrameSteps steps = exactStep ? m_Scheduler.StepExactly(1) : m_Scheduler.Advance(delta, m_TimeScale);
+		FrameSteps steps = exactStep ? m_Scheduler.StepExactly(1) : m_Scheduler.Advance(delta, m_TimeScale);
+		{
+			ENGINE_PROFILE_SCOPE("FrameLoop::FixedSteps");
+			for (uint32_t step = 0; step < steps.StepCount; ++step)
+			{
+				m_Client->OnFrameFixedStep(m_Scheduler.GetSimStep(steps.FirstTick + step));
+				// ADR 0038 decision 15: a scene transition requested in this tick ends the frame's steps; the rest stay in the
+				// scheduler for the following frames, which run them in the new scene.
+				if (step + 1 < steps.StepCount && m_Client->EndsFrameSteps())
+				{
+					steps = m_Scheduler.EndFrameAfter(steps, step + 1);
+					break;
+				}
+			}
+		}
 		progress.Steps = steps;
 		progress.Frame = {
 			.DeltaTime = delta * m_TimeScale,
@@ -170,11 +184,6 @@ namespace Engine {
 			.Alpha = steps.Alpha,
 			.FrameIndex = m_FrameCount,
 		};
-		{
-			ENGINE_PROFILE_SCOPE("FrameLoop::FixedSteps");
-			for (uint32_t step = 0; step < steps.StepCount; ++step)
-				m_Client->OnFrameFixedStep(m_Scheduler.GetSimStep(steps.FirstTick + step));
-		}
 
 		// 6. The frame update, with the clock's delta scaled by the play session's time scale.
 		CrashHandler::SetBreadcrumb(CrashBreadcrumb::FramePhase, "Update");

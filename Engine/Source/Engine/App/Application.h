@@ -280,6 +280,9 @@ namespace Engine {
 		virtual void OnEvent(Event& /*event*/) {}
 		// Zero or more times per frame, one per fixed step (§4.2).
 		virtual void OnFixedStep(const SimStep& /*step*/) {}
+		// After each fixed step: true when the frame must run no further one (the play session's EndsFrameSteps: a scene
+		// transition requested in that tick, ADR 0038 decision 15). False by default.
+		[[nodiscard]] virtual bool EndsFixedSteps() const { return false; }
 		// Once per frame after the steps; frame.Alpha is this frame's interpolation factor (§5.2).
 		virtual void OnUpdate(const FrameTime& /*frame*/) {}
 		// Once per frame before the steps, after queued main-thread work: the safe point where automation requests run
@@ -326,6 +329,7 @@ namespace Engine {
 		void OnFrameEvent(Event& event) override;
 		void OnFrameSafePoint() override;
 		void OnFrameFixedStep(const SimStep& step) override;
+		[[nodiscard]] bool EndsFrameSteps() const override { return EndsFixedSteps(); }
 		void OnFrameUpdate(const FrameTime& frame) override;
 		void OnFrameRender(const FrameTime& frame) override;
 		// M18 (C18.3, decision 29): step 2b's recovery.

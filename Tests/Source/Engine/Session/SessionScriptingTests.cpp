@@ -5,6 +5,7 @@
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/Json/Json.h"
+#include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/AudioSystem.h"
@@ -30,6 +31,7 @@
 
 #include <algorithm>
 #include <format>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
@@ -241,6 +243,139 @@ return Script.Define("Reader", T)
 			RunGroupedTicks(*session, ticks, stepsPerFrame);
 			CHECK(session->GetScriptErrors().GetErrors().empty());
 			return GroupedRun{ SessionTrace(session->GetScene()), session->ComputeStateHash() };
+		}
+
+		// Runs one frame of `session` per entry of `deltas` as the host loops do (FrameLoop, the test runner's ScriptedClock):
+		// `scheduler` advances by the delta, the frame runs the steps it gives, stopping after a step that ends the frame's
+		// steps (PlaySession::EndsFrameSteps) and giving the rest back (FixedStepScheduler::EndFrameAfter), then its frame
+		// phase. Returns the state hash at the end of each frame by the ticks completed then.
+		static std::map<uint64_t, uint64_t> RunScheduledFrames(PlaySession& session, FixedStepScheduler& scheduler, std::span<const double> deltas)
+		{
+			std::map<uint64_t, uint64_t> hashes;
+			uint64_t frameIndex = 0;
+			for (const double delta : deltas)
+			{
+				FrameSteps steps = scheduler.Advance(delta, 1.0);
+				for (uint32_t step = 0; step < steps.StepCount; ++step)
+				{
+					session.FixedStep();
+					if (step + 1 < steps.StepCount && session.EndsFrameSteps())
+					{
+						steps = scheduler.EndFrameAfter(steps, step + 1);
+						break;
+					}
+				}
+				session.FrameUpdate(FrameTime{ .DeltaTime = delta, .UnscaledDeltaTime = delta, .Alpha = steps.Alpha, .FrameIndex = frameIndex++ });
+				CHECK(scheduler.GetTick() == session.GetTick());
+				hashes[session.GetTick()] = session.ComputeStateHash();
+			}
+			return hashes;
+		}
+
+		// `frames` frames of `stepsPerFrame` fixed steps' time each, at 60 Hz.
+		static std::vector<double> FrameDeltas(uint32_t frames, uint32_t stepsPerFrame)
+		{
+			return std::vector<double>(frames, static_cast<double>(stepsPerFrame) / 60.0);
+		}
+
+		// The scripts of the transition cases. Old.luau: every tick it draws from the session stream and creates an entity
+		// (both reach the state hash), and at tick RequestTick its OnFixedUpdate requests Scene.Load of `target`.
+		// Counter.luau: records its OnStart's tick and its first OnFixedUpdate's and moves one unit along X every tick.
+		// Starter.luau: its OnStart requests Scene.Load of `target`.
+		static std::string OldSceneSource(int requestTick, std::string_view target = "Assets/Scenes/Counter.scene")
+		{
+			return std::format(R"(local T = {{}}
+local RequestTick = {}
+function T:OnFixedUpdate()
+	self.Entity.Transform.Translation = vector.create(Random.Number(), 0, 0)
+	Scene.CreateEntity("old")
+	if Time.GetTick() == RequestTick then
+		Scene.Load(Assets.Load("{}"))
+	end
+end
+return Script.Define("Old", T)
+)",
+				requestTick, target);
+		}
+
+		inline constexpr std::string_view CounterSource = R"(local T = {}
+function T:OnStart()
+	Scene.CreateEntity("trace:start:" .. Time.GetTick())
+end
+function T:OnFixedUpdate()
+	if not self.Fixed then
+		self.Fixed = true
+		Scene.CreateEntity("trace:fixed:" .. Time.GetTick())
+	end
+	self.Entity.Transform:Translate(vector.create(1, 0, 0))
+end
+return Script.Define("Counter", T)
+)";
+
+		static std::string StarterSource(std::string_view target)
+		{
+			return std::format(R"(local T = {{}}
+function T:OnStart()
+	Scene.CreateEntity("old")
+	Scene.Load(Assets.Load("{}"))
+end
+function T:OnFixedUpdate()
+	Scene.CreateEntity("old")
+end
+return Script.Define("Starter", T)
+)",
+				target);
+		}
+
+		// Publishes a scene holding one entity `name` with `script` at `path`.
+		static void PublishScriptScene(ScriptTestFixture& fixture, AssetHandle handle, std::string_view path, std::string_view name, AssetHandle script)
+		{
+			SceneTestFixture scene;
+			AttachSessionScript(scene.GetScene().CreateEntity(name), script);
+			auto document = SceneSerializer::ToJson(scene.GetScene());
+			REQUIRE(document);
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(std::move(*document));
+			fixture.GetAssetManager().Publish(handle, data, std::string(path));
+		}
+
+		// A session of `fixture`'s scene run through RunScheduledFrames at 60 Hz with at most 5 steps a frame: its trace
+		// (the current scene's) and the state hashes by tick.
+		struct ScheduledRun
+		{
+			std::vector<std::string> Trace{};
+			std::map<uint64_t, uint64_t> Hashes{};
+			uint64_t Tick = 0;
+		};
+		static ScheduledRun RunScheduled(ScriptTestFixture& fixture, std::span<const double> deltas)
+		{
+			auto created = PlaySession::CreateFromScene(ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			FixedStepScheduler scheduler(FrameLoopConfig{ .FixedHz = 60, .MaxStepsPerFrame = 5 });
+			ScheduledRun run;
+			run.Hashes = RunScheduledFrames(*session, scheduler, deltas);
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+			run.Trace = SessionTrace(session->GetScene());
+			run.Tick = session->GetTick();
+			return run;
+		}
+
+		// The ticks both runs completed a frame at, with equal state hashes; fails on a tick whose hashes differ.
+		static uint32_t CompareSharedHashes(const std::map<uint64_t, uint64_t>& left, const std::map<uint64_t, uint64_t>& right)
+		{
+			uint32_t shared = 0;
+			for (const auto& [tick, hash] : left)
+			{
+				const auto found = right.find(tick);
+				if (found == right.end())
+					continue;
+				CAPTURE(tick);
+				CHECK(hash == found->second);
+				++shared;
+			}
+			return shared;
 		}
 
 		class ScriptPhaseHook final : public IPlaySessionTestHook
@@ -842,13 +977,16 @@ return Script.Define("Second", T)
 			CHECK(session->GetScriptErrors().GetErrors().empty());
 		}
 
-		// ADR 0038, friction F17: a Scene.Load or Scene.Reload takes effect at the end of the frame (ConsumeRequests), so in a
-		// frame that runs several fixed steps the later ones still run in the current scene and VM, and a second request made
-		// in them is refused with InvalidState while the first one still applies (Rolling Ball's Restart and delayed load).
-		TEST_CASE("PlaySession: a scene transition waits for the frame's end, so the frame's later fixed steps run in the current scene and refuse another request")
+		// ADR 0038 decision 15 (friction F17, fixed): a Scene.Load or Scene.Reload requested in a fixed step belongs to that
+		// tick. The frame runs no further fixed step (EndsFrameSteps; a FixedStep called anyway runs nothing), its frame phase
+		// runs in the current scene and the transition applies at its end, as lockstep applies it after every tick. A second
+		// request in the same tick (another behaviour's) is refused with InvalidState while the first still applies. This case
+		// was F17's "a scene transition waits for the frame's end, so the frame's later fixed steps run in the current scene
+		// and refuse another request", which pinned the later steps running in the old scene.
+		TEST_CASE("PlaySession: a scene transition requested in a fixed step ends the frame's fixed steps, applies at the frame's end and refuses a second request in its tick")
 		{
 			Test::ScriptTestFixture fixture;
-			const AssetHandle sourceScript(0x710012), targetScript(0x710013), targetScene(0x710014);
+			const AssetHandle sourceScript(0x710012), targetScript(0x710013), targetScene(0x710014), rivalScript(0x710015);
 			REQUIRE(fixture.AddScript(sourceScript, "Assets/Scripts/First.luau", R"(
 local T = {}
 function T:OnCreate()
@@ -859,14 +997,19 @@ function T:OnFixedUpdate()
 	self.Entity.Name = "Step" .. self.Steps
 	if self.Steps == 1 then
 		Scene.Load(Assets.Load("Assets/Scenes/Second.scene"), { From = 1 })
-	elseif self.Steps == 2 then
-		local ok, message = pcall(function() Scene.Reload({ From = 2 }) end)
-		if not ok and string.find(tostring(message), "InvalidState", 1, true) then
-			Scene.CreateEntity("Refused")
-		end
 	end
 end
 return Script.Define("First", T)
+)"));
+			REQUIRE(fixture.AddScript(rivalScript, "Assets/Scripts/Rival.luau", R"(
+local T = {}
+function T:OnFixedUpdate()
+	local ok, message = pcall(function() Scene.Reload({ From = 2 }) end)
+	if not ok and string.find(tostring(message), "InvalidState", 1, true) then
+		Scene.CreateEntity("Refused")
+	end
+end
+return Script.Define("Rival", T)
 )"));
 			REQUIRE(fixture.AddScript(targetScript, "Assets/Scripts/Second.luau", R"(
 local T = {}
@@ -883,6 +1026,7 @@ return Script.Define("Second", T)
 			data->Document = CreateRef<const Json>(std::move(*document));
 			fixture.GetAssetManager().Publish(targetScene, data, "Assets/Scenes/Second.scene");
 			Test::AttachSessionScript(fixture.GetScene().CreateEntity("First"), sourceScript);
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Rival"), rivalScript);
 			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
 			REQUIRE(created);
 			auto session = std::move(*created);
@@ -890,23 +1034,177 @@ return Script.Define("Second", T)
 			const uint64_t vm = session->GetScripts()->GetGeneration();
 			const uint64_t sceneGeneration = session->GetSceneGeneration();
 
-			// One frame of two fixed steps: the load requested in the first waits, and the second runs in the same scene and VM.
+			// A frame given two fixed steps: the first requests the load (Rival's request in the same tick is refused), which
+			// ends the frame's steps; a second FixedStep runs nothing.
+			CHECK_FALSE(session->EndsFrameSteps());
 			session->FixedStep();
 			CHECK(session->GetScene().FindEntityByPath("/Step1").IsValid());
-			session->FixedStep();
-			CHECK(session->GetScene().FindEntityByPath("/Step2").IsValid());
 			CHECK(session->GetScene().FindEntityByPath("/Refused").IsValid());
+			CHECK(session->EndsFrameSteps());
+			session->FixedStep();
+			CHECK(session->GetTick() == 1);
+			CHECK_FALSE(session->GetScene().FindEntityByPath("/Step2").IsValid());
 			CHECK(session->GetScripts()->GetGeneration() == vm);
 			CHECK(session->GetSceneGeneration() == sceneGeneration);
-			session->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 60.0, .UnscaledDeltaTime = 1.0 / 60.0, .Alpha = 1.0, .FrameIndex = 0 });
+			session->FrameUpdate(FrameTime{ .DeltaTime = 2.0 / 60.0, .UnscaledDeltaTime = 2.0 / 60.0, .Alpha = 1.0, .FrameIndex = 0 });
 
-			// The first request applied at the frame's end; the refused one changed nothing.
+			// The request applied at the frame's end; the refused one changed nothing; the next tick runs in the new scene.
+			CHECK_FALSE(session->EndsFrameSteps());
 			CHECK(session->GetSceneGeneration() == sceneGeneration + 1);
 			CHECK(session->GetScripts()->GetGeneration() != vm);
 			CHECK(session->GetLoadParameters() == Json{ { "From", 1 } });
 			CHECK(session->GetScene().FindEntityByPath("/Loaded1").IsValid());
 			CHECK_FALSE(session->GetScene().FindEntityByPath("/Refused").IsValid());
+			session->FixedStep();
+			CHECK(session->GetTick() == 2);
 			CHECK(session->GetScriptErrors().GetErrors().empty());
+		}
+
+		// Decision 15: a transition requested in OnFixedUpdate at any step of a frame (first, middle or last) applies after
+		// that tick, so the new scene's first tick and the state hash at every completed boundary are those of lockstep at
+		// two, three and five steps a frame. Before it, the frame's later steps ran in the old scene (drawing from the session
+		// stream and creating entities), and the new scene started a tick per such step later.
+		TEST_CASE("PlaySession: a scene transition requested at any step of a frame applies after its tick however the ticks are grouped into frames")
+		{
+			for (const int requestTick : { 3, 4, 5, 6 })
+			{
+				CAPTURE(requestTick);
+				Test::ScriptTestFixture fixture;
+				const AssetHandle oldScript(0x7100a0), counterScript(0x7100a1), counterScene(0x7100a2);
+				REQUIRE(fixture.AddScript(oldScript, "Assets/Scripts/Old.luau", Test::OldSceneSource(requestTick)));
+				REQUIRE(fixture.AddScript(counterScript, "Assets/Scripts/Counter.luau", std::string(Test::CounterSource)));
+				Test::PublishScriptScene(fixture, counterScene, "Assets/Scenes/Counter.scene", "Counter", counterScript);
+				Test::AttachSessionScript(fixture.GetScene().CreateEntity("Old"), oldScript);
+				const std::vector<std::string> expected = { std::format("start:{}", requestTick + 1), std::format("fixed:{}", requestTick + 1) };
+				const auto lockstepDeltas = Test::FrameDeltas(15, 1);
+				const Test::ScheduledRun lockstep = Test::RunScheduled(fixture, lockstepDeltas);
+				CHECK(lockstep.Trace == expected);
+				for (const uint32_t steps : { 2u, 3u, 5u })
+				{
+					CAPTURE(steps);
+					const auto deltas = Test::FrameDeltas((15 + steps - 1) / steps, steps);
+					const Test::ScheduledRun grouped = Test::RunScheduled(fixture, deltas);
+					CHECK(grouped.Trace == lockstep.Trace);
+					// Boundaries after the new scene's first tick are among those compared.
+					CHECK(Test::CompareSharedHashes(grouped.Hashes, lockstep.Hashes) >= 2);
+					CHECK(grouped.Hashes.rbegin()->first > static_cast<uint64_t>(requestTick + 1));
+				}
+			}
+		}
+
+		// Decision 15: a transition a scene's startup callbacks request belongs to the next tick: the requesting scene runs
+		// that tick, the frame ends its steps after it and applies it, and a frame of no fixed step leaves it pending. At the
+		// session's start and after a Scene.Load, frames of no step first give lockstep's first tick of the new scene and
+		// lockstep's state hashes. Before it, a frame of no step applied the request at its end, so the requesting scene ran
+		// no tick and the new scene started a tick early.
+		TEST_CASE("PlaySession: a scene transition the startup callbacks request applies after the next tick, with or without frames of no fixed step first")
+		{
+			const AssetHandle counterScript(0x7100a3), counterScene(0x7100a4), starterScript(0x7100a5), relayScene(0x7100a6), oldScript(0x7100a7);
+			SUBCASE("at session start")
+			{
+				Test::ScriptTestFixture fixture;
+				REQUIRE(fixture.AddScript(counterScript, "Assets/Scripts/Counter.luau", std::string(Test::CounterSource)));
+				REQUIRE(fixture.AddScript(starterScript, "Assets/Scripts/Starter.luau", Test::StarterSource("Assets/Scenes/Counter.scene")));
+				Test::PublishScriptScene(fixture, counterScene, "Assets/Scenes/Counter.scene", "Counter", counterScript);
+				Test::AttachSessionScript(fixture.GetScene().CreateEntity("Starter"), starterScript);
+				const auto lockstepDeltas = Test::FrameDeltas(8, 1);
+				std::vector<double> unstepped = Test::FrameDeltas(8, 1);
+				unstepped.insert(unstepped.begin(), { 0.0, 0.0 });
+				const Test::ScheduledRun lockstep = Test::RunScheduled(fixture, lockstepDeltas);
+				CHECK(lockstep.Trace == std::vector<std::string>{ "start:1", "fixed:1" });
+				const Test::ScheduledRun grouped = Test::RunScheduled(fixture, unstepped);
+				CHECK(grouped.Trace == lockstep.Trace);
+				CHECK(Test::CompareSharedHashes(grouped.Hashes, lockstep.Hashes) >= 2);
+			}
+			SUBCASE("after Scene.Load")
+			{
+				Test::ScriptTestFixture fixture;
+				REQUIRE(fixture.AddScript(counterScript, "Assets/Scripts/Counter.luau", std::string(Test::CounterSource)));
+				REQUIRE(fixture.AddScript(starterScript, "Assets/Scripts/Starter.luau", Test::StarterSource("Assets/Scenes/Counter.scene")));
+				// Old loads Relay.scene at tick 0, whose Starter's OnStart, a startup callback, loads Counter.scene.
+				REQUIRE(fixture.AddScript(oldScript, "Assets/Scripts/Old.luau", Test::OldSceneSource(0, "Assets/Scenes/Relay.scene")));
+				Test::PublishScriptScene(fixture, counterScene, "Assets/Scenes/Counter.scene", "Counter", counterScript);
+				Test::PublishScriptScene(fixture, relayScene, "Assets/Scenes/Relay.scene", "Starter", starterScript);
+				Test::AttachSessionScript(fixture.GetScene().CreateEntity("Old"), oldScript);
+				const auto lockstepDeltas = Test::FrameDeltas(8, 1);
+				std::vector<double> unstepped = Test::FrameDeltas(8, 1);
+				unstepped.insert(unstepped.begin() + 1, { 0.0, 0.0 });
+				const Test::ScheduledRun lockstep = Test::RunScheduled(fixture, lockstepDeltas);
+				CHECK(lockstep.Trace == std::vector<std::string>{ "start:2", "fixed:2" });
+				const Test::ScheduledRun grouped = Test::RunScheduled(fixture, unstepped);
+				CHECK(grouped.Trace == lockstep.Trace);
+				CHECK(Test::CompareSharedHashes(grouped.Hashes, lockstep.Hashes) >= 2);
+			}
+		}
+
+		// Decision 15 (rule c): a transition requested in the frame phase (OnUpdate) applies at that frame's end, after the
+		// frame's steps, and one requested between frames (an evaluation) at the next frame's end, after its steps: frame-
+		// phase code is presentation, and neither ends a frame's steps.
+		TEST_CASE("PlaySession: a scene transition requested in the frame phase or between frames applies at that frame's end")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle updaterScript(0x7100a8), counterScript(0x7100a9), counterScene(0x7100aa);
+			REQUIRE(fixture.AddScript(counterScript, "Assets/Scripts/Counter.luau", std::string(Test::CounterSource)));
+			REQUIRE(fixture.AddScript(updaterScript, "Assets/Scripts/Updater.luau", R"(local T = {}
+function T:OnUpdate()
+	if not self.Requested then
+		self.Requested = true
+		Scene.Load(Assets.Load("Assets/Scenes/Counter.scene"))
+	end
+end
+return Script.Define("Updater", T)
+)"));
+			Test::PublishScriptScene(fixture, counterScene, "Assets/Scenes/Counter.scene", "Counter", counterScript);
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Updater"), updaterScript);
+			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			FixedStepScheduler scheduler(FrameLoopConfig{ .FixedHz = 60, .MaxStepsPerFrame = 5 });
+			// Frame 0 runs its three steps, then OnUpdate requests the load, which applies at the frame's end.
+			const std::vector<double> frame = Test::FrameDeltas(1, 3);
+			static_cast<void>(Test::RunScheduledFrames(*session, scheduler, frame));
+			CHECK(session->GetTick() == 3);
+			CHECK(Test::SessionTrace(session->GetScene()) == std::vector<std::string>{ "start:3" });
+			static_cast<void>(Test::RunScheduledFrames(*session, scheduler, frame));
+			CHECK(session->GetTick() == 6);
+			CHECK(Test::SessionTrace(session->GetScene()) == std::vector<std::string>{ "start:3", "fixed:3" });
+			// Between frames: the next frame runs its three steps in the current scene, then applies it.
+			const auto evaluated = session->GetScripts()->Evaluate("Scene.Reload()", VfsPath{});
+			REQUIRE_MESSAGE(evaluated, (evaluated ? "" : evaluated.error().ToString()));
+			CHECK_FALSE(session->EndsFrameSteps());
+			const uint64_t generation = session->GetSceneGeneration();
+			static_cast<void>(Test::RunScheduledFrames(*session, scheduler, frame));
+			CHECK(session->GetTick() == 9);
+			CHECK(session->GetSceneGeneration() == generation + 1);
+			CHECK(Test::SessionTrace(session->GetScene()) == std::vector<std::string>{ "start:9" });
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+		}
+
+		// Decision 15: the steps a frame did not run after a transition ended its steps stay in the scheduler, and the next
+		// frames run them in the new scene, so after the same total frame time the session stands at the same tick as without
+		// a transition (within the scheduler's per-frame cap).
+		TEST_CASE("PlaySession: the fixed steps a transition leaves unrun in its frame run in the next frames, so no tick is lost")
+		{
+			uint64_t ticks[2] = {};
+			for (const int requestTick : { 3, 1000 })
+			{
+				CAPTURE(requestTick);
+				Test::ScriptTestFixture fixture;
+				const AssetHandle oldScript(0x7100ab), counterScript(0x7100ac), counterScene(0x7100ad);
+				REQUIRE(fixture.AddScript(oldScript, "Assets/Scripts/Old.luau", Test::OldSceneSource(requestTick)));
+				REQUIRE(fixture.AddScript(counterScript, "Assets/Scripts/Counter.luau", std::string(Test::CounterSource)));
+				Test::PublishScriptScene(fixture, counterScene, "Assets/Scenes/Counter.scene", "Counter", counterScript);
+				Test::AttachSessionScript(fixture.GetScene().CreateEntity("Old"), oldScript);
+				// Six frames of three steps; the request at tick 3, the first step of frame 1, leaves two steps for frame 2.
+				const auto deltas = Test::FrameDeltas(6, 3);
+				const Test::ScheduledRun run = Test::RunScheduled(fixture, deltas);
+				ticks[requestTick == 3 ? 0 : 1] = run.Tick;
+				if (requestTick == 3)
+					CHECK(run.Trace == std::vector<std::string>{ "start:4", "fixed:4" });
+			}
+			CHECK(ticks[0] == 18);
+			CHECK(ticks[1] == 18);
 		}
 
 		TEST_CASE("PlaySession: error cursors survive scene replacement and external eval invalidates recording")

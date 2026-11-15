@@ -871,7 +871,7 @@ namespace Engine {
 			const double delta = FrameClock->Delta();
 			const bool manual = FrameClock->GetKind() == ClockKind::Manual;
 			const double scale = manual ? 1.0 : Session->GetTimeScale();
-			const auto steps = manual ? Scheduler->StepExactly(1) : Scheduler->Advance(delta, scale);
+			auto steps = manual ? Scheduler->StepExactly(1) : Scheduler->Advance(delta, scale);
 			const auto timeout = Selected[SuiteIndex].Description.Cases[Selected[SuiteIndex].Cases[CaseIndex]].TimeoutTicks;
 			const auto suiteLimit = Host->GetProjectSettings().Testing.SuiteTickLimit;
 			for (uint32_t i = 0; i < steps.StepCount; ++i)
@@ -916,6 +916,13 @@ namespace Engine {
 				}
 				if (Quit || FatalStop)
 					break;
+				// ADR 0038 decision 15: a scene transition requested in this tick (by the game or the case) ends the frame's
+				// steps, as lockstep's frame phase follows every tick; the rest stay in the scheduler for the next frames.
+				if (i + 1 < steps.StepCount && Session->EndsFrameSteps())
+				{
+					steps = Scheduler->EndFrameAfter(steps, i + 1);
+					break;
+				}
 			}
 			Session->FrameUpdate({ delta * scale, delta, steps.Alpha, FrameIndex++ });
 			DrainCapture();
@@ -930,7 +937,7 @@ namespace Engine {
 				if (!TerminalCase && !Quit)
 				{
 					Current.Status = "error";
-					AddFailure(Current, { "case yielded across Scene.Load; return in the requesting frame and verify the new scene in the next case", Resume.File, Resume.Line, {} });
+					AddFailure(Current, { "case yielded across Scene.Load; return in the requesting tick and verify the new scene in the next case", Resume.File, Resume.Line, {} });
 					TerminalCase = true;
 				}
 			}

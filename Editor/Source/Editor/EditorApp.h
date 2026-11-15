@@ -50,6 +50,7 @@ namespace Engine {
 		void OnEvent(Event& event) override;
 		void OnRenderSubmitted(uint64_t frameIndex, uint64_t submissionId) override;
 		void OnFixedStep(const SimStep& step) override;
+		[[nodiscard]] bool EndsFixedSteps() const override;
 		void OnUpdate(const FrameTime& frame) override;
 		void OnRender(RenderContext& context) override;
 		void OnImGuiRender() override;

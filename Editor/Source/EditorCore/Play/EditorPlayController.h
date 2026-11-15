@@ -107,6 +107,9 @@ namespace Engine {
 		// EditorApp's frame hooks (§4.2 steps 5 to 7): OnFixedStep once per loop step (PlaySession::AdvanceLoopStep),
 		// OnUpdate once per frame (PlaySession::AdvanceLoopFrame) after the steps. No effect in Edit mode.
 		void OnFixedStep();
+		// After OnFixedStep: the ordinary session's PlaySession::EndsFrameSteps (a scene transition requested in that tick
+		// ends the frame's steps; ADR 0038 decision 15); false without one or while a test run drives its own session.
+		[[nodiscard]] bool EndsFixedSteps() const;
 		void OnUpdate(const FrameTime& frame);
 		// After UI dispatch, automation handlers and pending-operation polls have returned. Applies queued ordinary-play
 		// script reloads and consumes Quit through Stop; deterministic drivers keep ownership of their sessions.

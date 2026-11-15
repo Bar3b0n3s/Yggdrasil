@@ -74,6 +74,23 @@ namespace Engine {
 		{
 		};
 
+		// Sets a flag of the session's state for its lifetime and clears it on every exit path.
+		class ScopedFlag
+		{
+		public:
+			explicit ScopedFlag(bool& flag)
+				: m_Flag(flag)
+			{
+				m_Flag = true;
+			}
+			~ScopedFlag() { m_Flag = false; }
+
+			ScopedFlag(const ScopedFlag&) = delete;
+			ScopedFlag& operator=(const ScopedFlag&) = delete;
+		private:
+			bool& m_Flag; // a documented back-reference to the state's flag, which outlives the scope
+		};
+
 	}
 
 	namespace Utils {
@@ -432,6 +449,19 @@ namespace Engine {
 		AssetHandle PendingSceneAsset{};
 		std::string PendingSourcePath{};
 		bool PendingIsReload = false; // the pending transition is a Scene.Reload, not a Scene.Load
+		// ADR 0038 decision 15: whose tick a pending transition belongs to. FixedStep: requested in a fixed step (or a startup
+		// request whose tick has run), so the frame runs no further step and applies it at its end; Startup: requested by a
+		// scene's startup callbacks, waiting for the next tick; Frame: requested in the frame phase or between frames,
+		// applied at that frame's end.
+		enum class TransitionOrigin : uint8_t
+		{
+			Frame,
+			FixedStep,
+			Startup
+		};
+		TransitionOrigin PendingOrigin = TransitionOrigin::Frame;
+		bool InFixedStep = false; // FixedStep is running
+		bool InStartup = false;   // StartScripts is running (a session's or a scene transition's startup)
 
 		[[nodiscard]] Scene& GetScene() override { return *RuntimeScene; }
 		[[nodiscard]] const TypeRegistry& GetTypes() const override { return *Registry; }
@@ -673,6 +703,8 @@ namespace Engine {
 		PendingSceneAsset = asset;
 		PendingSourcePath = std::move(sourcePath);
 		PendingIsReload = reload;
+		PendingOrigin = InFixedStep ? TransitionOrigin::FixedStep : InStartup ? TransitionOrigin::Startup
+																			  : TransitionOrigin::Frame;
 		return {};
 	}
 
@@ -684,6 +716,7 @@ namespace Engine {
 		PendingSceneAsset = AssetHandle();
 		PendingSourcePath.clear();
 		PendingIsReload = false;
+		PendingOrigin = TransitionOrigin::Frame;
 	}
 
 	Status PlaySession::State::RequestSceneLoad(AssetHandle scene, Json parameters)
@@ -784,6 +817,8 @@ namespace Engine {
 	{
 		if (Scripts == nullptr)
 			return;
+		// A transition the startup callbacks request belongs to the next tick (ADR 0038 decision 15).
+		const ScopedFlag startup(InStartup);
 		const Status initialized = Scripts->InitializeInstances();
 		if (!initialized)
 		{
@@ -852,7 +887,8 @@ namespace Engine {
 				Scripts->Stop();
 			return;
 		}
-		if (PendingScene == nullptr)
+		// ADR 0038 decision 15: a startup callback's request belongs to the next tick, which this frame has not run.
+		if (PendingScene == nullptr || PendingOrigin == TransitionOrigin::Startup)
 			return;
 		// The request a failure of the transition is reported as (the milestone review, P1).
 		const bool reload = PendingIsReload;
@@ -1508,8 +1544,10 @@ namespace Engine {
 	{
 		State& state = *m_State;
 		ENGINE_CORE_ASSERT(state.Activated, "Activate the prepared play session before stepping");
-		if (state.FatalStop || state.QuitRequest.has_value())
+		// A transition requested in a completed tick ends the frame's steps (EndsFrameSteps): no further step runs before it.
+		if (state.FatalStop || state.QuitRequest.has_value() || EndsFrameSteps())
 			return;
+		const ScopedFlag inFixedStep(state.InFixedStep);
 		const uint64_t tick = state.Tick;
 		const SimStep step = SimStep::FromTick(tick, state.FixedDelta);
 		PhysicsSystem& physics = *state.Physics;
@@ -1617,6 +1655,15 @@ namespace Engine {
 		state.EnterPhase(*this, PlaySessionPhase::UiLayout, tick);
 		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
 		state.Tick = tick + 1;
+		// ADR 0038 decision 15: a startup callback's request waited for this tick, which has now run in the requesting scene.
+		if (state.PendingScene != nullptr && state.PendingOrigin == State::TransitionOrigin::Startup)
+			state.PendingOrigin = State::TransitionOrigin::FixedStep;
+	}
+
+	bool PlaySession::EndsFrameSteps() const
+	{
+		const State& state = *m_State;
+		return state.PendingScene != nullptr && state.PendingOrigin == State::TransitionOrigin::FixedStep;
 	}
 
 	void PlaySession::FrameUpdate(const FrameTime& frame)

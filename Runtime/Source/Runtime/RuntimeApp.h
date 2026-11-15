@@ -109,6 +109,7 @@ namespace Engine {
 		void OnEvent(Event& event) override;
 		void OnSafePoint() override;
 		void OnFixedStep(const SimStep& step) override;
+		[[nodiscard]] bool EndsFixedSteps() const override;
 		void OnUpdate(const FrameTime& frame) override;
 		void OnRender(RenderContext& context) override;
 #if !defined(ENGINE_DIST)
