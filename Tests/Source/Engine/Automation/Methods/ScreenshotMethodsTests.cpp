@@ -376,6 +376,26 @@ namespace Engine {
 			CHECK((*shot)["inlineOmitted"] == Json(false));
 		}
 
+		// ADR 0038, friction F05: viewport.screenshot {width: 1280, height: 720} wrote a 1024 x 576 PNG, maxDimension's 1024
+		// applying to a size the caller asked for. With width or height given, maxDimension defaults to the larger rendered
+		// side, so the PNG has the requested size; without them it stays 1024, and an explicit maxDimension still downscales.
+		TEST_CASE("ScreenshotMethods: a requested width or height keeps its size unless maxDimension is passed")
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("ViewportScreenshotRequestedSize", log);
+			const auto size = [&setup](const Json& params)
+			{
+				const Result<Json> shot = setup.Call("viewport.screenshot", params);
+				REQUIRE_MESSAGE(shot.has_value(), shot.error().ToString());
+				return std::pair{ ReadUnsigned((*shot)["width"]), ReadUnsigned((*shot)["height"]) };
+			};
+			CHECK(size(Json{ { "view", "scene" }, { "width", 1280 }, { "height", 720 } }) == std::pair{ 1280u, 720u });
+			CHECK(size(Json{ { "view", "scene" }, { "width", 1536 } }) == std::pair{ 1536u, DefaultViewportScreenshotHeight });
+			CHECK(size(Json{ { "view", "scene" }, { "height", 1200 } }) == std::pair{ DefaultViewportScreenshotWidth, 1200u });
+			CHECK(size(Json{ { "view", "scene" }, { "width", 1280 }, { "height", 720 }, { "maxDimension", 1024 } }) == std::pair{ 1024u, 576u });
+			CHECK(size(Json{ { "view", "scene" } }) == std::pair{ DefaultViewportScreenshotWidth, DefaultViewportScreenshotHeight });
+		}
+
 		TEST_CASE("ScreenshotMethods: inline leaves out a PNG over the inline budget, so the result is never offloaded")
 		{
 			Test::EditorTestFixture fixture("ViewportScreenshotLargeInline");

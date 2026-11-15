@@ -577,7 +577,7 @@ namespace Engine {
 		return std::string(output.GetPath());
 	}
 
-	Result<ScriptEvaluation> EditorMethodContext::EvalInEdit(std::string_view code, std::string_view reference, std::string_view behaviour)
+	Result<ScriptEvaluation> EditorMethodContext::EvalInEdit(std::string_view code, std::string_view reference, std::string_view behaviour, std::optional<ScriptError>& failure)
 	{
 		if (!m_Editor->HasScene())
 			return MakeError(ErrorCode::InvalidState, "no edit scene is open");
@@ -593,7 +593,7 @@ namespace Engine {
 		// M22 (Docs/Decisions/0033-m22-contract.md decisions 11 and 17): the project's locale, as a play session's VM reads it.
 		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = &host, .Api = api, .Settings = m_Editor->GetProject().GetSettings().Scripting, .Mode = RunModes::Editor, .ReadOnly = true, .Locale = m_Editor->GetProject().GetSettings().Localization.Locale }));
 		ENGINE_TRY(engine->InitializeInstances());
-		return engine->Evaluate(code, VfsPath{}, entity, behaviour);
+		return engine->Evaluate(code, VfsPath{}, entity, behaviour, &failure);
 	}
 
 	std::string EditorMethodContext::GetClientName(ClientId client) const

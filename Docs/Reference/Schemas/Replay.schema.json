@@ -45,7 +45,7 @@
 			"maximum": 100000
 		},
 		"EngineVersion": {
-			"description": "The replay format's engine version, which every recorder writes as \"0.1.0\" (ReplayEngineVersionString) whatever the build, so neither a version bump nor a commit rewrites a replay (informational).",
+			"description": "The version of the engine that recorded the replay (its engineVersion, never the build id; replays recorded before ADR 0038 hold \"0.1.0\"). Informational: no verification and no state hash reads it.",
 			"type": "string"
 		},
 		"Config": {

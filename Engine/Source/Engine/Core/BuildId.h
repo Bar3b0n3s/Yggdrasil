@@ -13,13 +13,14 @@
 //
 // Where it appears (decision 13): session.hello's and session.info's "build", the automation session files' "build"
 // (§13.2), Engine.pak's metadata "Build" and GameManifest v2's "Build" (Game.json), each as FormatBuildId's text. Replay
-// headers keep writing ReplayEngineVersionString ("0.1.0", Asset/ReplayData.h), never the build id, so neither a commit
-// nor a version bump rewrites a replay; the state hash never sees either (§9.1).
+// headers record EngineVersionString (ADR 0038, friction F10; Asset/ReplayData.h), never the build id, so a commit
+// rewrites no replay; the state hash never sees either (§9.1).
 
 namespace Engine {
 
 	// The engine's semantic version (MAJOR.MINOR.PATCH): session.hello's, session.info's and the session files'
-	// "engineVersion" (§13.2), and the EngineVersion of exported manifests and Engine.pak's metadata. It moved here from
+	// "engineVersion" (§13.2), the EngineVersion of exported manifests and Engine.pak's metadata, and from ADR 0038
+	// (friction F10) the EngineVersion of a new recording's replay header. It moved here from
 	// Automation/Protocol/JsonRpc.h, which includes this header, with the build id. The backlog program's reservation
 	// ledgers (Docs/Decisions/0028-backlog-program.md) own its value: the last lander of each phase bumps the minor
 	// version (0.2.0 at the end of phase 1, 0.3.0 and 0.4.0 after phases 2 and 3), so parallel milestone branches never

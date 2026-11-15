@@ -2,8 +2,9 @@
 server API (dynamic tool registration).
 
 Tools:
-  - bridge-local: editor_launch {project, create?, template?, headless?, renderer?, recover?} (template: the catalogue's
-    project_create templates), editor_attach {project?, pid?} (a relative project path is resolved against the
+  - bridge-local: editor_launch {project, create?, template?, headless?, renderer?, headlessGameView?, recover?}
+    (template: the catalogue's project_create templates; headlessGameView: the editor's --headless-game-view),
+    editor_attach {project?, pid?} (a relative project path is resolved against the
     repository root, never the bridge's working directory; every attach and every launch sends a transcribed
     session.info, a launch right after its project.open or project.create, whose result it reports as "session" with
     the open scene; a launch waits for a running gate and a rendering editor holds the machine-wide GPU lock until it
@@ -235,6 +236,10 @@ def local_tool_schemas(templates: list[str] | None = None) -> dict[str, dict[str
             "headless": {"type": "boolean", "description": "Run without a window (default true)"},
             "renderer": {"type": "string", "enum": ["vulkan", "none"],
                          "description": "Default none; vulkan for the screenshot tools (needs a GPU)"},
+            "headlessGameView": {"type": "boolean",
+                                 "description": "Also render the game view every frame, as the soak does (the editor's "
+                                                "--headless-game-view), so stats.get reports it; needs headless and "
+                                                "renderer vulkan (default false)"},
             "recover": {"type": "boolean",
                         "description": "Adopt the newest valid autosave of every autosaved scene, each as an "
                                        "unsaved open scene (project.open {recover: true}), as after EditorCrashed "
@@ -677,6 +682,7 @@ class Bridge:
                                 template=str(arguments.get("template", "Empty")),
                                 headless=boolean_argument(arguments, "headless", True),
                                 renderer=str(arguments.get("renderer", "none")),
+                                headless_game_view=boolean_argument(arguments, "headlessGameView", False),
                                 recover=boolean_argument(arguments, "recover", False))
         self.connection = self.launcher.launch(request, cancelled)
         status = self.connection.describe()

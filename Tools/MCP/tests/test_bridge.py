@@ -1032,6 +1032,55 @@ class LauncherTests(BridgeTestCase):
         spawned.kill.assert_called_once()
         self.assertIsNone(broken.client)
 
+    def test_editor_launch_headless_game_view_starts_an_editor_that_renders_its_game_view(self) -> None:
+        # ADR 0038, friction F12: a headless editor renders its Scene view only, so a builder's stats.get reported the
+        # game view unavailable, while the soak renders it (--headless-game-view). headlessGameView starts the editor
+        # with that option; it needs a headless editor with renderer vulkan, and is refused before anything is
+        # spawned otherwise.
+        root = self.make_project()
+
+        def open_project(params: dict[str, Any]) -> dict[str, Any]:
+            return {"project": {"name": "Game", "root": root.as_posix()}, "warnings": [], "recoveryAvailable": False,
+                    "recovered": False}
+
+        editor = self.start_server({"project.open": open_project,
+                                    "session.info": lambda params: {"pid": 4242, "renderer": "vulkan"}})
+        launcher, _ = self.make_launcher()
+        spawned: list[list[str]] = []
+
+        def launch_editor(executable: Path, arguments: list[str], *_: Any, **__: Any) -> Any:
+            spawned.append(list(arguments))
+            return mock.Mock()
+
+        def connect(session: Any, supervised: bool, **_: Any) -> EditorConnection:
+            return EditorConnection(None, supervised=True, client=self.connect(editor), repository_root=REPOSITORY_ROOT)
+
+        bridge = server.Bridge(REPOSITORY_ROOT, [], launcher)
+        self.assertEqual(server.local_tool_schemas()["editor_launch"]["properties"]["headlessGameView"]["type"],
+                         "boolean")
+        with mock.patch.object(engine_client, "find_editor_executable", return_value=Path("Editor")), \
+                mock.patch.object(engine_client, "launch_editor", side_effect=launch_editor), \
+                mock.patch.object(launcher, "connect", side_effect=connect), \
+                mock.patch.object(launcher, "take_machine_locks", return_value=None):
+            for game_view in (True, False):
+                with self.subTest(headlessGameView=game_view):
+                    structured, text, is_error = bridge.call_tool("editor_launch", {
+                        "project": str(root), "renderer": "vulkan", "headlessGameView": game_view})
+                    self.assertFalse(is_error, text)
+                    self.assertEqual(spawned[-1][:4], ["--automation", "--renderer", "vulkan", "--headless"])
+                    self.assertEqual("--headless-game-view" in spawned[-1], game_view)
+                    self.assertFalse(bridge.call_tool("editor_shutdown", {})[2])
+            for arguments, error in (({"renderer": "none", "headlessGameView": True}, "ValueError"),
+                                     ({"renderer": "vulkan", "headless": False, "headlessGameView": True},
+                                      "ValueError"),
+                                     ({"renderer": "vulkan", "headlessGameView": "yes"}, "InvalidParams")):
+                with self.subTest(arguments=arguments):
+                    structured, text, is_error = bridge.call_tool("editor_launch", {"project": str(root), **arguments})
+                    self.assertTrue(is_error)
+                    self.assertEqual(structured["error"], error)
+                    self.assertIn("headlessGameView", structured["message"])
+        self.assertEqual(len(spawned), 2, "a refused launch spawns nothing")
+
     def test_a_launch_whose_project_call_raises_kills_the_editor_it_spawned(self) -> None:
         # The milestone review's R30: only a raising session.info ended the spawned editor; a project.open or
         # project.create that raised instead of answering left it running, unsupervised and holding the project lock.

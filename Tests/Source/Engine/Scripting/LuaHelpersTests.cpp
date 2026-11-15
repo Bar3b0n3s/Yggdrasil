@@ -228,8 +228,9 @@ namespace Engine {
 				Test::ExpectLog expected(LogLevel::Error, "child diagnostic");
 				CHECK_FALSE(fixture.Evaluate(source));
 				CHECK(expected.GetMatchCount() == 1);
-				REQUIRE_FALSE(fixture.Errors.empty());
-				const auto& error = fixture.Errors.back();
+				CHECK(fixture.Errors.empty()); // the evaluation's failure is its caller's (ADR 0038, friction F01)
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				const auto& error = *fixture.EvaluationFailure;
 				CHECK(error.Kind == ScriptErrorKind::Type);
 				CHECK(error.Script == "Assets/Child.luau");
 				CHECK(error.Line == 71);
@@ -247,8 +248,8 @@ namespace Engine {
 				Test::ExpectLog unrelatedLog(LogLevel::Error, "unrelated");
 				CHECK_FALSE(fixture.Evaluate("pcall(Probe.Forwarded)\nerror(\"unrelated\")"));
 				CHECK(unrelatedLog.GetMatchCount() == 1);
-				REQUIRE_FALSE(fixture.Errors.empty());
-				const auto& unrelated = fixture.Errors.back();
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				const auto& unrelated = *fixture.EvaluationFailure;
 				CHECK(unrelated.Kind == ScriptErrorKind::Runtime);
 				CHECK(unrelated.Script != "Assets/Child.luau");
 				CHECK(unrelated.Line == 2);
@@ -259,8 +260,9 @@ namespace Engine {
 				Test::ExpectLog nonstringLog(LogLevel::Error, "script raised a non-string error");
 				CHECK_FALSE(fixture.Evaluate("error({Kind = \"type\", Script = \"Assets/Child.luau\", Line = 71})"));
 				CHECK(nonstringLog.GetMatchCount() == 1);
-				CHECK(fixture.Errors.back().Kind == ScriptErrorKind::Runtime);
-				CHECK(fixture.Errors.back().Script != "Assets/Child.luau");
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				CHECK(fixture.EvaluationFailure->Kind == ScriptErrorKind::Runtime);
+				CHECK(fixture.EvaluationFailure->Script != "Assets/Child.luau");
 			}
 		}
 
@@ -275,8 +277,9 @@ namespace Engine {
 			Test::ExpectLog expected(LogLevel::Error, "child diagnostic");
 			CHECK_FALSE(fixture.Evaluate("local saved = self.Saved\nerror(saved)", id));
 			CHECK(expected.GetMatchCount() == 1);
-			REQUIRE_FALSE(fixture.Errors.empty());
-			const auto& error = fixture.Errors.back();
+			CHECK(fixture.Errors.empty()); // the evaluation's failure is its caller's (ADR 0038, friction F01)
+			REQUIRE(fixture.EvaluationFailure.has_value());
+			const auto& error = *fixture.EvaluationFailure;
 			// Not the stale Type fault of Assets/Child.luau:71 owned by entity 65: the raiser's frame, kind and owner.
 			CHECK(error.Kind == ScriptErrorKind::Runtime);
 			CHECK(error.Script != "Assets/Child.luau");
@@ -325,7 +328,8 @@ return true
 		}
 		// The native test game's friction NT-08: a value that is not JSON (script.eval's result here, as for every Luau to JSON
 		// conversion) is refused with ErrorCode::Script naming its Luau type (an engine value by its type name) and where it
-		// lies in the returned value, so a builder sees what to unpack.
+		// lies in the returned value, so a builder sees what to unpack. (An evaluation converts a vector, Color or Quat: ADR
+		// 0038, friction F01; every other value is refused as before.)
 		TEST_CASE("LuaHelpers: a value that is not JSON is refused naming its Luau type and its place in the value")
 		{
 			Test::ScriptTestFixture fixture;
@@ -338,20 +342,20 @@ return true
 				CHECK(result.error().GetCode() == ErrorCode::Script);
 				return result.error().GetMessageText();
 			};
-			const std::string vector = refusal("return {1, vector.create(1, 2, 3)}");
-			CHECK(vector.contains("vector"));
-			CHECK(vector.contains("[2]"));
-			const std::string quat = refusal("return {Pose = {Speed = 1, Rotation = Quat.New(0, 0, 0, 1)}}");
-			CHECK(quat.contains("Quat"));
-			CHECK(quat.contains("Pose.Rotation"));
+			const std::string function = refusal("return {1, function() end}");
+			CHECK(function.contains("function"));
+			CHECK(function.contains("[2]"));
+			const std::string generator = refusal("return {Pose = {Speed = 1, Generator = Random.New(1)}}");
+			CHECK(generator.contains("RandomGenerator"));
+			CHECK(generator.contains("Pose.Generator"));
 			const std::string quoted = refusal("return {[\"two words\"] = {function() end}}");
 			CHECK(quoted.contains("function"));
 			CHECK(quoted.contains("[\"two words\"][1]"));
 			// A reserved word is no field name in Luau (Pose.end does not parse), so it is quoted like any other key.
-			const std::string reserved = refusal("return {Pose = {[\"end\"] = {vector.create(1, 2, 3)}}}");
+			const std::string reserved = refusal("return {Pose = {[\"end\"] = {function() end}}}");
 			CHECK(reserved.contains("Pose[\"end\"][1]"));
-			const std::string root = refusal("return vector.create(1, 2, 3)");
-			CHECK(root.contains("vector"));
+			const std::string root = refusal("return Random.New(1)");
+			CHECK(root.contains("RandomGenerator"));
 			CHECK_FALSE(root.contains("["));
 			const auto unpacked = fixture.Evaluate("local v = vector.create(1, 2, 3)\nreturn {1, {v.x, v.y, v.z}}");
 			REQUIRE_MESSAGE(unpacked.has_value(), (unpacked ? "" : unpacked.error().ToString()));
@@ -371,15 +375,52 @@ return true
 				CHECK(result.error().GetCode() == ErrorCode::Script);
 				return result.error().GetMessageText();
 			};
-			const std::string deep = refusal("return {{{{{{{{{{vector.create(1, 2, 3)}}}}}}}}}}");
-			CHECK(deep.contains("vector value at ...[1][1][1][1][1][1][1][1] is not"));
-			const std::string longKey = refusal("return {[string.rep(\"k\", 40) .. \" x\"] = vector.create(1, 2, 3)}");
+			const std::string deep = refusal("return {{{{{{{{{{function() end}}}}}}}}}}");
+			CHECK(deep.contains("function value at ...[1][1][1][1][1][1][1][1] is not"));
+			const std::string longKey = refusal("return {[string.rep(\"k\", 40) .. \" x\"] = function() end}");
 			CHECK(longKey.contains(std::format("at [\"{}...\"] is not", std::string(32, 'k'))));
 			// "\195\169" is the two bytes of U+00E9, whose second byte would be the 33rd: the cut keeps neither.
-			const std::string utf8Key = refusal("return {[string.rep(\"k\", 31) .. \"\\195\\169 x\"] = vector.create(1, 2, 3)}");
+			const std::string utf8Key = refusal("return {[string.rep(\"k\", 31) .. \"\\195\\169 x\"] = function() end}");
 			CHECK(utf8Key.contains(std::format("at [\"{}...\"] is not", std::string(31, 'k'))));
-			const std::string control = refusal("return {[\"a\\1b\"] = vector.create(1, 2, 3)}");
+			const std::string control = refusal("return {[\"a\\1b\"] = function() end}");
 			CHECK(control.contains(R"(at ["a\x01b"] is not)"));
+		}
+		// ADR 0038, friction F01: an evaluation's result (script.eval's) holds a vector, a Color or a Quat as reflection's
+		// JSON spelling, the array of its components, at any depth of the returned value, as graph.liveValues reads them;
+		// a non-finite component is refused like a non-finite number. Scene parameters, which a replay header stores, stay
+		// strict JSON.
+		TEST_CASE("LuaHelpers: an evaluation returns vectors, Colors and Quats as arrays of their components at any depth")
+		{
+			Test::ScriptTestFixture fixture;
+			auto scene = CreateRef<SceneData>();
+			scene->Document = CreateRef<const Json>(Json::object());
+			fixture.GetAssetManager().Publish(AssetHandle(77), scene, "Assets/Next.scene");
+			REQUIRE(fixture.Start());
+			const auto root = fixture.Evaluate("return vector.create(1, 2.5, -3)");
+			REQUIRE_MESSAGE(root.has_value(), (root ? "" : root.error().ToString()));
+			CHECK(root->Value.Get() == Json::array({ 1.0, 2.5, -3.0 }));
+			const auto nested = fixture.Evaluate("return {Ball = {Velocity = vector.create(0, -9.5, 4), Tint = Color.New(1, 0.5, 0.25, 0.75)}, "
+												 "Poses = {{Quat.Identity()}, {}}, Count = 2}");
+			REQUIRE_MESSAGE(nested.has_value(), (nested ? "" : nested.error().ToString()));
+			const Json components = {
+				{ "Ball", { { "Tint", Json::array({ 1.0, 0.5, 0.25, 0.75 }) }, { "Velocity", Json::array({ 0.0, -9.5, 4.0 }) } } },
+				{ "Count", 2 },
+				{ "Poses", Json::array({ Json::array({ Json::array({ 0.0, 0.0, 0.0, 1.0 }) }), Json::object() }) },
+			};
+			CHECK(nested->Value.Get() == components);
+			{
+				Test::ExpectLog expected(LogLevel::Error, "non-finite");
+				const auto infinite = fixture.Evaluate("return {Speed = vector.create(math.huge, 0, 0)}");
+				REQUIRE_FALSE(infinite.has_value());
+				CHECK(infinite.error().GetCode() == ErrorCode::Script);
+			}
+			{
+				Test::ExpectLog expected(LogLevel::Error, "is not a JSON scalar or table");
+				const auto parameters = fixture.Evaluate("Scene.Load(Assets.Load('Assets/Next.scene'), {Start = vector.create(1, 2, 3)}) return true");
+				REQUIRE_FALSE(parameters.has_value());
+				CHECK(parameters.error().GetMessageText().contains("vector value at Start"));
+				CHECK_FALSE(fixture.RequestedScene.IsValid());
+			}
 		}
 		TEST_CASE("LuaHelpers: scene JSON budgets reject expansion before host mutation and recover for valid aliases")
 		{
@@ -403,9 +444,9 @@ return true
 				Test::ExpectLog expected(LogLevel::Error, "native budget");
 				CHECK_FALSE(fixture.Evaluate(source));
 				CHECK(expected.GetMatchCount() == 1);
-				REQUIRE_FALSE(fixture.Errors.empty());
-				CHECK(fixture.Errors.back().Kind == ScriptErrorKind::Runtime);
-				CHECK(fixture.Errors.back().Line > 0);
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				CHECK(fixture.EvaluationFailure->Kind == ScriptErrorKind::Runtime);
+				CHECK(fixture.EvaluationFailure->Line > 0);
 				CHECK_FALSE(fixture.RequestedScene.IsValid());
 				CHECK(fixture.RequestedParameters.is_null());
 				CHECK(fixture.ExternalMutations.empty());
@@ -505,10 +546,10 @@ return ok
 				CHECK(expected.GetMatchCount() == 1);
 			}
 			armed = false;
-			REQUIRE_FALSE(fixture.Errors.empty());
-			CHECK(fixture.Errors.back().Kind == ScriptErrorKind::Timeout);
-			CHECK(fixture.Errors.back().Line > 0);
-			CHECK_FALSE(fixture.Errors.back().Script.empty());
+			REQUIRE(fixture.EvaluationFailure.has_value());
+			CHECK(fixture.EvaluationFailure->Kind == ScriptErrorKind::Timeout);
+			CHECK(fixture.EvaluationFailure->Line > 0);
+			CHECK_FALSE(fixture.EvaluationFailure->Script.empty());
 			CHECK_FALSE(fixture.RequestedScene.IsValid());
 			CHECK(fixture.RequestedParameters.is_null());
 			CHECK(fixture.ExternalMutations.empty());
@@ -539,9 +580,9 @@ return true
 			const auto failure = fixture.Evaluate("local function inner()\n return Probe.Float(math.huge)\nend\nreturn inner()");
 			CHECK_FALSE(failure);
 			CHECK(expected.GetMatchCount() == 1);
-			REQUIRE_FALSE(fixture.Errors.empty());
-			CHECK(fixture.Errors.back().Line == 2);
-			CHECK(fixture.Errors.back().Message.find("Probe.Float") != std::string::npos);
+			REQUIRE(fixture.EvaluationFailure.has_value());
+			CHECK(fixture.EvaluationFailure->Line == 2);
+			CHECK(fixture.EvaluationFailure->Message.find("Probe.Float") != std::string::npos);
 		}
 		TEST_CASE("LuaHelpers: checks reject coercions fractional integers and narrowing overflow")
 		{
@@ -831,10 +872,10 @@ return pcall(function() setFields({Data = data}) end)
 			armed = false;
 			CHECK(fixture.GetScene().FindEntityByID(id).GetComponent<ScriptComponent>().Scripts.front().Fields == before);
 			CHECK(fixture.ExternalMutations.empty());
-			REQUIRE_FALSE(fixture.Errors.empty());
-			CHECK(fixture.Errors.back().Kind == ScriptErrorKind::Timeout);
-			CHECK(fixture.Errors.back().Line > 0);
-			CHECK_FALSE(fixture.Errors.back().Script.empty());
+			REQUIRE(fixture.EvaluationFailure.has_value());
+			CHECK(fixture.EvaluationFailure->Kind == ScriptErrorKind::Timeout);
+			CHECK(fixture.EvaluationFailure->Line > 0);
+			CHECK_FALSE(fixture.EvaluationFailure->Script.empty());
 			CheckHelperScript(fixture, R"(
 local script = self.Entity:GetComponent("Script")
 -- The entity's one script slot (Script version 2): its Fields are written with the whole list.

@@ -96,7 +96,10 @@ return Script.Define("Owner", Owner)
         element = fields[1]["schema"]["items"]
         self.assertEqual((element["default"], element["minimum"], element["maximum"]), (2, 1, 5))
 
-    def test_edit_eval_is_read_only_and_errors_survive_vm_replacement(self) -> None:
+    def test_edit_eval_is_read_only_and_its_failure_is_the_callers(self) -> None:
+        # Each edit evaluation runs in a fresh read-only VM. A refused write fails it with its located error in the
+        # response's scriptError; the failure is the caller's, so script.errors never lists it (ADR 0038, friction F01).
+        # Its value holds a vector, Color or Quat as the array of its components.
         client, _ = self.open_editor_with_scene()
         client.call("entity.create", {"name": "Before"})
         before = client.call("entity.get", {"entity": "/Before"})["entity"]
@@ -107,14 +110,14 @@ return Script.Define("Owner", Owner)
         with self.assertRaises(engine_client.EngineError) as readonly:
             client.call("script.eval", {"context": "edit", "code": 'Scene.FindByName("Before").Name = "After"'})
         self.assert_engine_error(readonly.exception, engine_client.SCRIPT_ERROR, "Script")
-        self.assertIn("scriptError", readonly.exception.data)
+        self.assertIn("read-only", readonly.exception.data["scriptError"]["message"])
         self.assertEqual(client.call("entity.get", {"entity": "/Before"})["entity"], before)
-        errors = client.call("script.errors", {"since": cursor, "limit": 1})
-        self.assertEqual(len(errors["errors"]), 1)
-        self.assertIn("read-only", errors["errors"][0]["message"])
-        client.call("script.eval", {"context": "edit", "code": "1 + 2"})
-        self.assertFalse(client.call("script.errors", {"since": errors["nextCursor"]})["errors"])
-        self.assertEqual(client.call("script.errors", {"since": cursor})["errors"], errors["errors"])
+        self.assertFalse(client.call("script.errors", {"since": cursor})["errors"])
+        self.assertFalse(client.call("script.errors")["errors"])
+        values = client.call("script.eval", {"context": "edit", "code":
+                                             "return {At = vector.create(1, 2, 3), Pose = {Quat.Identity()}, "
+                                             "Tint = Color.New(1, 0.5, 0, 1)}"})
+        self.assertEqual(values["value"], {"At": [1, 2, 3], "Pose": [[0, 0, 0, 1]], "Tint": [1, 0.5, 0, 1]})
 
     def test_script_errors_keep_bounded_messages_and_report_evictions(self) -> None:
         client, _ = self.open_editor_with_scene()

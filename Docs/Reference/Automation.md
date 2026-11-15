@@ -664,14 +664,14 @@ Example: Undo the last command.
 
 ### editor.screenshot
 
-Requests a fresh editor UI frame, including while minimized, waits for that frame and captures the whole editor. Downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).
+Requests a fresh editor UI frame, including while minimized, waits for that frame and captures the whole editor. Downscales it to maxDimension (default 1024) and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).
 
 - Flags: tool `editor_screenshot`, pending
 - Timeout: 60 s
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `maxDimension` | `UInt32` |  | `1024` | The larger side of the PNG at most this many pixels. |
+| `maxDimension` | `UInt32` |  | `1024` | The larger side of the PNG at most this many pixels (default 1024), the image downscaled to fit. |
 | `keep` | `Bool` |  | `false` | Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project), which no later editor session prunes, instead of Library/Automation/Out/. |
 
 | Result | Type | Description |
@@ -2786,7 +2786,7 @@ Example: Create a behaviour.
 
 ### script.errors
 
-Reads retained script errors without clearing them, including updated repeat counts.
+Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's.
 
 - Flags: tool `script_errors`, runtime, batch, scene target
 - Timeout: 60 s
@@ -2810,7 +2810,7 @@ Example: Read errors from the beginning.
 
 ### script.eval
 
-Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership.
+Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors.
 
 - Flags: tool `script_eval`, runtime, scene target
 - Timeout: 60 s
@@ -2825,7 +2825,7 @@ Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys 
 
 | Result | Type | Description |
 |---|---|---|
-| `value` | `Variant` | First returned finite, acyclic JSON value. |
+| `value` | `Variant` | First returned finite, acyclic JSON value; a vector, Color or Quat at any depth as the array of its components ([x, y, z], [r, g, b, a], [x, y, z, w]). |
 | `prints` | `Array<String>` | Printed messages in call order. |
 
 Example: Evaluate an expression during play.
@@ -3020,12 +3020,14 @@ Example: Swap in shaders rebuilt by CompileShaders.py.
 
 ### stats.get
 
-Reads host and displayed-view statistics without waiting for the GPU or advancing a frame.
+Reads host and displayed-view statistics without waiting for the GPU or advancing a frame; views: false leaves the per-view render statistics out.
 
 - Flags: dry run, runtime, batch
 - Timeout: 60 s
 
-Param: none.
+| Param | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `views` | `Bool` |  | `true` | Optional: false leaves out the per-view render statistics (views is empty), for a counter read such as a soak check's entities, bodies, voices and heap; true, the default, reports them. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -3050,6 +3052,12 @@ Example: Inspect current host and renderer observations.
 
 ```json
 {}
+```
+
+Example: Read the counters only, without the per-view render statistics.
+
+```json
+{"views":false}
 ```
 
 ## terrain
@@ -3140,7 +3148,7 @@ Runs configured tests and returns every outcome (counts, failedCases and the cas
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `filter` | `String` |  | `""` | Case-insensitive substring of suite/case or replay path. |
+| `filter` | `String` |  | `""` | Case-insensitive substring of suite/case or replay path; a filtered run resolves and validates only the suites and replays it selects. |
 | `timeoutTicks` | `UInt32` |  | `0` | Optional positive run-wide tick cap; omitted means no additional limit. |
 | `record` | `String` |  | `""` | Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written. |
 | `coverage` | `Bool` |  | `false` | Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them. |
@@ -3363,7 +3371,7 @@ Example: Query the centre of the default scene viewport.
 
 ### viewport.screenshot
 
-Renders a view of the target scene afresh at width x height (the game view through the primary camera, the editor's scene view, or a camera entity), downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).
+Renders a view of the target scene afresh at width x height (the game view through the primary camera, the editor's scene view, or a camera entity), downscales it to maxDimension (by default the requested size, or 1024 without width and height) and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).
 
 - Flags: tool `viewport_screenshot`, runtime, scene target
 - Timeout: 60 s
@@ -3378,7 +3386,7 @@ Renders a view of the target scene afresh at width x height (the game view throu
 | `camera` | `String` |  | `""` | A camera entity of the target scene (an EntityRef) to render through instead of the view's camera. |
 | `debugView` | `String` |  | `""` | A debug view to render instead of the lit image: a RenderDebugView name, ignoring case ("Lit", the default, also for ""). A data view stores each value v as round(255 v), except LightCount's heat map: 0 lights black, 1 to 2 blue, 3 to 4 cyan, 5 to 8 green, 9 to 16 yellow, 17 to 32 orange (1, 0.5, 0), more red. |
 | `annotate` | `Variant` |  | `null` | Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected. |
-| `maxDimension` | `UInt32` |  | `1024` | The larger side of the PNG at most this many pixels. |
+| `maxDimension` | `UInt32` |  | `1024` | The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when either is given, so the PNG has the requested size, and 1024 otherwise. |
 | `inline` | `Bool` |  | `false` | Also return the PNG as base64 in "data" when it is at most 30 KB; a larger one is only written (inlineOmitted). |
 | `keep` | `Bool` |  | `false` | Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project and in the Runtime), which no later editor session prunes, instead of Library/Automation/Out/. |
 

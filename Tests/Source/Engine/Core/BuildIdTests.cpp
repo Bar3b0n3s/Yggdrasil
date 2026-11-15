@@ -1,8 +1,6 @@
 #include "TestsPCH.h"
 #include "Engine/Core/BuildId.h"
 
-#include "Engine/Asset/ReplayData.h"
-
 #include <string>
 #include <string_view>
 
@@ -48,13 +46,12 @@ namespace Engine {
 
 		// The reservation ledgers own the version (Docs/Decisions/0028-backlog-program.md): the last lander of each phase
 		// bumps its minor version, 0.3.0 at M23's landing, phase 2's last (Docs/Decisions/0034-m23-contract.md decision 17), and 0.4.0
-		// at M26's, phase 3's last (Docs/Decisions/0037-m26-contract.md decision 19).
-		// Replay headers keep their own constant, so the bump rewrites no replay.
-		TEST_CASE("BuildId: the engine version is phase 3's, and replay headers keep their own")
+		// at M26's, phase 3's last (Docs/Decisions/0037-m26-contract.md decision 19). A new recording's replay header records
+		// it too (ADR 0038, friction F10: ReplayMethodsTests), while the replays recorded before keep "0.1.0".
+		TEST_CASE("BuildId: the engine version is phase 3's")
 		{
 			CHECK(EngineVersionString == "0.4.0");
 			CHECK(GetBuildId().Version == "0.4.0");
-			CHECK(ReplayEngineVersionString == "0.1.0");
 		}
 	}
 

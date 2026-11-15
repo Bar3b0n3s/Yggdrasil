@@ -897,7 +897,7 @@ namespace Engine {
 			operation = m_State->Execute(call, script, entity);
 			if (!operation)
 				return 0;
-			auto json = Detail::SandboxAccess::ReadJson(call, -1);
+			auto json = Detail::SandboxAccess::ReadJson(call, -1, Detail::SandboxAccess::JsonEngineValues::Components);
 			if (!json)
 			{
 				ErrorLocation location{};

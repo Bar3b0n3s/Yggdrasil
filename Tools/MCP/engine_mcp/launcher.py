@@ -1,6 +1,6 @@
 """Launch or attach (Docs/Architecture.md §13.8 "Launch or attach", §4.13): two processes never write the same project.
 
-editor_launch {project, create?, template?, headless?, renderer?, recover?}:
+editor_launch {project, create?, template?, headless?, renderer?, headlessGameView?, recover?}:
   1. A live session file whose projectPath names the project (engine_client.find_session): attach to that editor, whose
      automation server is listening (it runs with --automation or "Allow AI automation"). Nothing is spawned. With
      recover this is an error: that editor has the project open, and only its own Recover prompt can adopt the autosave.
@@ -10,8 +10,11 @@ editor_launch {project, create?, template?, headless?, renderer?, recover?}:
   3. Otherwise spawn bin/<cfg>-<sys>-<arch>/Editor/Editor(.exe) (Release preferred; a missing binary is an error naming
      "python Scripts/Build.py --config Release --project Editor") in the launcher state with --automation (headless:
      --headless; renderer: --renderer none by default, so a launch needs no GPU; "vulkan" serves viewport_screenshot and
-     editor_screenshot, which a --renderer none editor answers with Unsupported), and supervise it. With create, the
-     project is created through project.create (template: one of project.create's, Empty or Basic3D). An existing
+     editor_screenshot, which a --renderer none editor answers with Unsupported; headlessGameView: --headless-game-view,
+     so a headless rendering editor also renders its game view every frame, as the soak's editors do, and stats.get
+     reports it; it needs headless and renderer "vulkan", and is a ValueError, nothing spawned, otherwise (ADR 0038,
+     friction F12)), and supervise it. With create, the project is created through project.create (template: one of
+     project.create's, Empty or Basic3D). An existing
      project opens through project.open {path, recover}, never through --project, so whatever opening it writes (the
      .meta files of new sources) is attributed to that transcribed request (§13.12 rule 2;
      Docs/Decisions/0026-m16-contract.md decision 11). project.open is also the one path that can adopt a recovery
@@ -158,6 +161,8 @@ class LaunchRequest:
     template: str = "Empty"
     headless: bool = True
     renderer: str = "none"
+    # --headless-game-view: the headless rendering editor renders its game view too (ADR 0038, friction F12).
+    headless_game_view: bool = False
     recover: bool = False
 
 
@@ -207,7 +212,8 @@ class Launcher:
 
     def launch(self, request: LaunchRequest, cancelled: threading.Event | None = None) -> EditorConnection:
         """editor_launch (see the module comment); `cancelled` is set when the client cancels the tool call. Raises
-        EditorAlreadyOpen, FileNotFoundError for a missing binary, locks.LockUnavailable when a gate or another GPU run
+        EditorAlreadyOpen, ValueError for an unknown renderer or for headlessGameView without headless and renderer
+        vulkan, FileNotFoundError for a missing binary, locks.LockUnavailable when a gate or another GPU run
         kept the machine-wide locks for lock_wait_seconds, LaunchCancelled when `cancelled` was set while the launch
         waited for them (nothing is spawned then), or RuntimeError when the spawned editor exits before it listens (with
         its exit code), when
@@ -217,6 +223,9 @@ class Launcher:
         editor is killed, since no connection to it is returned."""
         if request.renderer not in RENDERERS:
             raise ValueError(f"renderer must be one of {', '.join(RENDERERS)} (got '{request.renderer}')")
+        if request.headless_game_view and (not request.headless or request.renderer != "vulkan"):
+            raise ValueError("headlessGameView renders the game view of a headless rendering editor: it needs headless "
+                             "and renderer \"vulkan\"")
         project = self.resolve_project(request.project)
         project_file = find_project_file(project)
         if project_file is None and not request.create:
@@ -237,7 +246,8 @@ class Launcher:
         # A launcher-state editor, which creates or opens the project through a transcribed request, so every write of
         # the creation or the open (the .meta files the open's scan writes for new sources) is attributed to it.
         executable = engine_client.find_editor_executable(self.repository_root, self.configurations)
-        arguments = ["--automation", "--renderer", request.renderer, *(["--headless"] if request.headless else [])]
+        arguments = ["--automation", "--renderer", request.renderer, *(["--headless"] if request.headless else []),
+                     *(["--headless-game-view"] if request.headless_game_view else [])]
         hold = self.take_machine_locks(request.renderer, project, cancelled)
         try:
             editor = engine_client.launch_editor(executable, arguments, self.user_data_directory(), self.app_name)

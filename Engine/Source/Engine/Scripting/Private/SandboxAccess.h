@@ -4,6 +4,7 @@
 #include "Engine/Scripting/Private/ScriptCall.h"
 #include "Engine/Scripting/Sandbox.h"
 
+#include <cstdint>
 #include <span>
 
 namespace Engine {
@@ -43,12 +44,22 @@ namespace Engine {
 		// own stack guards and traceback capture through public Luau APIs; ScriptEngine alone publishes runtime errors.
 		struct SandboxAccess
 		{
+			// How ReadJson converts a vector, a Color or a Quat: refused like every other value that is not JSON (scene
+			// parameters, Variant values), or as the array of its finite components, reflection's JSON spelling ([x, y, z],
+			// [r, g, b, a], [x, y, z, w]), at any depth: an evaluation's result (ADR 0038, friction F01).
+			enum class JsonEngineValues : uint8_t
+			{
+				Refuse,
+				Components
+			};
+
 			// Shared evaluation/binding conversion. Protected entry only; leaves the stack unchanged. Rejects cycles,
-			// non-JSON values and depth > MaxJsonDepth. Repeated aliases count on every expansion: the native allowance
-			// is min(4 MiB, VM soft limit), charged 256 bytes per value/entry and four per string/key byte. This bounds
-			// temporary/output storage separately from VM allocations. Limit rejection is Script (Runtime), not a VM
-			// allocator breach; the caller may continue after cleanup. Polls the inherited safety deadline throughout.
-			[[nodiscard]] static Result<Json> ReadJson(ScriptCall& call, int index);
+			// values that are not JSON (but the engine values `engineValues` converts) and depth > MaxJsonDepth. Repeated
+			// aliases count on every expansion: the native allowance is min(4 MiB, VM soft limit), charged 256 bytes per
+			// value/entry and four per string/key byte. This bounds temporary/output storage separately from VM allocations.
+			// Limit rejection is Script (Runtime), not a VM allocator breach; the caller may continue after cleanup. Polls the
+			// inherited safety deadline throughout.
+			[[nodiscard]] static Result<Json> ReadJson(ScriptCall& call, int index, JsonEngineValues engineValues = JsonEngineValues::Refuse);
 
 			// Appends to the active evaluation's ordered print sink; otherwise a no-op. Never writes a log entry.
 			// The registered Log.Info/print callback owns logging, so forwarding here cannot duplicate its output.

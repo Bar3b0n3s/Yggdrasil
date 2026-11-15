@@ -124,7 +124,7 @@ namespace Engine {
 		[[nodiscard]] Result<std::string> ValidateReplayOutput(std::string_view path) const override;
 		[[nodiscard]] Result<std::string> WriteReplay(std::string_view path, const ReplayDocument& document) override;
 		[[nodiscard]] ScriptErrorStream* GetScriptErrors() const override;
-		[[nodiscard]] Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity, std::string_view behaviour) override;
+		[[nodiscard]] Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity, std::string_view behaviour, std::optional<ScriptError>& failure) override;
 		[[nodiscard]] std::string GetClientName(ClientId client) const override;
 		[[nodiscard]] EventLog& GetEventLog() const override;
 		[[nodiscard]] Result<Image> CaptureView(const RenderSnapshot& snapshot, const ViewportScreenshotRequest& request) override;

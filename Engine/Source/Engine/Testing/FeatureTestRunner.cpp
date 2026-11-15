@@ -46,6 +46,19 @@ namespace Engine {
 				|| filter.empty();
 		}
 
+		// The cases of `description` that `filter` selects, by index: those whose "<suite>/<case>" it matches; none, for a
+		// suite without cases whose name it matches; nullopt when it selects nothing of the suite.
+		std::optional<std::vector<size_t>> SelectCases(const TestSuiteDescription& description, std::string_view filter)
+		{
+			std::vector<size_t> cases;
+			for (size_t index = 0; index < description.Cases.size(); ++index)
+				if (Matches(description.Name + "/" + description.Cases[index].Name, filter))
+					cases.push_back(index);
+			if (cases.empty() && (!description.Cases.empty() || !Matches(description.Name, filter)))
+				return std::nullopt;
+			return cases;
+		}
+
 		bool Passed(const TestCaseResult& row)
 		{
 			return row.Failures.empty() && (row.Status == "passed" || row.Status == "skipped" || (row.Status == "quit" && row.QuitExpected));
@@ -1446,6 +1459,38 @@ namespace Engine {
 	}
 	FeatureTestRunner::~FeatureTestRunner() = default;
 
+	bool FeatureTestRunner::MatchesFilter(std::string_view text, std::string_view filter)
+	{
+		return Matches(text, filter);
+	}
+
+	Result<TestSuiteDescription> FeatureTestRunner::DiscoverSuite(IFeatureTestHost& host, const TestSuiteSettings& settings, TestSuiteSettings::Mode mode)
+	{
+		State scratch;
+		scratch.Host = &host;
+		ENGINE_TRY_ASSIGN(scratch.Session, host.CreateSuiteSession(settings, mode, scratch, scratch));
+		if (!scratch.Session || !scratch.Session->GetScripts())
+			return MakeError(ErrorCode::InvalidState, "suite discovery needs a script session");
+		ENGINE_TRY_ASSIGN(auto asset, host.ResolveTestScript(settings.Script));
+		ENGINE_TRY_ASSIGN(auto collected, scratch.Session->GetScripts()->CollectSuite(asset, scratch));
+		TestSuiteDescription description;
+		description.Name = collected.Name;
+		description.Script = settings.Script;
+		description.Scene = settings.Scene;
+		description.Modes = settings.Modes;
+		for (const auto& item : collected.Cases)
+			description.Cases.push_back({ item.Name, item.File, item.Line, item.TimeoutTicks == 0 ? host.GetProjectSettings().Testing.CaseTimeoutTicks : item.TimeoutTicks });
+		return description;
+	}
+
+	Result<std::vector<std::string>> FeatureTestRunner::DiscoverReplays(IFeatureTestHost& host)
+	{
+		ENGINE_TRY_ASSIGN(std::vector<std::string> replays, host.ExpandReplayPaths(host.GetProjectSettings().Testing.Replays));
+		std::sort(replays.begin(), replays.end());
+		replays.erase(std::unique(replays.begin(), replays.end()), replays.end());
+		return replays;
+	}
+
 	Result<TestInventory> FeatureTestRunner::Discover(IFeatureTestHost& host, TestSuiteSettings::Mode mode)
 	{
 		if (mode != TestSuiteSettings::Mode::Editor && mode != TestSuiteSettings::Mode::Release && mode != TestSuiteSettings::Mode::Dist)
@@ -1455,25 +1500,10 @@ namespace Engine {
 		{
 			if (std::find(settings.Modes.begin(), settings.Modes.end(), mode) == settings.Modes.end())
 				continue;
-			State scratch;
-			scratch.Host = &host;
-			ENGINE_TRY_ASSIGN(scratch.Session, host.CreateSuiteSession(settings, mode, scratch, scratch));
-			if (!scratch.Session || !scratch.Session->GetScripts())
-				return MakeError(ErrorCode::InvalidState, "suite discovery needs a script session");
-			ENGINE_TRY_ASSIGN(auto asset, host.ResolveTestScript(settings.Script));
-			ENGINE_TRY_ASSIGN(auto collected, scratch.Session->GetScripts()->CollectSuite(asset, scratch));
-			TestSuiteDescription description;
-			description.Name = collected.Name;
-			description.Script = settings.Script;
-			description.Scene = settings.Scene;
-			description.Modes = settings.Modes;
-			for (const auto& item : collected.Cases)
-				description.Cases.push_back({ item.Name, item.File, item.Line, item.TimeoutTicks == 0 ? host.GetProjectSettings().Testing.CaseTimeoutTicks : item.TimeoutTicks });
+			ENGINE_TRY_ASSIGN(TestSuiteDescription description, DiscoverSuite(host, settings, mode));
 			inventory.Suites.push_back(std::move(description));
 		}
-		ENGINE_TRY_ASSIGN(inventory.Replays, host.ExpandReplayPaths(host.GetProjectSettings().Testing.Replays));
-		std::sort(inventory.Replays.begin(), inventory.Replays.end());
-		inventory.Replays.erase(std::unique(inventory.Replays.begin(), inventory.Replays.end()), inventory.Replays.end());
+		ENGINE_TRY_ASSIGN(inventory.Replays, DiscoverReplays(host));
 		return inventory;
 	}
 
@@ -1492,29 +1522,46 @@ namespace Engine {
 		for (size_t index = 0; index < options.RecordExpect.size(); ++index)
 			if (options.RecordExpect[index].Tick != options.RecordExpectBytecode[index].Tick)
 				return MakeError(ErrorCode::InvalidArgument, "recording expectation {} is at tick {}, its compiled form at tick {}", index, options.RecordExpect[index].Tick, options.RecordExpectBytecode[index].Tick);
-		ENGINE_TRY_ASSIGN(auto inventory, Discover(host, options.Mode));
+		if (options.Mode != TestSuiteSettings::Mode::Editor && options.Mode != TestSuiteSettings::Mode::Release && options.Mode != TestSuiteSettings::Mode::Dist)
+			return MakeError(ErrorCode::InvalidArgument, "test discovery requires Editor, Release or Dist mode");
 		auto next = CreateScope<State>();
 		next->Host = &host;
 		next->Options = options;
 		next->ReportData.Mode = options.Mode;
-		size_t inventoryIndex = 0;
 		const auto& suites = host.GetProjectSettings().Testing.Suites;
 		for (size_t settingsIndex = 0; settingsIndex < suites.size(); ++settingsIndex)
 		{
 			const TestSuiteSettings& settings = suites[settingsIndex];
 			if (std::find(settings.Modes.begin(), settings.Modes.end(), options.Mode) == settings.Modes.end())
 				continue;
+			Result<TestSuiteDescription> description = DiscoverSuite(host, settings, options.Mode);
+			if (!description)
+			{
+				// ADR 0038, friction F03: a filtered run resolves and validates only the suites its filter selects. A suite
+				// that does not resolve (a scene not made yet) is collected again without its scene, to read its declared name
+				// and cases: when the filter selects none of them, the run leaves it out; otherwise, or when even that
+				// collection fails, it refuses the run as an unfiltered one does.
+				if (options.Filter.empty())
+					return std::unexpected(description.error());
+				TestSuiteSettings sceneless = settings;
+				sceneless.Scene.clear();
+				const Result<TestSuiteDescription> declared = DiscoverSuite(host, sceneless, options.Mode);
+				if (!declared || SelectCases(*declared, options.Filter).has_value())
+					return std::unexpected(description.error());
+				continue;
+			}
+			std::optional<std::vector<size_t>> cases = SelectCases(*description, options.Filter);
+			if (!cases.has_value())
+				continue;
 			State::Selection selection;
 			selection.Settings = settings;
 			selection.SettingsIndex = settingsIndex;
-			selection.Description = inventory.Suites[inventoryIndex++];
-			for (size_t i = 0; i < selection.Description.Cases.size(); ++i)
-				if (Matches(selection.Description.Name + "/" + selection.Description.Cases[i].Name, options.Filter))
-					selection.Cases.push_back(i);
-			if (!selection.Cases.empty() || (selection.Description.Cases.empty() && Matches(selection.Description.Name, options.Filter)))
-				next->Selected.push_back(std::move(selection));
+			selection.Description = std::move(*description);
+			selection.Cases = std::move(*cases);
+			next->Selected.push_back(std::move(selection));
 		}
-		for (const auto& path : inventory.Replays)
+		ENGINE_TRY_ASSIGN(const std::vector<std::string> replays, DiscoverReplays(host));
+		for (const auto& path : replays)
 			if (Matches(path, options.Filter))
 				next->Replays.push_back(path);
 		if (options.Record && next->Selected.size() != 1)

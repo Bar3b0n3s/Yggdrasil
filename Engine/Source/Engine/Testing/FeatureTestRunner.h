@@ -179,6 +179,14 @@ namespace Engine {
 		// Collects in scratch sessions, releases all references/sessions and leaves no active session behind. Does not
 		// execute cases. Settings order is preserved; replay globs are de-duplicated and sorted by canonical path.
 		[[nodiscard]] static Result<TestInventory> Discover(IFeatureTestHost& host, TestSuiteSettings::Mode mode);
+		// Whether a run's filter selects `text` ("<suite>/<case>", a suite's name or a replay's path): `filter` is an ASCII
+		// case-insensitive substring of it, and the empty filter selects everything.
+		[[nodiscard]] static bool MatchesFilter(std::string_view text, std::string_view filter);
+		// Selects the suites of options.Mode and their cases the filter selects (FeatureTestSelection), resolving and
+		// collecting each in a scratch session as Discover does, and the replays it matches. ADR 0038 (friction F03): a
+		// filtered run validates only what it selects. A suite that does not resolve is collected again with no scene, for
+		// its declared name and cases; one the filter then selects nothing of is left out, and any other failure (the filter
+		// selects it, or it cannot be collected at all) refuses the run with the suite's own error, as an unfiltered run does.
 		[[nodiscard]] Status Begin(IFeatureTestHost& host, const FeatureTestRunOptions& options = {});
 		// One bounded unit: a collection/teardown transition, one ManualClock tick, or one ScriptedClock frame (0..N
 		// fixed steps + exactly one frame phase). true means complete. Host wall budgets may partition calls only.
@@ -241,6 +249,10 @@ namespace Engine {
 		[[nodiscard]] std::string GetPhase() const;
 	private:
 		struct State;
+		// One suite as Discover collects it: in a scratch session of its scene, its declared name and cases.
+		[[nodiscard]] static Result<TestSuiteDescription> DiscoverSuite(IFeatureTestHost& host, const TestSuiteSettings& settings, TestSuiteSettings::Mode mode);
+		// The replay globs' paths, de-duplicated and sorted by canonical path.
+		[[nodiscard]] static Result<std::vector<std::string>> DiscoverReplays(IFeatureTestHost& host);
 		Scope<State> m_State{};
 	};
 

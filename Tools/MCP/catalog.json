@@ -514,7 +514,7 @@
 		{
 			"name": "editor_screenshot",
 			"method": "editor.screenshot",
-			"description": "Requests a fresh editor UI frame, including while minimized, waits for that frame and captures the whole editor. Downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
+			"description": "Requests a fresh editor UI frame, including while minimized, waits for that frame and captures the whole editor. Downscales it to maxDimension (default 1024) and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "EditorScreenshotParams",
@@ -522,7 +522,7 @@
 				"type": "object",
 				"properties": {
 					"maxDimension": {
-						"description": "The larger side of the PNG at most this many pixels.",
+						"description": "The larger side of the PNG at most this many pixels (default 1024), the image downscaled to fit.",
 						"type": "integer",
 						"minimum": 1,
 						"maximum": 8192
@@ -3067,7 +3067,7 @@
 		{
 			"name": "script_errors",
 			"method": "script.errors",
-			"description": "Reads retained script errors without clearing them, including updated repeat counts.",
+			"description": "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ScriptErrorsParams",
@@ -3105,7 +3105,7 @@
 		{
 			"name": "script_eval",
 			"method": "script.eval",
-			"description": "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership.",
+			"description": "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ScriptEvalParams",
@@ -3331,7 +3331,7 @@
 				"type": "object",
 				"properties": {
 					"filter": {
-						"description": "Case-insensitive substring of suite/case or replay path.",
+						"description": "Case-insensitive substring of suite/case or replay path; a filtered run resolves and validates only the suites and replays it selects.",
 						"type": "string"
 					},
 					"timeoutTicks": {
@@ -3561,7 +3561,7 @@
 		{
 			"name": "viewport_screenshot",
 			"method": "viewport.screenshot",
-			"description": "Renders a view of the target scene afresh at width x height (the game view through the primary camera, the editor's scene view, or a camera entity), downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
+			"description": "Renders a view of the target scene afresh at width x height (the game view through the primary camera, the editor's scene view, or a camera entity), downscales it to maxDimension (by default the requested size, or 1024 without width and height) and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ViewportScreenshotParams",
@@ -3600,7 +3600,7 @@
 						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected."
 					},
 					"maxDimension": {
-						"description": "The larger side of the PNG at most this many pixels.",
+						"description": "The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when either is given, so the PNG has the requested size, and 1024 otherwise.",
 						"type": "integer",
 						"minimum": 1,
 						"maximum": 8192

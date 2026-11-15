@@ -44,6 +44,7 @@ namespace Engine {
 	class EventLog;
 	class PlaySession;
 	class Scene;
+	struct ScriptError;
 	class ScriptErrorStream;
 	struct ScriptEvaluation;
 	struct PlayStartOptions;
@@ -145,9 +146,9 @@ namespace Engine {
 		// Editor-only, fresh read-only VM over the edit scene, with fields/class links but no lifecycle callbacks.
 		// Entity is an optional EntityRef, resolved at /entity. Behaviour names the Script.Define name of the entity's slot
 		// self binds to, empty for its first slot (ScriptEngine::Evaluate: NotFound when no slot has it). Runtime returns
-		// Unsupported at /context before trying to resolve a nonexistent edit scene. Returns owned value/prints; errors
-		// retain full script error data.
-		[[nodiscard]] virtual Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity, std::string_view behaviour);
+		// Unsupported at /context before trying to resolve a nonexistent edit scene. Returns owned value/prints; a failure
+		// in the VM is the caller's error, whose full script error data `failure` receives (ScriptEngine::Evaluate's).
+		[[nodiscard]] virtual Result<ScriptEvaluation> EvalInEdit(std::string_view code, std::string_view entity, std::string_view behaviour, std::optional<ScriptError>& failure);
 
 		// The display name of `client` (session.hello's client.name, or "batch", "cli", "test" for in-process clients); empty
 		// for NoClient or a client that is gone. play.state reports the lockstep owner by it.

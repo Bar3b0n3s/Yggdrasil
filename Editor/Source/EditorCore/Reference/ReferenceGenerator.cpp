@@ -142,7 +142,7 @@ namespace Engine {
 {"From": {"Node": 4, "Pin": "True"}, "To": {"Node": 5, "Pin": "In"}}, {"From": {"Node": 5, "Pin": "Then"}, "To": {"Node": 6, "Pin": "In"}}]})";
 
 		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 3, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
-"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.1.0", "Config": "Editor",
+"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.4.0", "Config": "Editor",
 "Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
 "Components": {"Transform": "a3c94e0f12b7d685", "Camera": "0c7e2a91f4d3b658"}},
 {"Id": "0000000000000022", "Path": "/Player", "Hash": "91d4c07a3e5b2f86", "Components": {"Transform": "47b0e9d2c61a5f38", "Script": "d8263f5a0b9c4e17"}}],
@@ -1121,8 +1121,8 @@ namespace Engine {
 			properties["Seed"] = IntegerSchema("The session seed.", 0, std::nullopt);
 			properties["FixedHz"] = IntegerSchema("The fixed simulation rate the replay was recorded at.", 1, FrameLoopConfig::MaxFixedHz);
 			properties["EngineVersion"] = StringSchema(
-				"The replay format's engine version, which every recorder writes as \"0.1.0\" (ReplayEngineVersionString) whatever the build, so neither "
-				"a version bump nor a commit rewrites a replay (informational).");
+				"The version of the engine that recorded the replay (its engineVersion, never the build id; replays recorded before ADR 0038 hold "
+				"\"0.1.0\"). Informational: no verification and no state hash reads it.");
 			properties["Config"] = StringSchema("The run mode that recorded the replay (Editor, Release or Dist), never the build configuration; informational.");
 			properties["Fingerprint"] = fingerprint;
 			properties["Events"] = Described(Json{ { "type", "array" }, { "items", ObjectSchema("One input event.", std::move(event), { "Tick", "Type" }) } },

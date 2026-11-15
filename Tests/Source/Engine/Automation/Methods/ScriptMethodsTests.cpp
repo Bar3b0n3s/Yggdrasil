@@ -30,25 +30,43 @@ namespace Engine {
 			return std::move(*result);
 		}
 
+		// Writes Assets/Scripts/Faulty.luau, a behaviour whose `callback` calls a local function that runs `raise` (an error
+		// call), and attaches it to a new root entity "Board": the game's own script errors, which script.errors lists (a failed
+		// script.eval is the caller's, ADR 0038 friction F01).
+		void CreateFaultyBoard(Test::AutomationFixture& fixture, std::string_view callback, std::string_view raise)
+		{
+			CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Faulty.luau" }, { "source", std::format("local Faulty = {{}}\n"
+																															  "local function fail() {} end\n"
+																															  "function Faulty.{}(self: any, ...: any)\n"
+																															  "\tfail()\n"
+																															  "end\n"
+																															  "return Script.Define('Faulty', Faulty)\n",
+																													  raise, callback) } });
+			CallScriptMethod(fixture, "entity.create", Json{ { "name", "Board" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Faulty.luau" } } }) } } } } } });
+		}
+
 	}
 
 	TEST_SUITE("Automation")
 	{
+		// The host's error stream outlives each session: a session's errors stay listed after play.stop, and a cursor taken
+		// before the next play.start reads that session's errors. Each session's occurrence starts its own count, since a new
+		// session forgets the earlier ones' errors (ADR 0038, friction F02).
 		TEST_CASE("ScriptMethods: host error cursors survive play session replacement")
 		{
 			Test::AutomationFixture fixture("ScriptHostHistory");
+			CreateFaultyBoard(fixture, "OnStart", "error('persistent host fault', 0)");
 			Json previous = "0";
 			for (int occurrence = 1; occurrence <= 2; ++occurrence)
 			{
-				CallScriptMethod(fixture, "play.start", Json{ { "paused", true } });
 				{
 					Test::ExpectLog expected(LogLevel::Error, "persistent host fault");
-					CHECK(fixture.Request("script.eval", Json{ { "context", "play" }, { "code", "error('persistent host fault', 0)" } }).contains("error"));
+					CallScriptMethod(fixture, "play.start", Json{ { "paused", true } });
 				}
 				CallScriptMethod(fixture, "play.stop", Json::object());
 				const Json errors = CallScriptMethod(fixture, "script.errors", Json{ { "since", previous } });
 				REQUIRE(errors["errors"].size() == 1);
-				CHECK(errors["errors"][0]["count"] == Json(occurrence));
+				CHECK(errors["errors"][0]["count"] == Json(1));
 				CHECK(errors["nextCursor"] != previous);
 				previous = errors["nextCursor"];
 			}
@@ -149,15 +167,14 @@ namespace Engine {
 		TEST_CASE("ScriptMethods: errors expose locations and tracebacks and advance an exclusive cursor")
 		{
 			Test::AutomationFixture fixture("ScriptErrorCursor");
+			CreateFaultyBoard(fixture, "OnStart", "error('contract error')");
 			const auto eventCursor = fixture.GetEditor().GetEngine().GetEventLog().GetNextSeq();
 			const Json start = CallScriptMethod(fixture, "script.errors", Json{ { "since", "end" } });
 			REQUIRE(start["errors"].empty());
 			const std::string cursor = JsonReader(start["nextCursor"]).ReadString().value_or(std::string());
 			{
 				Test::ExpectLog expected(LogLevel::Error, "contract error");
-				const Json response = fixture.Request("script.eval",
-					Json{ { "context", "edit" }, { "code", "local function fail() error('contract error') end\nfail()" } });
-				CHECK(response.contains("error"));
+				CallScriptMethod(fixture, "play.start", Json{ { "paused", true } });
 				CHECK(expected.GetMatchCount() == 1);
 			}
 			const Json errors = CallScriptMethod(fixture, "script.errors", Json{ { "since", cursor }, { "limit", 1 } });
@@ -172,6 +189,7 @@ namespace Engine {
 			CHECK(Json(raised.Events[0].Message) == error["message"]);
 			const Json next = CallScriptMethod(fixture, "script.errors", Json{ { "since", errors["nextCursor"] } });
 			CHECK(next["errors"].empty());
+			CallScriptMethod(fixture, "play.stop", Json::object());
 		}
 
 		// The entity summary's path is "the entity's path from the scene root", which script.errors left empty. The stream
@@ -261,6 +279,74 @@ namespace Engine {
 			CHECK(after["errors"].empty());
 		}
 
+		// ADR 0038, friction F01: a failed script.eval is the caller's error. It is answered with ScriptError and its located
+		// error in the response's scriptError data, and the game's script errors (script.errors) never list it, in either
+		// context; its value holds vectors, Quats and Colors as arrays.
+		TEST_CASE("ScriptMethods: a failed script.eval answers its caller and is not among the game's script errors")
+		{
+			Test::AutomationFixture fixture("ScriptEvalCallerError");
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true } });
+			const auto eventCursor = fixture.GetEditor().GetEngine().GetEventLog().GetNextSeq();
+			for (const std::string_view context : { "play", "edit" })
+			{
+				CAPTURE(context);
+				Test::ExpectLog expected(LogLevel::Error, "caller fault");
+				const Json response = fixture.Request("script.eval",
+					Json{ { "context", context }, { "code", "local function fail() error('caller fault') end\nfail()" } });
+				REQUIRE(response.contains("error"));
+				const Json& data = response["error"]["data"];
+				CHECK(data["errorCode"] == Json("Script"));
+				REQUIRE_MESSAGE(data.contains("scriptError"), data.dump());
+				CHECK(data["scriptError"]["kind"] == Json("runtime"));
+				CHECK(data["scriptError"]["line"] == Json(1));
+				CHECK(JsonReader(data["scriptError"]["message"]).ReadString().value_or(std::string()).contains("caller fault"));
+				CHECK_FALSE(data["scriptError"]["traceback"].empty());
+			}
+			CHECK(CallScriptMethod(fixture, "script.errors", Json::object())["errors"].empty());
+			CHECK(fixture.GetEditor().GetEngine().GetEventLog().Read(eventCursor, std::array{ EngineEventType::ScriptErrorRaised }).Events.empty());
+			const Json value = CallScriptMethod(fixture, "script.eval",
+				Json{ { "context", "play" }, { "code", "return {Velocity = vector.create(1, 2, 3), Pose = {Rotation = Quat.Identity(), Tint = Color.New(1, 0, 0, 1)}}" } });
+			CHECK(value["value"] == Json{ { "Pose", Json{ { "Rotation", Json::array({ 0, 0, 0, 1 }) }, { "Tint", Json::array({ 1, 0, 0, 1 }) } } }, { "Velocity", Json::array({ 1, 2, 3 }) } });
+			CallScriptMethod(fixture, "play.stop", Json::object());
+		}
+
+		// ADR 0038, friction F02: script.errors reports the current play session's errors. The errors of an earlier session
+		// stay listed after it stops, until a new session starts; a cursor taken before that start still reads exactly the new
+		// session's errors, and an error the new session raises again starts a new count.
+		TEST_CASE("ScriptMethods: script.errors reports the current play session's errors only")
+		{
+			Test::AutomationFixture fixture("ScriptErrorsPerSession");
+			CreateFaultyBoard(fixture, "OnFixedUpdate", "error('session fault', 0)");
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true }, { "pauseOnError", false } });
+			{
+				Test::ExpectLog expected(LogLevel::Error, "session fault");
+				CallScriptMethod(fixture, "play.step", Json{ { "ticks", 1 } });
+			}
+			CallScriptMethod(fixture, "play.stop", Json::object());
+			const Json stopped = CallScriptMethod(fixture, "script.errors", Json::object());
+			REQUIRE(stopped["errors"].size() == 1);
+			const Json cursor = CallScriptMethod(fixture, "script.errors", Json{ { "since", "end" } })["nextCursor"];
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true }, { "pauseOnError", false } });
+			CHECK(CallScriptMethod(fixture, "script.errors", Json::object())["errors"].empty());
+			CHECK(CallScriptMethod(fixture, "script.errors", Json{ { "since", cursor } })["errors"].empty());
+			{
+				Test::ExpectLog expected(LogLevel::Error, "session fault");
+				CallScriptMethod(fixture, "play.step", Json{ { "ticks", 1 } });
+			}
+			const Json current = CallScriptMethod(fixture, "script.errors", Json::object());
+			REQUIRE(current["errors"].size() == 1);
+			CHECK(current["errors"][0]["count"] == Json(1));
+			CHECK(current["errors"][0]["tick"] == stopped["errors"][0]["tick"]);
+			CHECK(CallScriptMethod(fixture, "script.errors", Json{ { "since", cursor } })["errors"] == current["errors"]);
+			CallScriptMethod(fixture, "play.stop", Json::object());
+			// A recording's session (input.record, as input.replay's) is a new play session too.
+			REQUIRE(CallScriptMethod(fixture, "script.errors", Json::object())["errors"].size() == 1);
+			CallScriptMethod(fixture, "scene.save", Json::object());
+			CallScriptMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CHECK(CallScriptMethod(fixture, "script.errors", Json::object())["errors"].empty());
+			CallScriptMethod(fixture, "play.stop", Json::object());
+		}
+
 		TEST_CASE("ScriptMethods: errors rejects malformed cursors and limits with located errors")
 		{
 			Test::AutomationFixture fixture("ScriptErrorsInvalid");
@@ -287,6 +373,7 @@ namespace Engine {
 			Test::AutomationFixture fixture("ScriptErrorBounds");
 			const std::string marker = " [truncated: 20000 bytes]";
 			{
+				// The caller's own error data is bounded as a retained error is.
 				Test::ExpectLog expected(LogLevel::Error, marker);
 				const Json response = fixture.Request("script.eval", Json{ { "context", "edit" }, { "code", "error(string.rep('x', 20000), 0)" } });
 				REQUIRE(response.contains("error"));
@@ -296,11 +383,17 @@ namespace Engine {
 				CHECK(data["scriptError"]["message"] == Json(std::string(MaxScriptLogMessageBytes - marker.size(), 'x') + marker));
 				CHECK(expected.GetMatchCount() == 1);
 			}
+			CreateFaultyBoard(fixture, "OnStart", "error(string.rep('x', 20000), 0)");
+			{
+				Test::ExpectLog expected(LogLevel::Error, marker);
+				CallScriptMethod(fixture, "play.start", Json{ { "paused", true } });
+				CHECK(expected.GetMatchCount() == 1);
+			}
 			const Json first = CallScriptMethod(fixture, "script.errors", Json::object());
 			REQUIRE(first["errors"].size() == 1);
 			CHECK(first["errors"][0]["message"] == Json(std::string(MaxScriptLogMessageBytes - marker.size(), 'x') + marker));
 			CHECK(first["evicted"] == Json(false));
-			// The editor's history keeps the newest distinct errors: one more than it retains evicts the evaluation's error.
+			// The editor's history keeps the newest distinct errors: one more than it retains evicts the behaviour's error.
 			ScriptErrorStream& history = fixture.GetEditor().GetPlay().GetScriptErrors();
 			for (size_t index = 0; index < MaxScriptErrorEntries; ++index)
 				static_cast<void>(history.Add({ .Script = "Assets/Scripts/Spam.luau", .Line = 1, .Message = std::format("fault {}", index) }));

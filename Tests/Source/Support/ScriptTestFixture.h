@@ -62,6 +62,8 @@ namespace Engine {
 			[[nodiscard]] ScriptApiRegistry& GetApi() { return m_Api; }
 			[[nodiscard]] InMemoryAssetManager& GetAssetManager() { return m_Assets; }
 			[[nodiscard]] Ref<const ScriptFieldSchemaSource> GetSchemaSnapshot() const { return m_Schemas; }
+			// ScriptEngine::Evaluate over the fixture's engine; a failure in the VM is its caller's error (ADR 0038, friction
+			// F01), which EvaluationFailure holds and Errors never receives.
 			[[nodiscard]] Result<ScriptEvaluation> Evaluate(std::string_view source, std::optional<UUID> entity = std::nullopt);
 			[[nodiscard]] Result<std::string> ReadModule(const VfsPath& path) override;
 
@@ -118,6 +120,8 @@ namespace Engine {
 			std::optional<int32_t> QuitCode{};
 			AssetHandle RequestedScene{};
 			Json RequestedParameters{};
+			// The last Evaluate's failure in the VM (ScriptEngine::Evaluate's `failure`); empty after one that succeeded.
+			std::optional<ScriptError> EvaluationFailure{};
 			// Scene.Reload requests (the last one's parameters; nullopt: keep the current ones) and what Scene.GetCurrent
 			// returns.
 			bool ReloadRequested = false;

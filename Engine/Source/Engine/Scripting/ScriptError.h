@@ -80,6 +80,11 @@ namespace Engine {
 		// Distinct errors evicted so far.
 		[[nodiscard]] uint64_t GetEvictedCount() const;
 		[[nodiscard]] bool HasEvictedAfter(uint64_t since) const;
+		// Forgets every retained error (ADR 0038, friction F02: the editor's history at the start of a new play session).
+		// The cursor keeps its value, so IDs go on increasing and a cursor taken before Clear reads exactly the errors added
+		// after it; an error that occurs again starts a new count. A forgotten error was not evicted: the evicted count and
+		// HasEvictedAfter are unchanged.
+		void Clear();
 	private:
 		std::vector<ScriptError> m_Errors{};
 		uint64_t m_Cursor = 0;

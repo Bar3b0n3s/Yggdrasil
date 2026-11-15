@@ -230,6 +230,51 @@ namespace Engine {
 			CHECK_FALSE(result["junitPath"].empty());
 		}
 
+		// ADR 0038, friction F03: a filtered run resolved every suite of the run's mode, so a suite the filter leaves out that
+		// names a scene not made yet refused it. It resolves and validates only the suites and replays the filter selects; a
+		// selected suite or replay whose scene is missing still refuses the run, as an unfiltered run does.
+		TEST_CASE("TestMethods: a filtered run resolves only the suites its filter selects")
+		{
+			Test::AutomationFixture fixture("TestRunFilterResolves");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Logic.test.luau" }, { "source", "return Test.Suite('Logic', function()\n"
+																												  "Test.Case('adds', function() Test.Expect(1 + 1 == 2) end)\nend)" } });
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Level2.test.luau" }, { "source", "return Test.Suite('Autopilot.Level2', function()\n"
+																												   "Test.Case('reaches the goal', function() Test.Expect(true) end)\nend)" } });
+			const Json logic{ { "Script", "Assets/Tests/Logic.test.luau" }, { "Scene", "" }, { "Modes", Json::array({ "Editor" }) } };
+			const Json level{ { "Script", "Assets/Tests/Level2.test.luau" }, { "Scene", "Assets/Scenes/Level2.scene" }, { "Modes", Json::array({ "Editor" }) } };
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ level, logic }) } } } } } });
+			for (const std::string_view filter : { "Logic/", "logic/adds", "adds" })
+			{
+				CAPTURE(filter);
+				const Json result = CallTestMethod(fixture, "test.run", Json{ { "filter", filter } });
+				CHECK(result["passed"] == Json(true));
+				REQUIRE(result["cases"].size() == 1);
+				CHECK(result["cases"][0]["suite"] == Json("Logic"));
+			}
+			for (const Json& params : { Json::object(), Json{ { "filter", "Autopilot" } }, Json{ { "filter", "Level2/reaches" } } })
+			{
+				CAPTURE(params.dump());
+				const Json refused = fixture.Request("test.run", params);
+				CHECK(refused["error"]["data"]["errorCode"] == Json("NotFound"));
+			}
+			// A replay whose scene asset is gone: only a run whose filter selects it is refused.
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Replays", Json::array({ "Assets/Tests/Replays/*.replay" }) } } } } } });
+			CallTestMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallTestMethod(fixture, "play.step", Json{ { "ticks", 3 }, { "render", "none" } });
+			CallTestMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Replays/Orphan.replay" } });
+			CallTestMethod(fixture, "play.stop", Json::object());
+			CallTestMethod(fixture, "scene.new", Json{ { "path", "Assets/Scenes/Other.scene" } });
+			// The replay no longer imports once its scene is gone.
+			Test::ExpectLog orphaned(LogLevel::Error, "replay scene handle is unknown");
+			CallTestMethod(fixture, "asset.delete", Json{ { "asset", "Assets/Scenes/Main.scene" } });
+			const Json filtered = CallTestMethod(fixture, "test.run", Json{ { "filter", "Logic/" } });
+			CHECK(filtered["passed"] == Json(true));
+			CHECK(filtered["cases"].size() == 1);
+			const Json orphan = fixture.Request("test.run", Json{ { "filter", "Replays/Orphan" } });
+			CHECK(orphan["error"]["data"]["errorCode"] == Json("NotFound"));
+			CHECK_FALSE(fixture.GetEditor().GetPlay().IsTestRunActive());
+		}
+
 		// Docs/Decisions/0026-m16-contract.md, friction S1-02: every test.run result carried several hundred script API
 		// coverage counters, so even a small run was offloaded and its summary hid the failures. Without coverage asked for,
 		// the result leaves them out (the JSON report keeps them) and names its outcome.

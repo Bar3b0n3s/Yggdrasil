@@ -78,6 +78,13 @@ class GameViewTests(AutomationTestCase):
         # The game view is the primary camera's, not the scene view's.
         scene = client.call("viewport.screenshot", {**GAME_VIEW, "view": "scene"})
         self.assertNotEqual(Path(scene["path"]).read_bytes(), Path(edit["path"]).read_bytes())
+        # ADR 0038, friction F05: a requested size is the PNG's unless maxDimension caps it (1024 was the default).
+        large = client.call("viewport.screenshot", {"view": "game", "width": 1280, "height": 720})
+        self.assertEqual((large["width"], large["height"]), (1280, 720))
+        self.assertEqual(png_size(Path(large["path"])), (1280, 720))
+        capped = client.call("viewport.screenshot",
+                             {"view": "game", "width": 1280, "height": 720, "maxDimension": 1024})
+        self.assertEqual(png_size(Path(capped["path"])), (1024, 576))
 
         # Without a primary camera the game view is InvalidState naming the validator code.
         client.call("entity.update", {"entity": "/Camera", "components": {"Camera": {"Primary": False}}})
@@ -149,6 +156,11 @@ class GameViewTests(AutomationTestCase):
         self.assertTrue(played["available"], played)
         self.assertEqual((played["width"], played["height"]), (WINDOW_WIDTH, WINDOW_HEIGHT))
         self.assertGreaterEqual(int(played["frame"]), int(edit["frame"]) + 10)
+        # ADR 0038, friction F09: a counter read leaves the per-view statistics out.
+        counters = client.call("stats.get", {"views": False})
+        self.assertEqual(counters["views"], [])
+        self.assertEqual(counters["entities"], client.call("stats.get")["entities"])
+        self.assertGreater(counters["entities"], 0)
         client.call("play.stop")
         self.shut_down(client)
 

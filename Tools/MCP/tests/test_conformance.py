@@ -184,6 +184,29 @@ class ConformanceTests(unittest.TestCase):
         self.assertNotIn("data", results[3]["structuredContent"])
         self.assertFalse(results[3]["structuredContent"]["inlineOmitted"])
 
+    def test_editor_launch_headless_game_view_renders_the_game_view(self) -> None:
+        # ADR 0038, friction F12: editor_launch {headlessGameView: true} starts a headless rendering editor that renders
+        # its game view every frame, as the soak's editors do, so stats.get reports the game view.
+        reason = harness.probe_rendering_editor()
+        if reason is not None:
+            if os.environ.get(harness.REQUIRE_GPU_VARIABLE) == "1":
+                self.fail(f"no usable Vulkan device for a rendering editor ({harness.REQUIRE_GPU_VARIABLE}=1): "
+                          f"{reason}")
+            print(f"{harness.NO_DEVICE_PREFIX}{self.id()}: {reason}", file=sys.stderr, flush=True)
+            return
+        results = self.run_session([
+            ("editor_launch", {"project": str(self.directory / "Game"), "create": True, "renderer": "vulkan",
+                               "headlessGameView": True}),
+            ("scene_new", {"path": "Assets/Scenes/Main.scene"}),
+            ("entity_create", {"name": "Camera", "components": {"Camera": {"Primary": True}}}),
+            ("engine_call", {"method": "stats.get", "params": {}}),
+        ])
+        for result in results:
+            self.assertFalse(result["isError"], result["text"])
+        views = results[3]["structuredContent"]["views"]
+        game = next(view for view in views if view["name"] == "game")
+        self.assertTrue(game["available"], game)
+
     def test_killed_editor_reports_editor_crashed(self) -> None:
         results = self.run_session([
             ("editor_launch", {"project": str(self.directory / "Game"), "create": True}),

@@ -6,6 +6,7 @@
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Support/AutomationTestClient.h"
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <cstdint>
 #include <format>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -422,23 +424,32 @@ return Script.Define("FuzzKeeper", T)
 			};
 			// A generated call either fails at line 6 (the bindings rejected it) or reaches line 7, which always raises. The
 			// guard in Scene.Instantiate's host path rejects an unrepresentable position before anything is created. Callers
-			// declare the published error (and any physics diagnostic an accepted extreme value causes) with ExpectLog.
-			const auto runGenerated = [&fixture, session, &path](const std::string& source, bool automation) -> uint32_t
+			// declare the logged error (and any physics diagnostic an accepted extreme value causes) with ExpectLog. The
+			// failure is the evaluation's caller's (ADR 0038, friction F01): returned as its scriptError (ScriptErrorToJson's
+			// form), never retained in the session's script errors.
+			const auto runGenerated = [&fixture, session, &path](const std::string& source, bool automation) -> Json
 			{
 				const uint64_t cursor = session->GetScriptErrors().GetCursor();
+				Json failure;
 				if (automation)
 				{
 					const Json response = fixture.Request("script.eval", Json{ { "context", "play" }, { "code", source } });
 					REQUIRE_MESSAGE(response.contains("error"), response.dump());
+					failure = response["error"]["data"]["scriptError"];
 				}
 				else
-					CHECK_FALSE(session->GetScripts()->Evaluate(source, *path));
-				const auto errors = session->GetScriptErrors().Read(cursor);
-				REQUIRE(errors.size() == 1);
-				CHECK(errors[0].Kind == ScriptErrorKind::Runtime);
-				CHECK((errors[0].Line == 6 || errors[0].Line == 7));
-				CHECK((errors[0].Line == 7) == (errors[0].Message.find("fuzz-accepted") != std::string::npos));
-				return errors[0].Line;
+				{
+					std::optional<ScriptError> raised;
+					CHECK_FALSE(session->GetScripts()->Evaluate(source, *path, std::nullopt, {}, &raised));
+					REQUIRE(raised.has_value());
+					failure = ScriptErrorToJson(*raised);
+				}
+				CHECK(session->GetScriptErrors().GetCursor() == cursor);
+				CHECK(failure["kind"] == Json("runtime"));
+				const uint32_t line = JsonReader(failure["line"]).ReadUInt32().value_or(0);
+				CHECK((line == 6 || line == 7));
+				CHECK((line == 7) == (JsonReader(failure["message"]).ReadString().value_or(std::string()).find("fuzz-accepted") != std::string::npos));
+				return failure;
 			};
 
 			// Once per process, before any call: the scene's canonical state and the three fixed generated statements.
@@ -450,11 +461,9 @@ return Script.Define("FuzzKeeper", T)
 				CAPTURE(statement);
 				Test::ExpectLog published(LogLevel::Error, "");
 				const size_t before = session->GetScene().GetEntityCount();
-				const uint64_t cursor = session->GetScriptErrors().GetCursor();
-				CHECK(runGenerated(Test::GeneratedFuzzSource(statement), false) == (expected.empty() ? 7u : 6u));
-				const auto errors = session->GetScriptErrors().Read(cursor);
-				REQUIRE(errors.size() == 1);
-				CHECK(errors[0].Message.find(expected) != std::string::npos);
+				Json failure = runGenerated(Test::GeneratedFuzzSource(statement), false);
+				CHECK(failure["line"] == Json(expected.empty() ? 7u : 6u));
+				CHECK(JsonReader(failure["message"]).ReadString().value_or(std::string()).find(expected) != std::string::npos);
 				CHECK(session->GetScene().GetEntityCount() == before);
 				reset();
 			}
@@ -482,7 +491,8 @@ return Script.Define("FuzzKeeper", T)
 				const uint64_t before = session->ComputeStateHash();
 				const double timeScale = session->GetTimeScale();
 				const uint64_t errorCursor = session->GetScriptErrors().GetCursor();
-				const auto execute = [&fixture, session, automation, &source, &path, &item]()
+				// Runs the call; for a rejected one, its error (ScriptErrorToJson's form), its caller's (ADR 0038, friction F01).
+				const auto execute = [&fixture, session, automation, &source, &path, &item]() -> Json
 				{
 					if (automation)
 					{
@@ -491,33 +501,26 @@ return Script.Define("FuzzKeeper", T)
 						{
 							REQUIRE_MESSAGE(response.contains("result"), response.dump());
 							CHECK(response["result"]["value"] == Json(true));
+							return Json();
 						}
-						else
-						{
-							REQUIRE_MESSAGE(response.contains("error"), response.dump());
-							CHECK(response["error"]["data"]["errorCode"] == Json("Script"));
-							const Json& error = response["error"]["data"]["scriptError"];
-							CHECK(error["kind"] == Json("runtime"));
-							CHECK(error["line"] == Json(6));
-							CHECK_FALSE(error["traceback"].empty());
-						}
+						REQUIRE_MESSAGE(response.contains("error"), response.dump());
+						CHECK(response["error"]["data"]["errorCode"] == Json("Script"));
+						return response["error"]["data"]["scriptError"];
 					}
-					else
+					std::optional<ScriptError> failure;
+					const auto result = session->GetScripts()->Evaluate(source, *path, std::nullopt, {}, &failure);
+					if (item.Valid)
 					{
-						const auto result = session->GetScripts()->Evaluate(source, *path);
-						if (item.Valid)
-						{
-							REQUIRE_MESSAGE(result, (result ? "" : result.error().ToString()));
-							CHECK(result->Value.Get() == Json(true));
-						}
-						else
-						{
-							REQUIRE_FALSE(result);
-							CHECK(result.error().GetCode() == ErrorCode::Script);
-							CHECK(result.error().GetLocation().File == "Assets/Tests/BindingFuzz.luau");
-							CHECK(result.error().GetLocation().Line == 6);
-						}
+						REQUIRE_MESSAGE(result, (result ? "" : result.error().ToString()));
+						CHECK(result->Value.Get() == Json(true));
+						return Json();
 					}
+					REQUIRE_FALSE(result);
+					CHECK(result.error().GetCode() == ErrorCode::Script);
+					CHECK(result.error().GetLocation().File == "Assets/Tests/BindingFuzz.luau");
+					CHECK(result.error().GetLocation().Line == 6);
+					REQUIRE(failure.has_value());
+					return ScriptErrorToJson(*failure);
 				};
 				if (item.Valid)
 				{
@@ -528,16 +531,15 @@ return Script.Define("FuzzKeeper", T)
 				else
 				{
 					Test::ExpectLog expected(LogLevel::Error, item.ErrorMember);
-					execute();
+					Json failure = execute();
 					CHECK(expected.GetMatchCount() == 1);
 					++rejected;
-					const auto errors = session->GetScriptErrors().Read(errorCursor);
-					REQUIRE(errors.size() == 1);
-					CHECK(errors[0].Kind == ScriptErrorKind::Runtime);
-					CHECK(errors[0].Line == 6);
-					CHECK(errors[0].Script == (automation ? "eval" : "Assets/Tests/BindingFuzz.luau"));
-					CHECK(errors[0].Message.find(item.ErrorMember) != std::string::npos);
-					CHECK_FALSE(errors[0].Traceback.empty());
+					CHECK(session->GetScriptErrors().GetCursor() == errorCursor);
+					CHECK(failure["kind"] == Json("runtime"));
+					CHECK(failure["line"] == Json(6));
+					CHECK(failure["script"] == Json(automation ? "eval" : "Assets/Tests/BindingFuzz.luau"));
+					CHECK(JsonReader(failure["message"]).ReadString().value_or(std::string()).find(item.ErrorMember) != std::string::npos);
+					CHECK_FALSE(failure["traceback"].empty());
 					CHECK(session->ComputeStateHash() == before);
 					CHECK(session->GetTimeScale() == timeScale);
 				}
@@ -579,7 +581,8 @@ return Script.Define("FuzzKeeper", T)
 				CAPTURE(statement);
 				CAPTURE(automation);
 				Test::ExpectLog published(LogLevel::Error, "");
-				const uint32_t line = runGenerated(Test::GeneratedFuzzSource(statement), automation);
+				Json failure = runGenerated(Test::GeneratedFuzzSource(statement), automation);
+				const uint32_t line = JsonReader(failure["line"]).ReadUInt32().value_or(0);
 				++(line == 7 ? generatedAccepted : generatedRejected);
 				const uint64_t tick = session->GetTick();
 				session->Tick();

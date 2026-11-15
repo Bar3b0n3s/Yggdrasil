@@ -837,16 +837,19 @@ return Script.Define("Ball", T)
 			const Entity ball = fixture.GetScene().CreateEntity("Ball");
 			Test::AttachLifecycleScript(ball, handle);
 			REQUIRE(fixture.Start());
+			// Reported to the caller alone (ADR 0038, friction F01: never the error stream), never against the behaviour's file
+			// or as its fault.
 			const auto typo = fixture.Evaluate("retrun self.Speed", ball.GetUUID());
 			REQUIRE_FALSE(typo);
+			REQUIRE(fixture.EvaluationFailure.has_value());
+			CHECK(fixture.EvaluationFailure->Kind == ScriptErrorKind::Compile);
+			CHECK(fixture.EvaluationFailure->Script != "Assets/Scripts/Ball.luau");
+			CHECK(fixture.EvaluationFailure->Entity == ball.GetUUID());
 			const auto missing = fixture.Evaluate("return self.Missing.x", ball.GetUUID());
 			REQUIRE_FALSE(missing);
-			REQUIRE(fixture.Errors.size() == 2);
-			// Reported to the caller and the error stream, never against the behaviour's file or as its fault.
-			CHECK(fixture.Errors[0].Kind == ScriptErrorKind::Compile);
-			CHECK(fixture.Errors[0].Script != "Assets/Scripts/Ball.luau");
-			CHECK(fixture.Errors[0].Entity == ball.GetUUID());
-			CHECK(fixture.Errors[1].Message.find("attempt to index nil") != std::string::npos);
+			REQUIRE(fixture.EvaluationFailure.has_value());
+			CHECK(fixture.EvaluationFailure->Message.find("attempt to index nil") != std::string::npos);
+			CHECK(fixture.Errors.empty());
 			CHECK_FALSE(fixture.PauseRequested);
 			const auto instances = fixture.GetEngine()->GetInstances();
 			REQUIRE(instances.size() == 1);
@@ -861,7 +864,7 @@ return Script.Define("Ball", T)
 			const auto state = fixture.Evaluate("return {self.Fixed, self.Waits}", ball.GetUUID());
 			REQUIRE(state);
 			CHECK(state->Value.Get() == Json::array({ 3, 3 }));
-			CHECK(fixture.Errors.size() == 2);
+			CHECK(fixture.Errors.empty());
 		}
 
 		TEST_CASE("ScriptInstanceLifecycle: a module top that removes an instance never leaves a callback on it")

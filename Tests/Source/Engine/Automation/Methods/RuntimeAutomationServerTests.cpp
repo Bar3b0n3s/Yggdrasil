@@ -165,12 +165,22 @@ namespace Engine {
 			CHECK(fixture.Call("script.eval", Json{ { "context", "edit" }, { "code", "1" } })["error"]["data"]["errorCode"] == Json("Unsupported"));
 			const Json cursor = fixture.Call("script.errors", Json{ { "since", "end" } })["result"]["nextCursor"];
 			{
+				// A failed evaluation is its caller's (ADR 0038, friction F01): answered with its scriptError, never retained.
 				Test::ExpectLog expected(LogLevel::Error, "runtime native fault");
-				CHECK(fixture.Call("script.eval", Json{ { "context", "play" }, { "code", "error('runtime native fault')" } })["error"]["data"]["errorCode"] == Json("Script"));
+				const Json failed = fixture.Call("script.eval", Json{ { "context", "play" }, { "code", "error('runtime native fault')" } });
+				CHECK(failed["error"]["data"]["errorCode"] == Json("Script"));
+				CHECK(failed["error"]["data"]["scriptError"]["message"].dump().contains("runtime native fault"));
+			}
+			CHECK(fixture.Call("script.errors", Json{ { "since", cursor } })["result"]["errors"].empty());
+			{
+				// A failed play.waitFor predicate is the game's, which the retained error service lists.
+				Test::ExpectLog expected(LogLevel::Error, "runtime wait fault");
+				const Json faulted = fixture.CallPending("play.waitFor", Json{ { "until", "error('runtime wait fault')" }, { "timeoutTicks", 1 } });
+				CHECK(faulted.contains("error"));
 			}
 			const Json errors = fixture.Call("script.errors", Json{ { "since", cursor } });
 			REQUIRE(errors["result"]["errors"].size() == 1);
-			CHECK(errors["result"]["errors"][0]["message"].dump().contains("runtime native fault"));
+			CHECK(errors["result"]["errors"][0]["message"].dump().contains("runtime wait fault"));
 			const Json waited = fixture.CallPending("play.waitFor", Json{ { "until", "Time.GetTick() == 2" }, { "timeoutTicks", 4 } });
 			REQUIRE_MESSAGE(waited.contains("result"), waited.dump());
 			CHECK(waited["result"]["satisfied"] == Json(true));

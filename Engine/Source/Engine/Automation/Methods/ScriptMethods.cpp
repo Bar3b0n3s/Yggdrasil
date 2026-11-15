@@ -87,6 +87,8 @@ namespace Engine {
 					"name the entity whose script slot self binds to"));
 			const ScriptErrorStream* stream = context.GetScriptErrors();
 			const uint64_t before = stream == nullptr ? 0 : stream->GetCursor();
+			// The failure's script error data: the caller's own error, which no error stream retains (ADR 0038, friction F01).
+			std::optional<ScriptError> failure;
 			// A behaviour name that no slot of the entity has is located at /script: the engine refuses it, unlocated, before
 			// running anything (an unresolved entity is already located at /entity).
 			const auto locateScript = [&params](Result<ScriptEvaluation> evaluated) -> Result<ScriptEvaluation>
@@ -97,7 +99,7 @@ namespace Engine {
 			};
 			Result<ScriptEvaluation> result = MakeError(ErrorCode::InvalidArgument, "unknown script evaluation context");
 			if (params.Context == ScriptEvaluationContext::Edit)
-				result = locateScript(context.EvalInEdit(params.Code, params.Entity, params.Script));
+				result = locateScript(context.EvalInEdit(params.Code, params.Entity, params.Script, failure));
 			else if (params.Context == ScriptEvaluationContext::Play)
 			{
 				ENGINE_TRY_ASSIGN(PlaySession * session, Utils::RequirePlaySession(context));
@@ -136,26 +138,31 @@ namespace Engine {
 						return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/entity", "entity has no behaviour instance in its first script slot",
 							"name the behaviour self binds to with script"));
 				}
-				result = locateScript(scripts->Evaluate(params.Code, VfsPath{}, entity, params.Script));
+				result = locateScript(scripts->Evaluate(params.Code, VfsPath{}, entity, params.Script, &failure));
 			}
 			if (!result && (result.error().GetCode() == ErrorCode::Script || result.error().GetCode() == ErrorCode::CompileFailed || result.error().GetCode() == ErrorCode::Timeout))
 			{
+				// The evaluation's own error data when the VM raised it; one that stopped the VM was published as the game's
+				// error (ScriptEngine::Evaluate), so the stream holds it; otherwise the returned error's location.
 				stream = context.GetScriptErrors();
-				const std::vector<ScriptError> errors = stream == nullptr ? std::vector<ScriptError>{} : stream->Read(before, 1000);
-				if (!errors.empty())
-					context.SetErrorData("scriptError", ScriptErrorToJson(errors.back()));
+				const std::vector<ScriptError> published = stream == nullptr || failure.has_value() ? std::vector<ScriptError>{} : stream->Read(before, 1000);
+				if (failure.has_value())
+					context.SetErrorData("scriptError", ScriptErrorToJson(*failure));
+				else if (!published.empty())
+					context.SetErrorData("scriptError", ScriptErrorToJson(published.back()));
 				else
 				{
-					const Error& failure = result.error();
+					const Error& raised = result.error();
 					ScriptError error;
-					error.Kind = failure.GetCode() == ErrorCode::CompileFailed ? ScriptErrorKind::Compile
-						: failure.GetCode() == ErrorCode::Timeout              ? ScriptErrorKind::Timeout
-																			   : ScriptErrorKind::Runtime;
-					error.Script = failure.GetLocation().File;
-					error.Line = failure.GetLocation().Line;
-					error.Column = failure.GetLocation().Column;
-					error.JsonPointer = failure.GetLocation().JsonPointer.value_or("");
-					error.Message = failure.GetMessageText();
+					error.Kind = raised.GetCode() == ErrorCode::CompileFailed ? ScriptErrorKind::Compile
+						: raised.GetCode() == ErrorCode::Timeout              ? ScriptErrorKind::Timeout
+																			  : ScriptErrorKind::Runtime;
+					error.Script = raised.GetLocation().File;
+					error.Line = raised.GetLocation().Line;
+					error.Column = raised.GetLocation().Column;
+					error.JsonPointer = raised.GetLocation().JsonPointer.value_or("");
+					error.Message = raised.GetMessageText();
+					BoundScriptError(error);
 					context.SetErrorData("scriptError", ScriptErrorToJson(error));
 				}
 				return std::unexpected(Error(ErrorCode::Script, result.error().GetMessageText()).WithLocation(result.error().GetLocation()));
@@ -201,14 +208,14 @@ namespace Engine {
 			.Field("entity", &ScriptEvalParams::Entity, "Optional behaviour entity bound as self.")
 			.Field("script", &ScriptEvalParams::Script, "The behaviour self binds to when entity has several scripts: its Script.Define name; absent, the entity's first script.");
 		registry.Struct<ScriptEvalResult>("ScriptEvalResult", "Detached evaluation result.")
-			.Field("value", &ScriptEvalResult::Value, "First returned finite, acyclic JSON value.")
+			.Field("value", &ScriptEvalResult::Value, "First returned finite, acyclic JSON value; a vector, Color or Quat at any depth as the array of its components ([x, y, z], [r, g, b, a], [x, y, z, w]).")
 			.Field("prints", &ScriptEvalResult::Prints, "Printed messages in call order.");
 	}
 
 	void RegisterSharedScriptMethods(MethodRegistry& methods)
 	{
-		methods.Add({ .Name = "script.errors", .Description = "Reads retained script errors without clearing them, including updated repeat counts.", .ExposeAsTool = true, .SupportsSceneTarget = true, .AvailableInRuntime = true, .AllowedInBatch = true, .Examples = { { .Description = "Read errors from the beginning.", .Params = Json::object() } } }, &Automation::ScriptErrors);
-		methods.Add({ .Name = "script.eval", .Description = "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership.", .RequiredParams = { "code", "context" }, .ExposeAsTool = true, .SupportsSceneTarget = true, .AvailableInRuntime = true, .Examples = { { .Description = "Evaluate an expression during play.", .Params = Json{ { "code", "1 + 2" }, { "context", "Play" } } } } }, &Automation::ScriptEval);
+		methods.Add({ .Name = "script.errors", .Description = "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's.", .ExposeAsTool = true, .SupportsSceneTarget = true, .AvailableInRuntime = true, .AllowedInBatch = true, .Examples = { { .Description = "Read errors from the beginning.", .Params = Json::object() } } }, &Automation::ScriptErrors);
+		methods.Add({ .Name = "script.eval", .Description = "Evaluates Luau in Edit (read-only, editor only) or the live Play VM; Play obeys lockstep ownership. A failure is the caller's error, answered with its located scriptError and logged, never one of the game's script errors.", .RequiredParams = { "code", "context" }, .ExposeAsTool = true, .SupportsSceneTarget = true, .AvailableInRuntime = true, .Examples = { { .Description = "Evaluate an expression during play.", .Params = Json{ { "code", "1 + 2" }, { "context", "Play" } } } } }, &Automation::ScriptEval);
 	}
 
 }

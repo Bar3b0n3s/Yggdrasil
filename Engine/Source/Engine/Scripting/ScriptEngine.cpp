@@ -665,7 +665,7 @@ namespace Engine {
 	}
 
 	Result<ScriptEvaluation> ScriptEngine::Evaluate(std::string_view source, const VfsPath& path, std::optional<UUID> entity,
-		std::string_view behaviour)
+		std::string_view behaviour, std::optional<ScriptError>* failure)
 	{
 		m_State->AssertOwner();
 		if (IsStopped())
@@ -696,12 +696,19 @@ namespace Engine {
 		// Tasks the evaluation spawns belong to its instance, and to a case only when evaluated from that case's work. The
 		// owner's slot is also the instance `self` binds to (ScriptEngineAccess::PushInstance).
 		Utils::ScriptEvaluationOwnerScope owner(m_State->CurrentOwner, { entity.value_or(UUID{}), m_State->CurrentOwner.Case, slot });
+		m_State->CallerFailure.reset();
+		if (failure != nullptr)
+			failure->reset();
 		auto result = m_State->Vm->Evaluate(source, path, entity);
 		if (!result)
 		{
-			const auto failure = m_State->Vm->GetLastError();
-			if (failure)
-				m_State->Publish(*failure, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase, .Slot = slot }, false, false, State::FaultPolicy::ReportOnly);
+			// The caller's error (ADR 0038, friction F01): logged and handed back, never retained as the game's.
+			const auto raised = m_State->Vm->GetLastError();
+			if (raised)
+				m_State->Publish(*raised, { .Entity = entity.value_or(UUID{}), .Case = m_State->ActiveCase, .Slot = slot }, false, false, State::FaultPolicy::CallerOnly);
+			if (failure != nullptr)
+				*failure = std::move(m_State->CallerFailure);
+			m_State->CallerFailure.reset();
 		}
 		return result;
 	}

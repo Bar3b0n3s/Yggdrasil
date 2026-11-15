@@ -71,11 +71,13 @@ namespace Engine {
 		SceneTarget Target = SceneTarget::Edit;
 		uint32_t Width = 640; // 1 to MaxViewportScreenshotDimension; the rendered size before maxDimension
 		uint32_t Height = 360;
-		std::string Camera{};         // an EntityRef of a camera entity of the target scene (M7)
-		std::string DebugView{};      // a debug view name (M8; see the file comment); empty: Lit
-		VariantValue Annotate{};      // {labels, colliders, bounds, axes} (M9)
-		uint32_t MaxDimension = 1024; // 1 to MaxViewportScreenshotDimension
-		bool Inline = false;          // also return the PNG as base64 in "data", when it fits MaxInlineScreenshotPngBytes
+		std::string Camera{};    // an EntityRef of a camera entity of the target scene (M7)
+		std::string DebugView{}; // a debug view name (M8; see the file comment); empty: Lit
+		VariantValue Annotate{}; // {labels, colliders, bounds, axes} (M9)
+		// 1 to MaxViewportScreenshotDimension. Absent, it is the larger of Width and Height when either is given (ADR 0038,
+		// friction F05: the PNG has the requested size), else 1024 (the default 640 x 360 fits it).
+		uint32_t MaxDimension = 1024;
+		bool Inline = false; // also return the PNG as base64 in "data", when it fits MaxInlineScreenshotPngBytes
 		// M19 (Docs/Decisions/0030-m19-contract.md decision 9, A-SHOTS): write the PNG into the host's kept-files directory
 		// (AutomationMethodContext::WriteKeptFile: Library/Automation/Kept/), which no later session prunes, instead of the
 		// output directory; the result's path names it as usual.

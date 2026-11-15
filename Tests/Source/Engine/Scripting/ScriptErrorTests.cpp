@@ -41,6 +41,29 @@ namespace Engine {
 			CHECK(errors.Read(std::numeric_limits<uint64_t>::max()).empty());
 		}
 
+		// ADR 0038, friction F02: the editor forgets a play session's errors when the next one starts.
+		TEST_CASE("ScriptError: Clear forgets the retained errors and keeps the cursor")
+		{
+			ScriptErrorStream errors;
+			const ScriptError fault{ .Script = "Assets/Scripts/Ball.luau", .Line = 3, .Message = "session fault" };
+			static_cast<void>(errors.Add(fault));
+			static_cast<void>(errors.Add(fault));
+			const uint64_t cursor = errors.GetCursor();
+			errors.Clear();
+			CHECK(errors.GetErrors().empty());
+			CHECK(errors.Read().empty());
+			CHECK(errors.GetCursor() == cursor);
+			CHECK(errors.GetEvictedCount() == 0);
+			CHECK_FALSE(errors.HasEvictedAfter(0));
+			// The same error again is a new entry with a new count, after the cursor taken before Clear.
+			const ScriptError again = errors.Add(fault);
+			CHECK(again.ID == cursor + 1);
+			CHECK(again.Count == 1);
+			const auto page = errors.Read(cursor);
+			REQUIRE(page.size() == 1);
+			CHECK(page.front().ID == again.ID);
+		}
+
 		TEST_CASE("ScriptError: JSON retains structured source frames and entity identity")
 		{
 			ScriptError error{

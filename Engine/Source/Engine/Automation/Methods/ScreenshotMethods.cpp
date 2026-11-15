@@ -229,7 +229,10 @@ namespace Engine {
 
 			const ViewportScreenshotRequest capture{ .Width = params.Width, .Height = params.Height, .MaxDimension = 0 };
 			ENGINE_TRY_ASSIGN(const Image captured, WithContext(context.CaptureView(snapshot, capture), "while rendering the viewport"));
-			ENGINE_TRY_ASSIGN(const Utils::WrittenScreenshot written, Utils::WriteScreenshot(context, captured, params.MaxDimension, params.Keep));
+			// A requested width or height is the PNG's size unless maxDimension is passed (ADR 0038, friction F05).
+			const bool sized = !context.HasParam("maxDimension") && (context.HasParam("width") || context.HasParam("height"));
+			const uint32_t maxDimension = sized ? std::max(params.Width, params.Height) : params.MaxDimension;
+			ENGINE_TRY_ASSIGN(const Utils::WrittenScreenshot written, Utils::WriteScreenshot(context, captured, maxDimension, params.Keep));
 			// Inline data only while the result stays below the offload threshold (MaxInlineScreenshotPngBytes).
 			const bool fitsInline = written.Png.size() <= MaxInlineScreenshotPngBytes;
 			return ViewportScreenshotResult{
@@ -288,7 +291,10 @@ namespace Engine {
 				"5 to 8 green, 9 to 16 yellow, 17 to 32 orange (1, 0.5, 0), more red.")
 			.Field("annotate", &ViewportScreenshotParams::Annotate,
 				"Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected.")
-			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)
+			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension,
+				"The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when "
+				"either is given, so the PNG has the requested size, and 1024 otherwise.",
+				dimensionMeta)
 			.Field("inline", &ViewportScreenshotParams::Inline,
 				"Also return the PNG as base64 in \"data\" when it is at most 30 KB; a larger one is only written (inlineOmitted).")
 			.Field("keep", &ViewportScreenshotParams::Keep,
@@ -322,8 +328,8 @@ namespace Engine {
 			{
 				.Name = "viewport.screenshot",
 				.Description = "Renders a view of the target scene afresh at width x height (the game view through the primary camera, the "
-							   "editor's scene view, or a camera entity), downscales it to maxDimension and writes it as a PNG whose path the "
-							   "result names. Needs a renderer (not --renderer none).",
+							   "editor's scene view, or a camera entity), downscales it to maxDimension (by default the requested size, or 1024 "
+							   "without width and height) and writes it as a PNG whose path the result names. Needs a renderer (not --renderer none).",
 				.RequiredParams = { "view" },
 				.ExposeAsTool = true,
 				.SupportsSceneTarget = true,

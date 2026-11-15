@@ -571,9 +571,9 @@ namespace Engine {
 		header.Parameters.Set(session->GetLoadParameters());
 		header.Seed = spec.Seed;
 		header.FixedHz = spec.Project.Simulation.FixedHz;
-		// The replay header's constant, never the manifest's version or build id, so a version bump rewrites no replay
+		// The running engine's version (ADR 0038, friction F10), never the build id, so a commit rewrites no replay
 		// (Docs/Decisions/0030-m19-contract.md decision 13).
-		header.EngineVersion = std::string(ReplayEngineVersionString);
+		header.EngineVersion = std::string(EngineVersionString);
 		// The run mode that recorded it (Release, or Dist), never the build configuration: Debug and Release Runtimes record
 		// the same bytes (§9.1, ADR 0022 "Integration").
 		header.Config = RuntimeTestMode == TestSuiteSettings::Mode::Dist ? "Dist" : "Release";

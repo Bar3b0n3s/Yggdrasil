@@ -54,30 +54,25 @@ class RuntimeScriptTests(AutomationTestCase):
         cursor = runtime.call("script.errors", {"since": "end"})["nextCursor"]
         event_cursor = runtime.call("events.read", {"cursor": "end"})["nextCursor"]
         log_cursor = runtime.call("log.read", {"cursor": "end"})["nextCursor"]
+        # A failed script.eval is the caller's error (ADR 0038, friction F01): answered with its located scriptError and
+        # logged, but never one of the game's script errors, so neither script.errors nor ScriptErrorRaised lists it.
         for count in (1, 2):
             with self.assertRaises(engine_client.EngineError) as fault:
                 runtime.call("script.eval", {"context": "play", "code": 'error("runtime eval fault")'})
             self.assert_engine_error(fault.exception, engine_client.SCRIPT_ERROR, "Script")
-            errors = runtime.call("script.errors", {"since": cursor})["errors"]
-            self.assertEqual(len(errors), 1, errors)
-            self.assertEqual(errors[0]["count"], count)
+            failure = fault.exception.data["scriptError"]
+            self.assertIn("runtime eval fault", failure["message"])
+            self.assertEqual(runtime.call("script.errors", {"since": cursor})["errors"], [])
             events = runtime.call("events.read", {"cursor": event_cursor, "types": ["ScriptErrorRaised"]})["events"]
-            self.assertEqual(len(events), count, events)
-            for event in events:
-                self.assertEqual(event["tick"], 0)
-                self.assertEqual(event["id"], errors[0]["entity"]["id"])
-                self.assertEqual(event["path"], errors[0]["script"])
-                self.assertEqual(event["message"], errors[0]["message"])
-                self.assertEqual(event["name"], "")
-                self.assertFalse(event["dirty"])
+            self.assertEqual(events, [])
             logs = runtime.call("log.read", {"cursor": log_cursor, "loggers": ["Script"],
                                             "contains": "runtime eval fault"})["entries"]
             self.assertEqual(len(logs), count, logs)
             for entry in logs:
                 self.assertEqual(entry["level"], "Error")
                 self.assertEqual(entry["tick"], 0)
-                self.assertEqual(entry["scriptFile"], errors[0]["script"])
-                self.assertEqual(entry["scriptLine"], errors[0]["line"])
+                self.assertEqual(entry["scriptFile"], failure["script"])
+                self.assertEqual(entry["scriptLine"], failure["line"])
         waited = runtime.call("play.waitFor", {"until": "Time.GetTick() >= 2", "timeoutTicks": 5})
         self.assertEqual(waited["tick"], 2)
         runtime.call("script.eval", {"context": "play", "code": 'Audio.SetGroupVolume("Music", 0.25)'})
@@ -96,9 +91,7 @@ class RuntimeScriptTests(AutomationTestCase):
             self.assertTrue(replayed["hashMatched"])
             self.assertEqual(runtime.call("script.eval", {"context": "play", "code":
                                                           'Audio.GetGroupVolume("Music")'})["value"], 1)
-        retained = runtime.call("script.errors", {"since": cursor})["errors"]
-        self.assertEqual(len(retained), 1, retained)
-        self.assertEqual(retained[0]["count"], 2)
+        self.assertEqual(runtime.call("script.errors", {"since": cursor})["errors"], [])
         self.assertEqual(runtime.call("events.read", {"cursor": event_cursor,
                                                       "types": ["ScriptErrorRaised"]})["events"], events)
         self.assertEqual(runtime.call("log.read", {"cursor": log_cursor, "loggers": ["Script"],
@@ -187,7 +180,7 @@ class RuntimeScriptTests(AutomationTestCase):
         self.assertIs(start["value"], True)
         event_cursor = runtime.call("events.read", {"cursor": "end"})["nextCursor"]
         log_cursor = runtime.call("log.read", {"cursor": "end"})["nextCursor"]
-        with self.assertRaises(engine_client.EngineError):
+        with self.assertRaises(engine_client.EngineError) as before:
             runtime.call("script.eval", {"context": "play", "code": 'error("before scene replacement")'})
         runtime.call("play.step", {"ticks": 2, "render": "none"})
         loaded = runtime.call("entity.get", {"entity": "/Loaded11"})["entity"]
@@ -195,29 +188,23 @@ class RuntimeScriptTests(AutomationTestCase):
         second = runtime.call("script.eval", {"context": "play", "code": current.format("Assets/Scenes/Second.scene")})
         self.assertIs(second["value"], True)
         self.assertEqual(runtime.call("entity.get", {"entity": "/Spawned9"})["entity"]["name"], "Spawned9")
-        errors = runtime.call("script.errors")["errors"]
-        self.assertEqual(len(errors), 1, errors)
-        self.assertIn("before scene replacement", errors[0]["message"])
-        with self.assertRaises(engine_client.EngineError) as fault:
+        with self.assertRaises(engine_client.EngineError) as after:
             runtime.call("script.eval", {"context": "play", "entity": loaded["id"],
                                           "code": 'error("after scene replacement")'})
-        self.assert_engine_error(fault.exception, engine_client.SCRIPT_ERROR, "Script")
-        errors = runtime.call("script.errors")["errors"]
-        self.assertEqual(len(errors), 2, errors)
-        self.assertEqual(errors[1]["entity"]["id"], loaded["id"])
-        events = runtime.call("events.read", {"cursor": event_cursor, "types": ["ScriptErrorRaised"]})["events"]
-        self.assertEqual(len(events), 2, events)
+        self.assert_engine_error(after.exception, engine_client.SCRIPT_ERROR, "Script")
+        # Both failed evaluations are their caller's (ADR 0038, friction F01): the game's script errors and events stay
+        # empty, while the log keeps each with its tick and entity, before and after the scene replacement.
+        self.assertEqual(runtime.call("script.errors")["errors"], [])
+        raised = runtime.call("events.read", {"cursor": event_cursor, "types": ["ScriptErrorRaised"]})["events"]
+        self.assertEqual(raised, [])
         logs = runtime.call("log.read", {"cursor": log_cursor, "loggers": ["Script"],
                                          "contains": "scene replacement"})["entries"]
         self.assertEqual(len(logs), 2, logs)
-        for error, event, entry, tick in zip(errors, events, logs, (0, 2), strict=True):
-            self.assertEqual(event["tick"], tick)
-            self.assertEqual(event["id"], error["entity"]["id"])
-            self.assertEqual(event["path"], error["script"])
-            self.assertEqual(event["message"], error["message"])
+        self.assertEqual(after.exception.data["scriptError"]["entity"]["id"], loaded["id"])
+        for fault, entry, tick, entity in zip((before, after), logs, (0, 2), ("", loaded["id"]), strict=True):
             self.assertEqual(entry["tick"], tick)
-            self.assertEqual(entry["entity"], event["id"])
-            self.assertEqual(entry["scriptFile"], event["path"])
+            self.assertEqual(entry["entity"], entity)
+            self.assertEqual(entry["scriptFile"], fault.exception.data["scriptError"]["script"])
         runtime.call("session.shutdown")
         self.assertEqual(process.wait(), EXIT_SUCCESS, process.output())
         quit_run = self.run_runtime(executable, ["--frames", "10"], self.directory / "RuntimeQuit")

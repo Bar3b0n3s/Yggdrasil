@@ -4,6 +4,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "Engine/Asset/ReplayData.h"
+#include "Engine/Core/BuildId.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Events.h"
@@ -568,6 +569,34 @@ namespace Engine {
 			CHECK(replayed["checkpointFailed"] == Json(false));
 			CHECK(replayed["stateHash"] == saved["stateHash"]);
 			CHECK(replayed["withoutInput"] == Json(false));
+		}
+
+		// ADR 0038, friction F10: a new recording's header recorded "0.1.0" whatever the engine. It records the running
+		// engine's version (EngineVersionString, session.hello's engineVersion). The header's EngineVersion is informational:
+		// neither verification nor any state hash reads it, so a replay recorded by an earlier version still verifies.
+		TEST_CASE("ReplayMethods: a new recording's header records the running engine's version, which verification never reads")
+		{
+			Test::AutomationFixture fixture("RecordEngineVersion");
+			SaveInputScene(fixture);
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 10 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			const std::string path = "Assets/Tests/Versioned.replay";
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", path } });
+			ReplayDocument replay = ReadRecordedReplay(fixture.GetEditor(), path);
+			CHECK(replay.Header.EngineVersion == EngineVersionString);
+			CHECK(replay.Header.Config == "Editor");
+			CHECK(CallReplayMethod(fixture, "input.readReplay", Json{ { "path", path } })["header"]["EngineVersion"] == Json(std::string(EngineVersionString)));
+			replay.Header.EngineVersion = "0.1.0";
+			const Result<std::string> text = ReplayToText(replay);
+			REQUIRE_MESSAGE(text.has_value(), (text ? "" : text.error().ToString()));
+			const auto file = VfsPath::Create("project", path);
+			REQUIRE(file.has_value());
+			REQUIRE(fixture.GetEditor().GetVfs().WriteFileAtomic(*file, AsBytes(*text)).has_value());
+			CallReplayMethod(fixture, "asset.reimport", Json{ { "asset", path } });
+			const Json replayed = CallReplayMethod(fixture, "input.replay", Json{ { "path", path }, { "verify", true }, { "strictHash", true } });
+			CHECK(replayed["passed"] == Json(true));
+			CHECK(replayed["checkpointsChecked"] == Json(1));
+			CHECK(replayed["stateHash"] == saved["stateHash"]);
 		}
 
 		TEST_CASE("ReplayMethods: input.replay stops at the first checkpoint that differs and names its tick and both hashes")

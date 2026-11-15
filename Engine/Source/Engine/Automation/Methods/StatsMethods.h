@@ -17,6 +17,9 @@ namespace Engine {
 
 	struct StatsGetParams
 	{
+		// ADR 0038 (friction F09): false leaves the per-view render statistics out (StatsGetResult::Views stays empty), for a
+		// counter read such as the soak check's; true, the default, reports them.
+		bool Views = true;
 	};
 
 	// Approximate diagnostic telemetry, never simulation state. Converts nonnegative observations to finite float:

@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include <format>
+#include <optional>
 #include <vector>
 
 namespace Engine {
@@ -221,15 +222,17 @@ return Script.Define("ActionProbe", T))"));
 										   "fixed 2 false false true 0.50|frame false false true"));
 			// An unknown name raises the located INPUT_UNKNOWN_ACTION error with the host's did-you-mean hint.
 			Test::ExpectLog expected(LogLevel::Error, "INPUT_UNKNOWN_ACTION: no action 'Jmup'");
-			const auto unknown = (*session)->GetScripts()->Evaluate("local value = 1\nreturn Input.IsActionDown('Jmup')", *path);
+			// The evaluation's failure is its caller's (ADR 0038, friction F01), which the session's script errors never list.
+			std::optional<ScriptError> failure;
+			const auto unknown = (*session)->GetScripts()->Evaluate("local value = 1\nreturn Input.IsActionDown('Jmup')", *path, std::nullopt, {}, &failure);
 			REQUIRE_FALSE(unknown.has_value());
 			CHECK(expected.GetMatchCount() == 1);
-			const auto errors = (*session)->GetScriptErrors().GetErrors();
-			REQUIRE_FALSE(errors.empty());
-			CHECK(errors.back().Line == 2);
-			CHECK(errors.back().Script == "Assets/Tests/ActionProbe.luau");
-			CHECK(errors.back().Message.find("Input.IsActionDown: ") != std::string::npos);
-			CHECK(errors.back().Message.find("Jump") != std::string::npos);
+			CHECK((*session)->GetScriptErrors().GetErrors().empty());
+			REQUIRE(failure.has_value());
+			CHECK(failure->Line == 2);
+			CHECK(failure->Script == "Assets/Tests/ActionProbe.luau");
+			CHECK(failure->Message.find("Input.IsActionDown: ") != std::string::npos);
+			CHECK(failure->Message.find("Jump") != std::string::npos);
 		}
 
 		// C22.3 (Docs/Decisions/0033-m22-contract.md decision 46; stream T, which registers Input.GetText over

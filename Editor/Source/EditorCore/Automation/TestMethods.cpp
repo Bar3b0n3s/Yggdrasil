@@ -297,7 +297,7 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(expectations, PrepareRecordExpectations(params, !params.Record.empty()));
 			}
 			auto host = CreateScope<EditorFeatureTestHost>(context);
-			ENGINE_TRY(host->Preflight());
+			ENGINE_TRY(host->Preflight(params.Filter));
 			EditorFeatureTestHost* adapter = host.get();
 			const bool reportCoverage = params.Coverage || context.GetEditor().GetProject().GetSettings().Testing.CoverageGates;
 			auto operation = CreateScope<TestRunOperation>(std::move(host), params.Record, reportCoverage);
@@ -337,7 +337,7 @@ namespace Engine {
 			.Field("suites", &TestListResult::Suites, "Configured suites and their declarations.")
 			.Field("replays", &TestListResult::Replays, "Replay paths expanded from the project globs.");
 		registry.Struct<TestRunParams>("TestRunParams", "Run selected suites, cases and replays without altering authored scene state.")
-			.Field("filter", &TestRunParams::Filter, "Case-insensitive substring of suite/case or replay path.")
+			.Field("filter", &TestRunParams::Filter, "Case-insensitive substring of suite/case or replay path; a filtered run resolves and validates only the suites and replays it selects.")
 			.Field("timeoutTicks", &TestRunParams::TimeoutTicks, "Optional positive run-wide tick cap; omitted means no additional limit.")
 			.Field("record", &TestRunParams::Record, "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written.")
 			.Field("coverage", &TestRunParams::Coverage, "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.")

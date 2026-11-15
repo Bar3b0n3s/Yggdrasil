@@ -123,7 +123,7 @@ namespace Engine {
 		const FieldMeta dimensionMeta{ .Min = 1.0, .Max = static_cast<double>(MaxViewportScreenshotDimension) };
 
 		registry.Struct<EditorScreenshotParams>("EditorScreenshotParams", "The params of editor.screenshot: the whole editor UI as a PNG.")
-			.Field("maxDimension", &EditorScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels.", dimensionMeta)
+			.Field("maxDimension", &EditorScreenshotParams::MaxDimension, "The larger side of the PNG at most this many pixels (default 1024), the image downscaled to fit.", dimensionMeta)
 			.Field("keep", &EditorScreenshotParams::Keep,
 				"Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project), which no later editor session prunes, instead of Library/Automation/Out/.");
 
@@ -140,8 +140,8 @@ namespace Engine {
 			{
 				.Name = "editor.screenshot",
 				.Description = "Requests a fresh editor UI frame, including while minimized, waits for that frame and captures the whole editor. "
-							   "Downscales it to maxDimension and writes it as a PNG whose path the result names. Needs a renderer (not "
-							   "--renderer none).",
+							   "Downscales it to maxDimension (default 1024) and writes it as a PNG whose path the result names. Needs a renderer "
+							   "(not --renderer none).",
 				.ExposeAsTool = true,
 				.Examples = { { .Description = "A screenshot of the editor at most 1024 pixels wide.", .Params = Json::object() } },
 			},

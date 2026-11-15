@@ -207,13 +207,18 @@ namespace Engine {
 
 		// `self` is the instance of the entity's slot whose behaviour's Script.Define name is `behaviour` (the first such
 		// slot), or of its first slot when `behaviour` is empty; NotFound, before anything runs, when no slot of the entity
-		// has that behaviour (its hint lists the entity's behaviours). A failed evaluation is published to the error stream
-		// and log, but it is not a callback of that instance: the behaviour stays enabled, keeps its tasks and is not
-		// paused on (§11.7). Spawned tasks belong to that instance.
+		// has that behaviour (its hint lists the entity's behaviours). A failed evaluation is the caller's error (ADR 0038,
+		// friction F01): it is logged and returned, and `failure`, when given, receives its ScriptError (kind, location,
+		// traceback, the bound entity and slot, the tick; bounded as a retained error is; empty after a success), but it is
+		// never retained in the error stream, passed to the host (OnScriptError) or claimed by a test case. It is not a
+		// callback of that instance either: the behaviour stays enabled, keeps its tasks and is not paused on (§11.7). A
+		// failure that stopped the VM (a hard memory breach) is the game's and is published as ExecuteBytecode's are,
+		// leaving `failure` empty. Spawned tasks belong to that instance, and their later faults are the game's.
 		[[nodiscard]] Result<ScriptEvaluation> Evaluate(std::string_view source, const VfsPath& path,
-			std::optional<UUID> entity = std::nullopt, std::string_view behaviour = {});
+			std::optional<UUID> entity = std::nullopt, std::string_view behaviour = {}, std::optional<ScriptError>* failure = nullptr);
 		// Trusted engine-produced replay predicates, including Dist. Never compiles source or creates a second VM. `self` is
-		// the instance of the entity's first slot. Failures follow Evaluate's reporting policy.
+		// the instance of the entity's first slot. A failure is published to the error stream, the host and the log (a
+		// replay expectation's error is the game's), without disabling or pausing its instance.
 		[[nodiscard]] Result<ScriptEvaluation> ExecuteBytecode(const ScriptData& script,
 			std::optional<UUID> entity = std::nullopt);
 		// EditorOnly: resolve the complete dependency closure, execute candidates in isolation, then atomically patch

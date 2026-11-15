@@ -31,10 +31,12 @@ namespace Engine {
 	// or 2 file migrates to version 3 with a null Fingerprint (nothing recorded, so nothing can be named), which
 	// project.upgrade writes (Tests/Data/Formats/Replay/v2.upgraded.replay); every recording writes a fingerprint.
 	inline constexpr uint32_t ReplayFingerprintFormatVersion = 3;
-	// The EngineVersion every recorder writes into a replay header (input.record, test.run's record, the Runtime's
-	// recordings): the constant "0.1.0", never EngineVersionString or the build id (Core/BuildId.h), so neither a version
-	// bump nor a commit rewrites a replay (decision 13, B-BVER). Readers accept any header text, as before.
-	inline constexpr std::string_view ReplayEngineVersionString = "0.1.0";
+	// A replay header's EngineVersion: every recorder (input.record, test.run's record, the Runtime's recordings) writes the
+	// running engine's version, EngineVersionString (Core/BuildId.h; session.hello's engineVersion), never the build id, so
+	// a commit rewrites no replay (Docs/Decisions/0030-m19-contract.md decision 13). Before ADR 0038 (friction F10) they
+	// wrote the constant "0.1.0", which the replays recorded then keep: the header's EngineVersion is informational, read by
+	// no verification and no state hash, so a version bump changes only the headers of later recordings. Readers accept
+	// any header text, as before.
 	// The recorders (input.record, test.run's record) store the state hash of every completed-tick boundary that is a
 	// positive multiple of this interval and lies before FinalTick (one second at 60 Hz; a tick inside a frame where a
 	// suite's scripted clock grouped several steps is no completed boundary, ReplayRecorder::CaptureCheckpoint), so a replay proves the

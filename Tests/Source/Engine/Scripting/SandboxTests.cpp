@@ -27,6 +27,7 @@
 #include <cmath>
 #include <format>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -69,9 +70,13 @@ namespace Engine {
 			const auto path = VfsPath::Create("project", "Assets/NestedEvaluation.luau");
 			if (!path)
 				return Lua::RaiseError(call, path.error());
-			const auto result = Lua::GetEngine(call)->Evaluate(explicitError ? "error('nested evaluation failure')" : "Task.Delay(0, function() Scene.CreateEntity('Inner') end)", *path);
+			// The nested evaluation's failure is its caller's (ADR 0038, friction F01): returned with where it was raised.
+			std::optional<ScriptError> failure;
+			const auto result = Lua::GetEngine(call)->Evaluate(explicitError ? "error('nested evaluation failure')" : "Task.Delay(0, function() Scene.CreateEntity('Inner') end)", *path, std::nullopt, {}, &failure);
 			Lua::Push(call, result.has_value());
-			return 1;
+			Lua::PushString(call, failure.has_value() ? std::string_view(failure->Script) : std::string_view());
+			Lua::Push(call, failure.has_value() && failure->Entity.IsValid());
+			return 3;
 		}
 
 		int UnavailableSandboxProbe(ScriptCall& /*call*/)
@@ -743,7 +748,8 @@ namespace Engine {
 				Test::ExpectLog expectedFailure(LogLevel::Error, "after write");
 				CHECK_FALSE(fixture.Evaluate("math.random(); error('after write')").has_value());
 				CHECK(fixture.ExternalMutations.size() == 1);
-				CHECK(fixture.Errors.size() == 1);
+				CHECK(fixture.EvaluationFailure.has_value());
+				CHECK(fixture.Errors.empty()); // the evaluation's failure is its caller's (ADR 0038, friction F01)
 			}
 			SUBCASE("deferred external writes get a fresh latch")
 			{
@@ -775,12 +781,14 @@ namespace Engine {
 			}
 		}
 
-		TEST_CASE("Sandbox: failed nested evaluations restore the resumed caller and publish once")
+		// A nested evaluation's failure is its caller's (ADR 0038, friction F01): logged once and returned to the binding,
+		// never published, and the resumed task goes on.
+		TEST_CASE("Sandbox: failed nested evaluations restore the resumed caller and report once")
 		{
 			Test::ScriptTestFixtureSpecification specification{};
 			specification.ConfigureApi = [](ScriptApiRegistry& api) -> Status
 			{
-				api.Module("Probe", "Nested evaluation observations.").Function("Nested", &NestedEvaluationProbe, "(explicitError: boolean) -> boolean", "Evaluate a failing ownerless chunk from a resumed task.");
+				api.Module("Probe", "Nested evaluation observations.").Function("Nested", &NestedEvaluationProbe, "(explicitError: boolean) -> (boolean, string, boolean)", "Evaluate a failing ownerless chunk from a resumed task: whether it succeeded, the script its failure names and whether that failure has an entity.");
 				return {};
 			};
 			Test::ScriptTestFixture fixture(specification);
@@ -788,28 +796,28 @@ namespace Engine {
 			Test::ExpectLog expectedResult(LogLevel::Error, "value is not a JSON scalar or table");
 			const auto spawned = fixture.Evaluate(R"(
 Task.Spawn(function()
-	assert(not Probe.Nested(false))
+	local ok, script, owned = Probe.Nested(false)
+	assert(not ok and script == "Assets/NestedEvaluation.luau" and not owned)
 	Task.WaitTicks(1)
-	assert(not Probe.Nested(true))
+	ok, script, owned = Probe.Nested(true)
+	assert(not ok and script == "Assets/NestedEvaluation.luau" and not owned)
 	Task.WaitTicks(1)
 	Scene.CreateEntity("Outer")
 end)
 return nil
 )");
 			REQUIRE_MESSAGE(spawned.has_value(), (spawned ? "" : spawned.error().ToString()));
-			REQUIRE(fixture.Errors.size() == 1);
+			CHECK(fixture.Errors.empty());
 			CHECK(expectedResult.GetMatchCount() == 1);
 			Test::ExpectLog expectedError(LogLevel::Error, "nested evaluation failure");
 			fixture.Frame.Tick = 1;
 			fixture.GetEngine()->ResumeTasks();
-			REQUIRE(fixture.Errors.size() == 2);
+			CHECK(fixture.Errors.empty());
 			CHECK(expectedError.GetMatchCount() == 1);
-			CHECK_FALSE(fixture.Errors.back().Entity.IsValid());
-			CHECK(fixture.Errors.back().Script == "Assets/NestedEvaluation.luau");
 			fixture.Frame.Tick = 2;
 			fixture.GetEngine()->ResumeTasks();
 			CHECK(fixture.GetScene().GetEntityCount() == 2);
-			CHECK(fixture.Errors.size() == 2);
+			CHECK(fixture.Errors.empty());
 			const auto recovered = fixture.Evaluate("return 19");
 			REQUIRE_MESSAGE(recovered.has_value(), (recovered ? "" : recovered.error().ToString()));
 			CHECK(recovered->Value.Get() == Json(19));
@@ -882,11 +890,12 @@ return nil
 				REQUIRE(fixture.GetEngine()->Reload(handle).has_value());
 				Test::ExpectLog expectedOld(LogLevel::Error, "old body");
 				CHECK_FALSE(fixture.Evaluate("self:Saved()", entity.GetUUID()).has_value());
-				REQUIRE_FALSE(fixture.Errors.empty());
-				CHECK(fixture.Errors.back().Line == 3);
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				CHECK(fixture.EvaluationFailure->Line == 3);
 				Test::ExpectLog expectedNew(LogLevel::Error, "new body");
 				CHECK_FALSE(fixture.Evaluate("self:Fail()", entity.GetUUID()).has_value());
-				CHECK(fixture.Errors.back().Line == 5);
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				CHECK(fixture.EvaluationFailure->Line == 5);
 			}
 			SUBCASE("interned map lifetime and budget do not depend on closure collection")
 			{

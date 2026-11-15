@@ -217,10 +217,55 @@ namespace Engine {
 			return first > 0 ? "..." + path : path;
 		}
 
-		// A nil, boolean, finite number or string at `index` as JSON. Errors: Script for any other value, naming its Luau type
-		// (luaL_typename: an engine value by its __type, such as "Quat") and its place in the converted value
-		// (FormatJsonReadPath of `frames`; the native test game's friction NT-08); Script for a non-finite number.
-		static Result<Json> ReadJsonScalar(ScriptCall& call, int index, Detail::NativeConversionBudget& budget, const std::vector<Scope<JsonReadFrame>>& frames)
+		// The components of a vector, a Color or a Quat as a JSON array of numbers (reflection's JSON spelling of the value);
+		// Script for a non-finite component, as for a non-finite number.
+		template<size_t Count>
+		static Result<Json> ReadJsonComponents(const std::array<float, Count>& components)
+		{
+			Json array = Json::array();
+			for (const float component : components)
+			{
+				if (!std::isfinite(component))
+					return MakeError(ErrorCode::Script, "JSON value contains a non-finite number");
+				array.push_back(static_cast<double>(component));
+			}
+			return array;
+		}
+
+		// With Components, the vector, Color or Quat at `index` as ReadJsonComponents' array ([x, y, z], [r, g, b, a],
+		// [x, y, z, w]); nullopt for any other value, and for every value with Refuse.
+		static std::optional<Result<Json>> ReadJsonEngineValue(lua_State* state, int index, Detail::SandboxAccess::JsonEngineValues engineValues)
+		{
+			if (engineValues != Detail::SandboxAccess::JsonEngineValues::Components)
+				return std::nullopt;
+			if (lua_type(state, index) == LUA_TVECTOR)
+			{
+				const float* vector = lua_tovector(state, index);
+				return ReadJsonComponents(std::array{ vector[0], vector[1], vector[2] });
+			}
+			if (lua_type(state, index) != LUA_TUSERDATA)
+				return std::nullopt;
+			const int tag = lua_userdatatag(state, index);
+			const size_t size = static_cast<size_t>(lua_objlen(state, index));
+			if (tag == std::to_underlying(Detail::ScriptValueTag::Color) && size == sizeof(glm::vec4))
+			{
+				const glm::vec4& color = *static_cast<const glm::vec4*>(lua_touserdatatagged(state, index, tag));
+				return ReadJsonComponents(std::array{ color.r, color.g, color.b, color.a });
+			}
+			if (tag == std::to_underlying(Detail::ScriptValueTag::Quat) && size == sizeof(glm::quat))
+			{
+				const glm::quat& rotation = *static_cast<const glm::quat*>(lua_touserdatatagged(state, index, tag));
+				return ReadJsonComponents(std::array{ rotation.x, rotation.y, rotation.z, rotation.w });
+			}
+			return std::nullopt;
+		}
+
+		// A nil, boolean, finite number or string at `index` as JSON, and with Components a vector, Color or Quat
+		// (ReadJsonEngineValue). Errors: Script for any other value, naming its Luau type (luaL_typename: an engine value by
+		// its __type, such as "Quat") and its place in the converted value (FormatJsonReadPath of `frames`; the native test
+		// game's friction NT-08); Script for a non-finite number or component.
+		static Result<Json> ReadJsonScalar(ScriptCall& call, int index, Detail::NativeConversionBudget& budget, const std::vector<Scope<JsonReadFrame>>& frames,
+			Detail::SandboxAccess::JsonEngineValues engineValues)
 		{
 			lua_State* state = call.State;
 			switch (lua_type(state, index))
@@ -241,6 +286,8 @@ namespace Engine {
 				}
 				default:
 				{
+					if (std::optional<Result<Json>> engineValue = ReadJsonEngineValue(state, index, engineValues))
+						return std::move(*engineValue);
 					const std::string path = FormatJsonReadPath(frames);
 					return std::unexpected(Error(ErrorCode::Script, std::format("{} value{} is not a JSON scalar or table", luaL_typename(state, index), path.empty() ? std::string() : std::format(" at {}", path)))
 							.WithHint("JSON holds nil, booleans, numbers, strings and tables of them: convert the value first, such as a vector v to {v.x, v.y, v.z}"));
@@ -304,7 +351,8 @@ namespace Engine {
 			return result;
 		}
 
-		static Result<Json> ReadJson(ScriptCall& call, int index, std::vector<const void*>& ancestors, Detail::NativeConversionBudget& budget)
+		static Result<Json> ReadJson(ScriptCall& call, int index, std::vector<const void*>& ancestors, Detail::NativeConversionBudget& budget,
+			Detail::SandboxAccess::JsonEngineValues engineValues = Detail::SandboxAccess::JsonEngineValues::Refuse)
 		{
 			lua_State* state = call.State;
 			index = lua_absindex(state, index);
@@ -350,7 +398,7 @@ namespace Engine {
 					}
 					else
 					{
-						ENGINE_TRY_ASSIGN(value, ReadJsonScalar(call, index, budget, frames));
+						ENGINE_TRY_ASSIGN(value, ReadJsonScalar(call, index, budget, frames, engineValues));
 						completed = true;
 					}
 				}
@@ -379,10 +427,10 @@ namespace Engine {
 			}
 		}
 
-		static Result<Json> ReadJson(ScriptCall& call, int index, std::vector<const void*>& ancestors)
+		static Result<Json> ReadJson(ScriptCall& call, int index, std::vector<const void*>& ancestors, Detail::SandboxAccess::JsonEngineValues engineValues)
 		{
 			Detail::NativeConversionBudget budget(call);
-			auto result = ReadJson(call, index, ancestors, budget);
+			auto result = ReadJson(call, index, ancestors, budget, engineValues);
 			if (result)
 				if (const auto status = budget.Poll(); !status)
 					result = std::unexpected(status.error());
@@ -1306,10 +1354,10 @@ namespace Engine {
 			return ReadString(index);
 		}
 
-		Result<Json> SandboxAccess::ReadJson(ScriptCall& call, int index)
+		Result<Json> SandboxAccess::ReadJson(ScriptCall& call, int index, JsonEngineValues engineValues)
 		{
 			std::vector<const void*> ancestors;
-			return Utils::ReadJson(call, index, ancestors);
+			return Utils::ReadJson(call, index, ancestors, engineValues);
 		}
 
 		ErrorLocation ScriptCallerLocation(ScriptCall& call, int level)

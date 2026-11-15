@@ -181,7 +181,8 @@ namespace Engine {
 		// the owning engine. Path is optional diagnostic origin; no source file is required or probed. Evaluation uses
 		// ScriptCompileMode::ExpressionOrChunk, so both expressions and complete return chunks retain authored locations.
 		// Supplying entity without an engine is InvalidState; a missing entity is NotFound. Source is Unsupported in Dist.
-		// Converts the first return to finite, acyclic JSON (scalars, arrays, string-keyed objects), rejecting unsupported
+		// Converts the first return to finite, acyclic JSON (scalars, arrays, string-keyed objects; a vector, Color or Quat at
+		// any depth as the array of its components, reflection's JSON spelling: ADR 0038, friction F01), rejecting other
 		// functions/threads/userdata, mixed-key tables or cycles with located Script errors. Captures print strings.
 		// Native JSON conversion has a separate allowance of min(4 MiB, MemoryLimitMB MiB), charging 256 bytes per
 		// expanded value/table entry and four per string/key byte. Repeated aliases are charged each time. Exhaustion

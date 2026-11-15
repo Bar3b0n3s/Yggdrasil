@@ -132,4 +132,9 @@ namespace Engine {
 		return m_EvictedThrough > since;
 	}
 
+	void ScriptErrorStream::Clear()
+	{
+		m_Errors.clear();
+	}
+
 }

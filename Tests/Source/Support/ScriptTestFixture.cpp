@@ -94,7 +94,7 @@ namespace Engine {
 		{
 			if (m_Engine == nullptr)
 				return MakeError(ErrorCode::InvalidState, "Start the script fixture before evaluating");
-			return m_Engine->Evaluate(source, {}, entity);
+			return m_Engine->Evaluate(source, {}, entity, {}, &EvaluationFailure);
 		}
 
 		Result<std::string> ScriptTestFixture::ReadModule(const VfsPath& path)

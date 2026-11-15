@@ -24,9 +24,11 @@ namespace Engine {
 		return value >= static_cast<double>(Maximum) ? Maximum : static_cast<float>(value);
 	}
 
-	Result<StatsGetResult> Automation::StatsGet(AutomationMethodContext& context, const StatsGetParams&)
+	Result<StatsGetResult> Automation::StatsGet(AutomationMethodContext& context, const StatsGetParams& params)
 	{
 		ENGINE_TRY_ASSIGN(StatsGetResult result, context.GetHostStatistics());
+		if (!params.Views)
+			result.Views.clear();
 		// M21's milestone review: the bodies of both physics worlds, so the hardening soak's no-growth rule sees 2D bodies too.
 		if (const PlaySession* session = context.GetPlaySession(); session != nullptr)
 			result.Bodies = CountSessionBodies(*session);
@@ -107,7 +109,10 @@ namespace Engine {
 
 	void RegisterStatsMethodTypes(TypeRegistry& registry)
 	{
-		static_cast<void>(registry.Struct<StatsGetParams>("StatsGetParams", "No parameters."));
+		registry.Struct<StatsGetParams>("StatsGetParams", "Which statistics stats.get reports.")
+			.Field("views", &StatsGetParams::Views,
+				"Optional: false leaves out the per-view render statistics (views is empty), for a counter read such as a soak check's "
+				"entities, bodies, voices and heap; true, the default, reports them.");
 		registry.Struct<StatsPassSummary>("StatsPassSummary", "One pass of a displayed view; GPU time may belong to its separately identified delayed GPU frame.")
 			.Field("name", &StatsPassSummary::Name, "Stable pass name.")
 			.Field("cpuMilliseconds", &StatsPassSummary::CpuMilliseconds, "Approximate CPU recording time in milliseconds.")
@@ -169,7 +174,7 @@ namespace Engine {
 
 	void RegisterStatsMethods(MethodRegistry& methods)
 	{
-		methods.Add({ .Name = "stats.get", .Description = "Reads host and displayed-view statistics without waiting for the GPU or advancing a frame.", .SupportsDryRun = true, .AvailableInRuntime = true, .AllowedInBatch = true, .Examples = { { .Description = "Inspect current host and renderer observations.", .Params = Json::object() } } }, &Automation::StatsGet);
+		methods.Add({ .Name = "stats.get", .Description = "Reads host and displayed-view statistics without waiting for the GPU or advancing a frame; views: false leaves the per-view render statistics out.", .SupportsDryRun = true, .AvailableInRuntime = true, .AllowedInBatch = true, .Examples = { { .Description = "Inspect current host and renderer observations.", .Params = Json::object() }, { .Description = "Read the counters only, without the per-view render statistics.", .Params = Json{ { "views", false } } } } }, &Automation::StatsGet);
 	}
 
 }

@@ -19,7 +19,10 @@ namespace Engine {
 	public:
 		explicit EditorFeatureTestHost(EditorMethodContext& context);
 		~EditorFeatureTestHost() override;
-		[[nodiscard]] Status Preflight();
+		// Before a test run or listing: the run's admission, the project's settings, refreshed assets, deterministic audio,
+		// no script type error, and every replay `filter` selects (FeatureTestRunner::MatchesFilter; all of them with the
+		// empty filter) loads and starts a session; a filtered run validates only what it selects (ADR 0038, friction F03).
+		[[nodiscard]] Status Preflight(std::string_view filter = {});
 		// The ScriptApiRegistry snapshot GetCoverage subtracts (MakeScriptApiCoverageCounters); call it immediately before
 		// FeatureTestRunner::Begin. Errors: those of ScriptApiRegistry::GetCoverage.
 		[[nodiscard]] Status CaptureCoverageBaseline();

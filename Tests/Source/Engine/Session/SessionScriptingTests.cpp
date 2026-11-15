@@ -11,6 +11,7 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/ScriptCompiler.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/ReplayRecorder.h"
 #include "Support/ExpectLog.h"
@@ -695,12 +696,19 @@ return Script.Define("Second", T)
 			auto session = std::move(*result);
 			session->SetExtractionEnabled(false);
 			Test::ExpectLog expected(LogLevel::Error, "session cursor probe");
-			CHECK_FALSE(session->GetScripts()->Evaluate("error('session cursor probe')", {}));
+			// A replay expectation's failure is the game's, which the session's stream retains (a failed external Evaluate is
+			// its caller's: ADR 0038, friction F01).
+			const auto compiled = ScriptCompiler::Compile({ .Source = "error('session cursor probe')", .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=probe" });
+			REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
+			ScriptData probe{};
+			probe.Bytecode = compiled->Bytecode;
+			probe.SourceMap = compiled->SourceMap;
+			CHECK_FALSE(session->GetScripts()->ExecuteBytecode(probe));
 			const uint64_t cursor = session->GetScriptErrors().GetCursor();
 			REQUIRE(cursor > 0);
 			REQUIRE(session->GetScripts()->GetHost().RequestSceneLoad(scene, Json::object()));
 			session->Tick();
-			CHECK_FALSE(session->GetScripts()->Evaluate("error('session cursor probe')", {}));
+			CHECK_FALSE(session->GetScripts()->ExecuteBytecode(probe));
 			const auto repeated = session->GetScriptErrors().Read(cursor);
 			REQUIRE(repeated.size() == 1);
 			CHECK(repeated[0].Count == 2);

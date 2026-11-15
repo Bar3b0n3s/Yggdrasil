@@ -38,7 +38,7 @@ namespace Engine {
 			m_Editor.GetPlay().ReleaseTestRun(*this);
 	}
 
-	Status EditorFeatureTestHost::Preflight()
+	Status EditorFeatureTestHost::Preflight(std::string_view filter)
 	{
 		ENGINE_TRY(m_Editor.GetPlay().CheckTestAdmission(m_Context.GetRequest().Client));
 		m_Project = m_Editor.GetProject().GetSettings();
@@ -61,6 +61,8 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const std::vector<std::string> replays, ExpandReplayPaths(m_Project.Testing.Replays));
 		for (const std::string& path : replays)
 		{
+			if (!FeatureTestRunner::MatchesFilter(path, filter))
+				continue;
 			ENGINE_TRY_ASSIGN(const AssetRef<ReplayData> replay, LoadReplay(path));
 			ENGINE_TRY_ASSIGN(auto scene, CreateReplaySession(replay->Header, TestSuiteSettings::Mode::Editor));
 			static_cast<void>(scene);

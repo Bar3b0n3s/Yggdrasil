@@ -361,7 +361,8 @@ namespace Engine {
 		result.Header.Parameters = options.Parameters.Get().is_null() ? VariantValue(Json::object()) : options.Parameters;
 		result.Header.Seed = specification.Seed;
 		result.Header.FixedHz = project.Simulation.FixedHz;
-		result.Header.EngineVersion = std::string(ReplayEngineVersionString);
+		// The running engine's version (ADR 0038, friction F10), as session.hello reports it.
+		result.Header.EngineVersion = std::string(EngineVersionString);
 		// The run mode that recorded it, never the build configuration: a Debug and a Release editor record the same bytes
 		// (§9.1, ADR 0022 "Integration").
 		result.Header.Config = "Editor";
@@ -441,7 +442,16 @@ namespace Engine {
 		if (AudioEngine* audio = editor.GetEngine().GetAudioEngine())
 			mixer = Utils::ReadMixerVolumes(*audio);
 		const CursorMode cursor = state.GetScriptCursorMode();
-		ENGINE_TRY_ASSIGN(PreparedSession prepared, PrepareSession(options, editor.GetProject().GetSettings()));
+		// Prepared without its startup callbacks, which run below once the earlier sessions' errors are forgotten.
+		ENGINE_TRY_ASSIGN(PreparedSession prepared, PrepareSession(options, editor.GetProject().GetSettings(), false, nullptr, nullptr, false, false, nullptr, false));
+		// script.errors reports the current play session's errors (ADR 0038, friction F02): the retained errors of an
+		// earlier session are forgotten before this one's OnCreate and OnStart can raise any, keeping the stream's cursor.
+		state.Errors.Clear();
+		// Activated unpaused, as an activating PrepareSession does; a startup pause (script error, Debug.Break, fatal stop)
+		// is kept.
+		prepared.Session->SetPaused(false);
+		prepared.Session->Activate();
+		prepared.Session->SetPaused(options.Paused || prepared.Session->IsPaused());
 		state.CursorBaseline = cursor;
 		state.PendingScriptReloads.clear();
 		state.ImportEventCursor = editor.GetEngine().GetEventLog().GetNextSeq();
@@ -982,6 +992,8 @@ namespace Engine {
 		state.SessionViewFixed = prepared.FixedView;
 		state.ReplayInputSerial = 0;
 		state.RecordingOwner = NoClient;
+		// A new play session's errors only (ADR 0038, friction F02), as Start forgets them.
+		state.Errors.Clear();
 		state.Session->Activate();
 		// Startup faults, Debug.Break and fatal stop retain their pause even when the launch options request running.
 		state.Session->SetPaused(options.Paused || state.Session->IsPaused());

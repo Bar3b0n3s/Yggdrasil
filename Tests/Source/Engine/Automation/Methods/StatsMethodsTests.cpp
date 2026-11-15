@@ -138,6 +138,25 @@ namespace Engine {
 			REQUIRE(after);
 			CHECK((*after)["scene"] == (*before)["scene"]);
 		}
+		// ADR 0038, friction F09: a counter read (the soak check's entities, bodies, voices and heap) received every view's
+		// per-pass render statistics too. views: false leaves them out; without it, or with true, they are reported.
+		TEST_CASE("StatsGet: views false leaves out the per-view statistics and keeps the counters")
+		{
+			Test::AutomationFixture setup("StatsWithoutViews");
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "One" } }));
+			const auto counters = setup.Call("stats.get", Json{ { "views", false } });
+			REQUIRE_MESSAGE(counters.has_value(), counters.error().ToString());
+			CHECK((*counters)["entities"] == Json(1));
+			CHECK((*counters)["views"] == Json::array());
+			for (const Json& params : { Json::object(), Json{ { "views", true } } })
+			{
+				const auto full = setup.Call("stats.get", params);
+				REQUIRE_MESSAGE(full.has_value(), full.error().ToString());
+				CHECK((*full)["entities"] == Json(1));
+				CHECK((*full)["views"].size() == 2);
+			}
+		}
+
 		TEST_CASE("StatsGet: reports the committed bytes of the C runtime's heap where the platform measures them")
 		{
 			// Docs/Decisions/0036-m25-tetris-pixel-art.md, "The soak": the soak's memory rule reads these fields. Windows

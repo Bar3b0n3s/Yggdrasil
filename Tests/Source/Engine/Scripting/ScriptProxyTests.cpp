@@ -704,10 +704,10 @@ return true
 				const auto rejected = fixture.Evaluate(std::format("local entity = Scene.FindByName(\"Root\")\nentity:AddComponent(\"Script\", {{Scripts = {{{{Script = Assets.Load(\"{}\"), Fields = {{}}, ExecutionOrder = 0}}}}}})", path));
 				CHECK_FALSE(rejected);
 				CHECK(expected.GetMatchCount() == 1);
-				REQUIRE_FALSE(fixture.Errors.empty());
-				CHECK(fixture.Errors.back().Line == 2);
-				CHECK_FALSE(fixture.Errors.back().Script.empty());
-				CHECK(fixture.Errors.back().Message.find("Behaviour") != std::string::npos);
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				CHECK(fixture.EvaluationFailure->Line == 2);
+				CHECK_FALSE(fixture.EvaluationFailure->Script.empty());
+				CHECK(fixture.EvaluationFailure->Message.find("Behaviour") != std::string::npos);
 				CHECK(fixture.GetScene().GetRevision() == revision);
 				CHECK(fixture.ExternalMutations.empty());
 			}
@@ -727,10 +727,10 @@ return true
 				const auto rejected = fixture.Evaluate(std::format("local script = Scene.FindByName(\"Root\"):GetComponent(\"Script\")\nscript.Scripts = {{{{Script = Assets.Load(\"{}\"), Fields = {{}}, ExecutionOrder = 0}}}}", path));
 				CHECK_FALSE(rejected);
 				CHECK(expected.GetMatchCount() == 1);
-				REQUIRE_FALSE(fixture.Errors.empty());
-				CHECK(fixture.Errors.back().Line == 2);
-				CHECK_FALSE(fixture.Errors.back().Script.empty());
-				CHECK(fixture.Errors.back().Message.find("Behaviour") != std::string::npos);
+				REQUIRE(fixture.EvaluationFailure.has_value());
+				CHECK(fixture.EvaluationFailure->Line == 2);
+				CHECK_FALSE(fixture.EvaluationFailure->Script.empty());
+				CHECK(fixture.EvaluationFailure->Message.find("Behaviour") != std::string::npos);
 				CHECK(fixture.GetScene().GetRevision() == attachedRevision);
 				CHECK(fixture.ExternalMutations.empty());
 				CHECK(root.GetComponent<ScriptComponent>().Scripts.front().Script.GetHandle() == AssetHandle(93));

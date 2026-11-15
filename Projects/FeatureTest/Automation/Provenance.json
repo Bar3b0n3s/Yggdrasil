@@ -5780,7 +5780,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Animation.replay",
-			"XXH64": "f4cd941db957d886",
+			"XXH64": "37136bcb6408e388",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5796,7 +5796,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Combined2DUi.replay",
-			"XXH64": "0768bf62c3cd226b",
+			"XXH64": "a99e0702788ea034",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5812,7 +5812,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Determinism.replay",
-			"XXH64": "efc0b907708f6299",
+			"XXH64": "61b179136f4d909a",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -5828,7 +5828,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Graphs.replay",
-			"XXH64": "fb20a7ef84cf73a7",
+			"XXH64": "efa510a95c5ca314",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5844,7 +5844,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Input.replay",
-			"XXH64": "8ed5ba153f6e41fd",
+			"XXH64": "09d9dea4ea462935",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5860,7 +5860,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/MultiScript.replay",
-			"XXH64": "aec85955217a1ce2",
+			"XXH64": "f09b42a0df3a29cd",
 			"Method": "input.record",
 			"RequestId": 19,
 			"Client": "batch",
@@ -5876,7 +5876,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Physics2D.replay",
-			"XXH64": "869fc40fa163c70a",
+			"XXH64": "ecb789ad37ec4dac",
 			"Method": "input.record",
 			"RequestId": 7,
 			"Client": "batch",
@@ -5892,7 +5892,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/PhysicsSemantics.replay",
-			"XXH64": "1c71811d052e7824",
+			"XXH64": "b4a8284bc50e9e31",
 			"Method": "input.record",
 			"RequestId": 12,
 			"Client": "batch",
@@ -5908,7 +5908,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Sprites2D.replay",
-			"XXH64": "233743ef2c4545ec",
+			"XXH64": "73f904c54e5de3d6",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5924,7 +5924,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Terrain.replay",
-			"XXH64": "6a2aca54a336717e",
+			"XXH64": "9a73e79ae4af4cb7",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5940,7 +5940,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/TextInput.replay",
-			"XXH64": "8ce9bc4660bd550d",
+			"XXH64": "a2e444a28700783b",
 			"Method": "test.run",
 			"RequestId": 4,
 			"Client": "batch",
@@ -5956,7 +5956,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Tilemap.replay",
-			"XXH64": "2ecb7e57ab22d01d",
+			"XXH64": "71819f2c53313778",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5972,7 +5972,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Ui.replay",
-			"XXH64": "79bd3f7d5fb19afb",
+			"XXH64": "e1961a163f294058",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -5988,7 +5988,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/UiWorld.replay",
-			"XXH64": "8a49c49d9ba3641a",
+			"XXH64": "1369ba5de12ee597",
 			"Method": "test.run",
 			"RequestId": 13,
 			"Client": "batch",

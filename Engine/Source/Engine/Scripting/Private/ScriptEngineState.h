@@ -74,11 +74,15 @@ namespace Engine {
 			std::vector<HeldEvent> PendingEvents{};
 		};
 
-		// Evaluation and replay-predicate failures are reported without disabling the addressed instance.
+		// Evaluation and replay-predicate failures are reported without disabling the addressed instance. CallerOnly is an
+		// external evaluation's (ScriptEngine::Evaluate; ADR 0038, friction F01): the caller's error, logged and kept in
+		// CallerFailure for the caller, but neither retained in the error stream nor passed to the hosts or a test case;
+		// one that stopped the VM (fatal) is the game's, and is published as ReportOnly publishes it.
 		enum class FaultPolicy : uint8_t
 		{
 			DisableInstance,
-			ReportOnly
+			ReportOnly,
+			CallerOnly
 		};
 
 		enum class ReferenceKind : uint8_t
@@ -182,6 +186,9 @@ namespace Engine {
 		// (ScriptError::Slot). The instance the error names is the one the DisableInstance policy disables.
 		void Publish(ScriptError error, ScriptTaskOwner owner = {}, bool caseBody = false, bool alreadyLogged = false,
 			FaultPolicy policy = FaultPolicy::DisableInstance);
+		// The Script channel's Error entry of a published (or CallerOnly) error: its kind and message, then its callback,
+		// entity and traceback, with the error's tick, entity and location as the log context.
+		static void LogScriptError(const ScriptError& occurrence);
 		void Publish(const Error& error, InstanceKey instance = {}, std::string_view callback = {});
 		// Not in Dist. The changed script plus the loaded modules and attached behaviours that transitively require it,
 		// in dependency order. Loads published assets only; executes no script code and publishes nothing.
@@ -248,6 +255,9 @@ namespace Engine {
 		// At most MaxScriptTestUnclaimedErrors (ScriptLimits.h); a claim removes its entry.
 		std::vector<ObservedError> ObservedErrors{};
 		std::optional<PendingFailure> PendingSafetyFailure{};
+		// The last CallerOnly failure Publish logged without publishing it, bounded (BoundScriptError) and with its owner's
+		// entity, slot and tick; ScriptEngine::Evaluate resets it before it runs and hands it to its caller.
+		std::optional<ScriptError> CallerFailure{};
 	};
 
 }

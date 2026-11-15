@@ -232,14 +232,35 @@ namespace Engine {
 		return Lua::ProtectedCall(call, &State::InvokeNative);
 	}
 
+	void ScriptEngine::State::LogScriptError(const ScriptError& occurrence)
+	{
+		// Physics logs before notifying its listener. Other errors log here; host histories are data-only copies.
+		LogContext context = LogContextScope::GetCurrent();
+		context.Tick = occurrence.Tick;
+		context.Entity = occurrence.Entity;
+		context.ScriptFile = occurrence.Script;
+		context.ScriptLine = occurrence.Line;
+		const LogContextScope scope(context);
+		std::string message = std::format("{}: {}", ScriptErrorKindToString(occurrence.Kind), occurrence.Message);
+		if (!occurrence.Callback.empty())
+			message += std::format("\nCallback: {}", occurrence.Callback);
+		if (!occurrence.EntityName.empty())
+			message += std::format("\nEntity: {} ({})", occurrence.EntityName, occurrence.Entity);
+		for (const ScriptTraceFrame& frame : occurrence.Traceback)
+			message += std::format("\n  at {}:{} ({})", frame.Script, frame.Line, frame.Function);
+		const int line = static_cast<int>(std::min(occurrence.Line, static_cast<uint32_t>(std::numeric_limits<int>::max())));
+		Detail::LogWrite(LogChannel::Script, LogLevel::Error, occurrence.Script.c_str(), line, occurrence.Callback.c_str(), "{}", message);
+	}
+
 	void ScriptEngine::State::Publish(ScriptError error, ScriptTaskOwner owner, bool caseBody, bool alreadyLogged, FaultPolicy policy)
 	{
 		const bool nested = Vm != nullptr && Detail::SandboxAccess::GetWatchdog(*Vm)->GetDepth() != 0;
 		if (nested && (error.Kind == ScriptErrorKind::Timeout || error.Kind == ScriptErrorKind::Memory))
 		{
-			// Safety faults remain latched across nested protected entries. The outer owner publishes once after unwind.
+			// Safety faults remain latched across nested protected entries. The outer owner publishes once after unwind, so a
+			// latched evaluation fault is published as ReportOnly publishes it: the outer entry fails with it too.
 			if (!PendingSafetyFailure.has_value())
-				PendingSafetyFailure = PendingFailure{ std::move(error), owner, caseBody, policy };
+				PendingSafetyFailure = PendingFailure{ std::move(error), owner, caseBody, policy == FaultPolicy::CallerOnly ? FaultPolicy::ReportOnly : policy };
 			return;
 		}
 		if (!nested && PendingSafetyFailure.has_value())
@@ -282,26 +303,18 @@ namespace Engine {
 		}
 		Recover();
 		const bool fatal = Vm != nullptr && Vm->IsStopped();
+		if (policy == FaultPolicy::CallerOnly && !fatal)
+		{
+			// The caller's own error (ADR 0038, friction F01): logged and returned to it, never the game's script error.
+			BoundScriptError(error);
+			if (!alreadyLogged)
+				LogScriptError(error);
+			CallerFailure = std::move(error);
+			return;
+		}
 		const ScriptError occurrence = Engine.m_Errors.Add(std::move(error));
 		if (!alreadyLogged)
-		{
-			// Physics logs before notifying its listener. Other errors log here; host histories are data-only copies.
-			LogContext context = LogContextScope::GetCurrent();
-			context.Tick = occurrence.Tick;
-			context.Entity = occurrence.Entity;
-			context.ScriptFile = occurrence.Script;
-			context.ScriptLine = occurrence.Line;
-			const LogContextScope scope(context);
-			std::string message = std::format("{}: {}", ScriptErrorKindToString(occurrence.Kind), occurrence.Message);
-			if (!occurrence.Callback.empty())
-				message += std::format("\nCallback: {}", occurrence.Callback);
-			if (!occurrence.EntityName.empty())
-				message += std::format("\nEntity: {} ({})", occurrence.EntityName, occurrence.Entity);
-			for (const ScriptTraceFrame& frame : occurrence.Traceback)
-				message += std::format("\n  at {}:{} ({})", frame.Script, frame.Line, frame.Function);
-			const int line = static_cast<int>(std::min(occurrence.Line, static_cast<uint32_t>(std::numeric_limits<int>::max())));
-			Detail::LogWrite(LogChannel::Script, LogLevel::Error, occurrence.Script.c_str(), line, occurrence.Callback.c_str(), "{}", message);
-		}
+			LogScriptError(occurrence);
 		// Only a nonfatal error outside the case body can be claimed. Past the cap it cannot, and the runner reports it as
 		// an unexpected error of the case.
 		const ScriptReference currentCase = !owner.Case.IsNull() ? owner.Case : ActiveCase;
