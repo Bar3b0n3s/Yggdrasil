@@ -282,6 +282,42 @@ namespace Engine {
 			REQUIRE(behaviourSource.has_value());
 			CHECK(behaviourSource->find("Script.Define(\"Script_Player_Controller\", Script_Player_Controller)") != std::string::npos);
 		}
+
+		// Docs/Decisions/0038-m27-rolling-ball.md friction F24: the lines script.read and script.write count.
+		TEST_CASE("EditorScriptService: CountScriptLines counts the lines each newline ends and a last line without one")
+		{
+			CHECK(CountScriptLines("") == 0);
+			CHECK(CountScriptLines("return 1") == 1);
+			CHECK(CountScriptLines("return 1\n") == 1);
+			CHECK(CountScriptLines("return 1\r\n") == 1);
+			CHECK(CountScriptLines("\r") == 1);
+			CHECK(CountScriptLines("\n") == 1);
+			CHECK(CountScriptLines("local A = 1\nreturn A") == 2);
+			CHECK(CountScriptLines("local A = 1\r\nreturn A\r\n\n") == 3);
+		}
+
+		// Friction F24: the span script.write reports, between the lines two sources share at their start and at their end.
+		TEST_CASE("EditorScriptService: FindChangedScriptLines gives one span between the lines two sources share at their start and end")
+		{
+			const auto span = [](uint32_t beforeLine, uint32_t beforeEnd, uint32_t afterLine, uint32_t afterEnd)
+			{
+				return std::optional<ScriptChangedLines>(ScriptChangedLines{ .Before = { .Line = beforeLine, .EndLine = beforeEnd }, .After = { .Line = afterLine, .EndLine = afterEnd } });
+			};
+			CHECK_FALSE(FindChangedScriptLines("", "").has_value());
+			CHECK_FALSE(FindChangedScriptLines("a\nb\n", "a\nb\n").has_value());
+			CHECK(FindChangedScriptLines("", "a\nb\n") == span(1, 1, 1, 3));
+			CHECK(FindChangedScriptLines("a\nb\n", "") == span(1, 3, 1, 1));
+			CHECK(FindChangedScriptLines("a\nb\nc\n", "a\nB\nc\n") == span(2, 3, 2, 3));
+			CHECK(FindChangedScriptLines("a\nb\nc\n", "a\nc\n") == span(2, 3, 2, 2));
+			CHECK(FindChangedScriptLines("a\nc\n", "a\nb\nc\n") == span(2, 2, 2, 3));
+			CHECK(FindChangedScriptLines("a\nb\nc\nd\n", "A\nb\nc\nD\n") == span(1, 5, 1, 5));
+			// Repeated lines: the shared ends never overlap.
+			CHECK(FindChangedScriptLines("a\nb\na\n", "a\n") == span(2, 4, 2, 2));
+			CHECK(FindChangedScriptLines("a\n", "a\na\n") == span(2, 2, 2, 3));
+			// Line ends belong to their lines.
+			CHECK(FindChangedScriptLines("a\nb", "a\nb\n") == span(2, 3, 2, 3));
+			CHECK(FindChangedScriptLines("a\r\nb\r\n", "a\nb\r\n") == span(1, 2, 1, 2));
+		}
 	}
 
 }

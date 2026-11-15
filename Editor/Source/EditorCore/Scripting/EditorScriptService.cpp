@@ -4,6 +4,7 @@
 #include "EditorCore/Commands/AssetEditCommand.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/Asset/AssetMetadata.h"
+#include "Engine/Asset/CookedFormat.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Importers/ScriptImporter.h"
 #include "Engine/Core/Utf8.h"
@@ -11,8 +12,11 @@
 
 #include <algorithm>
 #include <format>
+#include <limits>
 #include <optional>
+#include <string>
 #include <tuple>
+#include <vector>
 
 namespace Engine {
 
@@ -44,8 +48,17 @@ namespace Engine {
 			return code == ErrorCode::Io || code == ErrorCode::PermissionDenied || code == ErrorCode::InvalidState || code == ErrorCode::Unsupported;
 		}
 
-		static Result<std::vector<ScriptDiagnostic>> CheckWrittenScript(EditorContext& editor, IScriptDiagnosticsProvider& diagnostics,
-			const VfsPath& path, std::string_view source, const AssetMetadata& metadata)
+		// What a detached import of a script's bytes found and cooked.
+		struct ScriptImportAttempt
+		{
+			std::vector<ScriptDiagnostic> Findings{};
+			std::optional<uint64_t> CookedHash{}; // HashCookedArtifact of its artifact; nullopt when the bytes do not cook
+		};
+
+		// Imports `source` as the script `metadata` describes at `path`, checking it with `diagnostics` when given (cooking
+		// never reads the check, so the artifact and its hash are the same without one).
+		static Result<ScriptImportAttempt> ImportScriptSource(EditorContext& editor, IScriptDiagnosticsProvider* diagnostics, const VfsPath& path,
+			std::string_view source, const AssetMetadata& metadata)
 		{
 			std::vector<ImportAssetLookupEntry> assets;
 			for (const AssetRecord* record : editor.GetAssets().GetRegistry().GetRecords())
@@ -53,27 +66,49 @@ namespace Engine {
 			std::ranges::sort(assets, {}, &ImportAssetLookupEntry::SourcePath);
 			// Detached real import: checks current bytes even while lockstep defers publication. AssetWriter alone
 			// schedules the manager's normal import/publication; this validation never replaces a live artifact.
-			ImportContext context({ .Vfs = &editor.GetVfs(), .SourcePath = path, .SourceBytes = AsBytes(source), .Registry = &editor.GetTypeRegistry(), .Assets = assets, .ScriptDiagnostics = &diagnostics, .LoadTimeScriptApi = &editor.GetLoadTimeScriptApi() });
+			ImportContext context({ .Vfs = &editor.GetVfs(), .SourcePath = path, .SourceBytes = AsBytes(source), .Registry = &editor.GetTypeRegistry(), .Assets = assets, .ScriptDiagnostics = diagnostics, .LoadTimeScriptApi = &editor.GetLoadTimeScriptApi() });
 			const Result<ImportResult> imported = ScriptImporter{}.Import(context, metadata);
 			if (!imported && IsInfrastructureFailure(imported.error()))
 				return std::unexpected(imported.error());
+			ScriptImportAttempt attempt;
+			if (imported && !imported->Artifacts.empty())
+				attempt.CookedHash = HashCookedArtifact(imported->Artifacts.front().Cooked);
 			// The attempt's findings already hold the importer's located failure (SCRIPT_COMPILE_ERROR, §13.7) once, without
 			// repeating a syntax error the checker reported on the same line.
-			std::vector<ScriptDiagnostic> findings;
 			if (const auto check = context.GetScriptCheck(); check.has_value())
-				findings = check->Diagnostics;
+				attempt.Findings = check->Diagnostics;
 			else if (!imported)
 			{
 				const Error& error = imported.error();
-				findings.push_back({ .Severity = DiagnosticSeverity::Error,
+				attempt.Findings.push_back({ .Severity = DiagnosticSeverity::Error,
 					.Code = "SCRIPT_COMPILE_ERROR",
 					.File = error.GetLocation().File.empty() ? std::string(path.GetPath()) : error.GetLocation().File,
 					.Line = error.GetLocation().Line,
 					.Column = error.GetLocation().Column,
 					.Message = error.GetMessageText() });
 			}
-			SortScriptDiagnostics(findings);
-			return findings;
+			SortScriptDiagnostics(attempt.Findings);
+			return attempt;
+		}
+
+		// `count` as a uint32_t, saturating.
+		static uint32_t ToLineNumber(size_t count)
+		{
+			return static_cast<uint32_t>(std::min<size_t>(count, std::numeric_limits<uint32_t>::max()));
+		}
+
+		// The lines of `source`, each with its '\n' when it has one (CountScriptLines' lines).
+		static std::vector<std::string_view> SplitScriptLines(std::string_view source)
+		{
+			std::vector<std::string_view> lines;
+			while (!source.empty())
+			{
+				const size_t end = source.find('\n');
+				const size_t length = end == std::string_view::npos ? source.size() : end + 1;
+				lines.push_back(source.substr(0, length));
+				source.remove_prefix(length);
+			}
+			return lines;
 		}
 
 		// A Lua string literal body for a suite name derived from a file stem.
@@ -114,6 +149,29 @@ namespace Engine {
 			std::optional<Error> m_Failure{};
 		};
 
+	}
+
+	uint32_t CountScriptLines(std::string_view source)
+	{
+		return Utils::ToLineNumber(Utils::SplitScriptLines(source).size());
+	}
+
+	std::optional<ScriptChangedLines> FindChangedScriptLines(std::string_view before, std::string_view after)
+	{
+		if (before == after)
+			return std::nullopt;
+		const std::vector<std::string_view> old = Utils::SplitScriptLines(before);
+		const std::vector<std::string_view> now = Utils::SplitScriptLines(after);
+		size_t leading = 0;
+		while (leading < old.size() && leading < now.size() && old[leading] == now[leading])
+			++leading;
+		size_t trailing = 0;
+		while (trailing < old.size() - leading && trailing < now.size() - leading && old[old.size() - 1 - trailing] == now[now.size() - 1 - trailing])
+			++trailing;
+		return ScriptChangedLines{
+			.Before = { .Line = Utils::ToLineNumber(leading + 1), .EndLine = Utils::ToLineNumber(old.size() - trailing + 1) },
+			.After = { .Line = Utils::ToLineNumber(leading + 1), .EndLine = Utils::ToLineNumber(now.size() - trailing + 1) },
+		};
 	}
 
 	EditorScriptService::EditorScriptService(EditorContext& editor, IScriptDiagnosticsProvider& diagnostics)
@@ -231,8 +289,25 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const uint64_t index, m_Editor->Execute(CreateScope<AssetEditCommand>(label, std::move(edits))));
 			static_cast<void>(index);
 		}
-		ENGINE_TRY_ASSIGN(std::vector<ScriptDiagnostic> findings, Utils::CheckWrittenScript(*m_Editor, *m_Diagnostics, path, source, metadata));
-		return EditorScriptWriteResult{ .Script = metadata.Handle, .Path = std::string(path.GetPath()), .UndoIndex = transaction.Commit(), .Diagnostics = std::move(findings) };
+		ENGINE_TRY_ASSIGN(Utils::ScriptImportAttempt attempt, Utils::ImportScriptSource(*m_Editor, m_Diagnostics, path, source, metadata));
+		std::optional<ScriptChangedLines> changed;
+		if (previous)
+			changed = FindChangedScriptLines(AsStringView(*previous), source);
+		else
+			changed = ScriptChangedLines{ .Before = {}, .After = { .Line = 1, .EndLine = Utils::ToLineNumber(size_t{ CountScriptLines(source) } + 1) } };
+		return EditorScriptWriteResult{ .Script = metadata.Handle,
+			.Path = std::string(path.GetPath()),
+			.UndoIndex = transaction.Commit(),
+			.Diagnostics = std::move(attempt.Findings),
+			.CookedHash = attempt.CookedHash,
+			.ChangedLines = changed };
+	}
+
+	Result<std::optional<uint64_t>> EditorScriptService::GetCookedHash(const VfsPath& path, std::string_view source, const AssetMetadata& metadata) const
+	{
+		ENGINE_TRY(Utils::ValidateScriptPath(*m_Editor, path));
+		ENGINE_TRY_ASSIGN(const Utils::ScriptImportAttempt attempt, Utils::ImportScriptSource(*m_Editor, nullptr, path, source, metadata));
+		return attempt.CookedHash;
 	}
 
 	Result<EditorScriptCheckResult> EditorScriptService::Check(std::span<const VfsPath> paths) const

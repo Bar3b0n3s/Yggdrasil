@@ -3150,7 +3150,7 @@
 		{
 			"name": "script_read",
 			"method": "script.read",
-			"description": "Reads exact script source and its stable asset identity.",
+			"description": "Reads exact script source and its stable asset identity, with its line count and content hash (the hash a replay's start fingerprint records for the script), so two reads with the same hash hold the same source.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ScriptReadParams",
@@ -3177,7 +3177,7 @@
 		{
 			"name": "script_write",
 			"method": "script.write",
-			"description": "Writes source as one undoable edit and returns full compile/type diagnostics; invalid source remains saved.",
+			"description": "Writes source as one undoable edit and returns full compile/type diagnostics; invalid source remains saved. The result also gives the written source's line count and content hash (as script.read reports them) and changedLines, a single span from the first to the last changed line against the replaced source (its old and new line ranges, not a diff; null for unchanged bytes), so an edit can be checked to change only the lines it meant to. A dry run reports the same.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ScriptWriteParams",

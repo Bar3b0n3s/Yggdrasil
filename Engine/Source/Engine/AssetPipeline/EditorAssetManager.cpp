@@ -1231,7 +1231,7 @@ namespace Engine {
 			{
 				const ImportedArtifact& artifact = result.Artifacts[index];
 				artifacts.push_back(artifact.Handle);
-				const uint64_t hash = XXH64(artifact.Cooked);
+				const uint64_t hash = HashCookedArtifact(artifact.Cooked);
 				LoadedArtifact& loaded = Loaded[artifact.Handle];
 				Self->ClearDiagnostics(artifact.Handle, ImportDiagnosticCodes);
 				if (loaded.Value != nullptr && loaded.ContentHash == hash)
@@ -1493,7 +1493,7 @@ namespace Engine {
 				if (artifacts.empty())
 					return MakeError(ErrorCode::ImportFailed, "the built-in '{}' produced no artifact", entry.Path);
 				ENGINE_TRY_ASSIGN(AssetRef<Asset> asset, Specification.Loaders->Load(artifacts.front(), { .Registry = Specification.Registry, .Handle = entry.Handle }));
-				Loaded[entry.Handle] = { .Value = asset, .ContentHash = XXH64(artifacts.front()) };
+				Loaded[entry.Handle] = { .Value = asset, .ContentHash = HashCookedArtifact(artifacts.front()) };
 				return asset;
 			};
 			Result<AssetRef<Asset>> loaded = load();

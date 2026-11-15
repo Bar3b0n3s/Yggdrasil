@@ -2,10 +2,33 @@
 
 from __future__ import annotations
 
+import json
 import time
 import unittest
 
 from harness import AutomationTestCase, engine_client
+
+# A behaviour that steps one unit along X per fixed step while Space is held: a recording that presses Space depends on
+# its input, which input.record stop's input check requires.
+KEY_MOVER = """local KeyMover = {}
+function KeyMover.OnFixedUpdate(self: any, dt: number)
+\tif Input.IsKeyDown("Space") then
+\t\tself.Entity.Transform:Translate(vector.create(1, 0, 0))
+\tend
+end
+return Script.Define("KeyMover", KeyMover)
+"""
+
+# Five lines of a module, each ending in a newline.
+FIVE_LINES = ["local A = 1\n", "local B = 2\n", "local C = 3\n", "local D = 4\n",
+              "return { A = A, B = B, C = C, D = D }\n"]
+
+
+def changed_lines(before_line: int, before_end: int, after_line: int, after_end: int) -> dict:
+    """script.write's changedLines for the lines [before_line, before_end) of the replaced source and [after_line,
+    after_end) of the written one."""
+    return {"before": {"line": before_line, "endLine": before_end},
+            "after": {"line": after_line, "endLine": after_end}}
 
 
 class ScriptTests(AutomationTestCase):
@@ -76,6 +99,73 @@ return Script.Define("Owner", Owner)
         self.assert_engine_error(missing.exception, engine_client.NOT_FOUND, "NotFound")
         client.call("edit.redo")
         self.assertEqual(client.call("script.read", {"path": path})["script"]["id"], written["script"]["id"])
+
+    def test_script_write_reports_the_single_span_of_lines_it_changed(self) -> None:
+        # ADR 0038, friction F24: proving that an edit changed only the lines it meant to took comparing two whole
+        # escaped sources by hand. script.write reports the one span from the first to the last changed line, as the
+        # replaced source's and the written source's line ranges, and the dry run reports the span of the write it
+        # would make.
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Scripts/Values.luau"
+
+        def write(lines: list[str], dry_run: bool = False) -> dict:
+            params = {"path": path, "source": "".join(lines)}
+            if dry_run:
+                params["dryRun"] = True
+            return client.call("script.write", params)
+
+        created = write(FIVE_LINES)
+        self.assertEqual(created["changedLines"], changed_lines(1, 1, 1, 6))
+        self.assertEqual(created["lineCount"], 5)
+        middle = FIVE_LINES[:2] + ["local C = 30\n"] + FIVE_LINES[3:]
+        self.assertEqual(write(middle)["changedLines"], changed_lines(3, 4, 3, 4))
+        start = ["--!strict\n"] + middle
+        self.assertEqual(write(start)["changedLines"], changed_lines(1, 1, 1, 2))
+        end = start + ["-- end\n"]
+        appended = write(end)
+        self.assertEqual(appended["changedLines"], changed_lines(7, 7, 7, 8))
+        self.assertEqual(appended["lineCount"], 7)
+        dry = write(start, dry_run=True)
+        self.assertTrue(dry["dryRun"])
+        self.assertEqual(dry["changedLines"], changed_lines(7, 8, 7, 7))
+        self.assertEqual(dry["lineCount"], 6)
+        self.assertEqual(client.call("script.read", {"path": path})["source"], "".join(end))
+        two_edits = end[:1] + ["local A = 10\n"] + end[2:4] + ["local D = 40\n"] + end[5:]
+        self.assertEqual(write(two_edits)["changedLines"], changed_lines(2, 6, 2, 6))
+        unchanged = write(two_edits)
+        self.assertIsNone(unchanged["changedLines"])
+        self.assertEqual(unchanged["undoIndex"], 0)
+
+    def test_script_hash_is_the_one_a_recorded_replay_fingerprints(self) -> None:
+        # ADR 0038, friction F24: script.read and script.write report the source's line count and its content hash,
+        # the cooked hash a replay's start fingerprint records for the script, so two reads with the same hash hold the
+        # same source, and a comment-only change shows as one changed line and a new hash.
+        client, root = self.open_editor_with_scene()
+        path = "Assets/Scripts/KeyMover.luau"
+        written = client.call("script.write", {"path": path, "source": KEY_MOVER})
+        self.assertRegex(written["hash"], "^[0-9a-f]{16}$")
+        self.assertEqual(written["lineCount"], 7)
+        read = client.call("script.read", {"path": path})
+        self.assertEqual((read["hash"], read["lineCount"]), (written["hash"], 7))
+        self.assertEqual(client.call("script.read", {"path": path})["hash"], read["hash"])
+        client.call("entity.create", {"name": "Mover",
+                                       "components": {"Script": {"Scripts": [{"Script": path}]}}})
+        client.call("scene.save")
+        client.call("input.record", {"action": "start"})
+        client.call("play.step", {"ticks": 4, "render": "none", "input": [
+            {"type": "key", "key": "Space", "state": "tap"}]})
+        client.call("input.record", {"action": "stop", "path": "Assets/Tests/Mover.replay"})
+        client.call("play.stop")
+        document = json.loads((root / "Assets/Tests/Mover.replay").read_text(encoding="utf-8"))
+        recorded = {asset["Handle"]: asset["Hash"] for asset in document["Fingerprint"]["Assets"]}
+        self.assertEqual(recorded[written["script"]["id"]], written["hash"])
+
+        commented = KEY_MOVER.replace("local KeyMover = {}\n", "local KeyMover = {} -- steps while Space is held\n")
+        changed = client.call("script.write", {"path": path, "source": commented})
+        self.assertEqual(changed["changedLines"], changed_lines(1, 2, 1, 2))
+        self.assertEqual(changed["lineCount"], 7)
+        self.assertNotEqual(changed["hash"], written["hash"])
+        self.assertEqual(client.call("script.read", {"path": path})["hash"], changed["hash"])
 
     def test_script_templates_and_recursive_field_schema(self) -> None:
         client, _ = self.open_editor_with_scene()

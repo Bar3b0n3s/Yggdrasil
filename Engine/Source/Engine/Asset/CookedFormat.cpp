@@ -26,6 +26,11 @@ namespace Engine {
 		return writer.TakeBuffer();
 	}
 
+	uint64_t HashCookedArtifact(std::span<const std::byte> artifact)
+	{
+		return XXH64(artifact);
+	}
+
 	Result<CookedArtifactView> ReadCookedArtifact(std::span<const std::byte> bytes)
 	{
 		if (bytes.size() < CookedHeader::Size)

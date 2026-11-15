@@ -2862,7 +2862,7 @@ Example: Inspect Ball's fields.
 
 ### script.read
 
-Reads exact script source and its stable asset identity.
+Reads exact script source and its stable asset identity, with its line count and content hash (the hash a replay's start fingerprint records for the script), so two reads with the same hash hold the same source.
 
 - Flags: tool `script_read`, batch
 - Timeout: 60 s
@@ -2876,6 +2876,8 @@ Reads exact script source and its stable asset identity.
 |---|---|---|
 | `script` | `AssetSummary` | Script identity. |
 | `source` | `String` | Exact UTF-8 source, preserving authored newlines. |
+| `lineCount` | `UInt32` | The source's lines: each \n ends one and a last line without one counts too (0 for an empty source); a \r before a \n belongs to its line. They are the lines diagnostics number. |
+| `hash` | `String` | The source's content hash, 16 lowercase hex digits: the XXH64 of the artifact the editor cooks from these bytes as this script (the artifact also holds its path), the value a replay's start fingerprint records for it (its Assets entry's Hash). Any changed byte changes it, so two reads of the script with the same hash hold the same source. Empty when the source does not cook (a compile or load-time error, an unresolved require). |
 
 Example: Read Ball.
 
@@ -2885,7 +2887,7 @@ Example: Read Ball.
 
 ### script.write
 
-Writes source as one undoable edit and returns full compile/type diagnostics; invalid source remains saved.
+Writes source as one undoable edit and returns full compile/type diagnostics; invalid source remains saved. The result also gives the written source's line count and content hash (as script.read reports them) and changedLines, a single span from the first to the last changed line against the replaced source (its old and new line ranges, not a diff; null for unchanged bytes), so an edit can be checked to change only the lines it meant to. A dry run reports the same.
 
 - Flags: tool `script_write`, mutates, dry run, batch
 - Timeout: 60 s
@@ -2901,6 +2903,9 @@ Writes source as one undoable edit and returns full compile/type diagnostics; in
 | `script` | `AssetSummary` | Stable script identity. |
 | `diagnostics` | `Array<ScriptDiagnostic>` | Findings do not discard the written source. |
 | `undoIndex` | `UInt32` | Undo step; zero for unchanged bytes or dry run. |
+| `lineCount` | `UInt32` | The written source's lines, counted as script.read's lineCount. |
+| `hash` | `String` | The written source's content hash, as script.read reports it: the value a replay's start fingerprint records for this script while these bytes are its source. Empty when they do not cook. |
+| `changedLines` | `Variant` | {before: {line, endLine}, after: {line, endLine}} (ScriptChangedLines): a single span from the first to the last changed line, not a diff. It holds the lines that differ from the source the write replaced once the lines both share at their start and at their end are set aside, compared with their line ends, as before (the replaced source's lines) and after (the written source's); unchanged lines between two edits lie inside it. A range is empty (line equal to endLine) where nothing was removed or added; a new script's before is empty at line 1 and its after the whole file; null when the bytes are unchanged. |
 
 Example: Write a module.
 

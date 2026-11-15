@@ -2,13 +2,19 @@
 
 #include "EditorCore/Automation/ScriptMethods.h"
 
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Session/ReplayFingerprint.h"
 #include "Support/AutomationTestClient.h"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -20,6 +26,36 @@ namespace Engine {
 			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
 			return std::move(*result);
 		}
+
+		// script.write's changedLines for the lines [beforeLine, beforeEnd) of the replaced source and [afterLine, afterEnd)
+		// of the written one.
+		Json ChangedLines(uint32_t beforeLine, uint32_t beforeEnd, uint32_t afterLine, uint32_t afterEnd)
+		{
+			return Json{ { "before", Json{ { "line", beforeLine }, { "endLine", beforeEnd } } }, { "after", Json{ { "line", afterLine }, { "endLine", afterEnd } } } };
+		}
+
+		Json WriteScript(Test::AutomationFixture& fixture, std::string_view path, std::string_view source)
+		{
+			return CallEditorScriptMethod(fixture, "script.write", Json{ { "path", path }, { "source", source } });
+		}
+
+		// The hash the replay start fingerprint of the open scene records for `script`, by the recorders' own function once
+		// the editor has published every import (without the session's script field schemas, which only type a script's
+		// asset fields); empty when the fingerprint lists no such asset.
+		std::string FingerprintHash(Test::AutomationFixture& fixture, const Json& script)
+		{
+			const Result<UUID> handle = JsonReader(script["id"]).ReadUUID();
+			REQUIRE(handle.has_value());
+			EditorAssetManager& assets = fixture.GetEditor().GetAssets();
+			assets.WaitIdle();
+			const Result<ReplayFingerprint> fingerprint = ComputeReplayFingerprint(fixture.GetEditor().GetScene(), nullptr, &assets);
+			REQUIRE_MESSAGE(fingerprint.has_value(), (fingerprint ? "" : fingerprint.error().ToString()));
+			const auto found = std::ranges::find(fingerprint->Assets, *handle, &ReplayAssetFingerprint::Handle);
+			return found == fingerprint->Assets.end() ? std::string() : found->Hash;
+		}
+
+		// Five lines of a module, each ending in a newline.
+		constexpr std::string_view FiveLines = "local A = 1\nlocal B = 2\nlocal C = 3\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n";
 
 	}
 
@@ -154,6 +190,147 @@ namespace Engine {
 			CHECK(fields["fields"][1]["schema"]["items"]["minimum"] == Json(1));
 			CHECK(fields["fields"][1]["schema"]["items"]["maximum"] == Json(5));
 			CHECK(fields["fields"][1]["schema"]["items"]["default"] == Json(2));
+		}
+
+		// Docs/Decisions/0038-m27-rolling-ball.md friction F24: a builder shows that two reads hold the same source by their
+		// hashes, and the hash is the one a replay's start fingerprint records for the script, so it names what a replay saw.
+		TEST_CASE("ScriptMethods: script.read and script.write report the content hash a replay's start fingerprint records for the script")
+		{
+			Test::AutomationFixture fixture("ScriptContentHash");
+			const std::string path = "Assets/Scripts/Spinner.luau";
+			const std::string first = "local Spinner = {}\n-- Turns slowly.\nfunction Spinner.OnFixedUpdate(self: any, dt: number)\nend\nreturn Script.Define(\"Spinner\", Spinner)\n";
+			Json written = WriteScript(fixture, path, first);
+			REQUIRE(written["hash"].is_string());
+			const std::string hash = JsonReader(written["hash"]).ReadString().value_or("");
+			CHECK(hash.size() == 16);
+			CHECK(std::ranges::all_of(hash, [](char digit)
+			{
+				return (digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f');
+			}));
+			Json read = CallEditorScriptMethod(fixture, "script.read", Json{ { "path", path } });
+			CHECK(read["hash"] == written["hash"]);
+			CHECK(CallEditorScriptMethod(fixture, "script.read", Json{ { "path", path } })["hash"] == read["hash"]);
+			CallEditorScriptMethod(fixture, "entity.create", Json{ { "name", "Spinner" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", path } } }) } } } } } });
+			CHECK(FingerprintHash(fixture, written["script"]) == hash);
+
+			// A comment-only change changes it alike in the write, the read and the fingerprint; the old bytes bring it back.
+			const std::string second = "local Spinner = {}\n-- Turns slowly, always.\nfunction Spinner.OnFixedUpdate(self: any, dt: number)\nend\nreturn Script.Define(\"Spinner\", Spinner)\n";
+			Json rewritten = WriteScript(fixture, path, second);
+			CHECK(rewritten["hash"] != written["hash"]);
+			CHECK(CallEditorScriptMethod(fixture, "script.read", Json{ { "path", path } })["hash"] == rewritten["hash"]);
+			CHECK(Json(FingerprintHash(fixture, written["script"])) == rewritten["hash"]);
+			CHECK(WriteScript(fixture, path, first)["hash"] == written["hash"]);
+			CHECK(FingerprintHash(fixture, written["script"]) == hash);
+
+			// A source that does not cook has no artifact, so no hash, while its findings say why.
+			const std::string broken = "Assets/Scripts/Broken.luau";
+			Json invalid = WriteScript(fixture, broken, "local = 1\n");
+			CHECK_FALSE(invalid["diagnostics"].empty());
+			CHECK(invalid["hash"] == Json(""));
+			CHECK(CallEditorScriptMethod(fixture, "script.read", Json{ { "path", broken } })["hash"] == Json(""));
+		}
+
+		TEST_CASE("ScriptMethods: script.read and script.write count a last line without a newline and a CRLF line end as one line")
+		{
+			Test::AutomationFixture fixture("ScriptLineCount");
+			const std::string path = "Assets/Scripts/Lines.luau";
+			struct LineCase
+			{
+				std::string_view Source{};
+				uint32_t Lines = 0;
+			};
+			for (const LineCase& lines : std::array{ LineCase{ "", 0 }, LineCase{ "return 1", 1 }, LineCase{ "return 1\n", 1 },
+					 LineCase{ "local A = 1\nreturn A", 2 }, LineCase{ "local A = 1\r\nreturn A\r\n", 2 }, LineCase{ "\n\n", 2 }, LineCase{ FiveLines, 5 } })
+			{
+				CAPTURE(lines.Source);
+				Json written = WriteScript(fixture, path, lines.Source);
+				CHECK(written["lineCount"] == Json(lines.Lines));
+				Json read = CallEditorScriptMethod(fixture, "script.read", Json{ { "path", path } });
+				CHECK(read["lineCount"] == Json(lines.Lines));
+			}
+		}
+
+		TEST_CASE("ScriptMethods: script.write reports the single span of lines an edit changed in the middle, at the start and at the end")
+		{
+			Test::AutomationFixture fixture("ScriptChangedLines");
+			const std::string path = "Assets/Scripts/Values.luau";
+			WriteScript(fixture, path, FiveLines);
+			struct Edit
+			{
+				std::string_view Label{};
+				std::string_view Source{};
+				Json Expected{};
+			};
+			const std::array edits{
+				Edit{ "one line in the middle", "local A = 1\nlocal B = 2\nlocal C = 30\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n", ChangedLines(3, 4, 3, 4) },
+				Edit{ "a line added at the start", "--!strict\nlocal A = 1\nlocal B = 2\nlocal C = 30\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n", ChangedLines(1, 1, 1, 2) },
+				Edit{ "a line added at the end", "--!strict\nlocal A = 1\nlocal B = 2\nlocal C = 30\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n-- end\n", ChangedLines(7, 7, 7, 8) },
+				Edit{ "the last line removed", "--!strict\nlocal A = 1\nlocal B = 2\nlocal C = 30\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n", ChangedLines(7, 8, 7, 7) },
+				Edit{ "the first line removed", "local A = 1\nlocal B = 2\nlocal C = 30\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n", ChangedLines(1, 2, 1, 1) },
+				Edit{ "one line replaced by three", "local A = 1\nlocal B = 2\nlocal C = 3\nlocal E = 5\nlocal F = 6\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n", ChangedLines(3, 4, 3, 6) },
+				Edit{ "two edits apart, one span", "local A = 1\nlocal B = 20\nlocal C = 3\nlocal E = 5\nlocal F = 60\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n", ChangedLines(2, 6, 2, 6) },
+			};
+			for (const Edit& edit : edits)
+			{
+				CAPTURE(edit.Label);
+				Json written = WriteScript(fixture, path, edit.Source);
+				CHECK(written["changedLines"] == edit.Expected);
+			}
+		}
+
+		TEST_CASE("ScriptMethods: script.write reports a new script's whole file as changed and no changed lines for unchanged bytes")
+		{
+			Test::AutomationFixture fixture("ScriptChangedLinesNew");
+			const std::string path = "Assets/Scripts/Values.luau";
+			Json created = WriteScript(fixture, path, FiveLines);
+			CHECK(created["changedLines"] == ChangedLines(1, 1, 1, 6));
+			Json empty = WriteScript(fixture, "Assets/Scripts/Empty.luau", "");
+			CHECK(empty["changedLines"] == ChangedLines(1, 1, 1, 1));
+			Json unchanged = WriteScript(fixture, path, FiveLines);
+			CHECK(unchanged["undoIndex"] == Json(0));
+			REQUIRE(unchanged.contains("changedLines"));
+			CHECK(unchanged["changedLines"].is_null());
+			CHECK(unchanged["lineCount"] == Json(5));
+			CHECK(unchanged["hash"] == created["hash"]);
+		}
+
+		TEST_CASE("ScriptMethods: script.write counts a changed line end, CRLF or a newline after the last line, as a changed line")
+		{
+			Test::AutomationFixture fixture("ScriptChangedLineEnds");
+			const std::string path = "Assets/Scripts/Ends.luau";
+			WriteScript(fixture, path, "local A = 1\nreturn A");
+			Json terminated = WriteScript(fixture, path, "local A = 1\nreturn A\n");
+			CHECK(terminated["changedLines"] == ChangedLines(2, 3, 2, 3));
+			CHECK(terminated["lineCount"] == Json(2));
+			WriteScript(fixture, path, "local A = 1\r\nreturn A\r\n");
+			Json mixed = WriteScript(fixture, path, "local A = 1\nreturn A\r\n");
+			CHECK(mixed["changedLines"] == ChangedLines(1, 2, 1, 2));
+		}
+
+		TEST_CASE("ScriptMethods: a script.write dry run reports the changed lines, line count and hash of the write it would make")
+		{
+			Test::AutomationFixture fixture("ScriptChangedLinesDryRun");
+			const std::string path = "Assets/Scripts/Values.luau";
+			Json base = WriteScript(fixture, path, FiveLines);
+			const std::string edited = "local A = 1\nlocal B = 20\nlocal C = 3\nlocal D = 4\nreturn { A = A, B = B, C = C, D = D }\n";
+			Json dry = CallEditorScriptMethod(fixture, "script.write", Json{ { "path", path }, { "source", edited }, { "dryRun", true } });
+			CHECK(dry["dryRun"] == Json(true));
+			CHECK(dry["changedLines"] == ChangedLines(2, 3, 2, 3));
+			CHECK(dry["lineCount"] == Json(5));
+			CHECK(dry["hash"] != base["hash"]);
+			CHECK(CallEditorScriptMethod(fixture, "script.read", Json{ { "path", path } })["hash"] == base["hash"]);
+			Json real = WriteScript(fixture, path, edited);
+			CHECK(real["changedLines"] == dry["changedLines"]);
+			CHECK(real["lineCount"] == dry["lineCount"]);
+			CHECK(real["hash"] == dry["hash"]);
+			Json dryNew = CallEditorScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/New.luau" }, { "source", FiveLines }, { "dryRun", true } });
+			CHECK(dryNew["changedLines"] == ChangedLines(1, 1, 1, 6));
+			CHECK(dryNew["lineCount"] == Json(5));
+			// The artifact names its script's path, so the same bytes at another path have another hash.
+			CHECK(dryNew["hash"].is_string());
+			CHECK(dryNew["hash"] != Json(""));
+			CHECK(dryNew["hash"] != base["hash"]);
+			CHECK_FALSE(fixture.Call("script.read", Json{ { "path", "Assets/Scripts/New.luau" } }).has_value());
 		}
 	}
 

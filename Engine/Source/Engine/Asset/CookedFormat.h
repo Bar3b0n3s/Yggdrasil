@@ -61,6 +61,13 @@ namespace Engine {
 	[[nodiscard]] Buffer WriteCookedArtifact(AssetType type, uint16_t formatVersion, uint32_t importerVersion,
 		std::span<const std::byte> payload);
 
+	// The cooked hash of a complete artifact (header and payload): XXH64 (seed 0) of its bytes. It is the value
+	// AssetManager::GetCookedHash returns for the asset that loads from the artifact (the editor's manager computes it with
+	// this function when it publishes an import; a pak's TOC records the same XXH64 of a cooked entry's bytes), which a
+	// replay's start fingerprint records, and which script.read and script.write report for the artifact a script's source
+	// cooks to (Docs/Decisions/0038-m27-rolling-ball.md friction F24). Pure and thread-safe.
+	[[nodiscard]] uint64_t HashCookedArtifact(std::span<const std::byte> artifact);
+
 	// Reads and validates an artifact: the magic, Flags 0, a known AssetType other than None, PayloadSize equal to the bytes
 	// after the header (no trailing data), and PayloadXXH64. It never trusts a size it read and never asserts on data
 	// (fuzzed: "CookedFormat: 10,000 seeded mutations never crash and always return Result"). Pure and thread-safe.

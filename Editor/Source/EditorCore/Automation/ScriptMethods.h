@@ -41,6 +41,11 @@ namespace Engine {
 	{
 		AssetSummary Script{};
 		std::string Source{}; // Exact UTF-8 bytes, with authored newlines; large responses use normal offloading.
+		// Docs/Decisions/0038-m27-rolling-ball.md friction F24: CountScriptLines of the source, and its content hash, the
+		// cooked hash a replay's start fingerprint records for the script (EditorScriptService::GetCookedHash) as 16
+		// lowercase hex digits; empty when the source does not cook.
+		uint32_t LineCount = 0;
+		std::string Hash{};
 	};
 
 	struct ScriptWriteParams
@@ -54,6 +59,12 @@ namespace Engine {
 		AssetSummary Script{};
 		std::vector<ScriptDiagnosticSummary> Diagnostics{};
 		uint32_t UndoIndex = 0;
+		// Friction F24: the written source's line count and content hash, as ScriptReadResult's, and the single span of
+		// lines it changed against the source it replaced (FindChangedScriptLines; a new file's every line): a serialized
+		// ScriptChangedLines, null for unchanged bytes. A dry run reports the same.
+		uint32_t LineCount = 0;
+		std::string Hash{};
+		VariantValue ChangedLines{};
 	};
 
 	struct ScriptCheckParams
