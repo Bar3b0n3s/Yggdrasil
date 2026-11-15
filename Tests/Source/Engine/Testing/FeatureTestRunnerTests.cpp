@@ -1690,6 +1690,30 @@ end))")
 			CHECK(teardownResult.Suites[0].ScriptErrors == 1);
 		}
 
+		// ADR 0038, friction F22: Test.GetScriptErrors reads the current scene's VM, which a scene load replaces, so a case
+		// after the load starts with an empty list; the suite's count keeps every error of its session. Pinned, since only a
+		// teardown error (above) was.
+		TEST_CASE("TestRunner: a script error raised before a scene load is in the suite's count but not in the next scene's Test.GetScriptErrors")
+		{
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("Transition",function()
+				Test.Case("faults then loads",function()
+					Task.Spawn(function() error("before load fault") end)
+					Test.ExpectScriptError("before load fault",4)
+					Test.ExpectEqual(#Test.GetScriptErrors(),1)
+					Scene.Load(Assets.Load("Assets/Scenes/Next.scene"))
+				end)
+				Test.Case("after",function() Test.ExpectEqual(#Test.GetScriptErrors(),0) end)
+			end))");
+			Test::ExpectLog expected(LogLevel::Error, "before load fault");
+			auto result = host.Run();
+			CHECK(result.Passed);
+			REQUIRE(result.Cases.size() == 2);
+			CHECK(result.Cases[0].Status == "passed");
+			CHECK(result.Cases[1].Status == "passed");
+			CHECK(result.Suites[0].ScriptErrors == 1);
+		}
+
 		TEST_CASE("TestRunner: cancellation releases sessions references and captures without another advance")
 		{
 			RunnerHost host;

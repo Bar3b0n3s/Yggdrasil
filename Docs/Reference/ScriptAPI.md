@@ -1166,7 +1166,7 @@ All modes; Test; pure/read.
 
 `(since: number?) -> {ScriptError}`
 
-Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences.
+Read the current scene's VM's error occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. A scene transition (Scene.Load, Scene.Reload) replaces the VM, so the next scene's list starts empty: an error the previous scene raised, in the transition's frame too, is read only by a case that ran in that scene (the case that requested the transition reads those raised before it returned), and the suite's scriptErrors count in the run's report counts it.
 
 All modes; Test; pure/read.
 

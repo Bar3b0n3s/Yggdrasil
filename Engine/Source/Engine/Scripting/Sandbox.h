@@ -192,8 +192,12 @@ namespace Engine {
 		// their own path/pointer/wrapper offset when a later call reuses the same authored diagnostic label.
 		[[nodiscard]] Result<ScriptEvaluation> Evaluate(std::string_view source, const VfsPath& path,
 			std::optional<UUID> entity = std::nullopt);
-		// Same evaluation semantics for trusted engine-produced bytecode; available in Dist. Replay Expect predicates
-		// use this path, with no source compilation or second VM. Module/class loading uses RunModule instead.
+		// Same evaluation semantics for trusted engine-produced bytecode, but for its value, which stays strict JSON: a
+		// vector, Color or Quat is refused like every other value that is not JSON, so a predicate that returns one by
+		// mistake fails instead of holding as a truthy array (ADR 0038's milestone review; only Evaluate, script.eval's
+		// path, converts them). Available in Dist. Replay Expect predicates (every player's, test.run's and input.record's
+		// expectations) and play.waitFor use this path, with no source compilation or second VM. Module/class loading uses
+		// RunModule instead.
 		// Embedded diagnostics name SourceMap.Path, prefix Message with its JSON pointer when present (so replay
 		// Expect index survives cooking), and map bytecode lines through GeneratedPrefixLines to authored source lines.
 		// A fileless chunk uses its synthetic diagnostic label. Evaluation entries carry private Eval origin; nested calls
@@ -212,6 +216,11 @@ namespace Engine {
 		[[nodiscard]] bool IsStopped() const noexcept;
 	private:
 		struct State;
+		// Evaluate's and ExecuteBytecode's execution and conversion of the first return: `componentArrays` converts a
+		// vector, Color or Quat at any depth to the array of its components (Evaluate), otherwise it is refused
+		// (ExecuteBytecode).
+		[[nodiscard]] Result<ScriptEvaluation> ExecuteEvaluation(const ScriptData& script, std::optional<UUID> entity, bool componentArrays);
+
 		Scope<State> m_State{};
 		friend struct Detail::SandboxAccess;
 	};

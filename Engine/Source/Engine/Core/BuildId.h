@@ -23,11 +23,15 @@ namespace Engine {
 	// (friction F10) the EngineVersion of a new recording's replay header. It moved here from
 	// Automation/Protocol/JsonRpc.h, which includes this header, with the build id. The backlog program's reservation
 	// ledgers (Docs/Decisions/0028-backlog-program.md) own its value: the last lander of each phase bumps the minor
-	// version (0.2.0 at the end of phase 1, 0.3.0 and 0.4.0 after phases 2 and 3), so parallel milestone branches never
-	// take the same value. 0.2.0 since M20, phase 1's last lander (Docs/Decisions/0031-m20-contract.md decision 10), 0.3.0
-	// since M23, phase 2's (Docs/Decisions/0034-m23-contract.md decision 17), and 0.4.0 since M26, phase 3's
-	// (Docs/Decisions/0037-m26-contract.md decision 19).
-	inline constexpr std::string_view EngineVersionString = "0.4.0";
+	// version (0.2.0 at the end of phase 1, 0.3.0, 0.4.0 and 0.5.0 after phases 2, 3 and 4), so parallel milestone
+	// branches never take the same value. 0.2.0 since M20, phase 1's last lander (Docs/Decisions/0031-m20-contract.md
+	// decision 10), 0.3.0 since M23, phase 2's (Docs/Decisions/0034-m23-contract.md decision 17), 0.4.0 since M26, phase
+	// 3's (Docs/Decisions/0037-m26-contract.md decision 19), and 0.5.0 since M27, phase 4's
+	// (Docs/Decisions/0038-m27-rolling-ball.md decision 13). Since a new recording records it, a bump changes FeatureTest's
+	// scaffold-recorded replays, which Scaffold.py --check compares byte for byte: the bumping commit regenerates
+	// FeatureTest (Scaffold.py, then Scaffold.py --check). The committed demos' replays keep the version they were
+	// recorded with, which no verification and no state hash reads.
+	inline constexpr std::string_view EngineVersionString = "0.5.0";
 
 	// The build a binary is, stamped when it was built (decision 13).
 	struct BuildId
@@ -52,7 +56,7 @@ namespace Engine {
 	[[nodiscard]] const BuildId& GetBuildId();
 
 	// The build id as one string, semantic-versioning build metadata: "<Version>" without a commit, "<Version>+<Commit>"
-	// for a clean tree, "<Version>+<Commit>.dirty" for a dirty one ("0.4.0+3f2a9c1d4e5b.dirty"). Asserts a valid id (a
+	// for a clean tree, "<Version>+<Commit>.dirty" for a dirty one ("0.5.0+3f2a9c1d4e5b.dirty"). Asserts a valid id (a
 	// Version of three decimal numbers without leading zeros, a Commit of 12 lowercase hex digits or empty, Dirty only with
 	// a Commit).
 	[[nodiscard]] std::string FormatBuildId(const BuildId& id);

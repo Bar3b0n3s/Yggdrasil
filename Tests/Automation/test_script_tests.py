@@ -65,6 +65,31 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertTrue(result["passed"])
         self.assertEqual([case["status"] for case in result["cases"]], ["passed"])
 
+    def test_a_filtered_run_resolves_only_the_suites_its_filter_selects(self) -> None:
+        # ADR 0038, friction F03: test.run {filter: "Logic/"} was refused with NotFound for a scene that only a suite
+        # the filter leaves out names. A filtered run resolves only the suites its filter selects; an unfiltered run, or
+        # one whose filter selects the suite naming the missing scene, is still refused.
+        client, _ = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Tests/Logic.test.luau", "source": (
+            'return Test.Suite("Logic", function()\n'
+            'Test.Case("adds", function() Test.Expect(1 + 1 == 2) end)\nend)')})
+        client.call("script.write", {"path": "Assets/Tests/Level2.test.luau", "source": (
+            'return Test.Suite("Autopilot.Level2", function()\n'
+            'Test.Case("reaches the goal", function() Test.Expect(true) end)\nend)')})
+        client.call("project.setSettings", {"patch": {"Testing": {"Suites": [
+            {"Script": "Assets/Tests/Level2.test.luau", "Scene": "Assets/Scenes/Level2.scene", "Modes": ["Editor"]},
+            {"Script": "Assets/Tests/Logic.test.luau", "Scene": "", "Modes": ["Editor"]}]}}})
+        result = engine_client.load_offloaded(client.call("test.run", {"filter": "Logic/"}, timeout=120.0))
+        self.assertTrue(result["passed"], result)
+        self.assertEqual([(case["suite"], case["status"]) for case in result["cases"]], [("Logic", "passed")])
+        for params in ({}, {"filter": "Autopilot.Level2"}):
+            with self.subTest(params=params):
+                with self.assertRaises(engine_client.EngineError) as refused:
+                    client.call("test.run", params, timeout=120.0)
+                self.assert_engine_error(refused.exception, engine_client.NOT_FOUND, "NotFound")
+                self.assertIn("Assets/Scenes/Level2.scene", refused.exception.detail)
+        self.assertEqual(client.call("play.state")["state"], "Edit")
+
     def test_test_run_returns_inline_and_names_the_failing_case(self) -> None:
         # Docs/Decisions/0026-m16-contract.md, friction S1-02: the coverage counters made every result too large to
         # send, and the offloaded summary hid the failures. Without coverage asked for, a run comes back inline.

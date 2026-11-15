@@ -1981,7 +1981,7 @@ Advances a paused or lockstep Play session until the predicate is truthy or time
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `until` | `String` | yes | `""` | Expression or chunk evaluated after every tick in the live VM. |
+| `until` | `String` | yes | `""` | Expression or chunk evaluated after every tick in the live VM. Its value must be JSON: one that is not, a vector, Color or Quat included (only script.eval returns those as arrays), ends the wait with its Script error. |
 | `timeoutTicks` | `UInt32` | yes | `600` | Maximum ticks to advance. |
 
 | Result | Type | Description |
@@ -2801,7 +2801,7 @@ Reads the game's retained script errors without clearing them, including updated
 |---|---|---|
 | `errors` | `Array<ScriptErrorSummary>` | Updated errors in cursor order. |
 | `nextCursor` | `String` | Exclusive sequence to reuse as since, also for an empty page. |
-| `evicted` | `Bool` | True when an error newer than since was evicted before this read: the stream keeps the 256 distinct errors with the latest occurrences, and the retained ones still follow. |
+| `evicted` | `Bool` | True when an error newer than since was evicted before this read: the stream keeps the 256 distinct errors with the latest occurrences, and the retained ones still follow. In the editor only an eviction of the current play session counts: a new session forgets the earlier sessions' evictions with their errors. |
 
 Example: Read errors from the beginning.
 
@@ -2928,7 +2928,7 @@ Opens the session: the first request of every connection, with the token from th
 |---|---|---|
 | `protocolVersion` | `String` | The protocol version the server speaks. |
 | `engineVersion` | `String` | The engine's version. |
-| `build` | `String` | The server's build id, semantic-versioning build metadata: the engine's version, then "+\<commit>" (12 lowercase hex digits of the commit it was built from) and ".dirty" when its working tree had uncommitted changes, such as "0.4.0+3f2a9c1d4e5b.dirty"; the version alone for a build without a commit. |
+| `build` | `String` | The server's build id, semantic-versioning build metadata: the engine's version, then "+\<commit>" (12 lowercase hex digits of the commit it was built from) and ".dirty" when its working tree had uncommitted changes, such as "0.5.0+3f2a9c1d4e5b.dirty"; the version alone for a build without a commit. |
 | `clientId` | `UInt32` | This connection's client id, unique for the server's lifetime. |
 | `capabilities` | `Array<String>` | The optional protocol features the server offers: dryRun, ifRevision, batch, pendingOperations, offload, and testHooks. |
 | `project` | `SessionProjectSummary` | The open project. |

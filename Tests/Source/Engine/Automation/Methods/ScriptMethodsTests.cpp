@@ -484,6 +484,26 @@ namespace Engine {
 			CallScriptMethod(fixture, "play.stop", Json::object());
 		}
 
+		// The milestone review of M27 (ADR 0038): a new play session forgot the earlier sessions' errors (friction F02) but
+		// not their evictions, so its script.errors answered evicted: true for errors it never raised.
+		TEST_CASE("ScriptMethods: a new play session's script.errors reports no eviction of an earlier session")
+		{
+			Test::AutomationFixture fixture("ScriptErrorsPerSessionEviction");
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true } });
+			// The first session's game raises one distinct error more than the editor's history retains.
+			ScriptErrorStream& history = fixture.GetEditor().GetPlay().GetScriptErrors();
+			for (size_t index = 0; index <= MaxScriptErrorEntries; ++index)
+				static_cast<void>(history.Add({ .Script = "Assets/Scripts/Spawner.luau", .Line = 4, .Message = std::format("instance {} faulted", index) }));
+			const Json first = CallScriptMethod(fixture, "script.errors", Json{ { "limit", 1 } });
+			CHECK(first["evicted"] == Json(true));
+			CallScriptMethod(fixture, "play.stop", Json::object());
+			CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true } });
+			const Json second = CallScriptMethod(fixture, "script.errors", Json::object());
+			CHECK(second["errors"].empty());
+			CHECK(second["evicted"] == Json(false));
+			CallScriptMethod(fixture, "play.stop", Json::object());
+		}
+
 		TEST_CASE("ScriptMethods: errors rejects malformed cursors and limits with located errors")
 		{
 			Test::AutomationFixture fixture("ScriptErrorsInvalid");

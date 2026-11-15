@@ -201,7 +201,7 @@ namespace Engine {
 		registry.Struct<ScriptErrorsResult>("ScriptErrorsResult", "Errors and a full precision decimal cursor.")
 			.Field("errors", &ScriptErrorsResult::Errors, "Updated errors in cursor order.")
 			.Field("nextCursor", &ScriptErrorsResult::NextCursor, "Exclusive sequence to reuse as since, also for an empty page.")
-			.Field("evicted", &ScriptErrorsResult::Evicted, std::format("True when an error newer than since was evicted before this read: the stream keeps the {} distinct errors with the latest occurrences, and the retained ones still follow.", MaxScriptErrorEntries));
+			.Field("evicted", &ScriptErrorsResult::Evicted, std::format("True when an error newer than since was evicted before this read: the stream keeps the {} distinct errors with the latest occurrences, and the retained ones still follow. In the editor only an eviction of the current play session counts: a new session forgets the earlier sessions' evictions with their errors.", MaxScriptErrorEntries));
 		registry.Struct<ScriptEvalParams>("ScriptEvalParams", "Evaluate Luau in an explicitly selected context.")
 			.Field("code", &ScriptEvalParams::Code, "UTF-8 Luau expression or chunk.")
 			.Field("context", &ScriptEvalParams::Context, "Edit or Play.")

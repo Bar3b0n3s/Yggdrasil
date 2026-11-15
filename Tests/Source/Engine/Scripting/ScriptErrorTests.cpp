@@ -64,6 +64,34 @@ namespace Engine {
 			CHECK(page.front().ID == again.ID);
 		}
 
+		// The milestone review of M27 (ADR 0038): Clear kept the eviction marker, so script.errors answered evicted: true in a
+		// new play session for an eviction of an earlier one, whose errors no cursor can read any more.
+		TEST_CASE("ScriptError: Clear forgets the evictions before it, so no cursor reads them as missed")
+		{
+			ScriptErrorStream errors;
+			const auto distinct = [](size_t index)
+			{
+				return ScriptError{ .Script = "Assets/Scripts/Spawner.luau", .Line = 4, .Message = std::format("instance {} faulted", index) };
+			};
+			for (size_t index = 0; index <= MaxScriptErrorEntries; ++index)
+				static_cast<void>(errors.Add(distinct(index)));
+			REQUIRE(errors.HasEvictedAfter(0));
+			const uint64_t cursor = errors.GetCursor();
+			errors.Clear();
+			CHECK_FALSE(errors.HasEvictedAfter(0));
+			CHECK(errors.GetCursor() == cursor);
+			// Errors after Clear are read from the old cursor and from 0 alike, with no eviction until one happens again.
+			static_cast<void>(errors.Add(distinct(0)));
+			CHECK_FALSE(errors.HasEvictedAfter(0));
+			CHECK(errors.Read(0).size() == 1);
+			CHECK(errors.Read(cursor).size() == 1);
+			for (size_t index = 1; index <= MaxScriptErrorEntries; ++index)
+				static_cast<void>(errors.Add(distinct(index)));
+			// The first error after Clear (ID cursor + 1) is evicted now: only a cursor before it missed it.
+			CHECK(errors.HasEvictedAfter(cursor));
+			CHECK_FALSE(errors.HasEvictedAfter(cursor + 1));
+		}
+
 		TEST_CASE("ScriptError: JSON retains structured source frames and entity identity")
 		{
 			ScriptError error{

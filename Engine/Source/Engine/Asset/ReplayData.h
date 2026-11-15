@@ -35,7 +35,9 @@ namespace Engine {
 	// running engine's version, EngineVersionString (Core/BuildId.h; session.hello's engineVersion), never the build id, so
 	// a commit rewrites no replay (Docs/Decisions/0030-m19-contract.md decision 13). Before ADR 0038 (friction F10) they
 	// wrote the constant "0.1.0", which the replays recorded then keep: the header's EngineVersion is informational, read by
-	// no verification and no state hash, so a version bump changes only the headers of later recordings. Readers accept
+	// no verification and no state hash, so a committed replay keeps the version it was recorded with. A version bump
+	// changes the header of every new recording, FeatureTest's scaffold-recorded replays included, which Scaffold.py
+	// --check compares byte for byte, so the bumping commit regenerates FeatureTest (ADR 0038 decision 13). Readers accept
 	// any header text, as before.
 	// The recorders (input.record, test.run's record) store the state hash of every completed-tick boundary that is a
 	// positive multiple of this interval and lies before FinalTick (one second at 60 Hz; a tick inside a frame where a

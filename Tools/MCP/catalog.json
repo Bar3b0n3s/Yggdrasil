@@ -1658,7 +1658,7 @@
 									"maximum": 4294967295
 								},
 								"luau": {
-									"description": "Luau expression or chunk returning a truthy value.",
+									"description": "Luau expression or chunk returning a truthy JSON value. A value that is not JSON fails the expectation with its Script error, a vector, Color or Quat included: only script.eval returns those as arrays.",
 									"type": "string"
 								}
 							},
@@ -2223,7 +2223,7 @@
 				"type": "object",
 				"properties": {
 					"until": {
-						"description": "Expression or chunk evaluated after every tick in the live VM.",
+						"description": "Expression or chunk evaluated after every tick in the live VM. Its value must be JSON: one that is not, a vector, Color or Quat included (only script.eval returns those as arrays), ends the wait with its Script error.",
 						"type": "string"
 					},
 					"timeoutTicks": {
@@ -3362,7 +3362,7 @@
 									"maximum": 4294967295
 								},
 								"luau": {
-									"description": "Luau expression or chunk returning a truthy value.",
+									"description": "Luau expression or chunk returning a truthy JSON value. A value that is not JSON fails the expectation with its Script error, a vector, Color or Quat included: only script.eval returns those as arrays.",
 									"type": "string"
 								}
 							},

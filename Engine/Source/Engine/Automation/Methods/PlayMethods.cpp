@@ -498,7 +498,7 @@ namespace Engine {
 		registry.Struct<PlaySetTimeScaleParams>("PlaySetTimeScaleParams", "The params of play.setTimeScale.")
 			.Field("scale", &PlaySetTimeScaleParams::Scale, "The time scale, 0 to 100 (required; 1 is real time).", timeScaleMeta);
 		registry.Struct<PlayWaitForParams>("PlayWaitForParams", "Advance until a Luau predicate becomes truthy.")
-			.Field("until", &PlayWaitForParams::Until, "Expression or chunk evaluated after every tick in the live VM.")
+			.Field("until", &PlayWaitForParams::Until, "Expression or chunk evaluated after every tick in the live VM. Its value must be JSON: one that is not, a vector, Color or Quat included (only script.eval returns those as arrays), ends the wait with its Script error.")
 			.Field("timeoutTicks", &PlayWaitForParams::TimeoutTicks, "Maximum ticks to advance.", { .Min = 1.0, .Max = static_cast<double>(MaxPlayStepTicks) });
 		registry.Struct<PlayWaitForResult>("PlayWaitForResult", "The final predicate value and tick.")
 			.Field("satisfied", &PlayWaitForResult::Satisfied, "The predicate returned a Lua-truthy value.")

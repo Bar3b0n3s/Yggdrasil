@@ -1903,7 +1903,7 @@ declare Test: {
 	GetParticleDigest: (entity: Entity) -> string?,
 	-- Returns the digest of an Animator entity's pose sampled in the last fixed step (the XXH64 of its joint model matrices and morph weights) as 16 hexadecimal digits, or nil without a pose; the same in every configuration, so a suite compares it across runs; test suites only. [All modes; Test; pure/read]
 	GetPoseDigest: (entity: Entity) -> string?,
-	-- Read occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. [All modes; Test; pure/read]
+	-- Read the current scene's VM's error occurrences newer than an exclusive error cursor; claimed errors remain visible. The VM keeps the 256 distinct errors with the latest occurrences. A scene transition (Scene.Load, Scene.Reload) replaces the VM, so the next scene's list starts empty: an error the previous scene raised, in the transition's frame too, is read only by a case that ran in that scene (the case that requested the transition reads those raised before it returned), and the suite's scriptErrors count in the run's report counts it. [All modes; Test; pure/read]
 	GetScriptErrors: (since: number?) -> {ScriptError},
 	-- Read the canonical simulated state hash: the world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input. It includes the tick, so two reads at different ticks always differ: compare two runs with input.replay's stateHash instead. [All modes; Test; pure/read]
 	GetStateHash: () -> string,

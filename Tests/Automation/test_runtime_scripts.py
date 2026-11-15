@@ -126,6 +126,8 @@ class RuntimeScriptTests(AutomationTestCase):
         # The header names the run mode that recorded it, never the build configuration (Architecture §9.1, ADR 0022
         # "Integration"), so a Debug and a Release Runtime record the same bytes.
         self.assertEqual(document["Config"], "Release")
+        # Its EngineVersion is the running engine's, the version the Runtime reports (ADR 0038, friction F10).
+        self.assertEqual(document["EngineVersion"], runtime.hello["engineVersion"])
         document["FinalStateHash"] = ("ffffffffffffffff" if document["FinalStateHash"] != "ffffffffffffffff"
                                       else "0000000000000000")
         recording.write_text(json.dumps(document), encoding="utf-8")

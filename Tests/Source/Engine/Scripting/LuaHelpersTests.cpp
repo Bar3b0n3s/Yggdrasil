@@ -422,6 +422,34 @@ return true
 				CHECK_FALSE(fixture.RequestedScene.IsValid());
 			}
 		}
+		// The milestone review of M27 (ADR 0038): friction F01's conversion is script.eval's alone. A predicate, which
+		// ExecuteBytecode runs (replay expectations in every player, test.run's and input.record's expectations, play.waitFor),
+		// keeps the strict rule: a vector, a Color or a Quat is no JSON and fails it, so a mistaken `return position` fails
+		// loudly instead of holding as a truthy array.
+		TEST_CASE("LuaHelpers: a predicate returning a vector, Color or Quat fails as a value that is not JSON")
+		{
+			Test::ScriptTestFixture fixture;
+			REQUIRE(fixture.Start());
+			const auto path = VfsPath::Parse("project://Assets/Tests/Predicate.replay");
+			REQUIRE(path.has_value());
+			for (const std::string_view source : { "return vector.create(1, 2.5, -3)", "return {At = Color.New(1, 0.5, 0.25, 1)}", "return {Quat.Identity()}" })
+			{
+				CAPTURE(source);
+				const auto compiled = ScriptCompiler::Compile({ .Path = *path, .Source = source, .Mode = ScriptCompileMode::ExpressionOrChunk, .ChunkName = "=replay/Predicate/Expect/0", .JsonPointer = "/Expect/0/Luau" });
+				REQUIRE_MESSAGE(compiled.has_value(), (compiled ? "" : compiled.error().ToString()));
+				ScriptData predicate{};
+				predicate.Bytecode = compiled->Bytecode;
+				predicate.SourceMap = compiled->SourceMap;
+				Test::ExpectLog expected(LogLevel::Error, "is not a JSON scalar or table");
+				const auto result = fixture.GetEngine()->ExecuteBytecode(predicate);
+				REQUIRE_FALSE(result.has_value());
+				CHECK(result.error().GetCode() == ErrorCode::Script);
+				CHECK(expected.GetMatchCount() == 1);
+				// The same value from an evaluation (script.eval's) is the array of its components.
+				const auto evaluated = fixture.Evaluate(source);
+				REQUIRE_MESSAGE(evaluated.has_value(), (evaluated ? "" : evaluated.error().ToString()));
+			}
+		}
 		TEST_CASE("LuaHelpers: scene JSON budgets reject expansion before host mutation and recover for valid aliases")
 		{
 			Test::ScriptTestFixtureSpecification specification{};

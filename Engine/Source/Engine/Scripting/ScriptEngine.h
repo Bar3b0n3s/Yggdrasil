@@ -213,12 +213,16 @@ namespace Engine {
 		// never retained in the error stream, passed to the host (OnScriptError) or claimed by a test case. It is not a
 		// callback of that instance either: the behaviour stays enabled, keeps its tasks and is not paused on (§11.7). A
 		// failure that stopped the VM (a hard memory breach) is the game's and is published as ExecuteBytecode's are,
-		// leaving `failure` empty. Spawned tasks belong to that instance, and their later faults are the game's.
+		// leaving `failure` empty. Spawned tasks belong to that instance, and their later faults are the game's. Its value
+		// holds a vector, Color or Quat at any depth as the array of its components (Sandbox::Evaluate).
 		[[nodiscard]] Result<ScriptEvaluation> Evaluate(std::string_view source, const VfsPath& path,
 			std::optional<UUID> entity = std::nullopt, std::string_view behaviour = {}, std::optional<ScriptError>* failure = nullptr);
 		// Trusted engine-produced replay predicates, including Dist. Never compiles source or creates a second VM. `self` is
 		// the instance of the entity's first slot. A failure is published to the error stream, the host and the log (a
-		// replay expectation's error is the game's), without disabling or pausing its instance.
+		// replay expectation's error is the game's), without disabling or pausing its instance. Its value stays strict JSON,
+		// so a vector, Color or Quat fails the predicate as every value that is not JSON does (Sandbox::ExecuteBytecode;
+		// ADR 0038's milestone review): a replay expectation in every player, test.run's and input.record's expectations
+		// and play.waitFor's predicate fail loudly instead of holding.
 		[[nodiscard]] Result<ScriptEvaluation> ExecuteBytecode(const ScriptData& script,
 			std::optional<UUID> entity = std::nullopt);
 		// EditorOnly: resolve the complete dependency closure, execute candidates in isolation, then atomically patch

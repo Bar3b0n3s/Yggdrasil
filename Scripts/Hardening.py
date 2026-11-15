@@ -460,16 +460,17 @@ def new_script_errors(client: Any, engine_client: Any, cursor: str, deadline: So
     Every page is read through engine_client.load_offloaded: the soak's connection has offloading on, so a page whose
     JSON is over the 48 KB bounded-output limit comes back as {path, truncated: true, summary} and the page itself is in
     the file it names (Architecture §13.4).
-    The editor never clears its error stream and each soak scene starts a fresh editor, so every entry after the cursor
-    is an error of this scene's play session (a repeated error included, which the stream moves after the cursor with
-    its latest occurrence). The stream lists each distinct error once, at its latest occurrence (its tick, and its count
-    of every occurrence, those before the cursor included), and keeps the 256 errors with the latest occurrences, so the
-    first occurrence is unknown: the line names the earliest listed entry. Returns one line when there is any, "<n> new
-    script error(s) during the soak; the earliest listed: <script>:<line>: <message> (latest at tick <tick>, <count>
-    occurrence(s))", <n> counting the entries returned, followed by "; earlier errors were evicted" when any page
-    answered evicted: true; and a line naming a script.errors call that failed (or returned no errors array or
-    nextCursor, an offloaded page whose file cannot be read, which the line names, or a page that leaves the cursor
-    where it was)."""
+    Each soak scene starts a fresh editor, and the editor forgets the errors of earlier play sessions, and their
+    evictions, when play.start starts the soak's session, keeping the cursor (ADR 0038, friction F02 and the milestone
+    review), so every entry after the cursor is an error of this scene's play session (a repeated error included, which
+    the stream moves after the cursor with its latest occurrence). The stream lists each distinct error once, at its
+    latest occurrence (its tick, and its count of that session's occurrences), and keeps the 256 errors with the latest
+    occurrences, so the first occurrence is unknown: the line names the earliest listed entry. Returns one line when
+    there is any, "<n> new script error(s) during the soak; the earliest listed: <script>:<line>: <message> (latest at
+    tick <tick>, <count> occurrence(s))", <n> counting the entries returned, followed by "; earlier errors were
+    evicted" when any page answered evicted: true; and a line naming a script.errors call that failed (or returned no
+    errors array or nextCursor, an offloaded page whose file cannot be read, which the line names, or a page that
+    leaves the cursor where it was)."""
     entries: list[Any] = []
     evicted = False
     failure: str | None = None

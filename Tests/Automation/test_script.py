@@ -148,6 +148,35 @@ return Script.Define("Owner", Owner)
         self.assertEqual(len(client.call("script.errors")["errors"]), 1)
         client.call("play.stop")
 
+    def test_script_errors_report_the_current_play_session_only(self) -> None:
+        # ADR 0038, friction F02: script.errors kept the errors of earlier play sessions, so a check of one session read
+        # an earlier one's. A new play session forgets them before its first callback and keeps the cursor, so a cursor
+        # taken before it starts reads exactly the new session's errors.
+        client, _ = self.open_editor_with_scene()
+        path = "Assets/Scripts/Faulty.luau"
+        client.call("script.write", {"path": path, "source": (
+            'local Faulty = {}\n'
+            'function Faulty:OnFixedUpdate() error("session fault", 0) end\n'
+            'return Script.Define("Faulty", Faulty)\n')})
+        client.call("entity.create", {"name": "Board", "components": {"Script": {"Scripts": [{"Script": path}]}}})
+        client.call("play.start", {"lockstep": True, "pauseOnError": False})
+        client.call("play.step", {"ticks": 1})
+        client.call("play.stop")
+        earlier = client.call("script.errors")["errors"]
+        self.assertEqual(len(earlier), 1, earlier)
+        cursor = client.call("script.errors", {"since": "end"})["nextCursor"]
+        client.call("play.start", {"lockstep": True, "pauseOnError": False})
+        self.assertEqual(client.call("script.errors")["errors"], [])
+        self.assertEqual(client.call("script.errors", {"since": cursor})["errors"], [])
+        client.call("play.step", {"ticks": 1})
+        current = client.call("script.errors")
+        self.assertEqual(len(current["errors"]), 1, current)
+        self.assertIn("session fault", current["errors"][0]["message"])
+        self.assertEqual(current["errors"][0]["count"], 1)
+        self.assertFalse(current["evicted"])
+        self.assertEqual(client.call("script.errors", {"since": cursor})["errors"], current["errors"])
+        client.call("play.stop")
+
     def test_script_errors_keep_bounded_messages_and_report_evictions(self) -> None:
         client, _ = self.open_editor_with_scene()
         path = "Assets/Scripts/Fault.luau"

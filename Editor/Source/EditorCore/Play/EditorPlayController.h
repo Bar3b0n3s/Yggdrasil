@@ -64,8 +64,9 @@ namespace Engine {
 
 		// M13 host state outlives every VM and is retained across Stop/Scene.Load. ADR 0038 (friction F02): a new play
 		// session (Start, StartRecording, StartReplay; not a test run's sessions) forgets the retained errors of the earlier
-		// ones before its first callback (ScriptErrorStream::Clear, which keeps the cursor), so script.errors reports the
-		// current session's errors and a cursor taken before the start reads exactly them.
+		// ones before its first callback (ScriptErrorStream::Clear, which keeps the cursor and forgets their evictions too),
+		// so script.errors reports the current session's errors, answering evicted only for an eviction of that session, and
+		// a cursor taken before the start reads exactly them.
 		[[nodiscard]] ScriptErrorStream& GetScriptErrors();
 		[[nodiscard]] Result<ScriptApiRegistry*> GetScriptApi();
 		// input.record start (§13.6): a lockstep session owned by options.LockstepOwner, recording from tick 0. Without

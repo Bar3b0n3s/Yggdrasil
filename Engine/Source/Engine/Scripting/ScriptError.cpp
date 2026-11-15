@@ -135,6 +135,7 @@ namespace Engine {
 	void ScriptErrorStream::Clear()
 	{
 		m_Errors.clear();
+		m_EvictedThrough = 0;
 	}
 
 }

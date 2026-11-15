@@ -849,11 +849,18 @@ namespace Engine {
 		ScriptData script{};
 		script.Bytecode = compiled->Bytecode;
 		script.SourceMap = compiled->SourceMap;
-		return ExecuteBytecode(script, entity);
+		// script.eval's result: a vector, Color or Quat comes back as its components (ADR 0038, friction F01).
+		return ExecuteEvaluation(script, entity, true);
 #endif
 	}
 
 	Result<ScriptEvaluation> Sandbox::ExecuteBytecode(const ScriptData& script, std::optional<UUID> entity)
+	{
+		// A predicate's result stays strict JSON (ADR 0038's milestone review).
+		return ExecuteEvaluation(script, entity, false);
+	}
+
+	Result<ScriptEvaluation> Sandbox::ExecuteEvaluation(const ScriptData& script, std::optional<UUID> entity, bool componentArrays)
 	{
 		m_State->AssertThread();
 		m_State->LastError.reset();
@@ -892,12 +899,13 @@ namespace Engine {
 		} capture{ *m_State, m_State->Prints };
 		m_State->Prints = &sink;
 		Status operation{};
-		const auto outcome = m_State->RunNative(m_State->Vm, [this, &script, entity, &evaluation, &operation](ScriptCall& call)
+		const auto outcome = m_State->RunNative(m_State->Vm, [this, &script, entity, componentArrays, &evaluation, &operation](ScriptCall& call)
 		{
 			operation = m_State->Execute(call, script, entity);
 			if (!operation)
 				return 0;
-			auto json = Detail::SandboxAccess::ReadJson(call, -1, Detail::SandboxAccess::JsonEngineValues::Components);
+			auto json = Detail::SandboxAccess::ReadJson(call, -1,
+				componentArrays ? Detail::SandboxAccess::JsonEngineValues::Components : Detail::SandboxAccess::JsonEngineValues::Refuse);
 			if (!json)
 			{
 				ErrorLocation location{};

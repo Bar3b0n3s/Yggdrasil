@@ -591,7 +591,7 @@ namespace Engine {
 			.Entry(InputRecordAction::Stop, "Stop", "Validate and save the completed recording.");
 		registry.Struct<InputRecordExpectation>("InputRecordExpectation", "An authored replay assertion at a completed-tick boundary.")
 			.Field("tick", &InputRecordExpectation::Tick, "Completed ticks, including zero.")
-			.Field("luau", &InputRecordExpectation::Luau, "Luau expression or chunk returning a truthy value.");
+			.Field("luau", &InputRecordExpectation::Luau, "Luau expression or chunk returning a truthy JSON value. A value that is not JSON fails the expectation with its Script error, a vector, Color or Quat included: only script.eval returns those as arrays.");
 		registry.Struct<InputRecordParams>("InputRecordParams", "Action-dependent recording parameters; inappropriate members are refused.")
 			.Field("action", &InputRecordParams::Action, "Start or Stop.")
 			.Field("restart", &InputRecordParams::Restart, "Start only: explicitly replace an existing play session.")
@@ -619,7 +619,7 @@ namespace Engine {
 			.Field("tick", &InputReplayResult::Expectation::Tick, "Completed-tick boundary.")
 			.Field("evaluated", &InputReplayResult::Expectation::Evaluated, "The expectation executed.")
 			.Field("satisfied", &InputReplayResult::Expectation::Satisfied, "The result was Lua-truthy.")
-			.Field("value", &InputReplayResult::Expectation::Value, "Detached result value.")
+			.Field("value", &InputReplayResult::Expectation::Value, "Detached result value, JSON: a predicate returning a value that is not JSON (a vector, Color or Quat included, which only script.eval returns as arrays) fails with its Script error instead.")
 			.Field("message", &InputReplayResult::Expectation::Message, "Failure explanation, when present.")
 			.Field("file", &InputReplayResult::Expectation::File, "Authored replay path.")
 			.Field("line", &InputReplayResult::Expectation::Line, "Line within the authored predicate.")

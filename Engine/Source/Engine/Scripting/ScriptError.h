@@ -77,13 +77,15 @@ namespace Engine {
 		// The ID of the latest occurrence, 0 before the first; evictions never lower it.
 		[[nodiscard]] uint64_t GetCursor() const;
 		[[nodiscard]] std::span<const ScriptError> GetErrors() const;
-		// Distinct errors evicted so far.
+		// Distinct errors evicted in the stream's life, before a Clear too.
 		[[nodiscard]] uint64_t GetEvictedCount() const;
 		[[nodiscard]] bool HasEvictedAfter(uint64_t since) const;
 		// Forgets every retained error (ADR 0038, friction F02: the editor's history at the start of a new play session).
 		// The cursor keeps its value, so IDs go on increasing and a cursor taken before Clear reads exactly the errors added
-		// after it; an error that occurs again starts a new count. A forgotten error was not evicted: the evicted count and
-		// HasEvictedAfter are unchanged.
+		// after it; an error that occurs again starts a new count. The evictions before Clear are forgotten with the errors
+		// (ADR 0038's milestone review): HasEvictedAfter is false for every cursor until an error added after Clear is
+		// evicted, since no Read could return a forgotten error either, and a forgotten error was not evicted, so the
+		// evicted count is unchanged.
 		void Clear();
 	private:
 		std::vector<ScriptError> m_Errors{};

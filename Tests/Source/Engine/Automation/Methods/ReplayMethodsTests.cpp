@@ -202,6 +202,55 @@ namespace Engine {
 			CHECK(outcome["expect"][2]["value"] == Json(42));
 		}
 
+		// The milestone review of M27 (ADR 0038): friction F01's conversion of a vector, Color or Quat is script.eval's alone.
+		// An expectation keeps the strict rule, so a mistaken `return position` fails, refusing input.record's stop and failing
+		// input.replay's verification, instead of holding as a truthy array that asserts nothing.
+		TEST_CASE("ReplayMethods: an expectation returning a vector, Color or Quat fails as a value that is not JSON")
+		{
+			Test::AutomationFixture fixture("ReplayEngineValues");
+			SaveInputScene(fixture);
+			const Json held = Json::array({ Json{ { "tick", 2 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } });
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 20 }, { "render", "none" }, { "input", held } });
+			Json refused;
+			{
+				Test::ExpectLog expected(LogLevel::Error, "is not a JSON scalar or table");
+				refused = fixture.Request("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Position.replay" }, { "expect", Json::array({ Json{ { "tick", 10 }, { "luau", "return Scene.FindByName('Mover').Transform.Translation" } } }) } });
+			}
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			const Json& refusal = refused["error"]["data"];
+			CHECK(refusal["errorCode"] == Json("Validation"));
+			REQUIRE_MESSAGE(refusal.contains("verification"), refusal.dump());
+			REQUIRE(refusal["verification"]["expect"].size() == 1);
+			CHECK(refusal["verification"]["expect"][0]["satisfied"] == Json(false));
+			CHECK(JsonReader(refusal["verification"]["expect"][0]).ReadMember<std::string>("message").value_or("").contains("is not a JSON scalar or table"));
+			CHECK_FALSE(ProjectFileExists(fixture, "Assets/Tests/Position.replay"));
+			CallReplayMethod(fixture, "play.stop");
+
+			// A replay whose expectations return them fails each.
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/EngineValues.replay" } });
+			WriteReplayExpectations(fixture, "Assets/Tests/EngineValues.replay",
+				{ { .Tick = 0, .Luau = "return vector.create(1, 2, 3)" }, { .Tick = 0, .Luau = "return Color.New(1, 0, 0, 1)" }, { .Tick = 0, .Luau = "return {Quat.Identity()}" } });
+			Json response;
+			{
+				Test::ExpectLog expected(LogLevel::Error, "is not a JSON scalar or table");
+				response = fixture.Request("input.replay", Json{ { "path", "Assets/Tests/EngineValues.replay" }, { "verify", true }, { "strictHash", true } });
+				CHECK(expected.GetMatchCount() == 3);
+			}
+			REQUIRE_MESSAGE(response.contains("error"), response.dump());
+			CHECK(response["error"]["data"]["errorCode"] == Json("Validation"));
+			const Json& outcome = response["error"]["data"]["replay"];
+			REQUIRE(outcome["expect"].size() == 3);
+			for (const Json& expectation : outcome["expect"])
+			{
+				CAPTURE(expectation.dump());
+				CHECK(expectation["evaluated"] == Json(true));
+				CHECK(expectation["satisfied"] == Json(false));
+				CHECK(JsonReader(expectation).ReadMember<std::string>("message").value_or("").contains("is not a JSON scalar or table"));
+			}
+		}
+
 		TEST_CASE("ReplayMethods: another active driver is rejected before replacing the session")
 		{
 			Test::EditorTestFixture fixture("ReplayDriverAdmission");

@@ -12850,7 +12850,7 @@
 								"maximum": 4294967295
 							},
 							"luau": {
-								"description": "Luau expression or chunk returning a truthy value.",
+								"description": "Luau expression or chunk returning a truthy JSON value. A value that is not JSON fails the expectation with its Script error, a vector, Color or Quat included: only script.eval returns those as arrays.",
 								"type": "string"
 							}
 						},
@@ -12954,7 +12954,7 @@
 								"maximum": 4294967295
 							},
 							"luau": {
-								"description": "Luau expression or chunk returning a truthy value.",
+								"description": "Luau expression or chunk returning a truthy JSON value. A value that is not JSON fails the expectation with its Script error, a vector, Color or Quat included: only script.eval returns those as arrays.",
 								"type": "string"
 							}
 						},
@@ -13197,7 +13197,7 @@
 								"type": "boolean"
 							},
 							"value": {
-								"description": "Detached result value."
+								"description": "Detached result value, JSON: a predicate returning a value that is not JSON (a vector, Color or Quat included, which only script.eval returns as arrays) fails with its Script error instead."
 							},
 							"message": {
 								"description": "Failure explanation, when present.",
@@ -16343,7 +16343,7 @@
 				"type": "object",
 				"properties": {
 					"until": {
-						"description": "Expression or chunk evaluated after every tick in the live VM.",
+						"description": "Expression or chunk evaluated after every tick in the live VM. Its value must be JSON: one that is not, a vector, Color or Quat included (only script.eval returns those as arrays), ends the wait with its Script error.",
 						"type": "string"
 					},
 					"timeoutTicks": {
@@ -24876,7 +24876,7 @@
 						"type": "string"
 					},
 					"evicted": {
-						"description": "True when an error newer than since was evicted before this read: the stream keeps the 256 distinct errors with the latest occurrences, and the retained ones still follow.",
+						"description": "True when an error newer than since was evicted before this read: the stream keeps the 256 distinct errors with the latest occurrences, and the retained ones still follow. In the editor only an eviction of the current play session counts: a new session forgets the earlier sessions' evictions with their errors.",
 						"type": "boolean"
 					},
 					"_meta": {
@@ -25529,7 +25529,7 @@
 						"type": "string"
 					},
 					"build": {
-						"description": "The server's build id, semantic-versioning build metadata: the engine's version, then \"+<commit>\" (12 lowercase hex digits of the commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.4.0+3f2a9c1d4e5b.dirty\"; the version alone for a build without a commit.",
+						"description": "The server's build id, semantic-versioning build metadata: the engine's version, then \"+<commit>\" (12 lowercase hex digits of the commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.5.0+3f2a9c1d4e5b.dirty\"; the version alone for a build without a commit.",
 						"type": "string"
 					},
 					"clientId": {
@@ -26629,7 +26629,7 @@
 								"maximum": 4294967295
 							},
 							"luau": {
-								"description": "Luau expression or chunk returning a truthy value.",
+								"description": "Luau expression or chunk returning a truthy JSON value. A value that is not JSON fails the expectation with its Script error, a vector, Color or Quat included: only script.eval returns those as arrays.",
 								"type": "string"
 							}
 						},

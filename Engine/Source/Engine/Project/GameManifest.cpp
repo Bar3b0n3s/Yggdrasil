@@ -160,7 +160,7 @@ namespace Engine {
 		[[nodiscard]] static Status CheckBuild(std::string_view build, std::string_view engineVersion, std::string_view pointer)
 		{
 			if (build.empty())
-				return std::unexpected(MakeManifestError(ErrorCode::Validation, pointer, "the build id is empty", "write the exporting build's id, such as \"0.4.0+3f2a9c1d4e5b\""));
+				return std::unexpected(MakeManifestError(ErrorCode::Validation, pointer, "the build id is empty", "write the exporting build's id, such as \"0.5.0+3f2a9c1d4e5b\""));
 			const Result<BuildId> parsed = ParseBuildId(build);
 			if (!parsed)
 				return std::unexpected(MakeManifestError(ErrorCode::Validation, pointer, parsed.error().GetMessageText(), parsed.error().GetHint()));

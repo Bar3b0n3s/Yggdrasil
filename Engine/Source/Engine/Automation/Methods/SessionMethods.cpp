@@ -141,7 +141,7 @@ namespace Engine {
 			.Field("engineVersion", &SessionHelloResult::EngineVersion, "The engine's version.")
 			.Field("build", &SessionHelloResult::Build,
 				"The server's build id, semantic-versioning build metadata: the engine's version, then \"+<commit>\" (12 lowercase hex digits of the "
-				"commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.4.0+3f2a9c1d4e5b.dirty\"; the "
+				"commit it was built from) and \".dirty\" when its working tree had uncommitted changes, such as \"0.5.0+3f2a9c1d4e5b.dirty\"; the "
 				"version alone for a build without a commit.")
 			.Field("clientId", &SessionHelloResult::Client, "This connection's client id, unique for the server's lifetime.")
 			.Field("capabilities", &SessionHelloResult::Capabilities,

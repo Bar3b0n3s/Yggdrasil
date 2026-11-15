@@ -45,8 +45,9 @@ namespace Engine {
 		struct SandboxAccess
 		{
 			// How ReadJson converts a vector, a Color or a Quat: refused like every other value that is not JSON (scene
-			// parameters, Variant values), or as the array of its finite components, reflection's JSON spelling ([x, y, z],
-			// [r, g, b, a], [x, y, z, w]), at any depth: an evaluation's result (ADR 0038, friction F01).
+			// parameters, Variant values, a predicate's result: Sandbox::ExecuteBytecode), or as the array of its finite
+			// components, reflection's JSON spelling ([x, y, z], [r, g, b, a], [x, y, z, w]), at any depth: script.eval's
+			// result, Sandbox::Evaluate's (ADR 0038, friction F01, and its milestone review).
 			enum class JsonEngineValues : uint8_t
 			{
 				Refuse,

@@ -60,6 +60,29 @@ namespace Engine {
 			CHECK(WaitCall(fixture, "play.state", Json::object())["state"] == Json("Paused"));
 		}
 
+		// The milestone review of M27 (ADR 0038): script.eval returns a vector, Color or Quat as the array of its components
+		// (friction F01), but a predicate keeps the strict rule, so `until: "return ball.Transform.WorldPosition"` fails with
+		// its Script error instead of holding at once as a truthy array.
+		TEST_CASE("PlayWaitFor: a predicate returning a vector, Color or Quat fails with its Script error")
+		{
+			Test::AutomationFixture fixture("WaitForEngineValues");
+			WaitCall(fixture, "play.start", Json{ { "lockstep", true }, { "pauseOnError", false } });
+			for (const std::string_view until : { "return vector.create(1, 2, 3)", "return Color.New(1, 0, 0, 1)", "return {Pose = Quat.Identity()}" })
+			{
+				CAPTURE(until);
+				Test::ExpectLog expected(LogLevel::Error, "is not a JSON scalar or table");
+				const Json failure = fixture.Request("play.waitFor", Json{ { "until", until }, { "timeoutTicks", 5 } });
+				REQUIRE_MESSAGE(failure.contains("error"), failure.dump());
+				CHECK(failure["error"]["data"]["errorCode"] == Json("Script"));
+				CHECK(JsonReader(failure["error"]["data"]["scriptError"]).ReadMember<std::string>("message").value_or("").contains("is not a JSON scalar or table"));
+				CHECK(expected.GetMatchCount() == 1);
+			}
+			// Each failed after its first tick.
+			CHECK(WaitCall(fixture, "play.state", Json::object())["tick"] == Json(3));
+			// script.eval converts the same value.
+			CHECK(WaitCall(fixture, "script.eval", Json{ { "context", "play" }, { "code", "return vector.create(1, 2, 3)" } })["value"] == Json::array({ 1.0, 2.0, 3.0 }));
+		}
+
 		TEST_CASE("PlayWaitFor: syntax errors and unavailable VMs do not advance the session")
 		{
 			Test::AutomationFixture fixture("WaitForAdmission");
