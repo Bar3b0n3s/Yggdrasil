@@ -699,6 +699,22 @@
 			"TranscriptLine": 41
 		},
 		{
+			"Path": "Assets/Tests/Frames.test.luau",
+			"XXH64": "7f5e6d98106ddd15",
+			"Method": "script.write",
+			"RequestId": 32,
+			"Client": "engine-mcp",
+			"TranscriptLine": 959
+		},
+		{
+			"Path": "Assets/Tests/Frames.test.luau.meta",
+			"XXH64": "12d254173f049982",
+			"Method": "script.write",
+			"RequestId": 27,
+			"Client": "engine-mcp",
+			"TranscriptLine": 949
+		},
+		{
 			"Path": "Assets/Tests/Lib/Autopilot.luau",
 			"XXH64": "1d7e29df2b3dfd8b",
 			"Method": "script.write",
@@ -780,11 +796,11 @@
 		},
 		{
 			"Path": "Assets/Tests/RollingBall.test.luau",
-			"XXH64": "571b13765ec216fc",
+			"XXH64": "36f889ac2eec29d1",
 			"Method": "script.write",
-			"RequestId": 46,
+			"RequestId": 33,
 			"Client": "engine-mcp",
-			"TranscriptLine": 731
+			"TranscriptLine": 961
 		},
 		{
 			"Path": "Assets/Tests/RollingBall.test.luau.meta",
@@ -796,11 +812,11 @@
 		},
 		{
 			"Path": "RollingBall.eproj",
-			"XXH64": "acb31f2b75ac302f",
+			"XXH64": "c2b6add9b8bc9cd6",
 			"Method": "project.setSettings",
-			"RequestId": 63,
+			"RequestId": 28,
 			"Client": "engine-mcp",
-			"TranscriptLine": 123
+			"TranscriptLine": 951
 		}
 	]
 }

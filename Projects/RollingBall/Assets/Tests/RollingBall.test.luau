@@ -1,8 +1,9 @@
 --!strict
--- Rolling Ball's integration suite (ADR 0038 decision 10): the main-path support check on every level, the respawn
--- at the last checkpoint, the goal and the timer carried across Scene.Load, the lift carrying the ball, a platform's
--- phased start, and Restart. The cases share one session and cross the levels by Scene.Load: the case during which a
--- transition is requested returns in that frame, and the next case runs in the new scene's VM.
+-- Rolling Ball's integration suite (ADR 0038 decision 10): the main-path support check and the HUD's level and par on
+-- every level, the respawn at the last checkpoint, the CHECKPOINT banner, the goal and the timer carried across
+-- Scene.Load, the lift carrying the ball, a platform's phased start, and Restart. The cases share one session and cross
+-- the levels by Scene.Load: the case during which a transition is requested returns in that frame, and the next case
+-- runs in the new scene's VM.
 local Actions = require("../Scripts/Actions")
 local BallScript = require("../Scripts/Ball")
 local Clock = require("../Scripts/Clock")
@@ -41,6 +42,12 @@ local function hudText(name: string): string
 	return if label then label.Text else ""
 end
 
+-- The HUD's level and par, which the game writes once at the level's start.
+local function expectHud(level: number)
+	Test.ExpectEqual(hudText("LevelText"), string.format("LEVEL %d/3", level), "the HUD names the level")
+	Test.ExpectEqual(hudText("ParText"), "PAR " .. Clock.Format(game().ParTicks), "the HUD shows the level's par")
+end
+
 -- Places the ball at rest (a test case may move it; recording suites never do).
 local function place(body: RigidBody, position: vector)
 	body:Teleport(position, Quat.Identity())
@@ -69,18 +76,22 @@ local function pieceOf(entity: Entity): string
 	return current.Name
 end
 
--- The collider nearest to a point by its collider bounds, as "<collider> of <piece>".
+-- The solid collider nearest to a point by its collider bounds, as "<collider> of <piece>". Trigger volumes (the
+-- checkpoints' and the goal's) are left out: a miss inside one would otherwise name the trigger, not the track.
 local function nearestPiece(point: vector): string
 	local best = "none"
 	local bestDistance = math.huge
 	for _, entity in Scene.FindAllWithComponent("BoxCollider") do
-		local low, high = Physics.GetColliderBounds(entity)
-		if low and high then
-			local closest = vector.create(math.clamp(point.x, low.x, high.x), math.clamp(point.y, low.y, high.y), math.clamp(point.z, low.z, high.z))
-			local distance = vector.magnitude(closest - point)
-			if distance < bestDistance then
-				bestDistance = distance
-				best = string.format("%s of %s (%.2f m away)", entity.Name, pieceOf(entity), distance)
+		local collider = entity.BoxCollider
+		if collider and not collider.IsTrigger then
+			local low, high = Physics.GetColliderBounds(entity)
+			if low and high then
+				local closest = vector.create(math.clamp(point.x, low.x, high.x), math.clamp(point.y, low.y, high.y), math.clamp(point.z, low.z, high.z))
+				local distance = vector.magnitude(closest - point)
+				if distance < bestDistance then
+					bestDistance = distance
+					best = string.format("%s of %s (%.2f m away)", entity.Name, pieceOf(entity), distance)
+				end
 			end
 		end
 	end
@@ -122,6 +133,10 @@ end
 return Test.Suite("RollingBall", function()
 	Test.Case("Level 1: the main path is supported everywhere but inside its gaps", function()
 		supportCheck(400)
+	end)
+
+	Test.Case("Level 1: the HUD shows the level and its par", function()
+		expectHud(1)
 	end)
 
 	Test.Case("Level 1: a fall respawns the ball at the last checkpoint with no velocity", function()
@@ -207,6 +222,10 @@ return Test.Suite("RollingBall", function()
 		Test.ExpectEqual(hudText("TimeText"), Clock.Format(current.TotalTicks), "the HUD shows the run's time")
 	end)
 
+	Test.Case("Level 2: the HUD shows the level and its par", function()
+		expectHud(2)
+	end)
+
 	Test.Case("Level 2: the lift carries the ball up to the upper deck", function()
 		local ballEntity, _, body = ballParts()
 		local lift = find("/Level/Lift")
@@ -238,19 +257,31 @@ return Test.Suite("RollingBall", function()
 			return
 		end
 		-- Away from the track and the ball; the authored pose is the cycle's start pose. The phase, halfway up the
-		-- rise, is set before the instance's first tick, so that its OnStart reads it. A script cannot see the first
-		-- tick's step itself (that tick both starts and moves the platform), so the case checks the poses it reaches.
+		-- rise, is set before the instance's first tick, so that its OnStart reads it.
 		local origin = vector.create(0, 20, 40)
 		local entity = Scene.Instantiate(prefab, origin)
 		local platform = entity:GetScript("MovingPlatform") :: PlatformScript.MovingPlatform
+		local body = entity.RigidBody :: RigidBody
 		platform.PhaseTicks = platform.DwellTicks + platform.MoveTicks // 2
 		local phase = platform.PhaseTicks
+		local function ease(tick: number): number
+			return Motion.Ease(tick, platform.MoveTicks, platform.DwellTicks)
+		end
 		for step = 1, 2 do
 			Test.WaitTicks(1)
 			Test.ExpectEqual(platform.Tick, phase + step, "the platform counts on from its phase")
-			local expected = origin + platform.Travel * Motion.Ease(phase + step, platform.MoveTicks, platform.DwellTicks)
+			local expected = origin + platform.Travel * ease(phase + step)
 			Test.ExpectNear(entity.Transform.WorldPosition, expected, 0.001, string.format("the platform's pose %d ticks on from its phase", step))
 		end
+		-- A Kinematic body's velocity is its last physics step's sweep, and a test case runs before its tick's step:
+		-- two ticks after the creation it is the sweep of the platform's first tick. From the phased pose that sweep is
+		-- one tick's step; from the authored pose (the platform not placed at its phase) it would be the jump there.
+		local perSecond = 1 / Time.GetFixedDeltaTime()
+		local travel = vector.magnitude(platform.Travel)
+		local stepSpeed = travel * (ease(phase + 1) - ease(phase)) * perSecond
+		local jumpSpeed = travel * ease(phase + 1) * perSecond
+		local speed = vector.magnitude(body:GetLinearVelocity())
+		Test.Expect(speed < 10, string.format("the first tick's sweep moved the platform at %.3f m/s (one tick's step %.3f m/s, the jump from the authored pose %.1f m/s)", speed, stepSpeed, jumpSpeed))
 		Scene.Destroy(entity)
 	end)
 
@@ -280,15 +311,23 @@ return Test.Suite("RollingBall", function()
 
 	Test.Case("Level 2: its next level is Level 3, which the suite loads with a carried time", function()
 		local nextLevel = game().NextLevel
-		Test.Expect(nextLevel ~= nil, "Level 2 names its next level")
+		Test.ExpectEqual(nextLevel, Assets.Load("Assets/Scenes/Level3.scene"), "Level 2's next level is Level 3")
 		if nextLevel then
 			Scene.Load(nextLevel, { ElapsedTicks = 3600 })
 		end
 	end)
 
-	Test.Case("Level 3: the main path is supported everywhere but inside its gaps", function()
+	Test.Case("Level 3: the suite's load arrives with its carried time", function()
 		Test.ExpectEqual(Scene.GetName(), "Level3")
 		Test.ExpectEqual(Scene.GetLoadParameters().ElapsedTicks, 3600, "Level 3 was loaded with the suite's time")
+		Test.ExpectEqual(game().StartTicks, 3600, "the game starts from the carried time")
+	end)
+
+	Test.Case("Level 3: the HUD shows the level and its par", function()
+		expectHud(3)
+	end)
+
+	Test.Case("Level 3: the main path is supported everywhere but inside its gaps", function()
 		supportCheck(500)
 	end)
 
@@ -320,5 +359,29 @@ return Test.Suite("RollingBall", function()
 		local current = game()
 		Test.ExpectEqual(current.StartTicks, 0, "the new run's timer starts at 0")
 		Test.ExpectEqual(current.TotalTicks, current.Ticks, "the run's time is Level 1's own")
+	end)
+
+	Test.Case("Level 1: a new checkpoint shows the CHECKPOINT banner for BannerTicks ticks", function()
+		local _, ball, body = ballParts()
+		local current = game()
+		local banner = find("/HUD/Banner")
+		Test.Expect(not banner:IsActive(), "no banner shows before the checkpoint")
+		place(body, find("/Level/Checkpoint1").Transform.WorldPosition + vector.create(0, 1, 0))
+		Test.WaitUntil(function()
+			return ball.LastOrder == 1
+		end, 30)
+		-- The ball enters the trigger in a tick's physics step, after that tick's fixed step and this case; the game
+		-- sees the new order in the next tick's fixed step and shows the banner there, before this case resumes in that
+		-- tick. So the banner shows from the tick in which the case first sees the order.
+		local shown = Time.GetTick()
+		Test.Expect(banner:IsActive(), "the banner shows in the tick the order rises")
+		Test.ExpectEqual(hudText("BannerText"), "CHECKPOINT", "the banner reads CHECKPOINT")
+		-- The first tick without the banner, counted from the tick it showed in, is the number of ticks it showed for:
+		-- shown in its tick and BannerTicks - 1 more, gone one tick later. With the countdown run after showBanner in the
+		-- tick that shows it (S2's order), it would be one fewer.
+		Test.WaitUntil(function()
+			return not banner:IsActive()
+		end, current.BannerTicks + 10)
+		Test.ExpectEqual(Time.GetTick() - shown, current.BannerTicks, string.format("the banner shown in tick %d shows for BannerTicks ticks", shown))
 	end)
 end)

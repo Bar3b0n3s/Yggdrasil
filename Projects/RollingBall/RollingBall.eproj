@@ -102,6 +102,20 @@
 				"Modes": ["Editor", "Release", "Dist"]
 			},
 			{
+				"Script": "Assets/Tests/Frames.test.luau",
+				"Scene": "Assets/Scenes/Level1.scene",
+				"Parameters": null,
+				"Isolation": "Suite",
+				"Clock": [0.1],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"]
+			},
+			{
 				"Script": "Assets/Tests/Autopilot/Level1.test.luau",
 				"Scene": "Assets/Scenes/Level1.scene",
 				"Parameters": null,
