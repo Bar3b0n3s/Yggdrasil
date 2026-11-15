@@ -1,8 +1,8 @@
 # Roadmap
 
-Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged).
+Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged). Amended on 2026-11-15 by `Docs/Decisions/0042-world-tree-engine-program.md` (the World Tree engine program: M28 to M33 in phases 5 and 6).
 
-The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work.
+The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work. After them, the World Tree engine program (M28 to M33 in phases 5 and 6, `Docs/Decisions/0042-world-tree-engine-program.md`) adds what the World Tree showcase game asked for.
 
 ## Rules for every milestone
 
@@ -47,6 +47,12 @@ The roadmap goes from an empty repository to a finished engine and editor (M15),
 | M25 Tetris rebuilt in place as pixel art (phase 3, lands before M26) | phase 2 | M24, M26 |
 | M26 Effects, post-processing and terrain (phase 3, lands last) | phase 2 | M24, M25 |
 | M27 Rolling Ball 3D (phase 4) | phase 3 | — |
+| M28 Game services (phase 5) | M27 | M29, M30 |
+| M29 Light limits (phase 5) | M27 | M28, M30 |
+| M30 Navigation (phase 5, lands last) | M27 | M28, M29 |
+| M31 Material parameters (phase 6) | phase 5 | M32, M33 |
+| M32 Fog (phase 6, lands before M33) | phase 5 | M31, M33 |
+| M33 Particle look (phase 6, lands last) | phase 5 | M31, M32 |
 
 Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
 
@@ -557,3 +563,104 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 - `StartScene` and `Export.BuildScenes` set; `project.validate` clean (no `PHYSICS_ADJACENT_STATIC_BODIES`); Dist export smoke exits 0; `AuditProvenance.py --project Projects/RollingBall` passes from a fresh clone against the committed provenance and transcript.
 
 **Parallelization**: one agent per game. M17 and this milestone (then M18) could run concurrently with different agents once M16 was closed, because they touch disjoint project folders; M17 is complete, and this milestone is phase 4, after the backlog program's three phases (ADR 0028 decision 14). One builder per session, a background agent of the lead's session (as M17's and M25's were), `D:\Engine` holding M27's branch for the builder window (ADR 0038 decision 8).
+
+---
+
+## M28 — Game services
+
+**Scope.** Phase 5, in readiness order with M29. World Tree's briefs 4 and 3 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3): display settings and a performance readout for scripts (wave W28.1), then save data for scripts (W28.2). New platform capabilities get Windows backends only (`Docs/Decisions/0028-backlog-program.md` decision 10). Its milestone end runs `CI.py --require-clang-cl`.
+
+**Deliverables**
+- Display settings from scripts: the window mode (windowed, borderless, exclusive), the resolution from the monitor's modes and VSync, applied at a frame boundary and persisted by the engine; they do nothing in the editor's game view, headless runs and fixed-view sessions.
+- A performance readout for scripts in every configuration, Dist included, frame-paced like `ParticleEmitter:GetParticleCount`; `stats.get` gains the counters it lacks.
+- A `SaveData` script namespace: a per-game key-value store with atomic commits, durable on Windows, a 1 MiB cap and a corrupt store survived; stores of their own for suites, replays (the header records the seed), lockstep and editor play; methods and an editor panel that read, seed and clear the editor's play store.
+
+**Acceptance**
+- In a Dist export, the game keeps rendering after each switch of window mode and resolution, and the choice is restored at the next launch.
+- The readout shows changing counts in Dist; reading it in `OnFixedUpdate` raises the documented error.
+- Options and progress saved in one Dist run are restored at the next; a replay whose game reads the store verifies at one hash whatever the machine's store holds; a seeded store opens a gated branch in a test; a store truncated by hand is reported and the game still starts.
+
+**Parallelization**: W28.1, then W28.2; both change the hosts' session and script-host files.
+
+---
+
+## M29 — Light limits
+
+**Scope.** Phase 5, in readiness order with M28. World Tree's brief 7 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+
+**Deliverables**
+- A `Rendering` setting for the shaded lights per view (256, 512, 1,024 or 2,048; 256 by default), with the cluster mask sized at run time.
+- 16 shadowed point lights (the most important four at full face size, the rest at half) and 16 shadowed spot lights per view, ranked by importance with hysteresis; static shadow caching.
+- Validation, `stats.get` and M28's readout report the caps and the drops.
+
+**Acceptance**
+- A scene of 1,000 small point lights renders every one with no drop warning, and its golden matches the brute-force loop.
+- Below the old caps every golden, the brute-force equality and FeatureTest's probe bakes stay byte-identical.
+- A cached shadow is drawn again when any kind of caster in its range changes, and the shadow pass costs less when nothing moves.
+
+**Parallelization**: one wave; the shadow cache can be a stream of its own.
+
+---
+
+## M30 — Navigation
+
+**Scope.** Phase 5, landing last. World Tree's brief 1 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 to 4), on Recast and Detour (`Docs/Decisions/0001-approvals.md`). Its milestone end runs `CI.py --milestone`, phase 5's hardened gate, on the merged tree of M28, M29 and M30 (`Docs/Decisions/0028-backlog-program.md` decision 12).
+
+**Deliverables**
+- A `NavMesh` asset with a validated payload and its fuzz target; a `Navigation` component (up to four agent types and the bake settings) and a `NavModifier` component (not walkable, or an area cost).
+- `navigation.bake` and its editor action: one undo step, byte-identical rebakes; `NAV_MESH_NOT_BAKED` and `NAV_MESH_STALE`.
+- A `Navigation` script namespace usable in the fixed step: `FindPath` (with partial paths), `ClosestPoint`, `Raycast` and `RandomPoint` from a seeded generator.
+- A navigation debug view in the scene view and in `viewport.screenshot`'s annotations.
+
+**Acceptance**
+- In a test arena with pillars, a ramp and a lava channel marked not walkable, a path goes around the pillars, up the ramp and never across the lava, and the large agent keeps its clearance.
+- Two bakes give identical bytes; moving a wall makes `project.validate` report the bake as stale.
+- A replay of agents chasing an autopilot verifies at one hash in Debug, Release and Dist.
+- 150 agents finding paths two or three times a second fit within the 60 Hz fixed step (`Perf.py`).
+
+**Parallelization**: W30.1 (the vendoring, the asset, the bake's input and the bake), then W30.2 (the queries, the script namespace, the debug view and the coverage).
+
+---
+
+## M31 — Material parameters
+
+**Scope.** Phase 6, at any time. World Tree's brief 5 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+
+**Deliverables**
+- A per-entity material-parameter component: a tint, an emissive colour and strength, a texture-coordinate offset and a scroll by simulation time, and a dissolve with an edge colour; skinned meshes included, carried in the instance record so that instancing keeps its batches.
+
+**Acceptance**
+- Golden images: a tinted, glowing, scrolled and half-dissolved copy of one mesh beside the untouched one.
+- 200 tinted instances draw in as few draws as untinted ones (`stats.get`); a replay with a scrolling surface verifies at one hash in every configuration; a scene without the component renders byte-identically.
+
+**Parallelization**: one wave.
+
+---
+
+## M32 — Fog
+
+**Scope.** Phase 6, landing before M33. World Tree's brief 2 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+
+**Deliverables**
+- A unique-per-scene `Fog` component: exponential distance fog, height fog, a colour with an optional ambient tint, a sun glow, and the skybox fogged or not; applied alike to opaque and transparent meshes, terrain, sprites and the SSR composite (particles in M33), and animatable from scripts and automation.
+
+**Acceptance**
+- Golden images: pillars receding into distance fog, height fog in a hollow, the sun glow and a transparent surface inside the fog.
+- A scene without fog renders byte-identically; fog costs under 0.5 ms at 1920 × 1080.
+
+**Parallelization**: one wave.
+
+---
+
+## M33 — Particle look
+
+**Scope.** Phase 6, landing last. World Tree's brief 6 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --milestone`, phase 6's hardened gate, on the merged tree of M31, M32 and M33.
+
+**Deliverables**
+- Flipbooks from sprite sheets (over the particle's life or picked at random, with blending between frames), rotation and spin, soft particles, alignment stretched along the velocity or flat on a plane, HDR intensity, motion vectors for TAA, and fog on particles. Particles stay presentation only.
+
+**Acceptance**
+- Golden images: a rotating flipbook flame meeting the floor softly, stretched sparks, a flat ring, a bright ember blooming, and particles in fog.
+- The committed particle digests and the Particles golden keep their values; particles no longer smear under TAA.
+
+**Parallelization**: one wave; fog on particles at its merge, after M32 has landed.
