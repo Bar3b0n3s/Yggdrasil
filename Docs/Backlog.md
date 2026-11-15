@@ -24,7 +24,7 @@ Milestones run in phases: the milestones of a phase are developed in parallel, e
 | 5 | M29 Light limits | The shaded lights per view as a setting up to 2,048; 16 shadowed point and spot lights; static shadow caching | Roadmap M29; ADR 0042 decisions 2 and 3 |
 | 5 | M30 Navigation (lands last) | Recast and Detour: the navigation mesh bake, its components, path queries in the fixed step, the debug view | Roadmap M30; ADR 0042 decisions 2 to 4 |
 | 6 | M31 Material parameters | Per-entity tint, emissive, texture scroll, dissolve and a dithered fade | Roadmap M31; ADR 0042 decisions 2 and 3 |
-| 6 | M32 Fog (before M33) | Distance and height fog, the sun glow | Roadmap M32; ADR 0042 decisions 2 and 3 |
+| 6 | M32 Fog and SSR's cost (before M33) | Distance and height fog, the sun glow; SSR's trace limited to glossy pixels, a half-resolution option (World Tree's brief 09) | Roadmap M32; ADR 0042 decisions 2 and 3 |
 | 6 | M33 Particle look (lands last) | Flipbooks, rotation, soft particles, alignment, HDR intensity, motion vectors, fog on particles | Roadmap M33; ADR 0042 decisions 2 and 3 |
 
 ## 2. Deferred features

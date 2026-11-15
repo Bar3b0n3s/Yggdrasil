@@ -3,7 +3,8 @@
 - **Status:** accepted. The product owner answered every point of the lead's draft on 2026-11-15 with "go with your recommendations" ("The owner's answers"). It is committed on main as a documentation-only change, with the Roadmap's M28 to M33 sections, `Docs/Backlog.md`'s §1 and §2 rows, the `0001-approvals.md` row and Architecture §18's rows. It schedules the seven engine tasks the World Tree showcase game asked for (`Projects/WorldTree/Design/EngineTasks/`, briefs 01 to 07, read at engine 0.5.0, `8d2e1469`). Lead-owned.
 - **Amended 2026-11-15 (phase 5's reservation ledger):** the section "Phase 5 reservation ledger" (decision 7; ADR 0028 decision 17's form), committed on main before phase 5 forks, with today's values read from the code and data at main `62a8666b`. It makes decision 7's phase-5 list exact, and where they differ the ledger is the rule: `ProjectSettings.*` is shared by the append rule (M29's `Rendering` member), M28's counters also reach `Renderer/RenderStats.h` and `SceneRenderer.cpp`'s stats block, and M29 also changes `RenderSnapshot.h`, `RenderExtraction.cpp`, `RenderAnnotations.cpp`, `ProjectValidator.cpp` and the extraction requests that copy the `Rendering` settings. It changes no gate tooling, so it is documentation only.
 - **Amended 2026-11-15 (World Tree's brief 08 and brief 5's addition):** decision 2's setup before phase 5 forks, `asset.import`'s `replace: true` (brief 08, "high, needed first"); decision 3's per-entity fade in M31 (brief 5's "seeing the player behind walls"); the ledger's fuzz row: M28's two user-data readers are fuzz targets (the lead's decision on the ledger's open point).
-- **Date:** 2026-11-15; phase 5's reservation ledger, World Tree's brief 08 and brief 5's addition 2026-11-15.
+- **Amended 2026-11-15 (World Tree's brief 09):** SSR's cost follows the glossy area, in M32 (decisions 2, 3 and 7).
+- **Date:** 2026-11-15; phase 5's reservation ledger, World Tree's brief 08, brief 5's addition and brief 09 2026-11-15.
 - **Decided by:** the product owner, 2026-11-15; recorded by the lead.
 - **Base:** main `26bb9565` (the backlog program closed by ADR 0038; Rolling Ball's level clock, session S6); phase 5's ledger on `62a8666b`.
 - **Authority:** Roadmap "Rules for every milestone"; ADR 0023; ADR 0028 decisions 10 to 12, 14, 16 and 17, whose process this program keeps (decision 6 below); Architecture §1.2, §3, §5, §8, §9, §11, §13 to §16.
@@ -23,6 +24,7 @@
   | 6 | Particle look | Medium: the fire realm | Square, unrotated, single-texture camera-facing quads, hard depth cut, colours capped at 1, no velocity for TAA (Backlog §6) |
   | 7 | Raise the light limits | High: the fire realm and horde mode | 256 lights per view (`MaxVisibleLights`, an 8-word cluster mask), 4 shadowed point lights (`MaxPointShadows`), 8 shadowed spot lights in a 4096 atlas that holds 16; importance recomputed each frame with no hysteresis |
   | 8 | Replace an imported asset's source | High, needed first: every fix to art made outside the editor | `asset.import` refuses an existing file (`AlreadyExists`), `asset.reimport` re-imports the unchanged copy, a file another program writes fails the provenance audit, and delete-then-import changes the source handle and so every sub-asset handle (`DeriveSubAssetHandle`), breaking every reference |
+  | 9 | Screen-space reflections cost the whole screen | Low, before the ice realm's mirror floors | On World Tree's Arena 1 at 1920 × 1080 the SSR pass takes 1.93 ms of the view's 4.3 ms though only eight of 35 floor tiles are below `SsrMaxRoughness`: the pass traces every pixel; GTAO already has a half-resolution setting (`Rendering.SsaoHalfResolution`), SSR none |
 
 - **The order the game needs:** briefs 1 and 4 first (enemies and the options menu), then 2, 5, 6 and 7 for the art pass, then 3 before the slice is finished. None blocks the game's start: it greyboxes meanwhile. Later realms will add briefs (physics joints, decals, audio effects); they are not in this program.
 
@@ -30,7 +32,7 @@
 
 ### 1. Scope
 
-The seven briefs, each with the behaviour its brief lists, and the stretch items the owner keeps (owner's answer 2). Each brief's "Out of scope" stays out: crowds, local avoidance, dynamic obstacles, run-time rebakes and off-mesh links (navigation); ray-traced and virtual shadow maps (light limits; won't do under ADR 0028).
+The seven briefs, and briefs 08 and 09 that the game added on the same day (decision 2), each with the behaviour its brief lists, and the stretch items the owner keeps (owner's answer 2). Each brief's "Out of scope" stays out: crowds, local avoidance, dynamic obstacles, run-time rebakes and off-mesh links (navigation); ray-traced and virtual shadow maps (light limits; won't do under ADR 0028).
 
 ### 2. Structure: two phases of three parallel milestones
 
@@ -40,7 +42,7 @@ The seven briefs, each with the behaviour its brief lists, and the stretch items
 | 5 | M29 | Light limits | 7 | readiness order with M28 | no: `CI.py --require-clang-cl` | ~6–8 with the shadow cache and shadow tiers |
 | 5 | M30 | Navigation | 1 | last in phase 5 | yes: phase 5's `CI.py --milestone` (Scene, Session, a new fuzzed reader) | ~12 |
 | 6 | M31 | Material parameters | 5 | any time | no: `CI.py --require-clang-cl` | ~3, ~5 with dissolve |
-| 6 | M32 | Fog | 2 | before M33 | no: `CI.py --require-clang-cl` | ~4 (volumetric light +3–5 if kept) |
+| 6 | M32 | Fog and SSR's cost | 2, 9 | before M33 | no: `CI.py --require-clang-cl` | ~5–6 (volumetric light +3–5 if kept) |
 | 6 | M33 | Particle look | 6 | last in phase 6 | yes: phase 6's `CI.py --milestone` (renderer) | ~5–7 |
 
 - **Before phase 5 forks: World Tree's brief 08** (added 2026-11-15, "high, needed first": the game's fire-kit glTF files could not be corrected without rebuilding every prefab). `asset.import {replace: true}` copies a new external file over an existing imported source and keeps its `.meta`, its handle and its import settings, so every sub-asset whose key survives keeps its handle and every reference keeps working. It reimports through `asset.reimport`'s path, so dependents follow, reports the sub-assets kept, added and removed, is undoable, has a dry run, and records the write in provenance and the transcript. It is one change on `setup/replace-source`, landing on main with `PreCommit.py` before the phase's branches fork (a change outside a milestone, ADR 0028 decision 11 item 6). It touches none of the ledger's phase 5 files, and the game needs it before any milestone could deliver it.
@@ -122,6 +124,7 @@ Each default goes into its milestone's contract, which may change it only with a
   - World-space UI keeps its accepted no-fog limit.
 - **What stays the same.** A scene without fog renders byte-identically. Probe and environment bakes exclude fog. The cost stays under 0.5 ms at 1920 × 1080.
 - **Volumetric light** (the brief's stretch item) is not in M32 unless the owner keeps it (owner's answer 2a).
+- **SSR's cost follows the glossy area** (World Tree's brief 09, added 2026-11-15; low priority, in M32 because M32 already owns the SSR pass's composite). The trace skips, early and per tile, every pixel above `SsrMaxRoughness` and the sky, so a mostly rough scene pays for its glossy pixels only, with the same image: the Ssr golden and every golden of a scene with SSR stay byte-identical. A `Rendering` project setting traces at half resolution, upsampled with GTAO's depth-aware filter, beside `SsaoHalfResolution` (a project setting, not a `PostProcess` field, which would change the canonical form of every scene that holds a PostProcess and move its replays' hashes); off by default, so nothing changes until a game turns it on. `stats.get`'s SSR row and M28's readout report how many tiles the trace covered.
 
 **M33 Particle look**
 - **Flipbooks:** a `SpriteSheet` and a clip or frame range on the emitter, played over the particle's life or picked per particle, with optional blending between frames (two UV sets).
@@ -168,7 +171,7 @@ Each phase's ledger is written at its start, as ADR 0028's were. The contended f
   - **M30:** `BuiltinComponents.h`'s new Navigation category, `AssetType` value 19, the validation codes, `RenderSnapshot.h`'s view flag, the screenshot annotation files and the `IScriptHost` navigation member (appended after M28's).
   - **Shared by append in landing order:** `RegisterBindings.cpp`, `RegisterMethods.cpp`, the premake files, `ModuleRules.json` (M30's new module), FeatureTest's scaffolds, IdSeed ranges and the generated references.
 - **Phase 6:**
-  - **M32:** `Quad.slang`, `QuadBatcher`, `QuadVertex.h`, the view and fog constants, and the SSR composite.
+  - **M32:** `Quad.slang`, `QuadBatcher`, `QuadVertex.h`, the view and fog constants, and the SSR pass (`SsrPass`, `Ssr.slang`: its trace for brief 09, its composite for fog) with the `Rendering` member for the half-resolution trace.
   - **M33:** `ParticlePass`, its new particle program and `ParticleSimulation`.
   - **M31:** the instance record and `PrepareDraws`.
   - **Merged by M33 last:** `Scene.slang` (M31's and M32's hunks), `RenderExtraction.cpp`, `Shaders.json` and `RenderPassDeclaration.h`.

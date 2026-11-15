@@ -51,7 +51,7 @@ The roadmap goes from an empty repository to a finished engine and editor (M15),
 | M29 Light limits (phase 5) | M27 | M28, M30 |
 | M30 Navigation (phase 5, lands last) | M27 | M28, M29 |
 | M31 Material parameters (phase 6) | phase 5 | M32, M33 |
-| M32 Fog (phase 6, lands before M33) | phase 5 | M31, M33 |
+| M32 Fog and SSR's cost (phase 6, lands before M33) | phase 5 | M31, M33 |
 | M33 Particle look (phase 6, lands last) | phase 5 | M31, M32 |
 
 Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
@@ -637,16 +637,18 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ---
 
-## M32 — Fog
+## M32 — Fog and SSR's cost
 
-**Scope.** Phase 6, landing before M33. World Tree's brief 2 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 6, landing before M33. World Tree's briefs 2 and 9 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - A unique-per-scene `Fog` component: exponential distance fog, height fog, a colour with an optional ambient tint, a sun glow, and the skybox fogged or not; applied alike to opaque and transparent meshes, terrain, sprites and the SSR composite (particles in M33), and animatable from scripts and automation.
+- SSR's cost follows the glossy area: the trace skips pixels above `SsrMaxRoughness` and the sky, a `Rendering` setting traces at half resolution, and `stats.get` reports the area traced.
 
 **Acceptance**
 - Golden images: pillars receding into distance fog, height fog in a hollow, the sun glow and a transparent surface inside the fog.
 - A scene without fog renders byte-identically; fog costs under 0.5 ms at 1920 × 1080.
+- A mostly rough scene's SSR pass costs roughly in proportion to its glossy area at 1920 × 1080, with the same image: every golden with SSR unchanged.
 
 **Parallelization**: one wave.
 

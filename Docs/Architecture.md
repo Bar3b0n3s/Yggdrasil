@@ -2219,7 +2219,7 @@ Every milestone ends with one `python Scripts/CI.py` green on Windows: every sta
 | M29 | Light limits (phase 5) | up to 2,048 shaded lights per view; 16 shadowed point and spot lights; static shadow caching |
 | M30 | Navigation (phase 5, lands last) | Recast and Detour: the navigation mesh bake, path queries in the fixed step, the debug view |
 | M31 | Material parameters (phase 6) | per-entity tint, emissive, texture scroll, dissolve and a dithered fade |
-| M32 | Fog (phase 6) | distance and height fog, the sun glow |
+| M32 | Fog and SSR's cost (phase 6) | distance and height fog, the sun glow; SSR traced only where glossy, a half-resolution option |
 | M33 | Particle look (phase 6, lands last) | flipbooks, rotation, soft particles, alignment, HDR intensity, motion vectors |
 
 ---
