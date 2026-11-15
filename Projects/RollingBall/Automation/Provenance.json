@@ -1,0 +1,806 @@
+{
+	"Format": "Provenance",
+	"Version": 1,
+	"Entries": [
+		{
+			"Path": ".luaurc",
+			"XXH64": "56824d2dd3716720",
+			"Method": "project.create",
+			"RequestId": 2,
+			"Client": "engine-mcp",
+			"TranscriptLine": 1
+		},
+		{
+			"Path": "Assets/Audio/Checkpoint.sfx",
+			"XXH64": "45d286e065d6467a",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Checkpoint.sfx.meta",
+			"XXH64": "e54f9c4b1926716d",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Fall.sfx",
+			"XXH64": "a0f25d7063ae223a",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Fall.sfx.meta",
+			"XXH64": "d57d05ac847e2351",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Roll.sfx",
+			"XXH64": "c882fcd427d5c603",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Roll.sfx.meta",
+			"XXH64": "4711428f99de6450",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Win.sfx",
+			"XXH64": "63d01e3b4c460708",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Audio/Win.sfx.meta",
+			"XXH64": "5c96ee5ebc1dc056",
+			"Method": "edit.batch",
+			"RequestId": 14,
+			"Client": "engine-mcp",
+			"TranscriptLine": 25
+		},
+		{
+			"Path": "Assets/Materials/Ball.material",
+			"XXH64": "d39fe5c6548684bd",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Ball.material.meta",
+			"XXH64": "dac42659c75b7630",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/CheckpointActive.material",
+			"XXH64": "99a4b66fed9db5ef",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/CheckpointActive.material.meta",
+			"XXH64": "ad5e3f998ce447b3",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/CheckpointIdle.material",
+			"XXH64": "b640fa2299dcf234",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/CheckpointIdle.material.meta",
+			"XXH64": "9385b66ff3b5c094",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Goal.material",
+			"XXH64": "ee468edbfdf4e137",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Goal.material.meta",
+			"XXH64": "1bdba11cfc1a3b22",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Kicker.material",
+			"XXH64": "72aa6430f349edde",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Kicker.material.meta",
+			"XXH64": "35995eeb1fd200ee",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Narrow.material",
+			"XXH64": "522ad4f3de8d5972",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Narrow.material.meta",
+			"XXH64": "8e4df6cdfb8a660f",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Platform.material",
+			"XXH64": "1787258594cc5e32",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Platform.material.meta",
+			"XXH64": "5fcec0476774c896",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Post.material",
+			"XXH64": "1f7a073ac9217eaa",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Post.material.meta",
+			"XXH64": "5587dd9e7e1e2d63",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Rail.material",
+			"XXH64": "0596f37229d9cd77",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Rail.material.meta",
+			"XXH64": "fef18236a0cea83b",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Ramp.material",
+			"XXH64": "8d09484f606bda0d",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Ramp.material.meta",
+			"XXH64": "645e6c1dfe2a1e73",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Track.material",
+			"XXH64": "ac0770104865c1ac",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Materials/Track.material.meta",
+			"XXH64": "15ba36578e537ee5",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "engine-mcp",
+			"TranscriptLine": 21
+		},
+		{
+			"Path": "Assets/Prefabs/Ball.prefab",
+			"XXH64": "02c7b5dceb2ee112",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Ball.prefab.meta",
+			"XXH64": "032617abb544c061",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Checkpoint.prefab",
+			"XXH64": "dfc6a1c36f9c84a7",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Checkpoint.prefab.meta",
+			"XXH64": "ff1aa1d3bfab6374",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/CurveLeft.prefab",
+			"XXH64": "bb5cbf214619d044",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/CurveLeft.prefab.meta",
+			"XXH64": "8f2615ca21bedb87",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/CurveRight.prefab",
+			"XXH64": "5037791be71694ac",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/CurveRight.prefab.meta",
+			"XXH64": "ba0a35b9316e1c06",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Gap.prefab",
+			"XXH64": "bd02706600a0388a",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Gap.prefab.meta",
+			"XXH64": "c2ade32400f92c0b",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Goal.prefab",
+			"XXH64": "6b4ec7d3279e8981",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Goal.prefab.meta",
+			"XXH64": "05c92e4c31246d39",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/HUD.prefab",
+			"XXH64": "585f50cb2979f05b",
+			"Method": "edit.batch",
+			"RequestId": 15,
+			"Client": "engine-mcp",
+			"TranscriptLine": 421
+		},
+		{
+			"Path": "Assets/Prefabs/HUD.prefab.meta",
+			"XXH64": "7a6da2e0dfde6a36",
+			"Method": "edit.batch",
+			"RequestId": 34,
+			"Client": "engine-mcp",
+			"TranscriptLine": 65
+		},
+		{
+			"Path": "Assets/Prefabs/MovingPlatform.prefab",
+			"XXH64": "773ce586b351107a",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/MovingPlatform.prefab.meta",
+			"XXH64": "dd66564a10857edb",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Narrow.prefab",
+			"XXH64": "3ee3dc3ac22e68a2",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Narrow.prefab.meta",
+			"XXH64": "3ca291cbb275857c",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Ramp.prefab",
+			"XXH64": "af29460e672357db",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Ramp.prefab.meta",
+			"XXH64": "ef51473ec99c7b79",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Straight.prefab",
+			"XXH64": "2428116668e8427b",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Prefabs/Straight.prefab.meta",
+			"XXH64": "30c5ec6a20e09f69",
+			"Method": "edit.batch",
+			"RequestId": 33,
+			"Client": "engine-mcp",
+			"TranscriptLine": 63
+		},
+		{
+			"Path": "Assets/Scenes/Level1.scene",
+			"XXH64": "2b14d4764dddd829",
+			"Method": "scene.save",
+			"RequestId": 17,
+			"Client": "engine-mcp",
+			"TranscriptLine": 425
+		},
+		{
+			"Path": "Assets/Scenes/Level1.scene.meta",
+			"XXH64": "b16d5f13c94460de",
+			"Method": "edit.batch",
+			"RequestId": 29,
+			"Client": "engine-mcp",
+			"TranscriptLine": 55
+		},
+		{
+			"Path": "Assets/Scenes/Level2.scene",
+			"XXH64": "22f14677dd723b12",
+			"Method": "scene.save",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 435
+		},
+		{
+			"Path": "Assets/Scenes/Level2.scene.meta",
+			"XXH64": "9c6ac07c0f8b8738",
+			"Method": "edit.batch",
+			"RequestId": 67,
+			"Client": "engine-mcp",
+			"TranscriptLine": 131
+		},
+		{
+			"Path": "Assets/Scenes/Level3.scene",
+			"XXH64": "d391b1fdc1ce5af7",
+			"Method": "scene.save",
+			"RequestId": 25,
+			"Client": "engine-mcp",
+			"TranscriptLine": 441
+		},
+		{
+			"Path": "Assets/Scenes/Level3.scene.meta",
+			"XXH64": "d5edf11bad8f6c7d",
+			"Method": "edit.batch",
+			"RequestId": 71,
+			"Client": "engine-mcp",
+			"TranscriptLine": 139
+		},
+		{
+			"Path": "Assets/Scripts/Actions.luau",
+			"XXH64": "2102d4790c0562b4",
+			"Method": "script.write",
+			"RequestId": 21,
+			"Client": "engine-mcp",
+			"TranscriptLine": 681
+		},
+		{
+			"Path": "Assets/Scripts/Actions.luau.meta",
+			"XXH64": "0dfa44dd9fc81a0d",
+			"Method": "script.create",
+			"RequestId": 20,
+			"Client": "engine-mcp",
+			"TranscriptLine": 679
+		},
+		{
+			"Path": "Assets/Scripts/Ball.luau",
+			"XXH64": "c6f2ce86e8082d72",
+			"Method": "script.write",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 683
+		},
+		{
+			"Path": "Assets/Scripts/Ball.luau.meta",
+			"XXH64": "57b7047e3300d908",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/Checkpoint.graph",
+			"XXH64": "5db1ac842fe78771",
+			"Method": "edit.batch",
+			"RequestId": 31,
+			"Client": "engine-mcp",
+			"TranscriptLine": 59
+		},
+		{
+			"Path": "Assets/Scripts/Checkpoint.graph.meta",
+			"XXH64": "467c46c7d469ac7e",
+			"Method": "edit.batch",
+			"RequestId": 29,
+			"Client": "engine-mcp",
+			"TranscriptLine": 55
+		},
+		{
+			"Path": "Assets/Scripts/Clock.luau",
+			"XXH64": "9d31b344911fc4d5",
+			"Method": "edit.batch",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Scripts/Clock.luau.meta",
+			"XXH64": "9f7b88d5594c9c20",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/FollowCamera.luau",
+			"XXH64": "fa03130707323b27",
+			"Method": "edit.batch",
+			"RequestId": 24,
+			"Client": "engine-mcp",
+			"TranscriptLine": 45
+		},
+		{
+			"Path": "Assets/Scripts/FollowCamera.luau.meta",
+			"XXH64": "de17172e8ee2a3bd",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/Game.luau",
+			"XXH64": "1082214fd7b11ddc",
+			"Method": "script.write",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 685
+		},
+		{
+			"Path": "Assets/Scripts/Game.luau.meta",
+			"XXH64": "7339825f5ddc49db",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/Motion.luau",
+			"XXH64": "24f6490fa1c06d9f",
+			"Method": "edit.batch",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Scripts/Motion.luau.meta",
+			"XXH64": "6210e6da3b10b9a2",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/MovingPlatform.luau",
+			"XXH64": "f844b67b5cfd0b51",
+			"Method": "script.write",
+			"RequestId": 45,
+			"Client": "engine-mcp",
+			"TranscriptLine": 729
+		},
+		{
+			"Path": "Assets/Scripts/MovingPlatform.luau.meta",
+			"XXH64": "c97aa31daa2bd52a",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/Track.luau",
+			"XXH64": "cd2f66cb6a14e0fa",
+			"Method": "edit.batch",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Scripts/Track.luau.meta",
+			"XXH64": "b59b1d24dcb3b0f3",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Scripts/Tuning.luau",
+			"XXH64": "98f36e0f985323e0",
+			"Method": "edit.batch",
+			"RequestId": 23,
+			"Client": "engine-mcp",
+			"TranscriptLine": 43
+		},
+		{
+			"Path": "Assets/Scripts/Tuning.luau.meta",
+			"XXH64": "ef153bf8dfa5e721",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Terrain/Valley.heightfield",
+			"XXH64": "263a8bd1f50634e2",
+			"Method": "terrain.edit",
+			"RequestId": 59,
+			"Client": "engine-mcp",
+			"TranscriptLine": 115
+		},
+		{
+			"Path": "Assets/Terrain/Valley.heightfield.meta",
+			"XXH64": "41fde624681b76d4",
+			"Method": "edit.batch",
+			"RequestId": 54,
+			"Client": "engine-mcp",
+			"TranscriptLine": 105
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Level1.test.luau",
+			"XXH64": "0596f4b099f584eb",
+			"Method": "edit.batch",
+			"RequestId": 62,
+			"Client": "engine-mcp",
+			"TranscriptLine": 121
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Level1.test.luau.meta",
+			"XXH64": "c767d8f6b85fdbac",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Level2.test.luau",
+			"XXH64": "a30ce8f02cf474ce",
+			"Method": "edit.batch",
+			"RequestId": 62,
+			"Client": "engine-mcp",
+			"TranscriptLine": 121
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Level2.test.luau.meta",
+			"XXH64": "74ec8d3a26b1fca9",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Level3.test.luau",
+			"XXH64": "d810ca899b1ad33a",
+			"Method": "edit.batch",
+			"RequestId": 62,
+			"Client": "engine-mcp",
+			"TranscriptLine": 121
+		},
+		{
+			"Path": "Assets/Tests/Autopilot/Level3.test.luau.meta",
+			"XXH64": "1683df97fffab830",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Tests/Lib/Autopilot.luau",
+			"XXH64": "1d7e29df2b3dfd8b",
+			"Method": "script.write",
+			"RequestId": 25,
+			"Client": "engine-mcp",
+			"TranscriptLine": 689
+		},
+		{
+			"Path": "Assets/Tests/Lib/Autopilot.luau.meta",
+			"XXH64": "4b57d372a00a2498",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Tests/Logic.test.luau",
+			"XXH64": "545069c37d9d498e",
+			"Method": "script.write",
+			"RequestId": 26,
+			"Client": "engine-mcp",
+			"TranscriptLine": 691
+		},
+		{
+			"Path": "Assets/Tests/Logic.test.luau.meta",
+			"XXH64": "195af076256a87f2",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "Assets/Tests/Replays/Level1.replay",
+			"XXH64": "0238f42d8468feb4",
+			"Method": "test.run",
+			"RequestId": 49,
+			"Client": "engine-mcp",
+			"TranscriptLine": 737
+		},
+		{
+			"Path": "Assets/Tests/Replays/Level1.replay.meta",
+			"XXH64": "4f7967eb0d37de0e",
+			"Method": "test.run",
+			"RequestId": 119,
+			"Client": "engine-mcp",
+			"TranscriptLine": 235
+		},
+		{
+			"Path": "Assets/Tests/Replays/Level2.replay",
+			"XXH64": "5f9ed248dd9668c6",
+			"Method": "test.run",
+			"RequestId": 56,
+			"Client": "engine-mcp",
+			"TranscriptLine": 751
+		},
+		{
+			"Path": "Assets/Tests/Replays/Level2.replay.meta",
+			"XXH64": "bf35056ff5ee2457",
+			"Method": "test.run",
+			"RequestId": 120,
+			"Client": "engine-mcp",
+			"TranscriptLine": 237
+		},
+		{
+			"Path": "Assets/Tests/Replays/Level3.replay",
+			"XXH64": "079fd157123138a8",
+			"Method": "test.run",
+			"RequestId": 62,
+			"Client": "engine-mcp",
+			"TranscriptLine": 763
+		},
+		{
+			"Path": "Assets/Tests/Replays/Level3.replay.meta",
+			"XXH64": "13a72ab89b572c01",
+			"Method": "test.run",
+			"RequestId": 121,
+			"Client": "engine-mcp",
+			"TranscriptLine": 239
+		},
+		{
+			"Path": "Assets/Tests/RollingBall.test.luau",
+			"XXH64": "571b13765ec216fc",
+			"Method": "script.write",
+			"RequestId": 46,
+			"Client": "engine-mcp",
+			"TranscriptLine": 731
+		},
+		{
+			"Path": "Assets/Tests/RollingBall.test.luau.meta",
+			"XXH64": "8b34108dd1ba4a32",
+			"Method": "edit.batch",
+			"RequestId": 22,
+			"Client": "engine-mcp",
+			"TranscriptLine": 41
+		},
+		{
+			"Path": "RollingBall.eproj",
+			"XXH64": "acb31f2b75ac302f",
+			"Method": "project.setSettings",
+			"RequestId": 63,
+			"Client": "engine-mcp",
+			"TranscriptLine": 123
+		}
+	]
+}

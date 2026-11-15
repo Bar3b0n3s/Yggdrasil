@@ -1,0 +1,177 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Checkpoint",
+	"Root": "a86955f3577ee632",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"Script": 2,
+		"ParticleEmitter": 1
+	},
+	"Entities": [
+		{
+			"ID": "a86955f3577ee632",
+			"Name": "Checkpoint",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Checkpoint"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Trigger",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [2, 1.5, 0.5],
+					"Offset": [0, 1.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "03cff99d7899575e",
+							"Fields": {
+								"ActiveMaterial": "2ad14fc1ecc93064",
+								"Chime": "f14a53660f138d90",
+								"Order": 1
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "91aebae35ad2fa88",
+			"Name": "PostL",
+			"Parent": "a86955f3577ee632",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.3, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.2, 2.5, 0.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["f79a3e48177d86bc"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "314933410fd92d4f",
+			"Name": "PostR",
+			"Parent": "a86955f3577ee632",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.3, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.2, 2.5, 0.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["f79a3e48177d86bc"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "49024882db0359bf",
+			"Name": "Bar",
+			"Parent": "a86955f3577ee632",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2.6, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4.8, 0.2, 0.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["0e55e883241fed0b"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "beba7600eac1f3b8",
+			"Name": "Burst",
+			"Parent": "a86955f3577ee632",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2.6, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": false,
+					"Loop": false,
+					"Duration": 5,
+					"Rate": 0,
+					"Burst": 0,
+					"MaxParticles": 256,
+					"Seed": 11,
+					"Lifetime": [0.5, 0.9],
+					"Speed": [2, 4],
+					"Size": [0.08, 0.16],
+					"Shape": "Sphere",
+					"ShapeRadius": 0.6,
+					"ConeAngle": 25,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, -4, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [0.2, 0.85, 1, 1]
+						},
+						{
+							"Time": 1,
+							"Color": [0.1, 0.6, 1, 0]
+						}
+					],
+					"SizeOverLife": []
+				}
+			}
+		}
+	]
+}

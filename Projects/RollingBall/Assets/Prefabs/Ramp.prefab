@@ -1,0 +1,40 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Ramp",
+	"Root": "14dce55358a5fa50",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"BoxCollider": 1
+	},
+	"Entities": [
+		{
+			"ID": "14dce55358a5fa50",
+			"Name": "Ramp",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 0.5, 8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["45f8255bdaac64b5"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		}
+	]
+}

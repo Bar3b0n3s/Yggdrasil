@@ -1,0 +1,506 @@
+{
+	"Format": "Graph",
+	"Version": 1,
+	"Name": "Checkpoint",
+	"Fields": [
+		{
+			"Name": "ActiveMaterial",
+			"Kind": "Asset",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "Material",
+			"EnumValues": [],
+			"Options": {}
+		},
+		{
+			"Name": "Chime",
+			"Kind": "Asset",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "AudioClip",
+			"EnumValues": [],
+			"Options": {}
+		},
+		{
+			"Name": "Order",
+			"Kind": "Integer",
+			"Default": 1,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Min": 0
+			}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Activated",
+			"Kind": "Bool",
+			"Default": false,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnTriggerEnter",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Call.Entity.HasTag",
+			"Position": [250, 120],
+			"Values": {
+				"tag": "Ball"
+			}
+		},
+		{
+			"Id": 3,
+			"Kind": "Self.Get.Activated",
+			"Position": [250, 220],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Logic.Not",
+			"Position": [450, 220],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Logic.And",
+			"Position": [600, 150],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Flow.Branch",
+			"Position": [800, 0],
+			"Values": {}
+		},
+		{
+			"Id": 7,
+			"Kind": "Self.Set.Activated",
+			"Position": [1000, 0],
+			"Values": {
+				"Value": true
+			}
+		},
+		{
+			"Id": 8,
+			"Kind": "Flow.Sequence",
+			"Position": [1200, 0],
+			"Values": {}
+		},
+		{
+			"Id": 9,
+			"Kind": "Self.Entity",
+			"Position": [1200, 300],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Call.Entity.FindChild",
+			"Position": [1400, 200],
+			"Values": {
+				"name": "Bar"
+			}
+		},
+		{
+			"Id": 11,
+			"Kind": "Flow.IfNotNil",
+			"Position": [1600, -200],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Get.Entity.MeshRenderer",
+			"Position": [1800, -100],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Flow.IfNotNil",
+			"Position": [2000, -200],
+			"Values": {}
+		},
+		{
+			"Id": 14,
+			"Kind": "Self.Get.ActiveMaterial",
+			"Position": [2000, -50],
+			"Values": {}
+		},
+		{
+			"Id": 15,
+			"Kind": "Call.MeshRenderer.SetMaterial",
+			"Position": [2250, -200],
+			"Values": {
+				"index": 1
+			}
+		},
+		{
+			"Id": 16,
+			"Kind": "Call.Entity.FindChild",
+			"Position": [1400, 400],
+			"Values": {
+				"name": "Burst"
+			}
+		},
+		{
+			"Id": 17,
+			"Kind": "Flow.IfNotNil",
+			"Position": [1600, 100],
+			"Values": {}
+		},
+		{
+			"Id": 18,
+			"Kind": "Get.Entity.ParticleEmitter",
+			"Position": [1800, 200],
+			"Values": {}
+		},
+		{
+			"Id": 19,
+			"Kind": "Flow.IfNotNil",
+			"Position": [2000, 100],
+			"Values": {}
+		},
+		{
+			"Id": 20,
+			"Kind": "Call.ParticleEmitter.Emit",
+			"Position": [2250, 100],
+			"Values": {
+				"count": 60
+			}
+		},
+		{
+			"Id": 21,
+			"Kind": "Self.Get.Chime",
+			"Position": [1600, 500],
+			"Values": {}
+		},
+		{
+			"Id": 22,
+			"Kind": "Get.Entity.Transform",
+			"Position": [1400, 600],
+			"Values": {}
+		},
+		{
+			"Id": 23,
+			"Kind": "Get.Transform.WorldPosition",
+			"Position": [1600, 600],
+			"Values": {}
+		},
+		{
+			"Id": 24,
+			"Kind": "Call.Audio.PlayOneShot",
+			"Position": [1850, 400],
+			"Values": {}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "other"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Then1"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Then2"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Then3"
+			},
+			"To": {
+				"Node": 24,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 16,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 22,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 14,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "asset"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 17,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 17,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 18,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 19,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 19,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 20,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 19,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 20,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 21,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 24,
+				"Pin": "clip"
+			}
+		},
+		{
+			"From": {
+				"Node": 22,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 23,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 23,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 24,
+				"Pin": "position"
+			}
+		}
+	]
+}

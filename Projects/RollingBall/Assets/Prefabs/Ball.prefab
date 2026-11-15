@@ -1,0 +1,86 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Ball",
+	"Root": "478096c60af9f02a",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"RigidBody": 1,
+		"SphereCollider": 1,
+		"AudioSource": 1,
+		"Script": 2
+	},
+	"Entities": [
+		{
+			"ID": "478096c60af9f02a",
+			"Name": "Ball",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Ball"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": ["52eb3da5098abad7"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Dynamic",
+					"Mass": 1,
+					"Friction": 0.8,
+					"Restitution": 0,
+					"LinearDamping": 0.1,
+					"AngularDamping": 0.4,
+					"GravityFactor": 1,
+					"MotionQuality": "LinearCast",
+					"AllowSleeping": false,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Ball",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 120,
+					"EnhancedInternalEdgeRemoval": true,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"SphereCollider": {
+					"Radius": 0.5,
+					"Offset": [0, 0, 0],
+					"IsTrigger": false
+				},
+				"AudioSource": {
+					"Clip": "6d00294947a32653",
+					"Volume": 0,
+					"Pitch": 1,
+					"Loop": true,
+					"PlayOnStart": true,
+					"Spatial": true,
+					"MinDistance": 10,
+					"MaxDistance": 60,
+					"Attenuation": "Inverse",
+					"Rolloff": 1,
+					"DopplerFactor": 1,
+					"Group": "Sfx"
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "392c104c7cf0be3c",
+							"Fields": {
+								"FallSound": "b20be608a1f8d9e2"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

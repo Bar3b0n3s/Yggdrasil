@@ -1,0 +1,40 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Straight",
+	"Root": "72b4b4f01d40808f",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"BoxCollider": 1
+	},
+	"Entities": [
+		{
+			"ID": "72b4b4f01d40808f",
+			"Name": "Straight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 0.5, 8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["b8de5701dfd6c86a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		}
+	]
+}

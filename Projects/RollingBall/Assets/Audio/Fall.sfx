@@ -1,0 +1,25 @@
+{
+	"Format": "SoundEffect",
+	"Version": 1,
+	"Seed": 0,
+	"Volume": 0.5,
+	"Layers": [
+		{
+			"Wave": "Saw",
+			"DutyCycle": 0.5,
+			"Notes": [],
+			"Duration": 0.6,
+			"StartFrequency": 520,
+			"EndFrequency": 90,
+			"Volume": 1,
+			"Envelope": {
+				"Attack": 0.01,
+				"Decay": 0.1,
+				"Sustain": 0.7,
+				"Release": 0.2
+			},
+			"LowPass": 2400,
+			"Delay": 0
+		}
+	]
+}

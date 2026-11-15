@@ -1,0 +1,230 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Goal",
+	"Root": "cf76ea1364f6707e",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"ParticleEmitter": 1
+	},
+	"Entities": [
+		{
+			"ID": "cf76ea1364f6707e",
+			"Name": "Goal",
+			"Parent": null,
+			"Active": true,
+			"Tags": ["Goal"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Trigger",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [2, 1.5, 1],
+					"Offset": [0, 1.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": true
+				}
+			}
+		},
+		{
+			"ID": "2c80b78f6b2204a2",
+			"Name": "PostL",
+			"Parent": "cf76ea1364f6707e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.3, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.2, 2.5, 0.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["a5e946cae8e49ea3"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "5adc4cddf63dd0f4",
+			"Name": "PostR",
+			"Parent": "cf76ea1364f6707e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.3, 1.25, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.2, 2.5, 0.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000105",
+					"Materials": ["a5e946cae8e49ea3"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "1595a251cc343131",
+			"Name": "Bar",
+			"Parent": "cf76ea1364f6707e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2.6, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4.8, 0.2, 0.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a5e946cae8e49ea3"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "dc2b5255dce86903",
+			"Name": "Pad",
+			"Parent": "cf76ea1364f6707e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.01, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 0.02, 2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a5e946cae8e49ea3"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "2aa6ddf13cf9e1f0",
+			"Name": "Sparkle",
+			"Parent": "cf76ea1364f6707e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.05, 0],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 24,
+					"Burst": 0,
+					"MaxParticles": 128,
+					"Seed": 23,
+					"Lifetime": [0.8, 1.6],
+					"Speed": [1, 2.5],
+					"Size": [0.05, 0.12],
+					"Shape": "Cone",
+					"ShapeRadius": 1.6,
+					"ConeAngle": 12,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, -0.6, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [1, 0.8, 0.25, 1]
+						},
+						{
+							"Time": 1,
+							"Color": [1, 0.6, 0.1, 0]
+						}
+					],
+					"SizeOverLife": []
+				}
+			}
+		},
+		{
+			"ID": "3053dde5e1da7cd6",
+			"Name": "WinBurst",
+			"Parent": "cf76ea1364f6707e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": false,
+					"Loop": false,
+					"Duration": 5,
+					"Rate": 0,
+					"Burst": 0,
+					"MaxParticles": 512,
+					"Seed": 31,
+					"Lifetime": [0.6, 1.2],
+					"Speed": [3, 6],
+					"Size": [0.08, 0.16],
+					"Shape": "Sphere",
+					"ShapeRadius": 0.6,
+					"ConeAngle": 25,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, -4, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [1, 0.8, 0.25, 1]
+						},
+						{
+							"Time": 1,
+							"Color": [1, 0.55, 0.1, 0]
+						}
+					],
+					"SizeOverLife": []
+				}
+			}
+		}
+	]
+}

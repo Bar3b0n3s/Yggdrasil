@@ -1,0 +1,40 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Narrow",
+	"Root": "a1cd428746af0df8",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"BoxCollider": 1
+	},
+	"Entities": [
+		{
+			"ID": "a1cd428746af0df8",
+			"Name": "Narrow",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.2, 0.5, 8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["601ae0534018bc19"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		}
+	]
+}

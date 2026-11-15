@@ -1,0 +1,70 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "MovingPlatform",
+	"Root": "adcf8b7745695a4b",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"Script": 2
+	},
+	"Entities": [
+		{
+			"ID": "adcf8b7745695a4b",
+			"Name": "MovingPlatform",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4, 0.5, 4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["016c3b2dc2f32506"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"RigidBody": {
+					"Type": "Kinematic",
+					"Mass": 1,
+					"Friction": 1,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Track",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "e2484f8c8f9673c8",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

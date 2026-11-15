@@ -1,0 +1,351 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "CurveRight",
+	"Root": "70665ed563536a61",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"BoxCollider": 1
+	},
+	"Entities": [
+		{
+			"ID": "70665ed563536a61",
+			"Name": "CurveRight",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "b8d4e8778aae83fd",
+			"Name": "Deck1",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.05133, -0.25, -0.78316],
+					"Rotation": [0, -0.065403126, 0, 0.99785894],
+					"Scale": [4, 0.5, 2.106]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["b8de5701dfd6c86a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "0ca457277a1fd698",
+			"Name": "Deck2",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.45672, -0.25, -2.2961],
+					"Rotation": [0, -0.19509032, 0, 0.98078525],
+					"Scale": [4, 0.5, 2.106]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["b8de5701dfd6c86a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "0c98ac194ff8d648",
+			"Name": "Deck3",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.23988, -0.25, -3.65257],
+					"Rotation": [0, -0.32143947, 0, 0.9469301],
+					"Scale": [4, 0.5, 2.106]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["b8de5701dfd6c86a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "b958dc2ba734a329",
+			"Name": "Deck4",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.34743, -0.25, -4.76012],
+					"Rotation": [0, -0.4422887, 0, 0.89687276],
+					"Scale": [4, 0.5, 2.106]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["b8de5701dfd6c86a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "87bbf3585fedb09d",
+			"Name": "Deck5",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.7039, -0.25, -5.54328],
+					"Rotation": [0, -0.55557024, 0, 0.8314696],
+					"Scale": [4, 0.5, 2.106]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["b8de5701dfd6c86a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "a755d0afcc862b28",
+			"Name": "Deck6",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [5.21684, -0.25, -5.94867],
+					"Rotation": [0, -0.6593458, 0, 0.7518398],
+					"Scale": [4, 0.5, 2.106]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["b8de5701dfd6c86a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "259bd80b4d30b483",
+			"Name": "Rail1",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2.0307, -0.05, -1.05726],
+					"Rotation": [0, -0.065403126, 0, 0.99785894],
+					"Scale": [0.2, 0.9, 2.159]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4093d6d28bcb942f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "a7ea3f89b40b5e3e",
+			"Name": "Rail2",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.48343, -0.05, -3.09973],
+					"Rotation": [0, -0.19509032, 0, 0.98078525],
+					"Scale": [0.2, 0.9, 2.159]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4093d6d28bcb942f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "3cabf03ee204ff28",
+			"Name": "Rail3",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-0.42616, -0.05, -4.93096],
+					"Rotation": [0, -0.32143947, 0, 0.9469301],
+					"Scale": [0.2, 0.9, 2.159]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4093d6d28bcb942f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "1d0164e7c8458d09",
+			"Name": "Rail4",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.06904, -0.05, -6.42616],
+					"Rotation": [0, -0.4422887, 0, 0.89687276],
+					"Scale": [0.2, 0.9, 2.159]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4093d6d28bcb942f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "ee9252de8c0450f5",
+			"Name": "Rail5",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.90027, -0.05, -7.48343],
+					"Rotation": [0, -0.55557024, 0, 0.8314696],
+					"Scale": [0.2, 0.9, 2.159]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4093d6d28bcb942f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "de9f5338eb4f782f",
+			"Name": "Rail6",
+			"Parent": "70665ed563536a61",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [4.94274, -0.05, -8.0307],
+					"Rotation": [0, -0.6593458, 0, 0.7518398],
+					"Scale": [0.2, 0.9, 2.159]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["4093d6d28bcb942f"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		}
+	]
+}

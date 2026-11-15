@@ -1,0 +1,5138 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "58e646c6b861e94e",
+		"Path": "Assets/Scenes/Level1.scene"
+	},
+	"Parameters": {},
+	"Seed": 27,
+	"FixedHz": 60,
+	"EngineVersion": "0.4.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "0127223c52056801",
+				"Path": "/Level/Path/PathNode011",
+				"Hash": "6e2b4e2a1abfa3a8",
+				"Components": {
+					"Transform": "220d7256c04986b8"
+				}
+			},
+			{
+				"Id": "0230a8710c0b16fd",
+				"Path": "/Level/P12",
+				"Hash": "77c172d37ec46020",
+				"Components": {
+					"Transform": "97b83970bc65d61f",
+					"Prefab": "78ba1e486cbf19ba",
+					"PrefabLink": "c6fa9a3fd2a88d34"
+				}
+			},
+			{
+				"Id": "0393a92a3b257f87",
+				"Path": "/Level/Path/PathNode007",
+				"Hash": "022b8e87dbad0f65",
+				"Components": {
+					"Transform": "133774d410f1aac6"
+				}
+			},
+			{
+				"Id": "0402f071de47a544",
+				"Path": "/Level/P12/Rail3",
+				"Hash": "cdb6090d7ea371fc",
+				"Components": {
+					"Transform": "1c663ca93de5b37a",
+					"PrefabLink": "61564adf03d820a7",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "053ef5ca01fd56b1",
+				"Path": "/Level/P03/Rail1",
+				"Hash": "89a30f31d4ec9445",
+				"Components": {
+					"Transform": "aa88377630e8b39b",
+					"PrefabLink": "ebe77b8b2c63fccf",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "061aa6649c822a7d",
+				"Path": "/Level/Path/PathNode022",
+				"Hash": "7896fd9dcf751371",
+				"Components": {
+					"Transform": "4d33b4e5eeb54dec"
+				}
+			},
+			{
+				"Id": "0b535e761a13e75c",
+				"Path": "/Level/Checkpoint1/Bar",
+				"Hash": "73763b48c6574791",
+				"Components": {
+					"Transform": "708c30d87c3aadbf",
+					"PrefabLink": "0fc10839dbdae433",
+					"MeshRenderer": "d8e07fc41938d407"
+				}
+			},
+			{
+				"Id": "0b841189f13535bf",
+				"Path": "/Level/P10/Deck6",
+				"Hash": "f0a8457c99b675ed",
+				"Components": {
+					"Transform": "98e4e9e6460b11aa",
+					"PrefabLink": "9492a77730a897a6",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0c3f69ede3b3d12a",
+				"Path": "/Level/P07/Deck5",
+				"Hash": "9bed7a82b87e7cbb",
+				"Components": {
+					"Transform": "3b27d92e911eabb7",
+					"PrefabLink": "fcdcc2c926e2cf1f",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0cf50f121d81e75b",
+				"Path": "/Level/P07/Deck2",
+				"Hash": "fecddcec9ecb3fe2",
+				"Components": {
+					"Transform": "617a3dc25481fb28",
+					"PrefabLink": "37f08093ec2d5a42",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "0e1fcf9fff8142d7",
+				"Path": "/Level/P04",
+				"Hash": "7b9e18bee576ecb3",
+				"Components": {
+					"Transform": "769643d5d8be3f01",
+					"Prefab": "1b664c2fadcb0a18",
+					"PrefabLink": "58c01fb7d1a8d8f9",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "12fc572650c6630c",
+				"Path": "/Level/Path/PathNode030",
+				"Hash": "f6a8eba64304b191",
+				"Components": {
+					"Transform": "dc9a643212825edd"
+				}
+			},
+			{
+				"Id": "133ab50b1e4953df",
+				"Path": "/Level/Path/PathNode033",
+				"Hash": "0521ceba4875e9ce",
+				"Components": {
+					"Transform": "20ac5d190ddc1cf3"
+				}
+			},
+			{
+				"Id": "197643593b9cf163",
+				"Path": "/Level/Goal",
+				"Hash": "cfdc4032cdbdeb9b",
+				"Components": {
+					"Transform": "44646af873c0281b",
+					"Prefab": "bfa141e63007572e",
+					"PrefabLink": "4d2f11f22e4e7988",
+					"RigidBody": "665935f0bb53b0b3",
+					"BoxCollider": "919e6d9ef412b2ab"
+				}
+			},
+			{
+				"Id": "1b86da445595348d",
+				"Path": "/Level/P05",
+				"Hash": "37843898845271fe",
+				"Components": {
+					"Transform": "7549279e240be2e2",
+					"Prefab": "e76d6218ac111f77",
+					"PrefabLink": "02df390076ff65fc",
+					"MeshRenderer": "b414fa416a5f3df0",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "1bc0e47e88841574",
+				"Path": "/Level/Path/PathNode023",
+				"Hash": "a33927869adb9212",
+				"Components": {
+					"Transform": "b30f3bdb5d607924"
+				}
+			},
+			{
+				"Id": "1bf6c4ab0f8fb27f",
+				"Path": "/Level/P03/Deck3",
+				"Hash": "739fd5d5a144e9f4",
+				"Components": {
+					"Transform": "11db543d394460b3",
+					"PrefabLink": "295262af60282b1e",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "1c971b2efa6a7637",
+				"Path": "/Level/P10/Rail3",
+				"Hash": "ef93e00d426a9897",
+				"Components": {
+					"Transform": "75bdaea24dd998a8",
+					"PrefabLink": "0ed928517d181c1f",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "1d25eb1c687ca4d4",
+				"Path": "/Level/P03/Deck5",
+				"Hash": "a03dcbb3efabe6fd",
+				"Components": {
+					"Transform": "2fe2a40337aeb6a1",
+					"PrefabLink": "b6bc90f8c55299ab",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "1fb237c0570125c2",
+				"Path": "/Level/Path/PathNode008",
+				"Hash": "03a2ffb845c740b9",
+				"Components": {
+					"Transform": "9b520d1eb07aa7fd"
+				}
+			},
+			{
+				"Id": "2001858c639c69e9",
+				"Path": "/HUD",
+				"Hash": "48965e6811aa4418",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Prefab": "c12de3ef05e51561",
+					"PrefabLink": "296de490629c251f",
+					"UiCanvas": "4f7353c607a491db"
+				}
+			},
+			{
+				"Id": "2a98a239430590fd",
+				"Path": "/Level/P03/Rail2",
+				"Hash": "6ff97e873fc228b3",
+				"Components": {
+					"Transform": "687dff68fd88b109",
+					"PrefabLink": "620cafdcbc51c313",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "2b2d76da5d4014e3",
+				"Path": "/Level/Goal/PostL",
+				"Hash": "d5c4a71b5f56918c",
+				"Components": {
+					"Transform": "b3e6f9b222047f21",
+					"PrefabLink": "848e3cb0e810fbe3",
+					"MeshRenderer": "d35e720c7e0bd1d6"
+				}
+			},
+			{
+				"Id": "2dfb0a41dfc558e2",
+				"Path": "/Level/Path/PathNode034",
+				"Hash": "f73169516af33c49",
+				"Components": {
+					"Transform": "6a4bfd507bd7901c"
+				}
+			},
+			{
+				"Id": "3412bcf149aacc3c",
+				"Path": "/Level/P07/Rail4",
+				"Hash": "7e99a67a5d2a1b76",
+				"Components": {
+					"Transform": "99a6e4ff9d916ccf",
+					"PrefabLink": "3f2274f3f371f5b6",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "34e1c0e63940a511",
+				"Path": "/Level/Path/PathNode009",
+				"Hash": "4ea8a4ce6e010103",
+				"Components": {
+					"Transform": "4ae0af481856d732"
+				}
+			},
+			{
+				"Id": "35a4017fcf19c510",
+				"Path": "/Level/Checkpoint2/Bar",
+				"Hash": "dfdf401ecbc3947e",
+				"Components": {
+					"Transform": "708c30d87c3aadbf",
+					"PrefabLink": "aecda8e138f2151e",
+					"MeshRenderer": "d8e07fc41938d407"
+				}
+			},
+			{
+				"Id": "3626aa45950e625d",
+				"Path": "/Level/P13",
+				"Hash": "383b373d36cbc7f1",
+				"Components": {
+					"Transform": "7ae71e30c370e6c3",
+					"Prefab": "1b664c2fadcb0a18",
+					"PrefabLink": "5b62fd32c48589d2",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "3715a0270d0e1b98",
+				"Path": "/Level/P12/Rail2",
+				"Hash": "9f117078d937b73b",
+				"Components": {
+					"Transform": "687dff68fd88b109",
+					"PrefabLink": "7f4bab00e24d8a97",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "465ee90961dd1917",
+				"Path": "/Level/P12/Deck4",
+				"Hash": "bbc46d9d38d68c3b",
+				"Components": {
+					"Transform": "cbeeadcae3d37296",
+					"PrefabLink": "14f1598cb0750d23",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "4ad33ca199a1c541",
+				"Path": "/Level/P03",
+				"Hash": "38f285fdda33c7ce",
+				"Components": {
+					"Transform": "50b44413f54879d1",
+					"Prefab": "78ba1e486cbf19ba",
+					"PrefabLink": "d422628ffdaf87cf"
+				}
+			},
+			{
+				"Id": "4d8908e8edcb71c4",
+				"Path": "/Level/P10/Rail6",
+				"Hash": "25a0aa099d117d5e",
+				"Components": {
+					"Transform": "5e21aba7069b06a0",
+					"PrefabLink": "36e34af69c7c9d90",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "4f3ecd67be8dd8d0",
+				"Path": "/Level/Path/PathNode015",
+				"Hash": "49ecf201a8ac60d5",
+				"Components": {
+					"Transform": "aa8fb6ee61da279c"
+				}
+			},
+			{
+				"Id": "4fc1a64503a864db",
+				"Path": "/Level/Path/PathNode006",
+				"Hash": "c35788a81ad37139",
+				"Components": {
+					"Transform": "4d8dd4764d2da037"
+				}
+			},
+			{
+				"Id": "4fc50c84b02af3a8",
+				"Path": "/Level/Path/PathNode013",
+				"Hash": "45002801f529b1fa",
+				"Components": {
+					"Transform": "20a03450a33c9128"
+				}
+			},
+			{
+				"Id": "54a0b368b93de0c7",
+				"Path": "/Level/P03/Deck2",
+				"Hash": "0764e0da7eac10f1",
+				"Components": {
+					"Transform": "468d886af1b5f58f",
+					"PrefabLink": "9f9eab222dc47f8e",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "54e047dc3a28405e",
+				"Path": "/Level/P07/Deck3",
+				"Hash": "1ebee2ed25b9fc31",
+				"Components": {
+					"Transform": "8910763f0b98ab38",
+					"PrefabLink": "ffdebdc86a9dcdb4",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "56a9050a3e785185",
+				"Path": "/Level/Path/PathNode024",
+				"Hash": "cf2bd35b5e448fa3",
+				"Components": {
+					"Transform": "968e6d51b8078b68"
+				}
+			},
+			{
+				"Id": "578072cdc84b1d7b",
+				"Path": "/Level/P07/Deck4",
+				"Hash": "806a4ae64a60cbdf",
+				"Components": {
+					"Transform": "048127a753ca2475",
+					"PrefabLink": "e031258fa01f9661",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "578336c162079867",
+				"Path": "/Level/P07/Rail1",
+				"Hash": "e10694ec196a7d06",
+				"Components": {
+					"Transform": "f6cb901ad29cf454",
+					"PrefabLink": "e1fa6d9b64964d7f",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "58220cfa4940fb12",
+				"Path": "/Backdrop",
+				"Hash": "0fb86d4b9eabb57e",
+				"Components": {
+					"Transform": "29cbd54027d4aa8d",
+					"Terrain": "c5b637b8bdab3086"
+				}
+			},
+			{
+				"Id": "584ff128e1417a47",
+				"Path": "/Level/Path/PathNode021",
+				"Hash": "264e8db2555c8596",
+				"Components": {
+					"Transform": "10fa2065ff3ad3ad"
+				}
+			},
+			{
+				"Id": "5b04acde2257ef96",
+				"Path": "/HUD/TopBar",
+				"Hash": "d3356ebb80d0eebc",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "0705ec3cc24097a4",
+					"UiRect": "93bcafaf95a694d4",
+					"UiImage": "083b8295415ba934"
+				}
+			},
+			{
+				"Id": "5b6de6cbdbcc6ac5",
+				"Path": "/Level/Path/PathNode026",
+				"Hash": "165f25eaf2aabcee",
+				"Components": {
+					"Transform": "2a47e087fbc2dcb2"
+				}
+			},
+			{
+				"Id": "5dddf968d6e16dd1",
+				"Path": "/Level/P03/Deck6",
+				"Hash": "ab5016ec06c311a7",
+				"Components": {
+					"Transform": "7e84cb0119291f8d",
+					"PrefabLink": "0cdf100c44a6a10d",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "637cd3147449b670",
+				"Path": "/Level/P10/Deck4",
+				"Hash": "6d5cfba44b2155f5",
+				"Components": {
+					"Transform": "048127a753ca2475",
+					"PrefabLink": "ada9f227b4accd42",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "66efed142274f520",
+				"Path": "/Level/P10/Rail1",
+				"Hash": "4a64be55ea5bb8be",
+				"Components": {
+					"Transform": "f6cb901ad29cf454",
+					"PrefabLink": "1a4cb3966a0bfe79",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "6713d75f8de59bc1",
+				"Path": "/Level/P09",
+				"Hash": "3df80edf43f9db1a",
+				"Components": {
+					"Transform": "99443948fc3b815e",
+					"Prefab": "1b664c2fadcb0a18",
+					"PrefabLink": "350e57f2932c0402",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "678b19cfb4656ee0",
+				"Path": "/Level/P03/Deck1",
+				"Hash": "910cc0f4663dc81c",
+				"Components": {
+					"Transform": "e2af8f3ff3c62ef0",
+					"PrefabLink": "008972a0a91872b7",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "6a448cb82a3758c3",
+				"Path": "/Level/Path/PathNode029",
+				"Hash": "02183f92e519f07f",
+				"Components": {
+					"Transform": "d008c57263f4cd1b"
+				}
+			},
+			{
+				"Id": "6ac87bbf8f43bc50",
+				"Path": "/HUD/Banner/BannerText",
+				"Hash": "272c384fe1b4abb2",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "a4a49431add75afd",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "c8588ad09f3a2bbf"
+				}
+			},
+			{
+				"Id": "71289c315cda4b5a",
+				"Path": "/Level/P08",
+				"Hash": "5753794ec73ac2d6",
+				"Components": {
+					"Transform": "2ee6d33f541430c8",
+					"Prefab": "e76d6218ac111f77",
+					"PrefabLink": "e45c3e5fff3faeff",
+					"MeshRenderer": "b414fa416a5f3df0",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "72624e2de607aba0",
+				"Path": "/Level/P07/Rail3",
+				"Hash": "b6bb6b56e8f9e00d",
+				"Components": {
+					"Transform": "75bdaea24dd998a8",
+					"PrefabLink": "c73b705997082ae1",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "74b14483f1b1909d",
+				"Path": "/Level/P10/Deck2",
+				"Hash": "df1919cf2c19f33c",
+				"Components": {
+					"Transform": "617a3dc25481fb28",
+					"PrefabLink": "9fdc01fadb5d6c26",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "764c509481d6b98c",
+				"Path": "/Level/P12/Deck1",
+				"Hash": "390b1fa03e3fa564",
+				"Components": {
+					"Transform": "e2af8f3ff3c62ef0",
+					"PrefabLink": "379dfe37be286a8c",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "79a8461caf06228d",
+				"Path": "/Level/P02",
+				"Hash": "d5eddd9734a23733",
+				"Components": {
+					"Transform": "431a3e841d26f11a",
+					"Prefab": "1b664c2fadcb0a18",
+					"PrefabLink": "9452a1d8da6b23de",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "7f6976a95a41344a",
+				"Path": "/Level/P10/Deck1",
+				"Hash": "03ba3309514bf18e",
+				"Components": {
+					"Transform": "533bdc6e5d51a4ea",
+					"PrefabLink": "257500ab90f14a92",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "7feb4a08e3f1dd10",
+				"Path": "/Level/Path/PathNode017",
+				"Hash": "9e0c9d72d8231b87",
+				"Components": {
+					"Transform": "3cd04cec3c160473"
+				}
+			},
+			{
+				"Id": "81616f5d6fbe882e",
+				"Path": "/Level/Path/PathNode020",
+				"Hash": "410c52cc99321a8c",
+				"Components": {
+					"Transform": "ed6403d1ab2e3f61"
+				}
+			},
+			{
+				"Id": "837f5e11e8488cae",
+				"Path": "/Level/Path/PathNode028",
+				"Hash": "c91ac23fee7a8f43",
+				"Components": {
+					"Transform": "af7d90397a27c557"
+				}
+			},
+			{
+				"Id": "84793e394352f80b",
+				"Path": "/Level/P07",
+				"Hash": "2404f51fc221399d",
+				"Components": {
+					"Transform": "99e5a6379a638870",
+					"Prefab": "0feb556ba0679038",
+					"PrefabLink": "2424004bb1bb2d53"
+				}
+			},
+			{
+				"Id": "85710fe6f4aac598",
+				"Path": "/Environment",
+				"Hash": "deeab536dcaa594a",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Environment": "fb2e28dc8f5a78eb",
+					"PostProcess": "bcb85fd4c660b2a6"
+				}
+			},
+			{
+				"Id": "85ae9ca9b88f11af",
+				"Path": "/Level/P12/Rail6",
+				"Hash": "b433ba9df5d94bbc",
+				"Components": {
+					"Transform": "2d244832aac85ce7",
+					"PrefabLink": "bc3ad97a460e3487",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "88362d246de9a443",
+				"Path": "/Level/P07/Deck1",
+				"Hash": "400e97deb595edfe",
+				"Components": {
+					"Transform": "533bdc6e5d51a4ea",
+					"PrefabLink": "38b64cb124cc20ae",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "8947588e0cf1a9ed",
+				"Path": "/Level/Path/PathNode002",
+				"Hash": "4fc2805457cae44b",
+				"Components": {
+					"Transform": "49f9f7bf3792369d"
+				}
+			},
+			{
+				"Id": "89bb83c2a6b507a2",
+				"Path": "/Level/Path/PathNode003",
+				"Hash": "5647a603e323d626",
+				"Components": {
+					"Transform": "24672988228a2360"
+				}
+			},
+			{
+				"Id": "89e29e81b64dbde8",
+				"Path": "/Ball",
+				"Hash": "c6092ac06911314a",
+				"Components": {
+					"Transform": "476e86475ab48b4d",
+					"Prefab": "0c34869118a10fd2",
+					"PrefabLink": "6eb023f536f0f077",
+					"MeshRenderer": "8d32566aa3169d6a",
+					"RigidBody": "5c3104f8d8f46402",
+					"SphereCollider": "9cd09cbe54c4e3b3",
+					"AudioSource": "2e0a4fd627daaa05",
+					"Script": "c270e137238a90fe"
+				}
+			},
+			{
+				"Id": "8c0d1c29ab671ea7",
+				"Path": "/HUD/BottomBar",
+				"Hash": "fee6d0c7aad95c03",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "eb18e9ec321c041c",
+					"UiRect": "b7cdf734500cf56c",
+					"UiImage": "083b8295415ba934"
+				}
+			},
+			{
+				"Id": "8e94badf05aa17a8",
+				"Path": "/Level/Path/PathNode016",
+				"Hash": "5aa0e260645fee5a",
+				"Components": {
+					"Transform": "a01ffc7ed4ae366a"
+				}
+			},
+			{
+				"Id": "8f80bc11df7619d0",
+				"Path": "/Level/Path/PathNode001",
+				"Hash": "abcee8f41f0f72d8",
+				"Components": {
+					"Transform": "ff8a6ac611284ff3"
+				}
+			},
+			{
+				"Id": "91f73afb8b88897a",
+				"Path": "/Level/Goal/Pad",
+				"Hash": "f04c047c9175e442",
+				"Components": {
+					"Transform": "1ccb32e5452a498d",
+					"PrefabLink": "e4c0f8177ef269a6",
+					"MeshRenderer": "419a6b351bd9b768"
+				}
+			},
+			{
+				"Id": "94a7cb7c0c6fa78c",
+				"Path": "/Level/P10/Deck3",
+				"Hash": "3f967914e06c7f9d",
+				"Components": {
+					"Transform": "8910763f0b98ab38",
+					"PrefabLink": "12cfc7b3f926b1fe",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "94e41ffeff5adf92",
+				"Path": "/Level/Path/PathNode018",
+				"Hash": "7d6a591bea023bce",
+				"Components": {
+					"Transform": "6b99a73f95ff4715"
+				}
+			},
+			{
+				"Id": "956e3b0c71189b33",
+				"Path": "/HUD/HelpText",
+				"Hash": "460600a2a47019b0",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "762435ed36dc4dd1",
+					"UiRect": "320855e1fe022fab",
+					"UiText": "031b823fa8730307"
+				}
+			},
+			{
+				"Id": "95a0ebe5f83f722f",
+				"Path": "/Level/Checkpoint2/PostL",
+				"Hash": "209ac1396a290114",
+				"Components": {
+					"Transform": "b3e6f9b222047f21",
+					"PrefabLink": "886501ea29e0c6e5",
+					"MeshRenderer": "ca2162793c2b8a88"
+				}
+			},
+			{
+				"Id": "960dd993f1872300",
+				"Path": "/Level/P03/Rail4",
+				"Hash": "e6f6fecdddaf7edb",
+				"Components": {
+					"Transform": "81a46bf7062d9073",
+					"PrefabLink": "febe503ced9606fe",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "967d8aa5a566eba6",
+				"Path": "/Level/Checkpoint1/Burst",
+				"Hash": "4d8254b5e91a756f",
+				"Components": {
+					"Transform": "3b6f5441ec680066",
+					"PrefabLink": "398b1bd5ffe63ba9",
+					"ParticleEmitter": "f31f14bb80a2def6"
+				}
+			},
+			{
+				"Id": "9953242c98376aa5",
+				"Path": "/Level/P07/Rail5",
+				"Hash": "042317edcda44ac3",
+				"Components": {
+					"Transform": "594efe568c2d99ce",
+					"PrefabLink": "bf740236cf5ae749",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "99a071c65801dfef",
+				"Path": "/Level/P06",
+				"Hash": "03952e4696e78abf",
+				"Components": {
+					"Transform": "5bc5c2a738d4b952",
+					"Prefab": "1b664c2fadcb0a18",
+					"PrefabLink": "96a4b999cae160dd",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "99bb1772c1aacc72",
+				"Path": "/Level/P12/Deck5",
+				"Hash": "57a65d641a7a7485",
+				"Components": {
+					"Transform": "2fe2a40337aeb6a1",
+					"PrefabLink": "7f13fbdc7f7bf595",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "99f6964469e9b0c9",
+				"Path": "/Level/P10",
+				"Hash": "54514df2d823e853",
+				"Components": {
+					"Transform": "87dd2e568b7e1e12",
+					"Prefab": "0feb556ba0679038",
+					"PrefabLink": "25f3322ad3c1a873"
+				}
+			},
+			{
+				"Id": "9a2e0dfc7f3e75c9",
+				"Path": "/Level/Checkpoint1",
+				"Hash": "926643c72000b49e",
+				"Components": {
+					"Transform": "ddb3387379decd96",
+					"Prefab": "fe191cd9369cf8ee",
+					"PrefabLink": "3b3abbd49ce0807b",
+					"RigidBody": "665935f0bb53b0b3",
+					"BoxCollider": "c3c4902c3000a9d6",
+					"Script": "b302eedc80392095"
+				}
+			},
+			{
+				"Id": "9b75c63f29385eb2",
+				"Path": "/Level/P10/Rail4",
+				"Hash": "5c5215b0648f74db",
+				"Components": {
+					"Transform": "99a6e4ff9d916ccf",
+					"PrefabLink": "6120192f873b136c",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "9c3e38df20089cbd",
+				"Path": "/Level/P07/Rail6",
+				"Hash": "c841c41e216d8392",
+				"Components": {
+					"Transform": "5e21aba7069b06a0",
+					"PrefabLink": "9da5ceb8931b7793",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "9c996d0d70c5ee49",
+				"Path": "/Level/P03/Rail3",
+				"Hash": "9c7fd90b98c88254",
+				"Components": {
+					"Transform": "1c663ca93de5b37a",
+					"PrefabLink": "60137dd2a40eaa31",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "a105eba64b60ec10",
+				"Path": "/Level/P01",
+				"Hash": "60107ffd429dac57",
+				"Components": {
+					"Transform": "d373d38b9398d3d9",
+					"Prefab": "1b664c2fadcb0a18",
+					"PrefabLink": "a0e85498e7d3d118",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "a2c72577f9168584",
+				"Path": "/Level/P12/Deck3",
+				"Hash": "edb82aeb3fdbd2bf",
+				"Components": {
+					"Transform": "11db543d394460b3",
+					"PrefabLink": "b9c74c952cfa0fae",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "a7cb8901909aa1a5",
+				"Path": "/Level/Goal/WinBurst",
+				"Hash": "28a652bbc1d1ea20",
+				"Components": {
+					"Transform": "e26cfddb9221f892",
+					"PrefabLink": "e88b402d01b7be00",
+					"ParticleEmitter": "9f1165045d14b0ce"
+				}
+			},
+			{
+				"Id": "abbb90d8df4fde3b",
+				"Path": "/Level/P03/Rail5",
+				"Hash": "7bb11ea690b1f5ce",
+				"Components": {
+					"Transform": "00a24d79dd05a8f2",
+					"PrefabLink": "628e8ded6547bda6",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "ac95cc452fd16013",
+				"Path": "/Level/Checkpoint2",
+				"Hash": "ec7f9fc7f30b034d",
+				"Components": {
+					"Transform": "d2bea762ff3a5416",
+					"Prefab": "b56646df1f636b8a",
+					"PrefabLink": "8ef74ee3055bce67",
+					"RigidBody": "665935f0bb53b0b3",
+					"BoxCollider": "c3c4902c3000a9d6",
+					"Script": "8f642c4785cab4e5"
+				}
+			},
+			{
+				"Id": "b3c8780c7c8596e6",
+				"Path": "/Level/Path/PathNode014",
+				"Hash": "d986b13c80579e88",
+				"Components": {
+					"Transform": "fa996ca6d299fd91"
+				}
+			},
+			{
+				"Id": "bb1c71fb98ae1f4a",
+				"Path": "/HUD/ParText",
+				"Hash": "86b5d7a0d910e996",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "ffa9a5362e0a06b9",
+					"UiRect": "20781e09bdbb5781",
+					"UiText": "fdff7d8e0a325131"
+				}
+			},
+			{
+				"Id": "bd351a6facef8f81",
+				"Path": "/HUD/Banner",
+				"Hash": "016ce79448115143",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "77fecc20149fb814",
+					"UiRect": "7b65a046046ff5ad",
+					"UiImage": "fb038b360cd32744"
+				}
+			},
+			{
+				"Id": "bda542afa3f9b587",
+				"Path": "/Level/P12/Rail5",
+				"Hash": "842246acf5db41be",
+				"Components": {
+					"Transform": "00a24d79dd05a8f2",
+					"PrefabLink": "096fc5f6036ef1b2",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "be4686ca053f108c",
+				"Path": "/Level/Path/PathNode010",
+				"Hash": "5410c49edd60e04b",
+				"Components": {
+					"Transform": "77c24e4879f08f20"
+				}
+			},
+			{
+				"Id": "c1bcd6721f19e5a6",
+				"Path": "/Level/Checkpoint2/PostR",
+				"Hash": "cf9c4b4b7bf86caa",
+				"Components": {
+					"Transform": "8af7f2e90a7e4c48",
+					"PrefabLink": "32e8b1a6e0c74766",
+					"MeshRenderer": "ca2162793c2b8a88"
+				}
+			},
+			{
+				"Id": "c3078931b7d34540",
+				"Path": "/Level/P07/Deck6",
+				"Hash": "cb7f6ab5396c3eba",
+				"Components": {
+					"Transform": "98e4e9e6460b11aa",
+					"PrefabLink": "0f05907e4b62d994",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "c650a296464634d0",
+				"Path": "/Camera",
+				"Hash": "e74d3f1c8629c42f",
+				"Components": {
+					"Transform": "8ec16c629beca11a",
+					"Camera": "0882a1ea8680559e",
+					"Script": "2957f27e9c5edbc5"
+				}
+			},
+			{
+				"Id": "c92fce36e198fb98",
+				"Path": "/Level/Checkpoint1/PostL",
+				"Hash": "d146d1a5cc66088f",
+				"Components": {
+					"Transform": "b3e6f9b222047f21",
+					"PrefabLink": "b64853960449f704",
+					"MeshRenderer": "ca2162793c2b8a88"
+				}
+			},
+			{
+				"Id": "c99f0bfd490183a0",
+				"Path": "/Level/P11",
+				"Hash": "6568671578a0a079",
+				"Components": {
+					"Transform": "5f9792e601b860d0",
+					"Prefab": "1b664c2fadcb0a18",
+					"PrefabLink": "3bcfd2399c150d42",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "cbdf4e0c03dfb552",
+				"Path": "/Level/P10/Rail5",
+				"Hash": "f03fe7409bc5b15a",
+				"Components": {
+					"Transform": "594efe568c2d99ce",
+					"PrefabLink": "06ebcec796d28f86",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "ce2f30fad05d14fc",
+				"Path": "/Level/Checkpoint2/Burst",
+				"Hash": "35cd632525b46201",
+				"Components": {
+					"Transform": "3b6f5441ec680066",
+					"PrefabLink": "a1382f21733d7d11",
+					"ParticleEmitter": "f31f14bb80a2def6"
+				}
+			},
+			{
+				"Id": "d3b8f6989cc8199e",
+				"Path": "/Level/Checkpoint1/PostR",
+				"Hash": "9b8da38312ade9c3",
+				"Components": {
+					"Transform": "8af7f2e90a7e4c48",
+					"PrefabLink": "a5c1b85e1c01147a",
+					"MeshRenderer": "ca2162793c2b8a88"
+				}
+			},
+			{
+				"Id": "d4dda993b43065cf",
+				"Path": "/Level/P03/Deck4",
+				"Hash": "0a678b4c5c095fdc",
+				"Components": {
+					"Transform": "cbeeadcae3d37296",
+					"PrefabLink": "7dade18d9dce781b",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "d5370912a3b62426",
+				"Path": "/Level/Path",
+				"Hash": "bf78e6f8b8759c11",
+				"Components": {
+					"Transform": "82125f902860db21"
+				}
+			},
+			{
+				"Id": "d65b815cb8e4896f",
+				"Path": "/Sun",
+				"Hash": "c88f11819945ae68",
+				"Components": {
+					"Transform": "a50e82ddea5d090f",
+					"DirectionalLight": "20c5a3686afe1b2d"
+				}
+			},
+			{
+				"Id": "d67a676b3ecc8f19",
+				"Path": "/Level/Path/PathNode032",
+				"Hash": "c448e694778923b2",
+				"Components": {
+					"Transform": "99327e5f7aa048a3"
+				}
+			},
+			{
+				"Id": "d79b054bcfb48328",
+				"Path": "/HUD/TimeText",
+				"Hash": "85ffc64ef8f0cd12",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "e23a5e161855aca7",
+					"UiRect": "178d1fcd8a913513",
+					"UiText": "fd5ba75322b67766"
+				}
+			},
+			{
+				"Id": "da38c487649ba626",
+				"Path": "/Level/P12/Deck6",
+				"Hash": "a4370500440a3d1f",
+				"Components": {
+					"Transform": "7e84cb0119291f8d",
+					"PrefabLink": "47f96e471de6afce",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "db3ec21076346e84",
+				"Path": "/Level/Goal/Bar",
+				"Hash": "9de14f1def5949e3",
+				"Components": {
+					"Transform": "708c30d87c3aadbf",
+					"PrefabLink": "d38d0d82ba1c13c0",
+					"MeshRenderer": "419a6b351bd9b768"
+				}
+			},
+			{
+				"Id": "e09a43edcd0c17c8",
+				"Path": "/Level/Path/PathNode031",
+				"Hash": "defcfa0c973a6e3d",
+				"Components": {
+					"Transform": "930ccc0bae3afd8c"
+				}
+			},
+			{
+				"Id": "e0af3095f3cd3648",
+				"Path": "/Level/P12/Rail4",
+				"Hash": "deea0f681ce13776",
+				"Components": {
+					"Transform": "81a46bf7062d9073",
+					"PrefabLink": "d4dcb914c2ca5386",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "e4202bbb4913d3a5",
+				"Path": "/Level/P10/Deck5",
+				"Hash": "0c7bf65c5fab43a8",
+				"Components": {
+					"Transform": "3b27d92e911eabb7",
+					"PrefabLink": "2d7e28ba7fe4dc81",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "e55a5da5ce90f75d",
+				"Path": "/Game",
+				"Hash": "d8d80e41de84bf1f",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "9bddfe87d266fcc4"
+				}
+			},
+			{
+				"Id": "e7058e371b39bed1",
+				"Path": "/Level/Path/PathNode012",
+				"Hash": "862dff514f412644",
+				"Components": {
+					"Transform": "46a600c862be0196"
+				}
+			},
+			{
+				"Id": "e865337361639614",
+				"Path": "/Level/P12/Rail1",
+				"Hash": "0094d7e62a2ca5e6",
+				"Components": {
+					"Transform": "aa88377630e8b39b",
+					"PrefabLink": "ffe7eb4b9bbfa51e",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "ea30aa78564f5b0b",
+				"Path": "/Level/Goal/PostR",
+				"Hash": "aa63ff27a6a0bd26",
+				"Components": {
+					"Transform": "8af7f2e90a7e4c48",
+					"PrefabLink": "c0f8d00fc0fd30c8",
+					"MeshRenderer": "d35e720c7e0bd1d6"
+				}
+			},
+			{
+				"Id": "eb01e8ee2d054e1f",
+				"Path": "/HUD/LevelText",
+				"Hash": "303802e4598a3434",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "e2b7e073a68b8cd7",
+					"UiRect": "4785277909964ef5",
+					"UiText": "795ac2bf061cc752"
+				}
+			},
+			{
+				"Id": "ec82d42e332acddd",
+				"Path": "/Level/P12/Deck2",
+				"Hash": "fb062d906932a551",
+				"Components": {
+					"Transform": "468d886af1b5f58f",
+					"PrefabLink": "4ca43b7d2202066a",
+					"MeshRenderer": "5d167e133acd541a",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "ecf1cfe841c381d9",
+				"Path": "/Level/P03/Rail6",
+				"Hash": "4eeea29f39619f08",
+				"Components": {
+					"Transform": "2d244832aac85ce7",
+					"PrefabLink": "abf7daccfd4d74ae",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "edf411b509725c12",
+				"Path": "/Level/Path/PathNode019",
+				"Hash": "385f3d991ef3ed17",
+				"Components": {
+					"Transform": "db5f456a94b9ce79"
+				}
+			},
+			{
+				"Id": "ee8ee1014b29d5c8",
+				"Path": "/Level/Goal/Sparkle",
+				"Hash": "79c3efc218a6ecd5",
+				"Components": {
+					"Transform": "618174466fb6af9d",
+					"PrefabLink": "ea44eaad3a037e11",
+					"ParticleEmitter": "75158e41cdb24c20"
+				}
+			},
+			{
+				"Id": "ef00dea920b1b1e4",
+				"Path": "/Level",
+				"Hash": "ae82b49be59a73d9",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"RigidBody": "3147371f579c6e68"
+				}
+			},
+			{
+				"Id": "f0839816eb0ac2b9",
+				"Path": "/Level/Path/PathNode004",
+				"Hash": "b7dacb2708d734b2",
+				"Components": {
+					"Transform": "361abaa54172224b"
+				}
+			},
+			{
+				"Id": "f514a5a1725b668f",
+				"Path": "/Level/Path/PathNode027",
+				"Hash": "fceee8200cc661cf",
+				"Components": {
+					"Transform": "1f52389e6a8a643b"
+				}
+			},
+			{
+				"Id": "f795f01ca635899e",
+				"Path": "/Level/P10/Rail2",
+				"Hash": "1457afc47f43697d",
+				"Components": {
+					"Transform": "cf37bd2f2ce92e83",
+					"PrefabLink": "57bb24909cabf6f2",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "fa78b41fcc1fe1ee",
+				"Path": "/Level/Path/PathNode025",
+				"Hash": "f4ea72f5b2f96668",
+				"Components": {
+					"Transform": "60d2411b10096c9b"
+				}
+			},
+			{
+				"Id": "fcd012531498659a",
+				"Path": "/Level/P07/Rail2",
+				"Hash": "2739b3af462e261a",
+				"Components": {
+					"Transform": "cf37bd2f2ce92e83",
+					"PrefabLink": "bb78ecc1eb3e74e6",
+					"MeshRenderer": "e783f91d1d6264a3",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "fdb476827aa48879",
+				"Path": "/Level/Path/PathNode005",
+				"Hash": "05ef86bcbc04c55e",
+				"Components": {
+					"Transform": "186dfc8e70d7c660"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "0000000000000202",
+				"Path": "engine://Environments/Sky",
+				"Type": "Environment",
+				"Hash": "326cd6c99922bd8b"
+			},
+			{
+				"Handle": "03cff99d7899575e",
+				"Path": "Assets/Scripts/Checkpoint.graph",
+				"Type": "Script",
+				"Hash": "41ee3eb120995e4d"
+			},
+			{
+				"Handle": "0d39e8f65b7b6519",
+				"Path": "Assets/Scripts/Game.luau",
+				"Type": "Script",
+				"Hash": "a8be089e40339081"
+			},
+			{
+				"Handle": "0e55e883241fed0b",
+				"Path": "Assets/Materials/CheckpointIdle.material",
+				"Type": "Material",
+				"Hash": "73e5ab980762a373"
+			},
+			{
+				"Handle": "1eceb26e386625cd",
+				"Path": "Assets/Prefabs/CurveLeft.prefab",
+				"Type": "Prefab",
+				"Hash": "39799fee966df170"
+			},
+			{
+				"Handle": "2ad14fc1ecc93064",
+				"Path": "Assets/Materials/CheckpointActive.material",
+				"Type": "Material",
+				"Hash": "b6df2f5cfb6ecfe1"
+			},
+			{
+				"Handle": "392c104c7cf0be3c",
+				"Path": "Assets/Scripts/Ball.luau",
+				"Type": "Script",
+				"Hash": "1be5b91811388641"
+			},
+			{
+				"Handle": "4093d6d28bcb942f",
+				"Path": "Assets/Materials/Rail.material",
+				"Type": "Material",
+				"Hash": "99c5ce82c6db264d"
+			},
+			{
+				"Handle": "45f8255bdaac64b5",
+				"Path": "Assets/Materials/Ramp.material",
+				"Type": "Material",
+				"Hash": "009d507460c9ca52"
+			},
+			{
+				"Handle": "48e98c526c4861dc",
+				"Path": "Assets/Scenes/Level2.scene",
+				"Type": "Scene",
+				"Hash": "3738ef3324b0c11c"
+			},
+			{
+				"Handle": "4f2bbc8785bc0c83",
+				"Path": "Assets/Terrain/Valley.heightfield",
+				"Type": "Heightfield",
+				"Hash": "73498a8922974f4e"
+			},
+			{
+				"Handle": "4ff8134989f7a72c",
+				"Path": "Assets/Prefabs/Goal.prefab",
+				"Type": "Prefab",
+				"Hash": "58dcd095aaaee986"
+			},
+			{
+				"Handle": "52eb3da5098abad7",
+				"Path": "Assets/Materials/Ball.material",
+				"Type": "Material",
+				"Hash": "2db11c6db90b3692"
+			},
+			{
+				"Handle": "58e646c6b861e94e",
+				"Path": "Assets/Scenes/Level1.scene",
+				"Type": "Scene",
+				"Hash": "ea100c97c6f07e61"
+			},
+			{
+				"Handle": "5f8e51751c9ba2d5",
+				"Path": "Assets/Prefabs/Checkpoint.prefab",
+				"Type": "Prefab",
+				"Hash": "6c3bf4b76fdb1d03"
+			},
+			{
+				"Handle": "6d00294947a32653",
+				"Path": "Assets/Audio/Roll.sfx",
+				"Type": "AudioClip",
+				"Hash": "c737a45055cc6bd7"
+			},
+			{
+				"Handle": "6fcd26eb0836aaac",
+				"Path": "Assets/Prefabs/Ball.prefab",
+				"Type": "Prefab",
+				"Hash": "5e1dab81cb1e933d"
+			},
+			{
+				"Handle": "7cebe12406e9f46a",
+				"Path": "Assets/Scripts/FollowCamera.luau",
+				"Type": "Script",
+				"Hash": "0ab534c4a3ca2e57"
+			},
+			{
+				"Handle": "898431c0371ddd6d",
+				"Path": "Assets/Prefabs/CurveRight.prefab",
+				"Type": "Prefab",
+				"Hash": "88a946a73a735e86"
+			},
+			{
+				"Handle": "a5e946cae8e49ea3",
+				"Path": "Assets/Materials/Goal.material",
+				"Type": "Material",
+				"Hash": "2d86dd624bded945"
+			},
+			{
+				"Handle": "b20be608a1f8d9e2",
+				"Path": "Assets/Audio/Fall.sfx",
+				"Type": "AudioClip",
+				"Hash": "963b87f8a842e355"
+			},
+			{
+				"Handle": "b8de5701dfd6c86a",
+				"Path": "Assets/Materials/Track.material",
+				"Type": "Material",
+				"Hash": "9c855620e27a2106"
+			},
+			{
+				"Handle": "c43e5548a88f6517",
+				"Path": "Assets/Prefabs/Ramp.prefab",
+				"Type": "Prefab",
+				"Hash": "9747d4aed10d3fdd"
+			},
+			{
+				"Handle": "c76d550123c60b4a",
+				"Path": "Assets/Audio/Win.sfx",
+				"Type": "AudioClip",
+				"Hash": "a84d70f3ed158b25"
+			},
+			{
+				"Handle": "c85c1919be65c245",
+				"Path": "Assets/Prefabs/Straight.prefab",
+				"Type": "Prefab",
+				"Hash": "3856845adadef804"
+			},
+			{
+				"Handle": "f14a53660f138d90",
+				"Path": "Assets/Audio/Checkpoint.sfx",
+				"Type": "AudioClip",
+				"Hash": "4e561ebaf6b8d640"
+			},
+			{
+				"Handle": "f1e4678a07860796",
+				"Path": "Assets/Prefabs/HUD.prefab",
+				"Type": "Prefab",
+				"Hash": "a520dfd5b1e2df59"
+			},
+			{
+				"Handle": "f79a3e48177d86bc",
+				"Path": "Assets/Materials/Post.material",
+				"Type": "Material",
+				"Hash": "0b4f8029ddd0ee05"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 1,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 1
+		},
+		{
+			"Tick": 46,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.9375
+		},
+		{
+			"Tick": 47,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.875
+		},
+		{
+			"Tick": 48,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 49,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.75
+		},
+		{
+			"Tick": 50,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 51,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.625
+		},
+		{
+			"Tick": 52,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 53,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 54,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.46875
+		},
+		{
+			"Tick": 55,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.4375
+		},
+		{
+			"Tick": 57,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.40625
+		},
+		{
+			"Tick": 58,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.375
+		},
+		{
+			"Tick": 60,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 62,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 64,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.28125
+		},
+		{
+			"Tick": 67,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.25
+		},
+		{
+			"Tick": 71,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 78,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 85,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 86,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 87,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 88,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 89,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 91,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0
+		},
+		{
+			"Tick": 92,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 93,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 95,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.09375
+		},
+		{
+			"Tick": 96,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.125
+		},
+		{
+			"Tick": 98,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.15625
+		},
+		{
+			"Tick": 100,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.1875
+		},
+		{
+			"Tick": 103,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.21875
+		},
+		{
+			"Tick": 106,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.25
+		},
+		{
+			"Tick": 108,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.21875
+		},
+		{
+			"Tick": 109,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.1875
+		},
+		{
+			"Tick": 110,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.15625
+		},
+		{
+			"Tick": 111,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.125
+		},
+		{
+			"Tick": 113,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.09375
+		},
+		{
+			"Tick": 114,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 116,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 119,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0
+		},
+		{
+			"Tick": 122,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 126,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 132,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 144,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 206,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 208,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 210,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.09375
+		},
+		{
+			"Tick": 214,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.125
+		},
+		{
+			"Tick": 221,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.15625
+		},
+		{
+			"Tick": 222,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.1875
+		},
+		{
+			"Tick": 223,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.21875
+		},
+		{
+			"Tick": 224,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.25
+		},
+		{
+			"Tick": 224,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 226,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.28125
+		},
+		{
+			"Tick": 227,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3125
+		},
+		{
+			"Tick": 227,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 228,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.34375
+		},
+		{
+			"Tick": 229,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.375
+		},
+		{
+			"Tick": 230,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.40625
+		},
+		{
+			"Tick": 231,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.46875
+		},
+		{
+			"Tick": 232,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 233,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 234,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.375
+		},
+		{
+			"Tick": 234,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 235,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.34375
+		},
+		{
+			"Tick": 237,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.375
+		},
+		{
+			"Tick": 238,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.40625
+		},
+		{
+			"Tick": 240,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4375
+		},
+		{
+			"Tick": 241,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.46875
+		},
+		{
+			"Tick": 243,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 244,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 245,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 246,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 247,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.6875
+		},
+		{
+			"Tick": 248,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 249,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 250,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 253,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 254,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 254,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 255,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 257,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 260,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 260,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 261,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 262,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.71875
+		},
+		{
+			"Tick": 262,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 263,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.78125
+		},
+		{
+			"Tick": 264,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.8125
+		},
+		{
+			"Tick": 265,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.875
+		},
+		{
+			"Tick": 265,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 266,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.90625
+		},
+		{
+			"Tick": 267,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.71875
+		},
+		{
+			"Tick": 268,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 269,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 269,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 270,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 277,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 277,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 278,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 278,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 279,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.71875
+		},
+		{
+			"Tick": 280,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.75
+		},
+		{
+			"Tick": 281,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.8125
+		},
+		{
+			"Tick": 282,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.84375
+		},
+		{
+			"Tick": 282,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 283,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.8125
+		},
+		{
+			"Tick": 283,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 284,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 284,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 285,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 285,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 286,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 287,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 291,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 293,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 294,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 294,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 295,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.6875
+		},
+		{
+			"Tick": 296,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.75
+		},
+		{
+			"Tick": 297,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.78125
+		},
+		{
+			"Tick": 298,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.75
+		},
+		{
+			"Tick": 299,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 300,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 300,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 301,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 302,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 309,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 310,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 311,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 311,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 312,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 313,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 314,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 315,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.6875
+		},
+		{
+			"Tick": 317,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.46875
+		},
+		{
+			"Tick": 318,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4375
+		},
+		{
+			"Tick": 319,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.40625
+		},
+		{
+			"Tick": 321,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.375
+		},
+		{
+			"Tick": 323,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.34375
+		},
+		{
+			"Tick": 326,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3125
+		},
+		{
+			"Tick": 328,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.28125
+		},
+		{
+			"Tick": 330,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 333,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3125
+		},
+		{
+			"Tick": 334,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 337,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.1875
+		},
+		{
+			"Tick": 337,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 338,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.15625
+		},
+		{
+			"Tick": 340,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.125
+		},
+		{
+			"Tick": 344,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.09375
+		},
+		{
+			"Tick": 348,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 348,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 352,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 359,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 372,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 381,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 384,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 388,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 392,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 395,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 400,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 402,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 407,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 409,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 417,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 419,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 434,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 435,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 435,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 436,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 1
+		},
+		{
+			"Tick": 440,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.9375
+		},
+		{
+			"Tick": 441,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.90625
+		},
+		{
+			"Tick": 442,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.875
+		},
+		{
+			"Tick": 443,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.84375
+		},
+		{
+			"Tick": 444,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 445,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.78125
+		},
+		{
+			"Tick": 446,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.71875
+		},
+		{
+			"Tick": 447,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 448,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 449,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 449,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.625
+		},
+		{
+			"Tick": 450,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 451,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 451,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 453,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 455,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.5
+		},
+		{
+			"Tick": 458,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.46875
+		},
+		{
+			"Tick": 461,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.4375
+		},
+		{
+			"Tick": 466,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.40625
+		},
+		{
+			"Tick": 473,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.375
+		},
+		{
+			"Tick": 490,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 497,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.375
+		},
+		{
+			"Tick": 499,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 506,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 507,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.28125
+		},
+		{
+			"Tick": 508,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.25
+		},
+		{
+			"Tick": 509,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 511,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 512,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 513,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 515,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 517,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 519,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 521,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0
+		},
+		{
+			"Tick": 523,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 526,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 527,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 532,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 544,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 553,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 556,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 608,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 610,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 613,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 616,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.125
+		},
+		{
+			"Tick": 623,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 624,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 625,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 626,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.25
+		},
+		{
+			"Tick": 627,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.28125
+		},
+		{
+			"Tick": 629,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 629,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 630,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 631,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 632,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.4375
+		},
+		{
+			"Tick": 633,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.46875
+		},
+		{
+			"Tick": 634,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 635,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 636,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 636,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 638,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 639,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 640,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.40625
+		},
+		{
+			"Tick": 641,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.4375
+		},
+		{
+			"Tick": 643,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.46875
+		},
+		{
+			"Tick": 644,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 645,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 646,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 646,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 647,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 648,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 649,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.71875
+		},
+		{
+			"Tick": 650,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.75
+		},
+		{
+			"Tick": 651,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 651,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 652,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 653,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 654,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 654,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 656,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 658,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 660,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 663,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 664,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 665,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.75
+		},
+		{
+			"Tick": 666,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 666,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 667,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.84375
+		},
+		{
+			"Tick": 668,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.71875
+		},
+		{
+			"Tick": 669,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 670,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 670,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 671,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 674,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 677,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 678,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 679,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 679,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 680,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.71875
+		},
+		{
+			"Tick": 681,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.78125
+		},
+		{
+			"Tick": 682,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 683,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.875
+		},
+		{
+			"Tick": 683,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 684,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 684,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 685,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 686,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 687,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 688,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 688,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 690,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 693,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 695,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 696,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 697,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 698,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.75
+		},
+		{
+			"Tick": 698,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 699,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 700,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.84375
+		},
+		{
+			"Tick": 701,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.875
+		},
+		{
+			"Tick": 702,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 702,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 703,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 703,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 704,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 705,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 706,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 707,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 707,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 708,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 712,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 713,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 714,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 715,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 716,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 717,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 718,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 719,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.46875
+		},
+		{
+			"Tick": 719,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 720,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.40625
+		},
+		{
+			"Tick": 721,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 721,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 724,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 727,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 729,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.28125
+		},
+		{
+			"Tick": 732,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.25
+		},
+		{
+			"Tick": 733,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.28125
+		},
+		{
+			"Tick": 735,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 737,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 740,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 743,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 744,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 747,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.40625
+		},
+		{
+			"Tick": 751,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 751,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0
+		},
+		{
+			"Tick": 752,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 752,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 753,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 756,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 763,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.09375
+		},
+		{
+			"Tick": 767,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 789,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 806,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 834,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 836,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 853,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 854,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 856,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0
+		},
+		{
+			"Tick": 859,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 863,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 869,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 882,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 911,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 913,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 950,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 952,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 955,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 959,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.125
+		},
+		{
+			"Tick": 967,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 968,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 969,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 970,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.25
+		},
+		{
+			"Tick": 970,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 971,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.28125
+		},
+		{
+			"Tick": 973,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 973,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 974,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 975,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 976,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.4375
+		},
+		{
+			"Tick": 977,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.46875
+		},
+		{
+			"Tick": 978,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 979,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 980,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 980,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 981,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 981,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 982,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 983,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 983,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 984,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.40625
+		},
+		{
+			"Tick": 985,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.4375
+		},
+		{
+			"Tick": 986,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 987,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.46875
+		},
+		{
+			"Tick": 989,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 989,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 990,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 991,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 992,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 993,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 994,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.75
+		},
+		{
+			"Tick": 995,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.78125
+		},
+		{
+			"Tick": 995,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 996,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 997,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 998,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 998,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1001,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 1002,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 1004,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 1006,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 1007,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 1008,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.75
+		},
+		{
+			"Tick": 1009,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.8125
+		},
+		{
+			"Tick": 1009,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1010,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.71875
+		},
+		{
+			"Tick": 1010,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1011,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 1012,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 1012,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1013,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 1017,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1018,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 1020,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 1022,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1023,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 1024,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.71875
+		},
+		{
+			"Tick": 1025,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.78125
+		},
+		{
+			"Tick": 1025,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1026,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.84375
+		},
+		{
+			"Tick": 1027,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.875
+		},
+		{
+			"Tick": 1029,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 1030,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 1031,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 1032,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 1034,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 1036,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 1039,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1040,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 1041,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 1042,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.75
+		},
+		{
+			"Tick": 1043,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.78125
+		},
+		{
+			"Tick": 1043,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1044,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.84375
+		},
+		{
+			"Tick": 1045,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.875
+		},
+		{
+			"Tick": 1046,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.6875
+		},
+		{
+			"Tick": 1046,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1047,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 1047,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1048,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 1049,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 1050,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 1051,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5
+		},
+		{
+			"Tick": 1056,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1057,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.53125
+		},
+		{
+			"Tick": 1058,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.5625
+		},
+		{
+			"Tick": 1059,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.59375
+		},
+		{
+			"Tick": 1060,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.625
+		},
+		{
+			"Tick": 1061,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.65625
+		},
+		{
+			"Tick": 1063,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.4375
+		},
+		{
+			"Tick": 1063,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1064,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.40625
+		},
+		{
+			"Tick": 1065,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.375
+		},
+		{
+			"Tick": 1065,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1068,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.34375
+		},
+		{
+			"Tick": 1071,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 1073,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.28125
+		},
+		{
+			"Tick": 1077,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 1078,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.3125
+		},
+		{
+			"Tick": 1080,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.21875
+		},
+		{
+			"Tick": 1081,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 1083,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1084,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1087,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1090,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1094,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.0625
+		},
+		{
+			"Tick": 1097,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1099,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1106,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1120,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 1128,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1130,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 1133,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1134,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 1136,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 1139,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.09375
+		},
+		{
+			"Tick": 1142,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.125
+		},
+		{
+			"Tick": 1148,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.15625
+		},
+		{
+			"Tick": 1151,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.1875
+		},
+		{
+			"Tick": 1152,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.21875
+		},
+		{
+			"Tick": 1153,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.25
+		},
+		{
+			"Tick": 1155,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.28125
+		},
+		{
+			"Tick": 1156,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3125
+		},
+		{
+			"Tick": 1157,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1158,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.34375
+		},
+		{
+			"Tick": 1159,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.40625
+		},
+		{
+			"Tick": 1160,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4375
+		},
+		{
+			"Tick": 1161,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.46875
+		},
+		{
+			"Tick": 1162,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 1164,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.375
+		},
+		{
+			"Tick": 1164,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1168,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.40625
+		},
+		{
+			"Tick": 1169,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4375
+		},
+		{
+			"Tick": 1170,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.46875
+		},
+		{
+			"Tick": 1170,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1172,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 1173,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1174,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1175,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 1176,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 1177,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.71875
+		},
+		{
+			"Tick": 1178,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.75
+		},
+		{
+			"Tick": 1178,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1179,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.8125
+		},
+		{
+			"Tick": 1180,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 1181,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1182,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 1182,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1183,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 1184,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 1186,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1188,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1190,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 1191,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.6875
+		},
+		{
+			"Tick": 1192,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.75
+		},
+		{
+			"Tick": 1193,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.8125
+		},
+		{
+			"Tick": 1193,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1195,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 1195,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1196,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 1197,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1198,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1198,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1199,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 1200,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1201,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1202,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1205,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 1206,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1207,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.6875
+		},
+		{
+			"Tick": 1208,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.71875
+		},
+		{
+			"Tick": 1209,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.78125
+		},
+		{
+			"Tick": 1209,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1210,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.8125
+		},
+		{
+			"Tick": 1211,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.875
+		},
+		{
+			"Tick": 1212,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.90625
+		},
+		{
+			"Tick": 1213,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.6875
+		},
+		{
+			"Tick": 1213,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1214,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 1214,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1215,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 1216,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1217,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1221,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1223,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1224,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 1225,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.6875
+		},
+		{
+			"Tick": 1226,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.75
+		},
+		{
+			"Tick": 1227,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.78125
+		},
+		{
+			"Tick": 1227,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1228,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.84375
+		},
+		{
+			"Tick": 1229,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.875
+		},
+		{
+			"Tick": 1230,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 1230,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.09375
+		},
+		{
+			"Tick": 1231,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 1231,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1232,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1233,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1234,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 1235,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5
+		},
+		{
+			"Tick": 1240,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1241,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.53125
+		},
+		{
+			"Tick": 1242,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.5625
+		},
+		{
+			"Tick": 1243,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1244,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.625
+		},
+		{
+			"Tick": 1245,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.65625
+		},
+		{
+			"Tick": 1246,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.59375
+		},
+		{
+			"Tick": 1247,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.4375
+		},
+		{
+			"Tick": 1247,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1248,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.40625
+		},
+		{
+			"Tick": 1248,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1249,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.375
+		},
+		{
+			"Tick": 1252,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.34375
+		},
+		{
+			"Tick": 1255,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3125
+		},
+		{
+			"Tick": 1257,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.28125
+		},
+		{
+			"Tick": 1260,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.1875
+		},
+		{
+			"Tick": 1262,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.3125
+		},
+		{
+			"Tick": 1265,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.1875
+		},
+		{
+			"Tick": 1265,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.15625
+		},
+		{
+			"Tick": 1267,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.15625
+		},
+		{
+			"Tick": 1270,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.125
+		},
+		{
+			"Tick": 1274,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.09375
+		},
+		{
+			"Tick": 1278,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.0625
+		},
+		{
+			"Tick": 1281,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0.125
+		},
+		{
+			"Tick": 1283,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -0.03125
+		},
+		{
+			"Tick": 1289,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1303,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1309,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1311,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1315,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1318,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1321,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1325,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1328,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1334,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1336,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1342,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1344,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1348,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0.03125
+		},
+		{
+			"Tick": 1350,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 1350,
+			"Type": "Action",
+			"Name": "MoveZ",
+			"Value": 0
+		}
+	],
+	"Expect": [],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "2ae8e5d4869f5c0d"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "8659a1dec6d871b1"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "229434a5bfa0faf5"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "33fab3122228d86e"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "2b1cae2d9e6447c1"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "32a02a7293347033"
+		},
+		{
+			"Tick": 420,
+			"StateHash": "5627ae4b9dd14c7e"
+		},
+		{
+			"Tick": 480,
+			"StateHash": "35df82e83df3a8ab"
+		},
+		{
+			"Tick": 540,
+			"StateHash": "e8d5cab8d7703ffa"
+		},
+		{
+			"Tick": 600,
+			"StateHash": "fc124092c76b22ad"
+		},
+		{
+			"Tick": 660,
+			"StateHash": "51ee94c20f598091"
+		},
+		{
+			"Tick": 720,
+			"StateHash": "f4b60b1b5cde121b"
+		},
+		{
+			"Tick": 780,
+			"StateHash": "87360b0a2e403783"
+		},
+		{
+			"Tick": 840,
+			"StateHash": "26d26b92dd5da922"
+		},
+		{
+			"Tick": 900,
+			"StateHash": "e0f820d28490bfa4"
+		},
+		{
+			"Tick": 960,
+			"StateHash": "73cb1320c156a872"
+		},
+		{
+			"Tick": 1020,
+			"StateHash": "5e90acbcf49b6930"
+		},
+		{
+			"Tick": 1080,
+			"StateHash": "0d4513ce3823bc6e"
+		},
+		{
+			"Tick": 1140,
+			"StateHash": "9d9f96ed37eb11e5"
+		},
+		{
+			"Tick": 1200,
+			"StateHash": "a5b58a2c13fbcbe9"
+		},
+		{
+			"Tick": 1260,
+			"StateHash": "21a37bb2a61e138e"
+		},
+		{
+			"Tick": 1320,
+			"StateHash": "fe1ec3454c9db87b"
+		}
+	],
+	"FinalTick": 1380,
+	"FinalStateHash": "03f4835d637dba17"
+}

@@ -1,0 +1,68 @@
+{
+	"Format": "Prefab",
+	"Version": 1,
+	"Name": "Gap",
+	"Root": "baac693b632176ea",
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"BoxCollider": 1
+	},
+	"Entities": [
+		{
+			"ID": "baac693b632176ea",
+			"Name": "Gap",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				}
+			}
+		},
+		{
+			"ID": "cef138c7d25d4cde",
+			"Name": "Kicker",
+			"Parent": "baac693b632176ea",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -0.045, -1.049],
+					"Rotation": [0.098538205, 0, 0, 0.9951333],
+					"Scale": [4, 0.5, 2.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["a042aad7849ce7a8"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "febcc1ab95bf5ade",
+			"Name": "GapMarker",
+			"Parent": "baac693b632176ea",
+			"Active": true,
+			"Tags": ["Gap"],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -3.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [4.4, 6, 3.2]
+				}
+			}
+		}
+	]
+}
