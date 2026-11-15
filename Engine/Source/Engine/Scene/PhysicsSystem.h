@@ -357,9 +357,10 @@ namespace Engine {
 		// PreStep's rebuilds (its item 1, with item 2's pairs across rebuilds and the partners it wakes) alone, without its
 		// kinematic moves, teleports and character updates, when a component change marked an owner since the last PreStep
 		// or synchronization; nothing otherwise. The play session runs it before every round of a start flush (§5.7 step 2,
-		// the frame phase's and the session setup's; ADR 0038 decision 14), after a TransformSystem::Update, so an entity has
-		// its body from its OnStart on, wherever it was created. Diagnostics are heard by the listener as PreStep's are. Not
-		// from a listener callback (asserted).
+		// and the startup flushes of the session and of Scene.Load and Scene.Reload; ADR 0038 decision 14), after a
+		// TransformSystem::Update, so an entity has its body from its OnStart on, wherever it was created, and every physics
+		// component or Active change made after a tick's PreStep is in force at the next tick's OnFixedUpdate. Diagnostics are
+		// heard by the listener as PreStep's are. Not from a listener callback (asserted).
 		void SynchronizeBodies();
 		// A step error (PHYSICS_LIMIT_EXCEEDED) is recorded as a diagnostic and logged once; the session keeps running.
 		void Step(const SimStep& step);

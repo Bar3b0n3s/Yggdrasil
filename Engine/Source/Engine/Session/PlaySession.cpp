@@ -504,8 +504,9 @@ namespace Engine {
 		// sprite sheets through the session's asset manager; null without one, since no sheet can load then and the phase
 		// changes nothing.
 		[[nodiscard]] Result<Scope<SpriteAnimationSystem>> CreateSpriteAnimation(Scene& scene) const;
-		// Creates and starts the scene's instances; a failure is reported as the session error of `transition`, the request
-		// that made the scene current (ReportSessionError).
+		// Creates and starts the scene's instances, then flushes what their startup callbacks destroyed or disabled (ADR 0038
+		// decision 14); a failure is reported as the session error of `transition`, the request that made the scene current
+		// (ReportSessionError).
 		void StartScripts(std::string_view transition);
 		void FlushDestroyed();
 		// OK while the frame may still request a scene transition: one per frame, none during a replacement or after a stop
@@ -795,6 +796,9 @@ namespace Engine {
 		for (const PhysicsDiagnostic& diagnostic : Physics2D->GetDiagnostics())
 			Scripts->OnPhysics2DDiagnostic(diagnostic);
 		Scripts->StartPending();
+		// ADR 0038 decision 14: what the startup callbacks destroyed or disabled leaves here, in the step view, with its
+		// OnDisable, OnDestroy and synthesized exits, so it is gone before the first tick however the frames group the ticks.
+		FlushDestroyed();
 	}
 
 	void PlaySession::State::FlushDestroyed()

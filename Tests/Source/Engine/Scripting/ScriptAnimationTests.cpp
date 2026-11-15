@@ -442,8 +442,7 @@ return Script.Define("Spawner", S)
 			session->SetExtractionEnabled(false);
 			Test::RunTicks(*session, 3);
 			CHECK(session->GetScriptErrors().GetErrors().empty());
-			// The event of tick 0 waited for the instance's OnStart (the frame's start flush after tick 0) and arrived once, at
-			// tick 1's start flush.
+			// The event of tick 0 waited for the instance's OnStart, at tick 1's start flush, which then delivered it once.
 			CHECK(ReadTrace(session->GetScene()) == std::vector<std::string>{ "start", "Begin" });
 		}
 

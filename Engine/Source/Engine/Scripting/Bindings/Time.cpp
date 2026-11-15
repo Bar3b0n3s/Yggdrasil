@@ -87,9 +87,9 @@ namespace Engine {
 				.Function("GetFixedDeltaTime", &Utils::TimeFixedDelta, "() -> number", "Returns the session's fixed step in seconds.", read)
 				.Function("GetTime", &Utils::TimeSimulation, "() -> number", "Returns simulation seconds: tick multiplied by fixed delta.", read)
 				.Function("GetTick", &Utils::TimeTick, "() -> number", "Returns the current simulation tick.", read)
-				.Function("GetFrameCount", &Utils::TimeFrame, "() -> number", "Returns the current rendered-frame index.", read)
+				.Function("GetFrameCount", &Utils::TimeFrame, "() -> number", "Returns the current rendered-frame index. It counts rendered frames, not ticks, so it depends on the frame rate (one a tick in lockstep, any number in live play): for presentation and tests, never for gameplay or hashed state.", read)
 				.Function("GetTimeScale", &Utils::TimeScale, "() -> number", "Returns the current session time scale.", read)
-				.Function("SetTimeScale", &Utils::TimeSetScale, "(scale: number) -> ()", "Sets the session time scale in [0, 100]; refused during read-only evaluation.")
+				.Function("SetTimeScale", &Utils::TimeSetScale, "(scale: number) -> ()", "Sets the session time scale in [0, 100]; refused during read-only evaluation. At 0 frames run without a fixed step, so an entity created meanwhile (in OnUpdate, OnLateUpdate or by an evaluation) gets no OnStart or OnUpdate until the first tick after the scale returns: spawn what must run while paused before setting the scale to 0, or pause with a flag.")
 				.Function("GetInterpolationAlpha", &Utils::TimeAlpha, "() -> number", "Returns one during the fixed phase, otherwise this frame's interpolation alpha.", read)
 				.Function("GetRealTime", &Utils::TimeReal, "() -> number", "Returns monotonic wall-clock seconds from an unspecified epoch. Nondeterministic; never use for gameplay.", read);
 			return {};

@@ -12,7 +12,9 @@
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
+#include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -28,6 +30,7 @@
 
 #include <algorithm>
 #include <format>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -89,19 +92,28 @@ namespace Engine {
 			std::vector<ScriptError> FatalErrors{};
 		};
 
-		// Runs `ticks` ticks of `session` in frames of `stepsPerFrame` fixed steps each (the last frame holds the rest), each
-		// frame ending with its frame phase, as a ScriptedClock groups ticks into frames; one step a frame is lockstep's.
-		static void RunGroupedTicks(PlaySession& session, uint32_t ticks, uint32_t stepsPerFrame)
+		// Runs one frame of `session` per element of `frames`, each that many fixed steps then the frame phase, as a ScriptedClock
+		// or live play groups ticks into frames. A frame of no step (live play above the tick rate, a short suite Clock) lasts
+		// half a fixed delta.
+		static void RunFrames(PlaySession& session, std::span<const uint32_t> frames)
 		{
-			for (uint32_t done = 0; done < ticks;)
+			for (const uint32_t steps : frames)
 			{
-				const uint32_t steps = std::min(stepsPerFrame, ticks - done);
 				for (uint32_t step = 0; step < steps; ++step)
 					session.FixedStep();
-				done += steps;
-				const double delta = static_cast<double>(steps) * session.GetFixedDelta();
+				const double delta = steps == 0 ? session.GetFixedDelta() / 2.0 : static_cast<double>(steps) * session.GetFixedDelta();
 				session.FrameUpdate(FrameTime{ .DeltaTime = delta, .UnscaledDeltaTime = delta, .Alpha = 1.0, .FrameIndex = 0 });
 			}
+		}
+
+		// Runs `ticks` ticks of `session` in frames of `stepsPerFrame` fixed steps each (the last frame holds the rest); one step
+		// a frame is lockstep's grouping.
+		static void RunGroupedTicks(PlaySession& session, uint32_t ticks, uint32_t stepsPerFrame)
+		{
+			std::vector<uint32_t> frames;
+			for (uint32_t done = 0; done < ticks; done += frames.back())
+				frames.push_back(std::min(stepsPerFrame, ticks - done));
+			RunFrames(session, frames);
 		}
 
 		// Nest.luau: an entity named "Level<n>" records its OnStart's tick and its first OnFixedUpdate's tick, moves one unit
@@ -1068,11 +1080,12 @@ return Script.Define("Loader", T)
 
 		// ADR 0038 decision 14 (the lead's follow-up decision): an entity created during a session starts only in a fixed
 		// step's start flush, never in the frame phase, so its OnStart reads the tick's input view and delta, and what it
-		// destroys leaves before the tick's physics step, however the ticks are grouped into frames. Before it, an entity
-		// created in the fixed step that ended a frame (every tick in lockstep) started in the frame phase: Early read the
-		// frame view (Move still 0) in lockstep and the next tick's step view (1) on two or three steps a frame, Late read a
-		// delta of two fixed steps when its tick ended a frame of two, and the Floor Early destroys still held the Ball in
-		// the next tick's physics step when that tick shared Early's frame.
+		// destroys leaves at that tick's destroy flush (step 8), after its physics step, however the ticks are grouped into
+		// frames. Before it, an entity created in the fixed step that ended a frame (every tick in lockstep) started in the
+		// frame phase: Early read the frame view (Move still 0) in lockstep and the next tick's step view (1) on two or three
+		// steps a frame, Late read a delta of two fixed steps when its tick ended a frame of two, and the Floor Early
+		// destroys left before the next tick's physics step in lockstep, while it still held the Ball there when that tick
+		// shared Early's frame.
 		TEST_CASE("PlaySession: what a spawned entity's OnStart reads and destroys is the same however the ticks are grouped into frames")
 		{
 			Test::ScriptTestFixture fixture;
@@ -1111,6 +1124,260 @@ return Script.Define("Spawner", T)
 				const Test::GroupedRun grouped = Test::RunGroupedWithMove(fixture, 6, steps);
 				CHECK(grouped.Trace == lockstep.Trace);
 				CHECK(grouped.StateHash == lockstep.StateHash);
+			}
+		}
+
+		// Decision 14 (the start-order review's finding 1): the startup flush of the session and of a scene transition is
+		// followed at once by a destroy and disable flush in the step view, so what the startup callbacks destroy or disable
+		// (with its OnDisable and OnDestroy) is gone before the first tick, whether the first frame runs a fixed step
+		// (lockstep) or none (live play above the tick rate). Before it, those requests waited for the next flush: tick 0's
+		// step 8 in lockstep, after its physics step, or a frame of no step's frame-phase flush, in the frame view, before it.
+		TEST_CASE("PlaySession: what the startup callbacks destroy or disable is gone before the first tick, whether the first frame runs a fixed step or none")
+		{
+			static constexpr std::string_view TracerSource = R"(local T = {}
+local function trace(self, what: string)
+	Scene.CreateEntity("trace:" .. self.Entity.Name .. ":" .. what .. ":" .. tostring(math.floor(Time.GetDeltaTime() * 6000 + 0.5)))
+end
+function T:OnDisable()
+	trace(self, "disable")
+end
+function T:OnDestroy()
+	trace(self, "destroy")
+end
+return Script.Define("Tracer", T)
+)";
+			static constexpr std::string_view ClearerSource = R"(local T = {}
+function T:OnStart()
+	(Scene.FindByName("Floor") :: Entity):Destroy();
+	(Scene.FindByName("Shelf") :: Entity):SetActive(false)
+end
+return Script.Define("Clearer", T)
+)";
+			// A Ball resting on Floor, which the Clearer's OnStart destroys, and another on Shelf, which it disables.
+			const auto build = [](Scene& scene, AssetHandle tracer, AssetHandle clearer)
+			{
+				const Entity floor = Test::AddBoxBody(scene, "Floor", glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(1.0f, 0.5f, 1.0f), BodyType::Static);
+				static_cast<void>(Test::AddSphereBody(scene, "BallOnFloor", glm::vec3(0.0f, 0.5f, 0.0f), 0.5f, BodyType::Dynamic));
+				const Entity shelf = Test::AddBoxBody(scene, "Shelf", glm::vec3(5.0f, -0.5f, 0.0f), glm::vec3(1.0f, 0.5f, 1.0f), BodyType::Static);
+				static_cast<void>(Test::AddSphereBody(scene, "BallOnShelf", glm::vec3(5.0f, 0.5f, 0.0f), 0.5f, BodyType::Dynamic));
+				Test::AttachSessionScript(floor, tracer);
+				Test::AttachSessionScript(shelf, tracer);
+				Test::AttachSessionScript(scene.CreateEntity("Clearer"), clearer);
+			};
+			const auto run = [](Test::ScriptTestFixture& fixture, std::span<const uint32_t> frames, uint32_t bodiesAtStart)
+			{
+				auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+				REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+				auto session = std::move(*created);
+				session->SetExtractionEnabled(false);
+				CHECK(session->GetPhysics().GetStats().BodyCount == bodiesAtStart);
+				Test::RunFrames(*session, frames);
+				CHECK(session->GetScriptErrors().GetErrors().empty());
+				return Test::GroupedRun{ Test::SessionTrace(session->GetScene()), session->ComputeStateHash() };
+			};
+			// OnDisable at once in the OnStart, then the flush's teardown and destruction in reverse canonical order, all in
+			// the step view (a fixed delta, 100 here).
+			const std::vector<std::string> expected = { "Shelf:disable:100", "Shelf:destroy:100", "Floor:destroy:100" };
+			SUBCASE("at session start")
+			{
+				Test::ScriptTestFixture fixture;
+				const AssetHandle tracer(0x710091), clearer(0x710092);
+				REQUIRE(fixture.AddScript(tracer, "Assets/Scripts/Tracer.luau", std::string(TracerSource)));
+				REQUIRE(fixture.AddScript(clearer, "Assets/Scripts/Clearer.luau", std::string(ClearerSource)));
+				build(fixture.GetScene(), tracer, clearer);
+				const std::vector<uint32_t> lockstep(6, 1);
+				std::vector<uint32_t> firstFrameWithoutStep(6, 1);
+				firstFrameWithoutStep.insert(firstFrameWithoutStep.begin(), 0);
+				// The two balls' bodies are left at the start: the startup flush removed Floor's and Shelf's.
+				const Test::GroupedRun stepped = run(fixture, lockstep, 2);
+				CHECK(stepped.Trace == expected);
+				const Test::GroupedRun unstepped = run(fixture, firstFrameWithoutStep, 2);
+				CHECK(unstepped.Trace == stepped.Trace);
+				CHECK(unstepped.StateHash == stepped.StateHash);
+			}
+			SUBCASE("after Scene.Load")
+			{
+				Test::ScriptTestFixture fixture;
+				const AssetHandle tracer(0x710093), clearer(0x710094), loader(0x710095), secondScene(0x710096);
+				REQUIRE(fixture.AddScript(tracer, "Assets/Scripts/Tracer.luau", std::string(TracerSource)));
+				REQUIRE(fixture.AddScript(clearer, "Assets/Scripts/Clearer.luau", std::string(ClearerSource)));
+				REQUIRE(fixture.AddScript(loader, "Assets/Scripts/Loader.luau", R"(local T = {}
+function T:OnFixedUpdate()
+	Scene.Load(Assets.Load("Assets/Scenes/Second.scene"))
+end
+return Script.Define("Loader", T)
+)"));
+				Test::SceneTestFixture second;
+				build(second.GetScene(), tracer, clearer);
+				auto document = SceneSerializer::ToJson(second.GetScene());
+				REQUIRE(document);
+				auto data = CreateRef<SceneData>();
+				data->Document = CreateRef<const Json>(std::move(*document));
+				fixture.GetAssetManager().Publish(secondScene, data, "Assets/Scenes/Second.scene");
+				Test::AttachSessionScript(fixture.GetScene().CreateEntity("Loader"), loader);
+				// Tick 0 requests the load, which applies at its frame's end; then lockstep, or a frame of no step first.
+				const std::vector<uint32_t> lockstep(7, 1);
+				std::vector<uint32_t> secondFrameWithoutStep(7, 1);
+				secondFrameWithoutStep.insert(secondFrameWithoutStep.begin() + 1, 0);
+				const Test::GroupedRun stepped = run(fixture, lockstep, 0);
+				CHECK(stepped.Trace == expected);
+				const Test::GroupedRun unstepped = run(fixture, secondFrameWithoutStep, 0);
+				CHECK(unstepped.Trace == stepped.Trace);
+				CHECK(unstepped.StateHash == stepped.StateHash);
+			}
+		}
+
+		// Decision 14 (the start-order review's finding 2): an entity created while no tick runs (time scale 0: the host's
+		// clock runs frames without a fixed step) starts at the first tick after the scale returns, so until then it gets no
+		// OnStart and no OnUpdate.
+		TEST_CASE("PlaySession: an entity created while the time scale is 0 starts at the first tick after it returns")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle menuScript(0x710097), pauserScript(0x710098);
+			REQUIRE(fixture.AddScript(menuScript, "Assets/Scripts/Menu.luau", R"(local T = {}
+local function trace(self, what: string)
+	Scene.CreateEntity("trace:" .. self.Entity.Name .. ":" .. what .. ":" .. Time.GetTick())
+end
+function T:OnStart()
+	trace(self, "start")
+end
+function T:OnUpdate()
+	if not self.Updated then
+		self.Updated = true
+		trace(self, "update")
+	end
+end
+return Script.Define("Menu", T)
+)"));
+			REQUIRE(fixture.AddScript(pauserScript, "Assets/Scripts/Pauser.luau", R"(local T = {}
+function T:OnUpdate()
+	if Time.GetTimeScale() == 0 and not self.Spawned then
+		self.Spawned = true
+		local menu = Scene.CreateEntity("Menu")
+		menu:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Menu.luau"), Fields = {}, ExecutionOrder = 0}}})
+	end
+end
+return Script.Define("Pauser", T)
+)"));
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Pauser"), pauserScript);
+			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			Test::RunTicks(*session, 2);
+			REQUIRE(session->SetTimeScale(0.0));
+			// Paused: frames without a fixed step, as the host's clock runs them at scale 0; the Pauser spawns the Menu in the
+			// first, which then gets no OnStart and no OnUpdate.
+			Test::RunFrames(*session, std::vector<uint32_t>(4, 0));
+			CHECK(session->GetScene().FindEntityByPath("/Menu").IsValid());
+			CHECK(Test::SessionTrace(session->GetScene()).empty());
+			REQUIRE(session->SetTimeScale(1.0));
+			Test::RunTicks(*session, 1);
+			CHECK(Test::SessionTrace(session->GetScene()) == std::vector<std::string>{ "Menu:start:2", "Menu:update:3" });
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+		}
+
+		// Decision 14 (the start-order review's finding 4): the start flush's body synchronization applies every physics
+		// component and Active change made after a tick's pre-step, not only a new entity's body, at the next tick's step 2,
+		// before OnFixedUpdate: a RigidBody type a collision callback changed and an entity OnUpdate re-enabled are in force in
+		// the next OnFixedUpdate, in 3D and 2D. Before it, both waited for that tick's pre-step, after OnFixedUpdate.
+		TEST_CASE("PlaySession: a physics component or Active change made after a tick's pre-step is in force at the next tick's OnFixedUpdate")
+		{
+			for (const bool is2D : { false, true })
+			{
+				CAPTURE(is2D);
+				Test::ScriptTestFixture fixture;
+				const AssetHandle freezerScript(0x710099), ballScript(0x71009a), observerScript(0x71009b);
+				const std::string body = is2D ? "RigidBody2D" : "RigidBody";
+				REQUIRE(fixture.AddScript(freezerScript, "Assets/Scripts/Freezer.luau", std::format(R"(local T = {{}}
+function T:{}(other)
+	if not self.Done then
+		self.Done = true
+		other.{}.Type = "Kinematic"
+		other:GetScript().Frozen = true
+	end
+end
+return Script.Define("Freezer", T)
+)",
+																							is2D ? "OnCollisionEnter2D" : "OnCollisionEnter", body)));
+				const std::string move = is2D ? "self.Entity.RigidBody2D:MoveKinematic(vector.create(position.x, position.y, 0), 0)"
+											  : "self.Entity.RigidBody:MoveKinematic(position, self.Entity.Transform.WorldRotation)";
+				REQUIRE(fixture.AddScript(ballScript, "Assets/Scripts/Ball.luau", std::format(R"(local T = {{}}
+function T:OnFixedUpdate()
+	if self.Frozen and not self.Checked then
+		self.Checked = true
+		local position = self.Entity.Transform.WorldPosition
+		local kinematic = pcall(function() {} end)
+		Scene.CreateEntity("trace:kinematic:" .. tostring(kinematic))
+	end
+end
+return Script.Define("Ball", T)
+)",
+																					  move)));
+				const std::string overlap = is2D ? "Physics2D.OverlapCircle(vector.create(20, 0, 0), 0.1)" : "Physics.OverlapSphere(vector.create(20, 0, 0), 0.1)";
+				REQUIRE(fixture.AddScript(observerScript, "Assets/Scripts/Observer.luau", std::format(R"(local T = {{}}
+function T:OnUpdate()
+	if not self.Enabled then
+		self.Enabled = true
+		(Scene.FindByName("Pooled") :: Entity):SetActive(true)
+	end
+end
+function T:OnFixedUpdate()
+	if self.Enabled and not self.Checked then
+		self.Checked = true
+		Scene.CreateEntity("trace:pooled:" .. tostring(#{} > 0))
+	end
+end
+return Script.Define("Observer", T)
+)",
+																							  overlap)));
+				Scene& editScene = fixture.GetScene();
+				Entity floor = editScene.CreateEntity("Floor");
+				Entity ball = editScene.CreateEntity("Ball");
+				Entity pooled = editScene.CreateEntity("Pooled");
+				floor.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, -0.5f, 0.0f);
+				});
+				ball.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 0.5f, 0.0f);
+				});
+				pooled.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(20.0f, 0.0f, 0.0f);
+				});
+				if (is2D)
+				{
+					floor.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Static });
+					floor.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(2.0f, 0.5f) });
+					ball.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .AllowSleeping = false });
+					ball.AddComponent<CircleCollider2DComponent>();
+					pooled.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Static });
+					pooled.AddComponent<BoxCollider2DComponent>();
+				}
+				else
+				{
+					floor.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+					floor.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(2.0f, 0.5f, 2.0f) });
+					ball.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .AllowSleeping = false });
+					ball.AddComponent<SphereColliderComponent>();
+					pooled.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+					pooled.AddComponent<BoxColliderComponent>();
+				}
+				pooled.SetActive(false);
+				Test::AttachSessionScript(floor, freezerScript);
+				Test::AttachSessionScript(ball, ballScript);
+				Test::AttachSessionScript(editScene.CreateEntity("Observer"), observerScript);
+				auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+				REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+				auto session = std::move(*created);
+				session->SetExtractionEnabled(false);
+				Test::RunTicks(*session, 30);
+				CHECK(session->GetScriptErrors().GetErrors().empty());
+				std::vector<std::string> trace = Test::SessionTrace(session->GetScene());
+				std::ranges::sort(trace);
+				CHECK(trace == std::vector<std::string>{ "kinematic:true", "pooled:true" });
 			}
 		}
 

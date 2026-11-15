@@ -874,7 +874,7 @@ Active-scene operations; searches return canonical order and never expose pendin
 
 `(name: string?, parent: Entity?) -> Entity`
 
-Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. Its OnStart runs at the next start flush, before its first update: the running one when called from an OnStart or an OnCreate it runs, the scene's startup flush when called from a startup OnCreate, otherwise the next fixed step's, before that tick's OnFixedUpdate; never in the frame phase, so OnUpdate and OnLateUpdate pass it by until then, and a physics body it is given (3D or 2D) exists from that OnStart on, wherever it was created; before that OnStart (in the creating callback, for example) it need not exist yet: Physics.GetBodyBounds is nil and the body methods raise 'has no physics body' (RigidBody2D's 'has no 2D physics body').
+Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. Its OnStart runs at the next start flush, before its first update: the running one when called from an OnStart or an OnCreate it runs, the scene's startup flush when called from a startup OnCreate, otherwise the next fixed step's, before that tick's OnFixedUpdate; never in the frame phase, so OnUpdate and OnLateUpdate pass it by until then (while the time scale is 0, until the first tick after it returns), and a physics body it is given (3D or 2D) exists from that OnStart on, wherever it was created; before that OnStart (in the creating callback, for example) it need not exist yet: Physics.GetBodyBounds is nil and the body methods raise 'has no physics body' (RigidBody2D's 'has no 2D physics body').
 
 All modes; Runtime|Test; mutates.
 
@@ -1322,7 +1322,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> number`
 
-Returns the current rendered-frame index.
+Returns the current rendered-frame index. It counts rendered frames, not ticks, so it depends on the frame rate (one a tick in lockstep, any number in live play): for presentation and tests, never for gameplay or hashed state.
 
 All modes; Runtime|Test; pure/read.
 
@@ -1370,7 +1370,7 @@ All modes; Runtime|Test; pure/read.
 
 `(scale: number) -> ()`
 
-Sets the session time scale in [0, 100]; refused during read-only evaluation.
+Sets the session time scale in [0, 100]; refused during read-only evaluation. At 0 frames run without a fixed step, so an entity created meanwhile (in OnUpdate, OnLateUpdate or by an evaluation) gets no OnStart or OnUpdate until the first tick after the scale returns: spawn what must run while paused before setting the scale to 0, or pause with a flag.
 
 All modes; Runtime|Test; mutates.
 
@@ -1762,7 +1762,7 @@ All modes; Runtime|Test; mutates.
 
 `(self: ScriptInstance) -> ()`
 
-Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before that tick's OnFixedUpdate (or in the running start flush, when an OnStart creates it), never in the frame phase, so it reads the tick's input and fixed delta whatever the frame rate. Its physics bodies exist from then on.
+Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before that tick's OnFixedUpdate (or in the running start flush, when an OnStart, or an OnCreate run by a start flush or a scene's startup, creates it), never in the frame phase, so it reads the tick's input and fixed delta whatever the frame rate. Its physics bodies exist from then on. While no tick runs (time scale 0) an entity created meanwhile gets no OnStart, and so no OnUpdate, until the first tick after the scale returns.
 
 All modes; Runtime|Test; mutates.
 

@@ -81,7 +81,8 @@ namespace Engine {
 								 //     Simulate, with or without a canvas (without one it reads no input and keeps the interaction
 								 //     state empty). C22.3 (decisions 47 and 50) adds the step's text and editing keys and, while
 								 //     the layout holds a World canvas, the pointer's ray through the primary camera
-		StartFlush,              // 2: the start flush (M13; empty), the only one during a session (the frame phase runs none):
+		StartFlush,              // 2: the start flush (M13; empty), the only one in a tick (the frame phase runs none; the
+								 //    session's and a scene transition's startup run their own, followed by a destroy flush):
 								 //    in rounds until no instance waits, the physics bodies of changed components synchronized
 								 //    (both worlds), then OnStart of the instances created or enabled since the last flush,
 								 //    canonical order, those the round's own callbacks create starting in the next round

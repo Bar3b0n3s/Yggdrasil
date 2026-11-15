@@ -587,8 +587,10 @@ namespace Engine {
 			behaviour.Callback("OnStart", "(self: ScriptInstance) -> ()",
 				"Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a "
 				"Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before "
-				"that tick's OnFixedUpdate (or in the running start flush, when an OnStart creates it), never in the frame phase, so it reads the tick's "
-				"input and fixed delta whatever the frame rate. Its physics bodies exist from then on.");
+				"that tick's OnFixedUpdate (or in the running start flush, when an OnStart, or an OnCreate run by a start flush or a scene's startup, "
+				"creates it), never in the frame phase, so it reads the tick's input and fixed delta whatever the frame rate. Its physics bodies exist "
+				"from then on. While no tick runs (time scale 0) an entity created meanwhile gets no OnStart, and so no OnUpdate, until the first tick "
+				"after the scale returns.");
 			for (const char* name : { "OnDestroy", "OnEnable", "OnDisable" })
 				behaviour.Callback(name, "(self: ScriptInstance) -> ()", "Called at the corresponding lifecycle transition.");
 			for (const char* name : { "OnFixedUpdate", "OnUpdate", "OnLateUpdate" })
