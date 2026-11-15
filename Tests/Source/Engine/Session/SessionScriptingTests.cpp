@@ -8,7 +8,10 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/AudioSystem.h"
+#include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/CircleCollider2DComponent.h"
+#include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -85,6 +88,117 @@ namespace Engine {
 			std::vector<std::string> Phases{};
 			std::vector<ScriptError> FatalErrors{};
 		};
+
+		// Runs `ticks` ticks of `session` in frames of `stepsPerFrame` fixed steps each (the last frame holds the rest), each
+		// frame ending with its frame phase, as a ScriptedClock groups ticks into frames; one step a frame is lockstep's.
+		static void RunGroupedTicks(PlaySession& session, uint32_t ticks, uint32_t stepsPerFrame)
+		{
+			for (uint32_t done = 0; done < ticks;)
+			{
+				const uint32_t steps = std::min(stepsPerFrame, ticks - done);
+				for (uint32_t step = 0; step < steps; ++step)
+					session.FixedStep();
+				done += steps;
+				const double delta = static_cast<double>(steps) * session.GetFixedDelta();
+				session.FrameUpdate(FrameTime{ .DeltaTime = delta, .UnscaledDeltaTime = delta, .Alpha = 1.0, .FrameIndex = 0 });
+			}
+		}
+
+		// Nest.luau: an entity named "Level<n>" records its OnStart's tick and its first OnFixedUpdate's tick, moves one unit
+		// along X in every OnFixedUpdate (so the state hash counts them), and its OnStart creates "Level<n + 1>" with the same
+		// behaviour up to "Level<depth>".
+		static std::string NestSource(int depth)
+		{
+			return std::format(R"(local T = {{}}
+local Depth = {}
+local function trace(self, what: string)
+	Scene.CreateEntity("trace:" .. self.Entity.Name .. ":" .. what)
+end
+function T:OnStart()
+	self.Fixed = 0
+	trace(self, "start:" .. Time.GetTick())
+	local level = tonumber(string.sub(self.Entity.Name, 6)) :: number
+	if level < Depth then
+		local child = Scene.CreateEntity("Level" .. (level + 1))
+		child:AddComponent("Script", {{Scripts = {{{{Script = Assets.Load("Assets/Scripts/Nest.luau"), Fields = {{}}, ExecutionOrder = 0}}}}}})
+	end
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	if self.Fixed == 1 then
+		trace(self, "fixed:" .. Time.GetTick())
+	end
+	self.Entity.Transform:Translate(vector.create(1, 0, 0))
+end
+return Script.Define("Nest", T)
+)",
+				depth);
+		}
+
+		// The Luau that creates Level1 with Nest.luau.
+		inline constexpr std::string_view SpawnLevel1 = R"(local level = Scene.CreateEntity("Level1")
+	level:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Nest.luau"), Fields = {}, ExecutionOrder = 0}}}))";
+
+		// The Luau of a local Spawn(name, x): a Kinematic probe "<name>" at (x, 0, 0) with Probe.luau, its body in the 3D world
+		// or, with `is2D`, the 2D one.
+		static std::string ProbeSpawnSource(bool is2D)
+		{
+			return std::format(R"(local function Spawn(name: string, x: number)
+	local entity = Scene.CreateEntity(name)
+	entity.Transform.Translation = vector.create(x, 0, 0)
+	entity:AddComponent("{}", {{HalfExtents = vector.create(1, 0.25, {})}})
+	entity:AddComponent("{}", {{Type = "Kinematic"}})
+	entity:AddComponent("Script", {{Scripts = {{{{Script = Assets.Load("Assets/Scripts/Probe.luau"), Fields = {{}}, ExecutionOrder = 0}}}}}})
+end
+)",
+				is2D ? "BoxCollider2D" : "BoxCollider", is2D ? 0 : 1, is2D ? "RigidBody2D" : "RigidBody");
+		}
+
+		// Probe.luau: records "trace:<name>:start:<body|none>" in OnStart (a velocity read, which raises without a body) and
+		// "trace:<name>:fixed:<body|none>" in its first two OnFixedUpdates (a MoveKinematic to where it is), through the 3D
+		// RigidBody or, with `is2D`, the RigidBody2D.
+		static std::string ProbeSource(bool is2D)
+		{
+			const std::string_view read = is2D ? "self.Entity.RigidBody2D:GetLinearVelocity()" : "self.Entity.RigidBody:GetLinearVelocity()";
+			const std::string_view move = is2D ? "self.Entity.RigidBody2D:MoveKinematic(vector.create(transform.WorldPosition.x, transform.WorldPosition.y, 0), 0)"
+											   : "self.Entity.RigidBody:MoveKinematic(transform.WorldPosition, transform.WorldRotation)";
+			return std::format(R"(local T = {{}}
+local function record(self, phase: string, ok: boolean)
+	Scene.CreateEntity("trace:" .. self.Entity.Name .. ":" .. phase .. ":" .. (if ok then "body" else "none"))
+end
+function T:OnStart()
+	self.Fixed = 0
+	record(self, "start", (pcall(function() return {} end)))
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	if self.Fixed <= 2 then
+		local transform = self.Entity.Transform
+		record(self, "fixed", (pcall(function() {} end)))
+	end
+end
+return Script.Define("Probe", T)
+)",
+				read, move);
+		}
+
+		struct GroupedRun
+		{
+			std::vector<std::string> Trace{};
+			uint64_t StateHash = 0;
+		};
+
+		// A session of `fixture`'s scene run for `ticks` ticks in frames of `stepsPerFrame` steps: its trace and state hash.
+		static GroupedRun RunGrouped(ScriptTestFixture& fixture, uint32_t ticks, uint32_t stepsPerFrame)
+		{
+			auto created = PlaySession::CreateFromScene(ScriptSessionSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+			auto session = std::move(*created);
+			session->SetExtractionEnabled(false);
+			RunGroupedTicks(*session, ticks, stepsPerFrame);
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+			return { SessionTrace(session->GetScene()), session->ComputeStateHash() };
+		}
 
 		class ScriptPhaseHook final : public IPlaySessionTestHook
 		{
@@ -804,123 +918,365 @@ return Script.Define("Second", T)
 			CHECK_FALSE((*fresh)->GetRecorder()->Finish(**fresh));
 		}
 
-		// ADR 0038, friction F19: an entity's body is created at the first physics pre-step after the entity was created
-		// (§5.7 step 5), and its OnStart runs at the first start flush after it. One created before a tick's pre-step (in
-		// OnFixedUpdate or a task, as a test case does) has its body by its OnStart; one created after it (in a physics
-		// callback, in the frame phase, or between ticks by script.eval) starts and runs its first OnFixedUpdate at the next
-		// tick before that tick's pre-step creates its body, so its body methods raise there (Rolling Ball's S3 probe).
-		TEST_CASE("PlaySession: an entity created after a tick's physics pre-step gets its body only at the next tick's pre-step, after its OnStart and first OnFixedUpdate")
+		// ADR 0038 decision 14 (the S3 fix review's frame-grouping finding): a start flush also starts, round after round, the
+		// instances its own OnStart callbacks create, so a nested spawn first runs OnStart and OnFixedUpdate at the same tick
+		// however the ticks are grouped into frames. Before it, Level2 (created by Level1's OnStart) started at the next
+		// flush: the next tick's in lockstep, the frame phase's when that tick shared Level1's frame, a tick later.
+		TEST_CASE("PlaySession: nested spawns from OnStart first run at the same tick however the ticks are grouped into frames")
+		{
+			for (const int depth : { 2, 3 })
+			{
+				CAPTURE(depth);
+				Test::ScriptTestFixture fixture;
+				const AssetHandle nestScript(0x710080), spawnerScript(0x710081);
+				REQUIRE(fixture.AddScript(nestScript, "Assets/Scripts/Nest.luau", Test::NestSource(depth)));
+				REQUIRE(fixture.AddScript(spawnerScript, "Assets/Scripts/Spawner.luau", std::format(R"(local T = {{}}
+function T:OnStart()
+	self.Fixed = 0
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	if self.Fixed == 1 then
+	{}
+	end
+end
+return Script.Define("Spawner", T)
+)",
+																							Test::SpawnLevel1)));
+				Test::AttachSessionScript(fixture.GetScene().CreateEntity("Spawner"), spawnerScript);
+				// Level1 is created in tick 0's OnFixedUpdate; every level starts before tick 1's OnFixedUpdate.
+				std::vector<std::string> expected;
+				for (int level = 1; level <= depth; ++level)
+					expected.push_back(std::format("Level{}:start:1", level));
+				for (int level = 1; level <= depth; ++level)
+					expected.push_back(std::format("Level{}:fixed:1", level));
+				const Test::GroupedRun lockstep = Test::RunGrouped(fixture, 6, 1);
+				CHECK(lockstep.Trace == expected);
+				for (const uint32_t steps : { 2u, 3u })
+				{
+					CAPTURE(steps);
+					const Test::GroupedRun grouped = Test::RunGrouped(fixture, 6, steps);
+					CHECK(grouped.Trace == lockstep.Trace);
+					CHECK(grouped.StateHash == lockstep.StateHash);
+				}
+			}
+		}
+
+		// Decision 14: the start flush of the session's setup starts the entities its OnStart callbacks spawn, before tick 0.
+		TEST_CASE("PlaySession: entities spawned by a startup OnStart start before tick 0 however the ticks are grouped into frames")
 		{
 			Test::ScriptTestFixture fixture;
-			const AssetHandle spawnerScript(0x710070), probeScript(0x710071);
-			REQUIRE(fixture.AddScript(spawnerScript, "Assets/Scripts/Spawner.luau", R"(
+			const AssetHandle nestScript(0x710082), spawnerScript(0x710083);
+			REQUIRE(fixture.AddScript(nestScript, "Assets/Scripts/Nest.luau", Test::NestSource(3)));
+			REQUIRE(fixture.AddScript(spawnerScript, "Assets/Scripts/Spawner.luau", std::format(R"(local T = {{}}
+function T:OnStart()
+	{}
+end
+return Script.Define("Spawner", T)
+)",
+																						Test::SpawnLevel1)));
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Spawner"), spawnerScript);
+			const std::vector<std::string> expected = { "Level1:start:0", "Level2:start:0", "Level3:start:0", "Level1:fixed:0", "Level2:fixed:0", "Level3:fixed:0" };
+			const Test::GroupedRun lockstep = Test::RunGrouped(fixture, 6, 1);
+			CHECK(lockstep.Trace == expected);
+			for (const uint32_t steps : { 2u, 3u })
+			{
+				CAPTURE(steps);
+				const Test::GroupedRun grouped = Test::RunGrouped(fixture, 6, steps);
+				CHECK(grouped.Trace == lockstep.Trace);
+				CHECK(grouped.StateHash == lockstep.StateHash);
+			}
+		}
+
+		// Decision 14: after Scene.Load, the new scene's start flush starts the entities its OnStart callbacks spawn, before
+		// its first tick. The load is requested in tick 5, the last of a frame at one, two and three steps a frame, so the new
+		// scene's first tick is 6 in every grouping (a request waits for its frame's end, friction F17).
+		TEST_CASE("PlaySession: entities spawned by OnStart after Scene.Load start before the new scene's first tick however the ticks are grouped into frames")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle nestScript(0x710084), spawnerScript(0x710085), loaderScript(0x710086), secondScene(0x710087);
+			REQUIRE(fixture.AddScript(nestScript, "Assets/Scripts/Nest.luau", Test::NestSource(3)));
+			REQUIRE(fixture.AddScript(spawnerScript, "Assets/Scripts/Spawner.luau", std::format(R"(local T = {{}}
+function T:OnStart()
+	{}
+end
+return Script.Define("Spawner", T)
+)",
+																						Test::SpawnLevel1)));
+			REQUIRE(fixture.AddScript(loaderScript, "Assets/Scripts/Loader.luau", R"(local T = {}
+function T:OnStart()
+	self.Fixed = 0
+end
+function T:OnFixedUpdate()
+	self.Fixed += 1
+	if self.Fixed == 6 then
+		Scene.Load(Assets.Load("Assets/Scenes/Second.scene"))
+	end
+end
+return Script.Define("Loader", T)
+)"));
+			Test::SceneTestFixture second;
+			Test::AttachSessionScript(second.GetScene().CreateEntity("Spawner"), spawnerScript);
+			auto document = SceneSerializer::ToJson(second.GetScene());
+			REQUIRE(document);
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(std::move(*document));
+			fixture.GetAssetManager().Publish(secondScene, data, "Assets/Scenes/Second.scene");
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Loader"), loaderScript);
+			const std::vector<std::string> expected = { "Level1:start:6", "Level2:start:6", "Level3:start:6", "Level1:fixed:6", "Level2:fixed:6", "Level3:fixed:6" };
+			const Test::GroupedRun lockstep = Test::RunGrouped(fixture, 12, 1);
+			CHECK(lockstep.Trace == expected);
+			for (const uint32_t steps : { 2u, 3u })
+			{
+				CAPTURE(steps);
+				const Test::GroupedRun grouped = Test::RunGrouped(fixture, 12, steps);
+				CHECK(grouped.Trace == lockstep.Trace);
+				CHECK(grouped.StateHash == lockstep.StateHash);
+			}
+		}
+
+		// ADR 0038 decision 14 (friction F19 and the S3 fix review's finding 1): the start flush synchronizes the physics bodies
+		// of both worlds before each of its rounds, so an entity has its body from its OnStart on, wherever it was created:
+		// before the tick's pre-step (OnFixedUpdate, a task), after it (a 3D or a 2D physics callback, an OnDestroy in the
+		// destroy flush, OnUpdate, OnLateUpdate, an evaluation between ticks) or by the session's startup callbacks (OnCreate,
+		// OnStart). This case was F19's "an entity created after a tick's physics pre-step gets its body only at the next
+		// tick's pre-step, after its OnStart and first OnFixedUpdate", which pinned the window the decision closed.
+		TEST_CASE("PlaySession: an entity has its physics body from its OnStart on, wherever it was created")
+		{
+			for (const bool is2D : { false, true })
+			{
+				CAPTURE(is2D);
+				Test::ScriptTestFixture fixture;
+				const AssetHandle spawnerScript(0x710070), probeScript(0x710071), toucherScript(0x710073), doomedScript(0x710074);
+				const std::string spawn = Test::ProbeSpawnSource(is2D);
+				REQUIRE(fixture.AddScript(spawnerScript, "Assets/Scripts/Spawner.luau", spawn + R"(
 local T = {}
-function T.Spawn(name: string, x: number)
-	local entity = Scene.CreateEntity(name)
-	entity.Transform.Translation = vector.create(x, 0, 0)
-	entity:AddComponent("BoxCollider", {HalfExtents = vector.create(1, 0.25, 1)})
-	entity:AddComponent("RigidBody", {Type = "Kinematic"})
-	entity:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Probe.luau"), Fields = {}, ExecutionOrder = 0}}})
+function T:OnCreate()
+	Spawn("InCreate", 10)
 end
 function T:OnStart()
 	self.Fixed = 0
 	self.Frames = 0
+	self.LateFrames = 0
+	Spawn("InStart", 15)
 	Task.Spawn(function()
 		Task.WaitTicks(1)
-		T.Spawn("InTask", 20)
+		Spawn("InTask", 20)
 	end)
 end
 function T:OnFixedUpdate()
 	self.Fixed += 1
 	if self.Fixed == 1 then
-		T.Spawn("InFixedUpdate", 30)
+		Spawn("InFixedUpdate", 30)
 	end
 end
 function T:OnTriggerEnter(other)
 	if not self.Entered then
 		self.Entered = true
-		T.Spawn("InTriggerEnter", 40)
+		Spawn("InTriggerEnter", 40)
 	end
 end
 function T:OnUpdate()
 	self.Frames += 1
 	if self.Frames == 1 then
-		T.Spawn("InUpdate", 50)
+		Spawn("InUpdate", 50)
+	end
+end
+function T:OnLateUpdate()
+	self.LateFrames += 1
+	if self.LateFrames == 1 then
+		Spawn("InLateUpdate", 55)
 	end
 end
 return Script.Define("Spawner", T)
 )"));
-			REQUIRE(fixture.AddScript(probeScript, "Assets/Scripts/Probe.luau", R"(
+				REQUIRE(fixture.AddScript(toucherScript, "Assets/Scripts/Toucher.luau", spawn + R"(
 local T = {}
-local function record(self, phase: string, ok: boolean)
-	Scene.CreateEntity("trace:" .. self.Entity.Name .. ":" .. phase .. ":" .. (if ok then "body" else "none"))
+function T:OnTriggerEnter2D(other)
+	if not self.Entered then
+		self.Entered = true
+		Spawn("InTriggerEnter2D", 45)
+	end
+end
+return Script.Define("Toucher", T)
+)"));
+				REQUIRE(fixture.AddScript(doomedScript, "Assets/Scripts/Doomed.luau", spawn + R"(
+local T = {}
+function T:OnFixedUpdate()
+	self.Entity:Destroy()
+end
+function T:OnDestroy()
+	Spawn("InDestroy", 60)
+end
+return Script.Define("Doomed", T)
+)"));
+				REQUIRE(fixture.AddScript(probeScript, "Assets/Scripts/Probe.luau", Test::ProbeSource(is2D)));
+				Scene& editScene = fixture.GetScene();
+				// A 3D trigger the Spawner overlaps and a 2D one the Toucher overlaps: both enter at tick 0's post-steps.
+				const Entity zone = Test::AddBoxBody(editScene, "Zone", glm::vec3(0.0f), glm::vec3(5.0f), BodyType::Static);
+				zone.Patch<BoxColliderComponent>([](BoxColliderComponent& collider)
+				{
+					collider.IsTrigger = true;
+				});
+				const Entity spawner = Test::AddSphereBody(editScene, "Spawner", glm::vec3(0.0f), 0.5f, BodyType::Dynamic);
+				Test::AttachSessionScript(spawner, spawnerScript);
+				Entity zone2D = editScene.CreateEntity("Zone2D");
+				zone2D.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Static });
+				zone2D.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(5.0f), .IsTrigger = true });
+				Entity toucher = editScene.CreateEntity("Toucher");
+				toucher.AddComponent<RigidBody2DComponent>();
+				toucher.AddComponent<CircleCollider2DComponent>();
+				Test::AttachSessionScript(toucher, toucherScript);
+				Test::AttachSessionScript(editScene.CreateEntity("Doomed"), doomedScript);
+				auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+				REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+				auto session = std::move(*created);
+				session->SetExtractionEnabled(false);
+
+				// Tick 0: InFixedUpdate in OnFixedUpdate, InTriggerEnter and InTriggerEnter2D in the post-steps' dispatches,
+				// InDestroy in the destroy flush, InUpdate and InLateUpdate in the frame phase.
+				session->Tick();
+				// Between ticks, as script.eval {context: Play} runs in a lockstep session.
+				const auto evaluated = session->GetScripts()->Evaluate(spawn + "Spawn(\"InEval\", 70)", VfsPath{});
+				REQUIRE_MESSAGE(evaluated, (evaluated ? "" : evaluated.error().ToString()));
+				for (int tick = 0; tick < 4; ++tick)
+					session->Tick();
+				CHECK(session->GetScriptErrors().GetErrors().empty());
+
+				const std::vector<std::string> trace = Test::SessionTrace(session->GetScene());
+				const auto traceOf = [&trace](std::string_view name)
+				{
+					std::vector<std::string> phases;
+					const std::string prefix = std::string(name) + ":";
+					for (const std::string& entry : trace)
+					{
+						if (entry.starts_with(prefix))
+							phases.push_back(entry.substr(prefix.size()));
+					}
+					return phases;
+				};
+				const std::vector<std::string> withBody = { "start:body", "fixed:body", "fixed:body" };
+				for (const std::string_view path : { "InCreate", "InStart", "InFixedUpdate", "InTask", "InTriggerEnter", "InTriggerEnter2D", "InDestroy",
+						 "InUpdate", "InLateUpdate", "InEval" })
+				{
+					CAPTURE(path);
+					CHECK(traceOf(path) == withBody);
+				}
+			}
+		}
+
+		// Decision 14: the startup callbacks of a scene that Scene.Load or Scene.Reload made current run in the new scene's
+		// start flush, whose rounds synchronize the bodies too, so what their OnCreate and OnStart spawn has its body from its
+		// OnStart on, in 3D and 2D.
+		TEST_CASE("PlaySession: entities spawned by the startup callbacks after Scene.Load and Scene.Reload have their physics bodies from their OnStart on")
+		{
+			for (const bool is2D : { false, true })
+			{
+				CAPTURE(is2D);
+				Test::ScriptTestFixture fixture;
+				const AssetHandle loaderScript(0x710075), spawnerScript(0x710076), probeScript(0x710077), secondScene(0x710078);
+				const std::string spawn = Test::ProbeSpawnSource(is2D);
+				REQUIRE(fixture.AddScript(loaderScript, "Assets/Scripts/Loader.luau", R"(local T = {}
+function T:OnFixedUpdate()
+	Scene.Load(Assets.Load("Assets/Scenes/Second.scene"))
+end
+return Script.Define("Loader", T)
+)"));
+				REQUIRE(fixture.AddScript(spawnerScript, "Assets/Scripts/Spawner.luau", spawn + R"(
+local T = {}
+function T:OnCreate()
+	self.Prefix = if Scene.GetLoadParameters().Reloaded then "Reload" else "Load"
+	Spawn(self.Prefix .. "InCreate", 10)
 end
 function T:OnStart()
 	self.Fixed = 0
-	record(self, "start", Physics.GetBodyBounds(self.Entity) ~= nil)
+	Spawn(self.Prefix .. "InStart", 20)
 end
 function T:OnFixedUpdate()
 	self.Fixed += 1
-	if self.Fixed <= 2 then
-		local transform = self.Entity.Transform
-		local moved = pcall(function()
-			self.Entity.RigidBody:MoveKinematic(transform.WorldPosition, transform.WorldRotation)
-		end)
-		record(self, "fixed", moved)
+	if self.Fixed == 3 and self.Prefix == "Load" then
+		Scene.Reload({ Reloaded = true })
 	end
 end
-return Script.Define("Probe", T)
+return Script.Define("Spawner", T)
 )"));
-			Scene& editScene = fixture.GetScene();
-			const Entity zone = Test::AddBoxBody(editScene, "Zone", glm::vec3(0.0f), glm::vec3(5.0f), BodyType::Static);
-			zone.Patch<BoxColliderComponent>([](BoxColliderComponent& collider)
-			{
-				collider.IsTrigger = true;
-			});
-			const Entity spawner = Test::AddSphereBody(editScene, "Spawner", glm::vec3(0.0f), 0.5f, BodyType::Dynamic);
-			Test::AttachSessionScript(spawner, spawnerScript);
-			auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
-			REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
-			auto session = std::move(*created);
-			session->SetExtractionEnabled(false);
-
-			// Tick 0: InFixedUpdate in OnFixedUpdate, InTriggerEnter in PostStep's dispatch, InUpdate in the frame phase.
-			session->Tick();
-			// Between ticks, as script.eval {context: Play} runs in a lockstep session.
-			const auto evaluated = session->GetScripts()->Evaluate(R"(
-local entity = Scene.CreateEntity("InEval")
-entity.Transform.Translation = vector.create(60, 0, 0)
-entity:AddComponent("BoxCollider", {HalfExtents = vector.create(1, 0.25, 1)})
-entity:AddComponent("RigidBody", {Type = "Kinematic"})
-entity:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Probe.luau"), Fields = {}, ExecutionOrder = 0}}})
-)",
-				VfsPath{});
-			REQUIRE_MESSAGE(evaluated, (evaluated ? "" : evaluated.error().ToString()));
-			for (int tick = 0; tick < 4; ++tick)
-				session->Tick();
-			CHECK(session->GetScriptErrors().GetErrors().empty());
-
-			const std::vector<std::string> trace = Test::SessionTrace(session->GetScene());
-			const auto traceOf = [&trace](std::string_view name)
-			{
-				std::vector<std::string> phases;
-				const std::string prefix = std::string(name) + ":";
-				for (const std::string& entry : trace)
+				REQUIRE(fixture.AddScript(probeScript, "Assets/Scripts/Probe.luau", Test::ProbeSource(is2D)));
+				Test::SceneTestFixture second;
+				Test::AttachSessionScript(second.GetScene().CreateEntity("Spawner"), spawnerScript);
+				auto document = SceneSerializer::ToJson(second.GetScene());
+				REQUIRE(document);
+				auto data = CreateRef<SceneData>();
+				data->Document = CreateRef<const Json>(std::move(*document));
+				fixture.GetAssetManager().Publish(secondScene, data, "Assets/Scenes/Second.scene");
+				Test::AttachSessionScript(fixture.GetScene().CreateEntity("Loader"), loaderScript);
+				auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+				REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+				auto session = std::move(*created);
+				session->SetExtractionEnabled(false);
+				const std::vector<std::string> withBody = { "start:body", "fixed:body", "fixed:body" };
+				const auto check = [&session, &withBody](std::string_view prefix)
 				{
-					if (entry.starts_with(prefix))
-						phases.push_back(entry.substr(prefix.size()));
-				}
-				return phases;
-			};
-			// Created before the tick's pre-step: the body exists by OnStart.
-			const std::vector<std::string> beforePreStep = { "start:body", "fixed:body", "fixed:body" };
-			CHECK(traceOf("InFixedUpdate") == beforePreStep);
-			CHECK(traceOf("InTask") == beforePreStep);
-			// Created after it: OnStart and the first OnFixedUpdate run before the next tick's pre-step creates the body.
-			const std::vector<std::string> afterPreStep = { "start:none", "fixed:none", "fixed:body" };
-			CHECK(traceOf("InTriggerEnter") == afterPreStep);
-			CHECK(traceOf("InUpdate") == afterPreStep);
-			CHECK(traceOf("InEval") == afterPreStep);
+					const std::vector<std::string> trace = Test::SessionTrace(session->GetScene());
+					for (const std::string_view path : { "InCreate", "InStart" })
+					{
+						std::vector<std::string> phases;
+						const std::string name = std::format("{}{}:", prefix, path);
+						for (const std::string& entry : trace)
+						{
+							if (entry.starts_with(name))
+								phases.push_back(entry.substr(name.size()));
+						}
+						CAPTURE(name);
+						CHECK(phases == withBody);
+					}
+				};
+
+				// Tick 0 requests the load, which applies at its frame's end; ticks 1 and 2 run the probes' first fixed steps.
+				Test::RunTicks(*session, 3);
+				check("Load");
+				// Tick 3 requests the reload; ticks 4 and 5 run the new probes' first fixed steps.
+				Test::RunTicks(*session, 3);
+				check("Reload");
+				CHECK(session->GetScriptErrors().GetErrors().empty());
+			}
+		}
+
+		// Decision 14's bound: a start flush runs at most MaxScriptStartRounds rounds, so an OnStart chain without end (each
+		// OnStart creating the next scripted entity) is reported as a script error of each instance still waiting, which is
+		// disabled instead of started, and the session goes on.
+		TEST_CASE("PlaySession: a start flush stops a runaway OnStart chain at its round limit with a script error")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle chainScript(0x710079);
+			REQUIRE(fixture.AddScript(chainScript, "Assets/Scripts/Chain.luau", R"(local T = {}
+function T:OnStart()
+	local next = Scene.CreateEntity("Chain")
+	next:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Chain.luau"), Fields = {}, ExecutionOrder = 0}}})
+	Scene.CreateEntity("trace:started")
+end
+return Script.Define("Chain", T)
+)"));
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Chain"), chainScript);
+			Scope<PlaySession> session;
+			{
+				Test::ExpectLog expected(LogLevel::Error, "limit of 16 rounds");
+				auto created = PlaySession::CreateFromScene(Test::ScriptSessionSpecification(fixture), fixture.GetScene());
+				REQUIRE_MESSAGE(created, (created ? "" : created.error().ToString()));
+				session = std::move(*created);
+			}
+			session->SetExtractionEnabled(false);
+			// The session's setup flush started the scene's Chain and the 15 it created round after round; the 16th created
+			// waits past the limit and is disabled.
+			CHECK(Test::SessionTrace(session->GetScene()).size() == MaxScriptStartRounds);
+			REQUIRE(session->GetScriptErrors().GetErrors().size() == 1);
+			const ScriptError& error = session->GetScriptErrors().GetErrors().front();
+			CHECK(error.Callback == "OnStart");
+			CHECK(error.Script == "Assets/Scripts/Chain.luau");
+			CHECK(error.Count == 1);
+			// The disabled instance never starts, so the chain stays ended in the next ticks.
+			Test::RunTicks(*session, 3);
+			CHECK(Test::SessionTrace(session->GetScene()).size() == MaxScriptStartRounds);
+			CHECK(session->GetScriptErrors().GetErrors().size() == 1);
 		}
 
 		// ADR 0038, friction F18: RigidBody:MoveKinematic writes the entity's pose, and the tick's physics pre-step (§5.7 step

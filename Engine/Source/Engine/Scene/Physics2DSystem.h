@@ -188,6 +188,10 @@ namespace Engine {
 
 		// --- The step (Physics2DPreStep, Physics2DStep, Physics2DPostStep; see the file comment) -----------------------------
 		void PreStep(const SimStep& step);
+		// PhysicsSystem::SynchronizeBodies in the plane (ADR 0038 decision 14): PreStep's rebuilds alone, creating the world
+		// at the first 2D body as PreStep does; nothing when no component change marked an owner, or when the scene holds no
+		// 2D component and no world exists.
+		void SynchronizeBodies();
 		void Step(const SimStep& step);
 		void PostStep(const SimStep& step);
 		void FlushDestroyed(uint64_t tick);

@@ -1604,6 +1604,21 @@ namespace Engine {
 		state.DeliverPendingDiagnostics();
 	}
 
+	void PhysicsSystem::SynchronizeBodies()
+	{
+		State& state = *m_State;
+		ENGINE_CORE_ASSERT(!state.Dispatching, "PhysicsSystem::SynchronizeBodies was called from a physics listener callback");
+		if (!state.ComponentsChanged)
+			return;
+		// PreStep's items 1 and 2: a hierarchy change seen here is consumed with the rebuild, as PreStep consumes it.
+		std::set<UUID> woken;
+		state.Rebuild(state.HasHierarchyChanged(), woken);
+		state.ComponentsChanged = false;
+		state.ChangedEntities.clear();
+		state.WakeOwners(woken);
+		state.DeliverPendingDiagnostics();
+	}
+
 	void PhysicsSystem::Step(const SimStep& step)
 	{
 		State& state = *m_State;

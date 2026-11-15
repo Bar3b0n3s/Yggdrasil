@@ -483,6 +483,15 @@ namespace Engine {
 		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
 		// M22 (C22.3, decision 46): the text latch, which Input.GetText reads.
 		[[nodiscard]] std::string_view GetText(InputPhase phase) const override { return Input.GetText(phase); }
+		// ADR 0038 decision 14: before each round of a start flush, the bodies of both worlds whose components changed, from
+		// world matrices brought up to date first, so an entity has its body from its OnStart on.
+		void SynchronizePhysicsBodies() override
+		{
+			if (RuntimeScene->GetRevision() != TransformRevision)
+				UpdateTransforms();
+			Physics->SynchronizeBodies();
+			Physics2D->SynchronizeBodies();
+		}
 		// FatalStop with the session error that caused it, already published (ReportSessionError).
 		void StopAfterSessionError()
 		{

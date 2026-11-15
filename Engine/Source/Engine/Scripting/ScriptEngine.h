@@ -83,6 +83,10 @@ namespace Engine {
 	inline constexpr std::string_view ScriptLiveValuesKey = "__GraphLive";
 	// The most entries ReadInstanceValues returns in each list; the rest are left out and Truncated is set.
 	inline constexpr size_t MaxScriptInstanceValues = 16384;
+	// The most rounds of OnStart one start flush runs (StartPending; ADR 0038 decision 14): an OnStart chain deeper than
+	// this (each OnStart creating a scripted entity whose OnStart creates the next) is a runaway, reported as a script error
+	// of each instance still waiting, which is disabled instead of started.
+	inline constexpr uint32_t MaxScriptStartRounds = 16;
 
 	// One value of an instance as ReadInstanceValues reads it.
 	struct ScriptInstanceValue
@@ -156,9 +160,15 @@ namespace Engine {
 		// list before creating instances. Nested OnCreate inherits the outer deadline; recursion beyond 16 is Script.
 		[[nodiscard]] Status NotifyCreated(std::span<const UUID> entities);
 
-		// Snapshot enabled, unstarted instances in (ExecutionOrder, canonical entity) order; invoke OnStart exactly once. Exclude
-		// pending destruction and fault-disabled owners. An instance created during this snapshot starts next phase.
-		// In the fixed step's start flush, physics callbacks held for started instances are then delivered (OnPhysicsEvent).
+		// The start flush (§5.7 step 2, the frame phase's, and the session setup's; ADR 0038 decision 14), in rounds: each
+		// round synchronizes the instances (SynchronizeInstances), then the host's physics bodies
+		// (IScriptHost::SynchronizePhysicsBodies), then snapshots the enabled, unstarted instances in (ExecutionOrder,
+		// canonical entity) order and invokes OnStart exactly once on each, excluding pending destruction and fault-disabled
+		// owners. Rounds repeat until no instance waits, so an instance created or enabled during the flush (by an OnStart,
+		// or an OnCreate it runs) starts in the same flush, and when an entity first runs never depends on how ticks are
+		// grouped into frames. A flush runs at most MaxScriptStartRounds rounds: each instance still waiting then is
+		// published as a script error of its OnStart (a runaway chain) and disabled. In the fixed step's start flush, physics
+		// callbacks held for started instances are then delivered (OnPhysicsEvent).
 		void StartPending();
 		// The session invokes these only in §5.7's matching phases. Each snapshots eligible started instances, excludes
 		// pending-destroy/disabled/unstarted entries, and never visits an entity created later in that phase. Host frame

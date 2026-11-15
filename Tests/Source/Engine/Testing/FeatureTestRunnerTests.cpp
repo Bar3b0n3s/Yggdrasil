@@ -34,6 +34,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -56,6 +57,9 @@ namespace Engine {
 			std::vector<std::string> PlayedReplays{};
 			std::vector<StampedPlayInputEvent> VerifiedInputs{};
 			std::vector<std::string> Screenshots{}; // the names CaptureScreenshot received, in order
+			// With RecordFrameHashes, the state hash at the end of each frame of the runs, by the ticks completed then.
+			std::map<uint64_t, uint64_t> FrameHashes{};
+			bool RecordFrameHashes = false;
 			PlaySession* Active = nullptr;
 			uint64_t Serial = 1;
 			uint32_t CoverageReads = 0;
@@ -300,6 +304,8 @@ return Script.Define("Driver",Driver))");
 							VerifiedInputs.push_back({ session.GetTick() - 1, event });
 					Frames.push_back(tick);
 					Generations.push_back(session.GetSceneGeneration());
+					if (RecordFrameHashes)
+						FrameHashes[tick] = session.ComputeStateHash();
 				}
 			}
 
@@ -956,6 +962,71 @@ end))");
 			CHECK_FALSE(result.Passed);
 			REQUIRE_FALSE(result.Cases.empty());
 			CHECK(result.Cases[0].Message.find("progress") != std::string::npos);
+		}
+
+		// ADR 0038 decision 14: the harness runs a suite in lockstep, one fixed step a frame, or on its Clock's ScriptedClock,
+		// several a frame. A start flush starts the instances its own OnStart callbacks create, so a spawn nested three deep
+		// (Level1 from OnFixedUpdate, Level2 from Level1's OnStart, Level3 from Level2's) first runs at the same tick in both
+		// modes, and the state hash at every tick where both end a frame is the same.
+		TEST_CASE("TestRunner: nested spawns first run at the same tick in lockstep and on a scripted clock")
+		{
+			RunnerHost host;
+			static_cast<void>(host.Script("Assets/Scripts/Nest.luau", R"(local Nest={}
+local function trace(self, what: string) Scene.CreateEntity("trace:" .. self.Entity.Name .. ":" .. what) end
+function Nest.OnStart(self)
+	self.Fixed = 0
+	trace(self, "start:" .. Time.GetTick())
+	local level = tonumber(string.sub(self.Entity.Name, 6)) :: number
+	if level < 3 then
+		local child = Scene.CreateEntity("Level" .. (level + 1))
+		child:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Nest.luau"), Fields = {}, ExecutionOrder = 0}}})
+	end
+end
+function Nest.OnFixedUpdate(self)
+	self.Fixed += 1
+	if self.Fixed == 1 then trace(self, "fixed:" .. Time.GetTick()) end
+	self.Entity.Transform:Translate(vector.create(1, 0, 0))
+end
+return Script.Define("Nest",Nest))"));
+			host.Behaviour(R"(local Driver={}
+function Driver.OnStart(self) self.Fixed = 0 end
+function Driver.OnFixedUpdate(self)
+	self.Fixed += 1
+	if self.Fixed == 1 then
+		local level = Scene.CreateEntity("Level1")
+		level:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Nest.luau"), Fields = {}, ExecutionOrder = 0}}})
+	end
+end
+return Script.Define("Driver",Driver))");
+			host.Suite(R"(return Test.Suite("Nested",function()
+	Test.Case("every level first runs at tick 1",function()
+		Test.WaitTicks(5)
+		for level = 1, 3 do
+			Test.Expect(Scene.FindByName("trace:Level" .. level .. ":start:1") ~= nil, "Level" .. level .. " starts at tick 1")
+			Test.Expect(Scene.FindByName("trace:Level" .. level .. ":fixed:1") ~= nil, "Level" .. level .. " first runs at tick 1")
+		end
+	end)
+end))");
+			host.RecordFrameHashes = true;
+			const auto lockstep = host.Run();
+			CHECK(lockstep.Passed);
+			const std::map<uint64_t, uint64_t> lockstepHashes = std::exchange(host.FrameHashes, {});
+			host.Settings.Testing.Suites[0].Clock = { 3.0f / 60.0f };
+			const auto clocked = host.Run();
+			CHECK(clocked.Passed);
+			CHECK(clocked.Suites[0].Ticks == lockstep.Suites[0].Ticks);
+			// The clock's frames end at ticks 3 and 6, where lockstep ends one too.
+			uint32_t compared = 0;
+			for (const auto& [tick, hash] : host.FrameHashes)
+			{
+				const auto found = lockstepHashes.find(tick);
+				if (tick == 0 || found == lockstepHashes.end())
+					continue;
+				CAPTURE(tick);
+				CHECK(hash == found->second);
+				++compared;
+			}
+			CHECK(compared >= 2);
 		}
 
 		TEST_CASE("TestRunner: zero time scale times out without simulation progress and releases audio")

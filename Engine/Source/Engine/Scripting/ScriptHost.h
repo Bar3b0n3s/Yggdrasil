@@ -139,6 +139,13 @@ namespace Engine {
 		// session's next latch. A play session's host returns its PlayInput's, and every other host (the edit evaluation,
 		// test fixtures without a session) keeps the default, empty, so Input.GetText reads no text there.
 		[[nodiscard]] virtual std::string_view GetText(InputPhase /*phase*/) const { return {}; }
+		// ADR 0038 decision 14: called by every start flush (ScriptEngine::StartPending) before each round of OnStart, outside
+		// any physics dispatch. A play session's host creates, rebuilds and removes the physics bodies of both worlds whose
+		// components changed since the last synchronization or pre-step (PhysicsSystem::SynchronizeBodies,
+		// Physics2DSystem::SynchronizeBodies, after a transform update), so an entity has its body from its OnStart on,
+		// wherever it was created; every other host (the edit evaluation, test fixtures without a session) keeps the
+		// default, which does nothing.
+		virtual void SynchronizePhysicsBodies() {}
 	};
 
 }

@@ -1559,6 +1559,28 @@ namespace Engine {
 		state.DeliverPendingDiagnostics();
 	}
 
+	void Physics2DSystem::SynchronizeBodies()
+	{
+		State& state = *m_State;
+		ENGINE_CORE_ASSERT(!state.Dispatching, "Physics2DSystem::SynchronizeBodies was called from a physics listener callback");
+		if (!state.ComponentsChanged)
+			return;
+		// PreStep's rule for a scene without a 2D component and without a world: nothing to compose.
+		if (state.World == nullptr && !state.SceneHolds2DComponents())
+		{
+			state.ComponentsChanged = false;
+			state.ChangedEntities.clear();
+			return;
+		}
+		std::set<UUID> woken;
+		state.Rebuild(state.HasHierarchyChanged(), woken);
+		state.ComponentsChanged = false;
+		state.ChangedEntities.clear();
+		if (state.World != nullptr && !state.Bodies.empty())
+			state.WakeOwners(woken);
+		state.DeliverPendingDiagnostics();
+	}
+
 	void Physics2DSystem::Step(const SimStep& step)
 	{
 		State& state = *m_State;

@@ -83,11 +83,11 @@
 //     scripts' OnDestroy): every active pair involving an entity marked for destruction (PendingDestroyTag) or effectively
 //     disabled is closed, each surviving side that received the pair's enter getting a synthesized exit (§9.4 "Exit on
 //     destroy, disable and character contacts"), dispatched in sorted order; then those entities' bodies and characters
-//     are removed (a re-enabled entity gets its body back at the next PreStep). The listener may destroy or disable more
-//     entities during that dispatch, so the flush repeats its close, dispatch and remove pass until a pass finds nothing
-//     left to do; each entity is handled once, which bounds the passes by the entity count (M13's OnDestroy for entities
-//     destroyed there joins the same loop). When it returns, no entity pending destruction or disabled has a body, a
-//     character or an active pair.
+//     are removed (a re-enabled entity gets its body back at the next PreStep or SynchronizeBodies). The listener may
+//     destroy or disable more entities during that dispatch, so the flush repeats its close, dispatch and remove pass
+//     until a pass finds nothing left to do; each entity is handled once, which bounds the passes by the entity count
+//     (M13's OnDestroy for entities destroyed there joins the same loop). When it returns, no entity pending destruction
+//     or disabled has a body, a character or an active pair.
 //
 // M20 (Docs/Decisions/0031-m20-contract.md decisions 2 and 3):
 //   - The pending enter (W-P03). A contact that Jolt added without touching (ContactEvent::Touching false: a speculative
@@ -354,6 +354,13 @@ namespace Engine {
 
 		// --- The step (see the file comment) ------------------------------------------------------------------------------
 		void PreStep(const SimStep& step);
+		// PreStep's rebuilds (its item 1, with item 2's pairs across rebuilds and the partners it wakes) alone, without its
+		// kinematic moves, teleports and character updates, when a component change marked an owner since the last PreStep
+		// or synchronization; nothing otherwise. The play session runs it before every round of a start flush (§5.7 step 2,
+		// the frame phase's and the session setup's; ADR 0038 decision 14), after a TransformSystem::Update, so an entity has
+		// its body from its OnStart on, wherever it was created. Diagnostics are heard by the listener as PreStep's are. Not
+		// from a listener callback (asserted).
+		void SynchronizeBodies();
 		// A step error (PHYSICS_LIMIT_EXCEEDED) is recorded as a diagnostic and logged once; the session keeps running.
 		void Step(const SimStep& step);
 		void PostStep(const SimStep& step);

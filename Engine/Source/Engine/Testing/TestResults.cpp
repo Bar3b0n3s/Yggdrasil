@@ -212,7 +212,7 @@ namespace Engine {
 			.Field("inputCheck", &TestRecordingResult::InputCheck, "The input check that let the recording through.")
 			.Field("expectations", &TestRecordingResult::Expectations, "The expectations written (test.run's expect), each verified with the recording's input before it was written.")
 			.Field("warnings", &TestRecordingResult::Warnings, "Notes on the written replay: the input check warns when its run without input differed only at checkpoints but reached the recorded final state hash, which then proves only the end state.")
-			.Field("replaced", &TestRecordingResult::Replaced, "For a replay written over an existing file: {checkpointsEqual, finalHashEqual} (TestRecordingReplaced), whether its checkpoints and final state hash equal the replaced file's (both true: the re-recording changed nothing the state hash covers); null for a new file.");
+			.Field("replaced", &TestRecordingResult::Replaced, "For a replay written over an existing file: {checkpointsEqual, finalHashEqual} (TestRecordingReplaced), whether its checkpoints (one every 60 ticks) and its final state hash equal the replaced file's; null for a new file. Both true means the state hash is the same at every checkpoint and at the final tick, so the replay's committed hashes are unchanged; it does not prove that no hashed state changed, since a difference that shows only between checkpoints is not seen.");
 		registry.Struct<TestRunResult>("TestRunResult", "TestRunResult shared test report.")
 			.Field("mode", &TestRunResult::Mode, "Mode of the test report.")
 			.Field("passed", &TestRunResult::Passed, "Passed of the test report.")

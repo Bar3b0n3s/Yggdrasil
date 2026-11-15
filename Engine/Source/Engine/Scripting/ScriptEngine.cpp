@@ -463,23 +463,49 @@ namespace Engine {
 		m_State->AssertOwner();
 		if (IsStopped() || IsReadOnly())
 			return;
-		const Status synchronized = SynchronizeInstances();
-		if (!synchronized)
+		// ADR 0038 decision 14: rounds until no instance waits, so the instances this flush's own callbacks create or enable
+		// start in it too, and the bodies synchronized before each round, so every entity has its body by its OnStart.
+		for (uint32_t round = 0;; ++round)
 		{
-			m_State->Publish(synchronized.error());
-			return;
-		}
-		const auto snapshot = m_State->OrderedInstances(false);
-		for (const State::InstanceKey key : snapshot)
-		{
-			const auto found = m_State->Instances.find(key);
-			if (found == m_State->Instances.end() || found->second.Started || found->second.FaultDisabled || found->second.DestroyPrepared)
-				continue;
-			const Entity entity = GetHost().GetScene().FindEntityByID(key.Entity);
-			if (!entity || !entity.IsActive())
-				continue;
-			found->second.Started = true;
-			m_State->Invoke(key, "OnStart");
+			const Status synchronized = SynchronizeInstances();
+			if (!synchronized)
+			{
+				m_State->Publish(synchronized.error());
+				return;
+			}
+			GetHost().SynchronizePhysicsBodies();
+			std::vector<State::InstanceKey> waiting;
+			for (const State::InstanceKey key : m_State->OrderedInstances(false))
+			{
+				const auto found = m_State->Instances.find(key);
+				if (found != m_State->Instances.end() && !found->second.Started)
+					waiting.push_back(key);
+			}
+			if (waiting.empty())
+				break;
+			if (round == MaxScriptStartRounds)
+			{
+				const Error runaway = Error(ErrorCode::Script,
+					std::format("OnStart not run: the start flush reached its limit of {} rounds, so OnStart callbacks keep creating scripted entities whose OnStart creates more",
+						MaxScriptStartRounds))
+										  .WithHint("end the chain, or create the next generation in a later tick (OnFixedUpdate or a task)");
+				for (const State::InstanceKey key : waiting)
+					m_State->Publish(runaway, key, "OnStart");
+				break;
+			}
+			for (const State::InstanceKey key : waiting)
+			{
+				const auto found = m_State->Instances.find(key);
+				if (found == m_State->Instances.end() || found->second.Started || found->second.FaultDisabled || found->second.DestroyPrepared)
+					continue;
+				const Entity entity = GetHost().GetScene().FindEntityByID(key.Entity);
+				if (!entity || !entity.IsActive())
+					continue;
+				found->second.Started = true;
+				m_State->Invoke(key, "OnStart");
+			}
+			if (IsStopped())
+				return;
 		}
 		// Physics callbacks and animation events belong to the fixed step. Contacts that began before an instance's OnStart
 		// follow the whole start flush of the next fixed step (frame-rate independent), before FixedUpdate, so each side sees

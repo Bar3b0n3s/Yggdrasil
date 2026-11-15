@@ -168,9 +168,10 @@ namespace Engine {
 			}
 
 			// How `recording` compares with the replay it is about to replace at `path` (TestRecordingReplaced; ADR 0038,
-			// friction F20): nullopt when no file exists there; a file that does not read as a replay (any error of
-			// ReadReplayDocument's strict read: Parse, Validation, UnsupportedVersion, a read failure) equals it in neither. Errors: ValidateReplayOutput's, which Begin
-			// already passed.
+			// friction F20): its checkpoints and final state hash against the file's; nullopt when no file exists there; a
+			// file that does not read as a replay (any error of ReadReplayDocument's strict read: Parse, Validation,
+			// UnsupportedVersion, a read failure) equals it in neither. Errors: ValidateReplayOutput's, which Begin already
+			// passed.
 			[[nodiscard]] static Result<std::optional<TestRecordingReplaced>> CompareWithReplaced(EditorMethodContext& context, std::string_view path, const ReplayDocument& recording)
 			{
 				ENGINE_TRY_ASSIGN(const std::string canonical, context.ValidateReplayOutput(path));
@@ -382,7 +383,7 @@ namespace Engine {
 	{
 		methods.Add({ .Name = "test.list", .Description = "Collects test suite and case names and source locations without running case bodies.", .Examples = { { .Description = "List configured tests.", .Params = Json::object() } } }, &Automation::TestList);
 		methods.AddPending<EditorMethodContext, TestRunParams, TestRunMethodResult>(
-			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged, and for a replay written over an existing file whether its checkpoints and final hash equal the replaced file's); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
+			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged, and for a replay written over an existing file whether its checkpoints, one every 60 ticks, and its final hash equal the replaced file's, which a change seen only between checkpoints leaves equal); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
 	}
 
 }

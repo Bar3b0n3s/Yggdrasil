@@ -504,6 +504,47 @@ namespace Engine {
 			CallScriptMethod(fixture, "play.stop", Json::object());
 		}
 
+		// ADR 0038 decision 14 (friction F19, as Rolling Ball's S3 probe met it): an entity script.eval creates between lockstep
+		// ticks starts at the next tick's start flush, which synchronizes the physics bodies first, so it has its body by its
+		// OnStart and first OnFixedUpdate, in the 3D world and the 2D one.
+		TEST_CASE("ScriptMethods: an entity a play evaluation creates between ticks has its physics body by its OnStart and first OnFixedUpdate")
+		{
+			for (const bool is2D : { false, true })
+			{
+				CAPTURE(is2D);
+				Test::AutomationFixture fixture(is2D ? "ScriptEvalSpawnBody2D" : "ScriptEvalSpawnBody");
+				const std::string_view body = is2D ? "RigidBody2D" : "RigidBody";
+				const std::string move = is2D ? "body:MoveKinematic(vector.create(transform.WorldPosition.x, transform.WorldPosition.y, 0), 0)"
+											  : "body:MoveKinematic(transform.WorldPosition, transform.WorldRotation)";
+				CallScriptMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Probe.luau" }, { "source", std::format("local Probe = {{}}\n"
+																																 "function Probe.OnStart(self: any)\n"
+																																 "\tself.StartBody = pcall(function() return self.Entity.{0}:GetLinearVelocity() end)\n"
+																																 "end\n"
+																																 "function Probe.OnFixedUpdate(self: any)\n"
+																																 "\tif self.FixedBody == nil then\n"
+																																 "\t\tlocal body, transform = self.Entity.{0}, self.Entity.Transform\n"
+																																 "\t\tself.FixedBody = pcall(function() {1} end)\n"
+																																 "\tend\n"
+																																 "end\n"
+																																 "return Script.Define('Probe', Probe)\n",
+																														 body, move) } });
+				CallScriptMethod(fixture, "play.start", Json{ { "lockstep", true } });
+				CallScriptMethod(fixture, "play.step", Json{ { "ticks", 1 } });
+				CallScriptMethod(fixture, "script.eval", Json{ { "context", "play" }, { "code", std::format("local entity = Scene.CreateEntity('Spawned')\n"
+																											"entity:AddComponent('{}', {{HalfExtents = vector.create(1, 0.25, {})}})\n"
+																											"entity:AddComponent('{}', {{Type = 'Kinematic'}})\n"
+																											"entity:AddComponent('Script', {{Scripts = {{{{Script = Assets.Load('Assets/Scripts/Probe.luau'), Fields = {{}}, ExecutionOrder = 0}}}}}})\n",
+																									is2D ? "BoxCollider2D" : "BoxCollider", is2D ? 0 : 1, body) } });
+				CallScriptMethod(fixture, "play.step", Json{ { "ticks", 1 } });
+				CHECK(CallScriptMethod(fixture, "script.errors", Json::object())["errors"].empty());
+				const Json result = CallScriptMethod(fixture, "script.eval",
+					Json{ { "context", "play" }, { "entity", "/Spawned" }, { "code", "return { start = self.StartBody, fixed = self.FixedBody }" } });
+				CHECK(result["value"]["start"] == Json(true));
+				CHECK(result["value"]["fixed"] == Json(true));
+				CallScriptMethod(fixture, "play.stop", Json::object());
+			}
+		}
+
 		TEST_CASE("ScriptMethods: errors rejects malformed cursors and limits with located errors")
 		{
 			Test::AutomationFixture fixture("ScriptErrorsInvalid");
