@@ -1,8 +1,8 @@
 # Roadmap
 
-Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged). Amended on 2026-11-15 by `Docs/Decisions/0042-world-tree-engine-program.md` (the World Tree engine program: M28 to M33, first in phases 5 and 6, then, by the product owner's answers of the same day, in one phase, phase 5, without hardening).
+Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged). Amended on 2026-11-15 by `Docs/Decisions/0042-world-tree-engine-program.md` (the World Tree engine program: M28 to M33, first in phases 5 and 6, then, by the product owner's answers of the same day, in one phase, phase 5, without hardening; M34 joined that phase the same day by the lead's decision).
 
-The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work. After them, the World Tree engine program (M28 to M33 in one phase, phase 5, `Docs/Decisions/0042-world-tree-engine-program.md`) adds what the World Tree showcase game asked for.
+The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work. After them, the World Tree engine program (M28 to M34 in one phase, phase 5, `Docs/Decisions/0042-world-tree-engine-program.md`) adds what the World Tree showcase game asked for.
 
 ## Rules for every milestone
 
@@ -47,14 +47,15 @@ The roadmap goes from an empty repository to a finished engine and editor (M15),
 | M25 Tetris rebuilt in place as pixel art (phase 3, lands before M26) | phase 2 | M24, M26 |
 | M26 Effects, post-processing and terrain (phase 3, lands last) | phase 2 | M24, M25 |
 | M27 Rolling Ball 3D (phase 4) | phase 3 | — |
-| M28 Game services (phase 5) | M27 | M29 to M33 |
-| M29 Light limits (phase 5) | M27 | M28, M30 to M33 |
-| M30 Navigation (phase 5, lands last, with M33) | M27 | M28, M29, M31 to M33 |
-| M31 Material parameters (phase 5) | M27 | M28 to M30, M32, M33 |
-| M32 Fog and SSR's cost (phase 5, lands before M33) | M27 | M28 to M31, M33 |
-| M33 Particle look (phase 5, lands last, with M30) | M27 | M28 to M32 |
+| M28 Game services (phase 5) | M27 | M29 to M34 |
+| M29 Light limits (phase 5) | M27 | M28, M30 to M34 |
+| M30 Navigation (phase 5, lands last, with M33) | M27 | M28, M29, M31 to M34 |
+| M31 Material parameters (phase 5) | M27 | M28 to M30, M32 to M34 |
+| M32 Fog and SSR's cost (phase 5, lands before M33) | M27 | M28 to M31, M33, M34 |
+| M33 Particle look (phase 5, lands last, with M30) | M27 | M28 to M32, M34 |
+| M34 Characters and input (phase 5) | M27 | M28 to M33 |
 
-Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last; phase 5 (M28 to M33, one phase without a hardened gate, `Docs/Decisions/0042-world-tree-engine-program.md` decision 2) M28, M29, M31 and M32 in readiness order, M32 before M33, then M30 and M33 in readiness order. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
+Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last; phase 5 (M28 to M34, one phase without a hardened gate, `Docs/Decisions/0042-world-tree-engine-program.md` decision 2) M28, M29, M31, M32 and M34 in readiness order, M32 before M33, then M30 and M33 in readiness order. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
 
 ---
 
@@ -568,7 +569,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M28 — Game services
 
-**Scope.** Phase 5, in readiness order with M29, M31 and M32. World Tree's briefs 4 and 3 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3): display settings and a performance readout for scripts (wave W28.1), then save data for scripts (W28.2). New platform capabilities get Windows backends only (`Docs/Decisions/0028-backlog-program.md` decision 10). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M29, M31, M32 and M34. World Tree's briefs 4 and 3 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3): display settings and a performance readout for scripts (wave W28.1), then save data for scripts (W28.2). New platform capabilities get Windows backends only (`Docs/Decisions/0028-backlog-program.md` decision 10). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - Display settings from scripts: the window mode (windowed, borderless, exclusive), the resolution from the monitor's modes and VSync, applied at a frame boundary and persisted by the engine; they do nothing in the editor's game view, headless runs and fixed-view sessions.
@@ -586,7 +587,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M29 — Light limits
 
-**Scope.** Phase 5, in readiness order with M28, M31 and M32. World Tree's brief 7 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M28, M31, M32 and M34. World Tree's brief 7 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - A `Rendering` setting for the shaded lights per view (256, 512, 1,024 or 2,048; 256 by default), with the cluster mask sized at run time.
@@ -624,7 +625,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M31 — Material parameters
 
-**Scope.** Phase 5, in readiness order with M28, M29 and M32. World Tree's brief 5 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M28, M29, M32 and M34. World Tree's brief 5 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - A per-entity material-parameter component: a tint, an emissive colour and strength, a texture-coordinate offset and a scroll by simulation time, a dissolve with an edge colour, and a dithered fade for walls that hide the player; skinned meshes included, carried in the instance record so that instancing keeps its batches.
@@ -639,7 +640,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M32 — Fog and SSR's cost
 
-**Scope.** Phase 5, in readiness order with M28, M29 and M31, landing before M33. World Tree's briefs 2 and 9 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M28, M29, M31 and M34, landing before M33. World Tree's briefs 2 and 9 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - A unique-per-scene `Fog` component: exponential distance fog, height fog, a colour with an optional ambient tint, a sun glow, and the skybox fogged or not; applied alike to opaque and transparent meshes, terrain, sprites and the SSR composite (particles in M33), and animatable from scripts and automation.
@@ -666,3 +667,23 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 - The committed particle digests and the Particles golden keep their values; particles no longer smear under TAA.
 
 **Parallelization**: one wave; fog on particles at its merge, after M32 has landed.
+
+---
+
+## M34 — Characters and input
+
+**Scope.** Phase 5, in readiness order with M28, M29, M31 and M32. World Tree's briefs 11 and 10 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3), added to the phase by the lead's decision of 2026-11-15. Its milestone end runs `CI.py --require-clang-cl`, without the hardening stage (ADR 0042, the owner's answer 9).
+
+**Deliverables**
+- Characters versus Dynamic bodies: a character's inner body never moves a Dynamic body through the solver; a character pushes Dynamic bodies only through `CharacterVirtual`'s own contacts and mass; it is never launched by standing on or stepping onto a light Dynamic body; a pushed light body slides along the ground and never passes through static geometry.
+- A Button action bindable to a gamepad axis, down past a threshold with hysteresis, so triggers work as buttons.
+- `project.setSettings` validating the input actions as `play.start` does and refusing a bad patch with each problem located; `project.validate` reporting the invalid bindings a project already holds (a new validation code).
+- A Camera ray from an explicit pose, `Camera:ScreenToWorldRayFrom(x, y, position, rotation)`, deterministic in the fixed step.
+
+**Acceptance**
+- A character walking at 6.5 m/s through fifteen 0.35 kg Dynamic shards on the floor stays below 0.1 m over 60 ticks, and no shard goes below −0.05 m: the shards are pushed aside along the ground.
+- A suite pressing a trigger bound to a Button action through `Test.InjectGamepad` sees the action fire, and release only below the lower threshold.
+- `project.setSettings` with an invalid binding returns an error naming it and writes nothing; `project.validate` reports a saved invalid binding with the new code.
+- A replay that aims with `ScreenToWorldRayFrom` in the fixed step verifies at one hash in Debug, Release and Dist.
+
+**Parallelization**: W34.1 (characters versus Dynamic bodies), then W34.2 (the input bindings and the aim ray).
