@@ -556,11 +556,11 @@
 		},
 		{
 			"Path": "Assets/Scripts/Game.luau",
-			"XXH64": "1082214fd7b11ddc",
+			"XXH64": "0a0e954027a902e2",
 			"Method": "script.write",
-			"RequestId": 23,
+			"RequestId": 17,
 			"Client": "engine-mcp",
-			"TranscriptLine": 685
+			"TranscriptLine": 1005
 		},
 		{
 			"Path": "Assets/Scripts/Game.luau.meta",
@@ -700,11 +700,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Frames.test.luau",
-			"XXH64": "7f5e6d98106ddd15",
+			"XXH64": "80498eb252d2e37e",
 			"Method": "script.write",
-			"RequestId": 32,
+			"RequestId": 14,
 			"Client": "engine-mcp",
-			"TranscriptLine": 959
+			"TranscriptLine": 999
 		},
 		{
 			"Path": "Assets/Tests/Frames.test.luau.meta",
@@ -748,11 +748,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Level1.replay",
-			"XXH64": "0238f42d8468feb4",
+			"XXH64": "f10acd8c999f4655",
 			"Method": "test.run",
-			"RequestId": 49,
+			"RequestId": 24,
 			"Client": "engine-mcp",
-			"TranscriptLine": 737
+			"TranscriptLine": 1019
 		},
 		{
 			"Path": "Assets/Tests/Replays/Level1.replay.meta",
@@ -764,11 +764,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Level2.replay",
-			"XXH64": "5f9ed248dd9668c6",
+			"XXH64": "01f88bab15f33986",
 			"Method": "test.run",
-			"RequestId": 56,
+			"RequestId": 31,
 			"Client": "engine-mcp",
-			"TranscriptLine": 751
+			"TranscriptLine": 1033
 		},
 		{
 			"Path": "Assets/Tests/Replays/Level2.replay.meta",
@@ -780,11 +780,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Level3.replay",
-			"XXH64": "079fd157123138a8",
+			"XXH64": "09819ab441c90d17",
 			"Method": "test.run",
-			"RequestId": 62,
+			"RequestId": 38,
 			"Client": "engine-mcp",
-			"TranscriptLine": 763
+			"TranscriptLine": 1047
 		},
 		{
 			"Path": "Assets/Tests/Replays/Level3.replay.meta",
@@ -796,11 +796,11 @@
 		},
 		{
 			"Path": "Assets/Tests/RollingBall.test.luau",
-			"XXH64": "36f889ac2eec29d1",
+			"XXH64": "451a280df4545503",
 			"Method": "script.write",
-			"RequestId": 33,
+			"RequestId": 19,
 			"Client": "engine-mcp",
-			"TranscriptLine": 961
+			"TranscriptLine": 1009
 		},
 		{
 			"Path": "Assets/Tests/RollingBall.test.luau.meta",

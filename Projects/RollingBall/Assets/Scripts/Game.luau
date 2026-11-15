@@ -134,8 +134,8 @@ function Game.OnStart(self: Game)
 end
 
 function Game.OnFixedUpdate(self: Game, _dt: number)
-	-- A transition applies at the frame's end, and the frame's remaining fixed steps still run here, where a second
-	-- request would raise InvalidState: once one is requested (Leaving), nothing more is.
+	-- A transition requested here applies after this tick, and the frame runs no further fixed step, so two requests can
+	-- meet only within one tick. Once one is requested (Leaving), nothing more is: a second would raise InvalidState.
 	if not self.Leaving and Input.IsActionPressed(Actions.Restart) then
 		self.Leaving = true
 		local first = self.FirstLevel

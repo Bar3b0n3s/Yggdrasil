@@ -8,7 +8,7 @@
 	"Parameters": {},
 	"Seed": 27,
 	"FixedHz": 60,
-	"EngineVersion": "0.4.0",
+	"EngineVersion": "0.5.0",
 	"Config": "Editor",
 	"Fingerprint": {
 		"Entities": [
@@ -1334,7 +1334,7 @@
 				"Handle": "0d39e8f65b7b6519",
 				"Path": "Assets/Scripts/Game.luau",
 				"Type": "Script",
-				"Hash": "a8be089e40339081"
+				"Hash": "fbcee3c4db08cbdd"
 			},
 			{
 				"Handle": "0e55e883241fed0b",

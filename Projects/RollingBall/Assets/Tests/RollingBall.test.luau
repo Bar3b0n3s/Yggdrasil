@@ -2,8 +2,8 @@
 -- Rolling Ball's integration suite (ADR 0038 decision 10): the main-path support check and the HUD's level and par on
 -- every level, the respawn at the last checkpoint, the CHECKPOINT banner, the goal and the timer carried across
 -- Scene.Load, the lift carrying the ball, a platform's phased start, and Restart. The cases share one session and cross
--- the levels by Scene.Load: the case during which a transition is requested returns in that frame, and the next case
--- runs in the new scene's VM.
+-- the levels by Scene.Load: a transition requested in a fixed step applies after the requesting tick, so the case
+-- during which one is requested returns in that tick, and the next case runs in the new scene's VM.
 local Actions = require("../Scripts/Actions")
 local BallScript = require("../Scripts/Ball")
 local Clock = require("../Scripts/Clock")
@@ -55,8 +55,8 @@ local function place(body: RigidBody, position: vector)
 	body:SetAngularVelocity(vector.zero)
 end
 
--- Presses Restart as a player would, and waits for the game to request its transition (it applies at the frame's
--- end, so the case returns in that frame and the next case runs in the scene it loads).
+-- Presses Restart as a player would, and waits for the game to request its transition (it applies after the
+-- requesting tick, so the case returns in that tick and the next case runs in the scene it loads).
 local function restart(current: GameScript.Game)
 	Test.InjectAction(Actions.Restart, "Tap")
 	Test.WaitUntil(function()
