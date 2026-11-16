@@ -106,4 +106,14 @@ namespace Engine {
 		specification.Graphics.VSync = settings.VSync;
 	}
 
+	std::string RestoreStartupDisplaySettings(ApplicationSpecification& specification, std::string_view appName, bool fixedView)
+	{
+		if (specification.Window != WindowMode::Windowed || fixedView)
+			return {};
+		StartupDisplaySettings display = ReadStartupDisplaySettings(appName, specification.UserDataRoot);
+		if (display.Settings.has_value())
+			ApplyStartupDisplaySettings(specification, *display.Settings);
+		return std::move(display.Problem);
+	}
+
 }

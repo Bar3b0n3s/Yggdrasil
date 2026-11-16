@@ -2,10 +2,12 @@
 
 #include "Engine/Platform/Window.h"
 
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Input/InputState.h"
 #include "Support/DeathTest.h"
 #include "Support/TestOptions.h"
+#include "Support/WaitUntil.h"
 #include "Support/WindowedChild.h"
 
 namespace Engine {
@@ -389,6 +391,39 @@ namespace Engine {
 		TEST_CASE("Window: a native window minimizes and restores in a windowed child process")
 		{
 			ENGINE_CHECK_WINDOWED_CHILD("Window: a native window minimizes and restores");
+		}
+
+		// Runs only in a windowed child process. M28 (Docs/Decisions/0043-m28-game-services.md decision 3): the Runtime restores
+		// a Borderless display mode (user://Display.json) by creating its window in it, so the window never shows in another
+		// mode first: undecorated, covering the primary monitor at its current video mode, which never changes. The window is
+		// closed at once (the lead's limits for the shared machine).
+		TEST_CASE("Window: a native window created Borderless covers its monitor"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			REQUIRE(GlfwLibrary::GetMode() == WindowMode::Windowed);
+
+			Result<Window> created = Window::Create({ .Title = "Native borderless", .Width = 320, .Height = 240, .DisplayMode = DisplayWindowMode::Borderless });
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			Window& window = *created;
+			window.PollEvents();
+			CHECK_FALSE(window.IsFullScreen());
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			const Result<DisplayVideoMode> desktop = QueryCurrentVideoMode(window);
+			REQUIRE_MESSAGE(desktop.has_value(), desktop.error().ToString());
+			CHECK(Test::WaitUntil([&window, &desktop]()
+			{
+				window.PollEvents();
+				return window.GetWidth() == desktop->Width && window.GetHeight() == desktop->Height;
+			}));
+#else
+			// No monitor query without a backend (Docs/Decisions/0028-backlog-program.md decision 10): the window opened.
+			CHECK(window.GetWidth() > 0);
+#endif
+		}
+
+		TEST_CASE("Window: a native window created Borderless covers its monitor in a windowed child process")
+		{
+			ENGINE_CHECK_WINDOWED_CHILD("Window: a native window created Borderless covers its monitor");
 		}
 	}
 

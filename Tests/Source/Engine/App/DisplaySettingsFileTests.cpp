@@ -7,6 +7,7 @@
 #include "Engine/Core/Mounts/MemoryMount.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Core/VirtualFileSystem.h"
+#include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Paths.h"
 #include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
@@ -15,8 +16,11 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <filesystem>
 #include <span>
 #include <string>
+#include <system_error>
+#include <utility>
 
 // M28 (Docs/Decisions/0043-m28-game-services.md decision 3): user://Display.json, the display settings a game chose, which
 // the Runtime applies before its window first shows.
@@ -118,6 +122,59 @@ namespace Engine {
 			CHECK(specification.WindowSettings.Width == 800);
 			CHECK(specification.WindowSettings.Height == 600);
 			CHECK(specification.WindowSettings.RefreshRate == 0);
+		}
+
+		TEST_CASE("DisplaySettingsFile: only a live windowed Runtime run restores Display.json, and an invalid one gives its problem")
+		{
+			const Test::TempDirectory temp;
+			const Result<UserDataPaths> paths = Paths::GetUserDataPaths("Game", temp.GetPath());
+			REQUIRE(paths.has_value());
+			std::error_code error;
+			std::filesystem::create_directories(paths->Root, error);
+			REQUIRE_FALSE(error);
+			const Result<std::string> text =
+				SerializeDisplaySettingsFile(DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 800, .Height = 600, .VSync = false });
+			REQUIRE(text.has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(paths->Root / "Display.json", std::as_bytes(std::span(text->data(), text->size()))).has_value());
+			// The factory's specification: the project's window and VSync, the run's user-data root.
+			const auto project = [&temp](WindowMode window)
+			{
+				ApplicationSpecification specification;
+				specification.Window = window;
+				specification.UserDataRoot = temp.GetPath();
+				specification.WindowSettings = WindowSpecification{ .Width = 1280, .Height = 720 };
+				specification.Graphics.VSync = true;
+				return specification;
+			};
+
+			// A live windowed run restores the file before its window first shows.
+			ApplicationSpecification live = project(WindowMode::Windowed);
+			CHECK(RestoreStartupDisplaySettings(live, "Game", false).empty());
+			CHECK(live.WindowSettings.Width == 800);
+			CHECK(live.WindowSettings.Height == 600);
+			CHECK_FALSE(live.Graphics.VSync);
+
+			// A headless run and a fixed-view run (FeatureTest, a replay) keep the project's window, and read nothing.
+			for (const auto& [window, fixedView] : { std::pair(WindowMode::Headless, false), std::pair(WindowMode::Windowed, true), std::pair(WindowMode::Headless, true) })
+			{
+				CAPTURE(WindowModeToString(window));
+				CAPTURE(fixedView);
+				ApplicationSpecification kept = project(window);
+				CHECK(RestoreStartupDisplaySettings(kept, "Game", fixedView).empty());
+				CHECK(kept.WindowSettings.Width == 1280);
+				CHECK(kept.WindowSettings.Height == 720);
+				CHECK(kept.Graphics.VSync);
+			}
+
+			// An invalid file leaves the project's window and returns the problem, which a run that does not read it never gets.
+			const std::string truncated = text->substr(0, text->size() / 2);
+			REQUIRE(FileSystem::WriteFileAtomic(paths->Root / "Display.json", std::as_bytes(std::span(truncated.data(), truncated.size()))).has_value());
+			ApplicationSpecification invalid = project(WindowMode::Windowed);
+			CHECK(RestoreStartupDisplaySettings(invalid, "Game", false).find("user://Display.json") != std::string::npos);
+			CHECK(invalid.WindowSettings.Width == 1280);
+			CHECK(invalid.Graphics.VSync);
+			ApplicationSpecification replay = project(WindowMode::Windowed);
+			CHECK(RestoreStartupDisplaySettings(replay, "Game", true).empty());
 		}
 
 		TEST_CASE("DisplaySettingsFile: the writer needs a user:// mount and writes Display.json there")

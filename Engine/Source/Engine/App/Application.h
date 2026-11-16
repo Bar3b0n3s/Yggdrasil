@@ -330,6 +330,9 @@ namespace Engine {
 		// Main thread, while Run is active. Unsupported without a device/ImGui (always in Dist); does not advance simulation
 		// or render here. Forced frames invoke the same render/submission hooks, with no reuse of stale ImGui draw data.
 		[[nodiscard]] Status RequestOffscreenUiFrame();
+		// M28 (decision 3): the VSync of the window's swapchain (Swapchain::GetVSync), the one its frames present with;
+		// nullopt without one (headless, RendererMode::None). Main thread.
+		[[nodiscard]] std::optional<bool> GetSwapchainVSync() const;
 
 #if !defined(ENGINE_DIST)
 		// The application's ImGuiLayer (editor screenshots re-render its last frame, §8.13); nullptr without ImGui, and

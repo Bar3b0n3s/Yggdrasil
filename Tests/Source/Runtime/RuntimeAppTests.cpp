@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "Engine/App/DisplaySettingsFile.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/Automation/Protocol/Framing.h"
 #include "Engine/Automation/Protocol/SessionFile.h"
@@ -402,6 +403,103 @@ namespace Engine {
 			CHECK(std::filesystem::is_regular_file(userData / "HeadlessGame/Logs/Runtime.log", error));
 			CHECK_FALSE(std::filesystem::exists(userData / ENGINE_PRODUCT_NAME, error));
 			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
+		}
+
+		TEST_CASE("RuntimeApp: a windowed run restores Display.json, logs an invalid one in the game's log and saves an applied request")
+		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 3; the W28.1 review's findings 2 and 6). The factory reads
+			// user://Display.json before logging exists, so an invalid file's problem reaches the game's log only from
+			// OnInitialize; a headless run never reads it. A valid file makes the first window in the chosen settings, which a
+			// script reads back, and a request the frame boundary applies is written back. Windowed runs without a renderer, on
+			// Windows, whose display backend alone exists (Docs/Decisions/0028-backlog-program.md decision 10).
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			const auto writeDisplay = [](const std::filesystem::path& gameData, std::string_view text)
+			{
+				REQUIRE(FileSystem::CreateDirectories(gameData).has_value());
+				REQUIRE(FileSystem::WriteFileAtomic(gameData / "Display.json", std::as_bytes(std::span(text.data(), text.size()))).has_value());
+			};
+			const std::string_view invalid = "{\"Format\": \"DisplaySettings\", \"Version\": 1, \"WindowMode\": ";
+			{
+				Test::TempDirectory userData("RuntimeDisplayHeadless");
+				const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "DisplayGame" });
+				REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+				writeDisplay(userData / "DisplayGame", invalid);
+				const Result<ProcessResult> result = RunRuntime(userData, { "--headless", "--renderer", "none", "--frames", "3", ManifestArgument(*manifest) });
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("runtime stderr: ", result->StandardError);
+				CHECK(result->ExitCode == ExitCode::Success);
+				CHECK_FALSE(result->StandardError.contains("Display.json"));
+			}
+			{
+				Test::TempDirectory userData("RuntimeDisplayInvalid");
+				const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "DisplayGame" });
+				REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+				writeDisplay(userData / "DisplayGame", invalid);
+				const Result<ProcessResult> result = RunRuntime(userData, { "--renderer", "none", "--frames", "3", ManifestArgument(*manifest) });
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				INFO("runtime stderr: ", result->StandardError);
+				CHECK(result->ExitCode == ExitCode::Success);
+				const Result<std::string> log = FileSystem::ReadText(userData / "DisplayGame/Logs/Runtime.log");
+				REQUIRE_MESSAGE(log.has_value(), log.error().ToString());
+				// The problem's line, at Warn level, in the game's own log.
+				const size_t found = log->find("user://Display.json");
+				REQUIRE(found != std::string::npos);
+				const size_t lineStart = log->find_last_of('\n', found);
+				const size_t start = lineStart == std::string::npos ? 0 : lineStart + 1;
+				CHECK(std::string_view(*log).substr(start, found - start).contains("[warning]"));
+			}
+
+			Test::TempDirectory userData("RuntimeDisplay");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "DisplayGame" });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			const std::filesystem::path display = userData / "DisplayGame/Display.json";
+			writeDisplay(userData / "DisplayGame",
+				"{\"Format\": \"DisplaySettings\", \"Version\": 1, \"WindowMode\": \"Windowed\", \"Width\": 200, \"Height\": 150, \"RefreshRate\": 0, \"VSync\": false}");
+			Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			Result<Process> process = Process::Spawn({ .Executable = std::move(*runtime),
+				.Arguments = Test::WithoutAudioDevice({ "--renderer", "none", "--automation", "--paused", ManifestArgument(*manifest),
+					"--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) }) });
+			REQUIRE_MESSAGE(process.has_value(), process.error().ToString());
+			const uint32_t pid = process->GetId();
+			const std::filesystem::path sessions = userData / "DisplayGame" / "Automation" / "Sessions";
+			REQUIRE(Test::WaitUntil([&sessions, pid]()
+			{
+				return FileSystem::Exists(SessionFile::GetPath(sessions, pid));
+			}));
+			Result<RuntimeAutomationConnection> connection = RuntimeAutomationConnection::Open(sessions, pid);
+			REQUIRE_MESSAGE(connection.has_value(), connection.error().ToString());
+			const auto evaluate = [&connection](std::string_view code) -> Json
+			{
+				const Result<Json> evaluated = connection->Call("script.eval", Json{ { "code", code }, { "context", "Play" } });
+				REQUIRE_MESSAGE(evaluated.has_value(), evaluated.error().ToString());
+				const std::optional<JsonReader> value = JsonReader(*evaluated).FindMember("value");
+				return value.has_value() ? value->GetValue() : Json();
+			};
+
+			// The project's window is 160 x 90 with VSync; the restored file's settings are in force.
+			CHECK(evaluate("local s = Application.GetDisplaySettings() return string.format('%s %dx%d %s', s.WindowMode, s.Width, s.Height, tostring(s.VSync))")
+				== Json("Windowed 200x150 false"));
+			// A request applies at the next frame boundary, and what was applied is written back.
+			CHECK(evaluate("local accepted = Application.SetDisplaySettings({ Width = 240, Height = 180 }) return accepted") == Json(true));
+			CHECK(Test::WaitUntil([&display]()
+			{
+				const Result<std::string> text = FileSystem::ReadText(display);
+				return text.has_value()
+					&& ParseDisplaySettingsFile(*text).value_or(DisplaySettings{})
+					== DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 240, .Height = 180, .RefreshRate = 0, .VSync = false };
+			}));
+
+			REQUIRE(connection->Call("session.shutdown", Json::object()).has_value());
+			const Result<ProcessResult> result = process->Wait(std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			CHECK(Test::FindProblemLogLines(result->StandardError).empty());
+#else
+			MESSAGE("RuntimeApp display settings: the display backend is Windows-only (Docs/Decisions/0028-backlog-program.md decision 10); "
+					"the restore's gate is covered by the DisplaySettingsFile cases");
+#endif
 		}
 
 		TEST_CASE("RuntimeApp: --frames ending before --screenshot-at fails the run"

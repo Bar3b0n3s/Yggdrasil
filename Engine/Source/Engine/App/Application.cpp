@@ -556,6 +556,13 @@ namespace Engine {
 		OnDisplaySettingsApplied(applied);
 	}
 
+	std::optional<bool> Application::GetSwapchainVSync() const
+	{
+		if (m_Rendering == nullptr || m_Rendering->WindowSwapchain == nullptr)
+			return std::nullopt;
+		return m_Rendering->WindowSwapchain->GetVSync();
+	}
+
 	Application::~Application() = default;
 
 	int Application::Run()

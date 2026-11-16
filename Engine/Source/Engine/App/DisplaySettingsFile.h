@@ -55,4 +55,11 @@ namespace Engine {
 	// first window shows in the chosen mode. The project's Fullscreen is cleared: the restored mode replaces it.
 	void ApplyStartupDisplaySettings(ApplicationSpecification& specification, const DisplaySettings& settings);
 
+	// The Runtime factory's restore: a live windowed run (`specification`'s Window is Windowed and `fixedView` is false; a
+	// FeatureTest or replay run is a fixed-view run, which keeps the project's window) reads `appName`'s Display.json under the
+	// specification's UserDataRoot (ReadStartupDisplaySettings) and applies what it holds (ApplyStartupDisplaySettings); a
+	// headless or fixed-view run reads nothing. Returns the read's problem, empty when the file was restored, absent or not
+	// read, for the Runtime to log once logging exists. Logs nothing.
+	[[nodiscard]] std::string RestoreStartupDisplaySettings(ApplicationSpecification& specification, std::string_view appName, bool fixedView);
+
 }

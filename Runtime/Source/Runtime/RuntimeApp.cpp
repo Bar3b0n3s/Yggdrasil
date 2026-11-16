@@ -1621,13 +1621,7 @@ namespace Engine {
 		ApplyGameSettings(specification, manifest->Name, manifest->Window, manifest->Simulation);
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): a live windowed run restores the display settings the game
 		// chose (user://Display.json) before its window first shows; FeatureTest and replay runs keep the project's window.
-		if (specification.Window == WindowMode::Windowed && !runtime.FeatureTest && runtime.Replay.empty())
-		{
-			StartupDisplaySettings display = ReadStartupDisplaySettings(manifest->Name, specification.UserDataRoot);
-			if (display.Settings.has_value())
-				ApplyStartupDisplaySettings(specification, *display.Settings);
-			runtime.DisplaySettingsProblem = std::move(display.Problem);
-		}
+		runtime.DisplaySettingsProblem = RestoreStartupDisplaySettings(specification, manifest->Name, runtime.FeatureTest || !runtime.Replay.empty());
 #if !defined(ENGINE_DIST)
 		// The F1 stats overlay (§14.4; Docs/Decisions/0024-m15-contract.md decision 17) needs Dear ImGui, which a windowed
 		// Debug or Release run with a renderer enables, without an ini file; headless runs and every Dist build have none.
