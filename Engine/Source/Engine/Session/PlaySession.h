@@ -53,6 +53,7 @@ namespace Engine {
 	class IScriptTestHost;
 	class NativeModuleTypes;
 	class NativeWorld;
+	class NavigationWorld;
 	class ParticleSystem;
 	class TypeRegistry;
 	class UiSystem;
@@ -616,6 +617,16 @@ namespace Engine {
 		// transition (its state lives in the scene's runtime components); never null once the session is created.
 		[[nodiscard]] ParticleSystem* GetParticles();
 		[[nodiscard]] const ParticleSystem* GetParticles() const;
+
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 11): the session's navigation (Navigation/NavigationWorld.h),
+		// built when the session loads a scene (Create, Scene.Load, Scene.Reload) from the NavMesh of its first Navigation
+		// component (canonical order) on an effectively enabled entity, in Play and Simulate alike; the script host returns it
+		// to the Navigation script module (IScriptHost::GetNavigation). Null when the scene has no such component, its NavMesh
+		// is null, or the mesh does not load or build (a warning names it, and NAV_MESH_NOT_BAKED reports it before play):
+		// every query then finds nothing. Read only by queries, so it adds no phase and no state-hash block. Valid until the
+		// next scene transition replaces it.
+		[[nodiscard]] NavigationWorld* GetNavigation();
+		[[nodiscard]] const NavigationWorld* GetNavigation() const;
 
 		// The state hash (§13.7, §5.1): XXH64 (seed 0) over the scene's minified canonical serialization
 		// (SceneSerializer::SaveToString, JsonStyle::Minified), followed by the tick, the Random state and the UUIDGenerator's

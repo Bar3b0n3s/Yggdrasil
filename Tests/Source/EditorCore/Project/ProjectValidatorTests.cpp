@@ -40,6 +40,7 @@
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -1375,8 +1376,8 @@ end
 			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
 			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, M23's
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
-			// codes, M34's INPUT_INVALID_ACTION and M33's PARTICLE_FRAME_OUT_OF_RANGE.
-			CHECK(codes.size() == 57 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes.
+			CHECK(codes.size() == 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1426,9 +1427,13 @@ end
 			CHECK(position(TerrainNoHeightfieldCode) + 1 == position(TerrainSplatNotRawCode));
 			// Phase 5's codes follow M26's in landing order (ADR 0042's phase 5 ledger): M34's INPUT_INVALID_ACTION
 			// (Docs/Decisions/0049-m34-characters-input.md decision 7) after them, then M33's PARTICLE_FRAME_OUT_OF_RANGE
-			// (Docs/Decisions/0048-m33-particle-look.md decision 9), and M30's two last.
+			// (Docs/Decisions/0048-m33-particle-look.md decision 9), and M30's two (Docs/Decisions/0045-m30-navigation.md
+			// decision 9), the last lander's block ending the list.
 			CHECK(position(TerrainSplatNotRawCode) + 1 == position("INPUT_INVALID_ACTION"));
 			CHECK(position("INPUT_INVALID_ACTION") + 1 == position(ParticleFrameOutOfRangeCode));
+			CHECK(position(ParticleFrameOutOfRangeCode) + 1 == position(NavMeshNotBakedCode));
+			CHECK(position(NavMeshNotBakedCode) + 1 == position(NavMeshStaleCode));
+			CHECK(codes.back() == NavMeshStaleCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

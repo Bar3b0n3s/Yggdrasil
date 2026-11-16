@@ -54,6 +54,8 @@ namespace Engine {
 				{ ".irradiance", "IrradianceVolume", AssetType::IrradianceVolume },
 				{ ".cube", "Lut", AssetType::Lut },
 				{ ".heightfield", "Heightfield", AssetType::Heightfield },
+				// M30 (Docs/Decisions/0045-m30-navigation.md decision 4).
+				{ ".navmesh", "NavMesh", AssetType::NavMesh },
 			};
 			for (const Expected& entry : expected)
 			{
@@ -73,7 +75,8 @@ namespace Engine {
 			CHECK(importers.FindForExtension(".Graph") == importers.FindById("Graph"));
 			CHECK(importers.FindForExtension(".CUBE") == importers.FindById("Lut"));
 			CHECK(importers.FindForExtension(".HeightField") == importers.FindById("Heightfield"));
-			CHECK(importers.GetImporters().size() == 18);
+			CHECK(importers.FindForExtension(".NavMesh") == importers.FindById("NavMesh"));
+			CHECK(importers.GetImporters().size() == 19);
 		}
 
 		TEST_CASE("ImporterRegistry: Describe lists ids, main types and extensions sorted by id")
@@ -81,7 +84,7 @@ namespace Engine {
 			ImporterRegistry importers;
 			RegisterBuiltinImporters(importers);
 			const std::vector<AssetImporterDescription> descriptions = importers.Describe();
-			REQUIRE(descriptions.size() == 18);
+			REQUIRE(descriptions.size() == 19);
 			CHECK(descriptions.front().Id == "Audio");
 			CHECK(descriptions.back().Id == "Tilemap");
 			for (size_t index = 1; index < descriptions.size(); ++index)
@@ -125,6 +128,8 @@ namespace Engine {
 			CHECK(importers.FindById("IrradianceVolume")->GetSettingsTypeName().empty());
 			// M26: nor has the heightfield importer; its source is binary samples (Asset/HeightfieldData.h).
 			CHECK(importers.FindById("Heightfield")->GetSettingsTypeName().empty());
+			// M30: nor has the navigation mesh importer (a binary source written by navigation.bake).
+			CHECK(importers.FindById("NavMesh")->GetSettingsTypeName().empty());
 		}
 	}
 

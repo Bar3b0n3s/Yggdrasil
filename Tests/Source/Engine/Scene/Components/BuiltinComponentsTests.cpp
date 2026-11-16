@@ -37,7 +37,8 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 55);
+			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) make 57.
+			static_assert(BuiltinComponents::Size == 57);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -69,6 +70,7 @@ namespace Engine {
 			static_assert(!TypeListContains<PrefabEntityKeys, BuiltinComponents>);
 			static_assert(!TypeListContains<AnimatorLayer, BuiltinComponents>);
 			static_assert(!TypeListContains<TerrainLayer, BuiltinComponents>);
+			static_assert(!TypeListContains<NavAgentType, BuiltinComponents>);
 			CHECK(TypeListContains<ScriptComponent, BuiltinComponents>);
 		}
 
@@ -702,6 +704,10 @@ namespace Engine {
 				"MaterialParameters",
 				// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 2): ADR 0042's phase-5 ledger's Fog category after Terrain.
 				"Fog",
+				// M30 (Docs/Decisions/0045-m30-navigation.md decision 5): ADR 0042's phase-5 ledger's categories after Terrain, in
+				// landing order.
+				"Navigation",
+				"NavModifier",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -713,7 +719,7 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,

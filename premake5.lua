@@ -88,6 +88,8 @@ group "Dependencies"
 	include "Vendor/libopus"
 	include "Vendor/opusfile"
 	include "Vendor/tinyexr"
+	include "Vendor/Recast"
+	include "Vendor/Detour"
 
 group "Engine"
 	include "Engine"

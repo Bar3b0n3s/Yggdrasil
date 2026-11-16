@@ -21,8 +21,10 @@ The metrics are "playCopy/1000Entities" (ms: per cycle, the round trip of a lock
 1,000-entity scene less that of a generated empty scene, so the session's fixed setup cost, which dominates a play.start
 in FeatureTest (about 0.7 s on the reference machine, with or without a renderer), cancels and the difference is the
 serializer copy of the entities that §5.6 budgets; the median of 5 cycles is compared with the budget),
-"replay/Determinism/tickMs" (ms per tick of the 600-tick replay in a --renderer none editor) and, per scene,
-"scene/<Name>/frameMs" and "scene/<Name>/simulationMs", the same summaries as the scene rows.
+"replay/Determinism/tickMs" (ms per tick of the 600-tick replay in a --renderer none editor),
+"navigation/150Agents/tickMs" (M30: ms per tick of a lockstep session in which 150 agents each find a path every 24
+fixed steps, in a --renderer none editor; Perf.py's docstring) and, per scene, "scene/<Name>/frameMs" and
+"scene/<Name>/simulationMs", the same summaries as the scene rows.
 """
 
 from __future__ import annotations
@@ -39,9 +41,10 @@ PERF_FORMAT = "PerfCapture"
 PERF_VERSION = 1
 PERF_REPORT_NAME = "Perf.json"
 # Tracked budgets, in the metric's unit (§5.6: "1,000 entities copy in under 30 ms (Release)"; ADR 0012 handed it to
-# this capture; M32's fog "under 0.5 ms at 1920 x 1080", Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5). Exceeding one
-# is a warning.
-BUDGETS = {"playCopy/1000Entities": 30.0, "fog/Fog/gpuCostMs": 0.5}
+# this capture; M32's fog "under 0.5 ms at 1920 x 1080", Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5; M30's navigation
+# case, about half of FeatureTest's 15.6 ms fixed step at 64 Hz, World Tree's brief 1's "fit comfortably in a 60 Hz fixed
+# step", Docs/Decisions/0045-m30-navigation.md decision 13). Exceeding one is a warning.
+BUDGETS = {"playCopy/1000Entities": 30.0, "fog/Fog/gpuCostMs": 0.5, "navigation/150Agents/tickMs": 8.0}
 
 _CAPTURE_MEMBERS = {"format": str, "version": int, "commit": str, "config": str, "host": dict, "metrics": list,
                     "scenes": list, "warnings": list}

@@ -1,5 +1,6 @@
 #include "TestsPCH.h"
 
+#include "EditorCore/Navigation/NavMeshBuilder.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/ProcessContext.h"
 #include "Engine/Core/FatalError.h"
@@ -92,6 +93,8 @@ namespace Engine {
 				.LogToFile = !options->IsChildProcess(),
 				.WriteCrashReports = !options->IsChildProcess() || !options->UserDataDirectory.empty(),
 				.VulkanLoader = VulkanLoaderPolicy::IfAvailable,
+				// Recast's hooks, for the navigation bake's tests (M30, Docs/Decisions/0045-m30-navigation.md decision 2).
+				.NavMeshBuildHooks = { .Install = &InstallNavMeshBuildHooks, .Remove = &RemoveNavMeshBuildHooks },
 			});
 			if (!created.has_value())
 			{

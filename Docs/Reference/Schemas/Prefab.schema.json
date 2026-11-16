@@ -3496,6 +3496,41 @@
 			},
 			"additionalProperties": false
 		},
+		"NavAgentType": {
+			"description": "One kind of agent the scene's navigation mesh is baked for, which queries name.",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "The name queries give (Navigation.FindPath's agent); unique in its component.",
+					"type": "string"
+				},
+				"Radius": {
+					"description": "The clearance the agent's paths keep from walls and edges, in metres.",
+					"type": "number",
+					"minimum": 0.05,
+					"maximum": 10
+				},
+				"Height": {
+					"description": "The headroom the agent needs to pass under an obstacle, in metres.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 20
+				},
+				"MaxSlope": {
+					"description": "The steepest slope the agent walks up, in degrees.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 85
+				},
+				"MaxStep": {
+					"description": "The highest ledge the agent steps onto, in metres.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				}
+			},
+			"additionalProperties": false
+		},
 		"Entity": {
 			"description": "One entity: its entity keys, then its components.",
 			"type": "object",

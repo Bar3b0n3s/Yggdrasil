@@ -31,6 +31,8 @@ namespace Engine {
 	// argument, granted by the ledger amendment on main of 2026-11-02); a host that passed none would draw a play scene's 2D
 	// colliders as an edit scene's, Dynamic bodies awake and asleep alike. Where the view's icons are on, a Light2D shows the
 	// PointLight icon in its Color (decision 20, stream L).
+	// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): with Navigation, the scene's baked navigation mesh follows the
+	// colliders as polygon edges (AppendNavigationDebugDraw, Scene/NavigationDebugDraw.h), in edit and play alike.
 	// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 9): the UI elements' bounds and labels go to snapshot.Ui's
 	// annotations in scene pixels (AppendUiRenderAnnotations, Scene/UiExtraction.h), whether or not the view has a camera.
 	[[nodiscard]] Status AppendRenderAnnotations(const Scene& scene, AssetManager& assets, const PhysicsLayerTable& layers,

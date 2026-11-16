@@ -1821,6 +1821,18 @@ One layer of an Animator's blend stack: a clip played at a time, speed and weigh
 | `Weight` | `Float` | `1` | 0 to 1 |  |  | How much the layer's animated joints override the layers before it, from 0 (none) to 1 (fully). |
 | `Loop` | `Bool` | `true` |  |  |  | Whether the clip starts again at its end; otherwise its last pose holds. |
 
+### NavAgentType
+
+One kind of agent the scene's navigation mesh is baked for, which queries name.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `"Default"` |  |  |  | The name queries give (Navigation.FindPath's agent); unique in its component. |
+| `Radius` | `Float` | `0.4` | 0.05 to 10 | m |  | The clearance the agent's paths keep from walls and edges, in metres. |
+| `Height` | `Float` | `1.8` | 0.1 to 20 | m |  | The headroom the agent needs to pass under an obstacle, in metres. |
+| `MaxSlope` | `Float` | `45` | 0 to 85 | deg |  | The steepest slope the agent walks up, in degrees. |
+| `MaxStep` | `Float` | `0.4` | 0 to 10 | m |  | The highest ledge the agent steps onto, in metres. |
+
 ### ParticleColorKey
 
 One key of a particle colour curve over the particle's life.

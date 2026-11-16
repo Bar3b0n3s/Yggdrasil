@@ -252,6 +252,9 @@ namespace Engine {
 			snapshot.Flags |= RenderViewFlags::Icons;
 		if (options.Wireframe)
 			snapshot.Flags |= RenderViewFlags::Wireframe;
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): the baked navigation mesh, which the annotations draw.
+		if (options.NavMesh)
+			snapshot.Flags |= RenderViewFlags::Navigation;
 		if (!selection.empty())
 			snapshot.Flags |= RenderViewFlags::Selection;
 		snapshot.SelectedEntities.assign(selection.begin(), selection.end());

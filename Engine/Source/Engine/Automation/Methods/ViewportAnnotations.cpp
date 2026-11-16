@@ -56,7 +56,7 @@ namespace Engine {
 				else
 					return std::unexpected(field.MakeLocatedError(ErrorCode::InvalidArgument, "expected label mode or EntityRef array"));
 			}
-			else if (name == "bounds" || name == "axes" || name == "colliders")
+			else if (name == "bounds" || name == "axes" || name == "colliders" || name == "navMesh")
 			{
 				const auto flag = field.ReadBool();
 				if (!flag)
@@ -65,8 +65,10 @@ namespace Engine {
 					result.Annotations.Bounds = *flag;
 				else if (name == "axes")
 					result.Annotations.Axes = *flag;
-				else
+				else if (name == "colliders")
 					result.Colliders = *flag;
+				else
+					result.NavMesh = *flag;
 			}
 			else
 				return std::unexpected(field.MakeLocatedError(ErrorCode::InvalidArgument, "unknown annotation option"));

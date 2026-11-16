@@ -15,6 +15,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/luau-gameplay/world-pause` ([world-pause.md](world-pause.md)): pausing the world while menus run: `Time.PauseWorld`, `ResumeWorld` and `IsWorldPaused`, `RunsWhileWorldPaused`, the world's and the session's clocks, tasks and sounds while paused.
 - `skills/luau-gameplay/characters-and-input` ([characters-and-input.md](characters-and-input.md)): how a character meets Dynamic bodies (the push, light bodies that never move it, tuning it with `Mass`), triggers as buttons, bindings checked when set, and aiming at the cursor in the fixed step with `Camera:ScreenToWorldRayFrom`.
 - `skills/luau-gameplay/game-services` ([game-services.md](game-services.md)): display settings (`Application.GetDisplayModes`, `GetDisplaySettings`, `SetDisplaySettings`), save data (`SaveData`), the session's audio mix, the performance readout (`Application.GetStats`), presentation text for frame-paced values (`UiText:SetPresentationText`) and frame-time signals recorded as input (`Input.PostSignal`, `Input.WasSignalled`).
+- `skills/luau-gameplay/navigation` ([navigation.md](navigation.md)): the `Navigation` module: paths, closest points, walks along the surface and random points on the baked navigation mesh, an agent type per query, determinism in the fixed step and a chaser behaviour.
 
 ## Script shape
 

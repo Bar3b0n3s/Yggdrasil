@@ -26,8 +26,9 @@ namespace Engine {
 	// (Docs/Decisions/0032-m21-contract.md decisions 15 and 27) and tilemap.paint (decision 26), M22's ui.tree
 	// (Docs/Decisions/0033-m22-contract.md decision 8) and ui.createWidget (decision 32), M23's animation.preview
 	// (Docs/Decisions/0034-m23-contract.md decision 32), M24's ten graph edit and read methods (Docs/Decisions/0035-m24-contract.md
-	// decision 12) and graph.liveValues (decision 14), and M26's lighting.bake, terrain.edit and terrain.importHeightmap
-	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), test hooks excluded.
+	// decision 12) and graph.liveValues (decision 14), M26's lighting.bake, terrain.edit and terrain.importHeightmap
+	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), and M30's navigation.bake
+	// (Docs/Decisions/0045-m30-navigation.md decision 8), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -38,7 +39,7 @@ namespace Engine {
 			"graph.moveNodes", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "input.inject", "input.readReplay",
 			"input.record", "input.replay", "lighting.bake", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
-			"physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
+			"navigation.bake", "physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
 			"play.setTimeScale", "play.setWorldPaused", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "savedata.clear", "savedata.get", "savedata.set",
@@ -127,7 +128,7 @@ namespace Engine {
 				"graph.connect", "graph.create", "graph.disconnect", "graph.liveValues", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers",
 				"graph.setValues", "input.inject", "input.readReplay", "input.record", "input.replay", "lighting.bake", "log.read", "native.build",
 				"native.getComponents", "native.load", "native.read",
-				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
+				"native.setComponents", "native.status", "native.write", "navigation.bake", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
 				"savedata.clear", "savedata.get", "savedata.set", "scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open",
 				"scene.query", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write",
@@ -304,9 +305,9 @@ namespace Engine {
 			// animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), M24's ten graph tools: the nine graph edit and read
 			// tools, every one but graph.moveNodes (Docs/Decisions/0035-m24-contract.md decision 12), and graph_live_values (decision
 			// 14), M26's lighting_bake, terrain_edit and terrain_import_heightmap (Docs/Decisions/0037-m26-contract.md decisions 8,
-			// 20 and 23), and M28's savedata_get, savedata_set and savedata_clear (Docs/Decisions/0043-m28-game-services.md
-			// decision 8).
-			CHECK(catalog["Tools"].size() == 85);
+			// 20 and 23), M28's savedata_get, savedata_set and savedata_clear (Docs/Decisions/0043-m28-game-services.md decision
+			// 8) and M30's navigation_bake (Docs/Decisions/0045-m30-navigation.md decision 8).
+			CHECK(catalog["Tools"].size() == 86);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

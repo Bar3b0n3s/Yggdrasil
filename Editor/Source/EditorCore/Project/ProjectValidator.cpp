@@ -57,6 +57,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Migrations.h"
+#include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/Prefab.h"
@@ -199,6 +200,10 @@ namespace Engine {
 			// M33 (Scene/SpriteValidation.h, Docs/Decisions/0048-m33-particle-look.md decision 9), appended after the earlier
 			// landers' (ADR 0042's phase-5 ledger: after M34's at M33's merge).
 			ParticleFrameOutOfRangeCode,
+			// M30 (Scene/NavigationValidation.h, Docs/Decisions/0045-m30-navigation.md decision 9), appended in landing order
+			// after main's (ADR 0042's phase-5 ledger: after every other lander's, M34's and M33's codes among them).
+			NavMeshNotBakedCode,
+			NavMeshStaleCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -438,6 +443,13 @@ namespace Engine {
 				"SpriteSheet's frames; the emitter's particles draw nothing.",
 				"Keep FirstFrame and FirstFrame + FrameCount within the sheet's frame count (FrameCount 0 runs to its last frame), or add "
 				"the frames to the sheet." },
+			ValidationCodeInfo{ NavMeshNotBakedCode, "Warning", false,
+				"A scene's Navigation component has no NavMesh, or its NavMesh does not load; every navigation query finds nothing.",
+				"Bake the scene's navigation with navigation.bake (the editor's Bake Navigation) and save the scene." },
+			ValidationCodeInfo{ NavMeshStaleCode, "Warning", false,
+				"A scene's static colliders, NavModifiers or Navigation settings changed after its navigation mesh was baked, or its bake "
+				"input can no longer be read (an unknown layer, a setting out of range); queries follow the old mesh.",
+				"Bake the scene's navigation again with navigation.bake (the editor's Bake Navigation) and save the scene." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1244,6 +1256,25 @@ namespace Engine {
 			}
 		}
 
+		// The navigation checks of §13.7 (M30, Scene/NavigationValidation.h): NAV_MESH_NOT_BAKED and NAV_MESH_STALE on the scene's
+		// Navigation component, its mesh loaded and its bake input recomputed through the editor's asset manager. Neither is
+		// fixable: baking writes files (navigation.bake).
+		static void CheckNavigation(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			if (assets == nullptr)
+				return;
+			for (NavigationSceneIssue& issue : FindNavigationSceneIssues(*checked.Target, *assets, checked.Layers))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		// The terrain checks of §13.7 (M26, Scene/TerrainValidation.h): TERRAIN_NO_HEIGHTFIELD and TERRAIN_SPLAT_NOT_RAW on each
 		// Terrain they name, its heightfield loaded and its splat map's .meta read through the editor's asset manager. Neither is
 		// fixable.
@@ -1559,6 +1590,7 @@ namespace Engine {
 			CheckSprites(editor, checked, diagnostics);
 			CheckUi(editor, checked, diagnostics);
 			CheckTerrain(editor, checked, diagnostics);
+			CheckNavigation(editor, checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

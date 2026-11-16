@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["NAV_MESH_NOT_BAKED"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

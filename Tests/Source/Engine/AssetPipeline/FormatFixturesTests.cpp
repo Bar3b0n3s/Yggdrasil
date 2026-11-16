@@ -18,12 +18,12 @@ namespace Engine {
 		// The importers of native formats, which projects author (scaffolds, the editor, automation) instead of importing a
 		// foreign file: they have no fixture in Tests/Data/Assets. M26's IrradianceVolume is lighting.bake's output, and its
 		// .heightfield is written by asset.create, terrain.importHeightmap and terrain.edit (Docs/Decisions/0037-m26-contract.md
-		// decisions 8 and 20).
+		// decisions 8 and 20); M30's NavMesh is navigation.bake's output (Docs/Decisions/0045-m30-navigation.md decision 4).
 		bool IsNativeImporter(std::string_view importer)
 		{
 			return importer == "Material" || importer == "Prefab" || importer == "Scene" || importer == "Script" || importer == "Replay" || importer == "SoundEffect"
 				|| importer == "SpriteSheet" || importer == "Tilemap" || importer == "StringTable" || importer == "Graph" || importer == "IrradianceVolume"
-				|| importer == "Heightfield";
+				|| importer == "Heightfield" || importer == "NavMesh";
 		}
 
 	}

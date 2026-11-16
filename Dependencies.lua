@@ -85,6 +85,8 @@ IncludeDir["SheenBidi"] = RepositoryRoot .. "/Vendor/SheenBidi/Headers"
 -- M23 (Docs/Decisions/0034-m23-contract.md decisions 13 and 14): texture compression and the OpenEXR reader.
 IncludeDir["CMP_Core"] = RepositoryRoot .. "/Vendor/CMP_Core/cmp_core/source"
 IncludeDir["tinyexr"] = RepositoryRoot .. "/Vendor/tinyexr"
+IncludeDir["Recast"] = RepositoryRoot .. "/Vendor/Recast/Include"
+IncludeDir["Detour"] = RepositoryRoot .. "/Vendor/Detour/Include"
 
 -- Project kinds that produce a linked binary and therefore link libraries.
 local LinkingKinds = "kind:ConsoleApp or WindowedApp or SharedLib"
@@ -497,6 +499,34 @@ function UseTinyExr()
 	filter {}
 end
 
+-- Recast (Vendor/Recast/VENDOR.md): the navigation-mesh builder of the editor's navigation.bake (M30,
+-- Docs/Decisions/0045-m30-navigation.md). No defines: Recast's headers read no configuration macro (the RC_ family stays
+-- empty). EditorCore takes the include directory (its Navigation/NavMeshBuilder.cpp alone includes Recast.h,
+-- Scripts/ModuleRules.json); EditorCore, Editor and Tests call this function, the Runtime's projects never do
+-- (UseRuntimeDependencies), so no exported game links Recast.
+function UseRecast()
+	externalincludedirs { IncludeDir.Recast }
+
+	filter { LinkingKinds }
+		links { "Recast" }
+
+	filter {}
+end
+
+-- Detour (Vendor/Detour/VENDOR.md): the run-time navigation mesh and its queries (M30,
+-- Docs/Decisions/0045-m30-navigation.md). No defines: DT_POLYREF64 and DT_VIRTUAL_QUERYFILTER stay undefined for the
+-- library and every consumer (the DT_ family is empty). Engine takes the include directory (the Navigation module's
+-- private files alone include Detour's headers, Scripts/ModuleRules.json), and every executable links it
+-- (UseRuntimeDependencies too): sessions answer navigation queries in the Runtime.
+function UseDetour()
+	externalincludedirs { IncludeDir.Detour }
+
+	filter { LinkingKinds }
+		links { "Detour" }
+
+	filter {}
+end
+
 -- The libraries the Runtime's code is compiled against (and, in an executable, linked with): the RuntimeCore library
 -- and the Runtime executable (Runtime/premake5.lua), and a game's native module and the Runtime linked with it
 -- (Scripts/Premake/NativeModule.lua; Docs/Decisions/0030-m19-contract.md decision 30), so a module's code compiles with
@@ -513,6 +543,7 @@ function UseRuntimeDependencies()
 	UseHarfBuzz()
 	UseSheenBidi()
 	UseCMPCore()
+	UseDetour()
 end
 
 -- The Runtime executable (Docs/Architecture.md §2.2, §14.3): RuntimeMain.cpp linked with the RuntimeCore and Engine

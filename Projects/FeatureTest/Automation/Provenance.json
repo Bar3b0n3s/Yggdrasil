@@ -3715,6 +3715,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Navigation.scene",
+			"XXH64": "6b47e7087f6688a8",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Navigation.scene.meta",
+			"XXH64": "d614fbfbe9b359fe",
+			"Method": "project.refreshAssets",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/NestedPrefabs.scene",
 			"XXH64": "8fa84329b198f851",
 			"Method": "scene.save",
@@ -4415,6 +4431,38 @@
 			"XXH64": "292f9416f0e3024e",
 			"Method": "script.write",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Navigation/NavChaser.luau",
+			"XXH64": "28f44d42ea8d83c1",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Navigation/NavChaser.luau.meta",
+			"XXH64": "7d3e0fb467ca5a1a",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Navigation/NavWarden.luau",
+			"XXH64": "3016b352d82ddb4a",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Navigation/NavWarden.luau.meta",
+			"XXH64": "3011b5968dad6f99",
+			"Method": "script.write",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6195,6 +6243,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Navigation/Navigation.test.luau",
+			"XXH64": "5df07e565594649d",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Navigation/Navigation.test.luau.meta",
+			"XXH64": "aed1f41aeafacb02",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/NestedPrefabs/NestedPrefabs.test.luau",
 			"XXH64": "eb404c52c6ab5a84",
 			"Method": "script.write",
@@ -6527,6 +6591,22 @@
 			"XXH64": "73aa15b06ba44a6c",
 			"Method": "input.record",
 			"RequestId": 19,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Navigation.replay",
+			"XXH64": "f1916f947b2e6480",
+			"Method": "input.record",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Navigation.replay.meta",
+			"XXH64": "971a3f68a19eaddf",
+			"Method": "input.record",
+			"RequestId": 8,
 			"Client": "batch",
 			"TranscriptLine": null
 		},

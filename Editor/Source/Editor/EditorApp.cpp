@@ -26,6 +26,7 @@
 #include "EditorCore/EngineAssetGenerators.h"
 #include "EditorCore/Export/Exporter.h"
 #include "EditorCore/Inspector/ReflectedEditController.h"
+#include "EditorCore/Navigation/NavMeshBuilder.h"
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Project/ProjectManager.h"
 #include "EditorCore/Reference/ReferenceGenerator.h"
@@ -1570,6 +1571,8 @@ namespace Engine {
 		specification.Name = ENGINE_PRODUCT_NAME;
 		// The editor's automation param and result structs join the context's type registry before it freezes (§5.4, §13.4).
 		specification.RegisterTypes = &RegisterEditorMethodTypes;
+		// Recast's hooks, for navigation.bake (M30, Docs/Decisions/0045-m30-navigation.md decision 2).
+		specification.NavMeshBuildHooks = { .Install = &InstallNavMeshBuildHooks, .Remove = &RemoveNavMeshBuildHooks };
 		specification.EnableImGui = true;
 		specification.ImGuiIniPath = "Editor/imgui.ini";
 		// Development builds mount engine:// at <repo>/Resources and enginecache:// at <repo>/bin/EngineCache, or at

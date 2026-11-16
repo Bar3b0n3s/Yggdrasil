@@ -36,6 +36,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/game-building/effects` ([effects.md](effects.md)): particles (emitters, shapes, blends, scripts and their digests) and baked lighting probes (irradiance volumes, box-projected reflection probes and `lighting_bake`).
 - `skills/game-building/post-processing` ([post-processing.md](post-processing.md)): post-processing: automatic exposure, colour-grading LUTs (`.cube`), screen-space reflections, fog (distance, height and sun glow) and TAA, their limits, and screenshots of temporal effects.
 - `skills/game-building/game-services` ([game-services.md](game-services.md)): an options menu (display settings, volumes) and saving (save data, `savedata_get`, `savedata_set` and `savedata_clear`, seeding the store a recording starts with, a corrupt store).
+- `skills/game-building/navigation` ([navigation.md](navigation.md)): navigation meshes: the `Navigation` component's agent types and bake settings, `NavModifier` holes and costs, `navigation_bake`, and the stale-bake checks.
 - `skills/game-building/terrain` ([terrain.md](terrain.md)): heightfield terrain: heightmap import, sculpting and painting with `terrain_edit`, splat layers, levels of detail, the terrain collider and `Terrain:SampleHeight`.
 
 ## Ground rules

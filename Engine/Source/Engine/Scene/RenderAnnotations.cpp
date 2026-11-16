@@ -16,6 +16,7 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/NavigationDebugDraw.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiExtraction.h"
@@ -130,6 +131,10 @@ namespace Engine {
 			// M21 (decision 28): the 2D colliders after the 3D ones, told asleep from awake by the session's 2D system.
 			AppendColliderDebugDraw(BuildCollider2DDebugDraw(scene, layers, physics2D, &assets, { .Alpha = snapshot.Alpha }), debug);
 		}
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): the baked navigation mesh's polygon edges, after the colliders,
+		// at their own colour: the mesh has no pose, so the snapshot's interpolation alpha does not apply to it.
+		if (HasFlag(snapshot.Flags, RenderViewFlags::Navigation))
+			static_cast<void>(AppendNavigationDebugDraw(scene, assets, debug));
 		snapshot.AnnotationDraw = std::move(debug);
 		snapshot.Icons = std::move(icons);
 		return {};

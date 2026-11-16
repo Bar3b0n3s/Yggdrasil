@@ -7,6 +7,7 @@
 #include "Engine/Core/Log.h"
 #include "Engine/Core/Profiler.h"
 #include "Engine/Graphics/VulkanDispatch.h"
+#include "Engine/Navigation/NavigationRuntime.h"
 #include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Platform/CrashHandler.h"
 #include "Engine/Platform/ErrorDialog.h"
@@ -25,13 +26,14 @@ namespace Engine {
 		// The live context, read by the fatal-error handler on whichever thread fails (process-level state, §3 rule 5).
 		static std::atomic<ProcessContext*> s_CurrentProcessContext{ nullptr };
 
-		constexpr std::array<ProcessContextStep, 8> ProcessContextSteps = {
+		constexpr std::array<ProcessContextStep, 9> ProcessContextSteps = {
 			ProcessContextStep::Log,
 			ProcessContextStep::Profiler,
 			ProcessContextStep::CrashHandler,
 			ProcessContextStep::Scripting,
 			ProcessContextStep::Physics,
 			ProcessContextStep::TextureCodecs,
+			ProcessContextStep::Navigation,
 			ProcessContextStep::VulkanLoader,
 			ProcessContextStep::Glfw,
 		};
@@ -166,6 +168,14 @@ namespace Engine {
 				InitializeTextureCodecs();
 				break;
 			}
+			case ProcessContextStep::Navigation:
+			{
+				// Detour's hooks, then Recast's when the application bakes (ProcessLibraryHooks).
+				InitializeNavigationRuntime();
+				if (m_Specification.NavMeshBuildHooks.Install != nullptr)
+					m_Specification.NavMeshBuildHooks.Install();
+				break;
+			}
 			case ProcessContextStep::VulkanLoader:
 			{
 				Status loaded = VulkanDispatch::Initialize();
@@ -219,6 +229,11 @@ namespace Engine {
 				break;
 			case ProcessContextStep::TextureCodecs:
 				// CMP_Core's state needs no teardown.
+				break;
+			case ProcessContextStep::Navigation:
+				if (m_Specification.NavMeshBuildHooks.Remove != nullptr)
+					m_Specification.NavMeshBuildHooks.Remove();
+				ShutdownNavigationRuntime();
 				break;
 			case ProcessContextStep::VulkanLoader:
 				VulkanDispatch::Shutdown();
@@ -275,6 +290,7 @@ namespace Engine {
 			case ProcessContextStep::Scripting:     return "Scripting";
 			case ProcessContextStep::Physics:       return "Physics";
 			case ProcessContextStep::TextureCodecs: return "TextureCodecs";
+			case ProcessContextStep::Navigation:    return "Navigation";
 			case ProcessContextStep::VulkanLoader:  return "VulkanLoader";
 			case ProcessContextStep::Glfw:          return "Glfw";
 		}

@@ -37,3 +37,7 @@
 /Tests/Projects/*/Native/** -text
 /Tests/Projects/*/*.eproj -text
 /Tests/Projects/*/.luaurc -text
+# recastnavigation stores its licence with CRLF line endings: Recast's and Detour's copies are kept byte for byte, as their
+# VENDOR.md records them (M30, Docs/Decisions/0045-m30-navigation.md decision 2).
+/Vendor/Recast/License.txt -text
+/Vendor/Detour/License.txt -text

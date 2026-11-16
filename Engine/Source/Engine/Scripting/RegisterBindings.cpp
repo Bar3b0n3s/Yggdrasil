@@ -49,6 +49,9 @@ namespace Engine {
 			// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the SaveData module, after RegisterTerrain (phase 5's
 			// ledger: before M30's RegisterNavigation).
 			ENGINE_TRY(ScriptBindings::RegisterSaveData(api));
+			// M30 (Docs/Decisions/0045-m30-navigation.md decision 10): the Navigation module, after the earlier milestones'
+			// registrations (landing order: after M28's RegisterSaveData, ADR 0042's ledger).
+			ENGINE_TRY(ScriptBindings::RegisterNavigation(api));
 			return {};
 		}
 

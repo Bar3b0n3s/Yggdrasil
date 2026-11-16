@@ -98,6 +98,8 @@ namespace Engine {
 			CHECK(AssetTypeToEditorIcon(AssetType::IrradianceVolume) == EditorIcon::IrradianceVolume);
 			CHECK(AssetTypeToEditorIcon(AssetType::Lut) == EditorIcon::Lut);
 			CHECK(AssetTypeToEditorIcon(AssetType::Heightfield) == EditorIcon::Heightfield);
+			// M30 (Docs/Decisions/0045-m30-navigation.md decision 4).
+			CHECK(AssetTypeToEditorIcon(AssetType::NavMesh) == EditorIcon::NavMesh);
 		}
 
 		// M24 (Docs/Decisions/0035-m24-contract.md decisions 2 and 15): a graph is a Script asset, told apart by its importer.

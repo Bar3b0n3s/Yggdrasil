@@ -61,6 +61,8 @@ namespace Engine {
 				{ "entity.update", SceneRelation::Target },
 				// M26: bakes the target scene's probes (Docs/Decisions/0037-m26-contract.md decision 8).
 				{ "lighting.bake", SceneRelation::Target },
+				// M30 (Docs/Decisions/0045-m30-navigation.md decision 8): the target scene's Navigation.
+				{ "navigation.bake", SceneRelation::Target },
 				// M19's native component reads and writes (Docs/Decisions/0031-m20-contract.md, "Merge with M19").
 				{ "native.getComponents", SceneRelation::Target },
 				{ "native.setComponents", SceneRelation::Target },

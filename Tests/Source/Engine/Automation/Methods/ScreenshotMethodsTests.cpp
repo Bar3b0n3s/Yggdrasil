@@ -8,6 +8,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Asset/AssetTypeRegistration.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
 #include "Engine/Automation/Methods/RuntimeAutomationServer.h"
@@ -28,11 +29,13 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/NavigationDebugDraw.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/GlmApprox.h"
+#include "Support/NavigationTestScene.h"
 #include "Support/SceneTestFixture.h"
 
 #include <cstdint>
@@ -530,6 +533,44 @@ namespace Engine {
 					if (std::string_view(target) == "play")
 						REQUIRE(setup.Call("play.stop", Json::object()));
 				}
+		}
+
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12; World Tree's brief 1): "a debug view of the mesh ... in
+		// viewport.screenshot captures, so an agent can see what was baked".
+		TEST_CASE("ScreenshotMethods: annotate.navMesh draws the scene's baked navigation mesh in the edit and play scenes")
+		{
+			CaptureLog log;
+			ScreenshotSetup setup("NavMeshAnnotation", log);
+			auto& editor = setup.GetFixture().GetEditor();
+			static_cast<void>(Test::AddNavigationArena(editor.GetScene()));
+			REQUIRE(setup.Call("scene.save", Json::object()));
+			REQUIRE(setup.Call("navigation.bake", Json::object()));
+			REQUIRE(setup.Call("entity.create", ParseJson(R"({"name":"Camera","components":{"Transform":{"Translation":[0,18,22],"EulerAngles":[-40,0,0]},"Camera":{"Primary":true}}})")));
+			REQUIRE(setup.Call("scene.save", Json::object()));
+			DebugDrawList expected;
+			const size_t lines = AppendNavigationDebugDraw(editor.GetScene(), editor.GetAssets(), expected);
+			REQUIRE(lines > 0);
+			for (const char* target : { "edit", "play" })
+			{
+				INFO(target);
+				if (std::string_view(target) == "play")
+					REQUIRE(setup.Call("play.start", Json{ { "lockstep", true } }));
+				const Json params{ { "view", "game" }, { "target", target }, { "width", 32 }, { "height", 24 }, { "annotate", Json{ { "navMesh", true } } } };
+				REQUIRE(setup.Call("viewport.screenshot", params));
+				REQUIRE(log.LastSnapshot);
+				CHECK(log.LastSnapshot->Flags == RenderViewFlags::Navigation);
+				CHECK(log.LastSnapshot->AnnotationDraw.GetCommands().size() == lines);
+				CHECK(log.LastSnapshot->DebugDraw.GetCommands().empty());
+				// Without the annotation, nothing.
+				REQUIRE(setup.Call("viewport.screenshot", Json{ { "view", "game" }, { "target", target }, { "width", 32 }, { "height", 24 } }));
+				CHECK(log.LastSnapshot->AnnotationDraw.GetCommands().empty());
+				if (std::string_view(target) == "play")
+					REQUIRE(setup.Call("play.stop", Json::object()));
+			}
+			const auto invalid = setup.Call("viewport.screenshot", Json{ { "view", "scene" }, { "annotate", Json{ { "navMesh", 1 } } } });
+			REQUIRE_FALSE(invalid);
+			CHECK(invalid.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(FirstIssuePointer(invalid.error()) == "/annotate/navMesh");
 		}
 
 		TEST_CASE("ScreenshotMethods: selection labels come only from a selection of the target scene")

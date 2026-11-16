@@ -216,7 +216,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -416,7 +416,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -506,7 +506,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -592,7 +592,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -752,7 +752,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -798,7 +798,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -983,7 +983,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -1050,7 +1050,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -1127,7 +1127,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -1234,7 +1234,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -1339,7 +1339,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -1503,7 +1503,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -1636,7 +1636,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -1866,7 +1866,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -7129,6 +7129,41 @@
 							}
 						},
 						"additionalProperties": false
+					},
+					"NavAgentType": {
+						"description": "One kind of agent the scene's navigation mesh is baked for, which queries name.",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "The name queries give (Navigation.FindPath's agent); unique in its component.",
+								"type": "string"
+							},
+							"Radius": {
+								"description": "The clearance the agent's paths keep from walls and edges, in metres.",
+								"type": "number",
+								"minimum": 0.05,
+								"maximum": 10
+							},
+							"Height": {
+								"description": "The headroom the agent needs to pass under an obstacle, in metres.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 20
+							},
+							"MaxSlope": {
+								"description": "The steepest slope the agent walks up, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 85
+							},
+							"MaxStep": {
+								"description": "The highest ledge the agent steps onto, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10
+							}
+						},
+						"additionalProperties": false
 					}
 				}
 			},
@@ -11403,6 +11438,41 @@
 							}
 						},
 						"additionalProperties": false
+					},
+					"NavAgentType": {
+						"description": "One kind of agent the scene's navigation mesh is baked for, which queries name.",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "The name queries give (Navigation.FindPath's agent); unique in its component.",
+								"type": "string"
+							},
+							"Radius": {
+								"description": "The clearance the agent's paths keep from walls and edges, in metres.",
+								"type": "number",
+								"minimum": 0.05,
+								"maximum": 10
+							},
+							"Height": {
+								"description": "The headroom the agent needs to pass under an obstacle, in metres.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 20
+							},
+							"MaxSlope": {
+								"description": "The steepest slope the agent walks up, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 85
+							},
+							"MaxStep": {
+								"description": "The highest ledge the agent steps onto, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10
+							}
+						},
+						"additionalProperties": false
 					}
 				}
 			},
@@ -11756,7 +11826,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -11883,7 +11953,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -12024,7 +12094,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -12144,7 +12214,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -12280,7 +12350,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -12498,7 +12568,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -12756,7 +12826,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -13083,7 +13153,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -13334,7 +13404,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -13469,7 +13539,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -14305,7 +14375,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -15368,6 +15438,160 @@
 						"path": "Native/Spinner.cpp",
 						"source": "#include \"Engine/Native/NativeApi.h\"\n"
 					}
+				}
+			]
+		},
+		{
+			"name": "navigation.bake",
+			"domain": "navigation",
+			"description": "Bakes an edit scene's navigation mesh: voxelizes the static colliders on the Navigation component's layers for each of its agent types, marks its NavModifiers, writes the mesh for the saved scene (Assets/Navigation/<the scene's path below Assets/ without .scene>.navmesh, so Assets/Scenes/Arena.scene bakes into Assets/Navigation/Scenes/Arena.navmesh), imports it and sets the component's NavMesh in one undoable edit. CPU only. Two bakes of one scene write byte-identical files.",
+			"exposeAsTool": true,
+			"mutates": true,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 600,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NavigationBakeMethodResult",
+				"description": "The navigation mesh navigation.bake baked.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The entity whose Navigation component now references the mesh.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"path": {
+						"description": "The written source file, project-relative: Assets/Navigation/<the scene's path below Assets/ without .scene>.navmesh.",
+						"type": "string"
+					},
+					"asset": {
+						"description": "The baked NavMesh asset, which the Navigation component's NavMesh now references.",
+						"$ref": "#/$defs/AssetSummary"
+					},
+					"changed": {
+						"description": "Whether the file's bytes changed (false when a rebake found the same input).",
+						"type": "boolean"
+					},
+					"inputHash": {
+						"description": "The bake input's hash (16 lowercase hex digits), which project.validate compares to report NAV_MESH_STALE.",
+						"type": "string"
+					},
+					"agents": {
+						"description": "Each agent type's mesh, in the Navigation component's order.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/NavigationBakeAgent"
+						}
+					},
+					"skippedBodies": {
+						"description": "Static bodies whose shape could not be described (PHYSICS_INVALID_SHAPE in project.validate), left out of the bake.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/EntitySummary"
+						}
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"AssetSummary": {
+						"description": "An asset's canonical id with its readable path and type.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The asset's handle: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"path": {
+								"description": "Its readable reference, such as \"Assets/Models/Track.glb#mesh:0:Straight\" or \"engine://Meshes/Cube\".",
+								"type": "string"
+							},
+							"type": {
+								"description": "Its type.",
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"NavigationBakeAgent": {
+						"description": "One agent type's baked navigation mesh.",
+						"type": "object",
+						"properties": {
+							"name": {
+								"description": "The agent type's name.",
+								"type": "string"
+							},
+							"polygons": {
+								"description": "The mesh's walkable polygons (0 when the agent type walks nowhere).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"vertices": {
+								"description": "The mesh's polygon vertices.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Bake the active scene's navigation mesh.",
+					"params": {}
 				}
 			]
 		},
@@ -17697,7 +17921,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -17865,7 +18089,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -21628,6 +21852,41 @@
 							}
 						},
 						"additionalProperties": false
+					},
+					"NavAgentType": {
+						"description": "One kind of agent the scene's navigation mesh is baked for, which queries name.",
+						"type": "object",
+						"properties": {
+							"Name": {
+								"description": "The name queries give (Navigation.FindPath's agent); unique in its component.",
+								"type": "string"
+							},
+							"Radius": {
+								"description": "The clearance the agent's paths keep from walls and edges, in metres.",
+								"type": "number",
+								"minimum": 0.05,
+								"maximum": 10
+							},
+							"Height": {
+								"description": "The headroom the agent needs to pass under an obstacle, in metres.",
+								"type": "number",
+								"minimum": 0.1,
+								"maximum": 20
+							},
+							"MaxSlope": {
+								"description": "The steepest slope the agent walks up, in degrees.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 85
+							},
+							"MaxStep": {
+								"description": "The highest ledge the agent steps onto, in metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10
+							}
+						},
+						"additionalProperties": false
 					}
 				}
 			},
@@ -21695,7 +21954,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -25725,7 +25984,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -26601,7 +26860,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -27033,7 +27292,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -27155,7 +27414,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -27272,7 +27531,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -28352,7 +28611,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -29054,7 +29313,7 @@
 							},
 							"type": {
 								"description": "Its type.",
-								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 							}
 						},
 						"additionalProperties": false
@@ -30049,7 +30308,7 @@
 						"type": "string"
 					},
 					"annotate": {
-						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected."
+						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds, axes and navMesh (the scene's baked navigation mesh as polygon edges) are booleans. Unknown members and invalid references are rejected."
 					},
 					"maxDimension": {
 						"description": "The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when either is given, so the PNG has the requested size, and 1024 otherwise.",
@@ -30237,6 +30496,10 @@
 						"description": "Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.",
 						"type": "boolean"
 					},
+					"navMesh": {
+						"description": "Show the scene's baked navigation mesh as polygon edges.",
+						"type": "boolean"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
@@ -30291,6 +30554,10 @@
 					},
 					"uiPreview": {
 						"description": "Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.",
+						"type": "boolean"
+					},
+					"navMesh": {
+						"description": "Whether the scene's baked navigation mesh is shown.",
 						"type": "boolean"
 					},
 					"_meta": {

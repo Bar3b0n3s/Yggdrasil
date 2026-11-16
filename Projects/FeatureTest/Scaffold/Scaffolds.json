@@ -500,6 +500,16 @@
 			]
 		},
 		{
+			"File": "Navigation.jsonl",
+			"IdSeed": 2701,
+			"Renderer": "none"
+		},
+		{
+			"File": "NavigationReplay.jsonl",
+			"IdSeed": 2702,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

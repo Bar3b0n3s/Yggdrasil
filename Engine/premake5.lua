@@ -116,6 +116,7 @@ project "Engine"
 	UseSheenBidi()
 	UseCMPCore()
 	UseTinyExr()
+	UseDetour()
 
 	if UseShadersProject then
 		dependson { "Shaders" }

@@ -23,8 +23,9 @@ from engine_mcp import server  # noqa: E402
 # decision 26), M22's ui_tree and ui_create_widget (Docs/Decisions/0033-m22-contract.md decisions 8 and 32), M23's
 # animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), M24's graph tools (Docs/Decisions/
 # 0035-m24-contract.md decisions 12 and 14), M26's lighting_bake, terrain_edit and terrain_import_heightmap
-# (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23) and M28's savedata_get, savedata_set and
-# savedata_clear (Docs/Decisions/0043-m28-game-services.md decision 8).
+# (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), M28's savedata_get, savedata_set and savedata_clear
+# (Docs/Decisions/0043-m28-game-services.md decision 8) and M30's navigation_bake (Docs/Decisions/
+# 0045-m30-navigation.md decision 8).
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate", "project_export", "project_upgrade",
@@ -47,6 +48,7 @@ PROXIED_TOOLS = {
     "lighting_bake",
     "terrain_edit", "terrain_import_heightmap",
     "savedata_get", "savedata_set", "savedata_clear",
+    "navigation_bake",
 }
 MAX_SCHEMA_BYTES = 4096
 

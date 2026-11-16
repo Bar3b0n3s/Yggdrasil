@@ -106,6 +106,7 @@ namespace Engine {
 				ProcessContextStep::Scripting,
 				ProcessContextStep::Physics,
 				ProcessContextStep::TextureCodecs,
+				ProcessContextStep::Navigation,
 				ProcessContextStep::VulkanLoader,
 				ProcessContextStep::Glfw,
 			};
@@ -117,17 +118,19 @@ namespace Engine {
 			REQUIRE(child.has_value());
 			CHECK(child->ExitCode == 0);
 
-			const std::array<std::string, 16> lines = {
+			const std::array<std::string, 18> lines = {
 				"Process context: Log initialized",
 				"Process context: Profiler initialized",
 				"Process context: CrashHandler initialized",
 				"Process context: Scripting initialized",
 				"Process context: Physics initialized",
 				"Process context: TextureCodecs initialized",
+				"Process context: Navigation initialized",
 				"Process context: VulkanLoader initialized",
 				"Process context: Glfw initialized",
 				"Process context: shutting down Glfw",
 				"Process context: shutting down VulkanLoader",
+				"Process context: shutting down Navigation",
 				"Process context: shutting down TextureCodecs",
 				"Process context: shutting down Physics",
 				"Process context: shutting down Scripting",
@@ -253,6 +256,7 @@ namespace Engine {
 			CHECK(ProcessContextStepToString(ProcessContextStep::Scripting) == "Scripting");
 			CHECK(ProcessContextStepToString(ProcessContextStep::Physics) == "Physics");
 			CHECK(ProcessContextStepToString(ProcessContextStep::TextureCodecs) == "TextureCodecs");
+			CHECK(ProcessContextStepToString(ProcessContextStep::Navigation) == "Navigation");
 			CHECK(ProcessContextStepToString(ProcessContextStep::VulkanLoader) == "VulkanLoader");
 			CHECK(ProcessContextStepToString(ProcessContextStep::Glfw) == "Glfw");
 

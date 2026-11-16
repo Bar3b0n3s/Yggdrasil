@@ -57,6 +57,7 @@ namespace Engine {
 				.LogOutputLevel = specification.MinimumLogLevel.value_or(LogLevel::Trace),
 				.VulkanLoader = specification.Renderer == RendererMode::Vulkan ? VulkanLoaderPolicy::Required : VulkanLoaderPolicy::None,
 				.ShowErrorDialogs = windowed,
+				.NavMeshBuildHooks = specification.NavMeshBuildHooks,
 			});
 			if (!context.has_value())
 			{

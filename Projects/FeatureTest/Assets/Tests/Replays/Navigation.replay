@@ -1,0 +1,266 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "33d861e14c5008ba",
+		"Path": "Assets/Scenes/Navigation.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.5.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "04efd6034595c5ec",
+				"Path": "/Sun",
+				"Hash": "612738b1db48fadf",
+				"Components": {
+					"Transform": "277ec5c0817bbe09",
+					"DirectionalLight": "8121abd1da7e7bfd"
+				}
+			},
+			{
+				"Id": "2132b79bcacfd990",
+				"Path": "/Husk1",
+				"Hash": "b3c3f58eb8265e29",
+				"Components": {
+					"Transform": "d3cebde988171617",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "717b8ecb1aa2c807"
+				}
+			},
+			{
+				"Id": "2c0a78aeb56c937c",
+				"Path": "/Camera",
+				"Hash": "9580267abf5b5ae3",
+				"Components": {
+					"Transform": "beef7b8b6595c91b",
+					"Camera": "5609a6e61e1a7872"
+				}
+			},
+			{
+				"Id": "34c1c952c5bc83b1",
+				"Path": "/Lava",
+				"Hash": "863855d6c67ddf3f",
+				"Components": {
+					"Transform": "876c210b1b7f8e4f",
+					"NavModifier": "0574ffab1a9e0ab8"
+				}
+			},
+			{
+				"Id": "54d572a2c4346636",
+				"Path": "/Husk4",
+				"Hash": "be2ca3b66a7ef846",
+				"Components": {
+					"Transform": "2b0cae413604569e",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "4700bb7b5780cbc5"
+				}
+			},
+			{
+				"Id": "5c0256fa74ee76ba",
+				"Path": "/Navigation",
+				"Hash": "5d3d00ace9d75b9f",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Navigation": "ad1e6346c3d76c96"
+				}
+			},
+			{
+				"Id": "6bc64a2538a30644",
+				"Path": "/Platform",
+				"Hash": "4a9ff6e742656a1c",
+				"Components": {
+					"Transform": "d55b9bea63f0e12b",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "815582fdf9020d7a",
+				"Path": "/Warden",
+				"Hash": "854604dc5d997ecc",
+				"Components": {
+					"Transform": "3f3a782708cee034",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"Script": "6b487f3991629b48"
+				}
+			},
+			{
+				"Id": "8fb7b498285d27bb",
+				"Path": "/Mud",
+				"Hash": "130dc54e23e48781",
+				"Components": {
+					"Transform": "e3ca683229a701e7",
+					"NavModifier": "ab2076cc0a453619"
+				}
+			},
+			{
+				"Id": "a46bb783b619c237",
+				"Path": "/Brute",
+				"Hash": "a85ef72dc59fc379",
+				"Components": {
+					"Transform": "510ccff4b5a5231f",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "ed3cb3c2e75fd9e2"
+				}
+			},
+			{
+				"Id": "bcbd30baebc9aaff",
+				"Path": "/Floor",
+				"Hash": "c13f44c21a380f5a",
+				"Components": {
+					"Transform": "9f72c4421af3d015",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "cb72a4f485ad2890",
+				"Path": "/Husk3",
+				"Hash": "f853da4a2bbd2eb7",
+				"Components": {
+					"Transform": "13ad335bc5ccf80b",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "aa1845f75a7fd732"
+				}
+			},
+			{
+				"Id": "d81dbae8d66dbbf2",
+				"Path": "/Pillar",
+				"Hash": "dac7498da9792f53",
+				"Components": {
+					"Transform": "6ea48c03eb5a6821",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "e51aa5140c52c2fd",
+				"Path": "/Ramp",
+				"Hash": "a2e05d7dca67dce1",
+				"Components": {
+					"Transform": "14e0d35446bd6ad1",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "f0557a0cdaadec0a",
+				"Path": "/Husk2",
+				"Hash": "4e180ab27bdd3c24",
+				"Components": {
+					"Transform": "a447a42874377feb",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "c2b82daec9fa5b30"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "5f58171f51a55797",
+				"Path": "Assets/Navigation/Scenes/Navigation.navmesh",
+				"Type": "NavMesh",
+				"Hash": "7fe4e573f60a9997"
+			},
+			{
+				"Handle": "87ae4faa4bca41ea",
+				"Path": "Assets/Scripts/Navigation/NavChaser.luau",
+				"Type": "Script",
+				"Hash": "de0d6e2fc5a353ad"
+			},
+			{
+				"Handle": "98717c9d436b9806",
+				"Path": "Assets/Scripts/Navigation/NavWarden.luau",
+				"Type": "Script",
+				"Hash": "7d381818494ef8cc"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 30,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 1
+		},
+		{
+			"Tick": 150,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		},
+		{
+			"Tick": 200,
+			"Type": "Action",
+			"Name": "MoveY",
+			"Value": 1
+		},
+		{
+			"Tick": 300,
+			"Type": "Action",
+			"Name": "MoveY",
+			"Value": 0
+		},
+		{
+			"Tick": 350,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": -1
+		},
+		{
+			"Tick": 470,
+			"Type": "Action",
+			"Name": "MoveX",
+			"Value": 0
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 599,
+			"Luau": "local warden = Scene.FindByName(\"Warden\").Transform.Translation\nlocal function insideLava(point: vector): boolean\n\treturn math.abs(point.x + 3) < 7 and math.abs(point.z + 5) < 1\nend\nfor _, name in { \"Husk1\", \"Husk2\", \"Husk3\", \"Husk4\", \"Brute\" } do\n\tlocal chaser = Scene.FindByName(name)\n\tlocal state = chaser:GetScript(\"NavChaser\")\n\tlocal position = chaser.Transform.Translation\n\tif state.Plans < 30 or state.Complete < 1 or insideLava(position) or vector.magnitude(position - warden) > 3 then\n\t\treturn false\n\tend\nend\nreturn warden.x < 1 and warden.z < -3"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "d858ce6df2277d09"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "1c2e60731f7ce308"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "019c13361416685a"
+		},
+		{
+			"Tick": 240,
+			"StateHash": "2c25b88691c63ef4"
+		},
+		{
+			"Tick": 300,
+			"StateHash": "d56f777562f2d1a7"
+		},
+		{
+			"Tick": 360,
+			"StateHash": "4127fe87ccd77ff0"
+		},
+		{
+			"Tick": 420,
+			"StateHash": "9c309fbbe47e8e06"
+		},
+		{
+			"Tick": 480,
+			"StateHash": "bc2387d158fba48c"
+		},
+		{
+			"Tick": 540,
+			"StateHash": "d61b829eb43142cc"
+		}
+	],
+	"FinalTick": 600,
+	"FinalStateHash": "e2cd8aa2ec310820"
+}

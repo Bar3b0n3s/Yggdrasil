@@ -11,6 +11,7 @@
 #include "Engine/AssetPipeline/Importers/IrradianceVolumeImporter.h"
 #include "Engine/AssetPipeline/Importers/LutImporter.h"
 #include "Engine/AssetPipeline/Importers/MaterialImporter.h"
+#include "Engine/AssetPipeline/Importers/NavMeshImporter.h"
 #include "Engine/AssetPipeline/Importers/PrefabImporter.h"
 #include "Engine/AssetPipeline/Importers/ReplayImporter.h"
 #include "Engine/AssetPipeline/Importers/SceneImporter.h"
@@ -135,12 +136,14 @@ namespace Engine {
 		registry.Register(CreateScope<LutImporter>());
 		// M26 (Docs/Decisions/0037-m26-contract.md decision 20).
 		registry.Register(CreateScope<HeightfieldImporter>());
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 4): navigation.bake's navigation meshes.
+		registry.Register(CreateScope<NavMeshImporter>());
 	}
 
 	void RegisterAssetPipelineTypes(TypeRegistry& registry)
 	{
 		// In the order of RegisterBuiltinImporters; the material, scene, prefab, script, replay, sprite sheet, tilemap, string
-		// table, graph, irradiance volume, LUT and heightfield importers have no settings (the sprite sheet, tilemap and string
+		// table, graph, irradiance volume, LUT, heightfield and navigation mesh importers have no settings (the sprite sheet, tilemap and string
 		// table structs are the Asset module's, RegisterAssetTypes).
 		TextureImporter::RegisterTypes(registry);
 		GltfImporter::RegisterTypes(registry);

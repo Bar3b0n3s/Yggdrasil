@@ -78,7 +78,8 @@ COMPONENT_ORDER = [
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
     "Animator", "SkinnedMesh", "ParticleEmitter", "ParticleLook", "IrradianceVolume", "ReflectionProbe", "Terrain",
-    "TerrainCollider", "MaterialParameters", "Fog", "ValidatorTarget", "ValidatorFollower",
+    "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier", "ValidatorTarget",
+    "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -370,6 +371,15 @@ def heightfield(resolution: int) -> bytes:
     """A flat `.heightfield` source of `resolution` x `resolution` samples (Asset/HeightfieldData.h): the magic "EHFD",
     the uint32 version 1, then the payload, the uint32 resolution and the uint16 samples, little-endian."""
     return b"EHFD" + struct.pack("<II", 1, resolution) + bytes(2 * resolution * resolution)
+
+
+def navmesh(input_hash: int) -> bytes:
+    """A `.navmesh` source of one agent type, "Default", baked over nothing (Asset/NavMeshData.h): the magic "ENAV", the
+    uint32 version 1, then the payload, `input_hash`, no area costs and the agent's settings and empty arrays."""
+    name = b"Default"
+    agent = struct.pack("<I", len(name)) + name + struct.pack("<6f", 0.4, 1.8, 45.0, 0.4, 0.2, 0.1)
+    agent += struct.pack("<6f", 0, 0, 0, 0, 0, 0) + struct.pack("<IIIII", 6, 0, 0, 0, 0)
+    return b"ENAV" + struct.pack("<IQII", 1, input_hash, 0, 1) + agent
 
 
 def sprite_sheet(frames: list[tuple[str, int, int]], clips: list[tuple[str, list[tuple[int, int]]]],
@@ -1005,6 +1015,19 @@ return Script.Define("Jumper", Jumper)
     item.entities.append(entity("e000000000000042", "Flame", {
         "Transform": transform(), "ParticleEmitter": {},
         "ParticleLook": {"SpriteSheet": "3a7e000000000015", "FrameCount": 2}}))
+
+    # The navigation checks (Docs/Decisions/0045-m30-navigation.md decision 9): a Navigation component never baked, and
+    # one whose mesh was baked from another input (its stored hash, 0, is no input's), so the scene's input reads as
+    # changed.
+    item = fixture("NAV_MESH_NOT_BAKED")
+    item.entities.append(entity("e000000000000042", "Navigation", {
+        "Transform": transform(), "Navigation": {"NavMesh": None}}))
+
+    item = fixture("NAV_MESH_STALE")
+    item.add("Project/Assets/Navigation/Main.navmesh", navmesh(0))
+    item.add_json("Project/Assets/Navigation/Main.navmesh.meta", meta("4e41000000000001", "NavMesh", "NavMesh"))
+    item.entities.append(entity("e000000000000042", "Navigation", {
+        "Transform": transform(), "Navigation": {"NavMesh": "4e41000000000001"}}))
 
     return fixtures
 

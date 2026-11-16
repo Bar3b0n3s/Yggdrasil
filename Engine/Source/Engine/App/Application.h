@@ -4,6 +4,7 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/FrameLoop.h"
+#include "Engine/App/ProcessContext.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Clock.h"
@@ -123,6 +124,11 @@ namespace Engine {
 		// first; Run also sets it (Log::SetOutputLevel) from its start to its end and then restores the previous level, so an
 		// application run in place, as the Tests do, is filtered alike.
 		std::optional<LogLevel> MinimumLogLevel{};
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 2): Recast's process-level hooks, the editor's navigation bake
+		// (EditorCore/Navigation/NavMeshBuilder.h), which RunApplication hands to the ProcessContext
+		// (ProcessContextSpecification::NavMeshBuildHooks). The editor sets them; the Runtime, which never links Recast, leaves
+		// them null.
+		ProcessLibraryHooks NavMeshBuildHooks{};
 	};
 
 	// The audio engine an application gets by default (§10.1): windowed runs play through the system's default device with

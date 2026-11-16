@@ -110,6 +110,8 @@ namespace Engine {
 			void OnExternalMutation(std::string_view reason) override;
 			[[nodiscard]] bool IsReloadDeferred() const override { return ReloadDeferred; }
 			[[nodiscard]] UiSystem* GetUi() override { return Ui; }
+			// M30 (Docs/Decisions/0045-m30-navigation.md decision 11): the navigation the Navigation module queries.
+			[[nodiscard]] NavigationWorld* GetNavigation() override { return Navigation; }
 
 			ScriptFrameState Frame{};
 			std::optional<bool> WorldPaused{}; // M35: the recorded world pause; nullopt for a host without a world
@@ -125,6 +127,9 @@ namespace Engine {
 			// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the UI the Ui module reads (IScriptHost::GetUi); null
 			// as in an edit evaluation.
 			UiSystem* Ui = nullptr;
+			// M30 (decision 11): the navigation the Navigation module queries (IScriptHost::GetNavigation); null as in an edit
+			// evaluation, where every query finds nothing.
+			NavigationWorld* Navigation = nullptr;
 			Json Parameters = Json::object();
 			std::map<std::string, ScriptActionState> Actions{};
 			CursorMode Cursor = CursorMode::Normal;

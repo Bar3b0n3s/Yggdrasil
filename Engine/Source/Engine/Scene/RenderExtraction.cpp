@@ -693,7 +693,8 @@ namespace Engine {
 	{
 		ENGINE_PROFILE_SCOPE("ExtractRenderSnapshot");
 		ENGINE_CORE_ASSERT(resource != nullptr, "ExtractRenderSnapshot needs a memory resource");
-		constexpr uint32_t ValidFlags = (1u << 7) - 1u;
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): through Navigation, 1 << 7.
+		constexpr uint32_t ValidFlags = (1u << 8) - 1u;
 		if ((std::to_underlying(request.Flags) & ~ValidFlags) != 0)
 			return MakeError(ErrorCode::InvalidArgument, "render extraction has unknown view flags");
 		if (request.Annotations.Labels > RenderAnnotationLabels::Explicit

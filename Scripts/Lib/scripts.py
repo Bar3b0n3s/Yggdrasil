@@ -106,6 +106,8 @@ BUILD_FIXTURE_FINDINGS = {
     "FastMathSheenBidi": re.compile(r"SheenBidi uses a non-precise floating-point model"),
     "FastMathCMPCore": re.compile(r"CMP_Core uses a non-precise floating-point model"),
     "FastMathTinyExr": re.compile(r"tinyexr uses a non-precise floating-point model"),
+    "FastMathRecast": re.compile(r"Recast uses a non-precise floating-point model"),
+    "FastMathDetour": re.compile(r"Detour uses a non-precise floating-point model"),
     "LuauContraction": re.compile(r"\[linux\] .*Luau uses a non-precise floating-point model: -ffp-contract=off is "
                                   r"missing"),
     "UndefinedJoltDefine": re.compile(r"Tests includes JoltPhysics headers but lacks JPH_PROFILE_ENABLED"),

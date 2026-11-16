@@ -21,6 +21,8 @@
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
+#include "Engine/Scene/Components/NavModifierComponent.h"
+#include "Engine/Scene/Components/NavigationComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
 #include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
@@ -107,7 +109,11 @@ namespace Engine {
 		MaterialParametersComponent,
 		// Fog (Registration/FogRegistration.cpp; M32, Docs/Decisions/0047-m32-fog-ssr.md decision 2). ADR 0042's phase-5 ledger:
 		// M30's Navigation, M31's MaterialParameters and M32's Fog categories go after Terrain, in landing order.
-		FogComponent>;
+		FogComponent,
+		// Navigation (Registration/NavigationRegistration.cpp; M30, Docs/Decisions/0045-m30-navigation.md decision 5). ADR 0042's
+		// phase-5 ledger: phase 5's new categories go after Terrain in landing order (M30's Navigation, M31's
+		// MaterialParameters, M32's Fog); M30 lands last, after batch 1's MaterialParameters and Fog.
+		NavigationComponent, NavModifierComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -133,8 +139,10 @@ namespace Engine {
 	void RegisterMaterialParametersComponents(TypeRegistry& registry);
 	// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 2), after Terrain, in ADR 0042's phase-5 ledger's landing order.
 	void RegisterFogComponents(TypeRegistry& registry);
+	// M30 (Docs/Decisions/0045-m30-navigation.md decision 5), after Terrain, in ADR 0042's phase-5 ledger's landing order.
+	void RegisterNavigationComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the fourteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the fifteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

@@ -145,6 +145,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterTerrain(ScriptApiRegistry& api);
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the SaveData module.
 		[[nodiscard]] Status RegisterSaveData(ScriptApiRegistry& api);
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 10): the Navigation module and its NavigationRaycast alias.
+		[[nodiscard]] Status RegisterNavigation(ScriptApiRegistry& api);
 
 	}
 
