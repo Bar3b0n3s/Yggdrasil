@@ -307,6 +307,10 @@ namespace Engine {
 			// grid the LightClusters pass and the forward passes read (LightClusterConstants b3).
 			PointShadowSet Points{};
 			LightClusterGrid Clusters{};
+			// M29 (decision 4): set by the Shadows stage: the planned point and spot lights whose maps the static shadow cache
+			// gave (RenderStats::CachedPointShadows and CachedSpotShadows).
+			uint32_t CachedPointShadows = 0;
+			uint32_t CachedSpotShadows = 0;
 			// M23 (C23.3, decision 27; stream C): set by the Prepare stage: the indices into SceneRenderer::State::DeformedMeshes
 			// of the items the Deform stage deforms this render (every deformed item one of whose draws survived culling, the
 			// shadow casters' included), in snapshot order.
@@ -585,6 +589,10 @@ namespace Engine {
 		// AllocatePointShadows' hysteresis and stable slots read under the same rule (empty after any other render).
 		SpotShadowAtlas SpotShadowHistory{};
 		PointShadowSet PointShadowHistory{};
+		// M29 (decision 4): the static shadow cache (ShadowPass.h's ShadowMapCache), cleared by a render that does not continue
+		// the view's history, by EnsureFrameTargets when it creates or re-acquires a spot or point shadow target, by a shader
+		// reload (Render's pipeline-generation check) and, with the state, by a device loss's release.
+		ShadowMapCache ShadowCache{};
 		// M23 (C23.1): the view's instance records, reused by every Render (stream A: the opaque draws', then the transparent
 		// draws', the shadow casters' and the selection's, written into InstanceBuffer by RecordViewSetup), and
 		// RENDER_POINT_SHADOW_BUDGET logged once per renderer (stream B).

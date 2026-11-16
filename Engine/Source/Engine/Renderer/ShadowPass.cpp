@@ -4,6 +4,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
@@ -19,6 +20,7 @@
 #include <cstring>
 #include <format>
 #include <numeric>
+#include <span>
 #include <tuple>
 
 namespace Engine {
@@ -57,6 +59,26 @@ namespace Engine {
 			return result;
 		}
 
+		// M29 (decision 4): the bytes of a value into a shadow signature.
+		template<typename T>
+		static void HashShadowValue(XXH64Hasher& hasher, const T& value)
+		{
+			hasher.Update(std::as_bytes(std::span<const T>(&value, 1)));
+		}
+
+		template<typename T>
+		static void HashShadowValues(XXH64Hasher& hasher, std::span<const T> values)
+		{
+			hasher.UpdateU64(values.size());
+			hasher.Update(std::as_bytes(values));
+		}
+
+		// A signature is never 0, which the cache reserves for "nothing reusable".
+		[[nodiscard]] static uint64_t FinishShadowSignature(const XXH64Hasher& hasher)
+		{
+			return hasher.Digest() | 1U;
+		}
+
 		[[nodiscard]] static bool IsFiniteShadowWorld(const glm::mat4& world)
 		{
 			for (glm::length_t column = 0; column < 4; ++column)
@@ -88,6 +110,18 @@ namespace Engine {
 			{
 				return value;
 			});
+		}
+
+		// M29 (decision 4): one shadow view (a cube face or a spot tile) into a map's signature: its view-projection and the
+		// signatures of the draws its frustum does not cull, in draw order, as RecordView records them.
+		static void HashShadowView(XXH64Hasher& hasher, const ShadowCasterSet& casters, const glm::mat4& viewProjection)
+		{
+			HashShadowValue(hasher, viewProjection);
+			for (const ShadowCasterDraw& draw : casters.Draws)
+			{
+				if (!IsOutsideShadow(draw.Bounds, viewProjection * draw.World, false))
+					hasher.UpdateU64(draw.Signature);
+			}
 		}
 
 	}
@@ -299,6 +333,26 @@ namespace Engine {
 					.Submesh = submeshIndex,
 					.VertexStream = source.VertexStream };
 				candidate.Record = MakeMeshInstanceRecord(item);
+				// M29 (decision 4): what this draw puts into a depth map. An Opaque caster binds no material, so its material does
+				// not count; a deformed caster's vertices are its entity's, posed by its palette and weights.
+				XXH64Hasher signature;
+				Utils::HashShadowValue(signature, item.World);
+				signature.UpdateU64(item.Mesh.GetValue());
+				signature.UpdateU64(mesh.Version);
+				signature.UpdateU64(submesh.IndexOffset);
+				signature.UpdateU64(submesh.IndexCount);
+				signature.UpdateU64(candidate.Draw.Variant);
+				signature.UpdateU64(candidate.Draw.ReflectedVariant);
+				signature.UpdateU64(mask ? materialHandle.GetValue() : 0U);
+				signature.UpdateU64(mask ? material.Generation : 0U);
+				signature.UpdateU64(source.Vertices != nullptr ? 1U : 0U);
+				if (source.Vertices != nullptr)
+				{
+					signature.UpdateU64(item.Entity.GetValue());
+					Utils::HashShadowValues(signature, std::span<const glm::mat4>(item.JointPalette));
+					Utils::HashShadowValues(signature, std::span<const float>(item.MorphWeights));
+				}
+				candidate.Draw.Signature = Utils::FinishShadowSignature(signature);
 				candidates.push_back(std::move(candidate));
 			}
 		}
@@ -530,8 +584,26 @@ namespace Engine {
 				"Invalid spot shadow target");
 			recording.BeginPass("SpotShadows", &commandList);
 			ShadowRecordingScope scope{ recording };
-			commandList.clearDepthStencilTexture(inputs.AtlasTarget, nvrhi::AllSubresources, true, 0, false, 0);
-			for (size_t index = 0; index < inputs.Spots->Tiles.size(); ++index)
+			// M29 (decision 4): the atlas is cleared whole (NVRHI clears whole subresources), so it is reused or drawn whole.
+			XXH64Hasher signature;
+			signature.UpdateU64(desc.width);
+			for (const SpotShadowTile& tile : inputs.Spots->Tiles)
+			{
+				signature.UpdateU64(tile.Slot);
+				signature.UpdateU64(tile.Size);
+				Utils::HashShadowValue(signature, tile.NearClip);
+				Utils::HashShadowValue(signature, tile.FarClip);
+				Utils::HashShadowView(signature, casters, tile.ViewProjection);
+			}
+			const uint64_t atlas = Utils::FinishShadowSignature(signature);
+			const bool cached = inputs.Cache != nullptr && inputs.Cache->Atlas == atlas;
+			if (cached)
+				result.CachedSpotLights = static_cast<uint32_t>(inputs.Spots->Tiles.size());
+			else if (inputs.Cache != nullptr)
+				inputs.Cache->Atlas = 0;
+			if (!cached)
+				commandList.clearDepthStencilTexture(inputs.AtlasTarget, nvrhi::AllSubresources, true, 0, false, 0);
+			for (size_t index = 0; index < inputs.Spots->Tiles.size() && !cached; ++index)
 			{
 				const SpotShadowTile& tile = inputs.Spots->Tiles[index];
 				const uint32_t slot = MaxShadowCascades + static_cast<uint32_t>(index);
@@ -545,6 +617,8 @@ namespace Engine {
 						scope.Counters, false));
 				}
 			}
+			if (!cached && inputs.Cache != nullptr)
+				inputs.Cache->Atlas = atlas;
 			result.DrawCalls += scope.Counters.DrawCalls;
 			result.Triangles += scope.Counters.Triangles;
 		}
@@ -578,6 +652,26 @@ namespace Engine {
 				ENGINE_CORE_ASSERT(light.Layer < (full ? MaxFullPointShadowLights : MaxHalfPointShadowLights), "Point shadow light {} is planned at layer group {}",
 					index, light.Layer);
 				const nvrhi::TextureDesc& desc = target->getDesc();
+				// M29 (decision 4): the light's map from the cache when its layer group holds the light's own signature.
+				XXH64Hasher signature;
+				signature.UpdateU64(std::to_underlying(light.Tier));
+				signature.UpdateU64(light.Layer);
+				signature.UpdateU64(desc.width);
+				Utils::HashShadowValue(signature, light.NearClip);
+				Utils::HashShadowValue(signature, light.FarClip);
+				for (const glm::mat4& viewProjection : light.FaceViewProjections)
+					Utils::HashShadowView(signature, casters, viewProjection);
+				const uint64_t map = Utils::FinishShadowSignature(signature);
+				uint64_t* held = nullptr;
+				if (inputs.Cache != nullptr)
+					held = full ? &inputs.Cache->Full[light.Layer] : &inputs.Cache->Half[light.Layer];
+				if (held != nullptr && *held == map)
+				{
+					++result.CachedPointLights;
+					continue;
+				}
+				if (held != nullptr)
+					*held = 0;
 				commandList.clearDepthStencilTexture(target, nvrhi::TextureSubresourceSet(0, 1, light.Layer * PointShadowFaceCount, PointShadowFaceCount), true, 0,
 					false, 0);
 				for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
@@ -595,6 +689,8 @@ namespace Engine {
 							constants[slot], scope.Counters, true));
 					}
 				}
+				if (held != nullptr)
+					*held = map;
 			}
 			result.DrawCalls += scope.Counters.DrawCalls;
 			result.Triangles += scope.Counters.Triangles;

@@ -97,7 +97,9 @@ class RendererIITests(AutomationTestCase):
         for view in shadowed:
             passes = {entry["name"]: entry for entry in view["passes"]}
             self.assertIn("PointShadows", passes, view)
-            self.assertGreater(passes["PointShadows"]["drawCalls"], 0, view)
+            # M29 (decision 4): the scene view continues its history, so after the first frame that drew them the
+            # unchanged maps are reused: the pass draws them, or the static shadow cache gives all sixteen.
+            self.assertTrue(passes["PointShadows"]["drawCalls"] > 0 or view["cachedPointShadows"] == 16, view)
             self.assertGreaterEqual(view["shadowDraws"], passes["PointShadows"]["drawCalls"], view)
 
     def test_viewport_pick_deterministic(self) -> None:
@@ -223,6 +225,33 @@ class RendererIITests(AutomationTestCase):
         self.assertNotEqual(self.shoot(client, target="play", annotate={"labels": "selection"}), play_clean)
         self.assertEqual(self.shoot(client, target="edit", annotate={"labels": "selection"}), edit_clean)
         client.call("play.stop")
+
+    def test_static_shadow_cache_reuses_unchanged_maps(self) -> None:
+        # M29 (Docs/Decisions/0044-m29-light-limits.md decisions 4 and 5): the editor's scene view continues its
+        # temporal history, so a shadowed point light whose light and casters do not change is drawn once and reused
+        # after that, which stats.get reports per view; an unavailable view reports no cached map.
+        client, _ = self.open_editor_with_scene()
+        stats = client.call("stats.get")
+        self.assertTrue(all(view["cachedPointShadows"] == 0 and view["cachedSpotShadows"] == 0
+                            for view in stats["views"]))
+        if not self.require_gpu():
+            return
+        rendered, _ = self.open_editor_with_scene(name="ShadowCacheProject", renderer="vulkan")
+        self.make_scene(rendered)
+        rendered.call("entity.create", {"name": "Bulb", "components": {
+            "Transform": {"Translation": [1.5, 1.5, 1.5]}, "PointLight": {"CastShadows": True, "Range": 6}}})
+        deadline = time.monotonic() + 60
+        while True:
+            observed = rendered.call("stats.get")
+            cached = [view for view in observed["views"]
+                      if view["available"] and view["shadowedPointLights"] == 1 and view["cachedPointShadows"] == 1]
+            if cached or time.monotonic() >= deadline:
+                break
+        self.assertTrue(cached, observed)
+        for view in cached:
+            self.assertEqual(view["cachedSpotShadows"], 0, view)
+            self.assertEqual(view["shadowDraws"], 0, view)  # the reused map drew no caster
+            self.assertEqual(view["maxShadedLights"], 256, view)
 
     def test_render_validation_warnings(self) -> None:
         client, _ = self.open_editor_with_scene()

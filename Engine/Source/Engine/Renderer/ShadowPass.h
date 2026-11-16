@@ -54,6 +54,10 @@ namespace Engine {
 		nvrhi::BufferHandle MaterialConstants{};
 		nvrhi::TextureHandle BaseColorMap{};
 		uint32_t Instance = 0; // its instance record's index in the view's Instances buffer
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): XXH64 of everything the draw puts into a depth map: its
+		// world matrix, mesh handle and GpuMesh::Version, submesh range, variants, a Mask caster's material handle and
+		// GpuMaterial::Generation, and a deformed caster's entity, joint palette and morph weights (PrepareCasters).
+		uint64_t Signature = 0;
 	};
 
 	// The view's shadow casters (ShadowPass::PrepareCasters).
@@ -64,6 +68,23 @@ namespace Engine {
 		// (RenderQualitySettings::Instancing false). Each face records, of every batch, the maximal runs of the draws its
 		// frustum does not cull, each run one instanced draw of adjacent instance records.
 		std::vector<MeshInstanceBatch> Batches{};
+	};
+
+	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): the static shadow cache, per-view renderer state that
+	// ShadowPass::Record reads and writes: the signature of what each point-shadow layer group of either tier and the spot atlas
+	// hold (0: nothing reusable). A point light's signature hashes its tier, layer group, face size, clip planes and each face's
+	// view-projection with the signatures of the caster draws that face records; the atlas's hashes every tile's slot,
+	// view-projection and clip planes with its draws. Record skips a point light whose layer group holds its own signature, and
+	// the whole atlas when it holds its own, counting them as cached, and stores a map's signature once it is drawn. The owner
+	// clears it (Clear) whenever the maps may no longer hold what the signatures say: a render that does not continue its
+	// view's temporal history, a new or re-acquired shadow target, a shader reload and a device loss.
+	struct ShadowMapCache
+	{
+		std::array<uint64_t, MaxFullPointShadowLights> Full{};
+		std::array<uint64_t, MaxHalfPointShadowLights> Half{};
+		uint64_t Atlas = 0;
+
+		void Clear() { *this = {}; }
 	};
 
 	struct ShadowRenderInputs
@@ -94,12 +115,17 @@ namespace Engine {
 		// while no planned light is Half.
 		nvrhi::ITexture* PointHalfTarget = nullptr;
 		std::span<const nvrhi::FramebufferHandle> PointHalfFramebuffers{}; // CreateFramebuffers(PointHalfTarget), one per layer
+		// M29 (decision 4): the view's static shadow cache, read and written by Record; null draws every map.
+		ShadowMapCache* Cache = nullptr;
 	};
 
 	struct ShadowRenderResult
 	{
 		uint32_t DrawCalls = 0;
 		uint32_t Triangles = 0;
+		// M29 (decision 4): the planned point lights and spot lights whose maps Record reused from the cache instead of drawing.
+		uint32_t CachedPointLights = 0;
+		uint32_t CachedSpotLights = 0;
 	};
 
 	// Shared immutable pipelines; per-view targets, framebuffers, caster constants, instance buffer and binding cache supplied

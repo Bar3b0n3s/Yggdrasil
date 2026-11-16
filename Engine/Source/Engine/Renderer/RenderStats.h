@@ -59,6 +59,10 @@ namespace Engine {
 		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 5): the snapshot's RenderQualitySettings::MaxShadedLights the
 		// frame shaded at most (the project's Rendering.MaxShadedLights in every host); 0 while unavailable.
 		uint32_t MaxShadedLights = 0;
+		// M29 (decision 4): the shadowed point and spot lights whose maps the frame reused from the static shadow cache, without
+		// drawing a caster (of ShadowedPointLights and ShadowedSpotLights; the spot atlas is reused whole or not at all).
+		uint32_t CachedPointShadows = 0;
+		uint32_t CachedSpotShadows = 0;
 	};
 
 	struct RenderPassCounters

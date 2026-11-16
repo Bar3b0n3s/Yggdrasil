@@ -26234,6 +26234,18 @@
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
+							},
+							"cachedPointShadows": {
+								"description": "Shadowed point lights whose shadow maps the frame reused unchanged, drawing no caster (the static shadow cache).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"cachedSpotShadows": {
+								"description": "Shadowed spot lights whose atlas tiles the frame reused unchanged (the atlas is reused whole or redrawn whole).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false

@@ -734,6 +734,7 @@ namespace Engine {
 		}
 		if (spots && Targets.SpotAtlas == nullptr)
 		{
+			ShadowCache.Atlas = 0; // M29: a new or re-acquired atlas holds nothing the cache knows
 			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle atlas, TargetPool->Acquire(ShadowPass::GetAtlasTargetDesc()));
 			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *atlas));
 			Targets.SpotAtlas = std::move(atlas);
@@ -741,6 +742,7 @@ namespace Engine {
 		}
 		if (pointShadowFaceSize != 0 && (Targets.PointShadowMaps == nullptr || Targets.PointShadowMaps->getDesc().width != pointShadowFaceSize))
 		{
+			ShadowCache.Full = {};
 			ClearTargetBindings();
 			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle maps, TargetPool->Acquire(ShadowPass::GetPointTargetDesc(pointShadowFaceSize)));
 			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *maps));
@@ -750,6 +752,7 @@ namespace Engine {
 		if (pointShadowHalfFaceSize != 0
 			&& (Targets.PointShadowMapsHalf == nullptr || Targets.PointShadowMapsHalf->getDesc().width != pointShadowHalfFaceSize))
 		{
+			ShadowCache.Half = {};
 			ClearTargetBindings();
 			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle maps, TargetPool->Acquire(ShadowPass::GetPointTargetDesc(pointShadowHalfFaceSize, PointShadowTier::Half)));
 			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *maps));
@@ -1268,6 +1271,7 @@ namespace Engine {
 		if (state.PipelineGeneration != state.Pipelines->Generation)
 		{
 			state.ClearBindings();
+			state.ShadowCache.Clear(); // M29: maps drawn by the replaced pipelines are not reused
 			state.PipelineGeneration = state.Pipelines->Generation;
 		}
 		state.Stats = {};
@@ -1381,6 +1385,8 @@ namespace Engine {
 		stats.ShadowedPointLights = static_cast<uint32_t>(frame.Points.Lights.size());
 		stats.DroppedPointShadows = frame.Points.Dropped;
 		stats.MaxShadedLights = snapshot.Quality.MaxShadedLights;
+		stats.CachedPointShadows = frame.CachedPointShadows;
+		stats.CachedSpotShadows = frame.CachedSpotShadows;
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1557,6 +1563,7 @@ namespace Engine {
 			ShadedLightHistory.clear();
 			SpotShadowHistory = {};
 			PointShadowHistory = {};
+			ShadowCache.Clear();
 		}
 		if (hasCamera)
 		{
@@ -2042,10 +2049,16 @@ namespace Engine {
 			.PointFramebuffers = Targets.PointShadowFramebuffers,
 			.PointHalfTarget = Targets.PointShadowMapsHalf.Get(),
 			.PointHalfFramebuffers = Targets.PointShadowHalfFramebuffers,
+			.Cache = &ShadowCache,
 		};
 		auto result = Pipelines->Shadows->Record(*frame.CommandList, *frame.Recording, ShadowBindings, inputs);
 		if (!result)
+		{
 			frame.KeepFirstError(std::unexpected(std::move(result).error()));
+			return;
+		}
+		frame.CachedPointShadows = result->CachedPointLights;
+		frame.CachedSpotShadows = result->CachedSpotLights;
 	}
 
 	void SceneRenderer::State::RecordDepthNormalStage(Detail::SceneRendererFrame& frame)
