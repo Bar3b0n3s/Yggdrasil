@@ -4,6 +4,7 @@
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Scripting/ScriptError.h"
@@ -190,6 +191,19 @@ namespace Engine {
 		}
 		// Input.WasSignalled: whether `name` was signalled in `phase`'s view (PlayInput::WasSignalled). Default: false.
 		[[nodiscard]] virtual bool WasSignalled(InputPhase /*phase*/, std::string_view /*name*/) const { return false; }
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): Application.GetDisplayModes, GetDisplaySettings and
+		// SetDisplaySettings. A play session answers them itself where the calls do nothing (the editor, headless runs and every
+		// fixed-view session) and forwards the others to its host; every other host keeps the defaults: Unsupported, so the
+		// module reports no modes, the view as a window and refuses a request.
+		[[nodiscard]] virtual Result<std::vector<DisplayVideoMode>> GetDisplayModes() const
+		{
+			return MakeError(ErrorCode::Unsupported, "this host has no display");
+		}
+		[[nodiscard]] virtual Result<DisplaySettings> GetDisplaySettings() const { return MakeError(ErrorCode::Unsupported, "this host has no display"); }
+		[[nodiscard]] virtual Status RequestDisplaySettings(const DisplaySettings& /*settings*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "this host has no display: display settings apply in a windowed Runtime");
+		}
 	};
 
 }

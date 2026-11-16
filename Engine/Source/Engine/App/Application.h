@@ -12,6 +12,7 @@
 #include "Engine/Core/RingBufferSink.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Graphics/GraphicsSpecification.h"
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Platform/Events.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Window.h"
@@ -255,6 +256,22 @@ namespace Engine {
 		[[nodiscard]] EngineContext& GetContext();
 
 		[[nodiscard]] const ApplicationSpecification& GetSpecification() const { return m_Specification; }
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): the display settings of a windowed application. Main
+		// thread, while the frame loop runs. GetDisplayVideoModes: QueryDisplayVideoModes of the window.
+		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayVideoModes() const;
+		// The settings in force: the window's mode (the specification's at the start, Exclusive for WindowSettings.Fullscreen,
+		// then each applied request's), its size in screen units (0 x 0 while minimized), its monitor's current refresh rate in
+		// the full-screen modes (0 windowed) and the VSync in force.
+		[[nodiscard]] DisplaySettings GetDisplaySettings() const;
+		// Checks `settings` now and applies them at the next frame boundary (the frame's safe point, before OnSafePoint and
+		// the fixed steps; the last request before it wins): the window's mode (ApplyDisplaySettings) and the swapchain's
+		// VSync, which the application keeps for every swapchain it creates, a device loss's included; then
+		// OnDisplaySettingsApplied with what was applied. A failed apply is logged and changes nothing. Errors: Unsupported
+		// headless (WindowMode::Headless), and those of QueryDisplayVideoModes (Linux, macOS, no monitor); InvalidArgument for
+		// settings outside ValidateDisplaySettings' ranges or an Exclusive mode the monitor does not list. Nothing is queued
+		// on error.
+		[[nodiscard]] Status RequestDisplaySettings(const DisplaySettings& settings);
 	protected:
 		// Makes the run end with `exitCode`, a failure (not ExitCode::Success, asserted): from the frame loop it ends the loop
 		// after the current frame as RequestExit does, and unlike RequestExit it also replaces a Success that an earlier request
@@ -288,6 +305,10 @@ namespace Engine {
 		// Once per frame before the steps, after queued main-thread work: the safe point where automation requests run
 		// (§4.2 step 3).
 		virtual void OnSafePoint() {}
+		// M28 (decision 3): after a display-settings request was applied at the frame boundary, with what was applied (the
+		// request; a Windowed window's refresh rate 0, a Borderless window's size and refresh rate its monitor's current mode);
+		// the Runtime persists it in user://Display.json.
+		virtual void OnDisplaySettingsApplied(const DisplaySettings& /*settings*/) {}
 		// Once per rendered frame with a device, after OnUpdate: record the frame's scene work into context.CommandList
 		// (§4.1, §8.2). Not called with RendererMode::None or for a frame the swapchain skips.
 		virtual void OnRender(RenderContext& /*context*/) {}
@@ -344,6 +365,8 @@ namespace Engine {
 		// forced UI target and the slot targets included, without a GPU call.
 		[[nodiscard]] Status CreateFrameObjects();
 		void ReleaseFrameObjects();
+		// M28 (decision 3): the frame boundary's half of RequestDisplaySettings.
+		void ApplyPendingDisplaySettings();
 		// Step 3's teardown of what InitializeRendering built, after GraphicsDevice::WaitForIdle.
 		void ShutdownRendering();
 		// Logs an initialization failure at Error level, and shows it in an error dialog when `process` has
@@ -364,6 +387,11 @@ namespace Engine {
 		struct LoggedErrorCounter;
 	private:
 		ApplicationSpecification m_Specification;
+		// M28 (decision 3): the request waiting for the next frame boundary, and the mode and VSync in force (the
+		// specification's at the start: WindowSettings' DisplayMode, Exclusive for Fullscreen, and Graphics.VSync).
+		std::optional<DisplaySettings> m_PendingDisplay{};
+		DisplayWindowMode m_DisplayMode = DisplayWindowMode::Windowed;
+		bool m_VSync = true;
 		Scope<EngineContext> m_Context;    // between the start of initialization and the end of OnShutdown
 		Scope<FrameLoop> m_FrameLoop;      // while the frame loop runs
 		Scope<FrameRendering> m_Rendering; // with a device, from InitializeRendering to ShutdownRendering

@@ -8,6 +8,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Core/UUIDGenerator.h"
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/FieldType.h"
 #include "Engine/Reflection/VariantValue.h"
@@ -200,6 +201,14 @@ namespace Engine {
 		// script heap). A host without a frame loop or renderer keeps the default, which fills nothing (RenderAvailable stays
 		// false).
 		virtual void ReadFrameStatistics(ScriptPerformanceStats& /*stats*/) const {}
+		// M28 (decision 3): the display of a live session (never asked in the editor, headless or a fixed-view session: the
+		// session answers those itself). A host without a display keeps the defaults, Unsupported.
+		[[nodiscard]] virtual Result<std::vector<DisplayVideoMode>> GetDisplayModes() const { return MakeError(ErrorCode::Unsupported, "the host has no display"); }
+		[[nodiscard]] virtual Result<DisplaySettings> GetDisplaySettings() const { return MakeError(ErrorCode::Unsupported, "the host has no display"); }
+		[[nodiscard]] virtual Status RequestDisplaySettings(const DisplaySettings& /*settings*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "the host has no display: display settings apply in a windowed Runtime");
+		}
 	};
 
 	// Instrumentation of the step order (§5.7 "documented and tested"; "PlaySession: step order matches the documented

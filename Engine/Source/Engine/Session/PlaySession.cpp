@@ -543,6 +543,42 @@ namespace Engine {
 			return true;
 		}
 		[[nodiscard]] bool WasSignalled(InputPhase phase, std::string_view name) const override { return Input.WasSignalled(phase, name); }
+		// M28 (decision 3): where the display calls do nothing: the editor (its game view and every editor session), a
+		// headless run and every fixed-view session (test runs, replays, recordings and lockstep, whose view is the project's
+		// window size); the reason, or empty where the host's display applies.
+		[[nodiscard]] std::string_view GetDisplayRefusal() const
+		{
+			const ScriptEnvironment environment = GetEnvironment();
+			if (environment.IsEditor)
+				return "the editor's game view keeps the project's window: display settings apply in the Runtime";
+			if (environment.IsHeadless)
+				return "a headless run has no display";
+			if (TestMode || Lockstep || (Recorder != nullptr && Recorder->IsRecording()))
+				return "a fixed-view session (a test run, replay, recording or lockstep session) keeps the project's window";
+			return {};
+		}
+		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayModes() const override
+		{
+			if (!GetDisplayRefusal().empty())
+				return std::vector<DisplayVideoMode>{};
+			if (Host == nullptr)
+				return MakeError(ErrorCode::Unsupported, "the session has no host display");
+			return Host->GetDisplayModes();
+		}
+		[[nodiscard]] Result<DisplaySettings> GetDisplaySettings() const override
+		{
+			if (GetDisplayRefusal().empty() && Host != nullptr)
+				return Host->GetDisplaySettings();
+			return DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = ViewWidth, .Height = ViewHeight, .RefreshRate = 0, .VSync = Project.Window.VSync };
+		}
+		[[nodiscard]] Status RequestDisplaySettings(const DisplaySettings& settings) override
+		{
+			if (const std::string_view refusal = GetDisplayRefusal(); !refusal.empty())
+				return MakeError(ErrorCode::Unsupported, "{}", refusal);
+			if (Host == nullptr)
+				return MakeError(ErrorCode::Unsupported, "the session has no host display");
+			return Host->RequestDisplaySettings(settings);
+		}
 		// ADR 0038 decision 14: before each round of a start flush, the bodies of both worlds whose components changed, from
 		// world matrices brought up to date first, so an entity has its body from its OnStart on.
 		void SynchronizePhysicsBodies() override

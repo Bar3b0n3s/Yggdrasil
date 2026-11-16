@@ -1,6 +1,7 @@
 #include "Runtime/RuntimeApp.h"
 
 #include "Engine/App/CommandLine.h"
+#include "Engine/App/DisplaySettingsFile.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/ProcessContext.h"
@@ -316,6 +317,10 @@ namespace Engine {
 		void OnScriptError(const ScriptError& error, bool fatal) override;
 		void OnScriptPhase(std::string_view script, std::string_view callback) override;
 		void ReadFrameStatistics(ScriptPerformanceStats& stats) const override;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): the window's display settings, through Application.
+		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayModes() const override { return App.GetDisplayVideoModes(); }
+		[[nodiscard]] Result<DisplaySettings> GetDisplaySettings() const override { return App.GetDisplaySettings(); }
+		[[nodiscard]] Status RequestDisplaySettings(const DisplaySettings& settings) override { return App.RequestDisplaySettings(settings); }
 		// The droppedSeconds baseline of the session just installed (TimingSession).
 		void BeginSessionTiming()
 		{
@@ -1532,6 +1537,13 @@ namespace Engine {
 		return true;
 	}
 
+	void RuntimeApp::OnDisplaySettingsApplied(const DisplaySettings& settings)
+	{
+		// M28 (decision 3): the choice outlives the run; a write that fails is logged and the game plays on.
+		if (const Status written = WriteDisplaySettingsFile(GetContext().GetVfs(), settings); !written)
+			ENGINE_WARN("The display settings could not be saved in {}: {}", DisplaySettingsPath, written.error().ToString());
+	}
+
 	Result<Scope<Application>> CreateRuntimeApp(std::span<const std::string> arguments)
 	{
 		const std::span<const CommandLineOption> engineOptions = GetEngineCommandLineOptions();
@@ -1582,6 +1594,13 @@ namespace Engine {
 		}
 
 		ApplyGameSettings(specification, manifest->Name, manifest->Window, manifest->Simulation);
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): a live windowed run restores the display settings the game
+		// chose (user://Display.json) before its window first shows; FeatureTest and replay runs keep the project's window.
+		if (specification.Window == WindowMode::Windowed && !runtime.FeatureTest && runtime.Replay.empty())
+		{
+			if (const std::optional<DisplaySettings> display = ReadStartupDisplaySettings(manifest->Name, specification.UserDataRoot))
+				ApplyStartupDisplaySettings(specification, *display);
+		}
 #if !defined(ENGINE_DIST)
 		// The F1 stats overlay (§14.4; Docs/Decisions/0024-m15-contract.md decision 17) needs Dear ImGui, which a windowed
 		// Debug or Release run with a renderer enables, without an ini file; headless runs and every Dist build have none.

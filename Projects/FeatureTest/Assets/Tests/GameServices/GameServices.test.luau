@@ -1,7 +1,7 @@
 --!strict
--- M28's game services (Docs/Decisions/0043-m28-game-services.md decisions 4 to 6) in GameServices.scene (GameServices.jsonl,
--- IdSeed 2501), in every run mode: the performance readout, presentation text and frame-time signals. Each case runs on a
--- fresh load of the scene.
+-- M28's game services (Docs/Decisions/0043-m28-game-services.md decisions 3 to 6) in GameServices.scene (GameServices.jsonl,
+-- IdSeed 2501), in every run mode: the display settings, the performance readout, presentation text and frame-time
+-- signals. Each case runs on a fresh load of the scene.
 local HudScript = require("../../Scripts/GameServices/Hud")
 
 local function hud(): Entity
@@ -51,5 +51,26 @@ return Test.Suite("GameServices", function()
 		end, 10)
 		Test.ExpectEqual(hudScript().Ended, true)
 		Test.ExpectEqual(Input.WasSignalled("Live"), false)
+	end)
+
+	Test.Case("display settings do nothing in a test run: no modes, the project's window, and a refused request", function()
+		Test.ExpectEqual(#Application.GetDisplayModes(), 0)
+		local display = Application.GetDisplaySettings()
+		Test.ExpectEqual(display.WindowMode, "Windowed")
+		Test.ExpectEqual(display.Width, 1280)
+		Test.ExpectEqual(display.Height, 720)
+		Test.ExpectEqual(display.RefreshRate, 0)
+		Test.ExpectEqual(display.VSync, true)
+		local accepted, reason = Application.SetDisplaySettings({ WindowMode = "Borderless", VSync = false })
+		Test.ExpectEqual(accepted, false)
+		Test.Expect(type(reason) == "string" and #reason > 0, "the refusal names its reason")
+		Test.ExpectEqual(Application.GetDisplaySettings().VSync, true)
+		-- A malformed request raises in a test run too.
+		Test.ExpectEqual((pcall(function()
+			Application.SetDisplaySettings({ WindowMode = "Fullscreen" })
+		end)), false)
+		Test.ExpectEqual((pcall(function()
+			Application.SetDisplaySettings({ Width = 0 })
+		end)), false)
 	end)
 end)

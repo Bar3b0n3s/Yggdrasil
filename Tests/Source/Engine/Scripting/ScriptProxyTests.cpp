@@ -252,6 +252,8 @@ return true
 				// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the surface of a terrain without a loaded heightfield.
 				{ "Terrain.SampleHeight", "assert(holders.Terrain.Terrain:SampleHeight(vector.zero) == nil)" },
 				{ "Terrain.SampleNormal", "assert(holders.Terrain.Terrain:SampleNormal(vector.zero) == nil)" },
+				// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): the fixture has no game UI, so no presentation text.
+				{ "UiText.GetPresentationText", "assert(holders.UiText.UiText:GetPresentationText() == nil)" },
 			};
 			const std::set<std::string_view> identityReads = { "Entity.ID", "Entity.IsValid", "Entity.__eq" };
 			// Reads of a system's state of the entity, which is leaving with it (decision 4, "Unchanged").
@@ -318,6 +320,8 @@ return true
 				// M26 (Docs/Decisions/0037-m26-contract.md decision 26).
 				{ "ParticleEmitter.Emit", "holders.ParticleEmitter.ParticleEmitter:Emit(1)" },
 				{ "ParticleEmitter.Clear", "holders.ParticleEmitter.ParticleEmitter:Clear()" },
+				// M28 (Docs/Decisions/0043-m28-game-services.md decision 5).
+				{ "UiText.SetPresentationText", "holders.UiText.UiText:SetPresentationText(\"16.7 ms\")" },
 			};
 
 			Test::ScriptTestFixture fixture({ .ConfigureApi = RegisterIdentityProbe });

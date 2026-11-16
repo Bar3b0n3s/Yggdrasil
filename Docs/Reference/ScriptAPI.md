@@ -6,6 +6,22 @@ Generated from ScriptApiRegistry and TypeRegistry.
 
 Application identity, window state and deferred quit requests.
 
+### Application.GetDisplayModes
+
+`() -> {DisplayMode}`
+
+Returns the video modes of the monitor the game's window is on, sorted by width, height and refresh rate: the resolutions Exclusive mode takes. Empty where display settings do nothing: the editor, headless runs, test runs, replays, recordings and lockstep sessions, and on Linux and macOS.
+
+All modes; Runtime|Test; pure/read.
+
+### Application.GetDisplaySettings
+
+`() -> DisplaySettings`
+
+Returns the display settings in force: the window mode, the window's size in screen units (the video mode's in the full-screen modes; 0 x 0 while the window is minimized, so a request then gives Width and Height), the refresh rate of a full-screen mode (0 windowed) and VSync. Where display settings do nothing it returns the session's view as a Windowed window with the project's Window.VSync.
+
+All modes; Runtime|Test; pure/read.
+
 ### Application.GetPlatform
 
 `() -> string`
@@ -67,6 +83,14 @@ All modes; Runtime|Test; pure/read.
 `(exitCode: number?) -> ()`
 
 Requests exit (default 0): stops editor Play, exits Runtime, or records quit and ends the current test suite. Never destroys the executing VM inline.
+
+All modes; Runtime|Test; mutates.
+
+### Application.SetDisplaySettings
+
+`(settings: DisplaySettingsRequest) -> (boolean, string?)`
+
+Requests display settings for the next frame boundary (a member left out keeps its current value): Windowed takes Width x Height; Borderless covers the monitor at its current mode; Exclusive switches the monitor to one of GetDisplayModes(). The Runtime keeps the choice in user://Display.json and applies it at the next start, before its window shows. Returns true when the request was accepted, or false and the reason where display settings do nothing (the editor, headless runs, test runs, replays, recordings, lockstep sessions, Linux and macOS), so they never touch the project's Window settings or the state hash. An unknown mode, a Width or Height outside 1 to 16384 or a RefreshRate over 1000 raises an error wherever the call is made, and in the Runtime so does an Exclusive mode the monitor does not list.
 
 All modes; Runtime|Test; mutates.
 
@@ -7053,6 +7077,24 @@ An animation clip's named event that an Animator layer's time passed: its name, 
 `{Point: vector, Normal: vector, RelativeSpeed: number, Collider: Entity, OtherCollider: Entity}`
 
 First contact from the receiving body's side, with collider identities for compounds.
+
+## DisplayMode
+
+`{Width: number, Height: number, RefreshRate: number}`
+
+One video mode of the monitor: its size in pixels and refresh rate in Hz.
+
+## DisplaySettings
+
+`{WindowMode: string, Width: number, Height: number, RefreshRate: number, VSync: boolean}`
+
+A window's display settings: WindowMode Windowed, Borderless or Exclusive; the window's size in screen units (the video mode's in the full-screen modes); the refresh rate of a full-screen mode (0 windowed); and vertical sync.
+
+## DisplaySettingsRequest
+
+`{WindowMode: string?, Width: number?, Height: number?, RefreshRate: number?, VSync: boolean?}`
+
+A request of Application.SetDisplaySettings: the DisplaySettings members to change; a member left out keeps its current value.
 
 ## FieldOptions
 

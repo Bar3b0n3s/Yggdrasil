@@ -108,6 +108,8 @@ namespace Engine {
 		void OnShutdown() override;
 		void OnEvent(Event& event) override;
 		void OnSafePoint() override;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): persists the applied settings in user://Display.json.
+		void OnDisplaySettingsApplied(const DisplaySettings& settings) override;
 		void OnFixedStep(const SimStep& step) override;
 		[[nodiscard]] bool EndsFixedSteps() const override;
 		void OnUpdate(const FrameTime& frame) override;

@@ -479,6 +479,19 @@ namespace Engine {
 		m_IsRecreatePending = true;
 	}
 
+	void Swapchain::SetVSync(bool vsync)
+	{
+		if (m_Specification.VSync == vsync)
+			return;
+		m_Specification.VSync = vsync;
+		RequestRecreate();
+	}
+
+	bool Swapchain::GetVSync() const
+	{
+		return m_Specification.VSync;
+	}
+
 	void Swapchain::InjectAcquireResultForTesting(VkResult result)
 	{
 		ENGINE_CORE_ASSERT(result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_ERROR_SURFACE_LOST_KHR,
