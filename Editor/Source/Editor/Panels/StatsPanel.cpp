@@ -162,6 +162,7 @@ namespace Engine {
 				Utils::DrawSupportingMetric("CPU preparation", std::format("{:.2f} ms", view.CpuMilliseconds));
 				Utils::DrawSupportingMetric("CPU frame", view.Frame);
 				Utils::DrawSupportingMetric("GPU frame", view.GpuAvailable ? view.GpuFrame : "Unavailable");
+				Utils::DrawSupportingMetric("Shaded light cap", std::to_string(view.MaxShadedLights));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

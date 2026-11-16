@@ -61,6 +61,7 @@ Texture2D<float2> SceneNormals : register(t9, space0);
 StructuredBuffer<InstanceRecord> Instances : register(t10, space0); // the mesh draws' records, which the terrain does not read
 StructuredBuffer<uint> LightClusterMasks : register(t11, space0);
 TextureCubeArray<float> PointShadowMaps : register(t12, space0);
+TextureCubeArray<float> PointShadowMapsHalf : register(t15, space0); // M29: the half tier's point-shadow cubes
 ConstantBuffer<ProbeConstants> Probes : register(b4, space0);
 StructuredBuffer<float4> IrradianceProbes : register(t13, space0);
 TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);

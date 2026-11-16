@@ -27,8 +27,9 @@ namespace Engine {
 	class GraphicsDevice;
 
 	// The caster-constant slots of one record: one per cascade (slots [0, 4)), then one per spot tile (from slot 4), then one per
-	// point-shadow face (M23: from slot 12, light i's faces at 12 + 6 i in PointShadowFaceCount order). A slot is 256 bytes,
-	// the largest minUniformBufferOffsetAlignment Vulkan allows, so every slot offset is a valid binding offset.
+	// point-shadow face (M23; M29's 16 spots and 16 point lights: from slot 20, the plan's light i's faces at 20 + 6 i in
+	// PointShadowFaceCount order), 116 in all. A slot is 256 bytes, the largest minUniformBufferOffsetAlignment Vulkan allows,
+	// so every slot offset is a valid binding offset.
 	inline constexpr uint32_t ShadowCasterFirstPointSlot = MaxShadowCascades + MaxSpotShadowLights;
 	inline constexpr uint32_t ShadowCasterSlotCount = ShadowCasterFirstPointSlot + MaxPointShadowLights * PointShadowFaceCount;
 	inline constexpr uint32_t ShadowCasterSlotStride = 256;
@@ -87,8 +88,12 @@ namespace Engine {
 		// pipelines of the reflected winding (every face projection is a reflection, PointShadowMaps.h) and the spot shadows'
 		// bias defaults. Null or empty Lights means no point shadows.
 		const PointShadowSet* Points = nullptr;                        // borrowed for Record only
-		nvrhi::ITexture* PointTarget = nullptr;                        // GetPointTargetDesc, 6 x MaxPointShadowLights layers
+		nvrhi::ITexture* PointTarget = nullptr;                        // GetPointTargetDesc(Full), the Full tier's cubes
 		std::span<const nvrhi::FramebufferHandle> PointFramebuffers{}; // CreateFramebuffers(PointTarget), one per layer
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): the Half tier's cubes (GetPointTargetDesc(Half)); null
+		// while no planned light is Half.
+		nvrhi::ITexture* PointHalfTarget = nullptr;
+		std::span<const nvrhi::FramebufferHandle> PointHalfFramebuffers{}; // CreateFramebuffers(PointHalfTarget), one per layer
 	};
 
 	struct ShadowRenderResult
@@ -124,9 +129,10 @@ namespace Engine {
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		[[nodiscard]] static nvrhi::TextureDesc GetCascadeTargetDesc(uint32_t shadowMapSize);
 		[[nodiscard]] static nvrhi::TextureDesc GetAtlasTargetDesc();
-		// M23: the PointShadowMaps cube array, PointShadowFaceCount x MaxPointShadowLights layers of `faceSize` (a
-		// GetPointShadowFaceSize) texels in the shadows' depth format.
-		[[nodiscard]] static nvrhi::TextureDesc GetPointTargetDesc(uint32_t faceSize);
+		// M23: the PointShadowMaps cube array, PointShadowFaceCount x MaxFullPointShadowLights layers of `faceSize` (a
+		// GetPointShadowFaceSize) texels in the shadows' depth format; M29: for PointShadowTier::Half, the PointShadowMapsHalf
+		// cube array, PointShadowFaceCount x MaxHalfPointShadowLights layers of `faceSize` (a GetPointShadowHalfFaceSize).
+		[[nodiscard]] static nvrhi::TextureDesc GetPointTargetDesc(uint32_t faceSize, PointShadowTier tier = PointShadowTier::Full);
 		// The per-view caster-constant buffer ShadowRenderInputs::CasterConstants takes.
 		[[nodiscard]] static nvrhi::BufferDesc GetCasterConstantsDesc();
 		// One depth-only framebuffer per array slice of `target` (a cascade, atlas or point-shadow target). Gpu errors propagate.

@@ -212,6 +212,12 @@
 				"SsaoHalfResolution": {
 					"description": "Computes ambient occlusion at half resolution.",
 					"type": "boolean"
+				},
+				"MaxShadedLights": {
+					"description": "The most lights one view shades: 256, 512, 1024 or 2048. More visible lights drop the least important ones (RENDER_LIGHT_LIMIT_EXCEEDED).",
+					"type": "integer",
+					"minimum": 256,
+					"maximum": 2048
 				}
 			},
 			"additionalProperties": false

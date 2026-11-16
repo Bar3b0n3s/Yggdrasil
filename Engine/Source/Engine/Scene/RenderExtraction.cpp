@@ -612,6 +612,8 @@ namespace Engine {
 		const uint32_t shadowSize = request.Quality.ShadowMapSize;
 		if (shadowSize < 256 || shadowSize > 8192 || (shadowSize & (shadowSize - 1)) != 0)
 			return MakeError(ErrorCode::InvalidArgument, "shadow map size must be a power of two from 256 to 8192");
+		if (!IsValidMaxShadedLights(request.Quality.MaxShadedLights))
+			return MakeError(ErrorCode::InvalidArgument, "the shaded-light cap must be 256, 512, 1024 or 2048, got {}", request.Quality.MaxShadedLights);
 		if (request.Width == 0 || request.Height == 0)
 			return MakeError(ErrorCode::InvalidArgument, "a render extraction needs a view of at least 1x1 pixels, got {}x{}", request.Width, request.Height);
 		if (!std::isfinite(request.Alpha) || request.Alpha < 0.0f || request.Alpha > 1.0f)

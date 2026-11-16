@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/RenderPrepare.h"
 
+#include "Engine/Core/Assert.h"
 #include "Shared/DrawConstants.h"
 
 #include <glm/gtc/constants.hpp>
@@ -153,8 +154,9 @@ namespace Engine {
 		});
 	}
 
-	LightCullResult CullLights(std::span<const LightData> lights, const CameraData& camera)
+	LightCullResult CullLights(std::span<const LightData> lights, const CameraData& camera, uint32_t maxShadedLights, std::span<const LightKey> previousShaded)
 	{
+		ENGINE_CORE_ASSERT(IsValidMaxShadedLights(maxShadedLights), "{} is not a shaded-light cap", maxShadedLights);
 		LightCullResult result;
 		std::vector<Utils::RankedLight> ranked;
 		const bool hasView = Utils::IsFinite(camera.View) && Utils::IsFinite(camera.Projection) && Utils::IsFinite(camera.Position);
@@ -181,28 +183,55 @@ namespace Engine {
 			const float importance = light.Intensity * std::max({ light.Color.r, light.Color.g, light.Color.b }) / (distance * distance);
 			ranked.push_back({ .Importance = importance, .Entity = light.Entity, .Index = index });
 		}
+		if (result.Visible.size() > maxShadedLights)
+		{
+			// More directional lights than the cap: the later ones are dropped, and no point or spot light is shaded.
+			result.Dropped = static_cast<uint32_t>(result.Visible.size() - maxShadedLights + ranked.size());
+			result.Visible.resize(maxShadedLights);
+			result.Importance.assign(result.Visible.size(), std::numeric_limits<float>::infinity());
+			return result;
+		}
 
 		// Directional lights come first in snapshot order; the others by descending importance, ties by entity UUID (then
 		// by snapshot order, for lights of one entity or without one).
-		std::ranges::sort(ranked, [](const Utils::RankedLight& left, const Utils::RankedLight& right)
+		const auto byImportance = [](const Utils::RankedLight& left, const Utils::RankedLight& right)
 		{
 			if (left.Importance != right.Importance)
 				return left.Importance > right.Importance;
 			return std::tie(left.Entity, left.Index) < std::tie(right.Entity, right.Index);
-		});
+		};
+		const size_t places = maxShadedLights - result.Visible.size();
+		if (ranked.size() > places)
+		{
+			// M29 (decision 3): the places go to the best ranks, a light shaded in the previous render ranking with its
+			// importance times LightHysteresis; the rest are dropped.
+			const auto rankOf = [&lights, previousShaded](const Utils::RankedLight& light)
+			{
+				const LightKey key{ .Entity = light.Entity, .Type = lights[light.Index].Type };
+				const bool held = light.Entity.IsValid() && std::ranges::binary_search(previousShaded, key);
+				return held ? light.Importance * LightHysteresis : light.Importance;
+			};
+			std::ranges::sort(ranked, [&rankOf](const Utils::RankedLight& left, const Utils::RankedLight& right)
+			{
+				const float leftRank = rankOf(left);
+				const float rightRank = rankOf(right);
+				if (leftRank != rightRank)
+					return leftRank > rightRank;
+				return std::tie(left.Entity, left.Index) < std::tie(right.Entity, right.Index);
+			});
+			result.Dropped = static_cast<uint32_t>(ranked.size() - places);
+			ranked.resize(places);
+		}
+		std::ranges::sort(ranked, byImportance);
+		result.Importance.assign(result.Visible.size(), std::numeric_limits<float>::infinity());
 		for (const Utils::RankedLight& light : ranked)
 		{
-			if (result.Visible.size() < MaxVisibleLights)
-				result.Visible.push_back(light.Index);
-			else
-				++result.Dropped;
+			result.Visible.push_back(light.Index);
+			result.Importance.push_back(light.Importance);
+			if (light.Entity.IsValid())
+				result.Shaded.push_back({ .Entity = light.Entity, .Type = lights[light.Index].Type });
 		}
-		if (result.Visible.size() > MaxVisibleLights)
-		{
-			// More directional lights than the limit: the later ones are dropped.
-			result.Dropped += static_cast<uint32_t>(result.Visible.size() - MaxVisibleLights);
-			result.Visible.resize(MaxVisibleLights);
-		}
+		std::ranges::sort(result.Shaded);
 		return result;
 	}
 

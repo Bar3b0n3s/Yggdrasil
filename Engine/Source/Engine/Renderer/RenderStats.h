@@ -56,6 +56,9 @@ namespace Engine {
 		uint32_t DroppedPointShadows = 0;
 		uint32_t MemoryAllocationCount = 0; // tracked Vulkan device allocations, not NVRHI object count
 		uint32_t MaxMemoryAllocationCount = 0;
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 5): the snapshot's RenderQualitySettings::MaxShadedLights the
+		// frame shaded at most (the project's Rendering.MaxShadedLights in every host); 0 while unavailable.
+		uint32_t MaxShadedLights = 0;
 	};
 
 	struct RenderPassCounters

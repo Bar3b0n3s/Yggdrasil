@@ -462,7 +462,8 @@ Header: `"Format": "Project", "Version": 1`. Schema: [Schemas/Project.schema.jso
 	},
 	"Rendering": {
 		"ShadowMapSize": 2048,
-		"SsaoHalfResolution": false
+		"SsaoHalfResolution": false,
+		"MaxShadedLights": 256
 	},
 	"Scripting": {
 		"MemoryLimitMB": 256,

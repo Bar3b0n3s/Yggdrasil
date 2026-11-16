@@ -50,7 +50,7 @@ class RendererIITests(AutomationTestCase):
         rendered, _ = self.open_editor_with_scene(name="RenderedProject", renderer="vulkan")
         self.make_scene(rendered)
         rendered.call("project.setSettings", {"patch": {"Rendering": {
-            "ShadowMapSize": 512, "SsaoHalfResolution": True}}})
+            "ShadowMapSize": 512, "SsaoHalfResolution": True, "MaxShadedLights": 1024}}})
         deadline = time.monotonic() + 60
         while True:
             observed = rendered.call("stats.get")
@@ -62,6 +62,8 @@ class RendererIITests(AutomationTestCase):
         self.assertTrue(current, observed)
         for view in current:
             self.assertTrue(view["ssaoHalfResolution"], view)
+            # M29 (Docs/Decisions/0044-m29-light-limits.md decision 5): the shaded-light cap in force.
+            self.assertEqual(view["maxShadedLights"], 1024, view)
         for view in ready:
             self.assertTrue(view["frame"].isdigit())
             self.assertTrue(view["gpuFrame"].isdigit())
@@ -77,17 +79,18 @@ class RendererIITests(AutomationTestCase):
         self.assertTrue(all((view["width"], view["height"]) != (73, 51)
                             for view in following["views"]))
 
-        # M23 (R-PLS, Docs/Decisions/0034-m23-contract.md decision 18): five shadow-casting point lights around the
-        # cube, one more than a view shadows: the views report four shadowed and one dropped, with a PointShadows pass.
-        for index in range(5):
+        # M23 (R-PLS, Docs/Decisions/0034-m23-contract.md decision 18), M29 (Docs/Decisions/0044-m29-light-limits.md
+        # decision 2): seventeen shadow-casting point lights around the cube, one more than a view shadows: the views
+        # report sixteen shadowed and one dropped, with a PointShadows pass.
+        for index in range(17):
             rendered.call("entity.create", {"name": f"Bulb{index}", "components": {
-                "Transform": {"Translation": [index - 2.0, 1.5, 1.5]},
-                "PointLight": {"Intensity": 10 - index, "Range": 6, "CastShadows": True}}})
+                "Transform": {"Translation": [index * 0.25 - 2.0, 1.5, 1.5]},
+                "PointLight": {"Intensity": 20 - index, "Range": 6, "CastShadows": True}}})
         deadline = time.monotonic() + 60
         while True:
             observed = rendered.call("stats.get")
             shadowed = [view for view in observed["views"]
-                        if view["available"] and view["shadowedPointLights"] == 4 and view["droppedPointShadows"] == 1]
+                        if view["available"] and view["shadowedPointLights"] == 16 and view["droppedPointShadows"] == 1]
             if shadowed or time.monotonic() >= deadline:
                 break
         self.assertTrue(shadowed, observed)
@@ -230,7 +233,9 @@ class RendererIITests(AutomationTestCase):
         self.assertEqual(len(dark), 1)
         self.assertEqual(dark[0]["severity"], "Warning")
         self.assertFalse(dark[0]["autoFixable"])
-        for index in range(9):
+        # M29 (Docs/Decisions/0044-m29-light-limits.md decision 6): a view shadows 16 spots, so a seventeenth is
+        # warned about.
+        for index in range(17):
             client.call("entity.create", {"name": f"Spot{index}", "components": {"SpotLight": {"CastShadows": True}}})
         client.call("scene.save")
         report = client.call("project.validate", {"scope": "project"})["diagnostics"]
@@ -240,12 +245,15 @@ class RendererIITests(AutomationTestCase):
         repeated = client.call("project.validate", {"scope": "project"})["diagnostics"]
         self.assertEqual([item["id"] for item in repeated if item["code"] == "RENDER_SPOT_SHADOW_BUDGET"],
                          [budget[0]["id"]])
-        # M23 (R-PLS): four shadow-casting point lights fit the budget, a fifth is warned about, unfixably.
-        for index in range(5):
+        # M23 (R-PLS), M29: sixteen shadow-casting point lights fit the budget, a seventeenth is warned about,
+        # unfixably.
+        for index in range(17):
             client.call("entity.create", {"name": f"Bulb{index}", "components": {"PointLight": {"CastShadows": True}}})
+            if index < 15:
+                continue
             report = client.call("project.validate", {"scope": "scene"})["diagnostics"]
             points = [item for item in report if item["code"] == "RENDER_POINT_SHADOW_BUDGET"]
-            self.assertEqual(len(points), 1 if index == 4 else 0, report)
+            self.assertEqual(len(points), 1 if index == 16 else 0, report)
         self.assertEqual(points[0]["severity"], "Warning")
         self.assertFalse(points[0]["autoFixable"])
 

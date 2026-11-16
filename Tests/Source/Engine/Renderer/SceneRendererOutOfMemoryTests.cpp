@@ -374,7 +374,7 @@ namespace Engine {
 				RenderSnapshot snapshot = MakeClusteredSnapshot(fixture);
 				const LightClusterGrid grid = ComputeLightClusterGrid(snapshot.Camera, fixture.Renderer().GetWidth(), fixture.Renderer().GetHeight());
 				{
-					const Test::BufferCreationFails failing(StorageBufferOfSize(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid)).byteSize));
+					const Test::BufferCreationFails failing(StorageBufferOfSize(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid), grid.WordCount).byteSize));
 					const Status rendered = RenderOnce(device, fixture.Renderer(), snapshot);
 					REQUIRE_FALSE(rendered.has_value());
 					CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
@@ -419,7 +419,7 @@ namespace Engine {
 				const LightClusterGrid grid = ComputeLightClusterGrid(snapshot.Camera, 256, 128);
 				std::vector<std::byte> fallback;
 				{
-					const Test::BufferCreationFails failing(StorageBufferOfSize(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid)).byteSize));
+					const Test::BufferCreationFails failing(StorageBufferOfSize(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid), grid.WordCount).byteSize));
 					const Status rendered = RenderOnce(device, fixture.Renderer(), snapshot);
 					REQUIRE_FALSE(rendered.has_value());
 					CHECK(rendered.error().GetCode() == ErrorCode::Gpu);

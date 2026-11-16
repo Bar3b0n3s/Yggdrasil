@@ -41,34 +41,132 @@ namespace Engine {
 			CHECK(GetPointShadowFaceSize(2048) == 512);
 			CHECK(GetPointShadowFaceSize(8192) == 2048);
 			CHECK(GetPointShadowFaceSize(256) == 128);
-			CHECK(MaxPointShadowLights == 4);
+			// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): 16 lights, four at full size, the rest at half.
+			CHECK(MaxPointShadowLights == 16);
+			CHECK(MaxFullPointShadowLights == 4);
+			CHECK(MaxHalfPointShadowLights == 12);
+			CHECK(GetPointShadowHalfFaceSize(2048) == 256);
+			CHECK(GetPointShadowHalfFaceSize(8192) == 1024);
+			CHECK(GetPointShadowHalfFaceSize(256) == 64);
 		}
 
-		// The four most important visible shadow-casting point lights are planned, in CullLights' order, each with its six
-		// faces and its layer; the fifth is dropped, a point light without CastShadows is not a candidate, and one whose range
-		// is not above twice its near plane is rejected without costing another its shadow.
-		TEST_CASE("PointShadowMaps: the four most important shadow-casting point lights are planned and the rest dropped")
+		// M29 (decision 2): the sixteen most important visible shadow-casting point lights are planned, in CullLights' order,
+		// each with its six faces, its tier and its layer: the first four Full at layers 0 to 3, as M23 planned four, the next
+		// twelve Half at layers 0 to 11; the seventeenth is dropped, a point light without CastShadows is not a candidate, and
+		// one whose range is not above twice its near plane is rejected without costing another its shadow.
+		TEST_CASE("PointShadowMaps: sixteen point lights are planned, the four most important at full face size and the rest at half")
 		{
 			std::vector<LightData> lights;
-			for (uint64_t index = 0; index < 5; ++index)
-				lights.push_back(MakeShadowedPoint(glm::vec3(static_cast<float>(index), 0.0f, -5.0f), 10.0f - static_cast<float>(index), 100 + index));
+			for (uint64_t index = 0; index < MaxPointShadowLights + 1; ++index)
+				lights.push_back(MakeShadowedPoint(glm::vec3(static_cast<float>(index), 0.0f, -5.0f), 30.0f - static_cast<float>(index), 100 + index));
+			const uint32_t unshadowed = static_cast<uint32_t>(lights.size());
 			lights.push_back(LightData{ .Type = RenderLightType::Point, .Intensity = 50.0f, .Position = glm::vec3(0.0f, 0.0f, -4.0f), .Range = 5.0f, .Entity = UUID(200) });
-			LightData tiny = MakeShadowedPoint(glm::vec3(0.0f, 1.0f, -5.0f), 20.0f, 300);
+			LightData tiny = MakeShadowedPoint(glm::vec3(0.0f, 1.0f, -5.0f), 40.0f, 300);
 			tiny.Range = 0.05f;
+			const uint32_t rejected = static_cast<uint32_t>(lights.size());
 			lights.push_back(tiny);
-			const std::vector<uint32_t> visible = { 6, 5, 0, 1, 2, 3, 4 };
+			std::vector<uint32_t> visible = { rejected, unshadowed };
+			for (uint32_t index = 0; index <= MaxPointShadowLights; ++index)
+				visible.push_back(index);
 
 			const Result<PointShadowSet> set = AllocatePointShadows(lights, visible);
 			REQUIRE_MESSAGE(set.has_value(), set.error().ToString());
 			REQUIRE(set->Lights.size() == MaxPointShadowLights);
-			for (uint32_t layer = 0; layer < MaxPointShadowLights; ++layer)
+			for (uint32_t index = 0; index < MaxPointShadowLights; ++index)
 			{
-				CHECK(set->Lights[layer].LightIndex == layer);
-				CHECK(set->Lights[layer].Layer == layer);
-				CHECK(set->Lights[layer].FarClip == 5.0f);
+				const PointShadowLight& planned = set->Lights[index];
+				CAPTURE(index);
+				CHECK(planned.LightIndex == index);
+				CHECK(planned.Entity == UUID(100 + index));
+				CHECK(planned.Tier == (index < MaxFullPointShadowLights ? PointShadowTier::Full : PointShadowTier::Half));
+				CHECK(planned.Layer == (index < MaxFullPointShadowLights ? index : index - MaxFullPointShadowLights));
+				CHECK(planned.FarClip == 5.0f);
 			}
 			CHECK(set->Dropped == 1);
 			CHECK(set->Rejected == 1);
+			// Below the old cap of four every light is Full, as M23 planned it.
+			const std::vector<uint32_t> four = { 0, 1, 2, 3 };
+			const Result<PointShadowSet> small = AllocatePointShadows(lights, four);
+			REQUIRE(small.has_value());
+			REQUIRE(small->Lights.size() == 4);
+			for (uint32_t index = 0; index < 4; ++index)
+			{
+				CHECK(small->Lights[index].Tier == PointShadowTier::Full);
+				CHECK(small->Lights[index].Layer == index);
+			}
+		}
+
+		// M29 (decision 3): at the cap of 16, a light the previous plan shadowed keeps its shadow against a newcomer less than a
+		// quarter more important; at the full tier's four, a light that was Full stays Full the same way; a kept light keeps
+		// its layer, and a newcomer takes the lowest free one. The importance is CullLights' (one per visible index).
+		TEST_CASE("PointShadowMaps: a light that held its shadow or its tier keeps it until a newcomer is a quarter more important")
+		{
+			std::vector<LightData> lights;
+			std::vector<uint32_t> visible;
+			std::vector<float> importance;
+			// Seventeen lights of importance 100 down to 84, in CullLights' (descending) order.
+			for (uint32_t index = 0; index <= MaxPointShadowLights; ++index)
+			{
+				lights.push_back(MakeShadowedPoint(glm::vec3(static_cast<float>(index), 0.0f, -5.0f), 1.0f, 100 + index));
+				visible.push_back(index);
+				importance.push_back(100.0f - static_cast<float>(index));
+			}
+			const Result<PointShadowSet> first = AllocatePointShadows(lights, visible, importance);
+			REQUIRE(first.has_value());
+			REQUIRE(first->Lights.size() == MaxPointShadowLights);
+			CHECK(first->Lights.back().LightIndex == MaxPointShadowLights - 1); // the seventeenth (84) is dropped
+
+			// The dropped light grows to 95, more than the weakest planned (85) but less than 1.25 times it: nothing changes with
+			// the previous plan, and without it the dropped light takes the place.
+			importance.back() = 95.0f;
+			std::vector<uint32_t> reordered = visible;
+			std::vector<float> reorderedImportance = importance;
+			// CullLights' order puts it right after light 5, which ties it at 95 with a smaller UUID.
+			reordered.pop_back();
+			reorderedImportance.pop_back();
+			reordered.insert(reordered.begin() + 6, MaxPointShadowLights);
+			reorderedImportance.insert(reorderedImportance.begin() + 6, 95.0f);
+			const Result<PointShadowSet> kept = AllocatePointShadows(lights, reordered, reorderedImportance, &*first);
+			REQUIRE(kept.has_value());
+			CHECK(std::ranges::find(kept->Lights, MaxPointShadowLights, &PointShadowLight::LightIndex) == kept->Lights.end());
+			CHECK(std::ranges::find(kept->Lights, MaxPointShadowLights - 1, &PointShadowLight::LightIndex) != kept->Lights.end());
+			const Result<PointShadowSet> fresh = AllocatePointShadows(lights, reordered, reorderedImportance);
+			REQUIRE(fresh.has_value());
+			CHECK(std::ranges::find(fresh->Lights, MaxPointShadowLights, &PointShadowLight::LightIndex) != fresh->Lights.end());
+			// Every kept light keeps its tier and layer.
+			for (const PointShadowLight& light : kept->Lights)
+			{
+				const auto before = std::ranges::find(first->Lights, light.LightIndex, &PointShadowLight::LightIndex);
+				REQUIRE(before != first->Lights.end());
+				CHECK(before->Tier == light.Tier);
+				CHECK(before->Layer == light.Layer);
+			}
+
+			// At 120 it is more than a quarter above 85: it takes the weakest light's place and the free Half layer.
+			reorderedImportance[6] = 120.0f;
+			std::ranges::rotate(reordered.begin(), reordered.begin() + 6, reordered.begin() + 7);
+			std::ranges::rotate(reorderedImportance.begin(), reorderedImportance.begin() + 6, reorderedImportance.begin() + 7);
+			const Result<PointShadowSet> taken = AllocatePointShadows(lights, reordered, reorderedImportance, &*first);
+			REQUIRE(taken.has_value());
+			const auto newcomer = std::ranges::find(taken->Lights, MaxPointShadowLights, &PointShadowLight::LightIndex);
+			REQUIRE(newcomer != taken->Lights.end());
+			CHECK(std::ranges::find(taken->Lights, MaxPointShadowLights - 1, &PointShadowLight::LightIndex) == taken->Lights.end());
+			// The full tier keeps its four, which rank at 1.25 times their importance (97 * 1.25 = 121.25 at least, above 120), so
+			// the newcomer is Half, at the layer the dropped light freed.
+			CHECK(newcomer->Tier == PointShadowTier::Half);
+			const auto dropped = std::ranges::find(first->Lights, MaxPointShadowLights - 1, &PointShadowLight::LightIndex);
+			REQUIRE(dropped != first->Lights.end());
+			CHECK(newcomer->Layer == dropped->Layer);
+			for (uint32_t index = 0; index < MaxFullPointShadowLights; ++index)
+			{
+				const auto full = std::ranges::find(taken->Lights, index, &PointShadowLight::LightIndex);
+				REQUIRE(full != taken->Lights.end());
+				CHECK(full->Tier == PointShadowTier::Full);
+			}
+
+			// The importance must be one per visible light, or none.
+			const std::vector<float> wrong(3, 1.0f);
+			CHECK_FALSE(AllocatePointShadows(lights, visible, wrong).has_value());
 		}
 
 		// The plan's other rules: an index out of range or given twice is InvalidArgument; a spot or directional light is never
@@ -256,7 +354,10 @@ namespace Engine {
 				.Materials = { UUID(8911) } } };
 			snapshot.Environment.FallbackColor = glm::vec3(0.0f);
 			for (uint32_t index = 0; index < MaxPointShadowLights; ++index)
-				snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(-1.5f, -0.6f + 0.4f * static_cast<float>(index), -4.5f), 40.0f, 100 + index));
+			{
+				const glm::vec3 position(-2.0f + 0.25f * static_cast<float>(index % 4), -0.6f + 0.4f * static_cast<float>(index / 4), -4.5f);
+				snapshot.Lights.push_back(MakeShadowedPoint(position, 40.0f, 100 + index));
+			}
 			snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(1.5f, 0.0f, -4.5f), 4.0f, 200));
 			Test::ExpectLog warning(LogLevel::Warn, std::string(RenderPointShadowBudgetCode));
 			const Image first = setup.Render(snapshot);
@@ -289,7 +390,7 @@ namespace Engine {
 				.Mesh = UUID(8910),
 				.Materials = { UUID(8911) } } };
 			for (uint32_t index = 0; index <= MaxPointShadowLights; ++index)
-				snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(-1.5f + 0.6f * static_cast<float>(index), 0.0f, -4.5f), 40.0f - static_cast<float>(index), 100 + index));
+				snapshot.Lights.push_back(MakeShadowedPoint(glm::vec3(-1.5f + 0.18f * static_cast<float>(index), 0.0f, -4.5f), 40.0f - static_cast<float>(index), 100 + index));
 			Test::ExpectLog warning(LogLevel::Warn, std::string(RenderPointShadowBudgetCode));
 			const Image before = setup.Render(snapshot);
 			CHECK(warning.GetMatchCount() == 1);

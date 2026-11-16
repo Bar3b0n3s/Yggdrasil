@@ -109,16 +109,98 @@ namespace Engine {
 		{
 			const CameraData camera = MakeCamera();
 			std::vector<LightData> lights;
-			for (uint32_t index = 0; index < MaxVisibleLights + 10; ++index)
+			for (uint32_t index = 0; index < DefaultMaxShadedLights + 10; ++index)
 				lights.push_back(MakePointLight(glm::vec3(0.0f, 0.0f, -5.0f), 1.0f + static_cast<float>(index), index + 1));
 			const LightCullResult result = CullLights(lights, camera);
-			CHECK(result.Visible.size() == MaxVisibleLights);
+			CHECK(result.Visible.size() == DefaultMaxShadedLights);
 			CHECK(result.Dropped == 10);
 			// The ten weakest (the first ten) are the ones dropped.
 			for (uint32_t index = 0; index < 10; ++index)
 				CHECK(std::ranges::find(result.Visible, index) == result.Visible.end());
 			// Deterministic: the same input gives the same list.
 			CHECK(CullLights(lights, camera).Visible == result.Visible);
+		}
+
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): the cap is the caller's, one of the four the setting takes.
+		TEST_CASE("RenderPrepare: CullLights shades up to the cap it is given and drops the least important beyond it")
+		{
+			const CameraData camera = MakeCamera();
+			CHECK(IsValidMaxShadedLights(256));
+			CHECK(IsValidMaxShadedLights(512));
+			CHECK(IsValidMaxShadedLights(1024));
+			CHECK(IsValidMaxShadedLights(2048));
+			CHECK_FALSE(IsValidMaxShadedLights(0));
+			CHECK_FALSE(IsValidMaxShadedLights(300));
+			CHECK_FALSE(IsValidMaxShadedLights(4096));
+			for (const uint32_t cap : { 256U, 512U, 1024U, 2048U })
+			{
+				CAPTURE(cap);
+				std::vector<LightData> lights;
+				// A directional light, then the point lights: the directional light takes one place.
+				lights.push_back(LightData{ .Type = RenderLightType::Directional, .Entity = UUID(1) });
+				for (uint32_t index = 0; index < cap + 9; ++index)
+					lights.push_back(MakePointLight(glm::vec3(0.0f, 0.0f, -5.0f), 1.0f + static_cast<float>(index), index + 2));
+				const LightCullResult result = CullLights(lights, camera, cap);
+				REQUIRE(result.Visible.size() == cap);
+				CHECK(result.Dropped == 10);
+				CHECK(result.Visible.front() == 0);
+				// The point lights by descending importance: the strongest (the last) first, the ten weakest dropped.
+				CHECK(result.Visible[1] == lights.size() - 1);
+				for (uint32_t index = 1; index <= 10; ++index)
+					CHECK(std::ranges::find(result.Visible, index) == result.Visible.end());
+				CHECK(result.Shaded.size() == cap - 1);
+				CHECK(std::ranges::is_sorted(result.Shaded));
+				// Every light fits under the next cap up.
+				if (cap < MaxShadedLightsCeiling)
+				{
+					const LightCullResult all = CullLights(lights, camera, cap * 2);
+					CHECK(all.Visible.size() == lights.size());
+					CHECK(all.Dropped == 0);
+				}
+			}
+		}
+
+		// M29 (decision 3): at a cap, a light shaded in the previous render keeps its place against a newcomer less than a
+		// quarter more important, and loses it to one more than a quarter more important; the list stays in plain importance
+		// order, and without competition the previous render changes nothing.
+		TEST_CASE("RenderPrepare: a light shaded at the cap stays shaded until a newcomer is a quarter more important")
+		{
+			const CameraData camera = MakeCamera();
+			std::vector<LightData> lights;
+			for (uint32_t index = 0; index < DefaultMaxShadedLights; ++index)
+				lights.push_back(MakePointLight(glm::vec3(0.0f, 0.0f, -5.0f), 100.0f + static_cast<float>(index), index + 1));
+			const LightCullResult first = CullLights(lights, camera);
+			REQUIRE(first.Dropped == 0);
+			REQUIRE(first.Shaded.size() == DefaultMaxShadedLights);
+			// Below the cap, the previous render changes nothing.
+			CHECK(CullLights(lights, camera, DefaultMaxShadedLights, first.Shaded).Visible == first.Visible);
+
+			// A newcomer 1.2 times as important as the weakest held light (intensity 100) does not displace it with the history,
+			// and does without it.
+			std::vector<LightData> contested = lights;
+			contested.push_back(MakePointLight(glm::vec3(0.0f, 0.0f, -5.0f), 120.0f, 9999));
+			const uint32_t newcomer = static_cast<uint32_t>(contested.size() - 1);
+			const LightCullResult kept = CullLights(contested, camera, DefaultMaxShadedLights, first.Shaded);
+			CHECK(kept.Dropped == 1);
+			CHECK(std::ranges::find(kept.Visible, 0U) != kept.Visible.end());
+			CHECK(std::ranges::find(kept.Visible, newcomer) == kept.Visible.end());
+			const LightCullResult fresh = CullLights(contested, camera, DefaultMaxShadedLights);
+			CHECK(std::ranges::find(fresh.Visible, 0U) == fresh.Visible.end());
+			CHECK(std::ranges::find(fresh.Visible, newcomer) != fresh.Visible.end());
+			// The list is in plain importance order whatever the hysteresis chose.
+			CHECK(std::ranges::is_sorted(kept.Visible, [&contested](uint32_t left, uint32_t right)
+			{
+				return contested[left].Intensity > contested[right].Intensity;
+			}));
+
+			// A newcomer 1.3 times as important takes the place even from a held light.
+			contested.back().Intensity = 130.0f;
+			const LightCullResult taken = CullLights(contested, camera, DefaultMaxShadedLights, first.Shaded);
+			CHECK(std::ranges::find(taken.Visible, 0U) == taken.Visible.end());
+			CHECK(std::ranges::find(taken.Visible, newcomer) != taken.Visible.end());
+			// Its key replaces the dropped light's in the next render's history.
+			CHECK(std::ranges::binary_search(taken.Shaded, LightKey{ .Entity = UUID(9999), .Type = RenderLightType::Point }));
+			CHECK_FALSE(std::ranges::binary_search(taken.Shaded, LightKey{ .Entity = UUID(1), .Type = RenderLightType::Point }));
 		}
 
 		TEST_CASE("RenderPrepare: lights with zero or non-finite radiance are culled")

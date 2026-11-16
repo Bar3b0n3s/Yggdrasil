@@ -64,23 +64,80 @@ namespace Engine {
 
 		TEST_CASE("SpotShadowAtlas: excess shadowed spots are reported without dropping their light")
 		{
-			auto lights = Utils::SpotTestLights(9);
+			auto lights = Utils::SpotTestLights(MaxSpotShadowLights + 1);
 			lights[0].Intensity = 10;
 			const auto visible = CullLights(lights, Utils::SpotTestCamera());
-			REQUIRE(visible.Visible.size() == 9);
+			REQUIRE(visible.Visible.size() == MaxSpotShadowLights + 1);
 			const auto atlas = AllocateSpotShadowAtlas(lights, visible.Visible, Utils::SpotTestCamera());
 			REQUIRE(atlas);
 			CHECK(atlas->Dropped == 1);
-			REQUIRE(atlas->Tiles.size() == 8);
-			for (size_t index = 0; index < 8; ++index)
+			REQUIRE(atlas->Tiles.size() == MaxSpotShadowLights);
+			for (size_t index = 0; index < MaxSpotShadowLights; ++index)
 				CHECK(atlas->Tiles[index].LightIndex == visible.Visible[index]);
 			CHECK(visible.Dropped == 0);
 			lights[1].Type = RenderLightType::Point;
 			lights[2].CastShadows = false;
 			const auto filtered = AllocateSpotShadowAtlas(lights, visible.Visible, Utils::SpotTestCamera());
 			REQUIRE(filtered);
-			CHECK(filtered->Tiles.size() == 7);
+			CHECK(filtered->Tiles.size() == MaxSpotShadowLights - 1);
 			CHECK(filtered->Dropped == 0);
+		}
+
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decisions 2 and 3): the atlas's sixteen tiles take sixteen spots, slot t
+		// at (t % 4, t / 4) * 1024 in importance order after a reset (the first eight where M23 put its eight); at the cap, a
+		// spot the previous atlas shadowed keeps its shadow against a newcomer less than a quarter more important, and every kept
+		// spot keeps its slot while a newcomer takes the freed one.
+		TEST_CASE("SpotShadowAtlas: sixteen spot lights take the atlas's sixteen tiles, and a kept light keeps its tile")
+		{
+			CHECK(MaxSpotShadowLights == 16);
+			auto lights = Utils::SpotTestLights(MaxSpotShadowLights + 1);
+			for (uint32_t index = 0; index <= MaxSpotShadowLights; ++index)
+				lights[index].Intensity = 100.0f - static_cast<float>(index); // the seventeenth, at 84, is the least important
+			const CameraData camera = Utils::SpotTestCamera();
+			const auto visible = CullLights(lights, camera);
+			const auto first = AllocateSpotShadowAtlas(lights, visible.Visible, camera);
+			REQUIRE(first);
+			REQUIRE(first->Tiles.size() == MaxSpotShadowLights);
+			CHECK(first->Dropped == 1);
+			for (uint32_t index = 0; index < MaxSpotShadowLights; ++index)
+			{
+				const SpotShadowTile& tile = first->Tiles[index];
+				CHECK(tile.LightIndex == index);
+				CHECK(tile.Entity == lights[index].Entity);
+				CHECK(tile.Slot == index);
+				CHECK(tile.X == index % 4 * 1024);
+				CHECK(tile.Y == index / 4 * 1024);
+			}
+
+			// The dropped spot grows to 95, above the weakest shadowed (85) but below 1.25 times it: kept out with the previous
+			// atlas, in without it.
+			lights[MaxSpotShadowLights].Intensity = 95.0f;
+			const auto contested = CullLights(lights, camera);
+			const auto kept = AllocateSpotShadowAtlas(lights, contested.Visible, camera, &*first);
+			REQUIRE(kept);
+			CHECK(std::ranges::find(kept->Tiles, MaxSpotShadowLights, &SpotShadowTile::LightIndex) == kept->Tiles.end());
+			for (const SpotShadowTile& tile : kept->Tiles)
+				CHECK(tile.Slot == first->Tiles[tile.LightIndex].Slot);
+			const auto fresh = AllocateSpotShadowAtlas(lights, contested.Visible, camera);
+			REQUIRE(fresh);
+			CHECK(std::ranges::find(fresh->Tiles, MaxSpotShadowLights, &SpotShadowTile::LightIndex) != fresh->Tiles.end());
+
+			// At 120 it takes the weakest spot's place and its slot; the others keep theirs, though the newcomer now ranks first.
+			lights[MaxSpotShadowLights].Intensity = 120.0f;
+			const auto overtaken = CullLights(lights, camera);
+			const auto taken = AllocateSpotShadowAtlas(lights, overtaken.Visible, camera, &*first);
+			REQUIRE(taken);
+			REQUIRE(taken->Tiles.size() == MaxSpotShadowLights);
+			CHECK(taken->Tiles.front().LightIndex == MaxSpotShadowLights);
+			CHECK(taken->Tiles.front().Slot == first->Tiles.back().Slot);
+			CHECK(std::ranges::find(taken->Tiles, MaxSpotShadowLights - 1, &SpotShadowTile::LightIndex) == taken->Tiles.end());
+			for (const SpotShadowTile& tile : taken->Tiles)
+			{
+				if (tile.LightIndex != MaxSpotShadowLights)
+					CHECK(tile.Slot == first->Tiles[tile.LightIndex].Slot);
+				CHECK(tile.X == tile.Slot % 4 * 1024);
+				CHECK(tile.Y == tile.Slot / 4 * 1024);
+			}
 		}
 
 		TEST_CASE("SpotShadowAtlas: invalid indices and cameras fail")

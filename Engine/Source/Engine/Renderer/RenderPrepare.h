@@ -9,6 +9,7 @@
 
 #include <glm/glm.hpp>
 
+#include <compare>
 #include <cstdint>
 #include <span>
 #include <string_view>
@@ -22,13 +23,9 @@
 
 namespace Engine {
 
-	// The most lights one view shades (§8.2, §8.3 pass 1: "light list <= 256"); more visible lights is
-	// RENDER_LIGHT_LIMIT_EXCEEDED (ProjectValidator's warning, and the renderer's warning logged once per renderer).
-	inline constexpr uint32_t MaxVisibleLights = 256;
-
-	// The code of §13.7's "more than 256 visible lights", defined here because the renderer logs it (Warning, once per
-	// renderer, when a view drops lights) and EditorCore's ProjectValidator reports it under the same spelling (a scene
-	// with more than MaxVisibleLights effectively enabled lights; EditorCore/Project/ProjectValidator.h).
+	// The code of §13.7's light limit, defined here because the renderer logs it (Warning, once per renderer, when a view
+	// drops lights) and EditorCore's ProjectValidator reports it under the same spelling (a scene with more effectively
+	// enabled lights than the project's Rendering.MaxShadedLights; EditorCore/Project/ProjectValidator.h).
 	inline constexpr std::string_view RenderLightLimitExceededCode = "RENDER_LIGHT_LIMIT_EXCEEDED";
 
 	// Whether `bounds` (local space) transformed by `world` lies entirely outside the view of `camera` (CameraData::View and
@@ -37,23 +34,49 @@ namespace Engine {
 	// at infinity). Empty bounds are never outside.
 	[[nodiscard]] bool IsOutsideView(const Aabb& bounds, const glm::mat4& world, const CameraData& camera);
 
+	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 3): a light's identity from one render of a view to the next, for
+	// the hysteresis at a cap: its entity and its type. A light without an entity (a snapshot built by hand) has none.
+	struct LightKey
+	{
+		UUID Entity{};
+		RenderLightType Type = RenderLightType::Directional;
+
+		auto operator<=>(const LightKey&) const = default;
+	};
+
+	// M29 (decision 3): where more candidates than places compete at a cap, a light that held such a place in the view's
+	// previous render ranks with its importance times this factor, so a newcomer must be a quarter more important to take
+	// its place. The chosen lights are then ordered by their plain importance.
+	inline constexpr float LightHysteresis = 1.25f;
+
 	// The light list of one view.
 	struct LightCullResult
 	{
-		// Indices into the snapshot's Lights of the lights to shade, at most MaxVisibleLights: every directional light in
-		// snapshot order, then the visible point and spot lights by descending importance, ties by entity UUID.
+		// Indices into the snapshot's Lights of the lights to shade, at most the cap: every directional light in snapshot
+		// order, then the visible point and spot lights by descending importance, ties by entity UUID then snapshot index.
 		std::vector<uint32_t> Visible{};
+		// M29 (decision 3): one per Visible entry, the light's importance (below); infinity for a directional light. The shadow
+		// planners' hysteresis (PointShadowMaps.h) ranks with it.
+		std::vector<float> Importance{};
 		// Lights not shaded besides the dropped ones: point and spot lights outside the view, and lights of any type
 		// (directional included) whose radiance or range is zero or not finite.
 		uint32_t Culled = 0;
-		uint32_t Dropped = 0; // visible lights beyond MaxVisibleLights (lowest importance first)
+		uint32_t Dropped = 0; // visible lights beyond the cap (the least important first, after the hysteresis)
+		// M29 (decision 3): the keys of the shaded point and spot lights that have an entity, sorted: the next render's
+		// `previousShaded`.
+		std::vector<LightKey> Shaded{};
 	};
 
 	// Culls `lights` for `camera`: a directional light is always visible when its radiance (Color * Intensity) is non-zero
 	// and finite; a point light when its Range sphere is not outside the view (as IsOutsideView, against the sphere); a spot
 	// light when the bounding sphere of its cone is not. A light with a non-finite value is culled. Importance is Intensity *
-	// max(Color) / max(distance from the camera to the light's sphere, 1)². Pure.
-	[[nodiscard]] LightCullResult CullLights(std::span<const LightData> lights, const CameraData& camera);
+	// max(Color) / max(distance from the camera to the light's sphere, 1)². M29 (decisions 1 and 3): at most
+	// `maxShadedLights` (IsValidMaxShadedLights, asserted) lights are shaded; when more point and spot lights are visible than
+	// the places the directional lights leave, those whose key is in `previousShaded` (sorted; the previous render's
+	// LightCullResult::Shaded, empty after a reset) rank with their importance times LightHysteresis, and the chosen ones are
+	// ordered by their plain importance. When every visible light fits, the hysteresis changes nothing. Pure.
+	[[nodiscard]] LightCullResult CullLights(std::span<const LightData> lights, const CameraData& camera, uint32_t maxShadedLights = DefaultMaxShadedLights,
+		std::span<const LightKey> previousShaded = {});
 
 	// A draw's place in the opaque order (§8.3 pass 1: "opaque sorted by pipeline -> material -> mesh").
 	struct OpaqueSortKey

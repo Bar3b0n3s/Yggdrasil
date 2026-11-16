@@ -48,7 +48,8 @@
 	},
 	"Rendering": {
 		"ShadowMapSize": 4096,
-		"SsaoHalfResolution": false
+		"SsaoHalfResolution": false,
+		"MaxShadedLights": 1024
 	},
 	"Scripting": {
 		"MemoryLimitMB": 128,

@@ -63,7 +63,7 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 2> ShadowRows = { "DirectionalShadows", "SpotShadows" };
 		inline constexpr std::array<std::string_view, 2> ShadowTargets = { "ShadowCascades", "ShadowAtlas" };
 		inline constexpr std::array<std::string_view, 1> PointShadowsRows = { "PointShadows" };
-		inline constexpr std::array<std::string_view, 1> PointShadowsTargets = { "PointShadowMaps" };
+		inline constexpr std::array<std::string_view, 2> PointShadowsTargets = { "PointShadowMaps", "PointShadowMapsHalf" };
 		inline constexpr std::array<std::string_view, 1> ScenePrograms = { "Scene" };
 		inline constexpr std::array<std::string_view, 1> DepthNormalRows = { "DepthNormal" };
 		// M26 (C26.1, R-TAA-VEL, R-SSR-IN; decision 14): the prepass's motion vectors and specular inputs after EntityId
@@ -158,7 +158,9 @@ namespace Engine {
 		{ .Name = "Skinning", .Stage = RenderStage::Deform, .PipelineCount = 1, .Programs = Detail::SkinningPrograms, .StatsRows = Detail::SkinningRows },
 		{ .Name = "Shadows", .Stage = RenderStage::Shadows, .PipelineCount = 6, .Programs = Detail::ShadowPrograms, .StatsRows = Detail::ShadowRows, .Targets = Detail::ShadowTargets },
 		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decision 3): the point lights' cube faces, drawn with the Shadows
-		// declaration's caster pipelines (ShadowPass) into its own cube-array target.
+		// declaration's caster pipelines (ShadowPass) into its own cube-array target. M29 (Docs/Decisions/0044-m29-light-limits.md
+		// decision 2): a second target, PointShadowMapsHalf, the half-size faces of the lights beyond the four most important,
+		// drawn with the same pipelines, so the startup count is unchanged.
 		{ .Name = "PointShadows", .Stage = RenderStage::Shadows, .StatsRows = Detail::PointShadowsRows, .Targets = Detail::PointShadowsTargets },
 		// The prepass and the picking prepass, {Opaque, Mask} x {CullBack, CullFront, CullNone} each.
 		{ .Name = "DepthNormal", .Stage = RenderStage::DepthNormal, .PipelineCount = 12, .Programs = Detail::ScenePrograms, .StatsRows = Detail::DepthNormalRows, .Targets = Detail::DepthNormalTargets },

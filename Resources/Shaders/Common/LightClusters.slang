@@ -22,7 +22,7 @@ uint GetLightClusterSlice(LightClusterConstants clusters, float viewDepth)
 }
 
 // The cluster of scene pixel `pixel` at view depth `viewDepth`: (z * Grid.y + y / LightClusterTileSize) * Grid.x + x /
-// LightClusterTileSize, the tile clamped to the grid. Its masks are the LightClusterWordCount words from its index times
+// LightClusterTileSize, the tile clamped to the grid. Its masks are the Grid.w words from its index times
 // Grid.w.
 uint GetLightClusterIndex(LightClusterConstants clusters, uint2 pixel, float viewDepth)
 {

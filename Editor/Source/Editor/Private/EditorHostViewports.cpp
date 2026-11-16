@@ -293,7 +293,7 @@ namespace Engine {
 		if (m_Editor.HasProject())
 		{
 			const auto& rendering = m_Editor.GetProject().GetSettings().Rendering;
-			request.Quality = { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution };
+			request.Quality = { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution, .MaxShadedLights = rendering.MaxShadedLights };
 			// M21 (decision 4): sprites sort in the project's layers, in edit and in play (ExtractView takes the request as it is).
 			request.SortingLayers = GetSortingLayers();
 		}

@@ -20,7 +20,7 @@
 //      textures, the environment; placeholders for missing assets, §7.2), submeshes culled against the view frustum by their
 //      bounds, opaque draws (AlphaMode Opaque and Mask) sorted by pipeline, then material, then mesh, then submesh (M23),
 //      transparent draws (AlphaMode Blend) back to front with ties by entity UUID; the lights culled and packed, at most
-//      MaxVisibleLights, logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants
+//      the snapshot's Quality.MaxShadedLights (M29), logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants
 //      written (ViewConstants b0, EnvironmentConstants b2, the Lights structured buffer t0, and from M23 the Instances
 //      structured buffer t10: one instance record per submesh draw of the view, every mesh pass drawing maximal runs of
 //      adjacent equal draws as one instanced draw, which renders exactly what one draw per submesh draw renders).
@@ -160,11 +160,11 @@ namespace Engine {
 	{
 		uint32_t MeshDraws = 0;       // submesh draws recorded by the forward passes (opaque and transparent)
 		uint32_t CulledSubmeshes = 0; // submeshes outside the frustum
-		uint32_t Lights = 0;          // lights used after culling (at most MaxVisibleLights, RenderPrepare.h)
+		uint32_t Lights = 0;          // lights used after culling (at most Quality.MaxShadedLights, RenderPrepare.h)
 		// M8 additions.
 		uint32_t TransparentDraws = 0;  // of MeshDraws, the Blend draws of pass 9
 		uint32_t CulledLights = 0;      // LightCullResult::Culled: outside the view, or zero or non-finite radiance or range
-		uint32_t DroppedLights = 0;     // visible lights beyond MaxVisibleLights (RENDER_LIGHT_LIMIT_EXCEEDED)
+		uint32_t DroppedLights = 0;     // visible lights beyond Quality.MaxShadedLights (RENDER_LIGHT_LIMIT_EXCEEDED)
 		uint32_t TextDraws = 0;         // text items and debug labels drawn
 		uint32_t DebugLineVertices = 0; // vertices of the debug lines drawn
 		// M21's milestone review: the visible tiles (of chunks that meet the view) past SceneRenderer::MaxTileQuadsPerView,

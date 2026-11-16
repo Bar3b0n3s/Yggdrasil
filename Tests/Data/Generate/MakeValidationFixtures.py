@@ -751,9 +751,11 @@ return Script.Define("Jumper", Jumper)
         "Transform": transform(0, 3, 0), "PointLight": {"Range": 2}}))
     item.expand.append({"Path": MAIN_SCENE, "Entity": "e000000000000003", "Count": 256})
 
+    # Seventeen shadow-casting spot lights, one more than a view shadows (Docs/Decisions/0044-m29-light-limits.md
+    # decision 6).
     item = fixture("RENDER_SPOT_SHADOW_BUDGET")
-    for index in range(9):
-        item.entities.append(entity(f"e00000000000001{index}", f"Spot{index}", {
+    for index in range(17):
+        item.entities.append(entity(f"e0000000000001{index:02x}", f"Spot{index}", {
             "Transform": transform(index * 2, 4, 0), "SpotLight": {"CastShadows": True}}))
 
     item = fixture("BUILD_START_SCENE_MISSING")
@@ -913,10 +915,11 @@ return Script.Define("Jumper", Jumper)
         "Transform": transform(), "UiRect": ui_rect(), "UiTextInput": {"Placeholder": "e000000000000005"}},
         parent="e000000000000003"))
 
-    # Five shadow-casting point lights, one more than a view shadows (Docs/Decisions/0034-m23-contract.md decision 18).
+    # Seventeen shadow-casting point lights, one more than a view shadows (Docs/Decisions/0034-m23-contract.md
+    # decision 18; Docs/Decisions/0044-m29-light-limits.md decision 6).
     item = fixture("RENDER_POINT_SHADOW_BUDGET")
-    for index in range(5):
-        item.entities.append(entity(f"e00000000000002{index}", f"Bulb{index}", {
+    for index in range(17):
+        item.entities.append(entity(f"e0000000000002{index:02x}", f"Bulb{index}", {
             "Transform": transform(index * 2, 3, 0), "PointLight": {"CastShadows": True}}))
 
     # The animation checks (Docs/Decisions/0034-m23-contract.md decision 30): a mesh skinned to a three-joint skin,

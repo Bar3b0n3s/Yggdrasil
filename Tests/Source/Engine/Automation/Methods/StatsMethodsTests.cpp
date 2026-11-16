@@ -30,6 +30,7 @@ namespace Engine {
 			stats.ShadowMapSize = 1024;
 			stats.SsaoHalfResolution = true;
 			stats.HistoryFrames = 7;
+			stats.MaxShadedLights = 1024;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -39,6 +40,7 @@ namespace Engine {
 			CHECK(summary.ShadowMapSize == 1024);
 			CHECK(summary.SsaoHalfResolution);
 			CHECK(summary.HistoryFrames == 7);
+			CHECK(summary.MaxShadedLights == 1024); // M29 (Docs/Decisions/0044-m29-light-limits.md decision 5)
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
@@ -59,6 +61,7 @@ namespace Engine {
 			CHECK(unavailable.ShadowMapSize == 0);
 			CHECK_FALSE(unavailable.SsaoHalfResolution);
 			CHECK(unavailable.HistoryFrames == 0);
+			CHECK(unavailable.MaxShadedLights == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")
@@ -196,7 +199,7 @@ namespace Engine {
 			Test::RenderQueryTestContext context(fixture.GetScene(), assets, settings, { .Method = method, .Params = Json::object(), .Registry = &methods });
 			context.Statistics.Fps = ToStatsTelemetry(59.123456789);
 			context.Statistics.Views = { { .Name = "scene", .Available = true, .Frame = "9007199254740997", .GpuFrame = "9007199254740993", .GpuAvailable = true, .Width = 640, .Height = 360, .CpuMilliseconds = 1.25, .Passes = { { .Name = "Forward", .CpuMilliseconds = 0.25, .GpuMilliseconds = 1.75, .GpuAvailable = true, .DrawCalls = 2, .Triangles = 24 } } },
-				{ .Name = "game", .Available = true, .Frame = "42", .GpuFrame = "40", .GpuAvailable = true, .Width = 320, .Height = 180, .ShadowMapSize = 512, .SsaoHalfResolution = true } };
+				{ .Name = "game", .Available = true, .Frame = "42", .GpuFrame = "40", .GpuAvailable = true, .Width = 320, .Height = 180, .ShadowMapSize = 512, .SsaoHalfResolution = true, .MaxShadedLights = 2048 } };
 			const auto result = methods.Invoke(context);
 			REQUIRE(std::holds_alternative<Json>(result));
 			const auto& json = std::get<Json>(result);
@@ -208,6 +211,8 @@ namespace Engine {
 			CHECK(json["views"][0]["ssaoHalfResolution"] == Json(false));
 			CHECK(json["views"][1]["shadowMapSize"] == Json(512));
 			CHECK(json["views"][1]["ssaoHalfResolution"] == Json(true));
+			CHECK(json["views"][0]["maxShadedLights"] == Json(0));
+			CHECK(json["views"][1]["maxShadedLights"] == Json(2048));
 			CHECK(json["views"][0]["passes"][0]["gpuMilliseconds"] == Json(1.75));
 			CHECK(context.StatisticsReads == 1);
 			CHECK(method->Specification.SupportsDryRun);

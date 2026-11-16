@@ -13,21 +13,22 @@ namespace Engine {
 	// The cluster grid of the clustered light loop (M23, C23.1, R-CLC; Docs/Decisions/0034-m23-contract.md decision 5).
 	// The view is divided into LightClusterTileSize x LightClusterTileSize tiles of scene pixels (the last row and column
 	// partial) times LightClusterDepthSlices slices of view depth, and each cluster holds one bit per entry of the view's
-	// light list (Shared/ShaderLight.h, at most MaxVisibleLights = 256 entries, so LightClusterWordCount 32-bit words): bit
-	// b of word w is set when light 32 w + b may reach the cluster. The LightClusters pass (the end of the Ambient stage)
+	// light list (Shared/ShaderLight.h): Grid.w 32-bit words, the view's shaded-light cap over 32 (M29: 8 at the default 256,
+	// up to MaxLightClusterWordCount at 2048; Docs/Decisions/0044-m29-light-limits.md decision 1): bit b of word w is set
+	// when light 32 w + b may reach the cluster. The LightClusters pass (the end of the Ambient stage)
 	// writes the masks, one thread per cluster and word, each the only writer of its word, so no atomic decides a bit; the
 	// forward pass reads its pixel's cluster and shades its set bits in ascending order, which is the light list's order,
 	// so the sum is the brute-force loop's over every light whose contribution is not exactly zero.
 #if defined(ENGINE_SHADER)
 	static const uint LightClusterTileSize = 64;
 	static const uint LightClusterDepthSlices = 24;
-	static const uint LightClusterWordCount = 8;
+	static const uint MaxLightClusterWordCount = 64;
 	static const uint LightClusterModeBruteForce = 0;
 	static const uint LightClusterModeClustered = 1;
 #else
 inline constexpr uint32_t LightClusterTileSize = 64;
 inline constexpr uint32_t LightClusterDepthSlices = 24;
-inline constexpr uint32_t LightClusterWordCount = 8;
+inline constexpr uint32_t MaxLightClusterWordCount = 64;
 inline constexpr uint32_t LightClusterModeBruteForce = 0;
 inline constexpr uint32_t LightClusterModeClustered = 1;
 #endif
@@ -41,7 +42,7 @@ inline constexpr uint32_t LightClusterModeClustered = 1;
 	// list (the reference the clustered render equals, RenderQualitySettings::ClusteredLights false).
 	struct LightClusterConstants
 	{
-		UInt4 Grid;     // tiles in x, tiles in y, LightClusterDepthSlices, LightClusterWordCount
+		UInt4 Grid;     // tiles in x, tiles in y, LightClusterDepthSlices, the mask words per cluster
 		Float4 Slicing; // Near, Far, slice scale, slice bias
 		UInt4 Mode;     // x: LightClusterModeClustered or LightClusterModeBruteForce; yzw padding
 	};

@@ -192,7 +192,9 @@ namespace Engine {
 			const ProjectSettings* settings = context.GetProjectSettings();
 			if (settings == nullptr)
 				return MakeError(ErrorCode::Unsupported, "viewport.screenshot needs the host's project rendering settings");
-			request.Quality = { .ShadowMapSize = settings->Rendering.ShadowMapSize, .SsaoHalfResolution = settings->Rendering.SsaoHalfResolution };
+			request.Quality = { .ShadowMapSize = settings->Rendering.ShadowMapSize,
+				.SsaoHalfResolution = settings->Rendering.SsaoHalfResolution,
+				.MaxShadedLights = settings->Rendering.MaxShadedLights };
 			request.SortingLayers = settings->SortingLayers.Layers;
 			request.SelectedEntities = context.GetSelectedEntities(*scene);
 			ENGINE_TRY_ASSIGN(request.Annotations, ResolveViewportAnnotations(context, *scene, annotations));

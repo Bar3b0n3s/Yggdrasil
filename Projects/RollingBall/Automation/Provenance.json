@@ -812,11 +812,11 @@
 		},
 		{
 			"Path": "RollingBall.eproj",
-			"XXH64": "c2b6add9b8bc9cd6",
-			"Method": "project.setSettings",
-			"RequestId": 28,
-			"Client": "engine-mcp",
-			"TranscriptLine": 951
+			"XXH64": "95ceb84fd6ef2521",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1215
 		}
 	]
 }

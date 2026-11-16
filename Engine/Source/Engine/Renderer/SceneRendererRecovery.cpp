@@ -115,7 +115,7 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle environmentConstants,
 			Utils::CreateViewBuffer(device, sizeof(EnvironmentConstants), 0, "SceneRenderer.EnvironmentConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle lights,
-			Utils::CreateViewBuffer(device, sizeof(ShaderLight) * MaxVisibleLights, sizeof(ShaderLight), "SceneRenderer.Lights"));
+			Utils::CreateViewBuffer(device, sizeof(ShaderLight) * MaxShadedLightsCeiling, sizeof(ShaderLight), "SceneRenderer.Lights"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle shadowConstants,
 			Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle casterConstants, device.CreateBuffer(ShadowPass::GetCasterConstantsDesc()));
@@ -128,7 +128,7 @@ namespace Engine {
 		state.ShadowCasterConstantsBuffer = std::move(casterConstants);
 		state.Targets = std::move(targets);
 		state.FinalTarget = 0;
-		state.Lights.reserve(MaxVisibleLights);
+		state.Lights.reserve(MaxShadedLightsCeiling);
 		return {};
 	}
 

@@ -21316,6 +21316,12 @@
 							"SsaoHalfResolution": {
 								"description": "Computes ambient occlusion at half resolution.",
 								"type": "boolean"
+							},
+							"MaxShadedLights": {
+								"description": "The most lights one view shades: 256, 512, 1024 or 2048. More visible lights drop the least important ones (RENDER_LIGHT_LIMIT_EXCEEDED).",
+								"type": "integer",
+								"minimum": 256,
+								"maximum": 2048
 							}
 						},
 						"additionalProperties": false
@@ -22366,6 +22372,12 @@
 							"SsaoHalfResolution": {
 								"description": "Computes ambient occlusion at half resolution.",
 								"type": "boolean"
+							},
+							"MaxShadedLights": {
+								"description": "The most lights one view shades: 256, 512, 1024 or 2048. More visible lights drop the least important ones (RENDER_LIGHT_LIMIT_EXCEEDED).",
+								"type": "integer",
+								"minimum": 256,
+								"maximum": 2048
 							}
 						},
 						"additionalProperties": false
@@ -26213,6 +26225,12 @@
 							},
 							"historyFrames": {
 								"description": "Renders since the view's temporal history (motion vectors, TAA's jitter and history, auto-exposure's adaptation) last started afresh: 0 at its first render, after a scene change, play starting or stopping, or a camera cut; one more each render after.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"maxShadedLights": {
+								"description": "The most lights the frame shaded (the project's Rendering.MaxShadedLights: 256, 512, 1024 or 2048); 0 when unavailable.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295

@@ -99,8 +99,9 @@ namespace Engine {
 	// registered (§5.5: the scene still loads, fully expanded).
 	inline constexpr std::string_view PrefabMissingAssetCode = "PREFAB_MISSING_ASSET";
 
-	// (Warning, not fixable, M8, §13.7: "more than 256 visible lights": a scene whose effectively enabled DirectionalLight,
-	// PointLight and SpotLight components number more than MaxVisibleLights is reported under RenderLightLimitExceededCode
+	// (Warning, not fixable, M8, §13.7: "more visible lights than a view shades": a scene whose effectively enabled
+	// DirectionalLight, PointLight and SpotLight components number more than the project's Rendering.MaxShadedLights (M29,
+	// Docs/Decisions/0044-m29-light-limits.md decision 6) is reported under RenderLightLimitExceededCode
 	// of Engine/Renderer/RenderPrepare.h, which the renderer logs too. The validator cannot know every view, so it counts
 	// the scene's lights; the renderer culls per view and logs the code once per renderer when a view really drops lights,
 	// the least important ones (RenderPrepare.h's CullLights). Reported on the scene file, without an entity.)

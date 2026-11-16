@@ -203,14 +203,15 @@ namespace Engine {
 		return desc;
 	}
 
-	nvrhi::TextureDesc ShadowPass::GetPointTargetDesc(uint32_t faceSize)
+	nvrhi::TextureDesc ShadowPass::GetPointTargetDesc(uint32_t faceSize, PointShadowTier tier)
 	{
-		ENGINE_CORE_ASSERT(faceSize >= 128 && faceSize <= 2048, "Invalid point shadow face size {}", faceSize);
+		const bool full = tier == PointShadowTier::Full;
+		ENGINE_CORE_ASSERT(faceSize >= (full ? 128U : 64U) && faceSize <= (full ? 2048U : 1024U), "Invalid point shadow face size {}", faceSize);
 		nvrhi::TextureDesc desc = GetCascadeTargetDesc(256);
 		desc.width = desc.height = faceSize;
-		desc.arraySize = PointShadowFaceCount * MaxPointShadowLights;
+		desc.arraySize = PointShadowFaceCount * (full ? MaxFullPointShadowLights : MaxHalfPointShadowLights);
 		desc.dimension = nvrhi::TextureDimension::TextureCubeArray;
-		desc.debugName = "PointShadowMaps";
+		desc.debugName = full ? "PointShadowMaps" : "PointShadowMapsHalf";
 		return desc;
 	}
 
@@ -549,28 +550,43 @@ namespace Engine {
 		}
 		if (points)
 		{
-			ENGINE_CORE_ASSERT(inputs.PointTarget && inputs.PointFramebuffers.size() == PointShadowFaceCount * MaxPointShadowLights,
+			// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): each planned light's six faces in its tier's cube array.
+			const bool half = std::ranges::any_of(inputs.Points->Lights, [](const PointShadowLight& light)
+			{
+				return light.Tier == PointShadowTier::Half;
+			});
+			ENGINE_CORE_ASSERT(inputs.PointTarget && inputs.PointFramebuffers.size() == PointShadowFaceCount * MaxFullPointShadowLights,
 				"Point shadow target or framebuffers are missing");
-			const nvrhi::TextureDesc& desc = inputs.PointTarget->getDesc();
-			ENGINE_CORE_ASSERT(desc.format == ShadowDepthFormat && desc.dimension == nvrhi::TextureDimension::TextureCubeArray
-					&& desc.arraySize == PointShadowFaceCount * MaxPointShadowLights && desc.width == desc.height,
+			ENGINE_CORE_ASSERT(!half || (inputs.PointHalfTarget && inputs.PointHalfFramebuffers.size() == PointShadowFaceCount * MaxHalfPointShadowLights),
+				"Half-size point shadow target or framebuffers are missing");
+			const auto validTarget = [](const nvrhi::ITexture* target, uint32_t lights)
+			{
+				const nvrhi::TextureDesc& desc = target->getDesc();
+				return desc.format == ShadowDepthFormat && desc.dimension == nvrhi::TextureDimension::TextureCubeArray
+					&& desc.arraySize == PointShadowFaceCount * lights && desc.width == desc.height;
+			};
+			ENGINE_CORE_ASSERT(validTarget(inputs.PointTarget, MaxFullPointShadowLights) && (!half || validTarget(inputs.PointHalfTarget, MaxHalfPointShadowLights)),
 				"Invalid point shadow target");
 			recording.BeginPass("PointShadows", &commandList);
 			ShadowRecordingScope scope{ recording };
-			// The planned lights hold the first layer groups (PointShadowLight::Layer is the light's index in the plan).
-			const uint32_t layers = static_cast<uint32_t>(inputs.Points->Lights.size()) * PointShadowFaceCount;
-			commandList.clearDepthStencilTexture(inputs.PointTarget, nvrhi::TextureSubresourceSet(0, 1, 0, layers), true, 0, false, 0);
 			for (size_t index = 0; index < inputs.Points->Lights.size(); ++index)
 			{
 				const PointShadowLight& light = inputs.Points->Lights[index];
-				ENGINE_CORE_ASSERT(light.Layer == index, "Point shadow light {} is planned at layer group {}", index, light.Layer);
+				const bool full = light.Tier == PointShadowTier::Full;
+				nvrhi::ITexture* target = full ? inputs.PointTarget : inputs.PointHalfTarget;
+				const std::span<const nvrhi::FramebufferHandle> framebuffers = full ? inputs.PointFramebuffers : inputs.PointHalfFramebuffers;
+				ENGINE_CORE_ASSERT(light.Layer < (full ? MaxFullPointShadowLights : MaxHalfPointShadowLights), "Point shadow light {} is planned at layer group {}",
+					index, light.Layer);
+				const nvrhi::TextureDesc& desc = target->getDesc();
+				commandList.clearDepthStencilTexture(target, nvrhi::TextureSubresourceSet(0, 1, light.Layer * PointShadowFaceCount, PointShadowFaceCount), true, 0,
+					false, 0);
 				for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
 				{
 					const uint32_t layer = light.Layer * PointShadowFaceCount + face;
-					nvrhi::IFramebuffer* framebuffer = inputs.PointFramebuffers[layer];
-					ENGINE_CORE_ASSERT(framebuffer && framebuffer->getDesc().depthAttachment.texture == inputs.PointTarget
+					nvrhi::IFramebuffer* framebuffer = framebuffers[layer];
+					ENGINE_CORE_ASSERT(framebuffer && framebuffer->getDesc().depthAttachment.texture == target
 							&& framebuffer->getDesc().depthAttachment.subresources.baseArraySlice == layer,
-						"Point shadow framebuffer {} does not attach layer {} of the point shadow target", layer, layer);
+						"Point shadow framebuffer {} does not attach layer {} of its tier's point shadow target", layer, layer);
 					const uint32_t slot = ShadowCasterFirstPointSlot + static_cast<uint32_t>(index) * PointShadowFaceCount + face;
 					if (!casters.Draws.empty())
 					{

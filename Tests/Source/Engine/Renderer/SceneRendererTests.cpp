@@ -853,7 +853,7 @@ namespace Engine {
 			{
 				RendererSetup setup(gpu, assets, 16, 16);
 				RenderSnapshot snapshot = MakeCubeSnapshot(16, 16, 1.0f);
-				for (uint32_t index = 0; index < MaxVisibleLights + 4; ++index)
+				for (uint32_t index = 0; index < DefaultMaxShadedLights + 4; ++index)
 				{
 					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point,
 						.Intensity = 1.0f,
@@ -865,8 +865,85 @@ namespace Engine {
 				static_cast<void>(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot));
 				static_cast<void>(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot));
 				CHECK(warning.GetMatchCount() == 1); // once per renderer
-				CHECK(setup.GetRenderer().GetLastStats().Lights == MaxVisibleLights);
+				CHECK(setup.GetRenderer().GetLastStats().Lights == DefaultMaxShadedLights);
 				CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 5);
+				CHECK(setup.GetRenderer().GetRenderStats().MaxShadedLights == DefaultMaxShadedLights);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): a raised cap shades every light up to it, through the cluster
+		// masks sized for it, and dropping lights beyond it (the warning's condition) only past it.
+		TEST_CASE("SceneRenderer: a raised cap shades every light up to it" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				RendererSetup setup(gpu, assets, 32, 32);
+				RenderSnapshot snapshot = MakeCubeSnapshot(32, 32, 0.0f);
+				for (uint32_t index = 0; index < 1000; ++index)
+				{
+					const float angle = static_cast<float>(index) * 0.618034f * 6.2831853f;
+					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point,
+						.Color = glm::vec3(1.0f, 0.8f, 0.6f),
+						.Intensity = 0.002f,
+						.Position = glm::vec3(std::cos(angle) * 0.8f, std::sin(angle) * 0.8f, 1.5f),
+						.Range = 4.0f,
+						.Entity = UUID(index + 1) });
+				}
+				for (const uint32_t cap : { 1024U, 2048U })
+				{
+					CAPTURE(cap);
+					snapshot.Quality.MaxShadedLights = cap;
+					static_cast<void>(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot));
+					CHECK(setup.GetRenderer().GetLastStats().Lights == 1000);
+					CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 0);
+					CHECK(setup.GetRenderer().GetRenderStats().MaxShadedLights == cap);
+				}
+				const Image clustered = RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot);
+				snapshot.Quality.ClusteredLights = false;
+				CHECK(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot).Pixels == clustered.Pixels);
+				snapshot.Quality.ClusteredLights = true;
+				snapshot.Quality.MaxShadedLights = 512;
+				Test::ExpectLog warning(LogLevel::Warn, "RENDER_LIGHT_LIMIT_EXCEEDED");
+				static_cast<void>(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot));
+				CHECK(setup.GetRenderer().GetLastStats().Lights == 512);
+				CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 488);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M29 (decision 1): below the old cap a larger one changes nothing: the masks hold more words, which no light sets, and
+		// the forward loop reads only the words its list fills.
+		TEST_CASE("SceneRenderer: a cap above 256 renders a scene of at most 256 lights byte for byte as the default"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				RendererSetup setup(gpu, assets, 64, 64);
+				RenderSnapshot snapshot = MakeCubeSnapshot(64, 64, 0.2f);
+				for (uint32_t index = 0; index < DefaultMaxShadedLights - 1; ++index)
+				{
+					const float angle = static_cast<float>(index) * 0.618034f * 6.2831853f;
+					snapshot.Lights.push_back(LightData{ .Type = index % 3 == 0 ? RenderLightType::Spot : RenderLightType::Point,
+						.Color = glm::vec3(0.5f + 0.5f * std::cos(angle), 0.6f, 0.5f + 0.5f * std::sin(angle)),
+						.Intensity = 0.05f,
+						.Position = glm::vec3(std::cos(angle) * 1.5f, std::sin(angle) * 1.5f, 1.0f + 0.002f * static_cast<float>(index)),
+						.Direction = glm::normalize(glm::vec3(-std::cos(angle), -std::sin(angle), -1.0f)),
+						.Range = 1.5f + 0.01f * static_cast<float>(index % 50),
+						.Entity = UUID(index + 1) });
+				}
+				const Image base = RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot);
+				REQUIRE(setup.GetRenderer().GetLastStats().Lights == DefaultMaxShadedLights);
+				for (const uint32_t cap : { 512U, 1024U, 2048U })
+				{
+					CAPTURE(cap);
+					snapshot.Quality.MaxShadedLights = cap;
+					CHECK(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot).Pixels == base.Pixels);
+				}
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}
@@ -1701,6 +1778,46 @@ namespace Engine {
 			// The dropped spot still lights its receiver (x = 1.5 at z = -5 is pixel 32 + 1.5 / (5 tan 30) * 32 = 48.6).
 			CHECK(Test::SceneRendererIntegrationFixture::Channel(second, 49, 32) > 20);
 			CHECK(second.Pixels == first.Pixels);
+		}
+
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): sixteen shadowed point lights (the four most important at
+		// full face size, twelve at half) and sixteen shadowed spot lights (the atlas's sixteen tiles) each cast their shadow of
+		// one blocker: turning any one light's CastShadows off changes the image, whichever tier, layer or tile it held.
+		TEST_CASE("SceneRenderer: each of sixteen shadowed point lights and sixteen shadowed spot lights casts its shadow")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			const glm::vec3 blocker(0.0f, 0.0f, -3.5f);
+			for (const RenderLightType type : { RenderLightType::Point, RenderLightType::Spot })
+			{
+				CAPTURE(type == RenderLightType::Point);
+				RenderSnapshot snapshot = MakeShadowScene(fixture, blocker, 0.4f);
+				for (uint32_t index = 0; index < 16; ++index)
+				{
+					const glm::vec3 position(-1.2f + 0.8f * static_cast<float>(index % 4), -1.2f + 0.8f * static_cast<float>(index / 4), -2.0f);
+					LightData light = MakeShadowingSpot(position, 0.3f - 0.005f * static_cast<float>(index), UUID(100 + index));
+					light.Direction = glm::normalize(blocker - position);
+					if (type == RenderLightType::Point)
+					{
+						light.Type = RenderLightType::Point;
+						light.Intensity = 0.15f - 0.002f * static_cast<float>(index);
+					}
+					snapshot.Lights.push_back(light);
+				}
+				const Image all = fixture.Render(snapshot);
+				const RenderStats stats = fixture.Renderer().GetRenderStats();
+				CHECK((type == RenderLightType::Point ? stats.ShadowedPointLights : stats.ShadowedSpotLights) == 16);
+				CHECK((type == RenderLightType::Point ? stats.DroppedPointShadows : stats.DroppedSpotShadows) == 0);
+				for (uint32_t index = 0; index < 16; ++index)
+				{
+					CAPTURE(index);
+					RenderSnapshot unshadowed = snapshot;
+					unshadowed.Lights[index].CastShadows = false;
+					CHECK(fixture.Render(unshadowed).Pixels != all.Pixels);
+				}
+				CHECK(fixture.Render(snapshot).Pixels == all.Pixels);
+			}
 		}
 
 		TEST_CASE("SceneRenderer: steady-state shadowed renders create no GPU objects")

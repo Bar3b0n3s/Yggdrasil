@@ -1,7 +1,7 @@
 // The forward passes' light loop (M23, R-CLC; Docs/Decisions/0034-m23-contract.md decisions 4 and 5): the direct light of
 // the view's lights at one pixel. Passes/Scene.slang includes it after its resource declarations and reads it through
-// ShadeDirectLights; it uses the view's Lights, Shadows, ShadowMaps, ShadowAtlas, PointShadowMaps, ShadowCompare, Clusters
-// and LightClusterMasks. Each light's shadow visibility is Common/Shadows.slang's GetLightVisibility (stream B's, with the
+// ShadeDirectLights; it uses the view's Lights, Shadows, ShadowMaps, ShadowAtlas, PointShadowMaps, PointShadowMapsHalf (M29),
+// ShadowCompare, Clusters and LightClusterMasks. Each light's shadow visibility is Common/Shadows.slang's GetLightVisibility (stream B's, with the
 // point-shadow branch; decision 4).
 //
 // The loop visits the set bits of the pixel's cluster's masks in ascending order, which is the light list's order
@@ -79,8 +79,8 @@ float3 ShadeDirectLights(float3 worldPosition, uint2 pixel, float viewDepth, boo
 			if (any(direct != float3(0.0)))
 			{
 				const float visibility = receiveShadows
-					? GetLightVisibility(ShadowMaps, ShadowAtlas, PointShadowMaps, ShadowCompare, Shadows, light, index, worldPosition, shadowNormal,
-						viewDepth, pixel)
+					? GetLightVisibility(ShadowMaps, ShadowAtlas, PointShadowMaps, PointShadowMapsHalf, ShadowCompare, Shadows, light, index,
+						worldPosition, shadowNormal, viewDepth, pixel)
 					: 1.0;
 				radiance += visibility * direct;
 			}
