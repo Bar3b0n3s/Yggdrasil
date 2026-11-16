@@ -873,7 +873,15 @@ namespace Engine {
 
 			if (kind == FieldType::Struct)
 			{
-				ReadStructJson(*type.GetStruct(), reader, object, walk);
+				const StructInfo& structType = *type.GetStruct();
+				if (!walk.MergePatch && &field == &structType.GetPatchField())
+				{
+					WalkContext patch = walk;
+					patch.MergePatch = true;
+					ReadStructJson(structType, reader, object, patch);
+					return;
+				}
+				ReadStructJson(structType, reader, object, walk);
 				return;
 			}
 
@@ -929,7 +937,8 @@ namespace Engine {
 			}
 
 			// Validation-only reads of structs with C++ storage go through a scratch object so that the type-level validators,
-			// which need one, still run.
+			// which need one, still run (a merge patch's validators do not, but its Variant resolvers read the preceding
+			// fields from the scratch all the same).
 			ObjectPtr scratch(nullptr, [](void* /*object*/) {});
 			void* target = object;
 			if (target == nullptr && type.GetType().HasOps())
@@ -976,7 +985,8 @@ namespace Engine {
 				validation.PopKey();
 			}
 
-			if (target != nullptr && validation.GetErrorCount() == errorsBefore)
+			// A merge patch's structs are partial: their rules hold for the patched object, never for the patch over defaults.
+			if (target != nullptr && !walk.MergePatch && validation.GetErrorCount() == errorsBefore)
 				Detail::ReflectionAccess::RunValidators(type, target, validation);
 		}
 

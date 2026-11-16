@@ -68,6 +68,9 @@ namespace Engine {
 			const IFieldSchemaSource* Schemas = nullptr;
 			VariantPolicy Policy = VariantPolicy::Write;
 			uint32_t VariantDepth = 0; // resolved Variant values around the value being walked
+			// The value being walked is (inside) a merge patch read through a StructInfo::GetPatchField: its structs are
+			// partial, so their type-level validators do not run (the write that applies the patch runs them).
+			bool MergePatch = false;
 		};
 
 		// --- JSON and type helpers

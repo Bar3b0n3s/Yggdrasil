@@ -1033,7 +1033,7 @@ namespace Engine {
 			const ResolveContext known{ .Registry = setup.Types.get(), .Owner = nullptr, .OwnerType = nullptr, .OwnerJson = nullptr, .Key = "Transform", .Schemas = nullptr };
 			const Result<const FieldInfo*> field = ResolveComponentValue(known);
 			REQUIRE(field.has_value());
-			CHECK(*field == &setup.Types->FindComponent("Transform")->GetSelfField());
+			CHECK(*field == &setup.Types->FindComponent("Transform")->GetPatchField());
 
 			ResolveContext unknown = known;
 			unknown.Key = "Trasnform";

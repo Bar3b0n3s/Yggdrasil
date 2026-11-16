@@ -399,6 +399,29 @@ return Script.Define("Brick", Brick)
 			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByPath("/Bad").IsValid());
 		}
 
+		// M35's builder's report, for prefab.instantiate's components: they patch the instance root's components, which come
+		// from the prefab, so a rule between a component's fields holds for the merged value, never for the patch over the
+		// component's defaults (UiRect's default AnchorMin, 0.5, is above the AnchorMax written here). A value the merged
+		// component breaks is still refused, and nothing is instantiated.
+		TEST_CASE("PrefabMethods: instantiate checks a partial component value merged into the prefab root's component")
+		{
+			Test::AutomationFixture setup("PrefabInstantiatePartialWrite");
+			CallOrFail(setup, "entity.create",
+				ParsePrefabMethodJson(R"({"name": "Panel", "components": {"UiRect": {"AnchorMin": [0.25, 0.25], "AnchorMax": [0.75, 0.75]}}})"));
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Panel" }, { "path", "Assets/Prefabs/Panel.prefab" } });
+			CallOrFail(setup, "prefab.instantiate",
+				ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/Panel.prefab", "name": "Lowered", "components": {"UiRect": {"AnchorMax": [0.375, 0.375]}}})"));
+			Json lowered = CallOrFail(setup, "entity.get", Json{ { "entity", "/Lowered" } });
+			CHECK(lowered["entity"]["components"]["UiRect"]["AnchorMin"] == ParsePrefabMethodJson("[0.25, 0.25]"));
+			CHECK(lowered["entity"]["components"]["UiRect"]["AnchorMax"] == ParsePrefabMethodJson("[0.375, 0.375]"));
+
+			Json crossed = setup.Request("prefab.instantiate",
+				ParsePrefabMethodJson(R"({"prefab": "Assets/Prefabs/Panel.prefab", "name": "Crossed", "components": {"UiRect": {"AnchorMax": [0.125, 0.125]}}})"));
+			REQUIRE_MESSAGE(crossed.contains("error"), crossed.dump());
+			CHECK(crossed["error"]["data"]["issues"][0]["pointer"] == Json("/components/UiRect/AnchorMin"));
+			CHECK_FALSE(setup.GetEditor().GetScene().FindEntityByPath("/Crossed").IsValid());
+		}
+
 		// Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal (ADR 0028
 		// decision 16), whose test this case rewrites. Replacing a member with an instance of a new prefab destroys the member
 		// and records its RemoveEntity on the outer instance root, and the new instance's root keeps the member's id as a user

@@ -86,6 +86,15 @@ namespace Engine {
 		// PrefabOverride's Value resolves to for an AddComponent override (§5.4) and what JsonSchema uses for $defs.
 		[[nodiscard]] const FieldInfo& GetSelfField() const;
 
+		// A schema-only field describing an RFC 7386 merge patch of an object of this struct (§5.4; the same name, type and
+		// description as GetSelfField): what an automation component value resolves to (ResolveComponentValue, the method
+		// registry's convention 10), which entity.update merges into the entity's current component. A value read through it
+		// is checked member by member, every member optional, as through GetSelfField, but the type-level validators do not
+		// run on it or on any struct inside it: they hold between the fields of the patched object, which the patch alone
+		// does not know (UiRect's AnchorMax below the default AnchorMin is valid for an entity whose AnchorMin is lower). The
+		// write that applies the patch (ApplyMergePatch on the current object, FromJson on a new default one) runs them.
+		[[nodiscard]] const FieldInfo& GetPatchField() const;
+
 		// A new object of this struct with every field at its default member initializer.
 		[[nodiscard]] ObjectPtr CreateDefault() const;
 
@@ -149,6 +158,7 @@ namespace Engine {
 		std::vector<Scope<StructValidator>> m_Validators;
 		std::vector<Scope<StructGenerator>> m_Generators;
 		Scope<FieldInfo> m_SelfField;
+		Scope<FieldInfo> m_PatchField;
 	private:
 		friend struct Detail::ReflectionAccess;
 	};

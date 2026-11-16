@@ -24,6 +24,26 @@ class BatchTests(AutomationTestCase):
         self.assertEqual(client.call("edit.history")["entries"], [])
         self.assertGreaterEqual(client.call("session.info")["_meta"]["revision"], revision)
 
+    def test_update_op_checks_a_partial_component_value_merged_into_the_current_one(self) -> None:
+        # M35's builder's report, through edit.batch's entity.update op: the component value merges into the entity's
+        # current component before its rules are checked, and a batch whose merged value breaks them rolls back whole.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Panel", "components": {
+            "UiRect": {"AnchorMin": [0.25, 0.25], "AnchorMax": [0.75, 0.75]}}})
+        client.call("edit.batch", {"label": "Lower", "ops": [{"method": "entity.update", "params": {
+            "entity": "/Panel", "components": {"UiRect": {"AnchorMax": [0.375, 0.375]}}}}]})
+        rect = client.call("entity.get", {"entity": "/Panel"})["entity"]["components"]["UiRect"]
+        self.assertEqual(rect["AnchorMin"], [0.25, 0.25])
+        self.assertEqual(rect["AnchorMax"], [0.375, 0.375])
+        with self.assertRaises(engine_client.EngineError) as crossed:
+            client.call("edit.batch", {"label": "Cross", "ops": [{"method": "entity.update", "params": {
+                "entity": "/Panel", "components": {"UiRect": {"AnchorMax": [0.125, 0.125]}}}}]})
+        self.assertEqual(crossed.exception.data["failedOp"], 0)
+        self.assertEqual([issue["pointer"] for issue in crossed.exception.issues],
+                         ["/ops/0/params/components/UiRect/AnchorMin"], crossed.exception.data)
+        rect = client.call("entity.get", {"entity": "/Panel"})["entity"]["components"]["UiRect"]
+        self.assertEqual(rect["AnchorMax"], [0.375, 0.375])
+
     def test_ref_substitution(self) -> None:
         client, _ = self.open_editor_with_scene()
         result = client.call("edit.batch", {"label": "Scaffold", "ops": [

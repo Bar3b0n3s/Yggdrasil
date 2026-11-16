@@ -165,6 +165,45 @@ namespace Engine {
 			CHECK(self.GetType().GetStruct() == type);
 		}
 
+		// The method registry's component values (convention 10) are merge patches: read through the patch field, a value is
+		// checked member by member, while the type's rules between fields wait for the patched object, which ApplyMergePatch
+		// checks (M35's builder's report: UiRect's AnchorMax could not be lowered alone below the default AnchorMin).
+		TEST_CASE("StructInfo: the patch field checks each member and leaves the rules between fields to the patched object")
+		{
+			const Scope<TypeRegistry> registry = CreateStructTestRegistry();
+			const ComponentInfo* type = registry->FindComponent<Test::TestComponent>();
+			REQUIRE(type != nullptr);
+			const FieldInfo& patch = type->GetPatchField();
+			CHECK(patch.GetName() == "TestComponent");
+			CHECK(patch.GetKind() == FieldType::Struct);
+			CHECK_FALSE(patch.IsStored());
+			CHECK(patch.GetType().GetStruct() == type);
+			CHECK(&patch != &type->GetSelfField());
+
+			// A sphere without mass breaks the type's rule as a whole value, never as a patch, which may patch a box.
+			const Json sphere = ParseStructJson(R"({"Shape": "Sphere", "Mass": 0})");
+			ValidationContext whole;
+			type->GetSelfField().ValidateJson(JsonReader(sphere), ResolveContext{}, whole);
+			CHECK(whole.GetErrorCount() == 1);
+			ValidationContext partial;
+			patch.ValidateJson(JsonReader(sphere), ResolveContext{}, partial);
+			CHECK(partial.GetErrorCount() == 0);
+			// Each member is still checked, at its pointer.
+			ValidationContext negative;
+			patch.ValidateJson(JsonReader(ParseStructJson(R"({"Mass": -1})")), ResolveContext{}, negative);
+			REQUIRE(negative.GetErrorCount() == 1);
+			CHECK(negative.GetIssues()[0].JsonPointer == "/TestComponent/Mass");
+
+			// The rule holds for the patched object: no mass is valid for a box and refused for a sphere, which keeps its mass.
+			const Json massless = ParseStructJson(R"({"Mass": 0})");
+			const ObjectPtr box = type->CreateDefault();
+			CHECK(type->ApplyMergePatch(box.get(), JsonReader(massless), ReadContext{}).has_value());
+			const ObjectPtr ball = type->CreateDefault();
+			static_cast<Test::TestComponent*>(ball.get())->Shape = Test::TestShape::Sphere;
+			CHECK_FALSE(type->ApplyMergePatch(ball.get(), JsonReader(massless), ReadContext{}).has_value());
+			CHECK(static_cast<const Test::TestComponent*>(ball.get())->Mass == 1.0f);
+		}
+
 		TEST_CASE("StructInfo: FromJson locates problems below the reader's pointer, a single one exactly")
 		{
 			const Scope<TypeRegistry> registry = CreateStructTestRegistry();

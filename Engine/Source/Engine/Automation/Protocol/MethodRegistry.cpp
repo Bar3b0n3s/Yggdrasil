@@ -683,7 +683,8 @@ namespace Engine {
 					.WithHint(hint)
 					.WithIssue(ErrorIssue{ .JsonPointer = {}, .Message = std::format("unknown component '{}'", context.Key), .Hint = hint, .Suggestions = std::move(suggestions) }));
 		}
-		return &component->GetSelfField();
+		// A merge patch of the component (convention 10): its rules between fields hold for the handler's merged value.
+		return &component->GetPatchField();
 	}
 
 	Error MakeNativeComponentWriteError(std::string_view name)

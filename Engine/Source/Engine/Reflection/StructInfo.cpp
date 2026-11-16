@@ -88,6 +88,12 @@ namespace Engine {
 		return *m_SelfField;
 	}
 
+	const FieldInfo& StructInfo::GetPatchField() const
+	{
+		ENGINE_CORE_ASSERT(m_PatchField != nullptr, "Struct '{}' has no TypeInfo yet", m_Name);
+		return *m_PatchField;
+	}
+
 	ObjectPtr StructInfo::CreateDefault() const
 	{
 		const TypeOps& ops = GetType().GetOps();
@@ -210,6 +216,12 @@ namespace Engine {
 		self.Description = m_Description;
 		self.Type = &type;
 		m_SelfField = CreateScope<FieldInfo>(std::move(self));
+
+		FieldInfo::Specification patch;
+		patch.Name = m_Name;
+		patch.Description = m_Description;
+		patch.Type = &type;
+		m_PatchField = CreateScope<FieldInfo>(std::move(patch));
 	}
 
 }

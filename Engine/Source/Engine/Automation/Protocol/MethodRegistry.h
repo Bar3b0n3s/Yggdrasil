@@ -60,11 +60,14 @@
 //      64-bit sequence numbers of their logs, so they never saturate, and also accept "end" (ObserveMethods.h).
 //  10. Component values. std::map<std::string, VariantValue> registered with VariantField and ResolveComponentValue: each
 //      key is a component registry name and its value that component's (partial) JSON, so validation, enum spelling and
-//      "unknown field" hints work inside it. A value may also set the component's writable virtual fields
-//      (Transform.EulerAngles, WorldPosition), each checked against its own field; read-only virtual fields are errors.
-//      The handler applies virtual fields through their setters (ComponentAccess::SetFieldValue). Full schemas reference
-//      the component $defs, which list the writable virtual fields too; compact (MCP) schemas show a free-form object
-//      (§13.8 "Compact tool schemas").
+//      "unknown field" hints work inside it. The value is a merge patch (StructInfo::GetPatchField): each member is
+//      checked on its own, while the component's rules between fields (its type-level validators: UiRect's AnchorMin not
+//      above AnchorMax) are checked by the handler's write on the value it produces, the entity's current component with
+//      the patch merged in or a new component's defaults with it, located below the value's pointer. A value may also set
+//      the component's writable virtual fields (Transform.EulerAngles, WorldPosition), each checked against its own field;
+//      read-only virtual fields are errors. The handler applies virtual fields through their setters (ComponentAccess::
+//      SetFieldValue). Full schemas reference the component $defs, which list the writable virtual fields too; compact
+//      (MCP) schemas show a free-form object (§13.8 "Compact tool schemas").
 //  11. Polymorphic members ("fix": true | [ids], "components": [...] | "all") are free-form VariantValue members that the
 //      handler validates, reporting InvalidArgument located at the member's pointer.
 //  12. Results. Canonical ids (16 hex digits) plus readable names and paths (§13.4); every edit-scene mutation reports
@@ -184,10 +187,11 @@ namespace Engine {
 	};
 
 	// The VariantSchemaResolver of params members that map component registry names to component values (convention 10):
-	// resolves context.Key through context.Registry->FindComponent to that component's self field (StructInfo::
-	// GetSelfField), so the value is read as the component's JSON with every member optional. Errors: NotFound with "did you
-	// mean" suggestions for an unknown component name; MakeNativeComponentWriteError for a native component's name;
-	// InvalidArgument for an empty key or a missing registry.
+	// resolves context.Key through context.Registry->FindComponent to that component's patch field (StructInfo::
+	// GetPatchField), so the value is read as the component's JSON with every member optional and checked member by member,
+	// its rules between fields left to the write that merges it. Errors: NotFound with "did you mean" suggestions for an
+	// unknown component name; MakeNativeComponentWriteError for a native component's name; InvalidArgument for an empty key
+	// or a missing registry.
 	[[nodiscard]] Result<const FieldInfo*> ResolveComponentValue(const ResolveContext& context);
 
 	// The refusal of a game's native component ("Native.<Name>", IsNativeComponentName) where automation writes registry

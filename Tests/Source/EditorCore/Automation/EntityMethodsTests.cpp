@@ -10,7 +10,9 @@
 #include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -30,6 +32,27 @@ namespace Engine {
 	static Json ScriptSlots(Json slot)
 	{
 		return Json{ { "Scripts", Json::array({ std::move(slot) }) } };
+	}
+
+	// The pointers an error response locates: each issue's, or its location's when it has no issues; empty for a success.
+	static std::vector<std::string> ReadErrorPointers(const Json& response)
+	{
+		std::vector<std::string> pointers;
+		const auto error = response.find("error");
+		if (error == response.end())
+			return pointers;
+		const auto data = error->find("data");
+		if (data == error->end())
+			return pointers;
+		if (const auto issues = data->find("issues"); issues != data->end() && issues->is_array())
+		{
+			for (const Json& issue : *issues)
+				pointers.push_back(JsonReader(issue).ReadMember<std::string>("pointer").value_or(std::string()));
+			return pointers;
+		}
+		if (const auto location = data->find("location"); location != data->end())
+			pointers.push_back(JsonReader(*location).ReadMember<std::string>("pointer").value_or(std::string()));
+		return pointers;
 	}
 
 	TEST_SUITE("EditorCore")
@@ -213,6 +236,67 @@ return Script.Define("References", References)
 			CHECK((*removed)["entity"]["name"] == Json("Orb"));
 			CHECK_FALSE((*removed)["entity"]["components"].contains("SphereCollider"));
 			CHECK(setup.Call("entity.update", ParseEntityMethodJson(R"({"entity":"/Orb","removeComponents":["Transform"]})")).error().GetCode() == ErrorCode::InvalidState);
+		}
+
+		// M35's builder's report: a component value in entity.update is a merge patch of the entity's current component, so a
+		// rule between its fields (UiRect's AnchorMin may not exceed AnchorMax) holds for the merged value, never for the patch
+		// over the component's defaults. Before the fix, lowering AnchorMax alone below the default AnchorMin (0.5) was refused
+		// although the entity's own AnchorMin (0.25) allows it. A write that the merged value breaks is still refused, located
+		// at the rule's field below the component, and a component the entity lacks is still added from its defaults.
+		TEST_CASE("EntityMethods: entity.update checks a partial component value merged into the entity's current component")
+		{
+			Test::AutomationFixture setup("EntityPartialWrite");
+			REQUIRE(setup.Call("entity.create",
+							 ParseEntityMethodJson(R"({"name":"Panel","components":{"UiRect":{"AnchorMin":[0.25,0.25],"AnchorMax":[0.75,0.75]}}})"))
+					.has_value());
+			Result<Json> lowered = setup.Call("entity.update", ParseEntityMethodJson(R"({"entity":"/Panel","components":{"UiRect":{"AnchorMax":[0.375,0.375]}}})"));
+			REQUIRE_MESSAGE(lowered.has_value(), lowered.error().ToString());
+			CHECK((*lowered)["entity"]["components"]["UiRect"]["AnchorMin"] == ParseEntityMethodJson("[0.25,0.25]"));
+			CHECK((*lowered)["entity"]["components"]["UiRect"]["AnchorMax"] == ParseEntityMethodJson("[0.375,0.375]"));
+			const uint64_t undoCount = setup.GetEditor().GetHistory().GetUndoCount();
+
+			Json crossed = setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Panel","components":{"UiRect":{"AnchorMax":[0.125,0.125]}}})"));
+			CHECK(ReadErrorPointers(crossed) == std::vector<std::string>{ "/components/UiRect/AnchorMin" });
+			CHECK(setup.GetEditor().GetHistory().GetUndoCount() == undoCount);
+			Result<Json> unchanged = setup.Call("entity.get", Json{ { "entity", "/Panel" } });
+			REQUIRE(unchanged.has_value());
+			CHECK((*unchanged)["entity"]["components"]["UiRect"]["AnchorMax"] == ParseEntityMethodJson("[0.375,0.375]"));
+
+			// An added component starts from its defaults, so the same value is refused there: entity.update's addition and
+			// entity.create's, which leaves no entity.
+			REQUIRE(setup.Call("entity.create", ParseEntityMethodJson(R"({"name":"Badge"})")).has_value());
+			Json addedByUpdate = setup.Request("entity.update", ParseEntityMethodJson(R"({"entity":"/Badge","components":{"UiRect":{"AnchorMax":[0.375,0.375]}}})"));
+			CHECK(ReadErrorPointers(addedByUpdate) == std::vector<std::string>{ "/components/UiRect/AnchorMin" });
+			const size_t entityCount = setup.GetEditor().GetScene().GetEntityCount();
+			Json addedByCreate = setup.Request("entity.create", ParseEntityMethodJson(R"({"name":"Label","components":{"UiRect":{"AnchorMax":[0.375,0.375]}}})"));
+			CHECK(ReadErrorPointers(addedByCreate) == std::vector<std::string>{ "/components/UiRect/AnchorMin" });
+			CHECK(setup.GetEditor().GetScene().GetEntityCount() == entityCount);
+		}
+
+		// The same merge in edit.batch's entity.update op, whose params are prepared like a request's.
+		TEST_CASE("EntityMethods: edit.batch's entity.update op checks a partial component value merged into the entity's current component")
+		{
+			Test::AutomationFixture setup("EntityPartialWriteBatch");
+			REQUIRE(setup.Call("entity.create",
+							 ParseEntityMethodJson(R"({"name":"Panel","components":{"UiRect":{"AnchorMin":[0.25,0.25],"AnchorMax":[0.75,0.75]}}})"))
+					.has_value());
+			Result<Json> batch = setup.Call("edit.batch", ParseEntityMethodJson(R"({"label":"Lower","ops":[
+				{"method":"entity.update","params":{"entity":"/Panel","components":{"UiRect":{"AnchorMax":[0.375,0.375]}}}}]})"));
+			REQUIRE_MESSAGE(batch.has_value(), batch.error().ToString());
+			Result<Json> fetched = setup.Call("entity.get", Json{ { "entity", "/Panel" } });
+			REQUIRE(fetched.has_value());
+			CHECK((*fetched)["entity"]["components"]["UiRect"]["AnchorMin"] == ParseEntityMethodJson("[0.25,0.25]"));
+			CHECK((*fetched)["entity"]["components"]["UiRect"]["AnchorMax"] == ParseEntityMethodJson("[0.375,0.375]"));
+
+			// A batch whose op the merged value breaks rolls back whole.
+			Json crossed = setup.Request("edit.batch", ParseEntityMethodJson(R"({"label":"Cross","ops":[
+				{"method":"entity.update","params":{"entity":"/Panel","components":{"UiRect":{"AnchorMax":[0.125,0.125]}}}}]})"));
+			REQUIRE_MESSAGE(crossed.contains("error"), crossed.dump());
+			CHECK(ReadErrorPointers(crossed) == std::vector<std::string>{ "/ops/0/params/components/UiRect/AnchorMin" });
+			CHECK(crossed["error"]["data"]["failedOp"] == Json(0));
+			fetched = setup.Call("entity.get", Json{ { "entity", "/Panel" } });
+			REQUIRE(fetched.has_value());
+			CHECK((*fetched)["entity"]["components"]["UiRect"]["AnchorMax"] == ParseEntityMethodJson("[0.375,0.375]"));
 		}
 
 		TEST_CASE("EntityMethods: virtual component fields are set through their setters in entity.create and entity.update")

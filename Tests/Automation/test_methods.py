@@ -56,6 +56,24 @@ class MethodTests(AutomationTestCase):
             client.call("entity.update", {"entity": ball["id"], "components": {"RigidBody": {"Mas": 2}}})
         self.assertIn("Mass", raised.exception.issues[0].get("hint", ""))
 
+    def test_entity_update_checks_a_partial_component_value_merged_into_the_current_one(self) -> None:
+        # M35's builder's report: a component value is a merge patch of the entity's current component, so one anchor of
+        # a UiRect is lowered alone below the default AnchorMin (0.5) when the entity's own AnchorMin (0.25) allows it,
+        # while a value that the merged component breaks is still refused at the rule's field.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Panel", "components": {
+            "UiRect": {"AnchorMin": [0.25, 0.25], "AnchorMax": [0.75, 0.75]}}})
+        updated = client.call("entity.update", {"entity": "/Panel", "components": {
+            "UiRect": {"AnchorMax": [0.375, 0.375]}}})["entity"]
+        self.assertEqual(updated["components"]["UiRect"]["AnchorMin"], [0.25, 0.25])
+        self.assertEqual(updated["components"]["UiRect"]["AnchorMax"], [0.375, 0.375])
+        with self.assertRaises(engine_client.EngineError) as crossed:
+            client.call("entity.update", {"entity": "/Panel", "components": {"UiRect": {"AnchorMax": [0.125, 0.125]}}})
+        self.assertEqual([issue["pointer"] for issue in crossed.exception.issues], ["/components/UiRect/AnchorMin"],
+                         crossed.exception.data)
+        self.assertEqual(client.call("entity.get", {"entity": "/Panel"})["entity"]["components"]["UiRect"]["AnchorMax"],
+                         [0.375, 0.375])
+
     def test_entity_create_sets_virtual_transform_fields(self) -> None:
         client, _ = self.open_editor_with_scene()
         # The batch of Architecture §13.10: a light aimed with Transform.EulerAngles, a virtual field.
