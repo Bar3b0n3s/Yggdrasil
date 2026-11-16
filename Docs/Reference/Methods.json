@@ -23092,6 +23092,10 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"loadError": {
+						"description": "savedata.set with merge: why the play store's file could not be read (it was moved aside as Store.corrupt-<n>.json and the values were merged into an empty store); empty when it was read, and for a write that replaces the store.",
+						"type": "string"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -23244,6 +23248,10 @@
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"loadError": {
+						"description": "savedata.set with merge: why the play store's file could not be read (it was moved aside as Store.corrupt-<n>.json and the values were merged into an empty store); empty when it was read, and for a write that replaces the store.",
+						"type": "string"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",

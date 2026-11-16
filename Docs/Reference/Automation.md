@@ -2482,6 +2482,7 @@ Param: none.
 |---|---|---|
 | `count` | `UInt32` | The number of keys. |
 | `bytes` | `UInt32` | The store's compact JSON size in bytes. |
+| `loadError` | `String` | savedata.set with merge: why the play store's file could not be read (it was moved aside as Store.corrupt-\<n>.json and the values were merged into an empty store); empty when it was read, and for a write that replaces the store. |
 
 Example: Start the next play without save data.
 
@@ -2536,6 +2537,7 @@ Seeds editor play's save data: replaces the play store with values (or merges th
 |---|---|---|
 | `count` | `UInt32` | The number of keys. |
 | `bytes` | `UInt32` | The store's compact JSON size in bytes. |
+| `loadError` | `String` | savedata.set with merge: why the play store's file could not be read (it was moved aside as Store.corrupt-\<n>.json and the values were merged into an empty store); empty when it was read, and for a write that replaces the store. |
 
 Example: Unlock the second realm for the next play.
 

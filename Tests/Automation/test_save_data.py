@@ -42,7 +42,7 @@ class SaveDataTests(AutomationTestCase):
         self.assertEqual(written["count"], 2)
         self.assertEqual(client.call("savedata.get")["values"], {"Options": {"Volume": 0.5}, "Realm": 2})
         merged = client.call("savedata.set", {"values": {"Realm": None, "Name": "Ash"}, "merge": True})
-        self.assertEqual(merged["count"], 2)
+        self.assertEqual((merged["count"], merged["loadError"]), (2, ""))
         self.assertEqual(client.call("savedata.get")["values"], {"Name": "Ash", "Options": {"Volume": 0.5}})
         stored = json.loads((root / "Library" / "SaveData" / "Store.json").read_text(encoding="utf-8"))
         self.assertEqual((stored["Format"], stored["Version"]), ("SaveData", 1))
@@ -171,6 +171,11 @@ class SaveDataTests(AutomationTestCase):
         load_error = client.call("script.eval", {"context": "play", "code": "return SaveData.GetLoadError()"})
         self.assertIsNone(load_error.get("value"))
         client.call("play.stop")
+        # A merge reads the store first: it moves an unreadable one aside and says why in its own result.
+        (directory / "Store.json").write_bytes(b'{"Format": "SaveData"')
+        merged = client.call("savedata.set", {"values": {"Realm": 1}, "merge": True})
+        self.assertIn("Store.corrupt-2.json", merged["loadError"])
+        self.assertEqual(client.call("savedata.get")["values"], {"Realm": 1})
 
 
 if __name__ == "__main__":

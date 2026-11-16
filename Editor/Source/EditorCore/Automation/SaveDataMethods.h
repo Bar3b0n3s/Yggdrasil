@@ -52,6 +52,7 @@ namespace Engine {
 	{
 		uint32_t Count = 0;
 		uint32_t Bytes = 0;
+		std::string LoadError{}; // savedata.set with merge: why its read moved the play store's file aside (empty when it could read it)
 	};
 
 	namespace Automation {

@@ -64,14 +64,27 @@ namespace Engine {
 			if (!params.Values.Get().is_object())
 				return MakeError(ErrorCode::InvalidArgument, "values must be an object of save-data values by key");
 			SaveDataStore store;
+			// A merge reads the play store first, and that read moves a store file it cannot read aside, so no later read finds
+			// it again: why travels with this result, or with the error of a value the merge refuses.
+			std::string loadError;
 			if (params.Merge)
 			{
 				ENGINE_TRY_ASSIGN(const SaveDataFileLoad load, context.GetEditor().GetPlay().ReadPlaySaveData());
 				ENGINE_TRY(store.Replace(load.Values.Get()));
+				loadError = load.Error.value_or(std::string());
 			}
 			for (const auto& [key, value] : params.Values.Get().items())
-				ENGINE_TRY(WithContext(store.Set(key, value), std::format("at /values/{}", key)));
-			return Utils::WritePlayStore(context, store);
+			{
+				if (Status set = WithContext(store.Set(key, value), std::format("at /values/{}", key)); !set)
+				{
+					if (loadError.empty())
+						return std::unexpected(std::move(set).error());
+					return std::unexpected(std::move(set).error().WithContext(std::format("the play store's file was read first: {}", loadError)));
+				}
+			}
+			ENGINE_TRY_ASSIGN(SaveDataWriteResult result, Utils::WritePlayStore(context, store));
+			result.LoadError = std::move(loadError);
+			return result;
 		}
 
 		Result<SaveDataWriteResult> SaveDataClear(EditorMethodContext& context, const NoParams& /*params*/)
@@ -103,7 +116,10 @@ namespace Engine {
 			.Field("merge", &SaveDataSetParams::Merge, "Merge values into the play store instead of replacing it.");
 		registry.Struct<SaveDataWriteResult>("SaveDataWriteResult", "The play store after a write.")
 			.Field("count", &SaveDataWriteResult::Count, "The number of keys.")
-			.Field("bytes", &SaveDataWriteResult::Bytes, "The store's compact JSON size in bytes.");
+			.Field("bytes", &SaveDataWriteResult::Bytes, "The store's compact JSON size in bytes.")
+			.Field("loadError", &SaveDataWriteResult::LoadError,
+				"savedata.set with merge: why the play store's file could not be read (it was moved aside as Store.corrupt-<n>.json and the "
+				"values were merged into an empty store); empty when it was read, and for a write that replaces the store.");
 	}
 
 	void RegisterSaveDataMethods(MethodRegistry& methods)
