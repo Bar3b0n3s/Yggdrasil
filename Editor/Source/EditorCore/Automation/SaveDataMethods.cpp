@@ -6,6 +6,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/SaveDataStore.h"
 
@@ -90,13 +91,15 @@ namespace Engine {
 		registry.Struct<SaveDataGetResult>("SaveDataGetResult", "A save-data store's contents.")
 			.Field("values", &SaveDataGetResult::Values, "The values by key, keys sorted, numbers as SaveData.Get returns them.")
 			.Field("count", &SaveDataGetResult::Count, "The number of keys.")
-			.Field("bytes", &SaveDataGetResult::Bytes, "The store's compact JSON size in bytes, at most 1,048,576.")
+			.Field("bytes", &SaveDataGetResult::Bytes, std::format("The store's compact JSON size in bytes, at most {}.", MaxSaveDataBytes))
 			.Field("loadError", &SaveDataGetResult::LoadError,
 				"Editor: why the play store's file could not be read (it was moved aside as Store.corrupt-<n>.json and the store is empty); "
 				"empty when it was read.");
 		registry.Struct<SaveDataSetParams>("SaveDataSetParams", "The params of savedata.set.")
 			.Field("values", &SaveDataSetParams::Values,
-				"An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects; null deletes a key.")
+				std::format("An object of values by key (1 to {} bytes each): booleans, finite numbers, strings, arrays and objects nesting at most "
+							"{} levels; null deletes a key.",
+					MaxSaveDataKeyBytes, MaxSaveDataDepth))
 			.Field("merge", &SaveDataSetParams::Merge, "Merge values into the play store instead of replacing it.");
 		registry.Struct<SaveDataWriteResult>("SaveDataWriteResult", "The play store after a write.")
 			.Field("count", &SaveDataWriteResult::Count, "The number of keys.")

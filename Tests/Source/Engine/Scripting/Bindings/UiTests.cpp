@@ -21,11 +21,10 @@
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
-
-#include <format>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>

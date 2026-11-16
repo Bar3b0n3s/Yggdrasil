@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cmath>
 #include <format>
 #include <limits>
 #include <optional>
@@ -547,19 +548,30 @@ namespace Engine {
 			ReplayLoadReport report;
 			auto document = ReplayFromText(*upgraded, report, true);
 			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
-			const Json store{ { "Big", 1e300 }, { "Count", 16777217.0 }, { "Nested", Json{ { "Values", Json::array({ 0.1, 2.000000001 }) } } },
-				{ "Stamp", 1731700000.123456 } };
+			// The W28.2 review's findings 2 and 3: -0 keeps its sign, and magnitudes of 2^63 or more are written in a form the
+			// reader accepts.
+			const Json store{ { "Big", 1e300 }, { "Count", 16777217.0 }, { "Huge", 0x1p64 }, { "Low", -(0x1p63 + 2048.0) },
+				{ "Nested", Json{ { "Values", Json::array({ 0.1, 2.000000001 }) } } }, { "Stamp", 1731700000.123456 }, { "Zero", -0.0 } };
+			// JSON numbers compare by value, so -0 equals 0: its sign is read separately.
+			const auto keepsNegativeZero = [](const Json& values)
+			{
+				const Result<double> zero = JsonReader(values["Zero"]).ReadDouble();
+				return zero.has_value() && *zero == 0.0 && std::signbit(*zero);
+			};
 			document->Header.SaveData.Set(store);
 			document->Header.Parameters.Set(Json{ { "Ratio", 0.1 } });
 
 			const auto text = ReplayToText(*document);
 			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
 			CHECK(text->contains("\"Count\": 16777217,"));
-			CHECK(text->contains("\"Stamp\": 1731700000.123456"));
+			CHECK(text->contains("\"Stamp\": 1731700000.123456,"));
+			CHECK(text->contains("\"Huge\": 1.8446744073709552e+19,"));
+			CHECK(text->contains("\"Zero\": -0.0"));
 			const auto read = ReplayFromText(*text, report, true);
 			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
 			// JSON numbers compare by value: a double written as 16777217 reads back as that integer.
 			CHECK(read->Header.SaveData.Get() == store);
+			CHECK(keepsNegativeZero(read->Header.SaveData.Get()));
 			// Load then save is byte-identical.
 			CHECK(ReplayToText(*read) == *text);
 
@@ -570,6 +582,7 @@ namespace Engine {
 			const auto loaded = LoadCookedReplay(*cooked);
 			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
 			CHECK((*loaded)->Header.SaveData.Get() == store);
+			CHECK(keepsNegativeZero((*loaded)->Header.SaveData.Get()));
 
 			// A store number JSON cannot hold is refused at its pointer; Parameters still take only the float range.
 			ReplayDocument infinite = *read;

@@ -27,6 +27,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptError.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/SaveDataStore.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
@@ -46,6 +47,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 
 // The editor's play mode (Architecture §5.6, §12.4; Docs/Decisions/0012-m7-decisions.md decisions 3 and 11).
@@ -1375,6 +1377,49 @@ return Script.Define("Host", Host)
 			const Result<Json> read = setup.Call("edit.getSelection", Json::object());
 			REQUIRE(read.has_value());
 			CHECK((*read)["selection"].empty());
+		}
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8; the W28.2 review's finding 1): a read-only editor's play
+		// store is private and in memory: writing it leaves the project's Library alone, and the project the editor opens
+		// next, even the first one again after another, starts with an empty store.
+		TEST_CASE("EditorPlayController: a read-only editor's play store is private to the project it opened and writes no file")
+		{
+			Test::EditorTestFixture fixture;
+			EditorContext& editor = fixture.GetEditor();
+			fixture.CreateAndOpenProject("First");
+			const std::filesystem::path first = editor.GetProject().GetProjectFile();
+			REQUIRE(editor.CloseProject().has_value());
+			fixture.CreateAndOpenProject("Second");
+			const std::filesystem::path second = editor.GetProject().GetProjectFile();
+			REQUIRE(editor.CloseProject().has_value());
+			uint32_t opened = 0;
+			const auto openReadOnly = [&fixture, &editor, &opened](const std::filesystem::path& projectFile)
+			{
+				Result<Scope<LoadedProject>> project = ProjectManager::OpenProject(projectFile,
+					{ .ReadOnly = true, .ReadOnlyCacheDirectory = fixture.GetDirectory() / std::format("ReadOnlyCache{}", ++opened) }, editor.GetTypeRegistry());
+				REQUIRE_MESSAGE(project.has_value(), project.error().ToString());
+				REQUIRE(editor.OpenProject(std::move(*project)).has_value());
+				REQUIRE(editor.IsReadOnly());
+			};
+			const auto readStore = [&editor]()
+			{
+				const Result<SaveDataFileLoad> load = editor.GetPlay().ReadPlaySaveData();
+				REQUIRE_MESSAGE(load.has_value(), load.error().ToString());
+				return load->Values.Get();
+			};
+			std::error_code error;
+
+			openReadOnly(first);
+			REQUIRE(editor.GetPlay().WritePlaySaveData(Json{ { "Realm", 2.0 } }).has_value());
+			CHECK(readStore() == Json{ { "Realm", 2.0 } });
+			CHECK_FALSE(std::filesystem::exists(first.parent_path() / "Library" / "SaveData" / "Store.json", error));
+			REQUIRE(editor.CloseProject().has_value());
+
+			openReadOnly(second);
+			CHECK(readStore() == Json::object());
+			REQUIRE(editor.CloseProject().has_value());
+			openReadOnly(first);
+			CHECK(readStore() == Json::object());
 		}
 	}
 

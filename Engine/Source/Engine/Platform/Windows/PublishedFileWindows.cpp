@@ -200,10 +200,16 @@ namespace Engine {
 			}
 			return {};
 		}();
-		if (written.has_value())
+		// The rename is written through to the disk before MoveFileExW returns, so the new name survives a power loss too
+		// (the W28.2 review's finding 9). It cannot replace a file that a reader holds open, even one sharing deletion
+		// (another process scanning or indexing the store): then Replace's POSIX rename replaces it, without the write-through.
+		if (written.has_value() && MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE)
 		{
-			if (Status replaced = Replace(temporary, path); !replaced)
-				written = std::unexpected(std::move(replaced).error());
+			const DWORD code = GetLastError();
+			if (code == ERROR_ACCESS_DENIED || code == ERROR_SHARING_VIOLATION)
+				written = Replace(temporary, path);
+			else
+				written = Utils::MakeWindowsError(code, std::format("rename '{}' to", FileSystem::PathToUtf8(temporary)), path);
 		}
 		if (!written.has_value())
 		{

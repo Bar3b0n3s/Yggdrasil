@@ -5,6 +5,7 @@ that records it and a replay that verifies whatever the machine's store holds, a
 from __future__ import annotations
 
 import json
+import math
 import unittest
 
 from harness import AutomationTestCase, engine_client
@@ -83,24 +84,78 @@ class SaveDataTests(AutomationTestCase):
         self.add_saver(client)
         # A large count and precise doubles, which a float would round (16,777,217 to 16,777,216): the replay's
         # header keeps the store's doubles exactly (ADR 0043 decision 7), and the recorded run reads them as stored.
-        store = {"Realm": 2, "Ratio": 0.1, "Count": 16777217, "Stamp": 1731700000.123456}
+        # -0 and magnitudes of 2^63 or more too (the W28.2 review's findings 2 and 3): the header keeps -0's sign and
+        # writes 2^64 in a form the reader accepts.
+        store = {"Realm": 2, "Ratio": 0.1, "Count": 16777217, "Stamp": 1731700000.123456, "Zero": -0.0,
+                 "Huge": 1.8446744073709552e19, "Low": -9.223372036854778e18}
         client.call("savedata.set", {"values": store})
         client.call("input.record", {"action": "start", "seed": 42})
         client.call("play.step", {"ticks": 4, "render": "none",
                                   "input": [{"type": "key", "key": "Space", "state": "tap"}]})
         exact = ("SaveData.Get('Realm') == 2 and SaveData.Get('Ratio') == 0.1 and SaveData.Get('Count') == 16777217"
-                 " and SaveData.Get('Stamp') == 1731700000.123456")
+                 " and SaveData.Get('Stamp') == 1731700000.123456 and 1 / SaveData.Get('Zero') == -math.huge"
+                 " and SaveData.Get('Huge') == 1.8446744073709552e19 and SaveData.Get('Low') == -9.223372036854778e18")
         client.call("input.record", {"action": "stop", "path": "Assets/Tests/Replays/Saved.replay",
                                      "expect": [{"tick": 4, "luau": exact}]})
         client.call("play.stop")
         replay = json.loads((root / "Assets" / "Tests" / "Replays" / "Saved.replay").read_text(encoding="utf-8"))
         self.assertEqual(replay["Version"], 4)
         self.assertEqual(replay["SaveData"], store)
+        self.assertEqual(math.copysign(1.0, replay["SaveData"]["Zero"]), -1.0)
         # The machine's store holds something else now: the replay starts with its own and verifies at its hash.
         client.call("savedata.set", {"values": {"Realm": 9}})
         verified = client.call("input.replay", {"path": "Assets/Tests/Replays/Saved.replay", "verify": True,
                                                 "strictHash": True})
         self.assertTrue(verified["passed"], json.dumps(verified))
+
+    def test_a_read_only_editor_keeps_a_private_store_and_writes_no_store_file(self) -> None:
+        # The W28.2 review's finding 1: a --read-only editor's play store lives in memory, so seeding it, a live
+        # session's commit and clearing it never write Library/SaveData/Store.json, and the next read-only editor of the
+        # project starts empty (a project opened next in the same editor: the EditorPlayController unit case).
+        client, root = self.open_editor_with_scene()
+        client.call("scene.save")
+        client.call("session.shutdown")
+        self.assertEqual(self.editors[-1].wait(), 0)
+        store = root / "Library" / "SaveData" / "Store.json"
+        reader = self.connect(self.start_editor(["--read-only"], project=root))
+        reader.call("scene.open", {"path": "Assets/Scenes/Main.scene"})
+        reader.call("savedata.set", {"values": {"Realm": 2}})
+        reader.call("play.start")
+        committed = reader.call("script.eval", {"context": "play",
+                                                "code": "SaveData.Set('Best', 7) return { SaveData.Commit() }"})
+        self.assertEqual(committed["value"], [True])
+        reader.call("play.stop")
+        self.assertEqual(reader.call("savedata.get")["values"], {"Best": 7, "Realm": 2})
+        # The next play starts with the private store.
+        reader.call("play.start")
+        best = reader.call("script.eval", {"context": "play", "code": "return SaveData.Get('Best')"})
+        self.assertEqual(best["value"], 7)
+        reader.call("play.stop")
+        self.assertFalse(store.exists())
+        reader.call("savedata.clear")
+        self.assertEqual(reader.call("savedata.get")["values"], {})
+        reader.call("savedata.set", {"values": {"Realm": 3}})
+        reader.call("session.shutdown")
+        self.assertEqual(self.editors[-1].wait(), 0)
+        self.assertFalse(store.exists())
+        second = self.connect(self.start_editor(["--read-only"], project=root))
+        self.assertEqual(second.call("savedata.get")["values"], {})
+        self.assertFalse(store.exists())
+
+    def test_a_save_data_value_nests_to_its_limit_and_no_deeper(self) -> None:
+        # The W28.2 review's finding 4: a value nests at most 64 arrays and tables (MaxSaveDataDepth), far below the
+        # readers' depth, so savedata.get, the store file and a replay header can always hold it.
+        client, root = self.open_editor_with_scene()
+        deep: object = []
+        for _ in range(63):
+            deep = {"Next": deep}
+        client.call("savedata.set", {"values": {"Deep": deep}})
+        self.assertEqual(client.call("savedata.get")["values"], {"Deep": deep})
+        stored = json.loads((root / "Library" / "SaveData" / "Store.json").read_text(encoding="utf-8"))
+        self.assertEqual(stored["Values"], {"Deep": deep})
+        with self.assertRaises(engine_client.EngineError):
+            client.call("savedata.set", {"values": {"Deeper": [deep]}})
+        self.assertEqual(client.call("savedata.get")["values"], {"Deep": deep})
 
     def test_a_corrupt_play_store_is_moved_aside_and_reported(self) -> None:
         client, root = self.open_editor_with_scene()

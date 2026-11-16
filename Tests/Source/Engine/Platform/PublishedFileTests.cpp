@@ -122,11 +122,39 @@ namespace Engine {
 			CHECK(entries == 1);
 			// Its parent must exist.
 			CHECK_FALSE(PublishedFile::WriteDurably(temp.GetPath() / "Missing" / "Store.json", std::as_bytes(std::span(first.data(), first.size()))).has_value());
+			// The W28.2 review's finding 8b: a rename that fails (a directory holds the name) removes the temporary it wrote.
+			const std::filesystem::path blocked = temp.GetPath() / "Blocked";
+			REQUIRE(FileSystem::CreateDirectories(blocked / "Inside").has_value());
+			CHECK_FALSE(PublishedFile::WriteDurably(blocked, std::as_bytes(std::span(first.data(), first.size()))).has_value());
+			CHECK(std::filesystem::is_directory(blocked / "Inside", error));
+			size_t afterFailure = 0;
+			for (std::filesystem::directory_iterator entry(temp.GetPath(), error); !error && entry != std::filesystem::directory_iterator(); entry.increment(error))
+				++afterFailure;
+			CHECK_FALSE(error);
+			CHECK(afterFailure == 2); // Store.json and Blocked, no temporary
 #else
 			REQUIRE_FALSE(written.has_value());
 			CHECK(written.error().GetCode() == ErrorCode::Unsupported);
 #endif
 		}
+
+#if defined(ENGINE_PLATFORM_WINDOWS)
+		// A reader sharing deletion holds the store open (another process scanning it): the write-through rename cannot
+		// replace it, so the write falls back to Replace's POSIX rename; the reader keeps the content it opened.
+		TEST_CASE("PublishedFile: a durable write replaces a file that a reader sharing deletion holds open")
+		{
+			Test::TempDirectory directory("PublishedFileDurableWhileRead");
+			const std::filesystem::path target = directory / "Store.json";
+			REQUIRE(FileSystem::WriteFileAtomic(target, AsBytes("old"), { .KeepBackup = false }).has_value());
+			const Result<Test::HeldFileHandle> reading = Test::OpenForReadingSharingAll(target);
+			REQUIRE_MESSAGE(reading.has_value(), reading.error().ToString());
+
+			const Status written = PublishedFile::WriteDurably(target, AsBytes("new"));
+			REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+			CHECK(Test::ReadRemaining(*reading).value_or("") == "old");
+			CHECK(FileSystem::ReadText(target).value_or("") == "new");
+		}
+#endif
 	}
 
 }

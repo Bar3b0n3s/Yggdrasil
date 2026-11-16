@@ -56,6 +56,29 @@ namespace Engine {
 			const DisplaySettings large{ .WindowMode = DisplayWindowMode::Windowed, .Width = 4000, .Height = 3000 };
 			CHECK(ComputeDisplayWindowRect(large, 100, 200, desktop, std::nullopt) == DisplayWindowRect{ .X = 100, .Y = 200, .Width = 4000, .Height = 3000 });
 		}
+
+		// The W28.1 review's finding 4 and the W28.2 review's finding 10: an Exclusive window is minimized at every focus loss, and its monitor goes back to
+		// the desktop's mode then, so the settings in force keep the window's last size and refresh rate, and a VSync toggle
+		// made then requests the mode the game had, not the desktop's rate.
+		TEST_CASE("DisplayModes: a minimized window's settings keep its last size and refresh rate")
+		{
+			const DisplaySettings exclusive{ .WindowMode = DisplayWindowMode::Exclusive, .Width = 1920, .Height = 1080, .RefreshRate = 60, .VSync = true };
+			// Shown: the window's size and its monitor's current rate.
+			const DisplaySettings shown = ResolveDisplaySettings(
+				DisplayObservation{ .Mode = DisplayWindowMode::Exclusive, .VSync = true, .Width = 1920, .Height = 1080, .MonitorRefreshRate = 60, .Last = exclusive });
+			CHECK(shown == exclusive);
+			// Minimized on a 144 Hz desktop: still the exclusive mode, with the VSync now in force.
+			const DisplaySettings minimized = ResolveDisplaySettings(
+				DisplayObservation{ .Mode = DisplayWindowMode::Exclusive, .VSync = false, .Width = 0, .Height = 0, .MonitorRefreshRate = 144, .Last = exclusive });
+			CHECK(minimized == DisplaySettings{ .WindowMode = DisplayWindowMode::Exclusive, .Width = 1920, .Height = 1080, .RefreshRate = 60, .VSync = false });
+			// Borderless runs at the monitor's current rate; Windowed has none, minimized or not.
+			CHECK(ResolveDisplaySettings(DisplayObservation{ .Mode = DisplayWindowMode::Borderless, .Width = 2560, .Height = 1440, .MonitorRefreshRate = 144 }).RefreshRate
+				== 144);
+			const DisplaySettings windowed{ .WindowMode = DisplayWindowMode::Windowed, .Width = 800, .Height = 600 };
+			CHECK(ResolveDisplaySettings(DisplayObservation{ .Mode = DisplayWindowMode::Windowed, .MonitorRefreshRate = 144, .Last = windowed }) == windowed);
+			CHECK(ResolveDisplaySettings(DisplayObservation{ .Mode = DisplayWindowMode::Windowed, .Width = 640, .Height = 480, .MonitorRefreshRate = 144 })
+				== DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 640, .Height = 480 });
+		}
 	}
 
 }

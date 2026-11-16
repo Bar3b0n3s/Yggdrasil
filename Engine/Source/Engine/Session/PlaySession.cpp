@@ -584,12 +584,11 @@ namespace Engine {
 		// M28 (decision 8): the SaveData module over the session's store. A fixed-view session (a test run, replay, recording or
 		// lockstep session) keeps its store in memory, so its commit writes nothing and succeeds; a session without a host
 		// does the same.
-		[[nodiscard]] Status GetSaveValue(std::string_view key, Json& value) const override
+		[[nodiscard]] Result<Json> GetSaveValue(std::string_view key) const override
 		{
 			ENGINE_TRY(SaveDataStore::ValidateKey(key));
 			const Json* found = SaveData.Find(key);
-			value = found != nullptr ? *found : Json(nullptr);
-			return {};
+			return found != nullptr ? *found : Json(nullptr);
 		}
 		[[nodiscard]] Status SetSaveValue(std::string_view key, const Json& value) override { return SaveData.Set(key, value); }
 		[[nodiscard]] Status ReplaceSaveData(const Json& values) override { return SaveData.Replace(values); }

@@ -38,7 +38,7 @@ namespace Engine {
 		// A key: 1 to MaxSaveDataKeyBytes bytes of valid UTF-8 (ScriptLimits.h). Errors: InvalidArgument naming the problem.
 		[[nodiscard]] static Status ValidateKey(std::string_view key);
 		// `value` in the store's canonical form (keys sorted at every depth, numbers as doubles). Errors: InvalidArgument for a
-		// non-finite number or a value nested deeper than MaxJsonDepth.
+		// non-finite number or a value that nests more than MaxSaveDataDepth arrays and tables (ScriptLimits.h).
 		[[nodiscard]] static Result<Json> Canonicalize(const Json& value);
 
 		// The value of `key`, or null when the store does not hold it.
@@ -86,10 +86,18 @@ namespace Engine {
 		std::optional<std::string> Error{}; // SaveData.GetLoadError's text
 	};
 
+	// What LoadSaveDataFile does with a store file that cannot be read.
+	enum class SaveDataCorruption : uint8_t
+	{
+		MoveAside,   // a session that may write the store (a live windowed run, editor play): kept as Store.corrupt-<n>.json
+		LeaveInPlace // a headless run, which never writes the store: the next run that may write it moves it aside and reports it
+	};
+
 	// Reads the store file `file`. A missing file is an empty store. A file that cannot be read or parsed is logged as a
-	// warning, moved aside as "Store.corrupt-<n>.json" beside it (the first free n from 1, so an earlier one is kept) and
-	// reported in Error, and the store starts empty; when it cannot be moved aside, the Error says so too.
-	[[nodiscard]] SaveDataFileLoad LoadSaveDataFile(const std::filesystem::path& file);
+	// warning and reported in Error, and the store starts empty; with SaveDataCorruption::MoveAside it is moved aside as
+	// "Store.corrupt-<n>.json" beside it (the first free n from 1, so an earlier one is kept), and when it cannot be, the
+	// Error says so too; with LeaveInPlace it stays where it is, unchanged.
+	[[nodiscard]] SaveDataFileLoad LoadSaveDataFile(const std::filesystem::path& file, SaveDataCorruption corruption = SaveDataCorruption::MoveAside);
 	// Writes `values` to `file`, creating its directory, replaced atomically and flushed durably to the disk on Windows
 	// (PublishedFile::WriteDurably); where there is no durable flush (Linux and macOS) it falls back to the atomic write without
 	// a flush (FileSystem::WriteFileAtomic), logged at Info. Errors: SerializeSaveDataFile's and the file system's.

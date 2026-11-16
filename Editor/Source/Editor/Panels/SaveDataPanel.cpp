@@ -12,7 +12,9 @@
 #include <nlohmann/json.hpp>
 
 #include <format>
+#include <optional>
 #include <string_view>
+#include <utility>
 
 namespace Engine {
 
@@ -61,6 +63,40 @@ namespace Engine {
 			m_Problem = written.error().ToString();
 	}
 
+	void SaveDataPanel::ApplyChange(EditorPanelContext& context, std::string_view key, std::optional<std::string_view> valueText)
+	{
+		Json value(nullptr);
+		if (valueText.has_value())
+		{
+			Result<Json> parsed = JsonReader::Parse(*valueText);
+			if (!parsed)
+			{
+				m_Problem = std::format("the value is not JSON: {}", parsed.error().ToString());
+				return;
+			}
+			value = std::move(*parsed);
+		}
+		const Result<SaveDataFileLoad> load = context.Editor.GetPlay().ReadPlaySaveData();
+		if (!load)
+		{
+			m_Problem = load.error().ToString();
+			return;
+		}
+		SaveDataStore store;
+		Status changed = store.Replace(load->Values.Get());
+		if (changed)
+			changed = store.Set(key, value);
+		if (!changed)
+		{
+			m_Problem = changed.error().ToString();
+			return;
+		}
+		Write(context, store.ToJson());
+		// The read above moved a store it could not read aside, so Write's refresh finds a readable one: keep why.
+		if (load->Error.has_value())
+			m_LoadError = *load->Error;
+	}
+
 	Status SaveDataPanel::Draw(EditorPanelContext& context)
 	{
 		EditorContext& editor = context.Editor;
@@ -87,20 +123,7 @@ namespace Engine {
 		ImGui::InputText("Key", m_Key.data(), m_Key.size());
 		ImGui::InputText("JSON value", m_ValueText.data(), m_ValueText.size());
 		if (ImGui::Button("Set"))
-		{
-			const std::string_view key(m_Key.data());
-			const Result<Json> value = JsonReader::Parse(std::string_view(m_ValueText.data()));
-			Json values = m_Values->Get();
-			if (!value)
-				m_Problem = std::format("the value is not JSON: {}", value.error().ToString());
-			else if (const Status valid = SaveDataStore::ValidateKey(key); !valid)
-				m_Problem = valid.error().ToString();
-			else
-			{
-				values[std::string(key)] = *value;
-				Write(context, values);
-			}
-		}
+			ApplyChange(context, std::string_view(m_Key.data()), std::string_view(m_ValueText.data()));
 
 		ImGui::SeparatorText(std::format("{} values", m_Values->Get().size()).c_str());
 		std::optional<std::string> deleted;
@@ -123,11 +146,7 @@ namespace Engine {
 			ImGui::EndTable();
 		}
 		if (deleted.has_value())
-		{
-			Json values = m_Values->Get();
-			values.erase(*deleted);
-			Write(context, values);
-		}
+			ApplyChange(context, *deleted, std::nullopt);
 		return {};
 	}
 

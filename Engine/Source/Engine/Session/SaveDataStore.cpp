@@ -27,7 +27,7 @@ namespace Engine {
 		constexpr uint32_t MaxCorruptSaveDataCopies = 1000;
 
 		// The leaves of CanonicalizeSaveValue, out of its recursion so that its frame stays small: a value nested
-		// MaxJsonDepth deep must fit the stack of a Debug build. Each returns the problem, or empty.
+		// MaxSaveDataDepth deep must fit the stack of a Debug build. Each returns the problem, or empty.
 		[[nodiscard]] static std::string CanonicalizeSaveNumber(const Json& value, Json& out)
 		{
 			const Result<double> number = JsonReader(value).ReadDouble();
@@ -43,11 +43,12 @@ namespace Engine {
 			return text && IsValidUtf8(*text) ? std::string() : std::string("a string is not valid UTF-8");
 		}
 
-		// `value` canonical in `out`: object keys sorted at every depth, every number a double. Returns the problem, or empty.
+		// `value` canonical in `out`: object keys sorted at every depth, every number a double. `depth` counts the arrays and
+		// objects around `value`, so a container at depth MaxSaveDataDepth is one level too deep. Returns the problem, or empty.
 		[[nodiscard]] static std::string CanonicalizeSaveValue(const Json& value, Json& out, size_t depth)
 		{
-			if (depth > MaxJsonDepth)
-				return std::format("the value is nested deeper than {} levels", MaxJsonDepth);
+			if ((value.is_object() || value.is_array()) && depth >= MaxSaveDataDepth)
+				return std::format("a save-data value nests at most {} arrays and tables", MaxSaveDataDepth);
 			if (value.is_object())
 			{
 				std::vector<std::pair<std::string_view, const Json*>> members;
@@ -251,7 +252,7 @@ namespace Engine {
 		return store.ToJson();
 	}
 
-	SaveDataFileLoad LoadSaveDataFile(const std::filesystem::path& file)
+	SaveDataFileLoad LoadSaveDataFile(const std::filesystem::path& file, SaveDataCorruption corruption)
 	{
 		SaveDataFileLoad load{ .Values = VariantValue(Json::object()) };
 		std::error_code error;
@@ -270,7 +271,14 @@ namespace Engine {
 			return load;
 		}
 		const std::string name = FileSystem::PathToUtf8(file.filename());
-		ENGINE_CORE_WARN("The save data in {} cannot be read, so the game starts with none: {}", FileSystem::PathToUtf8(file), values.error().ToString());
+		ENGINE_CORE_WARN("The save data in '{}' cannot be read, so the game starts with none: {}", FileSystem::PathToUtf8(file), values.error().ToString());
+		if (corruption == SaveDataCorruption::LeaveInPlace)
+		{
+			load.Error = std::format("{} could not be read, so the game started with no save data ({}); it was left in place for the next run "
+									 "that can write the store",
+				name, values.error().GetMessageText());
+			return load;
+		}
 		// Kept beside the store for whoever wants to recover it, under the first free name, so an earlier copy stays.
 		std::string kept;
 		for (uint32_t copy = 1; copy <= Utils::MaxCorruptSaveDataCopies && kept.empty(); ++copy)
@@ -285,7 +293,7 @@ namespace Engine {
 				kept = FileSystem::PathToUtf8(candidate.filename());
 			else
 			{
-				ENGINE_CORE_WARN("The corrupt save data {} cannot be moved aside: {}", FileSystem::PathToUtf8(file), moved.message());
+				ENGINE_CORE_WARN("The corrupt save data '{}' cannot be moved aside: {}", FileSystem::PathToUtf8(file), moved.message());
 				break;
 			}
 		}
@@ -307,7 +315,7 @@ namespace Engine {
 		const Status durable = PublishedFile::WriteDurably(file, bytes);
 		if (durable.has_value() || durable.error().GetCode() != ErrorCode::Unsupported)
 			return durable;
-		ENGINE_CORE_INFO("The save data in {} is written atomically without a durable flush: {}", FileSystem::PathToUtf8(file), durable.error().GetMessageText());
+		ENGINE_CORE_INFO("The save data in '{}' is written atomically without a durable flush: {}", FileSystem::PathToUtf8(file), durable.error().GetMessageText());
 		return FileSystem::WriteFileAtomic(file, bytes, { .KeepBackup = false });
 	}
 

@@ -42,12 +42,15 @@ namespace Engine {
 		[[nodiscard]] static Status Replace(const std::filesystem::path& from, const std::filesystem::path& to);
 
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8; the owner's answer 5 of ADR 0042): writes `data` to `path`
-		// so that, once it returns, the new content survives a power loss: a temporary file beside `path` is written, flushed
-		// to the disk (FlushFileBuffers) and closed, then renamed over `path` (Replace). A crash or failure at any instant
-		// leaves either the old or the new content, and the temporary is removed on failure. The parent directory must
-		// exist. Windows only (Docs/Decisions/0028-backlog-program.md decision 10): Linux and macOS report Unsupported, and the
-		// caller falls back to FileSystem::WriteFileAtomic. Errors: NotFound (the parent), PermissionDenied, Io naming the
-		// failed step.
+		// so that, once it returns, the new content survives a power loss (but in the fallback below): a temporary file beside `path` is written, flushed
+		// to the disk (FlushFileBuffers) and closed, then renamed over `path` with the rename written through to the disk
+		// (MoveFileExW with MOVEFILE_REPLACE_EXISTING and MOVEFILE_WRITE_THROUGH). That rename cannot replace a `path` that a
+		// reader holds open, even one sharing deletion; then the temporary is renamed with Replace, whose POSIX rename replaces
+		// it but is not written through, so a power loss soon after that write may bring the old content back. A crash or
+		// power loss at any instant leaves either the old or the new content, and the temporary is removed on failure. The
+		// parent directory must exist. Windows only (Docs/Decisions/0028-backlog-program.md decision 10): Linux and macOS
+		// report Unsupported, and the caller falls back to FileSystem::WriteFileAtomic. Errors: NotFound (the parent),
+		// PermissionDenied, Io naming the failed step.
 		[[nodiscard]] static Status WriteDurably(const std::filesystem::path& path, std::span<const std::byte> data);
 	};
 

@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <limits>
 #include <map>
 
@@ -299,18 +300,22 @@ namespace Engine {
 		{
 			// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): a replay header's save data, written exactly.
 			Result<Json> document = JsonReader::Parse(
-				R"({"Count": 16777217.0, "Stamp": 1731700000.123456, "Ratio": 0.1, "Big": 1e300, "Zero": -0.0, "Values": [2.5, 1]})");
+				R"({"Count": 16777217.0, "Stamp": 1731700000.123456, "Ratio": 0.1, "Big": 1e300, "Zero": -0.0, "Values": [2.5, 1], "Huge": 1.8446744073709552e19, "Low": -9.223372036854778e18})");
 			REQUIRE(document.has_value());
 			const Result<std::string> doubles = JsonWriter::Write(*document, JsonStyle::Minified, JsonNumbers::Double);
 			REQUIRE_MESSAGE(doubles.has_value(), doubles.error().ToString());
-			CHECK(*doubles == R"({"Count":16777217,"Stamp":1731700000.123456,"Ratio":0.1,"Big":1e+300,"Zero":0,"Values":[2.5,1]})");
+			// -0 keeps its sign, and 2^64 and -(2^63 + 2048) take the exponent form, never an integer literal outside the 64-bit
+			// range, which the reader would refuse (the W28.2 review's findings 2 and 3).
+			CHECK(*doubles
+				== R"({"Count":16777217,"Stamp":1731700000.123456,"Ratio":0.1,"Big":1e+300,"Zero":-0.0,"Values":[2.5,1],"Huge":1.8446744073709552e+19,"Low":-9.223372036854778e+18})");
 			Result<Json> read = JsonReader::Parse(*doubles);
 			REQUIRE(read.has_value());
-			for (const char* key : { "Count", "Stamp", "Ratio", "Big" })
+			for (const char* key : { "Count", "Stamp", "Ratio", "Big", "Huge", "Low" })
 			{
 				CAPTURE(key);
 				CHECK((*read)[key].get<double>() == (*document)[key].get<double>());
 			}
+			CHECK(std::signbit((*read)["Zero"].get<double>()));
 			// As float, the default, the same tree rounds and 1e300 is out of range.
 			Json floats = *document;
 			floats.erase("Big");

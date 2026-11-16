@@ -2504,7 +2504,7 @@ Reads editor play's save data: the play store (the project's Library/SaveData/St
 |---|---|---|
 | `values` | `Variant` | The values by key, keys sorted, numbers as SaveData.Get returns them. |
 | `count` | `UInt32` | The number of keys. |
-| `bytes` | `UInt32` | The store's compact JSON size in bytes, at most 1,048,576. |
+| `bytes` | `UInt32` | The store's compact JSON size in bytes, at most 1048576. |
 | `loadError` | `String` | Editor: why the play store's file could not be read (it was moved aside as Store.corrupt-\<n>.json and the store is empty); empty when it was read. |
 
 Example: Read the play store.
@@ -2529,7 +2529,7 @@ Seeds editor play's save data: replaces the play store with values (or merges th
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `values` | `Variant` | yes | `null` | An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects; null deletes a key. |
+| `values` | `Variant` | yes | `null` | An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects nesting at most 64 levels; null deletes a key. |
 | `merge` | `Bool` |  | `false` | Merge values into the play store instead of replacing it. |
 
 | Result | Type | Description |

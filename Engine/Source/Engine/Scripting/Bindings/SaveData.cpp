@@ -29,13 +29,13 @@ namespace Engine {
 		static int SaveDataGet(ScriptCall& call)
 		{
 			const std::string key = CheckSaveKey(call);
-			Json value;
-			if (const Status read = call.Engine->GetHost().GetSaveValue(key, value); !read)
-				return Lua::RaiseError(call, read.error());
-			if (value.is_null())
+			const Result<Json> value = call.Engine->GetHost().GetSaveValue(key);
+			if (!value)
+				return Lua::RaiseError(call, value.error());
+			if (value->is_null())
 				lua_pushnil(call.State);
 			else
-				Lua::PushJson(call, value);
+				Lua::PushJson(call, *value);
 			return 1;
 		}
 
@@ -55,10 +55,10 @@ namespace Engine {
 		{
 			const std::string key = CheckSaveKey(call);
 			IScriptHost& host = call.Engine->GetHost();
-			Json held;
-			if (const Status read = host.GetSaveValue(key, held); !read)
-				return Lua::RaiseError(call, read.error());
-			const bool existed = !held.is_null();
+			const Result<Json> held = host.GetSaveValue(key);
+			if (!held)
+				return Lua::RaiseError(call, held.error());
+			const bool existed = !held->is_null();
 			if (existed)
 			{
 				if (const Status permission = call.PrepareHostMutation(); !permission)
@@ -121,10 +121,11 @@ namespace Engine {
 					read)
 				.Function("Set", &Utils::SaveDataSet, "(key: string, value: any) -> ()",
 					std::format("Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, "
-								"arrays and tables of string keys (no functions, cycles or mixed keys). The store is part of the session's state "
-								"hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The "
-								"whole store is at most {} bytes of compact JSON; a Set past it raises, naming the size.",
-						MaxSaveDataBytes))
+								"arrays and tables of string keys (no functions, cycles or mixed keys), nesting at most {} arrays and tables. The "
+								"store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only "
+								"once SaveData.Commit writes it. The whole store is at most {} bytes of compact JSON; a Set past it raises, naming "
+								"the size.",
+						MaxSaveDataDepth, MaxSaveDataBytes))
 				.Function("Delete", &Utils::SaveDataDelete, "(key: string) -> boolean", "Deletes the value saved under key; returns whether there was one.")
 				.Function("GetKeys", &Utils::SaveDataKeys, "() -> {string}", "Returns the keys of the saved values, sorted by their bytes.", read)
 				.Function("Commit", &Utils::SaveDataCommit, "() -> (boolean, string?)",

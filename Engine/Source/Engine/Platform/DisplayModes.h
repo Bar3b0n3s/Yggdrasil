@@ -6,8 +6,8 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <utility>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // M28 (Docs/Decisions/0043-m28-game-services.md decision 3): the display modes a game's options menu switches between, and
@@ -71,6 +71,23 @@ namespace Engine {
 	// mode has no rectangle (the monitor's mode is the window).
 	[[nodiscard]] DisplayWindowRect ComputeDisplayWindowRect(const DisplaySettings& settings, int32_t monitorX, int32_t monitorY,
 		const DisplayVideoMode& desktop, const std::optional<std::pair<int32_t, int32_t>>& windowedPosition);
+
+	// What a window shows of its display settings now (Application::GetDisplaySettings' inputs).
+	struct DisplayObservation
+	{
+		DisplayWindowMode Mode = DisplayWindowMode::Windowed; // the mode in force
+		bool VSync = true;                                    // the VSync in force
+		uint32_t Width = 0;                                   // the window's size; 0 x 0 while it is minimized
+		uint32_t Height = 0;
+		uint32_t MonitorRefreshRate = 0; // the current refresh rate of the window's monitor, 0 when unknown
+		DisplaySettings Last{};          // what was resolved while the window was last not minimized
+	};
+
+	// The settings in force (M28, the W28.1 review's finding 4 and the W28.2 review's finding 10):the observation's mode and VSync; while the window is
+	// minimized (an Exclusive window is, at every focus loss, when its monitor goes back to the desktop's mode) the last
+	// size and refresh rate it had; otherwise its size and, in the two full-screen modes, its monitor's current refresh rate
+	// (Windowed has none: 0). Pure.
+	[[nodiscard]] DisplaySettings ResolveDisplaySettings(const DisplayObservation& observation);
 
 	// The ranges every display request and user://Display.json take (ValidateDisplaySettings).
 	inline constexpr uint32_t MaxDisplayExtent = 16384;

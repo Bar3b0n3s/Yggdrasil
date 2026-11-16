@@ -962,7 +962,7 @@ All modes; Runtime|Test; pure/read.
 
 `(key: string, value: any) -> ()`
 
-Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys). The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size.
+Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys), nesting at most 64 arrays and tables. The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size.
 
 All modes; Runtime|Test; mutates.
 
@@ -1378,7 +1378,7 @@ All modes; Test; mutates.
 
 `(values: {[string]: any}) -> ()`
 
-Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "Case" suite starts empty again.
+Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "Case" suite starts empty again; a case that seeds the store and calls Scene.Reload() returns in that tick, and a later case of an Isolation "Suite" suite sees the reloaded scene read it.
 
 All modes; Test; mutates.
 

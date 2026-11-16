@@ -36,7 +36,8 @@ namespace Engine {
 	//     scalars (null, boolean, number, string) stays on one line, "[1, 2, 3]" with ", " separators; an array with at
 	//     least one object or array element puts each element on its own line like an object. Empty containers are
 	//     "{}" and "[]". The document ends with exactly one "\n". Minified drops every space and line break.
-	//   - Doubles (WriteDouble, JsonNumbers::Double): the same rules on double, the shortest text that round-trips the double.
+	//   - Doubles (WriteDouble, JsonNumbers::Double): the shortest text that round-trips the double, which JsonReader::Parse
+	//     reads back exactly: -0 as "-0.0", and a magnitude of 2^63 or more in the exponent form (2^64 is "1.8446744073709552e+19").
 	//   - Floats: the shortest text that round-trips the float value (std::to_chars on float, so 0.1f is "0.1", 1.0f is
 	//     "1", 1e8f is "1e+08"); -0 is written as "0"; NaN and infinities are rejected.
 	//   - Integers: decimal, exact over the full int64 and uint64 ranges. UUIDs: 16-digit lowercase hex strings (§4.8).
@@ -69,8 +70,10 @@ namespace Engine {
 		void WriteInt(int64_t value);
 		void WriteUInt(uint64_t value);
 		void WriteFloat(float value);
-		// The shortest text that round-trips the double (std::to_chars on double); -0 is written as 0, and NaN and infinities
-		// are data errors, as for WriteFloat. Only where a format documents its numbers as doubles (JsonNumbers::Double).
+		// The shortest text that round-trips the double (std::to_chars on double), which JsonReader::Parse reads back exactly:
+		// -0 keeps its sign ("-0.0"), and a magnitude of 2^63 or more takes the exponent form, never an integer literal outside
+		// the 64-bit range. NaN and infinities are data errors, as for WriteFloat. Only where a format documents its numbers as
+		// doubles (JsonNumbers::Double).
 		void WriteDouble(double value);
 		void WriteString(std::string_view value);
 		void WriteUUID(UUID value);

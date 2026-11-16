@@ -75,11 +75,15 @@ namespace Engine {
 			return quoted;
 		}
 
-		template<typename T>
-		static std::string NumberText(T value)
+		// WriteDouble's magnitude from which the exponent form is written: 2^63.
+		static constexpr double DoubleExponentFormLimit = 0x1p63;
+
+		// std::to_chars of `value`; with a std::chars_format, the shortest text in that format that round-trips it.
+		template<typename T, typename... Format>
+		static std::string NumberText(T value, Format... format)
 		{
 			std::array<char, 32> buffer{};
-			const std::to_chars_result result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+			const std::to_chars_result result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, format...);
 			ENGINE_CORE_VERIFY(result.ec == std::errc(), "std::to_chars needs more than {} characters", buffer.size());
 			return std::string(buffer.data(), result.ptr);
 		}
@@ -343,8 +347,16 @@ namespace Engine {
 			}
 			return;
 		}
-		// -0 is written as 0; std::to_chars on double gives the shortest text that round-trips the value.
-		state.AddScalar(value == 0.0 ? std::string("0") : Utils::NumberText(value));
+		// The shortest text that round-trips the value (std::to_chars on double), read back exactly by JsonReader::Parse:
+		// -0 keeps its sign as "-0.0" (a "-0" would read back as the integer 0), and a magnitude of 2^63 or more takes the
+		// exponent form, since std::to_chars writes such a value as an integer literal when that is not longer, which the
+		// reader refuses outside the 64-bit range (18446744073709552000 for 2^64).
+		if (value == 0.0)
+			state.AddScalar(std::signbit(value) ? std::string("-0.0") : std::string("0"));
+		else if (std::fabs(value) >= Utils::DoubleExponentFormLimit)
+			state.AddScalar(Utils::NumberText(value, std::chars_format::scientific));
+		else
+			state.AddScalar(Utils::NumberText(value));
 	}
 
 	void JsonWriter::WriteString(std::string_view value)

@@ -37,7 +37,7 @@ namespace Engine {
 		VariantValue Values{};   // the store's values by key, an object
 		uint32_t Count = 0;      // its keys
 		uint32_t Bytes = 0;      // its compact JSON size, at most MaxSaveDataBytes
-		std::string LoadError{}; // why the play store could not be read and was moved aside (empty when it could), or the session's
+		std::string LoadError{}; // why the play store could not be read and was moved aside (empty when it could)
 	};
 
 	// savedata.set {values, merge?}

@@ -31,6 +31,7 @@ namespace Engine {
 
 		void WriteText(const std::filesystem::path& path, std::string_view text)
 		{
+			REQUIRE(FileSystem::CreateDirectories(path.parent_path()).has_value());
 			REQUIRE(FileSystem::WriteFileAtomic(path, std::as_bytes(std::span(text.data(), text.size())), { .KeepBackup = false }).has_value());
 		}
 
@@ -93,10 +94,19 @@ namespace Engine {
 			refused("\xff", Json(1.0));
 			CHECK(store.Set(std::string(MaxSaveDataKeyBytes, 'k'), Json(1.0)).has_value());
 			REQUIRE(store.Delete(std::string(MaxSaveDataKeyBytes, 'k')));
+			// A value nests at most MaxSaveDataDepth arrays and tables, far below the readers' MaxJsonDepth, which the store file
+			// and a replay header add levels to (the W28.2 review's finding 4): at the limit it round-trips through the file.
 			Json deep = Json::array();
-			for (size_t level = 0; level < MaxJsonDepth + 1; ++level)
-				deep = Json::array({ std::move(deep) });
-			refused("Deep", deep);
+			for (size_t level = 1; level < MaxSaveDataDepth; ++level)
+				deep = Json::object({ { "Next", std::move(deep) } });
+			REQUIRE(store.Set("Deep", deep).has_value());
+			const Result<std::string> deepFile = SerializeSaveDataFile(store.ToJson());
+			REQUIRE(deepFile.has_value());
+			const Result<Json> deepRead = ParseSaveDataFile(*deepFile);
+			REQUIRE_MESSAGE(deepRead.has_value(), deepRead.error().ToString());
+			CHECK(*deepRead == store.ToJson());
+			REQUIRE(store.Delete("Deep"));
+			refused("Deep", Json::array({ deep }));
 			refused("Text", Json("\xc3"));
 			// The cap counts the whole store: a value that fits alone does not fit beside another.
 			const std::string half(MaxSaveDataBytes / 2, 'x');
@@ -196,6 +206,50 @@ namespace Engine {
 				CHECK(std::filesystem::exists(temp.GetPath() / "SaveData" / std::format("Store.corrupt-{}.json", copy), error));
 				CHECK_FALSE(std::filesystem::exists(file, error));
 			}
+		}
+
+		// The W28.2 review's finding 6: a headless run (the Dist smoke test, on the player's real user data) never writes the
+		// store, so it leaves one it cannot read where it is, unchanged, for the next run that may write it to move aside and
+		// report to the player.
+		TEST_CASE("SaveDataStore: a store file that cannot be read is left in place, unchanged, when the run never writes it")
+		{
+			const Test::TempDirectory temp;
+			const std::filesystem::path file = temp.GetPath() / "SaveData" / "Store.json";
+			const std::string truncated = "{\"Format\": \"SaveData\", \"Version\": 1, \"Values\": {\"Realm\"";
+			WriteText(file, truncated);
+			Test::ExpectLog warning(LogLevel::Warn, "save data");
+			const SaveDataFileLoad headless = LoadSaveDataFile(file, SaveDataCorruption::LeaveInPlace);
+			CHECK(warning.GetMatchCount() == 1);
+			CHECK(headless.Values.Get() == Json::object());
+			CHECK(headless.Error.has_value());
+			CHECK(FileSystem::ReadText(file).value_or("") == truncated);
+			std::error_code error;
+			CHECK_FALSE(std::filesystem::exists(temp.GetPath() / "SaveData" / "Store.corrupt-1.json", error));
+			// The next run that may write the store moves it aside and reports it.
+			const SaveDataFileLoad live = LoadSaveDataFile(file);
+			REQUIRE(live.Error.has_value());
+			CHECK(live.Error->find("Store.corrupt-1.json") != std::string::npos);
+			CHECK_FALSE(std::filesystem::exists(file, error));
+		}
+
+		// The W28.2 review's finding 8a: when every Store.corrupt-<n>.json name is taken, the file stays where it is and the
+		// error the session reports says it could not be moved aside.
+		TEST_CASE("SaveDataStore: a store file that cannot be moved aside stays where it is and its error says so")
+		{
+			const Test::TempDirectory temp;
+			const std::filesystem::path directory = temp.GetPath() / "SaveData";
+			const std::filesystem::path file = directory / "Store.json";
+			for (int copy = 1; copy <= 1000; ++copy)
+				WriteText(directory / std::format("Store.corrupt-{}.json", copy), "{}");
+			const std::string truncated = "{\"Format\": \"SaveData\"";
+			WriteText(file, truncated);
+			Test::ExpectLog warning(LogLevel::Warn, "save data");
+			const SaveDataFileLoad load = LoadSaveDataFile(file);
+			CHECK(warning.GetMatchCount() == 1);
+			CHECK(load.Values.Get() == Json::object());
+			REQUIRE(load.Error.has_value());
+			CHECK(load.Error->find("could not be moved aside") != std::string::npos);
+			CHECK(FileSystem::ReadText(file).value_or("") == truncated);
 		}
 
 		TEST_CASE("SaveDataStore: 1,000 seeded mutations of Store.json never crash" * doctest::test_suite(Test::FuzzSuite))

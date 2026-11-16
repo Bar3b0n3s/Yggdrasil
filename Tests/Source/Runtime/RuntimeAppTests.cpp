@@ -23,9 +23,11 @@
 
 #include <array>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -163,6 +165,43 @@ namespace Engine {
 			FrameDecoder m_Decoder{};
 			int64_t m_NextId = 1;
 		};
+
+		// The Runtime of the game `name` (its manifest at `manifest`) with `arguments`, --automation and --paused, its user
+		// data in `userData` and no audio device: evaluates each of `codes` in the play session (script.eval), then ends the
+		// run with session.shutdown and checks that it exits with Success. Returns the values; its standard error goes to
+		// `standardError`.
+		std::vector<Json> EvaluateInRuntime(const Test::TempDirectory& userData, std::string_view name, const std::filesystem::path& manifest,
+			std::vector<std::string> arguments, std::span<const std::string_view> codes, std::string& standardError)
+		{
+			Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			arguments.insert(arguments.end(), { "--automation", "--paused", ManifestArgument(manifest), "--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) });
+			Result<Process> process = Process::Spawn({ .Executable = std::move(*runtime), .Arguments = Test::WithoutAudioDevice(std::move(arguments)) });
+			REQUIRE_MESSAGE(process.has_value(), process.error().ToString());
+			const uint32_t pid = process->GetId();
+			const std::filesystem::path sessions = userData / std::string(name) / "Automation" / "Sessions";
+			REQUIRE(Test::WaitUntil([&sessions, pid]()
+			{
+				return FileSystem::Exists(SessionFile::GetPath(sessions, pid));
+			}));
+			Result<RuntimeAutomationConnection> connection = RuntimeAutomationConnection::Open(sessions, pid);
+			REQUIRE_MESSAGE(connection.has_value(), connection.error().ToString());
+			std::vector<Json> values;
+			for (const std::string_view code : codes)
+			{
+				const Result<Json> evaluated = connection->Call("script.eval", Json{ { "code", code }, { "context", "Play" } });
+				REQUIRE_MESSAGE(evaluated.has_value(), evaluated.error().ToString());
+				const std::optional<JsonReader> value = JsonReader(*evaluated).FindMember("value");
+				values.push_back(value.has_value() ? value->GetValue() : Json());
+			}
+			REQUIRE(connection->Call("session.shutdown", Json::object()).has_value());
+			const Result<ProcessResult> result = process->Wait(std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			standardError = result->StandardError;
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+			return values;
+		}
 #endif
 
 		// Replaces the first `from` in `path`'s text with `to`.
@@ -480,15 +519,18 @@ namespace Engine {
 			// The project's window is 160 x 90 with VSync; the restored file's settings are in force.
 			CHECK(evaluate("local s = Application.GetDisplaySettings() return string.format('%s %dx%d %s', s.WindowMode, s.Width, s.Height, tostring(s.VSync))")
 				== Json("Windowed 200x150 false"));
-			// A request applies at the next frame boundary, and what was applied is written back.
+			// A request applies at the next frame boundary, and what was applied is written back in that boundary, so once the
+			// window shows the new size the file holds it. The file is read only then: a reader polling it would hold it open
+			// while the Runtime renames the new file over it, and that write would fail.
 			CHECK(evaluate("local accepted = Application.SetDisplaySettings({ Width = 240, Height = 180 }) return accepted") == Json(true));
-			CHECK(Test::WaitUntil([&display]()
+			CHECK(Test::WaitUntil([&evaluate]()
 			{
-				const Result<std::string> text = FileSystem::ReadText(display);
-				return text.has_value()
-					&& ParseDisplaySettingsFile(*text).value_or(DisplaySettings{})
-					== DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 240, .Height = 180, .RefreshRate = 0, .VSync = false };
+				return evaluate("local s = Application.GetDisplaySettings() return s.Width == 240 and s.Height == 180") == Json(true);
 			}));
+			const Result<std::string> written = FileSystem::ReadText(display);
+			REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+			CHECK(ParseDisplaySettingsFile(*written).value_or(DisplaySettings{})
+				== DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 240, .Height = 180, .RefreshRate = 0, .VSync = false });
 
 			REQUIRE(connection->Call("session.shutdown", Json::object()).has_value());
 			const Result<ProcessResult> result = process->Wait(std::chrono::seconds(120));
@@ -499,6 +541,58 @@ namespace Engine {
 #else
 			MESSAGE("RuntimeApp display settings: the display backend is Windows-only (Docs/Decisions/0028-backlog-program.md decision 10); "
 					"the restore's gate is covered by the DisplaySettingsFile cases");
+#endif
+		}
+
+		TEST_CASE("RuntimeApp: a live run reads the game's store, a headless run never writes it, and a corrupt one waits for a windowed run")
+		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 8; the W28.2 review's findings 1 and 6): a live session, a
+			// headless one included, starts with user://SaveData/Store.json; a headless run (the Dist smoke test, on the player's
+			// real user data) never writes it: its Commit returns false and the file keeps its bytes, and a store it cannot read
+			// stays where it is, reported to its scripts, so the next windowed run moves it aside and reports it to the player.
+			// The windowed run has no renderer; the Runtime's automation is reached on Windows only.
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			Test::TempDirectory userData("RuntimeSaveData");
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", { .Name = "StoreGame" });
+			REQUIRE_MESSAGE(manifest.has_value(), manifest.error().ToString());
+			const std::filesystem::path directory = userData / "StoreGame" / "SaveData";
+			const std::filesystem::path store = directory / "Store.json";
+			const auto writeStore = [&directory, &store](std::string_view text)
+			{
+				REQUIRE(FileSystem::CreateDirectories(directory).has_value());
+				REQUIRE(FileSystem::WriteFileAtomic(store, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+			};
+			std::string standardError;
+
+			const std::string_view saved = "{\"Format\": \"SaveData\", \"Version\": 1, \"Values\": {\"Realm\": 2}}";
+			writeStore(saved);
+			const std::array headlessCodes = { std::string_view("return SaveData.Get('Realm')"),
+				std::string_view("SaveData.Set('Realm', 3) local committed, reason = SaveData.Commit() return { committed, type(reason) }") };
+			const std::vector<Json> headless = EvaluateInRuntime(userData, "StoreGame", *manifest, { "--headless", "--renderer", "none" }, headlessCodes, standardError);
+			REQUIRE(headless.size() == 2);
+			CHECK(headless[0] == Json(2));
+			CHECK(headless[1] == Json::array({ false, "string" }));
+			CHECK(FileSystem::ReadText(store).value_or("") == saved);
+
+			const std::string_view truncated = "{\"Format\": \"SaveData\", \"Version\": 1, \"Values\": {\"Realm\"";
+			writeStore(truncated);
+			const std::array loadErrorCode = { std::string_view("return SaveData.GetLoadError()") };
+			const std::vector<Json> left = EvaluateInRuntime(userData, "StoreGame", *manifest, { "--headless", "--renderer", "none" }, loadErrorCode, standardError);
+			REQUIRE(left.size() == 1);
+			CHECK(left[0].is_string());
+			CHECK(FileSystem::ReadText(store).value_or("") == truncated);
+			std::error_code error;
+			CHECK_FALSE(std::filesystem::exists(directory / "Store.corrupt-1.json", error));
+			CHECK(standardError.contains("Store.json"));
+
+			const std::vector<Json> moved = EvaluateInRuntime(userData, "StoreGame", *manifest, { "--renderer", "none" }, loadErrorCode, standardError);
+			REQUIRE(moved.size() == 1);
+			REQUIRE(moved[0].is_string());
+			CHECK(moved[0].dump().contains("Store.corrupt-1.json"));
+			CHECK(FileSystem::ReadText(directory / "Store.corrupt-1.json").value_or("") == truncated);
+			CHECK_FALSE(std::filesystem::exists(store, error));
+#else
+			MESSAGE("RuntimeApp save data: the Runtime's automation is reached on Windows only (RuntimeAutomationConnection)");
 #endif
 		}
 

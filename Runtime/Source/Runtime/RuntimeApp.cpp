@@ -582,7 +582,11 @@ namespace Engine {
 			spec.SaveData = options.SaveData;
 		else if (!fixedView)
 		{
-			SaveDataFileLoad saveData = LoadSaveDataFile(GetSaveDataFile());
+			// A headless run never writes the store, so it leaves a corrupt one in place: the next windowed run moves it aside
+			// and tells the player (the W28.2 review's finding 6; the Dist smoke test runs on the real user data).
+			const SaveDataCorruption corruption = App.GetSpecification().Window == WindowMode::Headless ? SaveDataCorruption::LeaveInPlace
+																										: SaveDataCorruption::MoveAside;
+			SaveDataFileLoad saveData = LoadSaveDataFile(GetSaveDataFile(), corruption);
 			spec.SaveData = std::move(saveData.Values);
 			spec.SaveDataLoadError = std::move(saveData.Error);
 		}

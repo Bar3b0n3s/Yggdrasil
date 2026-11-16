@@ -721,9 +721,11 @@ namespace Engine {
 					"configuration, so a suite compares it across runs; test suites only.",
 					pure)
 				.Function("SetSaveData", Utils::SetSaveData, "(values: {[string]: any}) -> ()",
-					"Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it "
-					"at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "
-					"\"Case\" suite starts empty again.",
+					std::format("Replaces the session's save data with values (keys of 1 to {} bytes, values SaveData.Set takes), as a game "
+								"finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an "
+								"Isolation \"Case\" suite starts empty again; a case that seeds the store and calls Scene.Reload() returns in that "
+								"tick, and a later case of an Isolation \"Suite\" suite sees the reloaded scene read it.",
+						MaxSaveDataKeyBytes),
 					mutation);
 			return {};
 		}

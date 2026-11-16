@@ -68,6 +68,11 @@ namespace Engine {
 	// ({"key":value,...}); a SaveData.Set past it raises, naming the size.
 	inline constexpr size_t MaxSaveDataKeyBytes = 256;
 	inline constexpr size_t MaxSaveDataBytes = 1024 * 1024;
+	// The nested arrays and tables of one SaveData value (a scalar nests 0, {} or {1} 1): far below the JSON readers' and
+	// VariantValue's MaxJsonDepth (512), to which the store file, a replay header and an automation result each add their
+	// own levels around the value, so every store a session holds can be written, read back and returned (the W28.2
+	// review's finding 4).
+	inline constexpr size_t MaxSaveDataDepth = 64;
 	// Test.Screenshot calls one suite makes, counted by the runner whatever the host's outcome; each may write a new image
 	// file (the editor writes every capture to a new file in its automation output directory). A later call in the suite
 	// raises a located error naming this limit and reaches no host; the case fails unless the script handles the error,

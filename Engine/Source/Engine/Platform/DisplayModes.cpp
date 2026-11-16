@@ -36,6 +36,24 @@ namespace Engine {
 		});
 	}
 
+	DisplaySettings ResolveDisplaySettings(const DisplayObservation& observation)
+	{
+		DisplaySettings settings{ .WindowMode = observation.Mode, .VSync = observation.VSync };
+		if (observation.Width == 0 || observation.Height == 0)
+		{
+			// Minimized: the monitor may be back at the desktop's mode, so the last size and refresh rate stand in, and a partial
+			// request (a VSync toggle) keeps the mode the window had.
+			settings.Width = observation.Last.Width;
+			settings.Height = observation.Last.Height;
+			settings.RefreshRate = observation.Mode == DisplayWindowMode::Windowed ? 0 : observation.Last.RefreshRate;
+			return settings;
+		}
+		settings.Width = observation.Width;
+		settings.Height = observation.Height;
+		settings.RefreshRate = observation.Mode == DisplayWindowMode::Windowed ? 0 : observation.MonitorRefreshRate;
+		return settings;
+	}
+
 	DisplayWindowRect ComputeDisplayWindowRect(const DisplaySettings& settings, int32_t monitorX, int32_t monitorY, const DisplayVideoMode& desktop,
 		const std::optional<std::pair<int32_t, int32_t>>& windowedPosition)
 	{

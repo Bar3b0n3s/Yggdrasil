@@ -23158,7 +23158,7 @@
 						"maximum": 4294967295
 					},
 					"bytes": {
-						"description": "The store's compact JSON size in bytes, at most 1,048,576.",
+						"description": "The store's compact JSON size in bytes, at most 1048576.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
@@ -23211,7 +23211,7 @@
 				"type": "object",
 				"properties": {
 					"values": {
-						"description": "An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects; null deletes a key."
+						"description": "An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects nesting at most 64 levels; null deletes a key."
 					},
 					"merge": {
 						"description": "Merge values into the play store instead of replacing it.",

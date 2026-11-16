@@ -5,6 +5,7 @@
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/SaveDataStore.h"
 #include "Support/ExpectLog.h"
@@ -13,6 +14,7 @@
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
+#include <format>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -170,6 +172,12 @@ return SaveData.GetKeys()
 			CHECK(play.Evaluate(R"(SaveData.Set("A", string.rep("x", 600000)) return true)") == Json(true));
 			CHECK(play.Raises(R"(SaveData.Set("B", string.rep("x", 600000)))"));
 			CHECK(play.Session->GetSaveData().GetKeys() == std::vector<std::string>{ "A" });
+			// A value nests at most MaxSaveDataDepth tables (the W28.2 review's finding 4): at the limit it is kept, one deeper
+			// raises.
+			CHECK(play.Evaluate(std::format(R"(local t = {{}} for i = 2, {} do t = {{ t }} end SaveData.Set("Deep", t) return true)", MaxSaveDataDepth))
+				== Json(true));
+			CHECK(play.Raises(std::format(R"(local t = {{}} for i = 1, {} do t = {{ t }} end SaveData.Set("Deeper", t))", MaxSaveDataDepth)));
+			CHECK(play.Session->GetSaveData().GetKeys() == std::vector<std::string>{ "A", "Deep" });
 		}
 
 		TEST_CASE("SaveData: Commit writes through a live session's host and in memory in a test run")

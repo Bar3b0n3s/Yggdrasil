@@ -1862,7 +1862,7 @@ declare SaveData: {
 	GetKeys: () -> {string},
 	-- Returns why the store the session started with could not be read (it was moved aside as Store.corrupt-<n>.json and the game started with no save data), or nil. [All modes; Runtime|Test; pure/read]
 	GetLoadError: () -> string?,
-	-- Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys). The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size. [All modes; Runtime|Test; mutates]
+	-- Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys), nesting at most 64 arrays and tables. The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size. [All modes; Runtime|Test; mutates]
 	Set: (key: string, value: any) -> (),
 }
 
@@ -1974,7 +1974,7 @@ declare Test: {
 	ReloadScript: (asset: AssetRef) -> (),
 	-- Capture a screenshot through the owning host; a suite takes at most 256 screenshots, and a later call raises an error without capturing. [All modes; Test; mutates]
 	Screenshot: (name: string) -> (),
-	-- Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "Case" suite starts empty again. [All modes; Test; mutates]
+	-- Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "Case" suite starts empty again; a case that seeds the store and calls Scene.Reload() returns in that tick, and a later case of an Isolation "Suite" suite sees the reloaded scene read it. [All modes; Test; mutates]
 	SetSaveData: (values: {[string]: any}) -> (),
 	-- End this case as skipped without erasing earlier failures; it stops its caller the way Test.Fail does, and the outcome stays latched. [All modes; Test; pure/read]
 	Skip: (reason: string) -> (),
