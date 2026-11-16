@@ -74,8 +74,8 @@ class ParticleLookTests(AutomationTestCase):
         # The emitter plays with its look: the session steps its particles, angles and frames.
         client.call("play.start", {"lockstep": True})
         client.call("play.step", {"ticks": 10, "render": "none"})
-        count = client.call("script.eval", {"context": "play",
-                                            "code": 'return Scene.FindByName("Flame").ParticleEmitter:GetParticleCount()'})
+        code = 'return Scene.FindByName("Flame").ParticleEmitter:GetParticleCount()'
+        count = client.call("script.eval", {"context": "play", "code": code})
         self.assertGreater(count["value"], 0, count)
         client.call("play.stop")
 
