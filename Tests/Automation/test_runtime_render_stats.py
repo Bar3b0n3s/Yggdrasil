@@ -17,7 +17,12 @@ from tiny_game import (TINY_GAME_NAME, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_g
 
 # Non-default ProjectSettings.Rendering, exported into Game.pak; the Runtime's stats.get reports what its game view
 # rendered with.
-EXPORTED_RENDERING = {"ShadowMapSize": 512, "SsaoHalfResolution": True, "MaxShadedLights": 2048, "SsrHalfResolution": True}
+EXPORTED_RENDERING = {
+    "ShadowMapSize": 512,
+    "SsaoHalfResolution": True,
+    "MaxShadedLights": 2048,
+    "SsrHalfResolution": True,
+}
 
 
 class RuntimeRenderStatsTests(AutomationTestCase):
