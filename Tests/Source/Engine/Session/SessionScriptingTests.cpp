@@ -523,7 +523,10 @@ return true
 			CHECK(session->GetScriptErrors().GetErrors().empty());
 		}
 
-		TEST_CASE("PlaySession: startup audio gains survive callbacks and restore across scene replacement")
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 9): the mix belongs to the session, so the replaced scene's
+		// OnDestroy volume is what the new scene's OnCreate reads, and the volume recorded before the session comes back only
+		// when the session ends.
+		TEST_CASE("PlaySession: startup audio gains survive callbacks and scene replacement, and restore when the session ends")
 		{
 			Test::ScriptTestFixture fixture;
 			VirtualFileSystem vfs;
@@ -535,7 +538,8 @@ return true
 			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Mix.luau", R"(
 local T = {}
 function T:OnCreate()
-	assert(Audio.GetGroupVolume("Music") == 1)
+	local replaced = Scene.GetLoadParameters().Replaced == true
+	assert(Audio.GetGroupVolume("Music") == (if replaced then 0.125 else 1))
 	Audio.SetGroupVolume("Music", 0.25)
 end
 function T:OnStart()
@@ -560,7 +564,7 @@ return Script.Define("Mix", T)
 			session->SetExtractionEnabled(false);
 			CHECK(audio.GetGroupVolume(AudioGroup::Music) == 0.5f);
 			CHECK(session->GetScriptErrors().GetErrors().empty());
-			REQUIRE(session->GetScripts()->GetHost().RequestSceneLoad(scene, Json::object()));
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneLoad(scene, Json{ { "Replaced", true } }));
 			session->Tick();
 			CHECK(session->GetSceneGeneration() == 2);
 			CHECK(audio.GetGroupVolume(AudioGroup::Music) == 0.5f);
@@ -568,6 +572,117 @@ return Script.Define("Mix", T)
 			session.reset();
 			CHECK(audio.GetGroupVolume(AudioGroup::Music) == 0.75f);
 			CHECK_FALSE(audio.IsSimulationTimeOwned());
+		}
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 9; World Tree's brief 03): a volume a script set "for the rest
+		// of the session" holds across Scene.Load and Scene.Reload, in every group, and the volumes the engine had before the
+		// session come back when it ends. Before the fix, each replacement restored the recorded volumes and set them to 1.
+		TEST_CASE("PlaySession: a group volume set before Scene.Load holds after it")
+		{
+			Test::ScriptTestFixture fixture;
+			VirtualFileSystem vfs;
+			const auto createdAudio = AudioEngine::Create(AudioEngineSpecification{}, vfs);
+			REQUIRE(createdAudio);
+			AudioEngine& audio = **createdAudio;
+			REQUIRE(audio.SetGroupVolume(AudioGroup::Music, 0.75f));
+			REQUIRE(audio.SetGroupVolume(AudioGroup::Ui, 0.5f));
+			const AssetHandle script(0x710024), scene(0x710025);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Options.luau", R"(
+local T = {}
+function T:OnCreate()
+	self.Observed = string.format("%g %g %g", Audio.GetGroupVolume("Music"), Audio.GetGroupVolume("Sfx"), Audio.GetGroupVolume("Ui"))
+end
+return Script.Define("Options", T)
+)"));
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Options"), script);
+			const auto document = SceneSerializer::ToJson(fixture.GetScene());
+			REQUIRE(document);
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(*document);
+			fixture.GetAssetManager().Publish(scene, data, "Assets/Scenes/Options.scene");
+			auto specification = Test::ScriptSessionSpecification(fixture);
+			specification.Audio = &audio;
+			specification.OwnsAudioTime = true;
+			auto result = PlaySession::Create(specification, *document);
+			REQUIRE(result);
+			auto session = std::move(*result);
+			session->SetExtractionEnabled(false);
+			const auto observed = [&session]() -> Json
+			{
+				const auto read = session->GetScripts()->Evaluate(R"(return (Scene.FindByName("Options") :: Entity):GetScript("Options").Observed)", {});
+				REQUIRE_MESSAGE(read.has_value(), (read ? "" : read.error().ToString()));
+				return read->Value.Get();
+			};
+			// Every session starts from the same mix.
+			CHECK(observed() == "1 1 1");
+			REQUIRE(session->GetScripts()->Evaluate(R"(
+Audio.SetGroupVolume("Music", 0.25)
+Audio.SetGroupVolume("Sfx", 0.5)
+Audio.SetGroupVolume("Ui", 2)
+)",
+				{}));
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneLoad(scene, Json::object()));
+			session->Tick();
+			REQUIRE(session->GetSceneGeneration() == 2);
+			CHECK(observed() == "0.25 0.5 2");
+			CHECK(audio.GetGroupVolume(AudioGroup::Music) == 0.25f);
+			CHECK(audio.GetGroupVolume(AudioGroup::Sfx) == 0.5f);
+			CHECK(audio.GetGroupVolume(AudioGroup::Ui) == 2.0f);
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneReload(std::nullopt));
+			session->Tick();
+			REQUIRE(session->GetSceneGeneration() == 3);
+			CHECK(observed() == "0.25 0.5 2");
+			CHECK(audio.GetGroupVolume(AudioGroup::Music) == 0.25f);
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+			session.reset();
+			CHECK(audio.GetGroupVolume(AudioGroup::Music) == 0.75f);
+			CHECK(audio.GetGroupVolume(AudioGroup::Sfx) == 1.0f);
+			CHECK(audio.GetGroupVolume(AudioGroup::Ui) == 0.5f);
+		}
+
+		// M28 (decision 9): a Scene.Load whose new scene's scripts fail to start stops the session after the replacement; the
+		// mix the session recorded still comes back when it ends.
+		TEST_CASE("PlaySession: a scene replacement whose scripts fail still restores the mix recorded before the session")
+		{
+			Test::ScriptTestFixture fixture;
+			VirtualFileSystem vfs;
+			const auto createdAudio = AudioEngine::Create(AudioEngineSpecification{}, vfs);
+			REQUIRE(createdAudio);
+			AudioEngine& audio = **createdAudio;
+			REQUIRE(audio.SetGroupVolume(AudioGroup::Sfx, 0.75f));
+			const AssetHandle script(0x710026), scene(0x710027);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Fails.luau", R"(
+local T = {}
+function T:OnCreate()
+	if Scene.GetLoadParameters().Fail == true then
+		error("the replaced scene's startup fails")
+	end
+end
+return Script.Define("Fails", T)
+)"));
+			Test::AttachSessionScript(fixture.GetScene().CreateEntity("Fails"), script);
+			const auto document = SceneSerializer::ToJson(fixture.GetScene());
+			REQUIRE(document);
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(*document);
+			fixture.GetAssetManager().Publish(scene, data, "Assets/Scenes/Fails.scene");
+			auto specification = Test::ScriptSessionSpecification(fixture);
+			specification.Audio = &audio;
+			specification.OwnsAudioTime = true;
+			auto result = PlaySession::Create(specification, *document);
+			REQUIRE(result);
+			auto session = std::move(*result);
+			session->SetExtractionEnabled(false);
+			REQUIRE(session->GetScripts()->Evaluate(R"(Audio.SetGroupVolume("Sfx", 0.25))", {}));
+			REQUIRE(session->GetScripts()->GetHost().RequestSceneLoad(scene, Json{ { "Fail", true } }));
+			{
+				Test::ExpectLog failure(LogLevel::Error, "the replaced scene's startup fails");
+				session->Tick();
+			}
+			CHECK_FALSE(session->GetScriptErrors().GetErrors().empty());
+			CHECK(audio.GetGroupVolume(AudioGroup::Sfx) == 0.25f);
+			session.reset();
+			CHECK(audio.GetGroupVolume(AudioGroup::Sfx) == 0.75f);
 		}
 
 		TEST_CASE("PlaySession: preparation preserves the live session and activation acquires audio after retirement")

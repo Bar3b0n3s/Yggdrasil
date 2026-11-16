@@ -1,0 +1,86 @@
+{
+	"Format": "Replay",
+	"Version": 4,
+	"Scene": {
+		"Handle": "9186b2fc3d2adcaf",
+		"Path": "Assets/Scenes/GameServices.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.5.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "002a9e90bb22b5b9",
+				"Path": "/Canvas",
+				"Hash": "e9b0e7dfb3986158",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiCanvas": "a5af45cc50283b9c"
+				}
+			},
+			{
+				"Id": "6569eaca6a29b54b",
+				"Path": "/Camera",
+				"Hash": "348781c6db1f5739",
+				"Components": {
+					"Transform": "b571ff7d96fca57d",
+					"Camera": "280661e01a10689e"
+				}
+			},
+			{
+				"Id": "a3069302e18e5e10",
+				"Path": "/Ground",
+				"Hash": "aff2130eb3fa990d",
+				"Components": {
+					"Transform": "51af4967850c3d8a",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "b5d600e0a7a42ae0",
+				"Path": "/Canvas/Hud",
+				"Hash": "eec88223a13c32ca",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "64e063f4113220c8",
+					"UiRect": "c617619cfa270c30",
+					"UiText": "df47c046deadc6f1"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "71c2de52865b12d2",
+				"Path": "Assets/Scripts/GameServices/Hud.luau",
+				"Type": "Script",
+				"Hash": "a3949c3664feccd1"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 45,
+			"Type": "Signal",
+			"Name": "FrameTimeExceeded"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 89,
+			"Luau": "local hud = Scene.FindByName(\"Hud\")\nreturn hud.UiText.Text == \"Run ended\" and hud:GetScript(\"Hud\").Ended"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "e12dceb96b738fce"
+		}
+	],
+	"FinalTick": 90,
+	"FinalStateHash": "1b0eac767cd34a35"
+}

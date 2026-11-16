@@ -14,6 +14,7 @@
 
 	#include <windows.h>
 
+	#include <algorithm>
 	#include <cstddef>
 	#include <cstring>
 	#include <format>
@@ -165,6 +166,57 @@ namespace Engine {
 			return {};
 		const DWORD moveCode = GetLastError();
 		return Utils::MakeWindowsError(moveCode, std::format("rename '{}' to", FileSystem::PathToUtf8(from)), to);
+	}
+
+	Status PublishedFile::WriteDurably(const std::filesystem::path& path, std::span<const std::byte> data)
+	{
+		// One temporary per process and target: a store is written on the main thread, and two processes never share a name.
+		std::filesystem::path temporary = path;
+		temporary += std::format(L".tmp-{}", GetCurrentProcessId());
+		Status written = [&temporary, data]() -> Status
+		{
+			ScopedFile file(CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+			if (file.Get() == INVALID_HANDLE_VALUE)
+			{
+				const DWORD code = GetLastError();
+				return Utils::MakeWindowsError(code, "create", temporary);
+			}
+			size_t offset = 0;
+			while (offset < data.size())
+			{
+				const DWORD chunk = static_cast<DWORD>(std::min<size_t>(data.size() - offset, std::numeric_limits<DWORD>::max()));
+				DWORD wrote = 0;
+				if (::WriteFile(file.Get(), data.data() + offset, chunk, &wrote, nullptr) == FALSE || wrote == 0)
+				{
+					const DWORD code = GetLastError();
+					return Utils::MakeWindowsError(code, "write", temporary);
+				}
+				offset += wrote;
+			}
+			if (FlushFileBuffers(file.Get()) == FALSE)
+			{
+				const DWORD code = GetLastError();
+				return Utils::MakeWindowsError(code, "flush", temporary);
+			}
+			return {};
+		}();
+		// The rename is written through to the disk before MoveFileExW returns, so the new name survives a power loss too
+		// (the W28.2 review's finding 9). It cannot replace a file that a reader holds open, even one sharing deletion
+		// (another process scanning or indexing the store): then Replace's POSIX rename replaces it, without the write-through.
+		if (written.has_value() && MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == FALSE)
+		{
+			const DWORD code = GetLastError();
+			if (code == ERROR_ACCESS_DENIED || code == ERROR_SHARING_VIOLATION)
+				written = Replace(temporary, path);
+			else
+				written = Utils::MakeWindowsError(code, std::format("rename '{}' to", FileSystem::PathToUtf8(temporary)), path);
+		}
+		if (!written.has_value())
+		{
+			std::error_code removed;
+			std::filesystem::remove(temporary, removed);
+		}
+		return written;
 	}
 
 }

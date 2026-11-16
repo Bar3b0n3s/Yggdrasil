@@ -476,6 +476,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "GameServices.jsonl",
+			"IdSeed": 2501,
+			"Renderer": "none"
+		},
+		{
+			"File": "SaveData.jsonl",
+			"IdSeed": 2502,
+			"Renderer": "none"
+		},
+		{
 			"File": "ParticleLook.jsonl",
 			"IdSeed": 3001,
 			"Renderer": "none"

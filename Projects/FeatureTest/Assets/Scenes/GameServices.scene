@@ -1,0 +1,157 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "GameServices",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"RigidBody": 1,
+		"BoxCollider": 1,
+		"Script": 2,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiText": 1
+	},
+	"Entities": [
+		{
+			"ID": "6569eaca6a29b54b",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.05, 0.05, 0.08]
+				}
+			}
+		},
+		{
+			"ID": "a3069302e18e5e10",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, -2, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"RigidBody": {
+					"Type": "Static",
+					"Mass": 1,
+					"Friction": 0.5,
+					"Restitution": 0,
+					"LinearDamping": 0.05,
+					"AngularDamping": 0.05,
+					"GravityFactor": 1,
+					"MotionQuality": "Discrete",
+					"AllowSleeping": true,
+					"LockTranslation": [false, false, false],
+					"LockRotation": [false, false, false],
+					"Layer": "Default",
+					"MaxLinearVelocity": 500,
+					"MaxAngularVelocity": 47.12,
+					"EnhancedInternalEdgeRemoval": false,
+					"InitialLinearVelocity": [0, 0, 0],
+					"InitialAngularVelocity": [0, 0, 0]
+				},
+				"BoxCollider": {
+					"HalfExtents": [0.5, 0.5, 0.5],
+					"Offset": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"IsTrigger": false
+				}
+			}
+		},
+		{
+			"ID": "002a9e90bb22b5b9",
+			"Name": "Canvas",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": null,
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
+				}
+			}
+		},
+		{
+			"ID": "b5d600e0a7a42ae0",
+			"Name": "Hud",
+			"Parent": "002a9e90bb22b5b9",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "71c2de52865b12d2",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [16, 16],
+					"Size": [480, 48],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Wave 1",
+					"Font": null,
+					"Size": 24,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Left",
+					"VerticalAlignment": "Top",
+					"Wrap": true,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		}
+	]
+}

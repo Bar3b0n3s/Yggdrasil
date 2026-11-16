@@ -339,6 +339,9 @@ namespace Engine {
 			// of the items the Deform stage deforms this render (every deformed item one of whose draws survived culling, the
 			// shadow casters' included), in snapshot order.
 			std::vector<size_t> Deforms{};
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): set by the Deform stage: the items with a skin it
+			// deformed this render (RenderStats::SkinnedMeshes).
+			uint32_t SkinnedMeshes = 0;
 			nvrhi::TextureHandle EnvironmentSpecular{};
 			nvrhi::TextureHandle EnvironmentSkybox{};
 			nvrhi::TextureHandle BlueNoise{};

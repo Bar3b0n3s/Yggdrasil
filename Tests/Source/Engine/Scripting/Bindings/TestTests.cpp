@@ -340,12 +340,15 @@ return true
 Test.InjectMouseMove(vector.create(6, 7, 0))
 Test.InjectScroll(vector.create(1, -1, 0))
 Test.InjectText("ok")
+Test.InjectSignal("FrameTimeExceeded")
 return true
 )");
-			REQUIRE(services.Inputs.size() == queued + 3);
+			REQUIRE(services.Inputs.size() == queued + 4);
 			CHECK(services.Inputs[queued] == Json{ { "type", "mouseMove" }, { "position", { 6, 7 } } });
 			CHECK(services.Inputs[queued + 1] == Json{ { "type", "scroll" }, { "delta", { 1, -1 } } });
 			CHECK(services.Inputs[queued + 2] == Json{ { "type", "text" }, { "text", "ok" } });
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a signal reaches the host in input.inject's form.
+			CHECK(services.Inputs[queued + 3] == Json{ { "type", "signal" }, { "name", "FrameTimeExceeded" } });
 			if (mode == RunModes::Editor)
 			{
 				CheckTrue(fixture, "Test.ReloadScript(Assets.Load(\"Assets/Scripts/Reload.luau\")); return true");
@@ -894,7 +897,7 @@ return Test.GetStateHash()=="0000000000001234"
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			const std::array<std::string_view, 27> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "InjectMouseMove", "InjectScroll", "InjectText", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest", "GetPoseDigest", "GetParticleDigest" };
+			const std::array<std::string_view, 29> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "InjectMouseMove", "InjectScroll", "InjectText", "InjectSignal", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest", "GetPoseDigest", "GetParticleDigest", "SetSaveData" };
 			const auto modules = fixture.GetApi().GetModules();
 			const auto found = std::find_if(modules.begin(), modules.end(), [](const auto& group)
 			{
@@ -912,7 +915,8 @@ return Test.GetStateHash()=="0000000000001234"
 				REQUIRE(member != found->Members.end());
 				CHECK(member->Options.Environments == (name == "Suite" ? ScriptApiEnvironment::All : ScriptApiEnvironment::Test));
 				CHECK(member->Options.Modes == (name == "ReloadScript" ? RunModes::EditorOnly : RunModes::All));
-				const bool mutation = name.starts_with("Inject") || name == "CaptureAudio" || name == "Screenshot" || name == "ReloadScript";
+				const bool mutation =
+					name.starts_with("Inject") || name == "CaptureAudio" || name == "Screenshot" || name == "ReloadScript" || name == "SetSaveData";
 				CHECK(member->Options.Mutates == mutation);
 				CHECK_FALSE(member->Signature.empty());
 				CHECK_FALSE(member->Description.empty());

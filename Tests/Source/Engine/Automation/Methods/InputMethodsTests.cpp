@@ -109,6 +109,36 @@ namespace Engine {
 			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetInput().GetLastAppliedEvents().size() == 3);
 		}
 
+		TEST_CASE("InputMethods: input.inject queues a frame-time signal that the tick latches")
+		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): automation injects the signals a lockstep session takes.
+			Test::AutomationFixture fixture("InputMethodsSignal");
+			REQUIRE(fixture.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			for (const auto& [event, pointer] : std::vector<std::pair<Json, std::string>>{
+					 { Json{ { "type", "signal" } }, "/events/0/name" },
+					 { Json{ { "type", "signal" }, { "name", "" } }, "/events/0/name" },
+					 { Json{ { "type", "signal" }, { "name", "Slow" }, { "state", "Down" } }, "/events/0/state" } })
+			{
+				CAPTURE(event.dump());
+				const Json response = fixture.Request("input.inject", Json{ { "events", Json::array({ event }) } });
+				CHECK(response["error"]["code"] == Json(-32602));
+				CHECK(response["error"]["data"]["issues"][0]["pointer"] == Json(pointer));
+			}
+			const Result<Json> injected = fixture.Call("input.inject", Json{ { "events", Json::array({ Json{ { "type", "signal" }, { "name", "Slow" } } }) } });
+			REQUIRE_MESSAGE(injected.has_value(), injected.error().ToString());
+			CHECK((*injected)["queued"] == Json(1));
+			REQUIRE(fixture.Call("play.step", Json{ { "ticks", 1 } }).has_value());
+			const PlayInput& input = fixture.GetEditor().GetPlay().GetSession()->GetInput();
+			CHECK(input.WasSignalled(InputPhase::Step, "Slow"));
+			// A lockstep session without a recorder ignores live signals: a script's post returns false and queues nothing.
+			const Result<Json> posted = fixture.Call("script.eval", Json{ { "context", "play" }, { "code", "return Input.PostSignal('Live')" } });
+			REQUIRE_MESSAGE(posted.has_value(), posted.error().ToString());
+			CHECK((*posted)["value"] == Json(false));
+			REQUIRE(fixture.Call("play.step", Json{ { "ticks", 1 } }).has_value());
+			CHECK_FALSE(input.WasSignalled(InputPhase::Step, "Live"));
+			CHECK_FALSE(input.WasSignalled(InputPhase::Step, "Slow"));
+		}
+
 		TEST_CASE("InputMethods: input.inject needs a play session")
 		{
 			Test::AutomationFixture fixture("InputMethods");

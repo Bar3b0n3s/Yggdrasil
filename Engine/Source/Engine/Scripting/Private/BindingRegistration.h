@@ -143,6 +143,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterParticles(ScriptApiRegistry& api);
 		// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the Terrain proxy's methods.
 		[[nodiscard]] Status RegisterTerrain(ScriptApiRegistry& api);
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the SaveData module.
+		[[nodiscard]] Status RegisterSaveData(ScriptApiRegistry& api);
 
 	}
 

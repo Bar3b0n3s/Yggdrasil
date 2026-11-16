@@ -6,11 +6,35 @@ Generated from ScriptApiRegistry and TypeRegistry.
 
 Application identity, window state and deferred quit requests.
 
+### Application.GetDisplayModes
+
+`() -> {DisplayMode}`
+
+Returns the video modes of the monitor the game's window is on, sorted by width, height and refresh rate: the resolutions Exclusive mode takes. Empty where display settings do nothing: the editor, headless runs, test runs, replays, recordings and lockstep sessions, and on Linux and macOS.
+
+All modes; Runtime|Test; pure/read.
+
+### Application.GetDisplaySettings
+
+`() -> DisplaySettings`
+
+Returns the display settings in force: the window mode, the window's size in screen units (the video mode's in the full-screen modes; its last size while the window is minimized), the refresh rate of a full-screen mode (0 windowed) and VSync. Where display settings do nothing it returns the session's view as a Windowed window with the project's Window.VSync.
+
+All modes; Runtime|Test; pure/read.
+
 ### Application.GetPlatform
 
 `() -> string`
 
 Returns the host platform name.
+
+All modes; Runtime|Test; pure/read.
+
+### Application.GetStats
+
+`() -> PerformanceStats`
+
+Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most the per-view cap, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.
 
 All modes; Runtime|Test; pure/read.
 
@@ -59,6 +83,14 @@ All modes; Runtime|Test; pure/read.
 `(exitCode: number?) -> ()`
 
 Requests exit (default 0): stops editor Play, exits Runtime, or records quit and ends the current test suite. Never destroys the executing VM inline.
+
+All modes; Runtime|Test; mutates.
+
+### Application.SetDisplaySettings
+
+`(settings: DisplaySettingsRequest) -> (boolean, string?)`
+
+Requests display settings for the next frame boundary (a member left out keeps its value in force, so a later request in the same frame replaces an earlier one: give every member that should change): Windowed takes Width x Height; Borderless covers the monitor at its current mode; Exclusive switches the monitor to one of GetDisplayModes(). The Runtime keeps the choice in user://Display.json and applies it at the next start, before its window shows. Returns true when the request was accepted, or false and the reason where display settings do nothing (the editor, headless runs, test runs, replays, recordings, lockstep sessions, Linux and macOS), so they never touch the project's Window settings or the state hash. An unknown mode, a Width or Height outside 1 to 16384 or a RefreshRate over 1000 raises an error wherever the call is made, and in the Runtime so does an Exclusive mode the monitor does not list.
 
 All modes; Runtime|Test; mutates.
 
@@ -448,6 +480,14 @@ All modes; Runtime|Test; pure/read.
 
 Argument 1: MouseButton.
 
+### Input.PostSignal
+
+`(name: string) -> boolean`
+
+Posts the frame-time signal name (1 to 64 bytes of UTF-8) for the next fixed step, where Input.WasSignalled reads it: a decision taken on frame-paced observations (ending a run whose frame time stays over a budget) recorded as input, so input.record records it and a replay plays it back. Returns whether the session takes live signals: ordinary play and recordings do; replays, test runs and lockstep sessions ignore them (false) and take only played-back signals and those Test.InjectSignal or input.inject injects. A name already posted for the same tick counts once; a tick takes at most 64 distinct signals. A fixed-step gameplay callback raises an error: it decides deterministically and acts directly.
+
+All modes; Runtime|Test; mutates.
+
 ### Input.SetCursorMode
 
 `(mode: CursorMode) -> ()`
@@ -457,6 +497,14 @@ Changes cursor visibility/capture; refused during read-only evaluation.
 All modes; Runtime|Test; mutates.
 
 Argument 1: CursorMode.
+
+### Input.WasSignalled
+
+`(name: string) -> boolean`
+
+Returns whether the signal name was latched: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) by this tick, in the frame phase (OnUpdate, OnLateUpdate) by any tick since the previous frame.
+
+All modes; Runtime|Test; pure/read.
 
 ## Loc
 
@@ -866,6 +914,58 @@ Uniform unit direction using two draws and deterministic trigonometry.
 
 All modes; Runtime|Test; mutates.
 
+## SaveData
+
+A game's save data: options and progress kept across runs, in the play session's store.
+
+### SaveData.Commit
+
+`() -> (boolean, string?)`
+
+Writes the store where the game keeps it: the Runtime's user://SaveData/Store.json (replaced atomically and flushed to the disk), editor play's Library/SaveData/Store.json (a read-only editor's private store). Returns true, or false and the reason (a headless Runtime reads its store and never writes it; a failed write). Test runs, replays, recordings and lockstep sessions keep their store in memory: Commit returns true and writes nothing.
+
+All modes; Runtime|Test; mutates.
+
+### SaveData.Delete
+
+`(key: string) -> boolean`
+
+Deletes the value saved under key; returns whether there was one.
+
+All modes; Runtime|Test; mutates.
+
+### SaveData.Get
+
+`(key: string) -> any`
+
+Returns the value saved under key (1 to 256 bytes of UTF-8), or nil when there is none: a boolean, number, string, array or table of string keys, as it was set.
+
+All modes; Runtime|Test; pure/read.
+
+### SaveData.GetKeys
+
+`() -> {string}`
+
+Returns the keys of the saved values, sorted by their bytes.
+
+All modes; Runtime|Test; pure/read.
+
+### SaveData.GetLoadError
+
+`() -> string?`
+
+Returns why the store the session started with could not be read (it was moved aside as Store.corrupt-<n>.json and the game started with no save data), or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### SaveData.Set
+
+`(key: string, value: any) -> ()`
+
+Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys), nesting at most 64 arrays and tables. The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size.
+
+All modes; Runtime|Test; mutates.
+
 ## Scene
 
 Active-scene operations; searches return canonical order and never expose pending destruction.
@@ -1242,6 +1342,14 @@ Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next un
 
 All modes; Test; mutates.
 
+### Test.InjectSignal
+
+`(name: string) -> ()`
+
+Queue the frame-time signal name (1 to 64 bytes of UTF-8) for the next unapplied input tick, where Input.WasSignalled reads it: how a test takes the decisions a live session posts with Input.PostSignal, which test runs ignore.
+
+All modes; Test; mutates.
+
 ### Test.InjectText
 
 `(text: string) -> ()`
@@ -1263,6 +1371,14 @@ EditorOnly; Test; mutates.
 `(name: string) -> ()`
 
 Capture a screenshot through the owning host; a suite takes at most 256 screenshots, and a later call raises an error without capturing.
+
+All modes; Test; mutates.
+
+### Test.SetSaveData
+
+`(values: {[string]: any}) -> ()`
+
+Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "Case" suite starts empty again; a case that seeds the store and calls Scene.Reload() returns in that tick, and a later case of an Isolation "Suite" suite sees the reloaded scene read it.
 
 All modes; Test; mutates.
 
@@ -5924,6 +6040,14 @@ The font; null uses its canvas's Font, or the default font when the canvas names
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### UiText.GetPresentationText
+
+`(self: UiText) -> string?`
+
+Returns the presentation text SetPresentationText set, or nil. Frame-paced: a fixed-step gameplay callback raises an error.
+
+All modes; Runtime|Test; pure/read.
+
 ### UiText.LineSpacing
 
 `number`
@@ -5939,6 +6063,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.SetPresentationText
+
+`(self: UiText, text: string?) -> ()`
+
+Shows text (at most 4096 bytes of UTF-8) in place of the element's Text until it is cleared with nil, the element or its UiText is removed, or the scene is replaced: frame-paced text such as a frame time or a performance readout, never serialized, hashed or recorded, so it never splits a replay. Layout and hit testing keep the authored Text's element. A fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error: set it in OnUpdate or OnLateUpdate.
+
+All modes; Runtime|Test; mutates.
 
 ### UiText.Size
 
@@ -6580,6 +6712,8 @@ The type of an input event (§13.6).
 
 - `Text`: Typed text, one character event per code point.
 
+- `Signal`: A frame-time signal (name): a decision a script took on frame-paced observations (Input.PostSignal), which the tick latches for Input.WasSignalled. Replays from version 4 carry it.
+
 ## InputRecordAction
 
 Start a fresh recording or stop and save it.
@@ -7050,6 +7184,14 @@ What a view renders instead of the lit image (a debug view).
 
 - `LightCount`: The number of lights each pixel's light cluster holds, as a heat map.
 
+## SaveDataTarget
+
+Which save-data store savedata.get reads.
+
+- `Editor`: The play store: what a live play session starts with and its SaveData.Commit writes.
+
+- `Play`: The running play session's store, as its scripts see it now.
+
 ## SceneDiffAgainst
 
 What scene.diff compares the open scene with.
@@ -7388,11 +7530,35 @@ An animation clip's named event that an Animator layer's time passed: its name, 
 
 First contact from the receiving body's side, with collider identities for compounds.
 
+## DisplayMode
+
+`{Width: number, Height: number, RefreshRate: number}`
+
+One video mode of the monitor: its size in pixels and refresh rate in Hz.
+
+## DisplaySettings
+
+`{WindowMode: "Windowed" | "Borderless" | "Exclusive", Width: number, Height: number, RefreshRate: number, VSync: boolean}`
+
+A window's display settings: WindowMode Windowed, Borderless or Exclusive; the window's size in screen units (the video mode's in the full-screen modes); the refresh rate of a full-screen mode (0 windowed); and vertical sync.
+
+## DisplaySettingsRequest
+
+`{WindowMode: ("Windowed" | "Borderless" | "Exclusive")?, Width: number?, Height: number?, RefreshRate: number?, VSync: boolean?}`
+
+A request of Application.SetDisplaySettings: the DisplaySettings members to change; a member left out keeps its current value.
+
 ## FieldOptions
 
 `{Min: number?, Max: number?, Step: number?, Tooltip: string?}`
 
 Editor metadata and numeric validation bounds for a field.
+
+## PerformanceStats
+
+`{RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number}`
+
+The performance readout of Application.GetStats: frame-paced observations, never simulation state.
 
 ## RaycastHit
 

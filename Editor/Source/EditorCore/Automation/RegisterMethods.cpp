@@ -17,6 +17,7 @@
 #include "EditorCore/Automation/PrefabMethods.h"
 #include "EditorCore/Automation/ProfilerMethods.h"
 #include "EditorCore/Automation/ProjectMethods.h"
+#include "EditorCore/Automation/SaveDataMethods.h"
 #include "EditorCore/Automation/SceneMethods.h"
 #include "EditorCore/Automation/ScreenshotMethods.h"
 #include "EditorCore/Automation/ScriptMethods.h"
@@ -77,6 +78,7 @@ namespace Engine {
 		RegisterLightingMethodTypes(registry);
 		// M26 (Docs/Decisions/0037-m26-contract.md decisions 20 and 23): terrain.importHeightmap and terrain.edit.
 		RegisterTerrainMethodTypes(registry);
+		RegisterSaveDataMethodTypes(registry); // M28, Docs/Decisions/0043-m28-game-services.md decision 8
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -107,6 +109,7 @@ namespace Engine {
 		RegisterGraphLiveValueMethods(methods); // M24 W24.2, decision 14
 		RegisterLightingMethods(methods);       // M26, Docs/Decisions/0037-m26-contract.md decision 8
 		RegisterTerrainMethods(methods);        // M26, Docs/Decisions/0037-m26-contract.md decisions 20 and 23
+		RegisterSaveDataMethods(methods);       // M28, Docs/Decisions/0043-m28-game-services.md decision 8
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

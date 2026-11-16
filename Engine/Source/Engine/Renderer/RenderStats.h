@@ -63,8 +63,8 @@ namespace Engine {
 		// drawing a caster (of ShadowedPointLights and ShadowedSpotLights; the spot atlas is reused whole or not at all).
 		uint32_t CachedPointShadows = 0;
 		uint32_t CachedSpotShadows = 0;
-		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 11 and 13; ADR 0042's phase-5 ledger: appended after M28's and M29's
-		// rows in landing order): the snapshot's RenderQualitySettings::SsrHalfResolution this frame rendered with; and the SSR
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 11 and 13; ADR 0042's phase-5 ledger: appended after M29's rows in
+		// landing order, M28's following at its later landing): the snapshot's RenderQualitySettings::SsrHalfResolution this frame rendered with; and the SSR
 		// trace's area in the completed GPU frame SsrAreaFrameIndex (read back, as the GPU timings are, once that frame's
 		// submission completed): the trace image's 8 x 8 tiles (SsrTiles), those the trace covered (SsrTracedTiles) and the
 		// trace pixels that traced in them (SsrTracedPixels; at half resolution each stands for four scene pixels), and the
@@ -79,6 +79,13 @@ namespace Engine {
 		uint32_t SsrTracedPixels = 0;
 		uint32_t SsrTraceGroups = 0;
 		uint32_t SsrTraceRows = 0;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4; ADR 0042's phase-5 ledger: appended after M29's and M32's
+		// rows, which landed first): the lights the frame shaded after culling (at most MaxShadedLights, M29's cap), the
+		// visible lights beyond that cap (RENDER_LIGHT_LIMIT_EXCEEDED's), and the skinned meshes the Deform stage deformed for
+		// the frame (a mesh with a skin; a morph-only mesh is not counted).
+		uint32_t VisibleLights = 0;
+		uint32_t DroppedLights = 0;
+		uint32_t SkinnedMeshes = 0;
 	};
 
 	// M32 (decision 13): the SSR area of one completed frame, which RenderStatsHistory::PublishSsrArea merges into the

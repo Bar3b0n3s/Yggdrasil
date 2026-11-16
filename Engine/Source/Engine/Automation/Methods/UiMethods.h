@@ -77,6 +77,10 @@ namespace Engine {
 		// and every ancestor) in the scene read. UiTreeParams::IncludeInactive lists the inactive ones, laid out as if they were
 		// active; otherwise only the play session's current layout can hold one, deactivated after the session laid it out.
 		bool Active = true;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 5; registered after Active): the play session's presentation
+		// text of the element's UiText (UiText:SetPresentationText), cut as Text is, which the element draws in place of its
+		// Text (TextBounds measures what it draws); empty when none is set and in the edit scene.
+		std::string PresentationText{};
 	};
 
 	// M25's F02: how far a text's box may reach beyond its rectangle before ui.tree reports it as overflowing, in pixels: the

@@ -407,6 +407,24 @@ namespace Engine {
 			return Inject(call, { { "type", "text" }, { "text", std::move(text) } });
 		}
 
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a frame-time signal, as a replay plays one back; the input
+		// path checks the name (1 to MaxScriptSignalNameBytes bytes of UTF-8).
+		static int InjectSignal(ScriptCall& call)
+		{
+			std::string name = Lua::CheckBoundedString(call, 1, MaxScriptSignalNameBytes);
+			return Inject(call, { { "type", "signal" }, { "name", std::move(name) } });
+		}
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): a suite's save data, which a test run keeps in memory.
+		static int SetSaveData(ScriptCall& call)
+		{
+			static_cast<void>(Host(call));
+			const Json values = Lua::CheckJson(call, 1);
+			Checked(call, call.PrepareHostMutation());
+			Checked(call, call.Engine->GetHost().ReplaceSaveData(values));
+			return 0;
+		}
+
 		static int Screenshot(ScriptCall& call)
 		{
 			IScriptTestHost& host = Host(call);
@@ -679,6 +697,10 @@ namespace Engine {
 				.Function("InjectMouseMove", Utils::InjectMouseMove, "(position: vector) -> ()", "Queue a mouse move to a finite XY position in view coordinates for the next unapplied input tick.", mutation)
 				.Function("InjectScroll", Utils::InjectScroll, "(delta: vector) -> ()", "Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next unapplied input tick.", mutation)
 				.Function("InjectText", Utils::InjectText, "(text: string) -> ()", "Queue committed text (non-empty UTF-8) for the next unapplied input tick, as typed characters.", mutation)
+				.Function("InjectSignal", Utils::InjectSignal, "(name: string) -> ()",
+					"Queue the frame-time signal name (1 to 64 bytes of UTF-8) for the next unapplied input tick, where Input.WasSignalled reads it: "
+					"how a test takes the decisions a live session posts with Input.PostSignal, which test runs ignore.",
+					mutation)
 				.Function("Screenshot", Utils::Screenshot, "(name: string) -> ()",
 					std::format("Capture a screenshot through the owning host; a suite takes at most {} screenshots, and a later call raises an error without capturing.", MaxScriptTestScreenshotsPerSuite), mutation)
 				.Function("ReloadScript", Utils::ReloadScript, "(asset: AssetRef) -> ()", "Synchronously reload a script in an editor test.", editor)
@@ -697,7 +719,14 @@ namespace Engine {
 					"Returns the seeded particle hash of a ParticleEmitter entity (the XXH64 of its live particles, random stream and emission "
 					"state) as 16 hexadecimal digits, or nil before its first Particles phase or without a ParticleEmitter; the same in every "
 					"configuration, so a suite compares it across runs; test suites only.",
-					pure);
+					pure)
+				.Function("SetSaveData", Utils::SetSaveData, "(values: {[string]: any}) -> ()",
+					std::format("Replaces the session's save data with values (keys of 1 to {} bytes, values SaveData.Set takes), as a game "
+								"finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an "
+								"Isolation \"Case\" suite starts empty again; a case that seeds the store and calls Scene.Reload() returns in that "
+								"tick, and a later case of an Isolation \"Suite\" suite sees the reloaded scene read it.",
+						MaxSaveDataKeyBytes),
+					mutation);
 			return {};
 		}
 

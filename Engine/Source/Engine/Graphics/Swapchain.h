@@ -167,6 +167,12 @@ namespace Engine {
 		// for, so Application does not call it on WindowResizeEvent (several events of one resize would each mark one).
 		void RequestRecreate();
 
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): changes the specification's VSync and, when it changed,
+		// requests a recreation (RequestRecreate), so the next AcquireNextImage chooses the present mode again
+		// (SwapchainSpecification::VSync's preference order). GetVSync reads the specification's.
+		void SetVSync(bool vsync);
+		[[nodiscard]] bool GetVSync() const;
+
 		// Test hooks for the windowed child of "Swapchain: resize, minimize and out-of-date recover": they make the next real
 		// call act on `result` through the same ClassifyAcquireResult or ClassifyPresentResult switch as a returned VkResult,
 		// so the recreation paths run without a compositor that produces the result on demand. Production code never calls

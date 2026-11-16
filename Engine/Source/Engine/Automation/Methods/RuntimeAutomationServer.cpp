@@ -1,6 +1,8 @@
 #include "EnginePCH.h"
 #include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 
+#include "Engine/Asset/AssetHandle.h"
+#include "Engine/Asset/AssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
@@ -32,6 +34,7 @@
 #include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -267,7 +270,13 @@ namespace Engine {
 			[[nodiscard]] SceneSummary MakeSceneSummary(const Scene& scene) const override
 			{
 				SceneSummary summary;
-				summary.Path = m_Host->Specification.ScenePath;
+				// The file the current scene came from (ADR 0038, friction F25): the reference path of the session's current
+				// scene asset (the start scene's, a recording's or a replay's, until a Scene.Load names another), else the
+				// start scene's (RuntimeAutomationServerSpecification::ScenePath).
+				const AssetHandle current = m_Host->Session->GetCurrentSceneAsset();
+				const AssetManager* assets = m_Host->Specification.Assets;
+				std::string file = assets != nullptr && current.IsValid() ? assets->GetReferencePath(current) : std::string();
+				summary.Path = file.empty() ? m_Host->Specification.ScenePath : std::move(file);
 				summary.Name = scene.GetName();
 				summary.Revision = ToAutomationCounter(scene.GetRevision());
 				summary.EntityCount = ToAutomationCounter(scene.GetEntityCount());

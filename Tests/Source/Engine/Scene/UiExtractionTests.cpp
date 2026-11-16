@@ -186,6 +186,46 @@ namespace Engine {
 			CHECK(plain.Color == glm::vec4(1.0f));
 		}
 
+		TEST_CASE("RenderExtraction: a presentation text draws in place of its element's Text in the element's own rectangle")
+		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): the request's presentation texts replace the drawn string
+			// only; the element's rectangle is the layout's, which never reads them. An empty one draws no text item.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const UiScene ui(scene);
+			const RenderExtractionRequest authored{ .Width = 128, .Height = 64 };
+			const Result<RenderSnapshot> before = ExtractRenderSnapshot(scene, authored);
+			REQUIRE_MESSAGE(before.has_value(), before.error().ToString());
+			const auto textItem = [&ui](const RenderSnapshot& snapshot) -> const UiDrawItem*
+			{
+				const auto found = std::ranges::find_if(snapshot.Ui.Items, [&ui](const UiDrawItem& item)
+				{
+					return item.Kind == UiDrawKind::Text && item.Entity == ui.Panel.GetUUID();
+				});
+				return found != snapshot.Ui.Items.end() ? &*found : nullptr;
+			};
+			REQUIRE(textItem(*before) != nullptr);
+			CHECK(textItem(*before)->Text == "Score");
+
+			UiPresentationTexts presentation{ { ui.Panel.GetUUID(), "16.7 ms" }, { UUID(0xDEAD), "nobody" } };
+			RenderExtractionRequest shown = authored;
+			shown.UiPresentation = &presentation;
+			const Result<RenderSnapshot> after = ExtractRenderSnapshot(scene, shown);
+			REQUIRE_MESSAGE(after.has_value(), after.error().ToString());
+			REQUIRE(textItem(*after) != nullptr);
+			CHECK(textItem(*after)->Text == "16.7 ms");
+			CHECK(textItem(*after)->Min == textItem(*before)->Min);
+			CHECK(textItem(*after)->Max == textItem(*before)->Max);
+			CHECK(after->Ui.Items.size() == before->Ui.Items.size());
+			// The authored text is untouched.
+			CHECK(ui.Panel.GetComponent<UiTextComponent>().Text == "Score");
+
+			presentation[ui.Panel.GetUUID()] = "";
+			const Result<RenderSnapshot> empty = ExtractRenderSnapshot(scene, shown);
+			REQUIRE_MESSAGE(empty.has_value(), empty.error().ToString());
+			CHECK(textItem(*empty) == nullptr);
+		}
+
 		TEST_CASE("RenderExtraction: a canvas's visible images and texts reach the Ui list in draw order with their scaled lengths")
 		{
 			Test::SceneTestFixture fixture;

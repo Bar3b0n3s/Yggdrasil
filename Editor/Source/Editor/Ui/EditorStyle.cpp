@@ -188,6 +188,7 @@ namespace Engine {
 				case EditorPanel::Automation:      return "Automation###Automation";
 				case EditorPanel::UndoHistory:     return "History###UndoHistory";
 				case EditorPanel::Native:          return "Native Code###Native";
+				case EditorPanel::SaveData:        return "Save Data###SaveData";
 				case EditorPanel::ProjectLauncher: return "Projects###ProjectLauncher";
 			}
 			ENGINE_ASSERT(false, "Unknown editor panel");

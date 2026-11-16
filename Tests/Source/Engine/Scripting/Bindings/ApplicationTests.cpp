@@ -20,6 +20,23 @@ namespace Engine {
 assert(Application.IsEditor() and not Application.IsHeadless() and Application.IsFocused())
 assert(Application.GetPlatform() == "TestPlatform" and Application.GetVersion() == "7.8.9")
 assert(Application.GetWindowSize() == vector.create(800, 600, 0))
+-- M28: the fixture is no play session, so it has no performance readout, and no display: no modes, the view as a
+-- window, and a request refused with its reason; a malformed request raises.
+assert(not pcall(Application.GetStats))
+assert(#Application.GetDisplayModes() == 0)
+local display = Application.GetDisplaySettings()
+assert(display.WindowMode == "Windowed" and display.Width == 800 and display.Height == 600 and display.RefreshRate == 0)
+local accepted, reason = Application.SetDisplaySettings({ WindowMode = "Borderless" })
+assert(accepted == false and type(reason) == "string")
+assert(not pcall(Application.SetDisplaySettings, { WindowMode = "Fullscreen" }))
+assert(not pcall(Application.SetDisplaySettings, { WindowMode = string.rep("x", 100000) }))
+assert(not pcall(Application.SetDisplaySettings, { Width = "wide" }))
+assert(not pcall(Application.SetDisplaySettings, { Width = 1.5 }))
+assert(not pcall(Application.SetDisplaySettings, { Width = 0 }))
+assert(not pcall(Application.SetDisplaySettings, { Height = 16385 }))
+assert(not pcall(Application.SetDisplaySettings, { RefreshRate = 1001 }))
+assert(not pcall(Application.SetDisplaySettings, { VSync = 1 }))
+assert(not pcall(Application.SetDisplaySettings, "Borderless"))
 Application.Quit(-12)
 return Time.GetTick() == 0
 )");

@@ -3,9 +3,20 @@
 #include "EditorCore/Automation/EditorMethodContext.h"
 
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Asset/AssetRegistry.h"
+#include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
+
+#include <format>
+#include <string>
+#include <string_view>
 
 namespace Engine {
 
@@ -488,6 +499,99 @@ return Script.Define("Fields", Fields)
 			CHECK(context->ResolveTargetScene(SceneTarget::Play, true, false).error().GetCode() == ErrorCode::InvalidState);
 			setup.GetEditor().CloseScene();
 			CHECK(context->ResolveTargetScene(SceneTarget::Edit, false, false).error().GetCode() == ErrorCode::InvalidState);
+		}
+
+		// ADR 0038, friction F25 (Rolling Ball S6): a play-scene read's scene block named the addressed open scene's file with
+		// the play scene's name and entity count. Its path is the file the session's current scene came from, play.start's
+		// scene and then the one a Scene.Load loaded, while its revision stays the open scene's, the session's owner.
+		TEST_CASE("EditorMethodContext: a play scene's summary names the scene file its current scene came from")
+		{
+			Test::AutomationFixture setup("ContextPlaySceneFile");
+			EditorContext& editor = setup.GetEditor();
+			// Two saved scene files beside the open Main, which stays the addressed scene: each is closed after its save.
+			const auto saveScene = [&setup](std::string_view path, int entities)
+			{
+				REQUIRE(setup.Call("scene.new", Json{ { "path", std::string(path) }, { "keepOpen", true } }).has_value());
+				for (int index = 0; index < entities; ++index)
+					REQUIRE(setup.Call("entity.create", Json{ { "name", std::format("Piece{}", index) } }).has_value());
+				REQUIRE(setup.Call("scene.close", Json{ { "save", true } }).has_value());
+			};
+			saveScene("Assets/Scenes/Level2.scene", 1);
+			saveScene("Assets/Scenes/Level3.scene", 2);
+			// The new files get their .meta, so their assets, at the next refresh; their imports are published before play.
+			REQUIRE(editor.GetAssets().Refresh());
+			editor.GetAssets().WaitIdle();
+			REQUIRE(editor.GetScene().GetName() == "Main");
+			const Json revision(editor.GetRevision());
+
+			// The two play-scene reads that report the scene block (the friction's was ui.tree's).
+			const auto checkPlayScene = [&setup, &revision](std::string_view path, std::string_view name, int entities)
+			{
+				for (const std::string_view method : { "scene.tree", "ui.tree" })
+				{
+					INFO(std::string(method));
+					const Result<Json> read = setup.Call(method, Json{ { "format", "Json" } });
+					REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+					const Json& scene = (*read)["scene"];
+					CHECK(scene["path"] == Json(std::string(path)));
+					CHECK(scene["name"] == Json(std::string(name)));
+					CHECK(scene["entityCount"] == Json(entities));
+					CHECK(scene["dirty"] == Json(false));
+					CHECK(scene["revision"] == revision);
+				}
+			};
+			REQUIRE(setup.Call("play.start", Json{ { "scene", "Assets/Scenes/Level2.scene" }, { "paused", true } }).has_value());
+			checkPlayScene("Assets/Scenes/Level2.scene", "Level2", 1);
+			REQUIRE(setup.Call("script.eval", Json{ { "context", "play" }, { "code", "Scene.Load(Assets.Load('Assets/Scenes/Level3.scene'))" } }).has_value());
+			REQUIRE(setup.Call("play.step", Json{ { "ticks", 1 } }).has_value());
+			checkPlayScene("Assets/Scenes/Level3.scene", "Level3", 2);
+
+			// The edit scene's summary is the open scene's.
+			const Result<Json> edit = setup.Call("scene.tree", Json{ { "format", "Json" }, { "target", "edit" } });
+			REQUIRE_MESSAGE(edit.has_value(), edit.error().ToString());
+			CHECK((*edit)["scene"]["path"] == Json("Assets/Scenes/Main.scene"));
+			CHECK((*edit)["scene"]["name"] == Json("Main"));
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
+		TEST_CASE("EditorMethodContext: play.start refreshes the assets first, so a scene file written since the last refresh plays with its scene asset")
+		{
+			Test::AutomationFixture setup("ContextPlayRefresh");
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Written.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Piece" } }).has_value());
+			REQUIRE(setup.Call("scene.close", Json{ { "save", true } }).has_value());
+			// The file is on disk, but no refresh has registered it yet.
+			const VfsPath written = VfsPath::Create("project", "Assets/Scenes/Written.scene").value();
+			REQUIRE(editor.GetVfs().Exists(written));
+			REQUIRE(editor.GetAssets().GetRegistry().FindBySourcePath(written) == nullptr);
+
+			REQUIRE(setup.Call("play.start", Json{ { "scene", "Assets/Scenes/Written.scene" }, { "paused", true } }).has_value());
+			const AssetRecord* record = editor.GetAssets().GetRegistry().FindBySourcePath(written);
+			REQUIRE(record != nullptr);
+			const PlaySession* session = editor.GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			CHECK(session->GetCurrentSceneAsset() == record->Metadata.Handle);
+			const Result<Json> read = setup.Call("scene.tree", Json{ { "format", "Json" } });
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK((*read)["scene"]["path"] == Json("Assets/Scenes/Written.scene"));
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
+		TEST_CASE("EditorMethodContext: play.start refused while a session runs leaves the assets unrefreshed")
+		{
+			Test::AutomationFixture setup("ContextPlayRefreshRefused");
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(setup.Call("play.start", Json{ { "paused", true } }).has_value());
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Late.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("scene.close", Json{ { "save", true } }).has_value());
+			const VfsPath late = VfsPath::Create("project", "Assets/Scenes/Late.scene").value();
+			REQUIRE(editor.GetAssets().GetRegistry().FindBySourcePath(late) == nullptr);
+			const Result<Json> refused = setup.Call("play.start", Json{ { "scene", "Assets/Scenes/Late.scene" } });
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetAssets().GetRegistry().FindBySourcePath(late) == nullptr);
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
 		}
 
 		TEST_CASE("EditorMethodContext: entity summaries carry the id, name and path")

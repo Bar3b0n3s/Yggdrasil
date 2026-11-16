@@ -29,7 +29,7 @@ namespace Engine {
 
 	TEST_SUITE("Session")
 	{
-		TEST_CASE("PlayInputEventCodec: automation and replay cover the same nine event kinds")
+		TEST_CASE("PlayInputEventCodec: automation and replay cover the same ten event kinds")
 		{
 			auto input = Input();
 			const Json events = Json::array({ { { "type", "ACTION" }, { "name", "Jump" }, { "state", "tap" } },
@@ -41,6 +41,7 @@ namespace Engine {
 				{ { "type", "scroll" }, { "delta", { 0, 2 } } },
 				{ { "type", "gamepadButton" }, { "gamepad", 3 }, { "button", "south" }, { "state", "Up" } },
 				{ { "type", "gamepadAxis" }, { "gamepad", 2 }, { "axis", "LeftX" }, { "value", -0.25f } },
+				{ { "type", "signal" }, { "name", "FrameTimeExceeded" } }, // M28 (Docs/Decisions/0043-m28-game-services.md decision 6)
 				{ { "type", "text" }, { "text", "snow â˜ƒ" } } });
 			for (const auto& event : events)
 			{

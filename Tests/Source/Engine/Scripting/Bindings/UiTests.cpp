@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Renderer/UiDrawList.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -8,12 +9,14 @@
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiImageComponent.h"
 #include "Engine/Scene/Components/UiRectComponent.h"
+#include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/ScriptTestFixture.h"
 
@@ -21,6 +24,7 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -64,6 +68,10 @@ namespace Engine {
 		{
 			Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
 			PopulateUiModuleScene(fixture.GetScene());
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): a text element for the UiText presentation methods.
+			Entity caption = fixture.GetScene().CreateEntity("Caption", fixture.GetScene().FindEntityByPath("/Canvas"));
+			caption.AddComponent<UiRectComponent>(UiRectComponent{});
+			caption.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "--", .RaycastTarget = false });
 			UiSystem ui;
 			ui.LayoutStep(fixture.GetScene(), glm::uvec2(320, 180));
 			fixture.Ui = &ui;
@@ -71,16 +79,22 @@ namespace Engine {
 			const auto result = fixture.Evaluate(R"(
 assert(Ui.GetFocus() == nil and Ui.GetHovered() == nil and Ui.GetPressed() == nil and not Ui.IsPointerOverUi())
 assert(not pcall(Ui.SetFocus, Scene.FindByName("Label")))
+local caption = Scene.FindByName("Caption").UiText
+assert(caption:GetPresentationText() == nil)
+caption:SetPresentationText("16.7 ms")
+assert(caption:GetPresentationText() == "16.7 ms" and caption.Text == "--")
 local rect = Ui.GetRect(Scene.FindByName("Button"))
 return rect ~= nil and rect.Min == vector.create(10, 20, 0) and rect.Max == vector.create(110, 50, 0)
 )");
 			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
 			CHECK(result->Value.Get() == Json(true));
+			REQUIRE(ui.FindPresentationText(caption.GetUUID()) != nullptr);
+			CHECK(*ui.FindPresentationText(caption.GetUUID()) == "16.7 ms");
 			const auto coverage = fixture.GetApi().GetCoverage(mode);
 			REQUIRE(coverage.has_value());
 			for (const auto& counter : coverage->Members)
 			{
-				if (counter.Owner == "Ui")
+				if (counter.Owner == "Ui" || (counter.Owner == "UiText" && counter.Member.ends_with("PresentationText")))
 				{
 					CAPTURE(counter.Member);
 					CHECK(counter.Calls > 0);
@@ -93,6 +107,53 @@ return rect ~= nil and rect.Min == vector.create(10, 20, 0) and rect.Max == vect
 
 	TEST_SUITE("Scripting")
 	{
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 5; the W28.1 review's finding 8): presentation text is at most
+		// MaxScriptPresentationTextBytes of valid UTF-8, refused before the UI keeps it, and an evaluation without a session's
+		// UI (an edit evaluation) cannot show it.
+		TEST_CASE("UiBindings: presentation text is refused past its byte limit, as invalid UTF-8 and without a game UI")
+		{
+			Test::ScriptTestFixture fixture;
+			PopulateUiModuleScene(fixture.GetScene());
+			Entity caption = fixture.GetScene().CreateEntity("Caption", fixture.GetScene().FindEntityByPath("/Canvas"));
+			caption.AddComponent<UiRectComponent>(UiRectComponent{});
+			caption.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "--", .RaycastTarget = false });
+			UiSystem ui;
+			ui.LayoutStep(fixture.GetScene(), glm::uvec2(320, 180));
+			fixture.Ui = &ui;
+			REQUIRE(fixture.Start().has_value());
+			const auto result = fixture.Evaluate(std::format(R"(
+local caption = Scene.FindByName("Caption").UiText
+caption:SetPresentationText(string.rep("x", {0}))
+assert(#caption:GetPresentationText() == {0})
+assert(not pcall(function() caption:SetPresentationText(string.rep("x", {1})) end))
+assert(#caption:GetPresentationText() == {0})
+assert(not pcall(function() caption:SetPresentationText("\xff") end))
+local set = caption.SetPresentationText
+assert(not pcall(function() set(Scene.FindByName("Button").UiRect, "x") end))
+return true
+)",
+				MaxScriptPresentationTextBytes, MaxScriptPresentationTextBytes + 1));
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			CHECK(result->Value.Get() == Json(true));
+			REQUIRE(ui.FindPresentationText(caption.GetUUID()) != nullptr);
+			CHECK(ui.FindPresentationText(caption.GetUUID())->size() == MaxScriptPresentationTextBytes);
+
+			// Without a session's UI: an edit evaluation refuses the set and reads nothing.
+			Test::ScriptTestFixture edit;
+			PopulateUiModuleScene(edit.GetScene());
+			Entity label = edit.GetScene().CreateEntity("Caption", edit.GetScene().FindEntityByPath("/Canvas"));
+			label.AddComponent<UiRectComponent>(UiRectComponent{});
+			label.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "--", .RaycastTarget = false });
+			REQUIRE(edit.Start().has_value());
+			const auto refused = edit.Evaluate(R"(
+local caption = Scene.FindByName("Caption").UiText
+assert(not pcall(function() caption:SetPresentationText("16.7 ms") end))
+return caption:GetPresentationText() == nil
+)");
+			REQUIRE_MESSAGE(refused.has_value(), (refused ? "" : refused.error().ToString()));
+			CHECK(refused->Value.Get() == Json(true));
+		}
+
 		// Decision 28: GetRect reads the UiSystem's current layout in scene pixels (nil for an entity it does not lay out); with
 		// no interaction yet the state reads empty; without a session's UI (an edit evaluation) every read reports nothing and
 		// SetFocus raises, with an element or nil.
@@ -234,6 +295,79 @@ return {rect.Min.x, rect.Min.y, rect.Max.x, rect.Max.y}
 				FindUiLayoutNode((*session)->GetUi().GetLayout(), (*session)->GetScene().FindEntityByPath("/Canvas/Button").GetUUID());
 			REQUIRE(node != nullptr);
 			CHECK(node->Min == glm::vec2(10.0f, 20.0f));
+		}
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): a behaviour shows a frame-paced value through presentation
+		// text in OnUpdate; the session's extraction draws it in place of Text, the state hash never sees it, and the fixed
+		// step cannot set it.
+		TEST_CASE("UiText: a behaviour's presentation text draws in the session's extraction, stays out of the state hash and is refused in the fixed step")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle script(0x7a2805);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Hud.luau", R"(
+local Hud = {}
+function Hud:OnFixedUpdate()
+	if self.FixedDone then return end
+	self.FixedDone = true
+	local ok = pcall(function() self.Entity.UiText:SetPresentationText("tick") end)
+	Scene.CreateEntity("trace:fixed:" .. tostring(ok))
+end
+function Hud:OnUpdate()
+	self.Frames = (self.Frames or 0) + 1
+	self.Entity.UiText:SetPresentationText(string.format("%d frames", self.Frames))
+end
+return Script.Define("Hud", Hud)
+)"));
+			Scene& scene = fixture.GetScene();
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity hud = scene.CreateEntity("Hud", canvas);
+			hud.AddComponent<UiRectComponent>(UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f), .Pivot = glm::vec2(0.0f), .Size = glm::vec2(200.0f, 40.0f) });
+			hud.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "--" });
+			ScriptSlot slot{};
+			slot.Script.SetHandle(script);
+			hud.AddComponent<ScriptComponent>(ScriptComponent{ { slot } });
+			PlaySessionSpecification specification;
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Serial = 1;
+			auto created = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(created.has_value(), (created ? "" : created.error().ToString()));
+			PlaySession& session = **created;
+			const auto frame = [&session]()
+			{
+				session.FixedStep();
+				session.FrameUpdate(FrameTime{ .DeltaTime = session.GetFixedDelta(), .UnscaledDeltaTime = session.GetFixedDelta(), .Alpha = 1.0, .FrameIndex = 0 });
+			};
+			frame();
+			const UUID hudId = session.GetScene().FindEntityByPath("/Canvas/Hud").GetUUID();
+			const auto drawnText = [&session, hudId]() -> std::string
+			{
+				for (const UiDrawItem& item : session.GetLastExtraction().Ui.Items)
+					if (item.Kind == UiDrawKind::Text && item.Entity == hudId)
+						return item.Text;
+				return "<none>";
+			};
+			const auto hasEntityNamed = [&session](std::string_view name)
+			{
+				for (const UUID id : session.GetScene().GetCanonicalOrder())
+					if (session.GetScene().FindEntityByID(id).GetName() == name)
+						return true;
+				return false;
+			};
+			CHECK(hasEntityNamed("trace:fixed:false"));
+			REQUIRE(session.GetUi().FindPresentationText(hudId) != nullptr);
+			CHECK(*session.GetUi().FindPresentationText(hudId) == "1 frames");
+			CHECK(drawnText() == "1 frames");
+			CHECK(session.GetScene().FindEntityByID(hudId).GetComponent<UiTextComponent>().Text == "--");
+			// Clearing it (an evaluation, which may set it in either phase) changes no hash and draws the authored Text again.
+			const uint64_t hash = session.ComputeStateHash();
+			REQUIRE(session.GetScripts()->Evaluate("Scene.FindByName('Hud').UiText:SetPresentationText(nil)", {}));
+			CHECK(session.ComputeStateHash() == hash);
+			CHECK(session.GetUi().FindPresentationText(hudId) == nullptr);
 		}
 
 		// Decision 3 (the review of W22.2's major, the lead's decision 1): the session lays its scene out before the scene's

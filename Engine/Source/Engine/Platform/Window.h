@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Platform/Events.h"
 
 #include <glm/vec2.hpp>
@@ -30,6 +31,12 @@ namespace Engine {
 		uint32_t Height = 900;
 		bool Resizable = true;
 		bool Fullscreen = false; // full screen on the primary monitor at its current video mode
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): the display mode a Runtime restores from user://Display.json,
+		// applied at creation so the window never shows in another mode first: Borderless covers the primary monitor at its
+		// current mode, undecorated (Width and Height ignored); Exclusive is full screen on the primary monitor at the video
+		// mode closest to Width x Height and RefreshRate (0: any). Windowed (the default) keeps Fullscreen's meaning.
+		DisplayWindowMode DisplayMode = DisplayWindowMode::Windowed;
+		uint32_t RefreshRate = 0;
 	};
 
 	// Receives every event the window delivers, on the main thread, during PollEvents or WaitEventsTimeout.
@@ -112,6 +119,10 @@ namespace Engine {
 		[[nodiscard]] glm::vec2 GetContentScale() const;
 
 		[[nodiscard]] bool IsMinimized() const;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): whether the window is full screen on a monitor (GLFW's
+		// monitor window: the project's Fullscreen, or the Exclusive display mode); false again once it left the monitor, also
+		// when the monitor was disconnected.
+		[[nodiscard]] bool IsFullScreen() const;
 		[[nodiscard]] bool IsFocused() const;
 
 		// The GLFWwindow*, for the code outside Platform that must call GLFW with it: the GLFW glue of Dear ImGui

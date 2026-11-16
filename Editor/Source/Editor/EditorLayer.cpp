@@ -13,6 +13,7 @@
 #include "Editor/Panels/LightingBakeAction.h"
 #include "Editor/Panels/NativePanel.h"
 #include "Editor/Panels/ProjectSettingsPanel.h"
+#include "Editor/Panels/SaveDataPanel.h"
 #include "Editor/Panels/SceneHierarchyPanel.h"
 #include "Editor/Panels/SceneViewportPanel.h"
 #include "Editor/Panels/StatsPanel.h"
@@ -175,6 +176,7 @@ namespace Engine {
 		AutomationPanel Automation{};
 		UndoHistoryPanel History{};
 		NativePanel Native{};
+		SaveDataPanel SaveData{};                 // M28: editor play's save data
 		AnimationPreviewPanel AnimationPreview{}; // M23: a window of its own while the selection holds an Animator
 		GraphEditorPanel GraphEditor{};           // M24: a window of its own while a graph is open in it
 		ProjectLauncher Launcher{};
@@ -791,7 +793,7 @@ namespace Engine {
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::SceneViewport), center);
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::GameViewport), center);
 			for (const EditorPanel panel : { EditorPanel::ContentBrowser, EditorPanel::Console, EditorPanel::Diagnostics,
-					 EditorPanel::Stats, EditorPanel::Automation, EditorPanel::UndoHistory, EditorPanel::Native })
+					 EditorPanel::Stats, EditorPanel::Automation, EditorPanel::UndoHistory, EditorPanel::Native, EditorPanel::SaveData })
 				ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(panel), bottom);
 			ImGui::DockBuilderDockWindow(Utils::EditorWindowTitle(EditorPanel::ProjectSettings), right);
 			ImGui::DockBuilderFinish(dock);
@@ -1092,6 +1094,7 @@ namespace Engine {
 					case EditorPanel::Automation:      drawn = m_State->Automation.Draw(context); break;
 					case EditorPanel::UndoHistory:     drawn = m_State->History.Draw(context); break;
 					case EditorPanel::Native:          drawn = m_State->Native.Draw(context); break;
+					case EditorPanel::SaveData:        drawn = m_State->SaveData.Draw(context); break;
 					case EditorPanel::ProjectLauncher:
 						if (!editor.HasProject())
 							drawn = m_State->Launcher.Draw(context);

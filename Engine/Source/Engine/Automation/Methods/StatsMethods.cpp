@@ -6,10 +6,9 @@
 #include "Engine/Platform/ProcessHeap.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Renderer/RenderStats.h"
-#include "Engine/Scene/Physics2DSystem.h"
-#include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/SessionStatistics.h"
 
 #include <cstdint>
 #include <limits>
@@ -29,9 +28,15 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(StatsGetResult result, context.GetHostStatistics());
 		if (!params.Views)
 			result.Views.clear();
-		// M21's milestone review: the bodies of both physics worlds, so the hardening soak's no-growth rule sees 2D bodies too.
+		// M21's milestone review: the bodies of both physics worlds, so the hardening soak's no-growth rule sees 2D bodies too;
+		// M28: their awake bodies and the live particles (SessionStatistics).
 		if (const PlaySession* session = context.GetPlaySession(); session != nullptr)
-			result.Bodies = CountSessionBodies(*session);
+		{
+			const SessionStatistics counters = ReadSessionStatistics(*session);
+			result.Bodies = counters.Bodies;
+			result.ActiveBodies = counters.ActiveBodies;
+			result.Particles = counters.Particles;
+		}
 		if (const PlaySession* session = context.GetPlaySession(); session != nullptr && session->GetScripts() != nullptr)
 		{
 			const ScriptMemoryState memory = session->GetScripts()->GetMemoryState();
@@ -64,12 +69,6 @@ namespace Engine {
 		return result;
 	}
 
-	uint32_t CountSessionBodies(const PlaySession& session)
-	{
-		const Physics2DSystem* physics2D = session.GetPhysics2D();
-		return session.GetPhysics().GetStats().BodyCount + (physics2D != nullptr ? physics2D->GetStats().BodyCount : 0);
-	}
-
 	StatsViewSummary MakeStatsViewSummary(std::string name, const RenderStats& stats)
 	{
 		StatsViewSummary result;
@@ -99,6 +98,9 @@ namespace Engine {
 		result.SsrTiles = stats.SsrTiles;
 		result.SsrTracedTiles = stats.SsrTracedTiles;
 		result.SsrTracedPixels = stats.SsrTracedPixels;
+		result.Lights = stats.VisibleLights;
+		result.DroppedLights = stats.DroppedLights;
+		result.SkinnedMeshes = stats.SkinnedMeshes;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -166,7 +168,11 @@ namespace Engine {
 				"The tiles the SSR trace covered, those holding a glossy pixel (roughness at most SsrMaxRoughness, the sky excluded); 0 when unavailable.")
 			.Field("ssrTracedPixels", &StatsViewSummary::SsrTracedPixels,
 				"The trace pixels that traced a reflection in the covered tiles (at half resolution each stands for four scene pixels); 0 when "
-				"unavailable.");
+				"unavailable.")
+			.Field("lights", &StatsViewSummary::Lights, "Lights the frame shaded after culling, at most maxShadedLights.")
+			.Field("droppedLights", &StatsViewSummary::DroppedLights,
+				"Visible lights beyond maxShadedLights, left unshaded (RENDER_LIGHT_LIMIT_EXCEEDED's).")
+			.Field("skinnedMeshes", &StatsViewSummary::SkinnedMeshes, "Meshes with a skin the frame deformed (morph-only meshes are not counted).");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")
@@ -194,7 +200,9 @@ namespace Engine {
 				"with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' "
 				"gameResolution). The Runtime supplies game only.")
 			.Field("deviceLosses", &StatsGetResult::DeviceLosses,
-				"The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none.");
+				"The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none.")
+			.Field("activeBodies", &StatsGetResult::ActiveBodies, "Awake physics bodies of the play session, the 3D world's and the 2D world's together; 0 without a session.")
+			.Field("particles", &StatsGetResult::Particles, "Live particles of the play session after its last Particles phase; 0 without a session.");
 	}
 
 	void RegisterStatsMethods(MethodRegistry& methods)

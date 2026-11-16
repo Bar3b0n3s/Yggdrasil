@@ -71,8 +71,10 @@ namespace Engine {
 		// The game's asset manager (AutomationMethodContext::GetAssets: entity.bounds reads mesh bounds through it), a
 		// documented back-reference that outlives the server; null makes entity.bounds Unsupported.
 		AssetManager* Assets = nullptr;
-		// The play scene's project-relative path (the start scene's reference path in Game.pak), which scene.tree's
-		// SceneSummary reports; empty: none.
+		// The start scene's project-relative path (its reference path in Game.pak; empty: none). The SceneSummary of
+		// scene.tree, ui.tree and session.info reports the reference path in Assets of the session's current scene asset
+		// (PlaySession::GetCurrentSceneAsset: the start scene, a recording's or a replay's, or the one a Scene.Load named),
+		// and this path when that asset has none (ADR 0038, friction F25).
 		std::string ScenePath{};
 		// As AutomationServerSpecification::WallClock: play.step's frame budget is measured with it; empty:
 		// std::chrono::steady_clock::now. Tests script it.

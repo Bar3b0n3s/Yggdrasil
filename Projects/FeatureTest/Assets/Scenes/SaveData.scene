@@ -1,0 +1,60 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "SaveData",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"Script": 2
+	},
+	"Entities": [
+		{
+			"ID": "e456be02a7a2a0ea",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.05, 0.05, 0.08]
+				}
+			}
+		},
+		{
+			"ID": "8b7116acdd152eae",
+			"Name": "Gate",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "98d469c9e850cba8",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

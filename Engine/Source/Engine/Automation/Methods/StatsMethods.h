@@ -11,7 +11,6 @@ namespace Engine {
 
 	class AutomationMethodContext;
 	class MethodRegistry;
-	class PlaySession;
 	class TypeRegistry;
 	struct RenderStats;
 
@@ -73,6 +72,11 @@ namespace Engine {
 		uint32_t SsrTiles = 0;
 		uint32_t SsrTracedTiles = 0;
 		uint32_t SsrTracedPixels = 0;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4; appended after M29's and M32's rows, which landed first):
+		// RenderStats::VisibleLights, DroppedLights and SkinnedMeshes.
+		uint32_t Lights = 0;
+		uint32_t DroppedLights = 0;
+		uint32_t SkinnedMeshes = 0;
 	};
 
 	struct StatsGetResult
@@ -99,15 +103,15 @@ namespace Engine {
 		// host recovered from since it started (GraphicsDevice::GetRecoveryCount), in the Editor and the Runtime; 0 with
 		// renderer none. Filled and registered ("deviceLosses") by W18.3's integration.
 		uint32_t DeviceLosses = 0;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the play session's awake bodies of both worlds and its
+		// live particles (SessionStatistics); 0 without a session.
+		uint32_t ActiveBodies = 0;
+		uint32_t Particles = 0;
 	};
 
 	// Owned diagnostic copy of one displayed renderer's history, preserving both CPU and delayed GPU identities.
 	// No rendering, waits, asset access or mutation. An unavailable history produces only the supplied view name.
 	[[nodiscard]] StatsViewSummary MakeStatsViewSummary(std::string name, const RenderStats& stats);
-
-	// M21's milestone review: the live bodies of `session`'s physics worlds, the 3D world's and the 2D world's together:
-	// stats.get's bodies (which the hardening soak's no-growth rule reads) and the Runtime's stats overlay.
-	[[nodiscard]] uint32_t CountSessionBodies(const PlaySession& session);
 
 	namespace Automation {
 

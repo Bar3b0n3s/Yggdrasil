@@ -2,7 +2,9 @@
 
 #include "Engine/Automation/Methods/RuntimeAutomationServer.h"
 
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Asset/AssetTypeRegistration.h"
+#include "Engine/Asset/DocumentData.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Automation/Methods/RegisterSharedMethods.h"
@@ -12,15 +14,19 @@
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Mounts/MemoryMount.h"
+#include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/ReplayRecorder.h"
 #include "Support/ExpectLog.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/TempDirectory.h"
 #include "Support/WaitUntil.h"
@@ -56,12 +62,12 @@ namespace Engine {
 		}
 
 		// A Runtime server over a session of a scene with a "Ball" under "Game" (and whatever `build` adds before the session
-		// starts), and an in-process client.
+		// starts, and whatever `configure` sets in its specification), and an in-process client.
 		class RuntimeServerFixture
 		{
 		public:
 			explicit RuntimeServerFixture(RuntimeAutomationServerSpecification specification = { .GameName = "Tiny" },
-				const std::function<void(Scene&)>& build = {})
+				const std::function<void(Scene&)>& build = {}, const std::function<void(PlaySessionSpecification&)>& configure = {})
 				: m_Registry(CreateRuntimeRegistry())
 			{
 				Scene& scene = m_Scene.GetScene();
@@ -71,6 +77,8 @@ namespace Engine {
 					build(scene);
 				PlaySessionSpecification session;
 				session.Registry = m_Registry.get();
+				if (configure)
+					configure(session);
 				Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(session, scene);
 				REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
 				m_Session = std::move(*created);
@@ -717,6 +725,51 @@ namespace Engine {
 			// Without the game's asset manager entity.bounds cannot read meshes.
 			const Json bounds = fixture.Call("entity.bounds", Json{ { "entities", Json::array({ "/Game" }) } });
 			CHECK(RuntimeServerFixture::GetErrorCode(bounds) == static_cast<int64_t>(RpcErrorCode::Unsupported));
+		}
+
+		// ADR 0038, friction F25: the scene block names the file the session's current scene came from, the start scene's
+		// until a Scene.Load names another, as the editor's play scene does; session.info's scene is the same.
+		TEST_CASE("RuntimeAutomationServer: the scene summary names the scene file the current scene came from")
+		{
+			// A "Next" scene of three entities that a Scene.Load reads, and the start scene's asset, of which only the path is
+			// read (the session starts from the fixture's scene), holding the same document.
+			const Scope<TypeRegistry> types = CreateRuntimeRegistry();
+			UUIDGenerator ids = UUIDGenerator::CreateDeterministic(0);
+			const Scope<Scene> authored = Scene::Create({ .Name = "Next", .Registry = types.get(), .IdGenerator = &ids });
+			for (const char* name : { "Floor", "Ball", "Goal" })
+				static_cast<void>(authored->CreateEntity(name));
+			Result<Json> document = SceneSerializer::ToJson(*authored);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			const Ref<SceneData> next = CreateRef<SceneData>();
+			next->Document = CreateRef<const Json>(std::move(*document));
+			const AssetHandle startHandle(0x7f2501);
+			const AssetHandle nextHandle(0x7f2502);
+			Test::InMemoryAssetManager assets;
+			assets.Publish(startHandle, next, "Assets/Scenes/Main.scene");
+			assets.Publish(nextHandle, next, "Assets/Scenes/Next.scene");
+			RuntimeServerFixture fixture({ .GameName = "Tiny", .Assets = &assets, .ScenePath = "Assets/Scenes/Main.scene" }, {},
+				[&assets, startHandle](PlaySessionSpecification& session)
+			{
+				session.Assets = &assets;
+				session.SceneAsset = startHandle;
+			});
+			const Json started = fixture.Call("scene.tree", Json{ { "format", "Json" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(started) == 0, started.dump());
+			CHECK(started["result"]["scene"]["path"] == Json("Assets/Scenes/Main.scene"));
+			CHECK(started["result"]["scene"]["name"] == Json("Test"));
+
+			const Json loading = fixture.Call("script.eval", Json{ { "context", "play" }, { "code", "Scene.Load(Assets.Load(\"Assets/Scenes/Next.scene\"))" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(loading) == 0, loading.dump());
+			fixture.GetSession().Tick();
+			REQUIRE(fixture.GetSession().GetCurrentSceneAsset() == nextHandle);
+			const Json loaded = fixture.Call("scene.tree", Json{ { "format", "Json" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(loaded) == 0, loaded.dump());
+			const Json& scene = loaded["result"]["scene"];
+			CHECK(scene["path"] == Json("Assets/Scenes/Next.scene"));
+			CHECK(scene["name"] == Json("Next"));
+			CHECK(scene["entityCount"] == Json(3));
+			CHECK(scene["dirty"] == Json(false));
+			CHECK(fixture.Call("session.info")["result"]["scene"]["path"] == Json("Assets/Scenes/Next.scene"));
 		}
 
 		// M20 (Docs/Decisions/0031-m20-contract.md decision 16): the Runtime has no open scenes, so a scene target, a path or an

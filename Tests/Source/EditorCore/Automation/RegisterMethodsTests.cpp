@@ -41,7 +41,8 @@ namespace Engine {
 			"physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
 			"play.setTimeScale", "play.setWorldPaused", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
-			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
+			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "savedata.clear", "savedata.get", "savedata.set",
+			"scene.activate", "scene.close", "scene.diff", "scene.get",
 			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
 			"session.hello", "session.info", "session.shutdown", "shaders.reload", "stats.get", "terrain.edit", "terrain.importHeightmap", "test.list", "test.run",
 			"tilemap.paint", "ui.createWidget", "ui.tree", "viewport.camera", "viewport.frame", "viewport.pick", "viewport.screenshot", "viewport.setOptions" };
@@ -128,8 +129,9 @@ namespace Engine {
 				"native.getComponents", "native.load", "native.read",
 				"native.setComponents", "native.status", "native.write", "play.start", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "project.create",
 				"project.export", "project.getSettings", "project.open", "project.save", "project.setSettings", "project.upgrade", "project.validate",
-				"scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open", "scene.query", "scene.save", "scene.tree",
-				"script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write", "terrain.edit", "terrain.importHeightmap",
+				"savedata.clear", "savedata.get", "savedata.set", "scene.activate", "scene.close", "scene.diff", "scene.list", "scene.new", "scene.open",
+				"scene.query", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.read", "script.write",
+				"terrain.edit", "terrain.importHeightmap",
 				"test.run", "tilemap.paint", "ui.createWidget", "ui.tree", "viewport.screenshot" };
 			// The edit.batch ops (ADR 0008 decision 8): pure reads and methods whose effects all go through Execute. asset.import and
 			// asset.reimport are pending operations; project.refreshAssets writes outside a command (ADR 0010 decision 20).
@@ -301,9 +303,10 @@ namespace Engine {
 			// decision 26), M22's ui_tree (Docs/Decisions/0033-m22-contract.md decision 8) and ui_create_widget (decision 32), M23's
 			// animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), M24's ten graph tools: the nine graph edit and read
 			// tools, every one but graph.moveNodes (Docs/Decisions/0035-m24-contract.md decision 12), and graph_live_values (decision
-			// 14), and M26's lighting_bake, terrain_edit and terrain_import_heightmap (Docs/Decisions/0037-m26-contract.md decisions 8,
-			// 20 and 23).
-			CHECK(catalog["Tools"].size() == 82);
+			// 14), M26's lighting_bake, terrain_edit and terrain_import_heightmap (Docs/Decisions/0037-m26-contract.md decisions 8,
+			// 20 and 23), and M28's savedata_get, savedata_set and savedata_clear (Docs/Decisions/0043-m28-game-services.md
+			// decision 8).
+			CHECK(catalog["Tools"].size() == 85);
 			for (Json& tool : catalog["Tools"])
 			{
 				INFO(tool["name"].dump());

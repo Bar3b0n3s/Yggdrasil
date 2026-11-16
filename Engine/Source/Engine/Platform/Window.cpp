@@ -389,7 +389,34 @@ namespace Engine {
 		GLFWmonitor* monitor = nullptr;
 		int width = static_cast<int>(specification.Width);
 		int height = static_cast<int>(specification.Height);
-		if (specification.Fullscreen)
+		if (specification.DisplayMode != DisplayWindowMode::Windowed)
+		{
+			// M28 (decision 3): a restored display mode, on the primary monitor.
+			GLFWmonitor* primary = glfwGetPrimaryMonitor();
+			const GLFWvidmode* mode = primary != nullptr ? glfwGetVideoMode(primary) : nullptr;
+			if (mode == nullptr)
+			{
+				return MakeError(ErrorCode::Unsupported, "cannot create window '{}' in {} mode: no primary monitor ({})", specification.Title,
+					DisplayWindowModeToString(specification.DisplayMode), GlfwLibrary::TakeErrorDescription());
+			}
+			if (specification.DisplayMode == DisplayWindowMode::Exclusive)
+			{
+				monitor = primary;
+				glfwWindowHint(GLFW_REFRESH_RATE, specification.RefreshRate != 0 ? static_cast<int>(specification.RefreshRate) : GLFW_DONT_CARE);
+			}
+			else
+			{
+				int left = 0;
+				int top = 0;
+				glfwGetMonitorPos(primary, &left, &top);
+				glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
+				glfwWindowHint(GLFW_POSITION_X, left);
+				glfwWindowHint(GLFW_POSITION_Y, top);
+				width = mode->width;
+				height = mode->height;
+			}
+		}
+		else if (specification.Fullscreen)
 		{
 			monitor = glfwGetPrimaryMonitor();
 			const GLFWvidmode* mode = monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
@@ -520,6 +547,12 @@ namespace Engine {
 	{
 		Impl::CheckUsable(m_Impl.get(), "GetCursorMode");
 		return m_Impl->Cursor;
+	}
+
+	bool Window::IsFullScreen() const
+	{
+		Impl::CheckUsable(m_Impl.get(), "IsFullScreen");
+		return glfwGetWindowMonitor(m_Impl->Handle) != nullptr;
 	}
 
 	uint32_t Window::GetWidth() const

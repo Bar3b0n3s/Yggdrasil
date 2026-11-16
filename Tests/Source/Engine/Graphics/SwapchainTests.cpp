@@ -5,6 +5,7 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Platform/Process.h"
 #include "Engine/Platform/Window.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -15,7 +16,9 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <algorithm>
 #include <optional>
+#include <tuple>
 
 namespace Engine {
 
@@ -484,6 +487,125 @@ namespace Engine {
 			// RetryAfterTrim), through a real window in a child process. It passes before W18.4 too, which changes the
 			// recreation, and keeps that half of the rule from regressing.
 			std::vector<std::string> arguments = { "--windowed-child=Swapchain: a recreation that fails without running out of memory returns Gpu without a trim" };
+			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stdout: ", child->StandardOutput);
+			INFO("child stderr: ", child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
+		// Runs only in a windowed child process: M28 (Docs/Decisions/0043-m28-game-services.md decision 3) the run-time display
+		// switches a game's options menu makes. VSync recreates the swapchain with the present mode chosen again; a window
+		// switched to Borderless (covering its monitor at the monitor's current video mode, which never changes the desktop's
+		// mode) and straight back to Windowed keeps presenting at each size. Exclusive changes the desktop's video mode, so no
+		// test switches to it; an Exclusive mode the monitor does not list is refused before anything changes.
+		TEST_CASE("Swapchain: VSync and the display mode switch at run time and presenting goes on"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			Result<Scope<EngineContext>> created = EngineContext::Create({
+				.WorkerCount = 0,
+				.Window = WindowSpecification{ .Title = "Display", .Width = 320, .Height = 240 },
+				.Graphics = GraphicsSpecification{
+					.Validation = true,
+					.SynchronizationValidation = true,
+					.MaxApiVersion = Test::GetTestOptions().VulkanApi,
+				},
+			});
+			if (!created.has_value())
+			{
+				Test::ReportGpuUnavailable(created.error().ToString());
+				return;
+			}
+			EngineContext& context = **created;
+			GraphicsDevice& device = *context.GetGraphicsDevice();
+			Window& window = *context.GetWindow();
+			Result<Scope<Swapchain>> swapchain = Swapchain::Create(device, window, { .VSync = true, .FramesInFlight = 2 });
+			REQUIRE_MESSAGE(swapchain.has_value(), swapchain.error().ToString());
+			Scope<FramePacer> framePacer = CreateScope<FramePacer>(device, 2);
+			FramePacer& pacer = *framePacer;
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 3) == 0);
+
+			// VSync off: one recreation, then the frames present; the same value again requests nothing; on: FIFO again.
+			uint32_t recreations = (*swapchain)->GetRecreationCount();
+			(*swapchain)->SetVSync(false);
+			CHECK_FALSE((*swapchain)->GetVSync());
+			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 3) == 1);
+			CHECK((*swapchain)->GetRecreationCount() == recreations + 1);
+			recreations = (*swapchain)->GetRecreationCount();
+			(*swapchain)->SetVSync(false);
+			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 3) == 0);
+			CHECK((*swapchain)->GetRecreationCount() == recreations);
+			(*swapchain)->SetVSync(true);
+			CHECK((*swapchain)->GetVSync());
+			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 3) == 1);
+			CHECK((*swapchain)->GetPresentMode() == VK_PRESENT_MODE_FIFO_KHR);
+
+			const Result<std::vector<DisplayVideoMode>> modes = QueryDisplayVideoModes(window);
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			REQUIRE_MESSAGE(modes.has_value(), modes.error().ToString());
+			REQUIRE_FALSE(modes->empty());
+			CHECK(std::ranges::is_sorted(*modes, [](const DisplayVideoMode& left, const DisplayVideoMode& right)
+			{
+				return std::tie(left.Width, left.Height, left.RefreshRate) < std::tie(right.Width, right.Height, right.RefreshRate);
+			}));
+			CHECK(std::ranges::adjacent_find(*modes) == modes->end());
+			const Result<DisplayVideoMode> current = QueryCurrentVideoMode(window);
+			REQUIRE_MESSAGE(current.has_value(), current.error().ToString());
+
+			// Refusals change nothing: an Exclusive mode the monitor does not list, and a Windowed size of 0.
+			const Status unlisted = ApplyDisplaySettings(window, DisplaySettings{ .WindowMode = DisplayWindowMode::Exclusive, .Width = 3, .Height = 2, .RefreshRate = 1 });
+			REQUIRE_FALSE(unlisted.has_value());
+			CHECK(unlisted.error().GetCode() == ErrorCode::InvalidArgument);
+			const Status empty = ApplyDisplaySettings(window, DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed });
+			REQUIRE_FALSE(empty.has_value());
+			CHECK(empty.error().GetCode() == ErrorCode::InvalidArgument);
+			CHECK(window.GetWidth() == 320);
+			CHECK(window.GetHeight() == 240);
+
+			// Each switch is followed once the window reports its new size and the swapchain has its framebuffer's; Borderless
+			// is held only for that and one presented frame, then the window is windowed again at once.
+			const auto follows = [&device, &swapchain, &pacer, &commandList, &window](uint32_t width, uint32_t height)
+			{
+				return Test::WaitUntil([&device, &swapchain, &pacer, &commandList, &window, width, height]()
+				{
+					PresentFrames(device, **swapchain, pacer, **commandList, window, 1);
+					return window.GetWidth() == width && window.GetHeight() == height && (*swapchain)->GetWidth() == window.GetFramebufferWidth();
+				});
+			};
+			const Status borderless = ApplyDisplaySettings(window, DisplaySettings{ .WindowMode = DisplayWindowMode::Borderless });
+			const bool coveredMonitor = borderless.has_value() && follows(current->Width, current->Height);
+			const uint32_t borderlessSkipped = borderless.has_value() ? PresentFrames(device, **swapchain, pacer, **commandList, window, 1) : 1;
+			const Status windowed = ApplyDisplaySettings(window, DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = 240 });
+			REQUIRE_MESSAGE(borderless.has_value(), borderless.error().ToString());
+			REQUIRE_MESSAGE(windowed.has_value(), windowed.error().ToString());
+			CHECK(coveredMonitor);
+			CHECK(borderlessSkipped == 0);
+			CHECK(follows(320, 240));
+			CHECK(PresentFrames(device, **swapchain, pacer, **commandList, window, 3) == 0);
+#else
+			REQUIRE_FALSE(modes.has_value());
+			CHECK(modes.error().GetCode() == ErrorCode::Unsupported);
+#endif
+
+			// Zero validation messages and nothing left alive (the first child's teardown).
+			device.WaitForIdle();
+			commandList->Reset();
+			swapchain->reset();
+			framePacer.reset();
+			device.RunGarbageCollection();
+			CHECK_MESSAGE(device.GetResourceTracker().GetTotalLiveCount() == 0, device.GetResourceTracker().DescribeLiveCounts());
+			const GpuMessageCounts counts = context.DestroyGraphics();
+			CHECK(counts.Errors == 0);
+			CHECK(counts.Warnings == 0);
+		}
+
+		TEST_CASE("Swapchain: VSync and the Borderless display mode switch at run time" * doctest::test_suite(Test::GpuSuite))
+		{
+			std::vector<std::string> arguments = { "--windowed-child=Swapchain: VSync and the display mode switch at run time and presenting goes on" };
 			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
 			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
 			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));

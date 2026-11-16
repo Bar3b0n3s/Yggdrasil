@@ -1,10 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/Session/PlayInput.h"
 
+#include "Engine/Asset/ReplayData.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Utf8.h"
 #include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/FuzzySuggest.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <algorithm>
 #include <array>
@@ -12,6 +14,8 @@
 #include <format>
 #include <map>
 #include <optional>
+#include <set>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -83,6 +87,7 @@ namespace Engine {
 				case PlayInputEventType::Scroll:
 				case PlayInputEventType::GamepadAxisInput:
 				case PlayInputEventType::Text:
+				case PlayInputEventType::Signal:
 					return false;
 			}
 			return false;
@@ -287,6 +292,11 @@ namespace Engine {
 		std::string StepText{};
 		std::string PendingFrameText{};
 		std::string FrameText{};
+		// M28 (decision 6): StepSignals, the signals the last ApplyTick applied; PendingFrameSignals, every step's since the
+		// last LatchFrame; FrameSignals, what the last LatchFrame took from it. Ordered sets of names.
+		std::set<std::string, std::less<>> StepSignals{};
+		std::set<std::string, std::less<>> PendingFrameSignals{};
+		std::set<std::string, std::less<>> FrameSignals{};
 
 		// Applies one queued event (Tap already expanded) to the devices or the injected actions.
 		void Apply(const PlayInputEvent& event);
@@ -323,6 +333,11 @@ namespace Engine {
 				SetInjectedButton(*action, event.State == PlayInputEventState::Down);
 			return;
 		}
+		if (event.Type == PlayInputEventType::Signal)
+		{
+			StepSignals.insert(event.Name);
+			return;
+		}
 		Devices.Apply(event);
 	}
 
@@ -332,6 +347,9 @@ namespace Engine {
 		{
 			case PlayInputEventType::Action:
 				ENGINE_CORE_ASSERT(false, "PlayInput: an action event is no device input");
+				return;
+			case PlayInputEventType::Signal:
+				ENGINE_CORE_ASSERT(false, "PlayInput: a signal event is no device input");
 				return;
 			case PlayInputEventType::KeyInput:
 				Input.Inject(KeyEvent{ .KeyCode = event.KeyCode,
@@ -593,7 +611,7 @@ namespace Engine {
 		for (size_t index = 0; index < applied.size(); ++index)
 		{
 			const PlayInputEvent& event = applied[index].Event;
-			if (event.Type == PlayInputEventType::Action)
+			if (event.Type == PlayInputEventType::Action || event.Type == PlayInputEventType::Signal)
 				continue;
 			if (event.Type == PlayInputEventType::Scroll)
 			{
@@ -704,6 +722,15 @@ namespace Engine {
 					return Utils::MakeMemberError("text", "the text must hold at least one character");
 				if (!IsValidUtf8(event.Text))
 					return Utils::MakeMemberError("text", std::format("the text is not valid UTF-8 (at byte {})", FindInvalidUtf8(event.Text)));
+				return {};
+			case PlayInputEventType::Signal:
+				if (event.Name.empty() || event.Name.size() > MaxScriptSignalNameBytes)
+				{
+					return Utils::MakeMemberError("name", std::format("a signal's name holds 1 to {} bytes (got {})", MaxScriptSignalNameBytes, event.Name.size()),
+						"name the decision, such as \"FrameTimeExceeded\"");
+				}
+				if (!IsValidUtf8(event.Name))
+					return Utils::MakeMemberError("name", std::format("the signal's name is not valid UTF-8 (at byte {})", FindInvalidUtf8(event.Name)));
 				return {};
 		}
 		return Utils::MakeMemberError("type", std::format("{} is not an input event type", std::to_underlying(event.Type)));
@@ -942,8 +969,10 @@ namespace Engine {
 		state.LastApplied.reserve(applied.size());
 		for (const QueuedEvent& queued : applied)
 			state.LastApplied.push_back(queued.Event);
+		state.StepSignals.clear();
 		for (const PlayInputEvent& event : state.LastApplied)
 			state.Apply(event);
+		state.PendingFrameSignals.insert(state.StepSignals.begin(), state.StepSignals.end());
 		state.Devices.Input.LatchStep();
 		state.LatchActions(InputPhase::Step);
 		state.NextTick = tick + 1;
@@ -974,6 +1003,8 @@ namespace Engine {
 		state.LatchActions(InputPhase::Frame);
 		// The text latch (C22.3): the frame's text is every step text latched since the previous frame.
 		state.FrameText = std::exchange(state.PendingFrameText, std::string());
+		// M28 (decision 6): the frame's signals are those of every tick applied since the previous frame.
+		state.FrameSignals = std::exchange(state.PendingFrameSignals, {});
 	}
 
 	void PlayInput::SetFramePreview(bool enabled)
@@ -1001,6 +1032,38 @@ namespace Engine {
 	std::string_view PlayInput::GetText(InputPhase phase) const
 	{
 		return phase == InputPhase::Step ? m_State->StepText : m_State->FrameText;
+	}
+
+	static_assert(MaxScriptSignalNameBytes == MaxReplaySignalNameBytes, "a replay holds every signal name a script posts");
+
+	Status PlayInput::QueueSignal(std::string_view name)
+	{
+		State& state = *m_State;
+		const PlayInputEvent signal{ .Type = PlayInputEventType::Signal, .Name = std::string(name) };
+		ENGINE_TRY(ValidatePlayInputEvent(signal, state.Actions));
+		std::vector<QueuedEvent>& events = state.Queued[state.NextTick];
+		size_t signals = 0;
+		for (const QueuedEvent& queued : events)
+		{
+			if (queued.Event.Type != PlayInputEventType::Signal)
+				continue;
+			if (queued.Event.Name == name)
+				return {};
+			++signals;
+		}
+		if (signals >= MaxScriptSignalsPerTick)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("a tick takes at most {} distinct signals", MaxScriptSignalsPerTick))
+					.WithHint("post one signal per decision, not one per frame value"));
+		}
+		events.push_back(QueuedEvent{ .Event = signal, .FromDevice = false });
+		return {};
+	}
+
+	bool PlayInput::WasSignalled(InputPhase phase, std::string_view name) const
+	{
+		const auto& signals = phase == InputPhase::Step ? m_State->StepSignals : m_State->FrameSignals;
+		return signals.contains(name);
 	}
 
 	uint64_t PlayInput::GetNextTick() const
@@ -1164,6 +1227,8 @@ namespace Engine {
 				return "GamepadAxis";
 			case PlayInputEventType::Text:
 				return "Text";
+			case PlayInputEventType::Signal:
+				return "Signal";
 		}
 		ENGINE_CORE_ASSERT(false, "unknown PlayInputEventType");
 		return "Unknown";

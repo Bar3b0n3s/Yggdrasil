@@ -98,12 +98,13 @@ namespace Engine {
 		// pointer is non-owning and valid until play.stop.
 		[[nodiscard]] virtual PlaySession* GetPlaySession() const = 0;
 
-		// play.start (editor only, Automation/Methods/PlayMethods.h): starts a session of `options.ScenePath` (empty: the open
-		// edit scene, through the serializer copy of §5.6) with the project's settings and `options`; the requesting client
-		// (GetRequest().Client) owns lockstep when options.Lockstep. Appends PlayStateChanged. Errors: InvalidState while a
-		// session runs, without an open scene, or when the scene references an asset in error, which it names (World Tree
-		// brief 14, §12.4; EditorPlayController::Start); the errors of PlaySession::Create; NotFound or Validation for
-		// options.ScenePath; Unsupported in the Runtime, whose session starts with the process.
+		// play.start (editor only, Automation/Methods/PlayMethods.h): refreshes the project's assets (as input.record does,
+		// ADR 0043 decision 2; only for a start the play controller would admit), then starts a session of `options.ScenePath`
+		// (empty: the open edit scene, through the serializer copy of §5.6) with the project's settings and `options`; the
+		// requesting client (GetRequest().Client) owns lockstep when options.Lockstep. Appends PlayStateChanged. Errors:
+		// InvalidState while a session runs, without an open scene, or when the scene references an asset in error, which it
+		// names (World Tree brief 14, §12.4; EditorPlayController::Start); the errors of PlaySession::Create; NotFound or
+		// Validation for options.ScenePath; Unsupported in the Runtime, whose session starts with the process.
 		[[nodiscard]] virtual Status StartPlay(const PlayStartOptions& options) = 0;
 
 		// play.stop (editor only): destroys the session (§5.6 Stop: the edit scene was never touched) and appends
@@ -197,7 +198,8 @@ namespace Engine {
 		// its next frame, after the response. Errors: those of the editor's save and its dirty-scene check.
 		[[nodiscard]] virtual Result<SessionShutdownResult> Shutdown(const SessionShutdownParams& params) = 0;
 
-		// scene.tree's summary of `scene`, a scene ResolveTargetScene returned: its file, name, revision (the "_meta"
+		// scene.tree's summary of `scene`, a scene ResolveTargetScene returned: its file (a play scene's: the file its current
+		// scene came from, PlaySession::GetCurrentSceneAsset's; ADR 0038, friction F25), name, revision (the "_meta"
 		// revision), dirty flag and entity count.
 		[[nodiscard]] virtual SceneSummary MakeSceneSummary(const Scene& scene) const = 0;
 

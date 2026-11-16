@@ -7,6 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <limits>
 #include <map>
 
@@ -293,6 +294,51 @@ namespace Engine {
 			Result<Json> tiny = JsonReader::Parse(R"({"Small": 1e-50, "Max": 3.4028235e38})");
 			REQUIRE(tiny.has_value());
 			CHECK(JsonWriter::Write(*tiny, JsonStyle::Minified) == std::string(R"({"Small":0,"Max":3.4028235e+38})"));
+		}
+
+		TEST_CASE("JsonWriter: doubles keep the shortest form that round-trips the double")
+		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): a replay header's save data, written exactly.
+			Result<Json> document = JsonReader::Parse(
+				R"({"Count": 16777217.0, "Stamp": 1731700000.123456, "Ratio": 0.1, "Big": 1e300, "Zero": -0.0, "Values": [2.5, 1], "Huge": 1.8446744073709552e19, "Low": -9.223372036854778e18})");
+			REQUIRE(document.has_value());
+			const Result<std::string> doubles = JsonWriter::Write(*document, JsonStyle::Minified, JsonNumbers::Double);
+			REQUIRE_MESSAGE(doubles.has_value(), doubles.error().ToString());
+			// -0 keeps its sign, and 2^64 and -(2^63 + 2048) take the exponent form, never an integer literal outside the 64-bit
+			// range, which the reader would refuse (the W28.2 review's findings 2 and 3).
+			CHECK(*doubles
+				== R"({"Count":16777217,"Stamp":1731700000.123456,"Ratio":0.1,"Big":1e+300,"Zero":-0.0,"Values":[2.5,1],"Huge":1.8446744073709552e+19,"Low":-9.223372036854778e+18})");
+			Result<Json> read = JsonReader::Parse(*doubles);
+			REQUIRE(read.has_value());
+			for (const char* key : { "Count", "Stamp", "Ratio", "Big", "Huge", "Low" })
+			{
+				CAPTURE(key);
+				CHECK((*read)[key].get<double>() == (*document)[key].get<double>());
+			}
+			CHECK(std::signbit((*read)["Zero"].get<double>()));
+			// As float, the default, the same tree rounds and 1e300 is out of range.
+			Json floats = *document;
+			floats.erase("Big");
+			const Result<std::string> floatText = JsonWriter::Write(floats, JsonStyle::Minified);
+			REQUIRE_MESSAGE(floatText.has_value(), floatText.error().ToString());
+			Result<Json> floatRead = JsonReader::Parse(*floatText);
+			REQUIRE(floatRead.has_value());
+			CAPTURE(*floatText);
+			CHECK((*floatRead)["Count"].get<double>() == 16777216.0);
+			CHECK((*floatRead)["Stamp"].get<double>() == static_cast<double>(static_cast<float>(1731700000.123456)));
+			CHECK((*floatRead)["Ratio"].get<double>() == 0.1); // the float's shortest text, "0.1"
+			CHECK_FALSE(JsonWriter::Write(*document, JsonStyle::Minified).has_value());
+
+			// WriteDouble refuses what JSON cannot hold, at its pointer.
+			JsonWriter writer;
+			writer.BeginObject();
+			writer.WriteKey("Infinite");
+			writer.WriteDouble(std::numeric_limits<double>::infinity());
+			writer.EndObject();
+			const Result<std::string> infinite = writer.Finish();
+			REQUIRE_FALSE(infinite.has_value());
+			CHECK(infinite.error().GetCode() == ErrorCode::Validation);
+			CHECK(infinite.error().GetLocation().JsonPointer == "/Infinite");
 		}
 
 		TEST_CASE("JsonWriter: keys with invalid UTF-8 fail Finish with the object's pointer")

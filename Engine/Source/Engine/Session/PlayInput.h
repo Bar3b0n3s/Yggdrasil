@@ -31,8 +31,8 @@ namespace Engine {
 	struct InputSettings;
 
 	// The event types of automation input and replays (§6.7, §13.6): registry enum "InputEventType", whose entry names are
-	// "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis" and "Text"
-	// (automation accepts any ASCII case, .replay files use these spellings). The enumerators of the four kinds named like a
+	// "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text" and "Signal"
+	// (automation accepts any ASCII case, .replay files use these spellings; "Signal" from the replay's version 4). The enumerators of the four kinds named like a
 	// KeyCodes.h type carry the suffix "Input", because GCC's -Wshadow reports an enumerator named like a type.
 	enum class PlayInputEventType : uint8_t
 	{
@@ -45,7 +45,10 @@ namespace Engine {
 		Scroll,             // Delta (x right-positive, y up-positive)
 		GamepadButtonInput, // Gamepad, GamepadButtonCode with State
 		GamepadAxisInput,   // Gamepad, Axis with Value (engine convention: up-positive sticks, §4.3)
-		Text                // Text: one CharEvent per code point; the text latch reads them (M22, C22.3: LatchStepText, GetText)
+		Text,               // Text: one CharEvent per code point; the text latch reads them (M22, C22.3: LatchStepText, GetText)
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): Name, a frame-time signal (Input.PostSignal): a decision
+		// taken on frame-paced observations, recorded as input; the tick that applies it latches it (WasSignalled).
+		Signal
 	};
 
 	// The state of a button-like event (§13.6): Tap is Down on its tick and Up on the next, so both edges are observed.
@@ -73,6 +76,7 @@ namespace Engine {
 		glm::vec2 Position{ 0.0f };                             // MouseMove, MouseButton with HasPosition
 		glm::vec2 Delta{ 0.0f };                                // MouseDelta, Scroll
 		std::string Text{};                                     // Text: UTF-8, at least one code point
+		// Signal uses Name: 1 to MaxScriptSignalNameBytes bytes of UTF-8 (Scripting/ScriptLimits.h).
 
 		bool operator==(const PlayInputEvent&) const = default;
 	};
@@ -182,6 +186,16 @@ namespace Engine {
 		// The latched text of `phase`'s view (UTF-8): Step the tick's (LatchStepText), Frame the frame's (LatchFrame). Empty
 		// before the first latch.
 		[[nodiscard]] std::string_view GetText(InputPhase phase) const;
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a live frame-time signal (Input.PostSignal) queued for
+		// GetNextTick() as an injected Signal event (never previewed), once per name and tick: a second post of a name already
+		// queued for that tick changes nothing. ApplyTick latches the step's signals (the Signal events it applied) and adds
+		// them to the frame's, which LatchFrame latches. Errors: those of ValidatePlayInputEvent; InvalidArgument when the
+		// tick already holds MaxScriptSignalsPerTick distinct signals.
+		[[nodiscard]] Status QueueSignal(std::string_view name);
+		// Whether `name` was signalled in `phase`'s view: Step, by the tick the last ApplyTick applied; Frame, by any tick
+		// applied since the previous LatchFrame, as the last LatchFrame latched them. False before the first latch.
+		[[nodiscard]] bool WasSignalled(InputPhase phase, std::string_view name) const;
 
 		// The tick the next ApplyTick applies.
 		[[nodiscard]] uint64_t GetNextTick() const;

@@ -51,6 +51,9 @@ namespace Engine {
 		std::string Filter{};
 		std::string Replay{};      // project replay asset or canonical user://Replays/ identity; non-Dist
 		bool VerifyReplay = false; // --verify: compiled expectations and strict terminal hash
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): why user://Display.json could not be restored, read by
+		// the factory before logging exists; OnInitialize logs it as a warning. Empty when it was restored or absent.
+		std::string DisplaySettingsProblem{};
 	};
 
 	// The options above, for CommandLine::Parse next to GetEngineCommandLineOptions. Static storage.
@@ -108,6 +111,8 @@ namespace Engine {
 		void OnShutdown() override;
 		void OnEvent(Event& event) override;
 		void OnSafePoint() override;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): persists the applied settings in user://Display.json.
+		void OnDisplaySettingsApplied(const DisplaySettings& settings) override;
 		void OnFixedStep(const SimStep& step) override;
 		[[nodiscard]] bool EndsFixedSteps() const override;
 		void OnUpdate(const FrameTime& frame) override;

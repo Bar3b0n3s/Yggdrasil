@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 
 #include <array>
+#include <cmath>
 #include <format>
 #include <limits>
 #include <optional>
@@ -31,6 +32,8 @@ namespace Engine {
 			d.Header.Seed = std::numeric_limits<uint64_t>::max();
 			d.Header.EngineVersion = "1";
 			d.Header.Config = "Debug";
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): version 4's store, nested.
+			d.Header.SaveData.Set(Json{ { "Best", 12.5f }, { "Progress", Json{ { "Realm", 2 }, { "Seen", Json::array({ "Fire", "Ice" }) } } } });
 			d.FinalTick = 2;
 			d.FinalStateHash = "0123456789abcdef";
 			d.Events = {
@@ -43,7 +46,8 @@ namespace Engine {
 				{ .Tick = 0, .Type = "Scroll", .Delta = glm::vec2(0, 2) },
 				{ .Tick = 0, .Type = "GamepadButton", .State = "Down", .ButtonName = "South", .Gamepad = 3 },
 				{ .Tick = 1, .Type = "GamepadAxis", .Value = 0.7f, .Gamepad = 2, .AxisName = "LeftTrigger" },
-				{ .Tick = 1, .Type = "Text", .Text = "hello ☃" }
+				{ .Tick = 1, .Type = "Text", .Text = "hello ☃" },
+				{ .Tick = 1, .Type = "Signal", .Name = "FrameTimeExceeded" }
 			};
 			return d;
 		}
@@ -261,10 +265,11 @@ namespace Engine {
 		}
 
 		// M16 friction S2-01 (FX-4): version 2 adds the state-hash checkpoints. A version 1 file still loads, migrated with
-		// none (only its final hash is compared, as before), and writes back canonically in the current version (3, with a
-		// null start fingerprint, Docs/Decisions/0030-m19-contract.md decision 2), the bytes project.upgrade then writes
+		// none (only its final hash is compared, as before), and writes back canonically in the current version (4, with a
+		// null start fingerprint, Docs/Decisions/0030-m19-contract.md decision 2, and an empty SaveData,
+		// Docs/Decisions/0043-m28-game-services.md decision 7), the bytes project.upgrade then writes
 		// (Tests/Data/Formats/Replay/v1.upgraded.replay).
-		TEST_CASE("ReplayData: a version 1 replay migrates to version 3 with no checkpoints")
+		TEST_CASE("ReplayData: a version 1 replay migrates to the current version with no checkpoints")
 		{
 			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Replay/v1.replay");
 			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v1.upgraded.replay");
@@ -278,6 +283,7 @@ namespace Engine {
 			CHECK(migrated->Version == ReplayFormatVersion);
 			CHECK(migrated->Checkpoints.empty());
 			CHECK_FALSE(migrated->Fingerprint.has_value());
+			CHECK(migrated->Header.SaveData.Get() == Json::object());
 			CHECK(migrated->FinalStateHash == "3e0c91a2b4d5f607");
 			const auto text = ReplayToText(*migrated);
 			REQUIRE(text.has_value());
@@ -368,7 +374,7 @@ namespace Engine {
 		TEST_CASE("ReplayData: seeded source and binary mutations never assert or crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			// The seed corpus (Docs/Decisions/0024-m15-contract.md decision 13): the synthetic document, which holds every
-			// event kind, and FeatureTest's committed replays (long event lists, multi-line Luau expectations), each as text
+			// event kind (M28's Signal included) and a nested SaveData header, and FeatureTest's committed replays (long event lists, multi-line Luau expectations), each as text
 			// and cooked with its expectations compiled as ReplayImporter compiles them. Each iteration draws its seed from its
 			// own Random.
 			struct ReplaySeed
@@ -448,10 +454,148 @@ namespace Engine {
 		}
 
 		// Docs/Decisions/0030-m19-contract.md decision 2 (A-FPRINT): version 3 adds the start fingerprint after Config. A
-		// version 2 file (the reserved fixture Formats/Replay/v2) migrates to version 3 with a null one, nothing recorded, and
-		// writes back as the bytes project.upgrade writes (Formats/Replay/v2.upgraded); in version 2 a Fingerprint member is
-		// unknown, and version 3 requires it.
-		TEST_CASE("ReplayData: a version 2 replay migrates to version 3 with a null fingerprint")
+		// version 2 file (the reserved fixture Formats/Replay/v2) migrates to the current version with a null one, nothing
+		// recorded, and writes back as the bytes project.upgrade writes (Formats/Replay/v2.upgraded, version 4 since M28); in
+		// version 2 a Fingerprint member is unknown, and version 3 requires it.
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): version 4 adds the header's SaveData after Config and the
+		// Signal event type. A version 3 file (Formats/Replay/v3, which v2's upgrade wrote before M28) migrates with an empty
+		// SaveData and writes back as the bytes project.upgrade writes (Formats/Replay/v3.upgraded); in version 3 a SaveData
+		// member is unknown and a Signal event is refused, and version 4 requires SaveData.
+		TEST_CASE("ReplayData: a version 3 replay migrates to version 4 with an empty save-data store, and refuses what version 4 adds")
+		{
+			const Result<std::string> v3 = Test::ReadTestDataText("Formats/Replay/v3.replay");
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v3.upgraded.replay");
+			REQUIRE(v3.has_value());
+			REQUIRE(upgraded.has_value());
+			CHECK(ReplayFormatVersion == 4);
+			ReplayLoadReport report;
+			const auto migrated = ReplayFromText(*v3, report, true);
+			REQUIRE_MESSAGE(migrated.has_value(), migrated.error().ToString());
+			CHECK(report.FileVersion == 3);
+			CHECK(report.Diagnostics.empty());
+			CHECK(migrated->Version == 4);
+			CHECK(migrated->Header.SaveData.Get() == Json::object());
+			const auto text = ReplayToText(*migrated);
+			REQUIRE(text.has_value());
+			CHECK(*text == *upgraded);
+			const auto again = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(report.FileVersion == 4);
+			CHECK(ReplayToText(*again).value_or("") == *upgraded);
+
+			// Version 3 knows neither member nor event type.
+			auto withSaveData = JsonReader::Parse(*v3);
+			REQUIRE(withSaveData.has_value());
+			(*withSaveData)["SaveData"] = Json::object();
+			CHECK_FALSE(ReplayFromJson(*withSaveData, report, true).has_value());
+			auto withSignal = JsonReader::Parse(*v3);
+			REQUIRE(withSignal.has_value());
+			(*withSignal)["Events"].push_back(Json{ { "Tick", 400 }, { "Type", "Signal" }, { "Name", "FrameTimeExceeded" } });
+			CHECK_FALSE(ReplayFromJson(*withSignal, report, true).has_value());
+			// Version 4 requires SaveData, an object.
+			auto withoutSaveData = JsonReader::Parse(*upgraded);
+			REQUIRE(withoutSaveData.has_value());
+			withoutSaveData->erase("SaveData");
+			CHECK_FALSE(ReplayFromJson(*withoutSaveData, report, true).has_value());
+			(*withoutSaveData)["SaveData"] = Json::array();
+			CHECK_FALSE(ReplayFromJson(*withoutSaveData, report, true).has_value());
+		}
+
+		TEST_CASE("ReplayData: version 4 keeps the save-data store and the signals through text and cooking")
+		{
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v3.upgraded.replay");
+			REQUIRE(upgraded.has_value());
+			ReplayLoadReport report;
+			auto document = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			document->Header.SaveData.Set(Json{ { "Best", 12.5 }, { "Realms", Json::array({ "Fire" }) }, { "Volume", Json{ { "Music", 0.25 } } } });
+			document->Events.push_back(ReplayEvent{ .Tick = 400, .Type = "Signal", .Name = "FrameTimeExceeded" });
+			const auto text = ReplayToText(*document);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const auto read = ReplayFromText(*text, report, true);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Header.SaveData.Get() == document->Header.SaveData.Get());
+			REQUIRE(read->Events.size() == document->Events.size());
+			CHECK(read->Events.back().Type == "Signal");
+			CHECK(read->Events.back().Name == "FrameTimeExceeded");
+
+			const std::vector<ReplayBytecodeExpectation> bytecode;
+			ReplayDocument withoutExpect = *read;
+			withoutExpect.Expect.clear();
+			const auto cookedPlain = CookReplay(withoutExpect, bytecode, 1);
+			REQUIRE_MESSAGE(cookedPlain.has_value(), cookedPlain.error().ToString());
+			const auto loaded = LoadCookedReplay(*cookedPlain);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			CHECK((*loaded)->Header.SaveData.Get() == document->Header.SaveData.Get());
+			REQUIRE_FALSE((*loaded)->Events.empty());
+			CHECK((*loaded)->Events.back().Type == "Signal");
+			CHECK((*loaded)->Events.back().Name == "FrameTimeExceeded");
+
+			// A signal's name holds 1 to 64 bytes.
+			ReplayDocument bad = withoutExpect;
+			bad.Events.back().Name.clear();
+			CHECK_FALSE(ReplayToText(bad).has_value());
+			bad.Events.back().Name = std::string(65, 'x');
+			CHECK_FALSE(ReplayToText(bad).has_value());
+		}
+
+		// M28 (decision 7; the lead's decision on the W28.1 review's departure 1): the header's SaveData holds the save-data
+		// store's doubles, which the text and the cooked replay keep exactly, while Parameters keep the authored floats.
+		TEST_CASE("ReplayData: the header's SaveData keeps the store's doubles exactly through text and cooking")
+		{
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v3.upgraded.replay");
+			REQUIRE(upgraded.has_value());
+			ReplayLoadReport report;
+			auto document = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			// The W28.2 review's findings 2 and 3: -0 keeps its sign, and magnitudes of 2^63 or more are written in a form the
+			// reader accepts.
+			const Json store{ { "Big", 1e300 }, { "Count", 16777217.0 }, { "Huge", 0x1p64 }, { "Low", -(0x1p63 + 2048.0) },
+				{ "Nested", Json{ { "Values", Json::array({ 0.1, 2.000000001 }) } } }, { "Stamp", 1731700000.123456 }, { "Zero", -0.0 } };
+			// JSON numbers compare by value, so -0 equals 0: its sign is read separately.
+			const auto keepsNegativeZero = [](const Json& values)
+			{
+				const Result<double> zero = JsonReader(values["Zero"]).ReadDouble();
+				return zero.has_value() && *zero == 0.0 && std::signbit(*zero);
+			};
+			document->Header.SaveData.Set(store);
+			document->Header.Parameters.Set(Json{ { "Ratio", 0.1 } });
+
+			const auto text = ReplayToText(*document);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			CHECK(text->contains("\"Count\": 16777217,"));
+			CHECK(text->contains("\"Stamp\": 1731700000.123456,"));
+			CHECK(text->contains("\"Huge\": 1.8446744073709552e+19,"));
+			CHECK(text->contains("\"Zero\": -0.0"));
+			const auto read = ReplayFromText(*text, report, true);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			// JSON numbers compare by value: a double written as 16777217 reads back as that integer.
+			CHECK(read->Header.SaveData.Get() == store);
+			CHECK(keepsNegativeZero(read->Header.SaveData.Get()));
+			// Load then save is byte-identical.
+			CHECK(ReplayToText(*read) == *text);
+
+			ReplayDocument withoutExpect = *read;
+			withoutExpect.Expect.clear();
+			const auto cooked = CookReplay(withoutExpect, std::vector<ReplayBytecodeExpectation>{}, 1);
+			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+			const auto loaded = LoadCookedReplay(*cooked);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			CHECK((*loaded)->Header.SaveData.Get() == store);
+			CHECK(keepsNegativeZero((*loaded)->Header.SaveData.Get()));
+
+			// A store number JSON cannot hold is refused at its pointer; Parameters still take only the float range.
+			ReplayDocument infinite = *read;
+			infinite.Header.SaveData.Set(Json{ { "Bad", std::numeric_limits<double>::infinity() } });
+			const auto refused = ReplayToText(infinite);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetLocation().JsonPointer == "/SaveData/Bad");
+			ReplayDocument parameters = *read;
+			parameters.Header.Parameters.Set(Json{ { "Big", 1e300 } });
+			CHECK_FALSE(ReplayToText(parameters).has_value());
+		}
+
+		TEST_CASE("ReplayData: a version 2 replay migrates to the current version with a null fingerprint")
 		{
 			const Result<std::string> v2 = Test::ReadTestDataText("Formats/Replay/v2.replay");
 			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v2.upgraded.replay");
@@ -462,18 +606,18 @@ namespace Engine {
 			REQUIRE_MESSAGE(migrated.has_value(), migrated.error().ToString());
 			CHECK(report.FileVersion == 2);
 			CHECK(report.Diagnostics.empty());
-			CHECK(ReplayFormatVersion == ReplayFingerprintFormatVersion);
-			CHECK(migrated->Version == ReplayFingerprintFormatVersion);
+			CHECK(ReplayFingerprintFormatVersion == 3);
+			CHECK(migrated->Version == ReplayFormatVersion);
 			CHECK_FALSE(migrated->Fingerprint.has_value());
 			REQUIRE(migrated->Checkpoints.size() == 2);
 			CHECK(migrated->FinalStateHash == "3e0c91a2b4d5f607");
 			const auto text = ReplayToText(*migrated);
 			REQUIRE(text.has_value());
 			CHECK(*text == *upgraded);
-			// The written form reads back unchanged, as version 3.
+			// The written form reads back unchanged, in the current version.
 			const auto again = ReplayFromText(*upgraded, report, true);
 			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
-			CHECK(report.FileVersion == ReplayFingerprintFormatVersion);
+			CHECK(report.FileVersion == ReplayFormatVersion);
 			CHECK(ReplayToText(*again).value_or("") == *upgraded);
 
 			// Version 2 has no Fingerprint: one there is an unknown member (a warning, an error when strict) and is ignored.
@@ -499,7 +643,7 @@ namespace Engine {
 		TEST_CASE("ReplayData: the start fingerprint round trips through the source and cooked replays and is validated")
 		{
 			auto d = Document();
-			d.Version = ReplayFingerprintFormatVersion;
+			d.Version = ReplayFormatVersion;
 			ReplayFingerprint fingerprint;
 			fingerprint.Entities = {
 				{ .Entity = UUID(0x11), .Path = "/Camera", .Hash = "00000000000000a1", .Components = { { .Component = "Transform", .Hash = "00000000000000b1" }, { .Component = "Camera", .Hash = "00000000000000c1" } } },
@@ -522,7 +666,7 @@ namespace Engine {
 			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
 			const auto artifact = ReadCookedArtifact(*cooked);
 			REQUIRE(artifact.has_value());
-			CHECK(artifact->Header.FormatVersion == ReplayFingerprintFormatVersion);
+			CHECK(artifact->Header.FormatVersion == ReplayData::FormatVersion);
 			const auto loaded = LoadCookedReplay(*cooked);
 			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
 			REQUIRE((*loaded)->Fingerprint.has_value());

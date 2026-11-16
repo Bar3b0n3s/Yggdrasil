@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 3,
+	"Version": 4,
 	"Scene": {
 		"Handle": "127dd341463dba20",
 		"Path": "Assets/Scenes/Components/UiWorld.scene"
@@ -10,6 +10,7 @@
 	"FixedHz": 64,
 	"EngineVersion": "0.5.0",
 	"Config": "Editor",
+	"SaveData": {},
 	"Fingerprint": {
 		"Entities": [
 			{

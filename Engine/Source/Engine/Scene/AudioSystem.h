@@ -11,6 +11,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -140,7 +141,9 @@ namespace Engine {
 	// its session: InitializeMix records the engine's Music, Sfx and Ui volumes and sets all three to 1, so every session (and every
 	// FeatureTest capture) starts from the same mix whatever the editor or an earlier session left; SetGroupVolume sets the
 	// engine's group; destroying the system restores the recorded volumes (nothing before InitializeMix), so Stop leaves
-	// the editor's mixer as it was. The Master volume is the host's (AudioEngine::SetMasterVolume) and never the session's.
+	// the editor's mixer as it was. A scene replacement hands the recorded volumes to the new scene's system (TakeMix,
+	// AdoptMix; M28), so the mix lasts the whole session. The Master volume is the host's (AudioEngine::SetMasterVolume) and
+	// never the session's.
 	class AudioSystem
 	{
 	public:
@@ -156,6 +159,13 @@ namespace Engine {
 		// Start calls this for standalone users; PlaySession calls it before OnCreate/OnStart. Destruction restores it
 		// even if startup never reaches Start. The host must retire the previous mixer owner before this call.
 		void InitializeMix();
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 9): the session's mix across a scene replacement. TakeMix hands
+		// over the volumes InitializeMix recorded before the session (nullopt when it never ran) and leaves the engine's current
+		// group volumes, the session's, in place: this system then restores nothing when it is destroyed. AdoptMix makes `recorded`
+		// this system's recorded volumes without touching the engine's, as if InitializeMix had recorded them, so the new
+		// scene's system restores them at the session's end and a volume a script set before Scene.Load or Scene.Reload holds.
+		[[nodiscard]] std::optional<std::array<float, AudioGroupCount>> TakeMix();
+		void AdoptMix(const std::array<float, AudioGroupCount>& recorded);
 
 		// Session setup (§5.6: "PlayOnStart audio starts"): initializes the mix if needed, plays every
 		// PlayOnStart source of an effectively enabled entity, in canonical order, and sets the listener. Called once, at the

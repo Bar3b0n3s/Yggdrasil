@@ -33,6 +33,8 @@ namespace Engine {
 	// Entity:AddComponent value: every string, map key and Variant string or object key of the value together. Text.Text
 	// and Script.Fields are the common cases.
 	inline constexpr size_t MaxScriptComponentStringBytes = 4 * 1024;
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): UiText:SetPresentationText's text.
+	inline constexpr size_t MaxScriptPresentationTextBytes = 4 * 1024;
 	// A Test.Suite or Test.Case name, which the runner keeps for the run's results.
 	inline constexpr size_t MaxScriptTestNameBytes = 256;
 	// A Test.ExpectScriptError pattern, which its waiting thread keeps until the wait ends.
@@ -58,6 +60,19 @@ namespace Engine {
 	inline constexpr size_t MaxScriptTestCasesPerSuite = 4096;
 	// Input events Test.InjectAction/Key/Mouse/Gamepad queue for one input tick.
 	inline constexpr size_t MaxScriptInjectedInputsPerTick = 1024;
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a frame-time signal's name (Input.PostSignal,
+	// Test.InjectSignal, input.inject's and a replay's Signal events), and the distinct live signals one tick takes.
+	inline constexpr size_t MaxScriptSignalNameBytes = 64;
+	inline constexpr size_t MaxScriptSignalsPerTick = 64;
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): a SaveData key, and the whole store as compact JSON
+	// ({"key":value,...}); a SaveData.Set past it raises, naming the size.
+	inline constexpr size_t MaxSaveDataKeyBytes = 256;
+	inline constexpr size_t MaxSaveDataBytes = 1024 * 1024;
+	// The nested arrays and tables of one SaveData value (a scalar nests 0, {} or {1} 1): far below the JSON readers' and
+	// VariantValue's MaxJsonDepth (512), to which the store file, a replay header and an automation result each add their
+	// own levels around the value, so every store a session holds can be written, read back and returned (the W28.2
+	// review's finding 4).
+	inline constexpr size_t MaxSaveDataDepth = 64;
 	// Test.Screenshot calls one suite makes, counted by the runner whatever the host's outcome; each may write a new image
 	// file (the editor writes every capture to a new file in its automation output directory). A later call in the suite
 	// raises a located error naming this limit and reaches no host; the case fails unless the script handles the error,

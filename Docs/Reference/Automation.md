@@ -29,6 +29,7 @@ Flags: **tool** (proxied by the MCP bridge as the named tool), **mutates** (chan
 | `profiler` | `profiler.capture` |
 | `project` | `project.create`, `project.export`, `project.getSettings`, `project.info`, `project.open`, `project.refreshAssets`, `project.save`, `project.setSettings`, `project.upgrade`, `project.validate` |
 | `rpc` | `rpc.discover` |
+| `savedata` | `savedata.clear`, `savedata.get`, `savedata.set` |
 | `scene` | `scene.activate`, `scene.close`, `scene.diff`, `scene.get`, `scene.list`, `scene.new`, `scene.open`, `scene.query`, `scene.raycast`, `scene.save`, `scene.tree` |
 | `script` | `script.check`, `script.create`, `script.errors`, `script.eval`, `script.fields`, `script.read`, `script.write` |
 | `session` | `session.hello`, `session.info`, `session.shutdown` |
@@ -1909,7 +1910,7 @@ Example: Pause the world, holding its sounds.
 
 ### play.start
 
-Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. Returns the session's state.
+Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. The editor refreshes the project's assets first, as input.record does, so a scene file written since the last refresh plays with its scene asset. Returns the session's state.
 
 - Flags: tool `play_start`
 - Timeout: 60 s
@@ -2528,6 +2529,84 @@ Example: Describe entity.create.
 {"method":"entity.create"}
 ```
 
+## savedata
+
+### savedata.clear
+
+Empties editor play's save data (the play store), as a first run of the game finds it.
+
+- Flags: tool `savedata_clear`
+- Timeout: 60 s
+
+Param: none.
+
+| Result | Type | Description |
+|---|---|---|
+| `count` | `UInt32` | The number of keys. |
+| `bytes` | `UInt32` | The store's compact JSON size in bytes. |
+| `loadError` | `String` | savedata.set with merge: why the play store's file could not be read (it was moved aside as Store.corrupt-\<n>.json and the values were merged into an empty store); empty when it was read, and for a write that replaces the store. |
+
+Example: Start the next play without save data.
+
+```json
+{}
+```
+
+### savedata.get
+
+Reads editor play's save data: the play store (the project's Library/SaveData/Store.json, a read-only editor's private store), which a live play session starts with and SaveData.Commit writes, or with target Play the running session's store.
+
+- Flags: tool `savedata_get`
+- Timeout: 60 s
+
+| Param | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `target` | `SaveDataTarget` |  | `"Editor"` | The store to read: Editor (the default) or Play. |
+
+| Result | Type | Description |
+|---|---|---|
+| `values` | `Variant` | The values by key, keys sorted, numbers as SaveData.Get returns them. |
+| `count` | `UInt32` | The number of keys. |
+| `bytes` | `UInt32` | The store's compact JSON size in bytes, at most 1048576. |
+| `loadError` | `String` | Editor: why the play store's file could not be read (it was moved aside as Store.corrupt-\<n>.json and the store is empty); empty when it was read. |
+
+Example: Read the play store.
+
+```json
+{}
+```
+
+Example: Read the running session's store.
+
+```json
+{"target":"Play"}
+```
+
+### savedata.set
+
+Seeds editor play's save data: replaces the play store with values (or merges them with merge: true), so the next live play session and the next input.record start with them. The running session keeps its own store.
+
+- Flags: tool `savedata_set`
+- Timeout: 60 s
+- Required params: `values`
+
+| Param | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `values` | `Variant` | yes | `null` | An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects nesting at most 64 levels; null deletes a key. |
+| `merge` | `Bool` |  | `false` | Merge values into the play store instead of replacing it. |
+
+| Result | Type | Description |
+|---|---|---|
+| `count` | `UInt32` | The number of keys. |
+| `bytes` | `UInt32` | The store's compact JSON size in bytes. |
+| `loadError` | `String` | savedata.set with merge: why the play store's file could not be read (it was moved aside as Store.corrupt-\<n>.json and the values were merged into an empty store); empty when it was read, and for a write that replaces the store. |
+
+Example: Unlock the second realm for the next play.
+
+```json
+{"values":{"Realm":2,"Volume":0.5}}
+```
+
 ## scene
 
 ### scene.activate
@@ -3127,6 +3206,8 @@ Reads host and displayed-view statistics without waiting for the GPU or advancin
 | `maxMemoryAllocationCount` | `UInt32` | Vulkan device allocation limit, zero without a device. |
 | `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' gameResolution). The Runtime supplies game only. |
 | `deviceLosses` | `UInt32` | The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none. |
+| `activeBodies` | `UInt32` | Awake physics bodies of the play session, the 3D world's and the 2D world's together; 0 without a session. |
+| `particles` | `UInt32` | Live particles of the play session after its last Particles phase; 0 without a session. |
 
 Example: Inspect current host and renderer observations.
 

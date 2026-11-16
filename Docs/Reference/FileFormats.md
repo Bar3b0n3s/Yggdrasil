@@ -16,7 +16,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | Prefab | `.prefab` | 1 | [Schemas/Prefab.schema.json](Schemas/Prefab.schema.json) |
 | Project | `.eproj` | 1 | [Schemas/Project.schema.json](Schemas/Project.schema.json) |
 | Provenance | `Automation/Provenance.json` | 1 | [Schemas/Provenance.schema.json](Schemas/Provenance.schema.json) |
-| Replay | `.replay` | 3 | [Schemas/Replay.schema.json](Schemas/Replay.schema.json) |
+| Replay | `.replay` | 4 | [Schemas/Replay.schema.json](Schemas/Replay.schema.json) |
 | Scene | `.scene` | 1 | [Schemas/Scene.schema.json](Schemas/Scene.schema.json) |
 | SoundEffect | `.sfx` | 1 | [Schemas/SoundEffect.schema.json](Schemas/SoundEffect.schema.json) |
 | SpriteSheet | `.spritesheet` | 1 | [Schemas/SpriteSheet.schema.json](Schemas/SpriteSheet.schema.json) |
@@ -521,12 +521,12 @@ Header: `"Format": "Provenance", "Version": 1`. Schema: [Schemas/Provenance.sche
 
 A recorded input replay (§6.7): the start scene and parameters, the seed and rate, the input events per tick, Luau expectations, the state-hash checkpoints the recording observed (one every 60 ticks before the final tick) and the final state hash. The state hash covers the simulated world: every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state; it never covers script tables (self.State, module locals), audio or input, which expectations observe instead. Verification with strictHash compares each checkpoint as playback reaches it and stops at the first that differs. A recording with input events is refused when a run without them reproduces every checkpoint, the final hash and every expectation. Every recording also keeps its start fingerprint, what its session held at tick 0 (each entity and component, and each asset they reference), so a replay whose hash differs names what changed since it was recorded. Version 1 files (no checkpoints) and version 2 files are read as version 3 with no fingerprint, and project.upgrade rewrites them.
 
-Header: `"Format": "Replay", "Version": 3`. Schema: [Schemas/Replay.schema.json](Schemas/Replay.schema.json).
+Header: `"Format": "Replay", "Version": 4`. Schema: [Schemas/Replay.schema.json](Schemas/Replay.schema.json).
 
 ```json
 {
 	"Format": "Replay",
-	"Version": 3,
+	"Version": 4,
 	"Scene": {
 		"Handle": "8a61c0d2e4f31b77",
 		"Path": "Assets/Scenes/Level2.scene"
@@ -538,6 +538,10 @@ Header: `"Format": "Replay", "Version": 3`. Schema: [Schemas/Replay.schema.json]
 	"FixedHz": 60,
 	"EngineVersion": "0.5.0",
 	"Config": "Editor",
+	"SaveData": {
+		"BestWave": 12,
+		"Realms": ["Fire"]
+	},
 	"Fingerprint": {
 		"Entities": [
 			{
@@ -592,6 +596,11 @@ Header: `"Format": "Replay", "Version": 3`. Schema: [Schemas/Replay.schema.json]
 			"Type": "Key",
 			"Key": "Escape",
 			"State": "Up"
+		},
+		{
+			"Tick": 145,
+			"Type": "Signal",
+			"Name": "FrameTimeExceeded"
 		}
 	],
 	"Expect": [
@@ -1007,7 +1016,7 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | Lut | `.cube` | Lut | 1 | none | yes |
 | Material | `.material` | Material | 2 | none | yes |
 | Prefab | `.prefab` | Prefab | 1 | none | yes |
-| Replay | `.replay` | Replay | 3 | none | yes |
+| Replay | `.replay` | Replay | 4 | none | yes |
 | Scene | `.scene` | Scene | 1 | none | yes |
 | Script | `.luau` | Script | 1 | none | yes |
 | SoundEffect | `.sfx` | AudioClip | 1 | none | yes |

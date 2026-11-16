@@ -596,7 +596,7 @@ namespace Engine {
 
 			const Json expected = ParseProjectJson(R"([
 				{"path": "Assets/Materials/Red.material", "reason": "canonical form"},
-				{"path": "Assets/Replays/Old.replay", "reason": "format version 1 to 3"},
+				{"path": "Assets/Replays/Old.replay", "reason": "format version 1 to 4"},
 				{"path": "Assets/Scenes/Old.scene", "reason": "format version 0 to 1"}])");
 			Result<Json> dryRun = setup.Call("project.upgrade", Json{ { "dryRun", true } });
 			REQUIRE_MESSAGE(dryRun.has_value(), dryRun.error().ToString());

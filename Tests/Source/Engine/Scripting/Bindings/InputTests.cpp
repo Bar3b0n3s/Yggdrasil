@@ -88,6 +88,9 @@ assert(Input.IsGamepadConnected(1) and not Input.IsGamepadConnected(0))
 assert(Input.IsGamepadButtonDown(1, "South") and Input.GetGamepadAxis(1, "LeftY") == 0.75)
 -- A host without a play session latches no text (IScriptHost::GetText's default); the session's case reads typed text.
 assert(Input.GetText() == "")
+-- M28: nor does it take or latch signals (IScriptHost::PostSignal's and WasSignalled's defaults); the session's cases do.
+assert(not pcall(Input.PostSignal, "Slow"))
+assert(not Input.WasSignalled("Slow"))
 for _, mode in {"Normal", "Hidden", "Locked"} do
 	Input.SetCursorMode(mode)
 	assert(Input.GetCursorMode() == mode)

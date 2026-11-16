@@ -1228,8 +1228,10 @@ Script members of `UiText`:
 | `Alignment` | proxy field | `TextAlignment` | read/write | All | How each line is aligned within the rectangle's width. |
 | `Color` | proxy field | `Color` | read/write | All | The linear text colour with opacity in the fourth component. |
 | `Font` | proxy field | `AssetRef?` | read/write | All | The font; null uses its canvas's Font, or the default font when the canvas names none. |
+| `GetPresentationText` | method | `(self: UiText) -> string?` |  | All | Returns the presentation text SetPresentationText set, or nil. Frame-paced: a fixed-step gameplay callback raises an error. |
 | `LineSpacing` | proxy field | `number` | read/write | All | Multiplies the font's line height. |
 | `RaycastTarget` | proxy field | `boolean` | read/write | All | Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. |
+| `SetPresentationText` | method | `(self: UiText, text: string?) -> ()` |  | All | Shows text (at most 4096 bytes of UTF-8) in place of the element's Text until it is cleared with nil, the element or its UiText is removed, or the scene is replaced: frame-paced text such as a frame time or a performance readout, never serialized, hashed or recorded, so it never splits a replay. Layout and hit testing keep the authored Text's element. A fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error: set it in OnUpdate or OnLateUpdate. |
 | `Size` | proxy field | `number` | read/write | All | The em size in canvas units. |
 | `Text` | proxy field | `string` | read/write | All | The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. |
 | `VerticalAlignment` | proxy field | `UiTextVerticalAlignment` | read/write | All | Where the text block sits in the rectangle's height. |

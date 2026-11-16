@@ -4,9 +4,11 @@
 #include "Engine/Core/Json/Json.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Platform/Window.h"
 #include "Engine/Scripting/ScriptError.h"
+#include "Engine/Scripting/ScriptPerformanceStats.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -15,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -175,6 +178,54 @@ namespace Engine {
 			return MakeError(ErrorCode::Unsupported, "this script host has no world to pause");
 		}
 		[[nodiscard]] virtual bool IsWorldPaused() const { return false; }
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): Application.GetStats's counters. A play session's host
+		// answers from its session and its host's frame statistics; every other host (the edit evaluation, test fixtures
+		// without a session) keeps the default, Unsupported.
+		[[nodiscard]] virtual Result<ScriptPerformanceStats> GetPerformanceStats() const
+		{
+			return MakeError(ErrorCode::Unsupported, "this host has no performance readout");
+		}
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): Input.PostSignal, a live frame-time signal for the next
+		// fixed step: true when the session takes live signals (ordinary play and recordings), false where it ignores them
+		// (replays, suites, FeatureTest runs and lockstep sessions without a recorder, which take only played-back and
+		// injected signals). Errors: InvalidArgument for a name the signal's rules refuse, or a tick already full of signals.
+		// Every other host keeps the default, Unsupported.
+		[[nodiscard]] virtual Result<bool> PostSignal(std::string_view /*name*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "this host takes no signals: Input.PostSignal works in a running play session");
+		}
+		// Input.WasSignalled: whether `name` was signalled in `phase`'s view (PlayInput::WasSignalled). Default: false.
+		[[nodiscard]] virtual bool WasSignalled(InputPhase /*phase*/, std::string_view /*name*/) const { return false; }
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): Application.GetDisplayModes, GetDisplaySettings and
+		// SetDisplaySettings. A play session answers them itself where the calls do nothing (the editor, headless runs and every
+		// fixed-view session) and forwards the others to its host; every other host keeps the defaults: Unsupported, so the
+		// module reports no modes, the view as a window and refuses a request.
+		[[nodiscard]] virtual Result<std::vector<DisplayVideoMode>> GetDisplayModes() const
+		{
+			return MakeError(ErrorCode::Unsupported, "this host has no display");
+		}
+		[[nodiscard]] virtual Result<DisplaySettings> GetDisplaySettings() const { return MakeError(ErrorCode::Unsupported, "this host has no display"); }
+		[[nodiscard]] virtual Status RequestDisplaySettings(const DisplaySettings& /*settings*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "this host has no display: display settings apply in a windowed Runtime");
+		}
+		// M28 (decision 8): the SaveData module and Test.SetSaveData over a play session's store (Session/SaveDataStore.h).
+		// GetSaveValue returns the key's value, or null when the key is absent; SetSaveValue deletes it with null; ReplaceSaveData replaces every value;
+		// CommitSaveData writes the store where its host keeps it; GetSaveDataLoadError is why the store the session started
+		// with could not be read. Every other host keeps the defaults, Unsupported, which the module raises, but for
+		// CommitSaveData, which SaveData.Commit returns as false and the reason.
+		// Defined in ScriptHost.cpp, where Json is complete.
+		[[nodiscard]] virtual Result<Json> GetSaveValue(std::string_view key) const;
+		[[nodiscard]] virtual Status SetSaveValue(std::string_view /*key*/, const Json& /*value*/) { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Status ReplaceSaveData(const Json& /*values*/) { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Result<std::vector<std::string>> GetSaveKeys() const { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Status CommitSaveData() { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Result<std::optional<std::string>> GetSaveDataLoadError() const
+		{
+			return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason);
+		}
+	private:
+		static constexpr std::string_view NoSaveDataReason = "this host has no save data: SaveData works in a play session";
 	};
 
 }

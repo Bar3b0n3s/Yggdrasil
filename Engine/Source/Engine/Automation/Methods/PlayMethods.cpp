@@ -568,7 +568,8 @@ namespace Engine {
 				{
 					.Name = "play.start",
 					.Description = "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance "
-								   "only through this client's play.step. Returns the session's state.",
+								   "only through this client's play.step. The editor refreshes the project's assets first, as input.record does, so a "
+								   "scene file written since the last refresh plays with its scene asset. Returns the session's state.",
 					.ExposeAsTool = true,
 					.Examples = { { .Description = "Play in lockstep with seed 42.", .Params = startExample } },
 				},

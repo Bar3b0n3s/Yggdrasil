@@ -12,6 +12,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -22,15 +23,22 @@
 namespace Engine {
 
 	inline constexpr std::string_view ReplayFormatName = "Replay";
-	// Version 2 adds Checkpoints, version 3 the start fingerprint (Fingerprint, below). A version 1 file migrates with no
-	// checkpoints (only its FinalStateHash is compared, as before), and a version 1 or 2 file with a null Fingerprint;
-	// project.upgrade rewrites both canonically.
-	inline constexpr uint32_t ReplayFormatVersion = 3;
+	// Version 2 adds Checkpoints, version 3 the start fingerprint (Fingerprint, below), version 4 (M28,
+	// Docs/Decisions/0043-m28-game-services.md decision 7) the header's SaveData and the Signal event type. A version 1 file
+	// migrates with no checkpoints (only its FinalStateHash is compared, as before), a version 1 or 2 file with a null
+	// Fingerprint, and a version 1 to 3 file with an empty SaveData (and holds no Signal event: one is refused there);
+	// project.upgrade rewrites them canonically.
+	inline constexpr uint32_t ReplayFormatVersion = 4;
 	// The first version with the start fingerprint (Docs/Decisions/0030-m19-contract.md decision 2, A-FPRINT), reserved for
 	// M19 by the phase 1 ledger: ReplayFormatVersion, ReplayData::FormatVersion and ReplayImporter::Version are 3. A version 1
 	// or 2 file migrates to version 3 with a null Fingerprint (nothing recorded, so nothing can be named), which
 	// project.upgrade writes (Tests/Data/Formats/Replay/v2.upgraded.replay); every recording writes a fingerprint.
 	inline constexpr uint32_t ReplayFingerprintFormatVersion = 3;
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): the first version with the header's SaveData and the Signal
+	// event type, whose Name holds 1 to MaxReplaySignalNameBytes bytes (Scripting's MaxScriptSignalNameBytes, which Session
+	// checks equal).
+	inline constexpr uint32_t ReplaySaveDataFormatVersion = 4;
+	inline constexpr size_t MaxReplaySignalNameBytes = 64;
 	// A replay header's EngineVersion: every recorder (input.record, test.run's record, the Runtime's recordings) writes the
 	// running engine's version, EngineVersionString (Core/BuildId.h; session.hello's engineVersion), never the build id, so
 	// a commit rewrites no replay (Docs/Decisions/0030-m19-contract.md decision 13). Before ADR 0038 (friction F10) they
@@ -64,11 +72,18 @@ namespace Engine {
 		// The run mode that recorded the replay ("Editor", "Release" or "Dist"), never the build configuration, so a replay's
 		// bytes do not depend on it (§9.1). Informational; never a reason to select a different expected hash.
 		std::string Config{};
+		// Version 4 (M28, decision 7): the session's save-data store at the recording's start, an object of the store's
+		// values by key (Null storage normalizes to an empty object; files always write an object), which seeds every
+		// playback's store. Its numbers are the store's doubles, written exactly (JsonNumbers::Double, in the text and the
+		// cooked payload) and read back exactly, so a recording starts from the store as it is; the session canonicalizes
+		// them as it seeds its store (SaveDataStore).
+		VariantValue SaveData{};
 	};
 
 	// Asset-owned wire vocabulary, not Session's PlayInputEvent (§3). Type/State/control names use canonical file
 	// spellings. Only the fields belonging to Type are serialized; readers reject inappropriate present members.
-	// Type: Action, Key, MouseButton, MouseMove, MouseDelta, Scroll, GamepadButton, GamepadAxis or Text.
+	// Type: Action, Key, MouseButton, MouseMove, MouseDelta, Scroll, GamepadButton, GamepadAxis, Text or (version 4) Signal,
+	// whose Name is the signal's.
 	// State: Down, Up or Tap; Action selects State OR Value. The source reader checks device names/ranges through
 	// Platform, while Session checks project action names when adapting this value to PlayInputEvent.
 	struct ReplayEvent
@@ -197,7 +212,7 @@ namespace Engine {
 	struct ReplayData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::Replay;
-		static constexpr uint16_t FormatVersion = 3;
+		static constexpr uint16_t FormatVersion = 4;
 
 		ReplayData();
 
@@ -226,10 +241,12 @@ namespace Engine {
 	// Version must be ReplayFormatVersion (readers migrate older files first); newer is UnsupportedVersion. No compiler
 	// runs here.
 	[[nodiscard]] Status ValidateReplayDocument(const ReplayDocument& document);
-	// The readers accept versions 1 to 3. Version 1 has no Checkpoints member (one is an unknown member there) and
+	// The readers accept versions 1 to 4. Version 1 has no Checkpoints member (one is an unknown member there) and
 	// migrates with none; the document returned is always ReplayFormatVersion, and report.FileVersion keeps the file's own
-	// version. Versions 2 and 3 require Checkpoints. Version 3 (decision 2) requires Fingerprint (an object or null); in
-	// versions 1 and 2 a Fingerprint member is unknown, and both migrate with a null one.
+	// version. Versions 2 to 4 require Checkpoints. Versions 3 and 4 (decision 2) require Fingerprint (an object or null); in
+	// versions 1 and 2 a Fingerprint member is unknown, and both migrate with a null one. Version 4 (M28) requires SaveData
+	// (an object whose numbers are finite doubles); in versions 1 to 3 a SaveData member is unknown, and they migrate with
+	// an empty one.
 	[[nodiscard]] Result<ReplayDocument> ReplayFromJson(const Json& document, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<ReplayDocument> ReplayFromText(std::string_view text, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<Json> ReplayToJson(const ReplayDocument& document);
@@ -241,16 +258,16 @@ namespace Engine {
 	// non-object, a float outside the float range, invalid UTF-8 or nesting deeper than MaxJsonDepth.
 	[[nodiscard]] Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer = "/Parameters");
 
-	// Cooked FormatVersion 3 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
+	// Cooked FormatVersion 4 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
 	// u64; length-prefixed UTF-8 scene path and canonical Parameters JSON; seed u64; FixedHz u32; length-prefixed
-	// EngineVersion and Config; event count u32; events in array order; expectation count u32; expectations;
+	// EngineVersion and Config; length-prefixed SaveData JSON (M28: minified, its numbers as doubles); event count u32; events in array order; expectation count u32; expectations;
 	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64; then the fingerprint
 	// (decision 2): u8 present (0 or 1); when present, entity count u32 and per entity its id u64, length-prefixed path,
 	// hash u64, component count u32 and per component its length-prefixed name and hash u64; then asset count u32 and per
-	// asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 and 2 artifacts (no checkpoints, no
-	// fingerprint) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache key) and
-	// exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the nine kinds
-	// above in that order), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;
+	// asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 to 3 artifacts (no checkpoints, no
+	// fingerprint or no SaveData) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache key) and
+	// exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the ten kinds
+	// above in that order, Signal's tag 9), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;
 	// Action has a u8 State/Value discriminant; MouseButton has a u8 HasPosition; gamepad index is u32. Expectations:
 	// Tick u64, length-prefixed complete CookScript artifact. The nested artifact preserves source maps and compiler
 	// ABI checks without a second bytecode envelope. Check counts, tags, lengths, finite values and trailing bytes.

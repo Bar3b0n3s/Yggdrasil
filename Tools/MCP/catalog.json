@@ -1493,10 +1493,10 @@
 								},
 								"type": {
 									"description": "The event type (required).",
-									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 								},
 								"name": {
-									"description": "action: the project action's name (exact, case-sensitive).",
+									"description": "action: the project action's name (exact, case-sensitive); signal: the frame-time signal's name, 1 to 64 bytes of UTF-8.",
 									"type": "string"
 								},
 								"state": {
@@ -2026,7 +2026,7 @@
 		{
 			"name": "play_start",
 			"method": "play.start",
-			"description": "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. Returns the session's state.",
+			"description": "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. The editor refreshes the project's assets first, as input.record does, so a scene file written since the last refresh plays with its scene asset. Returns the session's state.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "PlayStartParams",
@@ -2111,10 +2111,10 @@
 								},
 								"type": {
 									"description": "The event type (required).",
-									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 								},
 								"name": {
-									"description": "action: the project action's name (exact, case-sensitive).",
+									"description": "action: the project action's name (exact, case-sensitive); signal: the frame-time signal's name, 1 to 64 bytes of UTF-8.",
 									"type": "string"
 								},
 								"state": {
@@ -2639,6 +2639,84 @@
 			},
 			"mutates": false,
 			"supportsDryRun": true,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "savedata_clear",
+			"method": "savedata.clear",
+			"description": "Empties editor play's save data (the play store), as a first run of the game finds it.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "savedata_get",
+			"method": "savedata.get",
+			"description": "Reads editor play's save data: the play store (the project's Library/SaveData/Store.json, a read-only editor's private store), which a live play session starts with and SaveData.Commit writes, or with target Play the running session's store.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SaveDataGetParams",
+				"description": "The params of savedata.get.",
+				"type": "object",
+				"properties": {
+					"target": {
+						"description": "The store to read: Editor (the default) or Play.",
+						"enum": ["Editor", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": false,
+			"supportsDryRun": false,
+			"timeoutSeconds": 60
+		},
+		{
+			"name": "savedata_set",
+			"method": "savedata.set",
+			"description": "Seeds editor play's save data: replaces the play store with values (or merges them with merge: true), so the next live play session and the next input.record start with them. The running session keeps its own store.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SaveDataSetParams",
+				"description": "The params of savedata.set.",
+				"type": "object",
+				"properties": {
+					"values": {
+						"description": "An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects nesting at most 64 levels; null deletes a key."
+					},
+					"merge": {
+						"description": "Merge values into the play store instead of replacing it.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["values"]
+			},
+			"mutates": false,
+			"supportsDryRun": false,
 			"timeoutSeconds": 60
 		},
 		{

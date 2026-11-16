@@ -440,7 +440,11 @@ namespace Engine {
 			.Entry(SceneTreeFormat::JsonList, "Json", "A flat list of entries in canonical order, with depth and parent.");
 
 		registry.Struct<SceneSummary>("SceneSummary", "The open scene.")
-			.Field("path", &SceneSummary::Path, "The project-relative path of its file; empty for a scene never saved.")
+			.Field("path", &SceneSummary::Path,
+				"The project-relative path of its file; empty for a scene never saved. A play scene's is the scene file its current scene came "
+				"from: the one the session started (play.start's scene, else the played open scene's; in the Runtime the start scene, a "
+				"recording's or a replay's) until a Scene.Load names another, which Scene.Reload keeps; for a play scene without a file (an "
+				"unsaved scene played), the open scene's path.")
 			.Field("name", &SceneSummary::Name, "The scene's name.")
 			.Field("revision", &SceneSummary::Revision,
 				"The host's revision (_meta.revision; the play scene's in the Runtime): it grows with every change to the open scene or the project "

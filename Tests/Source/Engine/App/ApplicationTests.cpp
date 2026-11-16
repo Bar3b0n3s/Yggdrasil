@@ -10,7 +10,9 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/RenderContext.h"
+#include "Engine/Platform/DisplayModes.h"
 #include "Engine/Platform/Process.h"
+#include "Engine/Platform/Window.h"
 #include "Support/ChildOutput.h"
 #include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
@@ -214,6 +216,242 @@ namespace Engine {
 				const std::array types = { EngineEventType::GpuDeviceLost };
 				DeviceLostEvents = GetContext().GetEventLog().Read(0, types).Events.size();
 				RecoveryCount = GetContext().GetGraphicsDevice()->GetRecoveryCount();
+			}
+		};
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): a game's options menu on a windowed application, one step per
+		// update, each taken once the previous one was observed (a request applies at the next frame boundary). The checks run
+		// in the hooks; Current reaches Done only when every step ran.
+		class DisplayApplication final : public Application
+		{
+		public:
+			enum class Step : uint8_t
+			{
+				Request,              // two requests and the refusals in one update; nothing applies at the call
+				Lose,                 // the last request applied at the boundary; the device is lost in this update
+				Recovered,            // the recovered swapchain kept the VSync in force
+				AwaitRecoveredFrame,  // a frame presents after the recovery; then the Borderless request
+				Cover,                // applied: the window covers its monitor
+				AwaitBorderlessFrame, // a frame presents at the monitor's size; then straight back to Windowed
+				Windowed,             // applied: the window's first size again
+				AwaitWindowedFrame,   // a frame presents; then the run ends
+				Done
+			};
+
+			explicit DisplayApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			Step Current = Step::Request;
+			std::vector<DisplaySettings> Applied;   // OnDisplaySettingsApplied's settings, in order
+			std::optional<bool> VSyncAfterRecovery; // the recreated swapchain's, in OnDeviceRecovered
+		protected:
+			void OnUpdate(const FrameTime& /*frame*/) override
+			{
+				Window& window = *GetContext().GetWindow();
+				// The window's own events bring the size a switch gives it.
+				const auto reaches = [&window](uint32_t width, uint32_t height)
+				{
+					return Test::WaitUntil([&window, width, height]()
+					{
+						window.PollEvents();
+						return window.GetWidth() == width && window.GetHeight() == height;
+					});
+				};
+				switch (Current)
+				{
+					case Step::Request:
+					{
+						const DisplaySettings start = GetDisplaySettings();
+						CHECK(start == DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = 240, .RefreshRate = 0, .VSync = true });
+						CHECK(GetSwapchainVSync() == std::optional<bool>(true));
+						CHECK(RequestDisplaySettings(DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 400, .Height = 300, .VSync = false }).has_value());
+						CHECK(RequestDisplaySettings(DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 360, .Height = 270, .VSync = false }).has_value());
+						// Refused at the call, replacing nothing queued: an Exclusive mode the monitor does not list, and settings
+						// outside the ranges.
+						for (const DisplaySettings& refused : {
+								 DisplaySettings{ .WindowMode = DisplayWindowMode::Exclusive, .Width = 3, .Height = 2, .RefreshRate = 1 },
+								 DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 0, .Height = 240 },
+								 DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = MaxDisplayExtent + 1 },
+								 DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = 240, .RefreshRate = MaxDisplayRefreshRate + 1 },
+							 })
+						{
+							const Status status = RequestDisplaySettings(refused);
+							CHECK((!status.has_value() && status.error().GetCode() == ErrorCode::InvalidArgument));
+						}
+						// Nothing applies at the call.
+						CHECK(GetDisplaySettings() == start);
+						CHECK(GetSwapchainVSync() == std::optional<bool>(true));
+						CHECK(Applied.empty());
+						Current = Step::Lose;
+						break;
+					}
+					case Step::Lose:
+						// The frame's last request, applied at this frame's boundary, before this update.
+						CHECK(Applied == std::vector<DisplaySettings>{ { .WindowMode = DisplayWindowMode::Windowed, .Width = 360, .Height = 270, .RefreshRate = 0, .VSync = false } });
+						CHECK_FALSE(GetDisplaySettings().VSync);
+						CHECK(GetSwapchainVSync() == std::optional<bool>(false));
+						CHECK(reaches(360, 270));
+						GetContext().GetGraphicsDevice()->GetDiagnostics().SetDeviceLost(true);
+						Current = Step::Recovered;
+						break;
+					case Step::Recovered:
+						// The recovery's swapchain has the VSync the request chose, not the specification's.
+						CHECK(VSyncAfterRecovery == std::optional<bool>(false));
+						CHECK(GetSwapchainVSync() == std::optional<bool>(false));
+						CHECK_FALSE(GetDisplaySettings().VSync);
+						Current = Step::AwaitRecoveredFrame;
+						m_FramesInStep = 0;
+						break;
+					case Step::AwaitRecoveredFrame:
+					{
+						if (m_FramesInStep == 0)
+							break;
+						DisplaySettings borderless = GetDisplaySettings();
+						borderless.WindowMode = DisplayWindowMode::Borderless;
+						CHECK(RequestDisplaySettings(borderless).has_value());
+						Current = Step::Cover;
+						break;
+					}
+					case Step::Cover:
+					{
+						// What was applied is the monitor's current mode, which Borderless never changes.
+						const Result<DisplayVideoMode> desktop = QueryCurrentVideoMode(window);
+						CHECK_MESSAGE(desktop.has_value(), (desktop.has_value() ? std::string() : desktop.error().ToString()));
+						if (!desktop.has_value())
+						{
+							RequestExit(ExitCode::Failed);
+							break;
+						}
+						const DisplaySettings expected{ .WindowMode = DisplayWindowMode::Borderless, .Width = desktop->Width, .Height = desktop->Height, .RefreshRate = desktop->RefreshRate, .VSync = false };
+						CHECK(Applied.size() == 2);
+						CHECK((Applied.size() == 2 && Applied[1] == expected));
+						CHECK(GetDisplaySettings().WindowMode == DisplayWindowMode::Borderless);
+						CHECK(GetDisplaySettings().RefreshRate == desktop->RefreshRate);
+						CHECK(reaches(desktop->Width, desktop->Height));
+						Current = Step::AwaitBorderlessFrame;
+						m_FramesInStep = 0;
+						break;
+					}
+					case Step::AwaitBorderlessFrame:
+						if (m_FramesInStep == 0)
+							break;
+						CHECK(m_LastFrameWidth == window.GetFramebufferWidth());
+						CHECK(m_LastFrameHeight == window.GetFramebufferHeight());
+						// Borderless is held for that one frame only (the lead's limit for the shared machine).
+						CHECK(RequestDisplaySettings(DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = 240, .VSync = false }).has_value());
+						Current = Step::Windowed;
+						break;
+					case Step::Windowed:
+						CHECK(Applied.size() == 3);
+						CHECK((Applied.size() == 3 && Applied[2] == DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = 240, .RefreshRate = 0, .VSync = false }));
+						CHECK(GetDisplaySettings().WindowMode == DisplayWindowMode::Windowed);
+						CHECK(GetDisplaySettings().RefreshRate == 0);
+						CHECK(reaches(320, 240));
+						Current = Step::AwaitWindowedFrame;
+						m_FramesInStep = 0;
+						break;
+					case Step::AwaitWindowedFrame:
+						if (m_FramesInStep == 0)
+							break;
+						CHECK(m_LastFrameWidth == window.GetFramebufferWidth());
+						Current = Step::Done;
+						RequestExit(ExitCode::Success);
+						break;
+					case Step::Done: break;
+				}
+			}
+
+			void OnRender(RenderContext& context) override
+			{
+				++m_FramesInStep;
+				m_LastFrameWidth = context.Width;
+				m_LastFrameHeight = context.Height;
+			}
+
+			void OnDisplaySettingsApplied(const DisplaySettings& settings) override
+			{
+				Applied.push_back(settings);
+			}
+
+			void OnDeviceRecovered(const GpuDeviceLossReport& /*report*/) override
+			{
+				VSyncAfterRecovery = GetSwapchainVSync();
+			}
+		private:
+			uint32_t m_FramesInStep = 0;
+			uint32_t m_LastFrameWidth = 0;
+			uint32_t m_LastFrameHeight = 0;
+		};
+
+		// M28 (decision 3): minimizes its window in the first update, reads the settings in force while minimized and asks for
+		// the VSync alone to change, then restores the window; the request applies at the next frame boundary.
+		class MinimizedDisplayApplication final : public Application
+		{
+		public:
+			explicit MinimizedDisplayApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::optional<DisplaySettings> Minimized; // GetDisplaySettings while minimized
+			Status Requested;                         // the VSync-only request's result
+			std::vector<DisplaySettings> Applied;
+			bool WindowChangesArrived = true;
+		protected:
+			void OnUpdate(const FrameTime& frame) override
+			{
+				Window& window = *GetContext().GetWindow();
+				if (frame.FrameIndex == 0)
+				{
+					window.Minimize();
+					WindowChangesArrived = Test::WaitUntilMinimized(window, true) && WindowChangesArrived;
+				}
+				else if (frame.FrameIndex == 1)
+				{
+					// The frame boundary saw the window minimized (0 x 0) before this update.
+					Minimized = GetDisplaySettings();
+					DisplaySettings settings = *Minimized;
+					settings.VSync = false;
+					Requested = RequestDisplaySettings(settings);
+					window.Restore();
+					WindowChangesArrived = Test::WaitUntilMinimized(window, false) && WindowChangesArrived;
+				}
+			}
+
+			void OnDisplaySettingsApplied(const DisplaySettings& settings) override
+			{
+				Applied.push_back(settings);
+			}
+		};
+
+		// M28 (decision 3): reads the display settings and asks for a change in its first update.
+		class DisplayReadingApplication final : public Application
+		{
+		public:
+			explicit DisplayReadingApplication(ApplicationSpecification specification)
+				: Application(std::move(specification))
+			{
+			}
+		public:
+			std::optional<DisplaySettings> Settings;
+			std::optional<ErrorCode> ModesError;
+			std::optional<ErrorCode> RequestError;
+		protected:
+			void OnUpdate(const FrameTime& /*frame*/) override
+			{
+				if (Settings.has_value())
+					return;
+				Settings = GetDisplaySettings();
+				if (const Result<std::vector<DisplayVideoMode>> modes = GetDisplayVideoModes(); !modes.has_value())
+					ModesError = modes.error().GetCode();
+				DisplaySettings windowed = *Settings;
+				windowed.WindowMode = DisplayWindowMode::Windowed;
+				windowed.Width = 320;
+				windowed.Height = 240;
+				if (const Status requested = RequestDisplaySettings(windowed); !requested.has_value())
+					RequestError = requested.error().GetCode();
 			}
 		};
 
@@ -1155,6 +1393,108 @@ namespace Engine {
 			INFO("child stdout: ", child->StandardOutput);
 			INFO("child stderr: ", child->StandardError);
 			CHECK(child->ExitCode == 0);
+		}
+
+		// Runs only in a windowed child process (Support/WindowedChild.h), M28 (Docs/Decisions/0043-m28-game-services.md decision
+		// 3): the display requests of a game's options menu on a windowed application (DisplayApplication's steps). A request
+		// applies at the next frame boundary, the frame's last one wins and a refused one queues nothing; the applied settings
+		// are a Windowed window's size at refresh rate 0 and a Borderless window's monitor mode; the chosen VSync survives a
+		// device loss. Windowed and Borderless only, Borderless for one presented frame (the lead's limits for the shared
+		// machine: Exclusive changes the desktop's video mode).
+		TEST_CASE("Application: a display request applies at the next frame boundary and its VSync survives a device loss"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+			if (!Test::ProbeGpuForProcess())
+				return;
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			ApplicationSpecification specification;
+			specification.Name = "ApplicationTests";
+			specification.Window = WindowMode::Windowed;
+			specification.WindowSettings = { .Title = "Application display test", .Width = 320, .Height = 240 };
+			specification.Clock = ClockKind::Manual;
+			specification.MaxFrames = 600; // a bound only: the steps end the run (RequestExit) once each was observed
+			specification.WorkerCount = 0;
+			// No test touches the machine's audio device (§15.1 T1).
+			specification.Audio = AudioEngineSpecification{};
+			UseTestRenderer(specification);
+			specification.Graphics.VSync = true;
+			DisplayApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			CHECK(application.Current == DisplayApplication::Step::Done);
+			CHECK(application.Applied.size() == 3);
+#else
+			MESSAGE("display settings have a Windows backend only (Docs/Decisions/0028-backlog-program.md decision 10)");
+#endif
+		}
+
+		TEST_CASE("Application: a display request applies at the frame boundary and the recovered swapchain keeps the chosen VSync"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			// M28 (decision 3; the W28.1 review's finding 2): ADR 0042's "Application keeps the chosen VSync, so device-loss
+			// recovery does not revert it", through the Application's frame, which the Swapchain child cannot reach.
+			std::vector<std::string> arguments = {
+				"--windowed-child=Application: a display request applies at the next frame boundary and its VSync survives a device loss",
+			};
+			const std::vector<std::string> gpuArguments = Test::GetGpuTestsChildArguments();
+			arguments.insert(arguments.end(), gpuArguments.begin(), gpuArguments.end());
+			const Result<ProcessResult> child = Process::Run(Test::MakeTestsChildSpecification(std::move(arguments)), std::chrono::seconds(60));
+			REQUIRE_MESSAGE(child.has_value(), child.error().ToString());
+			INFO("child stdout: ", child->StandardOutput);
+			INFO("child stderr: ", child->StandardError);
+			CHECK(child->ExitCode == 0);
+		}
+
+		// Runs only in a windowed child process (Support/WindowedChild.h), M28 (decision 3; the W28.1 review's finding 4): a
+		// minimized window reports 0 x 0 (an Exclusive window is minimized at every focus loss), so the settings in force keep
+		// its last size, and a request that changes only the VSync (an options menu's toggle) is taken. No renderer: the
+		// window alone.
+		TEST_CASE("Application: a minimized window keeps its last size in the display settings"
+			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
+		{
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			ApplicationSpecification specification;
+			specification.Name = "ApplicationTests";
+			specification.Window = WindowMode::Windowed;
+			specification.WindowSettings = { .Title = "Application minimized display test", .Width = 320, .Height = 240 };
+			specification.Clock = ClockKind::Manual;
+			specification.MaxFrames = 3;
+			specification.WorkerCount = 0;
+			specification.Renderer = RendererMode::None;
+			// No test touches the machine's audio device (§15.1 T1).
+			specification.Audio = AudioEngineSpecification{};
+			specification.Graphics.VSync = true;
+			MinimizedDisplayApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			CHECK(application.WindowChangesArrived);
+			REQUIRE(application.Minimized.has_value());
+			CHECK(*application.Minimized == DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = 240, .RefreshRate = 0, .VSync = true });
+			CHECK_MESSAGE(application.Requested.has_value(), (application.Requested.has_value() ? std::string() : application.Requested.error().ToString()));
+			CHECK(application.Applied == std::vector<DisplaySettings>{ { .WindowMode = DisplayWindowMode::Windowed, .Width = 320, .Height = 240, .RefreshRate = 0, .VSync = false } });
+#else
+			MESSAGE("display settings have a Windows backend only (Docs/Decisions/0028-backlog-program.md decision 10)");
+#endif
+		}
+
+		TEST_CASE("Application: a minimized window keeps its last size in the display settings in a windowed child process")
+		{
+			ENGINE_CHECK_WINDOWED_CHILD("Application: a minimized window keeps its last size in the display settings");
+		}
+
+		TEST_CASE("Application: a headless application reports the project's full screen as Exclusive and refuses display requests")
+		{
+			// M28 (decision 3): the settings in force come from the specification (Fullscreen is the Exclusive mode, the
+			// graphics VSync), and a headless process has no display to change.
+			ApplicationSpecification specification = MakeHeadlessSpecification(2);
+			specification.WindowSettings.Fullscreen = true;
+			specification.Graphics.VSync = false;
+			DisplayReadingApplication application(std::move(specification));
+			CHECK(application.Run() == ExitCode::Success);
+			REQUIRE(application.Settings.has_value());
+			CHECK(application.Settings->WindowMode == DisplayWindowMode::Exclusive);
+			CHECK_FALSE(application.Settings->VSync);
+			CHECK(application.Settings->RefreshRate == 0);
+			CHECK(application.ModesError == std::optional<ErrorCode>(ErrorCode::Unsupported));
+			CHECK(application.RequestError == std::optional<ErrorCode>(ErrorCode::Unsupported));
 		}
 
 		// Runs only in a windowed child process (Support/WindowedChild.h), M18 (C18.4, Docs/Decisions/0029-m18-contract.md

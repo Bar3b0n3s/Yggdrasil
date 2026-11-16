@@ -9,8 +9,10 @@
 #include "Engine/Core/Time.h"
 #include "Engine/Platform/Events.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/SaveDataStore.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -91,6 +93,20 @@ namespace Engine {
 		// is the game view's (the Game panel's image when available, else the project's window size; PlaySession.h).
 		void SetScriptEnvironment(ScriptEnvironment environment);
 		[[nodiscard]] ScriptEnvironment GetScriptEnvironment() const;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the editor application's part of the performance readout
+		// (IPlaySessionHost::ReadFrameStatistics): its frame loop's Fps and CpuMilliseconds and the Game view's render
+		// counters. EditorApp sets it; without one (an editor context without a frame loop) the readout has the session's
+		// counters only.
+		void SetFrameStatisticsSource(std::function<void(ScriptPerformanceStats&)> source);
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): editor play's save data, which a live session starts with
+		// and SaveData.Commit writes (savedata.get, savedata.set, savedata.clear and the Save Data panel): the project's
+		// Library/SaveData/Store.json, or a read-only editor's private store, in memory as long as the editor runs (a project
+		// opened next starts with an empty one). ReadPlaySaveData moves a corrupt file aside (LoadSaveDataFile) and reports
+		// why in its Error. Errors: InvalidState without a project; WritePlaySaveData's InvalidArgument for values the store
+		// refuses (SaveDataStore::Replace) and the file system's.
+		[[nodiscard]] Result<SaveDataFileLoad> ReadPlaySaveData();
+		[[nodiscard]] Status WritePlaySaveData(const Json& values);
 
 		[[nodiscard]] bool IsPlaying() const;
 		// The running session; nullptr in Edit mode. Valid until Stop.

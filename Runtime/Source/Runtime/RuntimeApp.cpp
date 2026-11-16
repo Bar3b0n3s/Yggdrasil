@@ -1,6 +1,7 @@
 #include "Runtime/RuntimeApp.h"
 
 #include "Engine/App/CommandLine.h"
+#include "Engine/App/DisplaySettingsFile.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/App/ExitCode.h"
 #include "Engine/App/ProcessContext.h"
@@ -52,6 +53,8 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/ReplayPlayer.h"
+#include "Engine/Session/SaveDataStore.h"
+#include "Engine/Session/SessionStatistics.h"
 #include "Engine/Testing/CoverageGates.h"
 #include "Engine/Testing/FeatureTestRunner.h"
 #include "Runtime/RuntimeCursor.h"
@@ -314,6 +317,19 @@ namespace Engine {
 		[[nodiscard]] CursorMode GetScriptCursorMode() const override;
 		void OnScriptError(const ScriptError& error, bool fatal) override;
 		void OnScriptPhase(std::string_view script, std::string_view callback) override;
+		void ReadFrameStatistics(ScriptPerformanceStats& stats) const override;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): the window's display settings, through Application.
+		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayModes() const override { return App.GetDisplayVideoModes(); }
+		[[nodiscard]] Result<DisplaySettings> GetDisplaySettings() const override { return App.GetDisplaySettings(); }
+		[[nodiscard]] Status RequestDisplaySettings(const DisplaySettings& settings) override { return App.RequestDisplaySettings(settings); }
+		// M28 (decision 8): a live session's save data, user://SaveData/Store.json; a headless run reads it and never writes it.
+		[[nodiscard]] std::filesystem::path GetSaveDataFile() { return App.GetProcessContext().GetUserDataPaths().Root / "SaveData" / "Store.json"; }
+		[[nodiscard]] Status CommitSaveData(const Json& values) override
+		{
+			if (App.GetSpecification().Window == WindowMode::Headless)
+				return MakeError(ErrorCode::Unsupported, "a headless run reads the game's save data and never writes it");
+			return WriteSaveDataFile(GetSaveDataFile(), values);
+		}
 		// The droppedSeconds baseline of the session just installed (TimingSession).
 		void BeginSessionTiming()
 		{
@@ -379,6 +395,17 @@ namespace Engine {
 		environment.Platform = "macOS";
 #endif
 		return environment;
+	}
+
+	void RuntimeApp::State::ReadFrameStatistics(ScriptPerformanceStats& stats) const
+	{
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the frame loop's and the game view's renderer's last
+		// observations, in every configuration, Dist included.
+		const FrameLoopStatistics frame = App.GetFrameStatistics();
+		stats.Fps = frame.Fps;
+		stats.CpuMilliseconds = frame.CpuMilliseconds;
+		if (Renderer != nullptr)
+			AddRenderStatistics(stats, Renderer->GetRenderStats());
 	}
 
 	Status RuntimeApp::State::SetScriptCursorMode(CursorMode mode)
@@ -549,6 +576,20 @@ namespace Engine {
 		// ordinary live play follows the framebuffer (OnUpdate).
 		fixedView = fixedView || testHost != nullptr || options.Lockstep;
 		const glm::uvec2 view = fixedView ? GetDeterministicViewSize(spec.Project.Window) : glm::uvec2(ViewWidth, ViewHeight);
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the save data. A fixed-view session keeps it in memory, from
+		// the options (a replay's header) or empty; a live session, a headless one included, starts with the game's store.
+		if (!options.SaveData.IsNull())
+			spec.SaveData = options.SaveData;
+		else if (!fixedView)
+		{
+			// A headless run never writes the store, so it leaves a corrupt one in place: the next windowed run moves it aside
+			// and tells the player (the W28.2 review's finding 6; the Dist smoke test runs on the real user data).
+			const SaveDataCorruption corruption = App.GetSpecification().Window == WindowMode::Headless ? SaveDataCorruption::LeaveInPlace
+																										: SaveDataCorruption::MoveAside;
+			SaveDataFileLoad saveData = LoadSaveDataFile(GetSaveDataFile(), corruption);
+			spec.SaveData = std::move(saveData.Values);
+			spec.SaveDataLoadError = std::move(saveData.Error);
+		}
 		spec.ViewWidth = view.x;
 		spec.ViewHeight = view.y;
 		spec.Audio = GetAudioEngine();
@@ -569,6 +610,7 @@ namespace Engine {
 		ReplayHeader header;
 		header.Scene = { scene, scene.IsValid() ? App.m_Assets->GetReferencePath(scene) : "" };
 		header.Parameters.Set(session->GetLoadParameters());
+		header.SaveData.Set(session->GetSaveData().ToJson());
 		header.Seed = spec.Seed;
 		header.FixedHz = spec.Project.Simulation.FixedHz;
 		// The running engine's version (ADR 0038, friction F10), never the build id, so a commit rewrites no replay
@@ -613,6 +655,7 @@ namespace Engine {
 		PlayStartOptions options;
 		options.Seed = header.Seed;
 		options.Parameters = header.Parameters;
+		options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 		options.Lockstep = true;
 		ResetTestCursor();
 		return PrepareSession(header.Scene.Handle, std::move(project), options, true);
@@ -822,6 +865,9 @@ namespace Engine {
 
 	Status RuntimeApp::OnInitialize()
 	{
+		// M28 (decision 3): the startup read's problem, now that the game's log exists (the Dist game's included).
+		if (!m_State->Options.DisplaySettingsProblem.empty())
+			ENGINE_WARN("{}", m_State->Options.DisplaySettingsProblem);
 #if !defined(ENGINE_DIST)
 		// The overlay's ImGui never changes the OS cursor, so the game's cursor mode holds as in Dist, which has no ImGui. The
 		// line says so once per windowed run; the F1 test (RuntimeAppTests) checks that the Runtime configured its context.
@@ -1001,6 +1047,7 @@ namespace Engine {
 				PlayStartOptions options;
 				options.Seed = header.Seed;
 				options.Parameters = header.Parameters;
+				options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 				options.Lockstep = true;
 				options.Paused = true;
 				return m_State->Restart(header, options, true);
@@ -1522,6 +1569,13 @@ namespace Engine {
 		return true;
 	}
 
+	void RuntimeApp::OnDisplaySettingsApplied(const DisplaySettings& settings)
+	{
+		// M28 (decision 3): the choice outlives the run; a write that fails is logged and the game plays on.
+		if (const Status written = WriteDisplaySettingsFile(GetContext().GetVfs(), settings); !written)
+			ENGINE_WARN("The display settings could not be saved in {}: {}", DisplaySettingsPath, written.error().ToString());
+	}
+
 	Result<Scope<Application>> CreateRuntimeApp(std::span<const std::string> arguments)
 	{
 		const std::span<const CommandLineOption> engineOptions = GetEngineCommandLineOptions();
@@ -1572,6 +1626,9 @@ namespace Engine {
 		}
 
 		ApplyGameSettings(specification, manifest->Name, manifest->Window, manifest->Simulation);
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): a live windowed run restores the display settings the game
+		// chose (user://Display.json) before its window first shows; FeatureTest and replay runs keep the project's window.
+		runtime.DisplaySettingsProblem = RestoreStartupDisplaySettings(specification, manifest->Name, runtime.FeatureTest || !runtime.Replay.empty());
 #if !defined(ENGINE_DIST)
 		// The F1 stats overlay (§14.4; Docs/Decisions/0024-m15-contract.md decision 17) needs Dear ImGui, which a windowed
 		// Debug or Release run with a renderer enables, without an ini file; headless runs and every Dist build have none.

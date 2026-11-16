@@ -72,6 +72,32 @@ class UiTreeTests(AutomationTestCase):
             client.call("ui.tree", {"canvas": "/Hud/Panel"})
         self.assert_engine_error(not_canvas.exception, engine_client.INVALID_PARAMS)
 
+    def test_presentation_text_shows_in_ui_tree_and_leaves_the_state_hash_alone(self) -> None:
+        # M28 (Docs/Decisions/0043-m28-game-services.md decision 5): UiText:SetPresentationText shows a frame-paced
+        # value in place of the element's Text; ui.tree reports it beside the authored text, and the state hash never
+        # sees it.
+        client, _ = self.open_editor_with_scene()
+        create_ui(client)
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 1})
+        before = client.call("play.state")["stateHash"]
+        client.call("script.eval", {"context": "play",
+                                    "code": "Scene.FindByName('Label').UiText:SetPresentationText('16.7 ms')"})
+        played = client.call("ui.tree", {"format": "Json", "target": "play"})
+        label = next(element for element in played["elements"] if element["name"] == "Label")
+        self.assertEqual((label["text"], label["presentationText"]), ("Score", "16.7 ms"))
+        self.assertEqual(client.call("play.state")["stateHash"], before)
+        # The edit scene has none.
+        edited = client.call("ui.tree", {"format": "Json", "target": "edit", "width": 200, "height": 100})
+        edited_label = next(element for element in edited["elements"] if element["name"] == "Label")
+        self.assertEqual(edited_label["presentationText"], "")
+        client.call("script.eval", {"context": "play",
+                                    "code": "Scene.FindByName('Label').UiText:SetPresentationText(nil)"})
+        cleared = client.call("ui.tree", {"format": "Json", "target": "play"})
+        cleared_label = next(element for element in cleared["elements"] if element["name"] == "Label")
+        self.assertEqual(cleared_label["presentationText"], "")
+        client.call("play.stop")
+
     def test_ui_tree_reports_each_text_box_and_whether_it_overflows(self) -> None:
         # M25's friction F02 (Docs/Decisions/0036-m25-tetris-pixel-art.md): each text's laid-out box in scene
         # pixels, so an agent checks that every text lies inside its rectangle; the outline marks a text that

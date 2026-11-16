@@ -10,7 +10,7 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [3]
+			"enum": [4]
 		},
 		"Scene": {
 			"description": "The scene the replay starts in.",
@@ -51,6 +51,10 @@
 		"Config": {
 			"description": "The run mode that recorded the replay (Editor, Release or Dist), never the build configuration; informational.",
 			"type": "string"
+		},
+		"SaveData": {
+			"description": "Version 4: the session's save-data store at the recording's start (SaveData's values by key), which seeds every playback's store, so the replay verifies whatever the machine's store holds; its numbers are the store's doubles, written exactly (unlike Parameters, whose numbers are floats); empty for a replay upgraded from an earlier version.",
+			"type": "object"
 		},
 		"Fingerprint": {
 			"description": "The start fingerprint: what the recorded session held at tick 0, so a playback whose state hash differs names what changed since the recording (a component, an entity, a script, a material, another referenced asset). Null for a replay upgraded from version 1 or 2, which names no change until it is recorded again.",
@@ -138,11 +142,11 @@
 						"minimum": 0
 					},
 					"Type": {
-						"description": "The event kind (§13.6).",
-						"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+						"description": "The event kind (§13.6); Signal from version 4.",
+						"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 					},
 					"Name": {
-						"description": "Action: the input action's name.",
+						"description": "Action: the input action's name. Signal: the frame-time signal's name (Input.PostSignal), 1 to 64 bytes.",
 						"type": "string"
 					},
 					"State": {
@@ -264,6 +268,6 @@
 			"pattern": "^[0-9a-f]{16}$"
 		}
 	},
-	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash"],
+	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash"],
 	"additionalProperties": false
 }

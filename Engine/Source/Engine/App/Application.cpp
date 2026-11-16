@@ -465,6 +465,103 @@ namespace Engine {
 	Application::Application(ApplicationSpecification specification)
 		: m_Specification(std::move(specification))
 	{
+		const WindowSpecification& window = m_Specification.WindowSettings;
+		m_DisplayMode = window.DisplayMode == DisplayWindowMode::Windowed && window.Fullscreen ? DisplayWindowMode::Exclusive : window.DisplayMode;
+		m_VSync = m_Specification.Graphics.VSync;
+		m_LastDisplay = DisplaySettings{ .WindowMode = m_DisplayMode,
+			.Width = window.Width,
+			.Height = window.Height,
+			.RefreshRate = m_DisplayMode == DisplayWindowMode::Windowed ? 0 : window.RefreshRate,
+			.VSync = m_VSync };
+	}
+
+	Result<std::vector<DisplayVideoMode>> Application::GetDisplayVideoModes() const
+	{
+		if (m_Specification.Window == WindowMode::Headless || m_Context == nullptr || m_Context->GetWindow() == nullptr)
+			return MakeError(ErrorCode::Unsupported, "a headless application has no display");
+		return QueryDisplayVideoModes(*m_Context->GetWindow());
+	}
+
+	DisplayObservation Application::ObserveDisplay() const
+	{
+		DisplayObservation observation{ .Mode = m_DisplayMode, .VSync = m_VSync, .Last = m_LastDisplay };
+		const Window* window = m_Context != nullptr ? m_Context->GetWindow() : nullptr;
+		if (window == nullptr)
+			return observation; // no window yet: 0 x 0, so the specification's settings
+		const bool headless = m_Specification.Window == WindowMode::Headless;
+		// A window the monitor let go (disconnected) is no longer exclusive, whatever the last request said.
+		if (observation.Mode == DisplayWindowMode::Exclusive && !headless && !window->IsFullScreen())
+			observation.Mode = DisplayWindowMode::Windowed;
+		observation.Width = window->GetWidth();
+		observation.Height = window->GetHeight();
+		// A full-screen window runs at its monitor's current video mode (Exclusive's own, Borderless's the desktop's) while it
+		// is not minimized; a minimized Exclusive window's monitor is back at the desktop's mode, so its last rate stands in.
+		if (observation.Mode != DisplayWindowMode::Windowed && !headless && observation.Width > 0 && observation.Height > 0)
+		{
+			if (const Result<DisplayVideoMode> current = QueryCurrentVideoMode(*window); current.has_value())
+				observation.MonitorRefreshRate = current->RefreshRate;
+		}
+		return observation;
+	}
+
+	DisplaySettings Application::GetDisplaySettings() const
+	{
+		return ResolveDisplaySettings(ObserveDisplay());
+	}
+
+	Status Application::RequestDisplaySettings(const DisplaySettings& settings)
+	{
+		ENGINE_TRY_ASSIGN(const std::vector<DisplayVideoMode> modes, GetDisplayVideoModes());
+		ENGINE_TRY(ValidateDisplaySettings(settings));
+		if (settings.WindowMode == DisplayWindowMode::Exclusive
+			&& !ContainsDisplayVideoMode(modes, DisplayVideoMode{ .Width = settings.Width, .Height = settings.Height, .RefreshRate = settings.RefreshRate }))
+		{
+			return std::unexpected(Error(ErrorCode::InvalidArgument,
+				std::format("the monitor has no video mode {} x {} at {} Hz", settings.Width, settings.Height, settings.RefreshRate))
+					.WithHint("pick one of Application.GetDisplayModes()"));
+		}
+		m_PendingDisplay = settings;
+		return {};
+	}
+
+	void Application::ApplyPendingDisplaySettings()
+	{
+		if (!m_PendingDisplay.has_value() || m_Context == nullptr || m_Context->GetWindow() == nullptr)
+			return;
+		const DisplaySettings settings = *std::exchange(m_PendingDisplay, std::nullopt);
+		if (const Status applied = ApplyDisplaySettings(*m_Context->GetWindow(), settings); !applied)
+		{
+			ENGINE_CORE_WARN("The display settings ({} {} x {} at {} Hz) could not be applied: {}", DisplayWindowModeToString(settings.WindowMode),
+				settings.Width, settings.Height, settings.RefreshRate, applied.error().ToString());
+			return;
+		}
+		// What was applied, which the Runtime persists: the request, with a Windowed window's refresh rate 0 and a Borderless
+		// window's size and refresh rate the monitor's current mode (the window's own size arrives with its next events).
+		DisplaySettings applied = settings;
+		if (settings.WindowMode == DisplayWindowMode::Windowed)
+			applied.RefreshRate = 0;
+		else if (settings.WindowMode == DisplayWindowMode::Borderless)
+		{
+			if (const Result<DisplayVideoMode> current = QueryCurrentVideoMode(*m_Context->GetWindow()); current.has_value())
+			{
+				applied.Width = current->Width;
+				applied.Height = current->Height;
+				applied.RefreshRate = current->RefreshRate;
+			}
+		}
+		m_DisplayMode = applied.WindowMode;
+		m_VSync = applied.VSync;
+		m_LastDisplay = applied;
+		if (m_Rendering != nullptr && m_Rendering->WindowSwapchain != nullptr)
+			m_Rendering->WindowSwapchain->SetVSync(m_VSync);
+		OnDisplaySettingsApplied(applied);
+	}
+
+	std::optional<bool> Application::GetSwapchainVSync() const
+	{
+		if (m_Rendering == nullptr || m_Rendering->WindowSwapchain == nullptr)
+			return std::nullopt;
+		return m_Rendering->WindowSwapchain->GetVSync();
 	}
 
 	Application::~Application() = default;
@@ -642,6 +739,17 @@ namespace Engine {
 
 	void Application::OnFrameSafePoint()
 	{
+		// M28 (decision 3): the mode in force when the monitor let an exclusive window go, and the settings of a window that is
+		// not minimized (its size and refresh rate, which stand in while it is); then a display-settings request applies at the
+		// frame boundary, before the subclass's safe point.
+		if (const Window* window = m_Context != nullptr ? m_Context->GetWindow() : nullptr)
+		{
+			if (m_DisplayMode == DisplayWindowMode::Exclusive && m_Specification.Window != WindowMode::Headless && !window->IsFullScreen())
+				m_DisplayMode = DisplayWindowMode::Windowed;
+			if (window->GetWidth() > 0 && window->GetHeight() > 0)
+				m_LastDisplay = GetDisplaySettings();
+		}
+		ApplyPendingDisplaySettings();
 		OnSafePoint();
 	}
 
@@ -938,7 +1046,7 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(rendering.WindowSwapchain,
 				WithContext(Swapchain::Create(device, window,
 								{
-									.VSync = device.GetSpecification().VSync,
+									.VSync = m_VSync, // M28 (decision 3): the VSync in force, a request's included
 									.FramesInFlight = framesInFlight,
 								}),
 					"while creating the swapchain"));

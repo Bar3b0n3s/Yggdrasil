@@ -141,14 +141,15 @@ namespace Engine {
 {"From": {"Node": 2, "Pin": "Result"}, "To": {"Node": 4, "Pin": "Condition"}}, {"From": {"Node": 3, "Pin": "Value"}, "To": {"Node": 2, "Pin": "B"}},
 {"From": {"Node": 4, "Pin": "True"}, "To": {"Node": 5, "Pin": "In"}}, {"From": {"Node": 5, "Pin": "Then"}, "To": {"Node": 6, "Pin": "In"}}]})";
 
-		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 3, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
-"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.5.0", "Config": "Editor",
+		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 4, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
+"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.5.0", "Config": "Editor", "SaveData": {"BestWave": 12, "Realms": ["Fire"]},
 "Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
 "Components": {"Transform": "a3c94e0f12b7d685", "Camera": "0c7e2a91f4d3b658"}},
 {"Id": "0000000000000022", "Path": "/Player", "Hash": "91d4c07a3e5b2f86", "Components": {"Transform": "47b0e9d2c61a5f38", "Script": "d8263f5a0b9c4e17"}}],
 "Assets": [{"Handle": "c0ffee0000000001", "Path": "Assets/Scripts/Player.luau", "Type": "Script", "Hash": "6a0f3d82e5c9b147"}]},
 "Events": [{"Tick": 0, "Type": "Action", "Name": "MoveZ", "Value": 1}, {"Tick": 100, "Type": "Action", "Name": "Jump", "State": "Tap"},
-{"Tick": 140, "Type": "Key", "Key": "Escape", "State": "Down"}, {"Tick": 141, "Type": "Key", "Key": "Escape", "State": "Up"}],
+{"Tick": 140, "Type": "Key", "Key": "Escape", "State": "Down"}, {"Tick": 141, "Type": "Key", "Key": "Escape", "State": "Up"},
+{"Tick": 145, "Type": "Signal", "Name": "FrameTimeExceeded"}],
 "Expect": [{"Tick": 150, "Luau": "return Scene.GetName() == 'Level3'"}],
 "Checkpoints": [{"Tick": 60, "StateHash": "9b1d5e0c27a4f381"}, {"Tick": 120, "StateHash": "51c7a0e9d2b64f18"}],
 "FinalTick": 150, "FinalStateHash": "3e0c91a2b4d5f607"})";
@@ -1055,9 +1056,9 @@ namespace Engine {
 
 			Json event = Json::object();
 			event["Tick"] = IntegerSchema("The tick the event applies at (step 1 of the tick), before FinalTick; events are ordered by tick.", 0, std::nullopt);
-			event["Type"] = EnumSchema({ "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text" },
-				"The event kind (§13.6).");
-			event["Name"] = StringSchema("Action: the input action's name.");
+			event["Type"] = EnumSchema({ "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal" },
+				"The event kind (§13.6); Signal from version 4.");
+			event["Name"] = StringSchema("Action: the input action's name. Signal: the frame-time signal's name (Input.PostSignal), 1 to 64 bytes.");
 			event["State"] = EnumSchema({ "Down", "Up", "Tap" }, "Action, Key, MouseButton, GamepadButton: the button state.");
 			event["Value"] = Described(Json{ { "type", "number" }, { "minimum", -1 }, { "maximum", 1 } },
 				"Action (axis) and GamepadAxis: the value; triggers range from 0 to 1.");
@@ -1124,6 +1125,10 @@ namespace Engine {
 				"The version of the engine that recorded the replay (its engineVersion, never the build id; replays recorded before ADR 0038 hold "
 				"\"0.1.0\"). Informational: no verification and no state hash reads it.");
 			properties["Config"] = StringSchema("The run mode that recorded the replay (Editor, Release or Dist), never the build configuration; informational.");
+			properties["SaveData"] = Described(Json{ { "type", "object" } },
+				"Version 4: the session's save-data store at the recording's start (SaveData's values by key), which seeds every playback's store, so "
+				"the replay verifies whatever the machine's store holds; its numbers are the store's doubles, written exactly (unlike Parameters, "
+				"whose numbers are floats); empty for a replay upgraded from an earlier version.");
 			properties["Fingerprint"] = fingerprint;
 			properties["Events"] = Described(Json{ { "type", "array" }, { "items", ObjectSchema("One input event.", std::move(event), { "Tick", "Type" }) } },
 				"The applied input events, ordered by tick.");
@@ -1140,8 +1145,8 @@ namespace Engine {
 				"The state hash at FinalTick: 16 lowercase hex digits. It covers the simulated world (every entity with its serialized components, the tick, "
 				"the session's Random state, the id draws and every body's physics state), never script tables, audio or input.");
 			return DocumentSchema(ReplayFormatName, "An input replay (§6.7).", std::move(properties),
-				{ "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick",
-					"FinalStateHash" });
+				{ "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Fingerprint", "Events", "Expect", "Checkpoints",
+					"FinalTick", "FinalStateHash" });
 		}
 
 		static Json ProvenanceSchema()

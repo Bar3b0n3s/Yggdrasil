@@ -40,6 +40,10 @@ namespace Engine {
 			stats.SsrTiles = 1200;
 			stats.SsrTracedTiles = 90;
 			stats.SsrTracedPixels = 4321;
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the lights shaded and dropped, and the skinned meshes.
+			stats.VisibleLights = 11;
+			stats.DroppedLights = 3;
+			stats.SkinnedMeshes = 5;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -57,6 +61,9 @@ namespace Engine {
 			CHECK(summary.SsrTiles == 1200);
 			CHECK(summary.SsrTracedTiles == 90);
 			CHECK(summary.SsrTracedPixels == 4321);
+			CHECK(summary.Lights == 11);
+			CHECK(summary.DroppedLights == 3);
+			CHECK(summary.SkinnedMeshes == 5);
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
@@ -84,6 +91,9 @@ namespace Engine {
 			CHECK(unavailable.CachedSpotShadows == 0);
 			CHECK_FALSE(unavailable.SsrHalfResolution);
 			CHECK(unavailable.SsrTiles == 0);
+			CHECK(unavailable.Lights == 0);
+			CHECK(unavailable.DroppedLights == 0);
+			CHECK(unavailable.SkinnedMeshes == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")

@@ -42,6 +42,8 @@
 #include "Engine/Scripting/ScriptProxy.h"
 #include "Engine/Session/NativeWorld.h"
 #include "Engine/Session/ReplayRecorder.h"
+#include "Engine/Session/SaveDataStore.h"
+#include "Engine/Session/SessionStatistics.h"
 
 #include <algorithm>
 #include <array>
@@ -109,6 +111,12 @@ namespace Engine {
 				return MakeSpecificationError("Registry", "a play session needs the context's type registry");
 			if (!specification.Parameters.IsNull() && !specification.Parameters.Get().is_object())
 				return MakeSpecificationError("Parameters", "scene parameters must be a JSON object");
+			if (!specification.SaveData.IsNull())
+			{
+				SaveDataStore seeded;
+				if (const Status valid = seeded.Replace(specification.SaveData.Get()); !valid)
+					return MakeSpecificationError("SaveData", valid.error().GetMessageText());
+			}
 			const SimulationSettings& simulation = specification.Project.Simulation;
 			if (simulation.FixedHz < 1 || simulation.FixedHz > FrameLoopConfig::MaxFixedHz)
 			{
@@ -405,6 +413,9 @@ namespace Engine {
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the UiLayout and FrameUiLayout phases' layouts, and
 		// (C22.2, decisions 24 and 30) the UiInput phase's interaction state, with the Ui settings' commands it reads.
 		UiSystem Ui{};
+		// M28 (decision 8): the session's save data, which a scene replacement keeps, and why the host's store could not be read.
+		SaveDataStore SaveData{};
+		std::optional<std::string> SaveDataLoadError{};
 		Utils::UiCommandBindings UiCommands{};
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the scene's animation (GetAnimation), created after the physics
 		// systems and replaced with them at a scene transition; never null once the session is created.
@@ -533,6 +544,90 @@ namespace Engine {
 		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
 		// M22 (C22.3, decision 46): the text latch, which Input.GetText reads.
 		[[nodiscard]] std::string_view GetText(InputPhase phase) const override { return Input.GetText(phase); }
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): Application.GetStats: the host's frame and render
+		// observations, the session's counters and the VM's heap.
+		[[nodiscard]] Result<ScriptPerformanceStats> GetPerformanceStats() const override
+		{
+			ScriptPerformanceStats stats;
+			if (Host != nullptr)
+				Host->ReadFrameStatistics(stats);
+			const SessionStatistics counters = ReadSessionStatistics(Session);
+			stats.Entities = counters.Entities;
+			stats.Bodies = counters.Bodies;
+			stats.ActiveBodies = counters.ActiveBodies;
+			stats.Particles = counters.Particles;
+			if (Scripts != nullptr)
+				stats.ScriptHeapBytes = Scripts->GetMemoryState().UsedBytes;
+			return stats;
+		}
+		// M28 (decision 6): live signals reach ordinary play and recordings only; replays, suites, FeatureTest runs and
+		// lockstep sessions without a recorder take the signals their input carries (played back or injected). The name is
+		// checked first, so a malformed one raises whatever the session.
+		[[nodiscard]] Result<bool> PostSignal(std::string_view name) override
+		{
+			ENGINE_TRY(ValidatePlayInputEvent(PlayInputEvent{ .Type = PlayInputEventType::Signal, .Name = std::string(name) }, Input.GetActions()));
+			const bool recording = Recorder != nullptr && Recorder->IsRecording();
+			if (TestMode || (Lockstep && !recording))
+				return false;
+			ENGINE_TRY(Input.QueueSignal(name));
+			return true;
+		}
+		[[nodiscard]] bool WasSignalled(InputPhase phase, std::string_view name) const override { return Input.WasSignalled(phase, name); }
+		// M28 (decision 3): where the display calls do nothing: the editor (its game view and every editor session), a
+		// headless run and every fixed-view session (test runs, replays, recordings and lockstep, whose view is the project's
+		// window size); the reason, or empty where the host's display applies.
+		[[nodiscard]] std::string_view GetDisplayRefusal() const
+		{
+			const ScriptEnvironment environment = GetEnvironment();
+			if (environment.IsEditor)
+				return "the editor's game view keeps the project's window: display settings apply in the Runtime";
+			if (environment.IsHeadless)
+				return "a headless run has no display";
+			if (TestMode || Lockstep || (Recorder != nullptr && Recorder->IsRecording()))
+				return "a fixed-view session (a test run, replay, recording or lockstep session) keeps the project's window";
+			return {};
+		}
+		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayModes() const override
+		{
+			if (!GetDisplayRefusal().empty())
+				return std::vector<DisplayVideoMode>{};
+			if (Host == nullptr)
+				return MakeError(ErrorCode::Unsupported, "the session has no host display");
+			return Host->GetDisplayModes();
+		}
+		[[nodiscard]] Result<DisplaySettings> GetDisplaySettings() const override
+		{
+			if (GetDisplayRefusal().empty() && Host != nullptr)
+				return Host->GetDisplaySettings();
+			return DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = ViewWidth, .Height = ViewHeight, .RefreshRate = 0, .VSync = Project.Window.VSync };
+		}
+		// M28 (decision 8): the SaveData module over the session's store. A fixed-view session (a test run, replay, recording or
+		// lockstep session) keeps its store in memory, so its commit writes nothing and succeeds; a session without a host
+		// does the same.
+		[[nodiscard]] Result<Json> GetSaveValue(std::string_view key) const override
+		{
+			ENGINE_TRY(SaveDataStore::ValidateKey(key));
+			const Json* found = SaveData.Find(key);
+			return found != nullptr ? *found : Json(nullptr);
+		}
+		[[nodiscard]] Status SetSaveValue(std::string_view key, const Json& value) override { return SaveData.Set(key, value); }
+		[[nodiscard]] Status ReplaceSaveData(const Json& values) override { return SaveData.Replace(values); }
+		[[nodiscard]] Result<std::vector<std::string>> GetSaveKeys() const override { return SaveData.GetKeys(); }
+		[[nodiscard]] Result<std::optional<std::string>> GetSaveDataLoadError() const override { return SaveDataLoadError; }
+		[[nodiscard]] Status CommitSaveData() override
+		{
+			if (TestMode || Lockstep || (Recorder != nullptr && Recorder->IsRecording()) || Host == nullptr)
+				return {};
+			return Host->CommitSaveData(SaveData.ToJson());
+		}
+		[[nodiscard]] Status RequestDisplaySettings(const DisplaySettings& settings) override
+		{
+			if (const std::string_view refusal = GetDisplayRefusal(); !refusal.empty())
+				return MakeError(ErrorCode::Unsupported, "{}", refusal);
+			if (Host == nullptr)
+				return MakeError(ErrorCode::Unsupported, "the session has no host display");
+			return Host->RequestDisplaySettings(settings);
+		}
 		// ADR 0038 decision 14: before each round of a start flush, the bodies of both worlds whose components changed, from
 		// world matrices brought up to date first, so an entity has its body from its OnStart on.
 		void SynchronizePhysicsBodies() override
@@ -991,6 +1086,9 @@ namespace Engine {
 		Physics2D->SetEventListener(nullptr);
 		Animation->SetEventListener(nullptr);
 		Scripts.reset();
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 9): the mix belongs to the session, so the replaced scene's
+		// system hands it over instead of restoring the volumes recorded before the session.
+		const std::optional<std::array<float, AudioGroupCount>> sessionMix = SceneAudio != nullptr ? SceneAudio->TakeMix() : std::nullopt;
 		SceneAudio.reset();
 		Animation.reset();
 		SpriteAnimation.reset();
@@ -1022,7 +1120,10 @@ namespace Engine {
 		if (Audio != nullptr)
 		{
 			SceneAudio = CreateScope<AudioSystem>(*RuntimeScene, AudioSystemSpecification{ .Audio = Audio, .Assets = Assets });
-			SceneAudio->InitializeMix();
+			if (sessionMix.has_value())
+				SceneAudio->AdoptMix(*sessionMix);
+			else
+				SceneAudio->InitializeMix();
 			AudioHeld = true;
 			ApplyAudioRunState();
 			// M35 (decision 3): the world pause outlives the scene, so the new scene's voices follow it from the start.
@@ -1235,7 +1336,8 @@ namespace Engine {
 				.SsrHalfResolution = Project.Rendering.SsrHalfResolution },
 			.SortingLayers = Project.SortingLayers.Layers,
 			// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state.
-			.UiInteraction = &Ui.GetInteraction() };
+			.UiInteraction = &Ui.GetInteraction(),
+			.UiPresentation = &Ui.GetPresentationTexts() };
 		Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*RuntimeScene, request);
 		if (snapshot)
 		{
@@ -1539,6 +1641,9 @@ namespace Engine {
 		state.Api = specification.ScriptApi;
 		state.Schemas = specification.ScriptSchemas;
 		state.Parameters = specification.Parameters.IsNull() ? Json::object() : specification.Parameters.Get();
+		if (!specification.SaveData.IsNull())
+			ENGINE_TRY(WithContext(state.SaveData.Replace(specification.SaveData.Get()), "while seeding the session's save data"));
+		state.SaveDataLoadError = specification.SaveDataLoadError;
 		state.Environment = specification.Environment;
 		state.ScriptRunMode = specification.ScriptRunMode;
 		state.TestMode = specification.TestMode;
@@ -1881,6 +1986,11 @@ namespace Engine {
 		return m_State->SceneGeneration;
 	}
 
+	const SaveDataStore& PlaySession::GetSaveData() const
+	{
+		return m_State->SaveData;
+	}
+
 	const Json& PlaySession::GetLoadParameters() const
 	{
 		return m_State->Parameters;
@@ -2025,6 +2135,8 @@ namespace Engine {
 		// M22 (C22.2, decision 29; ADR 0028's phase-2 ledger: after M21's physics2d block): the ui block, the interaction
 		// state and the queued UI events; nothing while both are empty, as in every scene without a canvas.
 		state.Ui.AppendStateHash(hasher);
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 10): the save-data block; nothing while the store is empty.
+		state.SaveData.AppendStateHash(hasher);
 		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 4; phase 5's ledger: after M28's save-data block): the
 		// world-pause block, from the session's first request to pause on: the pause in force and its sounds choice, the
 		// pending request (0 none, 1 pause, 2 resume) and its sounds choice, and the world's clock. Nothing before, so a session
@@ -2231,6 +2343,7 @@ namespace Engine {
 		view.SimulationTime = m_State->GetRenderTime(view.Alpha);
 		// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state, as in its game view.
 		view.UiInteraction = &m_State->Ui.GetInteraction();
+		view.UiPresentation = &m_State->Ui.GetPresentationTexts();
 		ENGINE_TRY_ASSIGN(auto snapshot, ExtractRenderSnapshot(*m_State->RuntimeScene, view));
 		snapshot.DebugDraw.Append(m_State->DebugDraw);
 		return snapshot;

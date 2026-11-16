@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <map>
 #include <optional>
 #include <string>
@@ -371,6 +372,50 @@ namespace Engine {
 			CHECK(input.GetText(InputPhase::Frame) == "x");
 			input.LatchFrame();
 			CHECK(input.GetText(InputPhase::Frame).empty());
+		}
+
+		TEST_CASE("PlayInput: a signal is latched by its tick's step view and the frame's since the last frame, once per name and tick")
+		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 6).
+			Result<PlayInput> created = PlayInput::Create(MakeActions());
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlayInput& input = *created;
+			input.SetFramePreview(true);
+			CHECK_FALSE(input.WasSignalled(InputPhase::Step, "Slow"));
+
+			// A live signal is queued for the next tick, never previewed by the frame view; posting it twice counts once.
+			REQUIRE(input.QueueSignal("Slow").has_value());
+			REQUIRE(input.QueueSignal("Slow").has_value());
+			CHECK(input.GetQueuedEventCount() == 1);
+			input.LatchFrame();
+			CHECK_FALSE(input.WasSignalled(InputPhase::Frame, "Slow"));
+			input.ApplyTick(0);
+			CHECK(input.WasSignalled(InputPhase::Step, "Slow"));
+			CHECK_FALSE(input.WasSignalled(InputPhase::Step, "Other"));
+			REQUIRE(input.GetLastAppliedEvents().size() == 1);
+			CHECK(input.GetLastAppliedEvents()[0] == PlayInputEvent{ .Type = PlayInputEventType::Signal, .Name = "Slow" });
+
+			// An injected one (a replay's, a test's) at a later tick; two ticks in one frame: the frame reads both.
+			REQUIRE(input.Queue(1, PlayInputEvent{ .Type = PlayInputEventType::Signal, .Name = "Done" }).has_value());
+			input.ApplyTick(1);
+			CHECK(input.WasSignalled(InputPhase::Step, "Done"));
+			CHECK_FALSE(input.WasSignalled(InputPhase::Step, "Slow"));
+			input.LatchFrame();
+			CHECK(input.WasSignalled(InputPhase::Frame, "Slow"));
+			CHECK(input.WasSignalled(InputPhase::Frame, "Done"));
+			input.ApplyTick(2);
+			CHECK_FALSE(input.WasSignalled(InputPhase::Step, "Done"));
+			input.LatchFrame();
+			CHECK_FALSE(input.WasSignalled(InputPhase::Frame, "Done"));
+
+			// Names hold 1 to 64 bytes of UTF-8, and a tick takes at most 64 distinct live signals.
+			CHECK_FALSE(input.QueueSignal("").has_value());
+			CHECK_FALSE(input.QueueSignal(std::string(65, 's')).has_value());
+			CHECK_FALSE(input.QueueSignal("\xFF").has_value());
+			for (int index = 0; index < 64; ++index)
+				REQUIRE(input.QueueSignal(std::format("S{}", index)).has_value());
+			CHECK_FALSE(input.QueueSignal("S64").has_value());
+			CHECK(input.QueueSignal("S3").has_value());
 		}
 
 		TEST_CASE("PlayInput: a previewed press is reported once by the frame view")

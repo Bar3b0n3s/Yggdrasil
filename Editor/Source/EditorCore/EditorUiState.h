@@ -26,6 +26,8 @@ namespace Engine {
 		// M19 (Docs/Decisions/0030-m19-contract.md decision 29): the game's native module and the user's Allow native code
 		// preference; closed by default.
 		Native,
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): editor play's save data; closed by default.
+		SaveData,
 		// Last: the editor's loops over the panels end with it.
 		ProjectLauncher
 	};
