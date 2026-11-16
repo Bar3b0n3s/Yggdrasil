@@ -7607,7 +7607,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Component values by registry name, merged into the existing components; missing components are added. A list replaces the old one, but a Script slot entry that gives Fields without Script patches the slot at its index (its script, ExecutionOrder and other field values kept; a null value removes one). An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene. Native components (Native.<Name>) are written with native.setComponents.",
+						"description": "Component values by registry name, merged into the existing components; missing components are added. A list replaces the old one (the old elements past its end are removed, its entries past the old one's end are new), but a Script slot entry without Script patches the slot at its index, keeping each member it omits: {} leaves the slot unchanged, {\"Fields\": {...}} changes those field values (a null value removes one), and an entry with a Script describes its whole slot. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene. Native components (Native.<Name>) are written with native.setComponents.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"
@@ -17743,7 +17743,7 @@
 					},
 					"components": {
 						"type": "object",
-						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Scripts\": [{\"Fields\": {...}}]}}, one entry per root slot, the list replacing the root's: an entry that gives Fields without Script patches the root's slot at its index (its script and ExecutionOrder kept, its other field values too; a null value removes one), and an entry with a Script describes its whole slot, omitted members taking their defaults. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the edit scene the request addresses.",
+						"description": "Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them (missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Scripts\": [{\"Fields\": {...}}]}}, one entry per root slot, the list replacing the root's: an entry without Script patches the root's slot at its index, keeping each member it omits ({} leaves the slot unchanged; its script, ExecutionOrder and other field values kept; a null value removes one), and an entry with a Script describes its whole slot, omitted members taking their defaults. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the edit scene the request addresses.",
 						"properties": {
 							"Transform": {
 								"$ref": "#/$defs/Transform"

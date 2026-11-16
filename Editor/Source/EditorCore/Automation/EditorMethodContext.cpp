@@ -39,9 +39,10 @@ namespace Engine {
 
 	namespace Utils {
 
-		// The indices of the slots of the Script component params `script` that give a Fields object, empty or not, without a
-		// Script member: each patches the slot at its index (CompleteBorrowingScriptSlot), whose Script handle its values
-		// resolve against (CompleteParameterOwners).
+		// The indices of the slot entries of the Script component params `script` that are objects without a Script member, an
+		// empty one included (World Tree's brief 19): each patches the slot at its index (CompleteBorrowingScriptSlot), whose
+		// Script handle its values resolve against (CompleteParameterOwners). An entry with a Script, null included, describes
+		// its whole slot, so a whole-list write (the inspector's reorder and remove) keeps exactly what it gives.
 		static std::vector<size_t> FindBorrowingScriptSlots(const Json& script)
 		{
 			std::vector<size_t> borrowing;
@@ -51,39 +52,42 @@ namespace Engine {
 			for (size_t slot = 0; slot < slots->size(); ++slot)
 			{
 				const Json& entry = (*slots)[slot];
-				const auto fields = entry.is_object() ? entry.find("Fields") : entry.end();
-				if (entry.is_object() && !entry.contains("Script") && fields != entry.end() && fields->is_object())
+				if (entry.is_object() && !entry.contains("Script"))
 					borrowing.push_back(slot);
 			}
 			return borrowing;
 		}
 
 		// Completes `entry`, a slot entry of FindBorrowingScriptSlots, from `owner`, the JSON of the slot at its index that its
-		// list replaces (Docs/Decisions/0031-m20-contract.md decision 17; the milestone review, S2 and S3): the entry takes
-		// the slot's Script and, when it gives none, its ExecutionOrder, and its Fields become the slot's with the entry's
-		// applied as a key patch (RFC 7386: a key it gives replaces the slot's, a null removes it). So the entry describes
-		// the slot as a Fields patch of Script version 1 left it, and a prefab instance records the changed keys only
-		// (decision 19). Nothing changes for an owner without a script.
+		// list replaces (Docs/Decisions/0031-m20-contract.md decision 17; the milestone review, S2 and S3; World Tree's brief
+		// 19): the entry takes each member of the slot that it omits (Script, ExecutionOrder, Fields), and a Fields object it
+		// gives becomes the slot's with the entry's applied as a key patch (RFC 7386: a key it gives replaces the slot's, a
+		// null removes it). So the entry is a patch of the slot, an empty one leaving it unchanged, and a prefab instance
+		// records the changed keys only (decision 19). A Fields value that is not an object stays as given, for the params'
+		// validation to refuse at its pointer; nothing changes for an owner that is not an object.
 		static void CompleteBorrowingScriptSlot(Json& entry, const Json& owner)
 		{
-			const auto script = owner.find("Script");
-			if (script == owner.end() || !script->is_string())
+			if (!owner.is_object())
 				return;
-			entry["Script"] = *script;
-			if (const auto order = owner.find("ExecutionOrder"); order != owner.end() && !entry.contains("ExecutionOrder"))
-				entry["ExecutionOrder"] = *order;
-			Json fields = Json::object();
-			if (const auto stored = owner.find("Fields"); stored != owner.end() && stored->is_object())
-				fields = *stored;
-			const Json patch = entry["Fields"];
-			for (auto member = patch.begin(); member != patch.end(); ++member)
+			if (const auto patch = entry.find("Fields"); patch != entry.end() && patch->is_object())
 			{
-				if (member->is_null())
-					fields.erase(member.key());
-				else
-					fields[member.key()] = *member;
+				const auto stored = owner.find("Fields");
+				Json fields = stored != owner.end() && stored->is_object() ? *stored : Json::object();
+				for (auto member = patch->begin(); member != patch->end(); ++member)
+				{
+					if (member->is_null())
+						fields.erase(member.key());
+					else
+						fields[member.key()] = *member;
+				}
+				*patch = std::move(fields);
 			}
-			entry["Fields"] = std::move(fields);
+			for (const char* member : { "Script", "ExecutionOrder", "Fields" })
+			{
+				const auto kept = owner.find(member);
+				if (kept != owner.end() && !entry.contains(member))
+					entry[member] = *kept;
+			}
 		}
 
 	}
@@ -284,8 +288,8 @@ namespace Engine {
 		const auto script = components->find("Script");
 		if (script == components->end() || !script->is_object())
 			return {};
-		// The slots that give Fields without a Script handle patch the slot at their index, borrowing its handle
-		// (Docs/Decisions/0031-m20-contract.md decision 17).
+		// The slot entries without a Script patch the slot at their index, borrowing its handle and every member they omit
+		// (Docs/Decisions/0031-m20-contract.md decision 17; World Tree's brief 19).
 		const std::vector<size_t> borrowing = Utils::FindBorrowingScriptSlots(*script);
 		if (borrowing.empty())
 			return {};
@@ -314,13 +318,15 @@ namespace Engine {
 		const auto* existing = owner.TryGetComponent<ScriptComponent>();
 		for (const size_t slot : borrowing)
 		{
-			if (existing == nullptr || slot >= existing->Scripts.size() || !existing->Scripts[slot].Script.IsValid())
+			// An entry past the end of the entity's list has no slot to patch: it describes a new slot.
+			if (existing == nullptr || slot >= existing->Scripts.size())
 				continue;
 			const ScriptSlot& stored = existing->Scripts[slot];
 			Json fields = Json::object();
 			for (const auto& [name, value] : stored.Fields)
 				fields[name] = value.Get();
-			const Json slotJson{ { "Script", stored.Script.GetHandle().ToString() }, { "Fields", std::move(fields) }, { "ExecutionOrder", stored.ExecutionOrder } };
+			const Json handle = stored.Script.IsValid() ? Json(stored.Script.GetHandle().ToString()) : Json();
+			const Json slotJson{ { "Script", handle }, { "Fields", std::move(fields) }, { "ExecutionOrder", stored.ExecutionOrder } };
 			Utils::CompleteBorrowingScriptSlot((*script)["Scripts"][slot], slotJson);
 		}
 		return {};
@@ -359,7 +365,7 @@ namespace Engine {
 				return {};
 			for (const size_t slot : Utils::FindBorrowingScriptSlots(script))
 			{
-				if (slot < slots->size() && (*slots)[slot].is_object())
+				if (slot < slots->size())
 					Utils::CompleteBorrowingScriptSlot(script["Scripts"][slot], (*slots)[slot]);
 			}
 			return {};

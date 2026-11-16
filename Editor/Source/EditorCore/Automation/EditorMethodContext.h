@@ -58,13 +58,15 @@ namespace Engine {
 		// Lazily pins the editor's current script field snapshot for this request, after path resolution. No project is
 		// InvalidState; snapshot acquisition failures propagate. Methods without schema-dependent params never load it.
 		[[nodiscard]] Result<Ref<const IFieldSchemaSource>> GetFieldSchemaSnapshot() override;
-		// A Script slot entry that entity.update gives a Fields object (an empty one included) without a Script patches the
-		// addressed entity's slot at its index, and prefab.instantiate's the prefab root's slot at its index (the component
-		// the per-instance values merge into): the entry takes that slot's Script handle and, when it gives none, its
-		// ExecutionOrder, and its Fields become the slot's with its own applied as a key patch (RFC 7386, a null removing a
-		// key; Docs/Decisions/0031-m20-contract.md decision 17 and the milestone review). An explicit Script (including
-		// null), or removing/re-adding the component, never borrows the old slot. No scene writes. Errors:
-		// prefab.instantiate's for a prefab that does not resolve or load, located at /prefab.
+		// A Script slot entry that entity.update gives without a Script (an empty object included) patches the addressed
+		// entity's slot at its index, and prefab.instantiate's the prefab root's slot at its index (the component the
+		// per-instance values merge into): the entry takes that slot's Script handle and each other member it omits (its
+		// ExecutionOrder, its Fields), and a Fields object it gives becomes the slot's with its own applied as a key patch
+		// (RFC 7386, a null removing a key), so {} leaves the slot unchanged (Docs/Decisions/0031-m20-contract.md decision 17,
+		// the milestone review and World Tree's brief 19). The list still replaces the old one: an entry past its end
+		// describes a new slot, and the slots past the given list's end are removed. An explicit Script (including null), or
+		// removing/re-adding the component, never borrows the old slot. No scene writes. Errors: prefab.instantiate's for a
+		// prefab that does not resolve or load, located at /prefab.
 		[[nodiscard]] Status CompleteParameterOwners(Json& params) override;
 
 		// The scene a request addresses (§13.4 "Target"): `target` as given when `given`, else the play scene for reads while
@@ -159,7 +161,7 @@ namespace Engine {
 		[[nodiscard]] Result<ViewportPixelSize> GetViewportPixelSize(ViewportView view) const;
 	private:
 		// CompleteParameterOwners for prefab.instantiate: completes each slot entry of `script` (the Script object of params'
-		// components) that gives Fields without a Script from the prefab root's slot at its index, when that slot has a script.
+		// components) without a Script from the prefab root's slot at its index, when the prefab root has that slot.
 		[[nodiscard]] Status CompletePrefabScriptOwner(const Json& params, Json& script);
 		// The SceneTarget the "target" member of `params` names, or nullopt when there is none or it is no SceneTarget name.
 		[[nodiscard]] std::optional<SceneTarget> ReadTargetParam(const Json& params) const;

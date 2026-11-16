@@ -63,11 +63,15 @@
 //      "unknown field" hints work inside it. The value is a merge patch (StructInfo::GetPatchField): each member is
 //      checked on its own, while the component's rules between fields (its type-level validators: UiRect's AnchorMin not
 //      above AnchorMax) are checked by the handler's write on the value it produces, the entity's current component with
-//      the patch merged in or a new component's defaults with it, located below the value's pointer. A value may also set
-//      the component's writable virtual fields (Transform.EulerAngles, WorldPosition), each checked against its own field;
-//      read-only virtual fields are errors. The handler applies virtual fields through their setters (ComponentAccess::
-//      SetFieldValue). Full schemas reference the component $defs, which list the writable virtual fields too; compact
-//      (MCP) schemas show a free-form object (§13.8 "Compact tool schemas").
+//      the patch merged in or a new component's defaults with it, located below the value's pointer. A list in it replaces
+//      the component's list whole (RFC 7386: a shorter one drops the elements past its end, a longer one appends), and only
+//      where the host completes an entry from the element at its index is an element patched (CompleteParameterOwners:
+//      entity.update's and prefab.instantiate's Script slot entry without a Script keeps each member it omits, so {} leaves
+//      its slot unchanged, World Tree's brief 19). A value may also set the component's writable virtual fields
+//      (Transform.EulerAngles, WorldPosition), each checked against its own field; read-only virtual fields are errors. The
+//      handler applies virtual fields through their setters (ComponentAccess::SetFieldValue). Full schemas reference the
+//      component $defs, which list the writable virtual fields too; compact (MCP) schemas show a free-form object (§13.8
+//      "Compact tool schemas").
 //  11. Polymorphic members ("fix": true | [ids], "components": [...] | "all") are free-form VariantValue members that the
 //      handler validates, reporting InvalidArgument located at the member's pointer.
 //  12. Results. Canonical ids (16 hex digits) plus readable names and paths (§13.4); every edit-scene mutation reports

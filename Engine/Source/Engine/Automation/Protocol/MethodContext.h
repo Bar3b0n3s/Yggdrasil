@@ -215,8 +215,9 @@ namespace Engine {
 
 		// Completes what a partial entry of the params omits from the addressed host object: the schema-discriminating owner
 		// fields its values resolve against, and for an entry of a list that replaces the old one whole while it patches
-		// one element, that element's other members (an entity.update Fields-only Script slot takes the slot's Script
-		// handle, its ExecutionOrder and its other field values, Docs/Decisions/0031-m20-contract.md decision 17). Called
+		// one element, that element's other members (an entity.update Script slot entry without a Script, {} included, takes
+		// the slot's Script handle, its ExecutionOrder and its field values unless it gives them, its Fields patching the
+		// slot's key by key, Docs/Decisions/0031-m20-contract.md decision 17 and World Tree's brief 19). Called
 		// for every request after its admission and before its params are canonicalized, so what it adds is canonicalized
 		// and validated with the rest. The default does nothing. An override never overwrites a supplied value (a supplied
 		// null member of a key patch removes that key), mutates host state or relaxes validation; what it adds is the host

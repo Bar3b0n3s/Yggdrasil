@@ -382,8 +382,8 @@ namespace Engine {
 
 		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 11; World Tree's brief 13, its third item): `script`, the
 		// Script component prefab.instantiate's components give the new instance root `root`, as the request's preparation
-		// completed it: a slot entry that gave Fields without a Script took the prefab root's slot, its other field values in
-		// prefab space (EditorMethodContext::CompleteParameterOwners). Each value of an entry for a slot whose script the
+		// completed it: a slot entry without a Script took the prefab root's slot, the field values it omits in prefab space
+		// (EditorMethodContext::CompleteParameterOwners). Each value of an entry for a slot whose script the
 		// instance's slot holds that still equals the prefab root's slot value takes the instance's value instead, the same
 		// value with its references mapped to the instance's own members, so the patch merges into the slot as the
 		// instantiation mapped it.
@@ -700,11 +700,11 @@ namespace Engine {
 			.VariantField("components", &PrefabInstantiateParams::Components,
 				"Per-instance component values for the instance root by registry name, merged into the prefab's as entity.update merges them "
 				"(missing components are added) and recorded as the instance's overrides; script fields go in {\"Script\": {\"Scripts\": "
-				"[{\"Fields\": {...}}]}}, one entry per root slot, the list replacing the root's: an entry that gives Fields without Script "
-				"patches the root's slot at its index (its script and ExecutionOrder kept, its other field values too; a null value removes "
-				"one), and an entry with a Script describes its whole slot, omitted members taking their defaults. "
-				"An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the "
-				"edit scene the request addresses.",
+				"[{\"Fields\": {...}}]}}, one entry per root slot, the list replacing the root's: an entry without Script patches the root's "
+				"slot at its index, keeping each member it omits ({} leaves the slot unchanged; its script, ExecutionOrder and other field "
+				"values kept; a null value removes one), and an entry with a Script describes its whole slot, omitted members taking their "
+				"defaults. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", "
+				"resolved in the edit scene the request addresses.",
 				&ResolveComponentValue);
 
 		registry.Struct<PrefabInstantiateResult>("PrefabInstantiateResult", "The new instance.")

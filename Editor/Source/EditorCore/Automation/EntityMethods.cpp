@@ -469,10 +469,11 @@ namespace Engine {
 			.Field("tags", &EntityUpdateParams::Tags, "The new tag list (replaces the old one).")
 			.VariantField("components", &EntityUpdateParams::Components,
 				"Component values by registry name, merged into the existing components; missing components are added. A list replaces the old "
-				"one, but a Script slot entry that gives Fields without Script patches the slot at its index (its script, ExecutionOrder and "
-				"other field values kept; a null value removes one). An Entity value takes 16 hex "
-				"digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", resolved in the target scene. Native components "
-				"(Native.<Name>) are written with native.setComponents.",
+				"one (the old elements past its end are removed, its entries past the old one's end are new), but a Script slot entry "
+				"without Script patches the slot at its index, keeping each member it omits: {} leaves the slot unchanged, "
+				"{\"Fields\": {...}} changes those field values (a null value removes one), and an entry with a Script describes its "
+				"whole slot. An Entity value takes 16 hex digits, a unique id prefix of at least 6 or a path such as \"/Game/ScoreText\", "
+				"resolved in the target scene. Native components (Native.<Name>) are written with native.setComponents.",
 				&ResolveComponentValue)
 			.Field("removeComponents", &EntityUpdateParams::RemoveComponents,
 				"Components to remove (before the components are written); native.setComponents removes a native one (null).")

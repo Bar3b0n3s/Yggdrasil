@@ -45,6 +45,54 @@ return Script.Define("Fields", Fields)
 		REQUIRE_MESSAGE(created.has_value(), (created ? std::string() : created.error().ToString()));
 	}
 
+	// World Tree's brief 19: /Warden with its child Blade and four script slots whose field values and execution orders
+	// differ from their defaults, Combat's Target naming Blade.
+	static void CreateFourSlotWarden(Test::AutomationFixture& setup)
+	{
+		const auto write = [&setup](const char* path, const char* source)
+		{
+			const auto written = setup.Call("script.write", Json{ { "path", path }, { "source", source } });
+			REQUIRE_MESSAGE(written.has_value(), (written ? std::string() : written.error().ToString()));
+		};
+		write("Assets/Controller.luau", "return Script.Define(\"Controller\", {Fields = {Speed = Field.Number(1), "
+										"CrossClip = Field.Number(0), FinisherClip = Field.Number(0)}})");
+		write("Assets/Combat.luau", "return Script.Define(\"Combat\", {Fields = {Damage = Field.Number(1), Target = Field.Entity()}})");
+		write("Assets/Health.luau", "return Script.Define(\"Health\", {Fields = {Max = Field.Number(10)}})");
+		write("Assets/Sap.luau", "return Script.Define(\"Sap\", {Fields = {Rate = Field.Number(1)}})");
+		REQUIRE(setup.Call("entity.create", Json{ { "name", "Warden" } }).has_value());
+		REQUIRE(setup.Call("entity.create", Json{ { "name", "Blade" }, { "parent", "/Warden" } }).has_value());
+		const Json controller{ { "Script", "Assets/Controller.luau" }, { "Fields", Json{ { "Speed", 3 } } }, { "ExecutionOrder", 1 } };
+		const Json combatFields{ { "Damage", 4 }, { "Target", "/Warden/Blade" } };
+		const Json combat{ { "Script", "Assets/Combat.luau" }, { "Fields", combatFields }, { "ExecutionOrder", 2 } };
+		const Json health{ { "Script", "Assets/Health.luau" }, { "Fields", Json{ { "Max", 30 } } } };
+		const Json sap{ { "Script", "Assets/Sap.luau" }, { "Fields", Json{ { "Rate", 2 } } }, { "ExecutionOrder", 4 } };
+		const Json components{ { "Script", Json{ { "Scripts", Json::array({ controller, combat, health, sap }) } } } };
+		const auto attached = setup.Call("entity.update", Json{ { "entity", "/Warden" }, { "components", components } });
+		REQUIRE_MESSAGE(attached.has_value(), (attached ? std::string() : attached.error().ToString()));
+	}
+
+	// The brief's Script value: two fields of the first slot, the other three slots given as {}.
+	static Json MakeWardenClipPatch()
+	{
+		const Json clips{ { "Fields", Json{ { "CrossClip", 7 }, { "FinisherClip", 9 } } } };
+		return Json{ { "Scripts", Json::array({ clips, Json::object(), Json::object(), Json::object() }) } };
+	}
+
+	// `before`, the Warden's slots, with the first slot's Fields as MakeWardenClipPatch leaves them (in their canonical order).
+	static Json MakeWardenClipResult(Json before)
+	{
+		before[0]["Fields"] = Json{ { "CrossClip", 7 }, { "FinisherClip", 9 }, { "Speed", 3 } };
+		return before;
+	}
+
+	// The script slots of `entity` as entity.get reads them.
+	static Json ReadScriptSlots(Test::AutomationFixture& setup, const char* entity)
+	{
+		const auto read = setup.Call("entity.get", Json{ { "entity", entity } });
+		REQUIRE_MESSAGE(read.has_value(), (read ? std::string() : read.error().ToString()));
+		return (*read)["entity"]["components"]["Script"]["Scripts"];
+	}
+
 	TEST_SUITE("EditorCore")
 	{
 		TEST_CASE("EditorMethodContext: fields-only script patches use the existing owner for paths enums bounds and undo")
@@ -239,6 +287,129 @@ return Script.Define("Fields", Fields)
 			const Json replaced = patch(Json{ { "Script", "Assets/Brick.luau" }, { "Fields", Json{ { "Hits", 4 } } } });
 			CHECK(replaced["Fields"] == Json{ { "Hits", 4 } });
 			CHECK(replaced["ExecutionOrder"] == Json(0));
+		}
+
+		// World Tree's brief 19: an entry without a Script patches the slot at its index and keeps each member it omits, so {}
+		// leaves its slot exactly as {"Fields": {}} does (it used to read as an empty slot: no script, no fields, order 0),
+		// for entity.update with and without dryRun and for edit.batch's entity.update op.
+		TEST_CASE("EditorMethodContext: a script slot entry without a Script keeps what it omits and an empty one leaves its slot unchanged")
+		{
+			Test::AutomationFixture setup("ContextEmptyScriptSlot");
+			CreateFourSlotWarden(setup);
+			const Json before = ReadScriptSlots(setup, "/Warden");
+			REQUIRE(before.size() == 4);
+			const Json expected = MakeWardenClipResult(before);
+			const Json update{ { "entity", "/Warden" }, { "components", Json{ { "Script", MakeWardenClipPatch() } } } };
+
+			Json dryRun = update;
+			dryRun["dryRun"] = true;
+			const auto previewed = setup.Call("entity.update", dryRun);
+			REQUIRE_MESSAGE(previewed.has_value(), (previewed ? std::string() : previewed.error().ToString()));
+			CHECK((*previewed)["entity"]["components"]["Script"]["Scripts"] == expected);
+			CHECK(ReadScriptSlots(setup, "/Warden") == before);
+
+			const auto updated = setup.Call("entity.update", update);
+			REQUIRE_MESSAGE(updated.has_value(), (updated ? std::string() : updated.error().ToString()));
+			CHECK((*updated)["entity"]["components"]["Script"]["Scripts"] == expected);
+			CHECK(ReadScriptSlots(setup, "/Warden") == expected);
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+			REQUIRE(ReadScriptSlots(setup, "/Warden") == before);
+
+			const Json op{ { "method", "entity.update" }, { "params", update } };
+			const auto batched = setup.Call("edit.batch", Json{ { "ops", Json::array({ op }) } });
+			REQUIRE_MESSAGE(batched.has_value(), (batched ? std::string() : batched.error().ToString()));
+			CHECK((*batched)["results"][0]["entity"]["components"]["Script"]["Scripts"] == expected);
+			CHECK(ReadScriptSlots(setup, "/Warden") == expected);
+			REQUIRE(setup.Call("edit.undo", Json::object()).has_value());
+
+			// An entry that gives only ExecutionOrder keeps its slot's script and field values.
+			Json reordered = before;
+			reordered[3]["ExecutionOrder"] = 6;
+			const Json orderOnly{ { "ExecutionOrder", 6 } };
+			const Json order{ { "Scripts", Json::array({ Json::object(), Json::object(), Json::object(), orderOnly }) } };
+			const auto ordered = setup.Call("entity.update", Json{ { "entity", "/Warden" }, { "components", Json{ { "Script", order } } } });
+			REQUIRE_MESSAGE(ordered.has_value(), (ordered ? std::string() : ordered.error().ToString()));
+			CHECK((*ordered)["entity"]["components"]["Script"]["Scripts"] == reordered);
+		}
+
+		// World Tree's brief 19's prefab case: the patch on an instance root, with dryRun and without, and as prefab.instantiate's
+		// components, records only the first slot's two changed fields (it used to record the other slots' scripts as null and
+		// their fields as removed, which prefab.apply would have written into the prefab); the slots given as {} keep their
+		// scripts, execution orders and field values, Combat's Target naming the instance's own Blade.
+		TEST_CASE("EditorMethodContext: empty script slot entries on a prefab instance record only the patched slot's fields")
+		{
+			Test::AutomationFixture setup("ContextEmptyScriptSlotPrefab");
+			CreateFourSlotWarden(setup);
+			const Json created{ { "entity", "/Warden" }, { "path", "Assets/Warden.prefab" }, { "replaceWithInstance", true } };
+			REQUIRE(setup.Call("prefab.create", created).has_value());
+			const Json before = ReadScriptSlots(setup, "/Warden");
+			const Json expected = MakeWardenClipResult(before);
+			const auto checkOverrides = [](const Json& entity)
+			{
+				const Json& overrides = entity["components"]["Prefab"]["Overrides"];
+				REQUIRE(overrides.size() == 1);
+				CHECK(overrides[0]["Component"] == Json("Script"));
+				CHECK(overrides[0]["Field"] == Json("Scripts/0/Fields"));
+				CHECK(overrides[0]["Value"] == Json{ { "CrossClip", 7 }, { "FinisherClip", 9 } });
+			};
+
+			for (const bool dryRun : { true, false })
+			{
+				CAPTURE(dryRun);
+				Json params{ { "entity", "/Warden" }, { "components", Json{ { "Script", MakeWardenClipPatch() } } } };
+				if (dryRun)
+					params["dryRun"] = true;
+				const auto updated = setup.Call("entity.update", params);
+				REQUIRE_MESSAGE(updated.has_value(), (updated ? std::string() : updated.error().ToString()));
+				CHECK((*updated)["entity"]["components"]["Script"]["Scripts"] == expected);
+				checkOverrides((*updated)["entity"]);
+				CHECK(ReadScriptSlots(setup, "/Warden") == (dryRun ? before : expected));
+			}
+			const auto warden = setup.Call("entity.get", Json{ { "entity", "/Warden" } });
+			REQUIRE(warden.has_value());
+			CHECK((*warden)["entity"]["components"]["Script"]["Scripts"] == expected);
+			checkOverrides((*warden)["entity"]);
+
+			const Json instantiated{ { "prefab", "Assets/Warden.prefab" }, { "name", "Copy" },
+				{ "components", Json{ { "Script", MakeWardenClipPatch() } } } };
+			const auto instance = setup.Call("prefab.instantiate", instantiated);
+			REQUIRE_MESSAGE(instance.has_value(), (instance ? std::string() : instance.error().ToString()));
+			const auto blade = setup.Call("entity.get", Json{ { "entity", "/Copy/Blade" } });
+			REQUIRE(blade.has_value());
+			Json copied = expected;
+			copied[1]["Fields"]["Target"] = (*blade)["entity"]["id"];
+			const auto copy = setup.Call("entity.get", Json{ { "entity", "/Copy" } });
+			REQUIRE(copy.has_value());
+			CHECK((*copy)["entity"]["components"]["Script"]["Scripts"] == copied);
+			checkOverrides((*copy)["entity"]);
+		}
+
+		// The list-length rule World Tree's brief 19 asked to define, kept from Docs/Decisions/0031-m20-contract.md decision 17:
+		// the given list replaces the slot list, so a shorter one removes the slots past its end, and an entry past the old
+		// list's end is a new slot, every member it omits taking its default (the inspector's Add script appends {}), while
+		// the entries within the old list patch their slots.
+		TEST_CASE("EditorMethodContext: a shorter script list removes the slots past its end and a longer one appends new slots")
+		{
+			Test::AutomationFixture setup("ContextScriptSlotCount");
+			CreateFourSlotWarden(setup);
+			const Json before = ReadScriptSlots(setup, "/Warden");
+			const auto preview = [&setup](Json scripts)
+			{
+				const Json components{ { "Script", Json{ { "Scripts", std::move(scripts) } } } };
+				const Json params{ { "entity", "/Warden" }, { "dryRun", true }, { "components", components } };
+				const auto updated = setup.Call("entity.update", params);
+				REQUIRE_MESSAGE(updated.has_value(), (updated ? std::string() : updated.error().ToString()));
+				return Json((*updated)["entity"]["components"]["Script"]["Scripts"]);
+			};
+
+			CHECK(preview(Json::array({ Json::object(), Json::object() })) == Json::array({ before[0], before[1] }));
+			Json longer = before;
+			longer.push_back(Json{ { "Script", nullptr }, { "Fields", Json::object() }, { "ExecutionOrder", 0 } });
+			longer.push_back(Json{ { "Script", nullptr }, { "Fields", Json::object() }, { "ExecutionOrder", 6 } });
+			const Json appended = Json::array(
+				{ Json::object(), Json::object(), Json::object(), Json::object(), Json::object(), Json{ { "ExecutionOrder", 6 } } });
+			CHECK(preview(appended) == longer);
+			CHECK(ReadScriptSlots(setup, "/Warden") == before);
 		}
 
 		TEST_CASE("EditorMethodContext: entity references resolve by id, unique prefix and path")

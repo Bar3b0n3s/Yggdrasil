@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import unittest
 
 from harness import AutomationTestCase, engine_client
@@ -101,6 +102,50 @@ return Script.Define("Links", Links)
         self.assertEqual(reverted["removedOverrides"], 1)
         self.assertEqual(read_slots()[1].get("Fields", {}), {})
         self.assertEqual(read_slots()[0]["Fields"], {"Amount": 2})
+
+    def test_an_empty_script_slot_entry_leaves_its_slot_unchanged(self) -> None:
+        # World Tree's brief 19: a slot entry without a Script patches the slot at its index and keeps what it omits,
+        # so {} leaves its slot unchanged as {"Fields": {}} does, with dryRun and without, and a prefab instance
+        # records only the patched slot's changed fields. A shorter list still removes the slots past its end.
+        client, _ = self.open_editor_with_scene()
+        names = ("Controller", "Combat", "Health", "Sap")
+        handles = {}
+        fields = "{Amount = Field.Number(1), Clip = Field.Number(0)}"
+        for name in names:
+            written = client.call("script.write", {
+                "path": f"Assets/Scripts/{name}.luau",
+                "source": f'return Script.Define("{name}", {{Fields = {fields}}})',
+            })
+            handles[name] = written["script"]["id"]
+        client.call("entity.create", {"name": "Warden", "components": {"Script": {"Scripts": [
+            {"Script": handles[name], "Fields": {"Amount": index + 2}, "ExecutionOrder": index + 1}
+            for index, name in enumerate(names)]}}})
+        client.call("prefab.create", {"entity": "/Warden", "path": "Assets/Prefabs/Warden.prefab",
+                                      "replaceWithInstance": True})
+
+        def read_slots() -> list:
+            entity = client.call("entity.get", {"entity": "/Warden", "components": ["Script"]})["entity"]
+            return entity["components"]["Script"]["Scripts"]
+
+        before = read_slots()
+        expected = copy.deepcopy(before)
+        expected[0]["Fields"]["Clip"] = 7
+        patch = {"Script": {"Scripts": [{"Fields": {"Clip": 7}}, {}, {}, {}]}}
+        for dry_run in (True, False):
+            with self.subTest(dry_run=dry_run):
+                params = {"entity": "/Warden", "components": patch}
+                if dry_run:
+                    params["dryRun"] = True
+                components = client.call("entity.update", params)["entity"]["components"]
+                self.assertEqual(components["Script"]["Scripts"], expected)
+                self.assertEqual([(entry["Component"], entry["Field"], entry["Value"])
+                                  for entry in components["Prefab"]["Overrides"]],
+                                 [("Script", "Scripts/0/Fields", {"Clip": 7})])
+                self.assertEqual(read_slots(), expected if not dry_run else before)
+
+        shorter = client.call("entity.update", {"entity": "/Warden", "dryRun": True,
+                                                "components": {"Script": {"Scripts": [{}, {}]}}})
+        self.assertEqual(shorter["entity"]["components"]["Script"]["Scripts"], expected[:2])
 
     def test_stats_reports_script_memory_only_with_a_live_vm(self) -> None:
         client, _ = self.open_editor_with_scene()
