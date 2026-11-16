@@ -42,6 +42,7 @@
 #include "Engine/Scripting/ScriptProxy.h"
 #include "Engine/Session/NativeWorld.h"
 #include "Engine/Session/ReplayRecorder.h"
+#include "Engine/Session/SaveDataStore.h"
 #include "Engine/Session/SessionStatistics.h"
 
 #include <algorithm>
@@ -110,6 +111,12 @@ namespace Engine {
 				return MakeSpecificationError("Registry", "a play session needs the context's type registry");
 			if (!specification.Parameters.IsNull() && !specification.Parameters.Get().is_object())
 				return MakeSpecificationError("Parameters", "scene parameters must be a JSON object");
+			if (!specification.SaveData.IsNull())
+			{
+				SaveDataStore seeded;
+				if (const Status valid = seeded.Replace(specification.SaveData.Get()); !valid)
+					return MakeSpecificationError("SaveData", valid.error().GetMessageText());
+			}
 			const SimulationSettings& simulation = specification.Project.Simulation;
 			if (simulation.FixedHz < 1 || simulation.FixedHz > FrameLoopConfig::MaxFixedHz)
 			{
@@ -406,6 +413,9 @@ namespace Engine {
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the UiLayout and FrameUiLayout phases' layouts, and
 		// (C22.2, decisions 24 and 30) the UiInput phase's interaction state, with the Ui settings' commands it reads.
 		UiSystem Ui{};
+		// M28 (decision 8): the session's save data, which a scene replacement keeps, and why the host's store could not be read.
+		SaveDataStore SaveData{};
+		std::optional<std::string> SaveDataLoadError{};
 		Utils::UiCommandBindings UiCommands{};
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 29): the scene's animation (GetAnimation), created after the physics
 		// systems and replaced with them at a scene transition; never null once the session is created.
@@ -570,6 +580,26 @@ namespace Engine {
 			if (GetDisplayRefusal().empty() && Host != nullptr)
 				return Host->GetDisplaySettings();
 			return DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = ViewWidth, .Height = ViewHeight, .RefreshRate = 0, .VSync = Project.Window.VSync };
+		}
+		// M28 (decision 8): the SaveData module over the session's store. A fixed-view session (a test run, replay, recording or
+		// lockstep session) keeps its store in memory, so its commit writes nothing and succeeds; a session without a host
+		// does the same.
+		[[nodiscard]] Status GetSaveValue(std::string_view key, Json& value) const override
+		{
+			ENGINE_TRY(SaveDataStore::ValidateKey(key));
+			const Json* found = SaveData.Find(key);
+			value = found != nullptr ? *found : Json(nullptr);
+			return {};
+		}
+		[[nodiscard]] Status SetSaveValue(std::string_view key, const Json& value) override { return SaveData.Set(key, value); }
+		[[nodiscard]] Status ReplaceSaveData(const Json& values) override { return SaveData.Replace(values); }
+		[[nodiscard]] Result<std::vector<std::string>> GetSaveKeys() const override { return SaveData.GetKeys(); }
+		[[nodiscard]] Result<std::optional<std::string>> GetSaveDataLoadError() const override { return SaveDataLoadError; }
+		[[nodiscard]] Status CommitSaveData() override
+		{
+			if (TestMode || Lockstep || (Recorder != nullptr && Recorder->IsRecording()) || Host == nullptr)
+				return {};
+			return Host->CommitSaveData(SaveData.ToJson());
 		}
 		[[nodiscard]] Status RequestDisplaySettings(const DisplaySettings& settings) override
 		{
@@ -1507,6 +1537,9 @@ namespace Engine {
 		state.Api = specification.ScriptApi;
 		state.Schemas = specification.ScriptSchemas;
 		state.Parameters = specification.Parameters.IsNull() ? Json::object() : specification.Parameters.Get();
+		if (!specification.SaveData.IsNull())
+			ENGINE_TRY(WithContext(state.SaveData.Replace(specification.SaveData.Get()), "while seeding the session's save data"));
+		state.SaveDataLoadError = specification.SaveDataLoadError;
 		state.Environment = specification.Environment;
 		state.ScriptRunMode = specification.ScriptRunMode;
 		state.TestMode = specification.TestMode;
@@ -1858,6 +1891,11 @@ namespace Engine {
 		return m_State->SceneGeneration;
 	}
 
+	const SaveDataStore& PlaySession::GetSaveData() const
+	{
+		return m_State->SaveData;
+	}
+
 	const Json& PlaySession::GetLoadParameters() const
 	{
 		return m_State->Parameters;
@@ -2002,6 +2040,8 @@ namespace Engine {
 		// M22 (C22.2, decision 29; ADR 0028's phase-2 ledger: after M21's physics2d block): the ui block, the interaction
 		// state and the queued UI events; nothing while both are empty, as in every scene without a canvas.
 		state.Ui.AppendStateHash(hasher);
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 10): the save-data block; nothing while the store is empty.
+		state.SaveData.AppendStateHash(hasher);
 		return hasher.Digest();
 	}
 

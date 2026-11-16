@@ -46,6 +46,9 @@ namespace Engine {
 			// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the Terrain proxy's methods, after the earlier milestones'
 			// registrations (landing order).
 			ENGINE_TRY(ScriptBindings::RegisterTerrain(api));
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the SaveData module, after RegisterTerrain (phase 5's
+			// ledger: before M30's RegisterNavigation).
+			ENGINE_TRY(ScriptBindings::RegisterSaveData(api));
 			return {};
 		}
 

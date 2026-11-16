@@ -204,6 +204,24 @@ namespace Engine {
 		{
 			return MakeError(ErrorCode::Unsupported, "this host has no display: display settings apply in a windowed Runtime");
 		}
+		// M28 (decision 8): the SaveData module and Test.SetSaveData over a play session's store (Session/SaveDataStore.h).
+		// GetSaveValue sets `value` to the key's value, or null when the key is absent; SetSaveValue deletes it with null; ReplaceSaveData replaces every value;
+		// CommitSaveData writes the store where its host keeps it; GetSaveDataLoadError is why the store the session started
+		// with could not be read. Every other host keeps the defaults, Unsupported, which the module raises.
+		[[nodiscard]] virtual Status GetSaveValue(std::string_view /*key*/, Json& /*value*/) const
+		{
+			return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason);
+		}
+		[[nodiscard]] virtual Status SetSaveValue(std::string_view /*key*/, const Json& /*value*/) { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Status ReplaceSaveData(const Json& /*values*/) { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Result<std::vector<std::string>> GetSaveKeys() const { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Status CommitSaveData() { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }
+		[[nodiscard]] virtual Result<std::optional<std::string>> GetSaveDataLoadError() const
+		{
+			return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason);
+		}
+	private:
+		static constexpr std::string_view NoSaveDataReason = "this host has no save data: SaveData works in a play session";
 	};
 
 }

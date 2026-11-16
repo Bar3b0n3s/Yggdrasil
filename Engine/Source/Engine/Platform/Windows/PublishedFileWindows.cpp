@@ -15,6 +15,7 @@
 	#include <windows.h>
 
 	#include <cstddef>
+	#include <algorithm>
 	#include <cstring>
 	#include <format>
 	#include <limits>
@@ -165,6 +166,51 @@ namespace Engine {
 			return {};
 		const DWORD moveCode = GetLastError();
 		return Utils::MakeWindowsError(moveCode, std::format("rename '{}' to", FileSystem::PathToUtf8(from)), to);
+	}
+
+	Status PublishedFile::WriteDurably(const std::filesystem::path& path, std::span<const std::byte> data)
+	{
+		// One temporary per process and target: a store is written on the main thread, and two processes never share a name.
+		std::filesystem::path temporary = path;
+		temporary += std::format(L".tmp-{}", GetCurrentProcessId());
+		Status written = [&temporary, data]() -> Status
+		{
+			ScopedFile file(CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+			if (file.Get() == INVALID_HANDLE_VALUE)
+			{
+				const DWORD code = GetLastError();
+				return Utils::MakeWindowsError(code, "create", temporary);
+			}
+			size_t offset = 0;
+			while (offset < data.size())
+			{
+				const DWORD chunk = static_cast<DWORD>(std::min<size_t>(data.size() - offset, std::numeric_limits<DWORD>::max()));
+				DWORD wrote = 0;
+				if (::WriteFile(file.Get(), data.data() + offset, chunk, &wrote, nullptr) == FALSE || wrote == 0)
+				{
+					const DWORD code = GetLastError();
+					return Utils::MakeWindowsError(code, "write", temporary);
+				}
+				offset += wrote;
+			}
+			if (FlushFileBuffers(file.Get()) == FALSE)
+			{
+				const DWORD code = GetLastError();
+				return Utils::MakeWindowsError(code, "flush", temporary);
+			}
+			return {};
+		}();
+		if (written.has_value())
+		{
+			if (Status replaced = Replace(temporary, path); !replaced)
+				written = std::unexpected(std::move(replaced).error());
+		}
+		if (!written.has_value())
+		{
+			std::error_code removed;
+			std::filesystem::remove(temporary, removed);
+		}
+		return written;
 	}
 
 }

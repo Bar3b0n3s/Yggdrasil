@@ -415,6 +415,16 @@ namespace Engine {
 			return Inject(call, { { "type", "signal" }, { "name", std::move(name) } });
 		}
 
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): a suite's save data, which a test run keeps in memory.
+		static int SetSaveData(ScriptCall& call)
+		{
+			static_cast<void>(Host(call));
+			const Json values = Lua::CheckJson(call, 1);
+			Checked(call, call.PrepareHostMutation());
+			Checked(call, call.Engine->GetHost().ReplaceSaveData(values));
+			return 0;
+		}
+
 		static int Screenshot(ScriptCall& call)
 		{
 			IScriptTestHost& host = Host(call);
@@ -709,7 +719,12 @@ namespace Engine {
 					"Returns the seeded particle hash of a ParticleEmitter entity (the XXH64 of its live particles, random stream and emission "
 					"state) as 16 hexadecimal digits, or nil before its first Particles phase or without a ParticleEmitter; the same in every "
 					"configuration, so a suite compares it across runs; test suites only.",
-					pure);
+					pure)
+				.Function("SetSaveData", Utils::SetSaveData, "(values: {[string]: any}) -> ()",
+					"Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it "
+					"at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "
+					"\"Case\" suite starts empty again.",
+					mutation);
 			return {};
 		}
 

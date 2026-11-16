@@ -897,7 +897,7 @@ return Test.GetStateHash()=="0000000000001234"
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			const std::array<std::string_view, 28> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "InjectMouseMove", "InjectScroll", "InjectText", "InjectSignal", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest", "GetPoseDigest", "GetParticleDigest" };
+			const std::array<std::string_view, 29> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "InjectMouseMove", "InjectScroll", "InjectText", "InjectSignal", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest", "GetPoseDigest", "GetParticleDigest", "SetSaveData" };
 			const auto modules = fixture.GetApi().GetModules();
 			const auto found = std::find_if(modules.begin(), modules.end(), [](const auto& group)
 			{
@@ -915,7 +915,8 @@ return Test.GetStateHash()=="0000000000001234"
 				REQUIRE(member != found->Members.end());
 				CHECK(member->Options.Environments == (name == "Suite" ? ScriptApiEnvironment::All : ScriptApiEnvironment::Test));
 				CHECK(member->Options.Modes == (name == "ReloadScript" ? RunModes::EditorOnly : RunModes::All));
-				const bool mutation = name.starts_with("Inject") || name == "CaptureAudio" || name == "Screenshot" || name == "ReloadScript";
+				const bool mutation =
+					name.starts_with("Inject") || name == "CaptureAudio" || name == "Screenshot" || name == "ReloadScript" || name == "SetSaveData";
 				CHECK(member->Options.Mutates == mutation);
 				CHECK_FALSE(member->Signature.empty());
 				CHECK_FALSE(member->Description.empty());

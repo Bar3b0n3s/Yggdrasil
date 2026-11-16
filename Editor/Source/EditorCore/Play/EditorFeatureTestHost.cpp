@@ -172,6 +172,8 @@ namespace Engine {
 		PlayStartOptions options;
 		options.ScenePath = std::string(scene->SourcePath.GetPath());
 		options.Parameters = header.Parameters;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the replay's save data, as its recording started.
+		options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 		options.Seed = header.Seed;
 		options.Lockstep = true;
 		ProjectSettings project = m_Project;

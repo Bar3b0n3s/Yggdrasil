@@ -158,6 +158,9 @@ namespace Engine {
 				{ "project.getSettings", SceneRelation::None },
 				{ "project.setSettings", SceneRelation::None }, // recorded in the active scene's history, as before M20
 				{ "rpc.discover", SceneRelation::None },
+				{ "savedata.clear", SceneRelation::None }, // M28: editor play's store (Docs/Decisions/0043-m28-game-services.md decision 8)
+				{ "savedata.get", SceneRelation::None },   // M28: editor play's store, or the play session's
+				{ "savedata.set", SceneRelation::None },   // M28: editor play's store
 				{ "script.check", SceneRelation::None },
 				{ "script.create", SceneRelation::None },
 				{ "script.fields", SceneRelation::None },

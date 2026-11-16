@@ -53,6 +53,7 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/ReplayPlayer.h"
+#include "Engine/Session/SaveDataStore.h"
 #include "Engine/Session/SessionStatistics.h"
 #include "Engine/Testing/CoverageGates.h"
 #include "Engine/Testing/FeatureTestRunner.h"
@@ -321,6 +322,14 @@ namespace Engine {
 		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayModes() const override { return App.GetDisplayVideoModes(); }
 		[[nodiscard]] Result<DisplaySettings> GetDisplaySettings() const override { return App.GetDisplaySettings(); }
 		[[nodiscard]] Status RequestDisplaySettings(const DisplaySettings& settings) override { return App.RequestDisplaySettings(settings); }
+		// M28 (decision 8): a live session's save data, user://SaveData/Store.json; a headless run reads it and never writes it.
+		[[nodiscard]] std::filesystem::path GetSaveDataFile() { return App.GetProcessContext().GetUserDataPaths().Root / "SaveData" / "Store.json"; }
+		[[nodiscard]] Status CommitSaveData(const Json& values) override
+		{
+			if (App.GetSpecification().Window == WindowMode::Headless)
+				return MakeError(ErrorCode::Unsupported, "a headless run reads the game's save data and never writes it");
+			return WriteSaveDataFile(GetSaveDataFile(), values);
+		}
 		// The droppedSeconds baseline of the session just installed (TimingSession).
 		void BeginSessionTiming()
 		{
@@ -567,6 +576,16 @@ namespace Engine {
 		// ordinary live play follows the framebuffer (OnUpdate).
 		fixedView = fixedView || testHost != nullptr || options.Lockstep;
 		const glm::uvec2 view = fixedView ? GetDeterministicViewSize(spec.Project.Window) : glm::uvec2(ViewWidth, ViewHeight);
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the save data. A fixed-view session keeps it in memory, from
+		// the options (a replay's header) or empty; a live session, a headless one included, starts with the game's store.
+		if (!options.SaveData.IsNull())
+			spec.SaveData = options.SaveData;
+		else if (!fixedView)
+		{
+			SaveDataFileLoad saveData = LoadSaveDataFile(GetSaveDataFile());
+			spec.SaveData = std::move(saveData.Values);
+			spec.SaveDataLoadError = std::move(saveData.Error);
+		}
 		spec.ViewWidth = view.x;
 		spec.ViewHeight = view.y;
 		spec.Audio = GetAudioEngine();
@@ -587,6 +606,7 @@ namespace Engine {
 		ReplayHeader header;
 		header.Scene = { scene, scene.IsValid() ? App.m_Assets->GetReferencePath(scene) : "" };
 		header.Parameters.Set(session->GetLoadParameters());
+		header.SaveData.Set(session->GetSaveData().ToJson());
 		header.Seed = spec.Seed;
 		header.FixedHz = spec.Project.Simulation.FixedHz;
 		// The running engine's version (ADR 0038, friction F10), never the build id, so a commit rewrites no replay
@@ -631,6 +651,7 @@ namespace Engine {
 		PlayStartOptions options;
 		options.Seed = header.Seed;
 		options.Parameters = header.Parameters;
+		options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 		options.Lockstep = true;
 		ResetTestCursor();
 		return PrepareSession(header.Scene.Handle, std::move(project), options, true);
@@ -1019,6 +1040,7 @@ namespace Engine {
 				PlayStartOptions options;
 				options.Seed = header.Seed;
 				options.Parameters = header.Parameters;
+				options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 				options.Lockstep = true;
 				options.Paused = true;
 				return m_State->Restart(header, options, true);

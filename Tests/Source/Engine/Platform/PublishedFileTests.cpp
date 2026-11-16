@@ -7,7 +7,10 @@
 #include "Support/TempDirectory.h"
 
 #include <cstddef>
+#include <filesystem>
+#include <span>
 #include <string>
+#include <system_error>
 
 namespace Engine {
 
@@ -99,6 +102,33 @@ namespace Engine {
 			CHECK(AsStringView(*read) == "new");
 		}
 #endif
+
+		TEST_CASE("PublishedFile: a durable write replaces the file and leaves no temporary")
+		{
+			const Test::TempDirectory temp;
+			const std::filesystem::path file = temp.GetPath() / "Store.json";
+			const std::string first = "first";
+			const std::string second = "second, longer";
+			const Status written = PublishedFile::WriteDurably(file, std::as_bytes(std::span(first.data(), first.size())));
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+			REQUIRE(PublishedFile::WriteDurably(file, std::as_bytes(std::span(second.data(), second.size()))).has_value());
+			CHECK(FileSystem::ReadText(file).value_or("") == second);
+			std::error_code error;
+			size_t entries = 0;
+			for (const auto& entry : std::filesystem::directory_iterator(temp.GetPath(), error))
+			{
+				static_cast<void>(entry);
+				++entries;
+			}
+			CHECK(entries == 1);
+			// Its parent must exist.
+			CHECK_FALSE(PublishedFile::WriteDurably(temp.GetPath() / "Missing" / "Store.json", std::as_bytes(std::span(first.data(), first.size()))).has_value());
+#else
+			REQUIRE_FALSE(written.has_value());
+			CHECK(written.error().GetCode() == ErrorCode::Unsupported);
+#endif
+		}
 	}
 
 }

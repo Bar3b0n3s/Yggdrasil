@@ -974,6 +974,26 @@ namespace Engine {
 			CHECK(ui.Draw().contains("Build your next world."));
 		}
 
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the Save Data panel is closed in the default workspace, so
+		// the editor looks as before; opened, it joins the bottom dock with the Console and shows editor play's store.
+		TEST_CASE("EditorLayer: the Save Data panel is closed in the default workspace and docks with the bottom panels when opened")
+		{
+			LayerUiHarness ui;
+			ui.Draw();
+			ui.Draw();
+			EditorUiState& state = ui.Environment.GetEditor().GetUiState();
+			CHECK(std::ranges::find(state.GetOpenPanels(), EditorPanel::SaveData) == state.GetOpenPanels().end());
+			REQUIRE(ui.Layer.RevealPanel(EditorPanel::SaveData));
+			ui.Draw();
+			CHECK(ui.Draw().contains("Library/SaveData/Store.json"));
+			const ImGuiWindow* saveData = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::SaveData));
+			const ImGuiWindow* console = ImGui::FindWindowByName(Utils::EditorWindowTitle(EditorPanel::Console));
+			REQUIRE(saveData != nullptr);
+			REQUIRE(console != nullptr);
+			REQUIRE(saveData->DockNode != nullptr);
+			CHECK(saveData->DockNode == console->DockNode);
+		}
+
 		// Docs/Decisions/0030-m19-contract.md decision 29: the default workspace leaves the Native panel closed, so the editor
 		// looks as before; opened, it joins the bottom dock with the Console and draws the Allow native code preference.
 		TEST_CASE("EditorLayer: the Native panel is closed in the default workspace and docks with the bottom panels when opened")

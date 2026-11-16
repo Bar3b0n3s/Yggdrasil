@@ -64,6 +64,10 @@ namespace Engine {
 	// Test.InjectSignal, input.inject's and a replay's Signal events), and the distinct live signals one tick takes.
 	inline constexpr size_t MaxScriptSignalNameBytes = 64;
 	inline constexpr size_t MaxScriptSignalsPerTick = 64;
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): a SaveData key, and the whole store as compact JSON
+	// ({"key":value,...}); a SaveData.Set past it raises, naming the size.
+	inline constexpr size_t MaxSaveDataKeyBytes = 256;
+	inline constexpr size_t MaxSaveDataBytes = 1024 * 1024;
 	// Test.Screenshot calls one suite makes, counted by the runner whatever the host's outcome; each may write a new image
 	// file (the editor writes every capture to a new file in its automation output directory). A later call in the suite
 	// raises a located error naming this limit and reaches no host; the case fails unless the script handles the error,

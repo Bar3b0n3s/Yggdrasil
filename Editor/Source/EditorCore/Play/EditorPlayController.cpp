@@ -194,6 +194,43 @@ namespace Engine {
 			if (FrameStatistics)
 				FrameStatistics(stats);
 		}
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): editor play's save data (ReadPlaySaveData): the project
+		// whose private store PrivateSaveData is (a read-only editor's), and its values.
+		std::filesystem::path PrivateSaveDataProject{};
+		Json PrivateSaveData = Json::object();
+		[[nodiscard]] std::filesystem::path GetSaveDataFile() const { return Editor->GetProject().GetRoot() / "Library" / "SaveData" / "Store.json"; }
+		// The private store of the open project, emptied when another project was opened since.
+		Json& GetPrivateSaveData()
+		{
+			if (PrivateSaveDataProject != Editor->GetProject().GetProjectFile())
+			{
+				PrivateSaveDataProject = Editor->GetProject().GetProjectFile();
+				PrivateSaveData = Json::object();
+			}
+			return PrivateSaveData;
+		}
+		[[nodiscard]] Result<SaveDataFileLoad> ReadSaveData()
+		{
+			if (!Editor->HasProject())
+				return MakeError(ErrorCode::InvalidState, "no project is open");
+			if (Editor->IsReadOnly())
+				return SaveDataFileLoad{ .Values = VariantValue(GetPrivateSaveData()) };
+			return LoadSaveDataFile(GetSaveDataFile());
+		}
+		[[nodiscard]] Status WriteSaveData(const Json& values)
+		{
+			if (!Editor->HasProject())
+				return MakeError(ErrorCode::InvalidState, "no project is open");
+			SaveDataStore store;
+			ENGINE_TRY(store.Replace(values));
+			if (Editor->IsReadOnly())
+			{
+				GetPrivateSaveData() = store.ToJson();
+				return {};
+			}
+			return WriteSaveDataFile(GetSaveDataFile(), store.ToJson());
+		}
+		[[nodiscard]] Status CommitSaveData(const Json& values) override { return WriteSaveData(values); }
 		// The serial of the next session (PlaySessionSpecification::Serial): sessions are counted from 1 and never share one.
 		uint64_t NextSerial = 1;
 		// True while this controller holds the asset manager's reload deferral (§7.5 race rule 4): from the start of a lockstep
@@ -356,6 +393,16 @@ namespace Engine {
 		specification.ScriptApi = api;
 		ENGINE_TRY_ASSIGN(specification.ScriptSchemas, editor.GetScriptSchemaSnapshot());
 		specification.Parameters = options.Parameters;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the save data. A fixed-view session keeps it in memory,
+		// from the options (a replay's header, a recording's start) or empty; editor live play starts with the play store.
+		if (!options.SaveData.IsNull())
+			specification.SaveData = options.SaveData;
+		else if (!fixedView)
+		{
+			ENGINE_TRY_ASSIGN(SaveDataFileLoad saveData, m_State->ReadSaveData());
+			specification.SaveData = std::move(saveData.Values);
+			specification.SaveDataLoadError = std::move(saveData.Error);
+		}
 		specification.Environment = m_State->GetScriptEnvironment();
 		specification.ScriptRunMode = RunModes::Editor;
 		specification.TestMode = testHost != nullptr;
@@ -367,6 +414,7 @@ namespace Engine {
 		PreparedSession result;
 		result.FixedView = fixedView;
 		result.Header.Parameters = options.Parameters.Get().is_null() ? VariantValue(Json::object()) : options.Parameters;
+		result.Header.SaveData = specification.SaveData.IsNull() ? VariantValue(Json::object()) : specification.SaveData;
 		result.Header.Seed = specification.Seed;
 		result.Header.FixedHz = project.Simulation.FixedHz;
 		// The running engine's version (ADR 0038, friction F10), as session.hello reports it.
@@ -853,6 +901,16 @@ namespace Engine {
 			m_State->ReplayInputSerial = 0;
 	}
 
+	Result<SaveDataFileLoad> EditorPlayController::ReadPlaySaveData()
+	{
+		return m_State->ReadSaveData();
+	}
+
+	Status EditorPlayController::WritePlaySaveData(const Json& values)
+	{
+		return m_State->WriteSaveData(values);
+	}
+
 	Result<ReplayHeader> EditorPlayController::DescribeReplayHeader() const
 	{
 		if (!m_State->Session || !m_State->Header.Scene.Handle.IsValid())
@@ -958,6 +1016,19 @@ namespace Engine {
 		}
 		ENGINE_TRY(ValidatePlayRequest(recording));
 		ENGINE_TRY(CheckPlayScripts(editor.GetProject().GetSettings()));
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): a recording starts with the play store's save data
+		// (savedata.set seeds it), as its replay header stores it (numbers as float, §6.7), so every replay of it starts with
+		// the same values whatever the machine's store holds then.
+		if (recording.SaveData.IsNull())
+		{
+			ENGINE_TRY_ASSIGN(const SaveDataFileLoad saveData, m_State->ReadSaveData());
+			Result<Json> canonical = CanonicalizeReplayParameters(saveData.Values.Get(), "/SaveData");
+			if (!canonical)
+			{
+				return std::unexpected(Error(canonical.error()).WithHint("a replay header stores numbers as float (§6.7): save values within the float range"));
+			}
+			recording.SaveData = VariantValue(std::move(*canonical));
+		}
 		ENGINE_TRY(editor.PrepareForPlay());
 		ENGINE_TRY(ReplaceSession(recording, editor.GetProject().GetSettings()));
 		state.RecordingOwner = options.LockstepOwner;
@@ -1039,6 +1110,7 @@ namespace Engine {
 		options.ScenePath = std::string(scene->SourcePath.GetPath());
 		options.Seed = header.Seed;
 		options.Parameters = header.Parameters;
+		options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 		options.Lockstep = true;
 		options.LockstepOwner = owner;
 		options.Paused = true;

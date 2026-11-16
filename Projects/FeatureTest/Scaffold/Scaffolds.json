@@ -414,6 +414,11 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "SaveData.jsonl",
+			"IdSeed": 2502,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

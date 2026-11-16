@@ -152,6 +152,9 @@ export type ProjectionType = "Perspective" | "Orthographic"
 -- What a view renders instead of the lit image (a debug view).
 export type RenderDebugView = "Lit" | "Albedo" | "Normals" | "Roughness" | "Metallic" | "Emissive" | "AO" | "ShadowCascades" | "Overdraw" | "LightCount"
 
+-- Which save-data store savedata.get reads.
+export type SaveDataTarget = "Editor" | "Play"
+
 -- What scene.diff compares the open scene with.
 export type SceneDiffAgainst = "Saved" | "Revision"
 
@@ -1847,6 +1850,22 @@ declare Random: {
 	UnitVector: () -> vector,
 }
 
+-- A game's save data: options and progress kept across runs, in the play session's store.
+declare SaveData: {
+	-- Writes the store where the game keeps it: the Runtime's user://SaveData/Store.json (replaced atomically and flushed to the disk), editor play's Library/SaveData/Store.json (a read-only editor's private store). Returns true, or false and the reason (a headless Runtime reads its store and never writes it; a failed write). Test runs, replays, recordings and lockstep sessions keep their store in memory: Commit returns true and writes nothing. [All modes; Runtime|Test; mutates]
+	Commit: () -> (boolean, string?),
+	-- Deletes the value saved under key; returns whether there was one. [All modes; Runtime|Test; mutates]
+	Delete: (key: string) -> boolean,
+	-- Returns the value saved under key (1 to 256 bytes of UTF-8), or nil when there is none: a boolean, number, string, array or table of string keys, as it was set. [All modes; Runtime|Test; pure/read]
+	Get: (key: string) -> any,
+	-- Returns the keys of the saved values, sorted by their bytes. [All modes; Runtime|Test; pure/read]
+	GetKeys: () -> {string},
+	-- Returns why the store the session started with could not be read (it was moved aside as Store.corrupt-<n>.json and the game started with no save data), or nil. [All modes; Runtime|Test; pure/read]
+	GetLoadError: () -> string?,
+	-- Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys). The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size. [All modes; Runtime|Test; mutates]
+	Set: (key: string, value: any) -> (),
+}
+
 -- Active-scene operations; searches return canonical order and never expose pending destruction.
 declare Scene: {
 	-- Creates immediately with a seeded ID and default name Entity (a name is at most 256 bytes). Runs OnCreate before returning; use IsValid if it may destroy itself. Its OnStart runs at the next start flush, before its first update: the running one when called from an OnStart or an OnCreate it runs, the scene's startup flush when called from a startup OnCreate, otherwise the next fixed step's, before that tick's OnFixedUpdate; never in the frame phase, so OnUpdate and OnLateUpdate pass it by until then (while the time scale is 0, until the first tick after it returns), and a physics body it is given (3D or 2D) exists from that OnStart on, wherever it was created; before that OnStart (in the creating callback, for example) it need not exist yet: Physics.GetBodyBounds is nil and the body methods raise 'has no physics body' (RigidBody2D's 'has no 2D physics body'). [All modes; Runtime|Test; mutates]
@@ -1955,6 +1974,8 @@ declare Test: {
 	ReloadScript: (asset: AssetRef) -> (),
 	-- Capture a screenshot through the owning host; a suite takes at most 256 screenshots, and a later call raises an error without capturing. [All modes; Test; mutates]
 	Screenshot: (name: string) -> (),
+	-- Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "Case" suite starts empty again. [All modes; Test; mutates]
+	SetSaveData: (values: {[string]: any}) -> (),
 	-- End this case as skipped without erasing earlier failures; it stops its caller the way Test.Fail does, and the outcome stays latched. [All modes; Test; pure/read]
 	Skip: (reason: string) -> (),
 	-- Construct a suite without executing its body; the name is UTF-8 without NUL and at most 256 bytes. [All modes; LoadTime|Runtime|Test; pure/read]

@@ -56,7 +56,7 @@ namespace Engine {
 		TEST_CASE("EditorUiState: the Native panel is named, ordered before the launcher and closed by default")
 		{
 			CHECK(EditorPanelToString(EditorPanel::Native) == "Native");
-			CHECK(static_cast<uint8_t>(EditorPanel::Native) + 1 == static_cast<uint8_t>(EditorPanel::ProjectLauncher));
+			CHECK(static_cast<uint8_t>(EditorPanel::Native) < static_cast<uint8_t>(EditorPanel::ProjectLauncher));
 			CHECK(EditorPanelToString(EditorPanel::ProjectLauncher) == "ProjectLauncher");
 			EditorUiState state;
 			for (const bool hasProject : { true, false })
@@ -70,6 +70,23 @@ namespace Engine {
 			const std::vector<EditorPanel> saved = { EditorPanel::Native, EditorPanel::Console };
 			state.SetOpenPanels(saved, true);
 			CHECK(std::vector<EditorPanel>(state.GetOpenPanels().begin(), state.GetOpenPanels().end()) == std::vector<EditorPanel>{ EditorPanel::Console, EditorPanel::Native });
+		}
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the Save Data panel, after the Native panel and right
+		// before the launcher, closed unless the user opens it.
+		TEST_CASE("EditorUiState: the Save Data panel is named, ordered before the launcher and closed by default")
+		{
+			CHECK(EditorPanelToString(EditorPanel::SaveData) == "SaveData");
+			CHECK(static_cast<uint8_t>(EditorPanel::Native) + 1 == static_cast<uint8_t>(EditorPanel::SaveData));
+			CHECK(static_cast<uint8_t>(EditorPanel::SaveData) + 1 == static_cast<uint8_t>(EditorPanel::ProjectLauncher));
+			EditorUiState state;
+			for (const bool hasProject : { true, false })
+			{
+				state.ResetLayout(hasProject);
+				CHECK(std::find(state.GetOpenPanels().begin(), state.GetOpenPanels().end(), EditorPanel::SaveData) == state.GetOpenPanels().end());
+			}
+			REQUIRE(state.SetPanelOpen(EditorPanel::SaveData, true));
+			CHECK(state.GetOpenPanels().back() == EditorPanel::ProjectLauncher);
 		}
 
 		TEST_CASE("EditorUiState: completed frames increase after UI construction")

@@ -914,6 +914,58 @@ Uniform unit direction using two draws and deterministic trigonometry.
 
 All modes; Runtime|Test; mutates.
 
+## SaveData
+
+A game's save data: options and progress kept across runs, in the play session's store.
+
+### SaveData.Commit
+
+`() -> (boolean, string?)`
+
+Writes the store where the game keeps it: the Runtime's user://SaveData/Store.json (replaced atomically and flushed to the disk), editor play's Library/SaveData/Store.json (a read-only editor's private store). Returns true, or false and the reason (a headless Runtime reads its store and never writes it; a failed write). Test runs, replays, recordings and lockstep sessions keep their store in memory: Commit returns true and writes nothing.
+
+All modes; Runtime|Test; mutates.
+
+### SaveData.Delete
+
+`(key: string) -> boolean`
+
+Deletes the value saved under key; returns whether there was one.
+
+All modes; Runtime|Test; mutates.
+
+### SaveData.Get
+
+`(key: string) -> any`
+
+Returns the value saved under key (1 to 256 bytes of UTF-8), or nil when there is none: a boolean, number, string, array or table of string keys, as it was set.
+
+All modes; Runtime|Test; pure/read.
+
+### SaveData.GetKeys
+
+`() -> {string}`
+
+Returns the keys of the saved values, sorted by their bytes.
+
+All modes; Runtime|Test; pure/read.
+
+### SaveData.GetLoadError
+
+`() -> string?`
+
+Returns why the store the session started with could not be read (it was moved aside as Store.corrupt-<n>.json and the game started with no save data), or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### SaveData.Set
+
+`(key: string, value: any) -> ()`
+
+Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys). The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size.
+
+All modes; Runtime|Test; mutates.
+
 ## Scene
 
 Active-scene operations; searches return canonical order and never expose pending destruction.
@@ -1319,6 +1371,14 @@ EditorOnly; Test; mutates.
 `(name: string) -> ()`
 
 Capture a screenshot through the owning host; a suite takes at most 256 screenshots, and a later call raises an error without capturing.
+
+All modes; Test; mutates.
+
+### Test.SetSaveData
+
+`(values: {[string]: any}) -> ()`
+
+Replaces the session's save data with values (keys of 1 to 256 bytes, values SaveData.Set takes), as a game finds it at its start: how a suite seeds the store a test run keeps in memory, empty until it does. Each case of an Isolation "Case" suite starts empty again.
 
 All modes; Test; mutates.
 
@@ -6747,6 +6807,14 @@ What a view renders instead of the lit image (a debug view).
 - `Overdraw`: The fragments each pixel accepted before depth rejection: 1 blue, 2 cyan, 3 green, 4 yellow, 5 or more red; black where none.
 
 - `LightCount`: The number of lights each pixel's light cluster holds, as a heat map.
+
+## SaveDataTarget
+
+Which save-data store savedata.get reads.
+
+- `Editor`: The play store: what a live play session starts with and its SaveData.Commit writes.
+
+- `Play`: The running play session's store, as its scripts see it now.
 
 ## SceneDiffAgainst
 

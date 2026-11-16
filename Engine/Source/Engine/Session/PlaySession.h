@@ -45,6 +45,7 @@ namespace Engine {
 	class Physics2DSystem;
 	class PhysicsSystem;
 	class ReplayRecorder;
+	class SaveDataStore;
 	class Scene;
 	class ScriptApiRegistry;
 	class ScriptEngine;
@@ -201,6 +202,13 @@ namespace Engine {
 		// script heap). A host without a frame loop or renderer keeps the default, which fills nothing (RenderAvailable stays
 		// false).
 		virtual void ReadFrameStatistics(ScriptPerformanceStats& /*stats*/) const {}
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): SaveData.Commit of a live session (a fixed-view session
+		// commits in memory without asking): write `values` (the store's canonical object) where the host keeps them. A host
+		// without a store keeps the default, Unsupported.
+		[[nodiscard]] virtual Status CommitSaveData(const Json& /*values*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "the host keeps no save data");
+		}
 		// M28 (decision 3): the display of a live session (never asked in the editor, headless or a fixed-view session: the
 		// session answers those itself). A host without a display keeps the defaults, Unsupported.
 		[[nodiscard]] virtual Result<std::vector<DisplayVideoMode>> GetDisplayModes() const { return MakeError(ErrorCode::Unsupported, "the host has no display"); }
@@ -246,6 +254,9 @@ namespace Engine {
 		double TimeScale = 1.0;             // [0, PlaySession::MaxTimeScale]
 		VariantValue Parameters{};          // absent normalizes to an empty JSON object
 		std::optional<bool> PauseOnError{}; // absent inherits project settings
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the save data a fixed-view session starts with (a replay's
+		// header, a recording's start), an object; absent: the host's own (a live session's store, or none).
+		VariantValue SaveData{};
 	};
 
 	// Everything a session needs to start. The project's settings are copied in whole, so a session never reads the project
@@ -289,6 +300,10 @@ namespace Engine {
 		ScriptApiRegistry* ScriptApi = nullptr;
 		Ref<const ScriptFieldSchemaSource> ScriptSchemas{};
 		VariantValue Parameters{}; // absent normalizes to an empty JSON object
+		// M28 (decision 8): the save data the session starts with, an object of values SaveDataStore takes (absent: none), and
+		// why the host's store could not be read (SaveData.GetLoadError).
+		VariantValue SaveData{};
+		std::optional<std::string> SaveDataLoadError{};
 		// M20 (Docs/Decisions/0031-m20-contract.md decision 5): the scene asset the scene document came from (the editor's
 		// open scene or play.start's scene, a suite's or replay's scene, the Runtime's start scene); the invalid handle for a
 		// scene without an asset (an editor scene never saved). Scene.GetCurrent returns it until a Scene.Load. The document
@@ -481,6 +496,9 @@ namespace Engine {
 		[[nodiscard]] const ScriptEngine* GetScripts() const;
 		[[nodiscard]] uint64_t GetSceneGeneration() const;
 		[[nodiscard]] const Json& GetLoadParameters() const;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the session's save data, kept across Scene.Load and
+		// Scene.Reload (a recording's header records it at tick 0; savedata.get {target: "Play"} reads it).
+		[[nodiscard]] const SaveDataStore& GetSaveData() const;
 		// M20 (Docs/Decisions/0031-m20-contract.md decision 5): the scene asset the current scene came from, what
 		// Scene.GetCurrent returns: PlaySessionSpecification::SceneAsset until a Scene.Load, then the asset it named (a
 		// Scene.Reload keeps it); the invalid handle for a scene without an asset.

@@ -23048,6 +23048,228 @@
 			]
 		},
 		{
+			"name": "savedata.clear",
+			"domain": "savedata",
+			"description": "Empties editor play's save data (the play store), as a first run of the game finds it.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SaveDataWriteResult",
+				"description": "The play store after a write.",
+				"type": "object",
+				"properties": {
+					"count": {
+						"description": "The number of keys.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"bytes": {
+						"description": "The store's compact JSON size in bytes.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"examples": [
+				{
+					"description": "Start the next play without save data.",
+					"params": {}
+				}
+			]
+		},
+		{
+			"name": "savedata.get",
+			"domain": "savedata",
+			"description": "Reads editor play's save data: the play store (the project's Library/SaveData/Store.json, a read-only editor's private store), which a live play session starts with and SaveData.Commit writes, or with target Play the running session's store.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": [],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SaveDataGetParams",
+				"description": "The params of savedata.get.",
+				"type": "object",
+				"properties": {
+					"target": {
+						"description": "The store to read: Editor (the default) or Play.",
+						"enum": ["Editor", "Play"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SaveDataGetResult",
+				"description": "A save-data store's contents.",
+				"type": "object",
+				"properties": {
+					"values": {
+						"description": "The values by key, keys sorted, numbers as SaveData.Get returns them."
+					},
+					"count": {
+						"description": "The number of keys.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"bytes": {
+						"description": "The store's compact JSON size in bytes, at most 1,048,576.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"loadError": {
+						"description": "Editor: why the play store's file could not be read (it was moved aside as Store.corrupt-<n>.json and the store is empty); empty when it was read.",
+						"type": "string"
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"examples": [
+				{
+					"description": "Read the play store.",
+					"params": {}
+				},
+				{
+					"description": "Read the running session's store.",
+					"params": {
+						"target": "Play"
+					}
+				}
+			]
+		},
+		{
+			"name": "savedata.set",
+			"domain": "savedata",
+			"description": "Seeds editor play's save data: replaces the play store with values (or merges them with merge: true), so the next live play session and the next input.record start with them. The running session keeps its own store.",
+			"exposeAsTool": true,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": false,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["values"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SaveDataSetParams",
+				"description": "The params of savedata.set.",
+				"type": "object",
+				"properties": {
+					"values": {
+						"description": "An object of values by key (1 to 256 bytes each): booleans, finite numbers, strings, arrays and objects; null deletes a key."
+					},
+					"merge": {
+						"description": "Merge values into the play store instead of replacing it.",
+						"type": "boolean"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["values"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "SaveDataWriteResult",
+				"description": "The play store after a write.",
+				"type": "object",
+				"properties": {
+					"count": {
+						"description": "The number of keys.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"bytes": {
+						"description": "The store's compact JSON size in bytes.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {}
+			},
+			"examples": [
+				{
+					"description": "Unlock the second realm for the next play.",
+					"params": {
+						"values": {
+							"Realm": 2,
+							"Volume": 0.5
+						}
+					}
+				}
+			]
+		},
+		{
 			"name": "scene.activate",
 			"domain": "scene",
 			"description": "Makes the open scene the scene target names the active scene.",

@@ -31,6 +31,12 @@ namespace Engine {
 		return MakeError(code, "cannot rename '{}' to '{}': {}", FileSystem::PathToUtf8(from), FileSystem::PathToUtf8(to), error.message());
 	}
 
+	Status PublishedFile::WriteDurably(const std::filesystem::path& path, std::span<const std::byte> /*data*/)
+	{
+		// Docs/Decisions/0028-backlog-program.md decision 10: Windows backends only.
+		return MakeError(ErrorCode::Unsupported, "'{}' cannot be flushed durably: only Windows has a backend", FileSystem::PathToUtf8(path));
+	}
+
 }
 
 #endif
