@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Reflection/ValidationContext.h"
@@ -39,6 +40,11 @@ namespace Engine {
 
 		bool operator==(const NavigationSceneIssue&) const = default;
 	};
+
+	// M30 W30.2 (Docs/Decisions/0045-m30-navigation.md decisions 11 and 12): the NavMesh of the Navigation component the bake
+	// reads (the first, in canonical order, on an effectively enabled entity), which the play session builds its navigation
+	// from and the navigation view draws; the null handle without such a component or with a null NavMesh. Main thread.
+	[[nodiscard]] AssetHandle FindSceneNavMesh(const Scene& scene);
 
 	// The navigation checks over `scene`, on the Navigation component the bake reads (the first, in canonical order, on an
 	// effectively enabled entity; none without one): NAV_MESH_NOT_BAKED when its NavMesh is null or does not load as a NavMesh

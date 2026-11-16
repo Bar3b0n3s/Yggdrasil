@@ -46,6 +46,9 @@ namespace Engine {
 			// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the Terrain proxy's methods, after the earlier milestones'
 			// registrations (landing order).
 			ENGINE_TRY(ScriptBindings::RegisterTerrain(api));
+			// M30 (Docs/Decisions/0045-m30-navigation.md decision 10): the Navigation module, after the earlier milestones'
+			// registrations (landing order; M28's RegisterSaveData precedes it at the merge, ADR 0042's ledger).
+			ENGINE_TRY(ScriptBindings::RegisterNavigation(api));
 			return {};
 		}
 

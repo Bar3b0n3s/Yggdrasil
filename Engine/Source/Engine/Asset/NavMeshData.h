@@ -75,8 +75,21 @@ namespace Engine {
 	inline constexpr uint32_t MaxNavMeshDetailVerticesPerPolygon = 255; // beyond the polygon's own
 	inline constexpr uint32_t MaxNavMeshDetailTrianglesPerPolygon = 255;
 	inline constexpr uint32_t MaxNavMeshExtraDetailVertices = 0xffff;
+	// A detail triangle's fourth byte flags each of its edges (bits 0, 2 and 4 for the edges from its vertex 0, 1 and 2) that
+	// lies on its polygon's boundary (Recast's flags, Detour's DT_DETAIL_EDGE_BOUNDARY). Detour's closest point to a
+	// position outside a polygon walks only the flagged edges of the polygon's detail triangles and reads its result
+	// unchecked, so every polygon has at least one detail triangle and at least one flagged edge.
+	inline constexpr uint8_t NavMeshDetailBoundaryEdges = 0x15;
 	inline constexpr uint32_t MaxNavMeshDetailVertices = 1U << 20;
 	inline constexpr uint32_t MaxNavMeshDetailTriangles = 1U << 20;
+	// Detour quantizes positions inside a mesh's bounds to uint16 steps of CellSize on all three axes (its BV tree and its
+	// polygon queries), and converts a detail vertex's offset from BoundsMin to int on the way, so a mesh's bounds span at
+	// most MaxNavMeshBoundsCells cells of CellSize along each axis (Y included), lie within MaxNavMeshCoordinate of the
+	// origin, and every detail vertex lies within the bounds grown by MaxNavMeshDetailMarginCells cells (CellSize along X
+	// and Z, CellHeight along Y): Recast's detail mesh rises up to a cell or two above the polygon mesh's vertices.
+	inline constexpr uint32_t MaxNavMeshBoundsCells = 65534;
+	inline constexpr float MaxNavMeshCoordinate = 1.0e9f; // metres, as MaxPhysicsCoordinate
+	inline constexpr uint32_t MaxNavMeshDetailMarginCells = 16;
 	// The source file's magic, its first four bytes.
 	inline constexpr std::array<char, 4> NavMeshSourceMagic = { 'E', 'N', 'A', 'V' };
 
@@ -129,7 +142,9 @@ namespace Engine {
 	//   - 1 to MaxNavAgentTypes agents with unique names of 1 to MaxNavAgentNameLength bytes; at most MaxNavMeshAreaCosts
 	//     area costs, each finite and in [1, MaxNavAreaCost];
 	//   - per agent: Radius, Height, MaxSlope and MaxStep finite and in their ranges; CellSize and CellHeight finite and in
-	//     [MinNavCellSize, MaxNavCellSize]; the bounds finite with BoundsMin <= BoundsMax; VerticesPerPolygon in [3, 6];
+	//     [MinNavCellSize, MaxNavCellSize]; the bounds within MaxNavMeshCoordinate of the origin with BoundsMin <= BoundsMax,
+	//     at most MaxNavMeshBoundsCells cells of CellSize along each axis, and wider than zero along X and Z when the agent
+	//     has polygons (Detour divides by the tile's width); VerticesPerPolygon in [3, 6];
 	//   - array sizes that agree (Vertices a multiple of 3 and at most MaxNavMeshVertices vertices, 2 * VerticesPerPolygon
 	//     uint16 per polygon, at most MaxNavMeshPolygons polygons, 4 DetailMeshes values per polygon, DetailVertices a
 	//     multiple of 3 and DetailTriangles of 4, within their limits);
@@ -138,8 +153,10 @@ namespace Engine {
 	//     (an unused slot's neighbour NavMeshNullIndex); its area NavMeshWalkableArea or in [1, AreaCosts.size()];
 	//   - every polygon's detail mesh: at least as many detail vertices as the polygon has vertices and at most
 	//     MaxNavMeshDetailVerticesPerPolygon more, its vertex and triangle ranges inside DetailVertices and DetailTriangles,
-	//     at most MaxNavMeshDetailTrianglesPerPolygon triangles, each triangle's three indices below its vertex count; the
-	//     extra detail vertices of all polygons together at most MaxNavMeshExtraDetailVertices; every detail vertex finite.
+	//     1 to MaxNavMeshDetailTrianglesPerPolygon triangles, at least one of them flagging an edge as the polygon's boundary
+	//     (NavMeshDetailBoundaryEdges), each triangle's three indices below its vertex count; the
+	//     extra detail vertices of all polygons together at most MaxNavMeshExtraDetailVertices; every detail vertex finite and
+	//     within the bounds grown by MaxNavMeshDetailMarginCells cells.
 	// Pure. Errors: Validation naming the first violation ("agent 'Small': polygon 12's vertex 3 is 70 of 64").
 	[[nodiscard]] Status ValidateNavMeshData(const NavMeshData& mesh);
 

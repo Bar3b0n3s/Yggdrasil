@@ -9,7 +9,16 @@ On a temporary copy of Projects/FeatureTest, a headless editor of --config (--re
   - per scene below Assets/Scenes/: in a lockstep session, the play.step time per tick of 8 calls of 30 ticks with
     render "Every" (frameMs) and with render "None" (simulationMs), stats.get's GPU pass times, and the editor
     process's memory (Lib/process.py);
-then a --renderer none editor replays Assets/Tests/Replays/Determinism.replay 3 times (replay/Determinism/tickMs).
+then a --renderer none editor measures:
+  - navigation/150Agents/tickMs (M30, Docs/Decisions/0045-m30-navigation.md decision 13; World Tree's brief 1, "150
+    agents each asking for a path two or three times a second must fit comfortably in a 60 Hz fixed step"): the baked
+    Assets/Scenes/Navigation.scene saved as a copy with 150 more of its chasers
+    (Assets/Scripts/Navigation/NavChaser.luau), each finding a path to its Warden with Navigation.FindPath 2.5 times a
+    second (every 24 fixed steps, staggered, about 6 paths a tick), half of them the Small agent type and half the
+    Large; in a lockstep session, the play.step time per tick of 8 calls of 30 ticks with render "None", after a
+    warm-up;
+  - replay/Determinism/tickMs: Assets/Tests/Replays/Determinism.replay replayed 3 times.
+--only selects some of the parts (playCopy, scenes, navigation, replay), a development aid for one measurement.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
 (--gpu-optional: no frame or GPU times) makes the step a warning. Only a capture that cannot run fails it: a missing
@@ -44,6 +53,13 @@ from Lib.report import EXIT_INIT_FAILED, Console, Status, Step, configure_stdio,
 FEATURE_PROJECT = paths.REPOSITORY_ROOT / "Projects" / "FeatureTest"
 PROJECT_CACHE_DIRECTORY = "Library"
 DETERMINISM_REPLAY = "Assets/Tests/Replays/Determinism.replay"
+NAVIGATION_SCENE = "Assets/Scenes/Navigation.scene"
+NAVIGATION_PERF_SCENE = "Assets/Scenes/PerfNavigation150.scene"  # beside the scene it copies
+NAVIGATION_CHASER = "Assets/Scripts/Navigation/NavChaser.luau"
+NAVIGATION_AGENTS = 150
+NAVIGATION_REPATH_TICKS = 24  # 2.5 paths a second at 60 Hz
+NAVIGATION_METRIC = "navigation/150Agents/tickMs"
+CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay")
 GENERATED_SCENE = "Assets/Perf/Entities1000.scene"
 GENERATED_EMPTY_SCENE = "Assets/Perf/Empty.scene"
 GENERATED_ENTITIES = 1000
@@ -259,6 +275,45 @@ class Capture:
                     times[str(entry["name"])] = float(entry.get("gpuMilliseconds", 0.0))
         return times
 
+    def navigation(self, client: Any) -> None:
+        """navigation/150Agents/tickMs (module docstring); an engine error makes it a warning."""
+        ops = []
+        for index in range(NAVIGATION_AGENTS):
+            column, row = index % 10, index // 10
+            fields = {"Agent": "Small" if index % 2 == 0 else "Large", "Speed": 3,
+                      "RepathTicks": NAVIGATION_REPATH_TICKS, "Offset": index % NAVIGATION_REPATH_TICKS}
+            translation = [-9.0 + 2.0 * column, 0.0, -9.0 + 1.25 * row]
+            scripts = [{"Script": NAVIGATION_CHASER, "Fields": fields}]
+            ops.append({"method": "entity.create",
+                        "params": {"name": f"PerfChaser{index:03}",
+                                   "components": {"Transform": {"Translation": translation},
+                                                  "Script": {"Scripts": scripts}}}})
+        playing = False
+        try:
+            self.call(client, "scene.open", {"path": NAVIGATION_SCENE, "discardChanges": True},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {"path": NAVIGATION_PERF_SCENE})
+            self.call(client, "edit.batch", {"label": "Perf: 150 navigation agents", "ops": ops},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            self.call(client, "play.start", {"lockstep": True})
+            playing = True
+            self.call(client, "play.step", {"ticks": WARM_UP_TICKS, "render": "None"}, timeout=STEP_TIMEOUT_SECONDS)
+            metric = perf.summarize(NAVIGATION_METRIC, "ms", self.step_chunks(client, "None"))
+        except (self.engine_client.EngineError, ValueError) as error:
+            engine_error = isinstance(error, self.engine_client.EngineError)
+            detail = f"{error.method}: {error.detail}" if engine_error else str(error)
+            self.warnings.append(f"{NAVIGATION_METRIC}: {detail}; not captured")
+            return
+        finally:
+            if playing:
+                try:
+                    self.call(client, "play.stop", {})
+                except self.engine_client.EngineError as error:
+                    self.warnings.append(f"{NAVIGATION_METRIC}: play.stop failed: {error.detail}")
+        self.metrics.append(metric)
+        self.console.print(f"  {NAVIGATION_METRIC}: median {metric.median:.3f} ms per tick")
+
     def replay(self, client: Any) -> None:
         """replay/Determinism/tickMs (module docstring)."""
         samples: list[float] = []
@@ -313,7 +368,8 @@ def run_editor(capture: Capture, editor: Path, project_file: Path, renderer: str
         editor_process.kill()
 
 
-def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console) -> Step:
+def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console,
+                 parts: tuple[str, ...] = CAPTURE_PARTS) -> Step:
     started = time.perf_counter()
     name = f"perf capture ({config})"
     editor = paths.output_directory(config) / "Editor" / paths.executable_name("Editor")
@@ -340,19 +396,28 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
             scenes = scene_paths(project_file.parent)
 
             def measure(client: Any, pid: int) -> None:
-                capture.play_copy(client)
-                for path in scenes:
-                    capture.scene(client, pid, path)
+                if "playCopy" in parts:
+                    capture.play_copy(client)
+                if "scenes" in parts:
+                    for path in scenes:
+                        capture.scene(client, pid, path)
 
-            run_editor(capture, editor, project_file, renderer, root / "UserData", measure)
-            run_editor(capture, editor, project_file, "none", root / "ReplayUserData",
-                       lambda client, _pid: capture.replay(client))
+            def measure_cpu(client: Any, _pid: int) -> None:
+                if "navigation" in parts:
+                    capture.navigation(client)
+                if "replay" in parts:
+                    capture.replay(client)
+
+            if "playCopy" in parts or "scenes" in parts:
+                run_editor(capture, editor, project_file, renderer, root / "UserData", measure)
+            if "navigation" in parts or "replay" in parts:
+                run_editor(capture, editor, project_file, "none", root / "ReplayUserData", measure_cpu)
     except CaptureError as error:
         return Step(name, Status.FAILED, f"the capture could not run: {error}", time.perf_counter() - started,
                     data=data)
     except OSError as error:
         return Step(name, Status.FAILED, f"the project copy failed: {error}", time.perf_counter() - started, data=data)
-    if not capture.scenes:
+    if "scenes" in parts and not capture.scenes:
         reason = capture.warnings[-1] if capture.warnings else "no scene below Assets/Scenes/"
         return Step(name, Status.FAILED, f"the capture could not run: no scene was measured ({reason})",
                     time.perf_counter() - started, data={**data, "warnings": capture.warnings})
@@ -399,6 +464,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gpu-optional", action="store_true",
                         help="without a usable Vulkan device, capture the CPU numbers with a warning instead of "
                              "failing")
+    parser.add_argument("--only", action="append", choices=CAPTURE_PARTS,
+                        help="capture only this part (repeatable; default every part): a development aid for one "
+                             "measurement, such as the navigation case")
     parser.add_argument("--json", action="store_true", help="emit a machine-readable result")
     locks.add_wait_arguments(parser)
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
@@ -407,7 +475,8 @@ def main(argv: list[str] | None = None) -> int:
     console = Console(options.json)
     try:
         with locks.acquire_gpu(locks.wait_seconds(options), console.print):
-            step = capture_perf(options.config, options.output.resolve(), options.gpu_optional, console)
+            parts = tuple(part for part in CAPTURE_PARTS if options.only is None or part in options.only)
+            step = capture_perf(options.config, options.output.resolve(), options.gpu_optional, console, parts)
     except locks.LockUnavailable as error:
         step = locks.unavailable_step(error)
     console.result(step)

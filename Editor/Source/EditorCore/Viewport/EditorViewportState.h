@@ -14,7 +14,8 @@ namespace Engine {
 	enum class ViewportView : uint8_t;
 
 	// Editor preferences, not renderer flags. The M9 adapter maps these to RenderViewFlags on a copied snapshot:
-	// EditorOverlays always for the scene view; Grid/Colliders/Icons/Wireframe from these members, Selection when selected.
+	// EditorOverlays always for the scene view; Grid/Colliders/Icons/Wireframe/NavMesh (Navigation) from these members,
+	// Selection when selected.
 	// Gizmos controls the ImGuizmo interaction. The game view never inherits scene-view overlays.
 	struct EditorViewportOptions
 	{
@@ -34,6 +35,9 @@ namespace Engine {
 		// (GetUiPreviewFrameSize, EditorCore/Ui/UiAuthoring.h) letterboxed in the panel, under the UI authoring overlay; the
 		// scene camera's controls, the transform gizmo and mesh picking are off while it is on.
 		bool UiPreview = false;
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): the scene's baked navigation mesh as polygon edges
+		// (RenderViewFlags::Navigation), in edit and play alike.
+		bool NavMesh = false;
 	};
 
 	// UI display rectangle in logical screen coordinates; ImageSize is the displayed texture's actual pixel size.

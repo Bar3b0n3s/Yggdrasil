@@ -235,7 +235,8 @@ namespace Engine {
 			ImGui::Checkbox("Colliders", &options.Colliders);
 			ImGui::Checkbox("Icons", &options.Icons);
 			ImGui::Checkbox("Wireframe", &options.Wireframe);
-			DrawUiPreviewOption(options); // M22 (decision 33)
+			ImGui::Checkbox("Navigation mesh", &options.NavMesh); // M30 (Docs/Decisions/0045-m30-navigation.md decision 12)
+			DrawUiPreviewOption(options);                         // M22 (decision 33)
 			state.SetOptions(options);
 			ImGui::Separator();
 			ExplicitRenderCamera camera = state.GetCamera();

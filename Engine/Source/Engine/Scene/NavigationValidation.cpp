@@ -33,6 +33,23 @@ namespace Engine {
 
 	}
 
+	AssetHandle FindSceneNavMesh(const Scene& scene)
+	{
+		if (scene.GetRegistry().view<NavigationComponent>().empty())
+			return {};
+		AssetHandle handle{};
+		bool found = false;
+		scene.ForEachCanonical([&handle, &found](ConstEntity entity)
+		{
+			if (!found && entity.IsActive() && entity.HasComponent<NavigationComponent>())
+			{
+				handle = entity.GetComponent<NavigationComponent>().NavMesh.GetHandle();
+				found = true;
+			}
+		});
+		return handle;
+	}
+
 	std::vector<NavigationSceneIssue> FindNavigationSceneIssues(const Scene& scene, AssetManager& assets, const PhysicsLayerTable* layers)
 	{
 		std::vector<NavigationSceneIssue> issues;

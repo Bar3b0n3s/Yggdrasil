@@ -263,6 +263,9 @@ export type CollisionContact = {Point: vector, Normal: vector, RelativeSpeed: nu
 -- Editor metadata and numeric validation bounds for a field.
 export type FieldOptions = {Min: number?, Max: number?, Step: number?, Tooltip: string?}
 
+-- A walk along the navigation surface: Clear when nothing blocks it, Point where it ends on the surface, the blocking edge's horizontal Normal (pointing back along the walk; zero when Clear) and the Fraction of the way it got in XZ.
+export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
+
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
 
@@ -1760,6 +1763,18 @@ declare Math: {
 	SmoothDamp: ((current: number, target: number, velocity: number, smoothTime: number, dt: number) -> (number, number)) & ((current: vector, target: vector, velocity: vector, smoothTime: number, dt: number) -> (vector, vector)),
 	-- Interpolates from a to b using 3t squared minus 2t cubed, with t clamped to [0, 1]. [All modes; LoadTime|Runtime|Test; pure/read]
 	SmoothStep: (a: number, b: number, t: number) -> number,
+}
+
+-- Queries of the play session's baked navigation mesh (the scene's Navigation component), deterministic and usable in every callback.
+declare Navigation: {
+	-- The point of the agent type's surface nearest to position within maxDistance metres (default 2, at most 10,000), or nil. [All modes; Runtime|Test; pure/read]
+	ClosestPoint: (position: vector, maxDistance: number?, agent: string?) -> vector?,
+	-- The path's corners (at most 256) from from's point on the mesh to to's, and whether it reaches to: an unreachable goal gives the partial path to the closest reachable point. nil and false when either end is more than 2 m from the mesh or the scene has no mesh. agent names an agent type of the Navigation component (default: its first). [All modes; Runtime|Test; pure/read]
+	FindPath: (from: vector, to: vector, agent: string?) -> ({vector}?, boolean),
+	-- A random point of the surface, uniform over its area: anywhere, or within radius metres (in XZ) of center on polygons reachable from it. Draws from generator, or from the session's Random stream when omitted; nil, without a draw, when there is no area to draw from. [All modes; Runtime|Test; mutates]
+	RandomPoint: (center: vector?, radius: number?, agent: string?, generator: RandomGenerator?) -> vector?,
+	-- A straight walk along the surface from from's point on the mesh toward to's XZ: whether it is clear, where it stops and the blocking edge's normal; nil when from is more than 2 m from the mesh. [All modes; Runtime|Test; pure/read]
+	Raycast: (from: vector, to: vector, agent: string?) -> NavigationRaycast?,
 }
 
 -- Queries and gravity for the active scene's physics system.

@@ -53,6 +53,7 @@ namespace Engine {
 		void RunUiBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunParticlesBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunTerrainBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		void RunNavigationBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 	}
 
@@ -175,7 +176,8 @@ namespace Engine {
 				&Test::RunLocBindingsCoverage,
 				&Test::RunUiBindingsCoverage,
 				&Test::RunParticlesBindingsCoverage,
-				&Test::RunTerrainBindingsCoverage
+				&Test::RunTerrainBindingsCoverage,
+				&Test::RunNavigationBindingsCoverage
 			};
 			Test::ScriptTestFixture catalog;
 			REQUIRE(catalog.Start());

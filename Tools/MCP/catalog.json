@@ -3633,7 +3633,7 @@
 						"type": "string"
 					},
 					"annotate": {
-						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected."
+						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds, axes and navMesh (the scene's baked navigation mesh as polygon edges) are booleans. Unknown members and invalid references are rejected."
 					},
 					"maxDimension": {
 						"description": "The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when either is given, so the PNG has the requested size, and 1024 otherwise.",

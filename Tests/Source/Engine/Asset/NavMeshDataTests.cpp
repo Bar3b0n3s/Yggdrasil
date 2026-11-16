@@ -5,6 +5,7 @@
 #include "Engine/Asset/AssetLoaderRegistry.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Navigation/NavigationWorld.h"
 #include "Support/DeathTest.h"
 #include "Support/Fuzz.h"
 
@@ -69,7 +70,7 @@ namespace Engine {
 				const glm::vec3 position = GetNavMeshVertexPosition(agent, vertex);
 				agent.DetailVertices.insert(agent.DetailVertices.end(), { position.x, position.y, position.z });
 			}
-			agent.DetailTriangles = { 0, 1, 2, 0, 0, 1, 2, 0 };
+			agent.DetailTriangles = { 0, 1, 2, NavMeshDetailBoundaryEdges, 0, 1, 2, NavMeshDetailBoundaryEdges };
 			return agent;
 		}
 
@@ -120,7 +121,7 @@ namespace Engine {
 			}
 			agent.DetailTriangles.clear();
 			for (uint32_t triangle = 0; triangle < detailTriangles; ++triangle)
-				agent.DetailTriangles.insert(agent.DetailTriangles.end(), { 0, 1, 2, 0 });
+				agent.DetailTriangles.insert(agent.DetailTriangles.end(), { 0, 1, 2, NavMeshDetailBoundaryEdges });
 			return mesh;
 		}
 
@@ -370,6 +371,19 @@ namespace Engine {
 			{
 				mesh.Agents[0].DetailTriangles[2] = 3;
 			}));
+			// Detour reads the closest point of a polygon's boundary edges unchecked (the fuzz case's crash): a polygon has a
+			// detail triangle, and one of its triangles flags a boundary edge.
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[0].DetailTriangles[3] = 0;
+			}));
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[1].DetailMeshes[7] = 0;
+			}));
+			NavMeshData oneEdge = MakeMesh();
+			oneEdge.Agents[0].DetailTriangles[3] = 0x10;
+			CHECK(IsValid(oneEdge));
 			CHECK(IsRefused([](NavMeshData& mesh)
 			{
 				mesh.Agents[0].DetailVertices[4] = std::numeric_limits<float>::quiet_NaN();
@@ -447,11 +461,57 @@ namespace Engine {
 			CHECK(ReadNavMeshSource(version).error().GetCode() == ErrorCode::UnsupportedVersion);
 		}
 
+		TEST_CASE("NavMeshData: bounds Detour cannot quantize, and a detail vertex far outside them, are refused")
+		{
+			// Detour quantizes the bounds in uint16 steps of CellSize along every axis (MakeAgent's cells are 0.5 m).
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[0].BoundsMax.x = mesh.Agents[0].BoundsMin.x + 65535.0f * 0.5f;
+			}));
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[0].BoundsMax.y = mesh.Agents[0].BoundsMin.y + 65535.0f * 0.5f;
+			}));
+			NavMeshData widest = MakeMesh();
+			widest.Agents[0].BoundsMax.x = widest.Agents[0].BoundsMin.x + 65534.0f * 0.5f;
+			CHECK(IsValid(widest));
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[1].BoundsMin.z = -2.0e9f;
+			}));
+			// Detour divides by the tile's width: an agent with polygons has some along X and Z.
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[0].BoundsMax.z = mesh.Agents[0].BoundsMin.z;
+			}));
+			NavMeshData flat = MakeMesh();
+			flat.Agents[0] = MakeRepeatedMesh(0, 0, 0).Agents[0];
+			flat.Agents[0].BoundsMax = flat.Agents[0].BoundsMin;
+			CHECK(IsValid(flat));
+			// A detail vertex at most 16 cells outside the bounds (0.5 m along X and Z, 0.25 m along Y).
+			NavMeshData margin = MakeMesh();
+			margin.Agents[0].DetailVertices[0] = margin.Agents[0].BoundsMin.x - 8.0f;
+			margin.Agents[0].DetailVertices[1] = margin.Agents[0].BoundsMax.y + 4.0f;
+			CHECK(IsValid(margin));
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[0].DetailVertices[0] = mesh.Agents[0].BoundsMin.x - 8.5f;
+			}));
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[1].DetailVertices[4] = mesh.Agents[1].BoundsMax.y + 4.25f;
+			}));
+			CHECK(IsRefused([](NavMeshData& mesh)
+			{
+				mesh.Agents[1].DetailVertices[5] = 3.0e38f;
+			}));
+		}
+
 		TEST_CASE("NavMeshData: 10,000 seeded mutations of a payload never crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			const Buffer payload = SerializeNavMeshPayload(MakeMesh());
 			REQUIRE(DeserializeNavMeshPayload(payload).has_value());
-			const Test::FuzzRun run = Test::RunFuzzCase(0x4E4D, 10000, [&payload](Random& random, uint64_t /*index*/)
+			const Test::FuzzRun run = Test::RunFuzzCase(0x4E4D, 10000, [&payload](Random& random, uint64_t index)
 			{
 				Buffer mutated = payload;
 				Test::MutateBytes(mutated, random);
@@ -461,6 +521,23 @@ namespace Engine {
 					return false;
 				CHECK(ValidateNavMeshData(*read).has_value());
 				CHECK(SerializeNavMeshPayload(*read) == mutated);
+				// Detour builds its mesh from every accepted payload (dtCreateNavMeshData, then the tile), and every query
+				// runs on it without reading outside its arrays or looping (the review of W30.1).
+				Result<Scope<NavigationWorld>> world = NavigationWorld::Create(*read);
+				REQUIRE_MESSAGE(world.has_value(), world.error().ToString());
+				Random queries(index);
+				for (size_t agent = 0; agent < (*world)->GetAgentCount(); ++agent)
+				{
+					const NavMeshAgent& baked = read->Agents[agent];
+					const glm::vec3 center = (baked.BoundsMin + baked.BoundsMax) * 0.5f;
+					static_cast<void>((*world)->FindPath(agent, baked.BoundsMin, baked.BoundsMax, 16));
+					static_cast<void>((*world)->FindPath(agent, center, baked.BoundsMin, 16));
+					static_cast<void>((*world)->Raycast(agent, baked.BoundsMin, baked.BoundsMax));
+					static_cast<void>((*world)->Raycast(agent, center, baked.BoundsMax));
+					static_cast<void>((*world)->FindClosestPoint(agent, center, 1.0f));
+					static_cast<void>((*world)->FindRandomPoint(agent, queries));
+					static_cast<void>((*world)->FindRandomPointAround(agent, center, 1.0f, queries));
+				}
 				return true;
 			});
 			if (Test::IsFuzzSample(run.Range))

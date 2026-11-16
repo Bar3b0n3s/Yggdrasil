@@ -22,6 +22,7 @@ namespace Engine {
 	class AudioSystem;
 	class DebugDrawList;
 	class IFieldSchemaSource;
+	class NavigationWorld;
 	class Physics2DSystem;
 	class PhysicsSystem;
 	class Random;
@@ -148,6 +149,11 @@ namespace Engine {
 		// wherever it was created; every other host (the edit evaluation, test fixtures without a session) keeps the
 		// default, which does nothing.
 		virtual void SynchronizePhysicsBodies() {}
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 11): the play session's navigation (Navigation/NavigationWorld.h),
+		// built from the current scene's baked navigation mesh, which the Navigation script module queries; null when the
+		// scene has none. A play session's host returns PlaySession::GetNavigation, and every other host (the edit
+		// evaluation, test fixtures without a session) keeps the default, null, for which every query finds nothing.
+		[[nodiscard]] virtual NavigationWorld* GetNavigation() { return nullptr; }
 	};
 
 }

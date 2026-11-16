@@ -197,6 +197,8 @@ namespace Engine {
 			request.SelectedEntities = context.GetSelectedEntities(*scene);
 			ENGINE_TRY_ASSIGN(request.Annotations, ResolveViewportAnnotations(context, *scene, annotations));
 			request.Flags = annotations.Colliders ? RenderViewFlags::Colliders : RenderViewFlags::None;
+			if (annotations.NavMesh)
+				request.Flags |= RenderViewFlags::Navigation;
 			EntitySummary cameraSummary;
 			ENGINE_TRY(Utils::SelectCamera(context, params, *scene, sceneViewCamera.has_value() ? &*sceneViewCamera : nullptr, request, cameraSummary));
 
@@ -217,7 +219,8 @@ namespace Engine {
 			snapshot.DebugView = debugView;
 			snapshot.SceneRevision = scene->GetRevision();
 			// The annotations go to the snapshot's AnnotationDraw: data views show them, never the session's debug primitives.
-			if (annotations.Colliders || request.Annotations.Labels != RenderAnnotationLabels::None || request.Annotations.Bounds || request.Annotations.Axes)
+			if (annotations.Colliders || annotations.NavMesh || request.Annotations.Labels != RenderAnnotationLabels::None || request.Annotations.Bounds
+				|| request.Annotations.Axes)
 			{
 				AssetManager* assets = context.GetAssets();
 				if (assets == nullptr)
@@ -290,7 +293,8 @@ namespace Engine {
 				"A data view stores each value v as round(255 v), except LightCount's heat map: 0 lights black, 1 to 2 blue, 3 to 4 cyan, "
 				"5 to 8 green, 9 to 16 yellow, 17 to 32 orange (1, 0.5, 0), more red.")
 			.Field("annotate", &ViewportScreenshotParams::Annotate,
-				"Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected.")
+				"Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds, axes and navMesh (the scene's "
+				"baked navigation mesh as polygon edges) are booleans. Unknown members and invalid references are rejected.")
 			.Field("maxDimension", &ViewportScreenshotParams::MaxDimension,
 				"The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when "
 				"either is given, so the PNG has the requested size, and 1024 otherwise.",

@@ -69,5 +69,8 @@ namespace Engine {
 	// dependency tracking; an edge is recorded before its module loads, so a failed require counts too.
 	inline constexpr size_t MaxScriptRequireBytes = 1024;
 	inline constexpr size_t MaxScriptRequireEdges = 16384;
+	// M30 (Docs/Decisions/0045-m30-navigation.md decision 10): the corners Navigation.FindPath returns; a longer path is cut
+	// after this many and reported as not reaching its goal, as an unreachable goal's partial path is.
+	inline constexpr size_t MaxScriptNavigationPathCorners = 256;
 
 }

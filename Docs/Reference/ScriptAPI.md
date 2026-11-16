@@ -662,6 +662,42 @@ Interpolates from a to b using 3t squared minus 2t cubed, with t clamped to [0, 
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
+## Navigation
+
+Queries of the play session's baked navigation mesh (the scene's Navigation component), deterministic and usable in every callback.
+
+### Navigation.ClosestPoint
+
+`(position: vector, maxDistance: number?, agent: string?) -> vector?`
+
+The point of the agent type's surface nearest to position within maxDistance metres (default 2, at most 10,000), or nil.
+
+All modes; Runtime|Test; pure/read.
+
+### Navigation.FindPath
+
+`(from: vector, to: vector, agent: string?) -> ({vector}?, boolean)`
+
+The path's corners (at most 256) from from's point on the mesh to to's, and whether it reaches to: an unreachable goal gives the partial path to the closest reachable point. nil and false when either end is more than 2 m from the mesh or the scene has no mesh. agent names an agent type of the Navigation component (default: its first).
+
+All modes; Runtime|Test; pure/read.
+
+### Navigation.RandomPoint
+
+`(center: vector?, radius: number?, agent: string?, generator: RandomGenerator?) -> vector?`
+
+A random point of the surface, uniform over its area: anywhere, or within radius metres (in XZ) of center on polygons reachable from it. Draws from generator, or from the session's Random stream when omitted; nil, without a draw, when there is no area to draw from.
+
+All modes; Runtime|Test; mutates.
+
+### Navigation.Raycast
+
+`(from: vector, to: vector, agent: string?) -> NavigationRaycast?`
+
+A straight walk along the surface from from's point on the mesh toward to's XZ: whether it is clear, where it stops and the blocking edge's normal; nil when from is more than 2 m from the mesh.
+
+All modes; Runtime|Test; pure/read.
+
 ## Physics
 
 Queries and gravity for the active scene's physics system.
@@ -7019,6 +7055,12 @@ First contact from the receiving body's side, with collider identities for compo
 `{Min: number?, Max: number?, Step: number?, Tooltip: string?}`
 
 Editor metadata and numeric validation bounds for a field.
+
+## NavigationRaycast (type)
+
+`{Clear: boolean, Point: vector, Normal: vector, Fraction: number}`
+
+A walk along the navigation surface: Clear when nothing blocks it, Point where it ends on the surface, the blocking edge's horizontal Normal (pointing back along the walk; zero when Clear) and the Fraction of the way it got in XZ.
 
 ## RaycastHit
 

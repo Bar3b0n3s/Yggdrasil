@@ -56,6 +56,9 @@ class PerfTests(unittest.TestCase):
         self.assertEqual(summary.maximum, 20.0)
         within = perf.summarize("playCopy/1000Entities", "ms", [29.0, 30.0, 31.0, 30.0])
         self.assertFalse(within.over_budget)  # the median equals the budget: not over it
+        # M30: the navigation case's budget, half of the 60 Hz fixed step.
+        self.assertEqual(perf.summarize("navigation/150Agents/tickMs", "ms", [4.0]).budget, 8.0)
+        self.assertTrue(perf.summarize("navigation/150Agents/tickMs", "ms", [7.0, 9.0, 10.0]).over_budget)
         with self.assertRaises(ValueError):
             perf.summarize("x", "ms", [1.0, math.inf])
 

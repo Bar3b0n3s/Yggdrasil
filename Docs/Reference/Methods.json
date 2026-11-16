@@ -28734,7 +28734,7 @@
 						"type": "string"
 					},
 					"annotate": {
-						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected."
+						"description": "Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds, axes and navMesh (the scene's baked navigation mesh as polygon edges) are booleans. Unknown members and invalid references are rejected."
 					},
 					"maxDimension": {
 						"description": "The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when either is given, so the PNG has the requested size, and 1024 otherwise.",
@@ -28922,6 +28922,10 @@
 						"description": "Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.",
 						"type": "boolean"
 					},
+					"navMesh": {
+						"description": "Show the scene's baked navigation mesh as polygon edges.",
+						"type": "boolean"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
@@ -28976,6 +28980,10 @@
 					},
 					"uiPreview": {
 						"description": "Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring.",
+						"type": "boolean"
+					},
+					"navMesh": {
+						"description": "Whether the scene's baked navigation mesh is shown.",
 						"type": "boolean"
 					},
 					"_meta": {

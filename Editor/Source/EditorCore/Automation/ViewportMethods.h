@@ -62,6 +62,8 @@ namespace Engine {
 		// it on makes the scene camera EditorCamera::Make2D's; turning it off keeps the camera.
 		bool Mode2D = false;
 		bool UiPreview = false; // M22 (decision 33): EditorViewportOptions::UiPreview
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): EditorViewportOptions::NavMesh
+		bool NavMesh = false;
 	};
 	struct ViewportSetOptionsResult
 	{
@@ -74,6 +76,7 @@ namespace Engine {
 		std::vector<uint32_t> GameResolution{}; // [width, height]; [0, 0] is free resolution
 		bool Mode2D = false;                    // M21: the scene view's 2D mode
 		bool UiPreview = false;                 // M22 (decision 33): EditorViewportOptions::UiPreview
+		bool NavMesh = false;                   // M30 (decision 12): EditorViewportOptions::NavMesh
 	};
 
 	namespace Automation {

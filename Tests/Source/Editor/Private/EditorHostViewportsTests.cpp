@@ -1349,6 +1349,21 @@ end)
 			CHECK(snapshot.Annotations.Axes);
 			CHECK(snapshot.SelectedEntities == std::vector<UUID>(selected.begin(), selected.end()));
 		}
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12).
+		TEST_CASE("EditorHostViewports: the navigation mesh option maps to the Navigation flag")
+		{
+			Test::EditorTestFixture fixture("HostViewportNavMesh");
+			GizmoController gizmos(fixture.GetEditor());
+			EditorHostViewports host(fixture.GetEditor(), gizmos);
+			for (const bool shown : { false, true })
+			{
+				RenderSnapshot snapshot;
+				EditorViewportOptions options;
+				options.NavMesh = shown;
+				REQUIRE(host.ConfigureSceneSnapshot(snapshot, options, {}).has_value());
+				CHECK(HasFlag(snapshot.Flags, RenderViewFlags::Navigation) == shown);
+			}
+		}
 		TEST_CASE("EditorHostViewports: no device refuses picking and unavailable images preserve the camera aspect")
 		{
 			Test::EditorTestFixture fixture("HostNoDevice");

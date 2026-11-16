@@ -97,6 +97,24 @@ namespace Engine {
 				CHECK((*result)[name] == (*before)[name]);
 		}
 
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): the scene view's navigation mesh option.
+		TEST_CASE("ViewportMethods: setOptions shows and hides the navigation mesh, which is off by default")
+		{
+			Test::M10MethodFixture setup;
+			const auto before = setup.Call("viewport.setOptions");
+			REQUIRE(before.has_value());
+			CHECK((*before)["navMesh"] == false);
+			const auto shown = setup.Call("viewport.setOptions", Json{ { "navMesh", true } });
+			REQUIRE(shown.has_value());
+			CHECK((*shown)["navMesh"] == true);
+			CHECK(setup.Fixture.GetEditor().GetViewportState().GetOptions().NavMesh);
+			for (std::string_view name : { "grid", "gizmos", "colliders", "icons", "wireframe" })
+				CHECK((*shown)[name] == (*before)[name]);
+			const auto hidden = setup.Call("viewport.setOptions", Json{ { "navMesh", false } });
+			REQUIRE(hidden.has_value());
+			CHECK((*hidden)["navMesh"] == false);
+		}
+
 		TEST_CASE("ViewportMethods: methods work headless without a GPU")
 		{
 			Test::M10MethodFixture setup;

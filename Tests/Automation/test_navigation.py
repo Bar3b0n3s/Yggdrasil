@@ -1,14 +1,18 @@
-"""Navigation through automation (Docs/Decisions/0045-m30-navigation.md decisions 8 and 9; Roadmap M30, World Tree's
+"""Navigation through automation (Docs/Decisions/0045-m30-navigation.md decisions 8 to 12; Roadmap M30, World Tree's
 brief 1): navigation.bake, the editor's Bake Navigation action, builds the saved scene's navigation mesh from its static
 colliders without a renderer, writes it beside the scene, assigns it in one undoable edit, and two bakes write
 byte-identical files; project.validate reports a scene not baked and a bake made stale by a moved wall; a playing editor
-and a scene without a Navigation component are refused."""
+and a scene without a Navigation component are refused; a play session's scripts query the baked mesh through the
+Navigation namespace; and the navigation view (viewport.setOptions navMesh, viewport.screenshot annotate.navMesh) draws
+the mesh's polygon edges."""
 
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 from harness import AutomationTestCase, engine_client
+from test_environment import png_pixels
 
 
 def navigation_codes(client: engine_client.EngineClient) -> list[str]:
@@ -93,6 +97,67 @@ class NavigationBakeTests(AutomationTestCase):
         client.call("play.stop")
         self.assertFalse((root / "Assets" / "Navigation").exists())
         self.assertIsNone(baked_mesh(client))
+
+
+class NavigationQueryTests(AutomationTestCase):
+    def test_scripts_query_the_baked_mesh_in_play(self) -> None:
+        # Decisions 10 and 11: the play session builds the scene's navigation from its baked mesh; a path from one side
+        # of the not walkable channel to the other goes around its end and reaches its goal; the large agent type keeps
+        # its larger clearance from the pillar; a raycast into the pillar stops short of it.
+        client, _ = self.open_editor_with_scene()
+        build_arena(client)
+        client.call("navigation.bake")
+        client.call("scene.save")
+        client.call("play.start", {"lockstep": True})
+
+        def evaluate(code: str) -> object:
+            return client.call("script.eval", {"context": "play", "code": code})["value"]
+
+        complete, corners = evaluate(
+            "local path, complete = Navigation.FindPath(vector.create(-6, 0, -8), vector.create(-6, 0, -2)) "
+            "return {complete, path}")
+        self.assertTrue(complete)
+        self.assertGreater(max(corner[0] for corner in corners), 4.0, corners)
+        for agent, clearance in (("Small", 0.4), ("Large", 1.0)):
+            point = evaluate(f"return Navigation.ClosestPoint(vector.create(-4, 0, 0), 3, '{agent}')")
+            outside = max(abs(point[0] + 4.0) - 0.5, abs(point[2]) - 0.5)
+            self.assertGreater(outside, clearance - 0.25, (agent, point))
+        hit = evaluate("local hit = Navigation.Raycast(vector.create(-8, 0, 0), vector.create(-1, 0, 0)) "
+                       "return {hit.Clear, hit.Point}")
+        self.assertFalse(hit[0])
+        self.assertLess(hit[1][0], -4.5)
+        client.call("play.stop")
+
+
+class NavigationViewTests(AutomationTestCase):
+    def test_the_navigation_view_draws_the_baked_mesh(self) -> None:
+        # Decision 12: viewport.setOptions' navMesh shows the scene view's navigation mesh (off by default), and
+        # viewport.screenshot's annotate.navMesh draws the polygon edges into a capture, which changes the image only
+        # where the mesh lies, and the same capture twice gives the same image.
+        if not self.require_gpu():
+            return
+        client, _ = self.open_editor_with_scene(renderer="vulkan")
+        self.assertFalse(client.call("viewport.setOptions")["navMesh"])
+        self.assertTrue(client.call("viewport.setOptions", {"navMesh": True})["navMesh"])
+        self.assertFalse(client.call("viewport.setOptions", {"navMesh": False})["navMesh"])
+
+        build_arena(client)
+        client.call("navigation.bake")
+        client.call("entity.create", {"name": "Camera", "components": {
+            "Transform": {"Translation": [0, 18, 0.001], "EulerAngles": [-90, 0, 0]},
+            "Camera": {"Primary": True, "Clear": "Color", "ClearColor": [0, 0, 0]}}})
+        size = {"view": "game", "width": 160, "height": 120}
+        clean = Path(client.call("viewport.screenshot", size)["path"])
+        annotated_params = {**size, "annotate": {"navMesh": True}}
+        annotated = Path(client.call("viewport.screenshot", annotated_params)["path"])
+        repeated = Path(client.call("viewport.screenshot", annotated_params)["path"])
+        self.assertNotEqual(annotated.read_bytes(), clean.read_bytes())
+        self.assertEqual(repeated.read_bytes(), annotated.read_bytes())
+        width, height, before = png_pixels(clean)
+        _, _, after = png_pixels(annotated)
+        changed = sum(1 for pixel in range(0, width * height * 4, 4)
+                      if before[pixel:pixel + 4] != after[pixel:pixel + 4])
+        self.assertGreater(changed, 100)
 
 
 if __name__ == "__main__":

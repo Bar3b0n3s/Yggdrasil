@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Asset/NavMeshData.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FixedStepScheduler.h"
@@ -10,6 +11,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Native/NativeComponents.h"
+#include "Engine/Navigation/NavigationWorld.h"
 #include "Engine/Platform/Input/InputActionMap.h"
 #include "Engine/Platform/Input/InputState.h"
 #include "Engine/Reflection/FuzzySuggest.h"
@@ -25,6 +27,7 @@
 #include "Engine/Scene/Components/TilemapColliderComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
+#include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/ParticleSystem.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
@@ -195,6 +198,31 @@ namespace Engine {
 			return result;
 		}
 
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 11): the navigation of `scene` (PlaySession::GetNavigation), null
+		// without a navigation mesh to build it from; a mesh that does not load or build is logged once, as a warning.
+		static Scope<NavigationWorld> CreateSceneNavigation(const Scene& scene, AssetManager* assets)
+		{
+			const AssetHandle handle = FindSceneNavMesh(scene);
+			if (assets == nullptr || !handle.IsValid())
+				return nullptr;
+			const Result<AssetRef<Asset>> loaded = assets->Load(handle);
+			const AssetRef<NavMeshData> mesh = loaded.has_value() ? AssetCast<NavMeshData>(*loaded) : nullptr;
+			if (mesh == nullptr)
+			{
+				ENGINE_CORE_WARN("The navigation mesh {} does not load ({}): every navigation query of the scene finds nothing", handle.ToString(),
+					loaded.has_value() ? "not a NavMesh" : loaded.error().ToString());
+				return nullptr;
+			}
+			Result<Scope<NavigationWorld>> world = NavigationWorld::Create(*mesh);
+			if (!world.has_value())
+			{
+				ENGINE_CORE_WARN("The navigation mesh {} does not build ({}): every navigation query of the scene finds nothing", handle.ToString(),
+					world.error().ToString());
+				return nullptr;
+			}
+			return std::move(*world);
+		}
+
 		// Whether `scene` holds a 2D physics component (EnTT storage sizes): the Physics2DPreStep transform update is needed
 		// only then (decision 10).
 		static bool HoldsPhysics2DComponents(const Scene& scene)
@@ -361,6 +389,8 @@ namespace Engine {
 		// The scene's sprite animation (M21, decisions 5 and 10), likewise: the SpriteAnimation phase's system, null in a
 		// session without an asset manager (CreateSpriteAnimation).
 		Scope<SpriteAnimationSystem> SpriteAnimation{};
+		// The scene's navigation (M30, Docs/Decisions/0045-m30-navigation.md decision 11), likewise; null without a mesh.
+		Scope<NavigationWorld> Navigation{};
 		PlayInput Input;
 		uint64_t Tick = 0;       // the next tick
 		uint64_t FrameIndex = 0; // frame phases run so far
@@ -511,6 +541,8 @@ namespace Engine {
 		}
 		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 28): the session's UI, which the Ui script module reads.
 		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
+		// M30 (decision 11): the scene's navigation, which the Navigation script module queries.
+		[[nodiscard]] NavigationWorld* GetNavigation() override { return Navigation.get(); }
 		// M22 (C22.3, decision 46): the text latch, which Input.GetText reads.
 		[[nodiscard]] std::string_view GetText(InputPhase phase) const override { return Input.GetText(phase); }
 		// ADR 0038 decision 14: before each round of a start flush, the bodies of both worlds whose components changed, from
@@ -930,6 +962,8 @@ namespace Engine {
 			ClearPendingTransition();
 			return;
 		}
+		// M30 (decision 11): the new scene's navigation, which reads only its mesh.
+		Scope<NavigationWorld> navigation = Utils::CreateSceneNavigation(*PendingScene, Assets);
 		ReplacingScene = true;
 		if (Scripts != nullptr)
 			Scripts->Stop();
@@ -958,6 +992,7 @@ namespace Engine {
 		Physics2D = std::move(*physics2D);
 		SpriteAnimation = std::move(*spriteAnimation);
 		Animation = std::move(*animation);
+		Navigation = std::move(navigation);
 		Parameters = std::move(PendingParameters);
 		CurrentDocument = std::move(PendingDocument);
 		CurrentSceneAsset = PendingSceneAsset;
@@ -1492,6 +1527,8 @@ namespace Engine {
 		state.Animation = std::move(*animation);
 		// M26 (Docs/Decisions/0037-m26-contract.md decision 6): the Particles phase's system, stepping at the fixed delta.
 		state.Particles = CreateScope<ParticleSystem>(static_cast<float>(state.FixedDelta));
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 11): the scene's navigation, from its baked mesh.
+		state.Navigation = Utils::CreateSceneNavigation(*state.RuntimeScene, state.Assets);
 
 		if (specification.Audio != nullptr && specification.Mode == PlayMode::Play)
 		{
@@ -1858,6 +1895,16 @@ namespace Engine {
 	const Physics2DSystem* PlaySession::GetPhysics2D() const
 	{
 		return m_State->Physics2D.get();
+	}
+
+	NavigationWorld* PlaySession::GetNavigation()
+	{
+		return m_State->Navigation.get();
+	}
+
+	const NavigationWorld* PlaySession::GetNavigation() const
+	{
+		return m_State->Navigation.get();
 	}
 
 	UiSystem& PlaySession::GetUi()

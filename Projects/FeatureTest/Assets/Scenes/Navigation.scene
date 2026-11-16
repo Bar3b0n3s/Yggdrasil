@@ -9,6 +9,7 @@
 		"Camera": 1,
 		"DirectionalLight": 1,
 		"BoxCollider": 1,
+		"Script": 2,
 		"Navigation": 1,
 		"NavModifier": 1
 	},
@@ -242,6 +243,206 @@
 					"CellSize": 0.25,
 					"CellHeight": 0.12,
 					"MinRegionArea": 2
+				}
+			}
+		},
+		{
+			"ID": "815582fdf9020d7a",
+			"Name": "Warden",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 3],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "98717c9d436b9806",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "2132b79bcacfd990",
+			"Name": "Husk1",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-8, 0, -8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "87ae4faa4bca41ea",
+							"Fields": {
+								"Agent": "Small",
+								"Offset": 0,
+								"Speed": 3.5
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "f0557a0cdaadec0a",
+			"Name": "Husk2",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-5, 0, -8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "87ae4faa4bca41ea",
+							"Fields": {
+								"Agent": "Small",
+								"Offset": 5,
+								"Speed": 3.5
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "cb72a4f485ad2890",
+			"Name": "Husk3",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 0, -8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "87ae4faa4bca41ea",
+							"Fields": {
+								"Agent": "Small",
+								"Offset": 10,
+								"Speed": 3.5
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "54d572a2c4346636",
+			"Name": "Husk4",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0, -8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "87ae4faa4bca41ea",
+							"Fields": {
+								"Agent": "Small",
+								"Offset": 15,
+								"Speed": 3.5
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "a46bb783b619c237",
+			"Name": "Brute",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-6, 0, -9],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "87ae4faa4bca41ea",
+							"Fields": {
+								"Agent": "Large",
+								"Offset": 7,
+								"Speed": 2.5
+							},
+							"ExecutionOrder": 0
+						}
+					]
 				}
 			}
 		}

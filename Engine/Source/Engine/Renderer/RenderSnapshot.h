@@ -71,6 +71,8 @@ namespace Engine {
 	// Wireframe replaces Lit mesh color with portable one-pixel triangle edges over camera ClearColor; normal solid
 	// depth/EntityId prepass still runs, so picking/selection remain geometry-based. No fillModeNonSolid requirement.
 	// DebugView != Lit takes precedence over Wireframe. Full wireframe/color/count rules are frozen in ADR0017.
+	// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): Navigation draws the scene's baked navigation mesh as polygon
+	// edges in AnnotationDraw (Scene/NavigationDebugDraw.h), independent like Colliders.
 	enum class RenderViewFlags : uint32_t
 	{
 		None = 0,
@@ -80,7 +82,8 @@ namespace Engine {
 		Colliders = 1U << 3,
 		Icons = 1U << 4,
 		Picking = 1U << 5,
-		Wireframe = 1U << 6
+		Wireframe = 1U << 6,
+		Navigation = 1U << 7
 	};
 
 	template<>

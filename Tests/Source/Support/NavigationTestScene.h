@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Asset/NavMeshData.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Scene/Entity.h"
 
@@ -14,6 +15,7 @@
 
 namespace Engine {
 
+	class AssetManager;
 	class Scene;
 
 	namespace Test {
@@ -35,6 +37,10 @@ namespace Engine {
 		// with two agent types, "Small" (radius 0.4 m, height 1.8 m) and "Large" (radius 1 m, height 2 m), 0.2 m cells.
 		// Returns the Navigation entity.
 		Entity AddNavigationArena(Scene& scene);
+
+		// The bake of `scene` with the default project's one layer (CollectNavigationBakeInput, then BuildNavMesh), both
+		// required to succeed.
+		[[nodiscard]] NavMeshData BakeNavigationScene(const Scene& scene, AssetManager& assets);
 
 		// Whether the XZ point `point` lies inside the XZ footprint of the axis-aligned box at `center` with `halfExtents`,
 		// grown by `margin` (negative shrinks it).

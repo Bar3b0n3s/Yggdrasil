@@ -141,6 +141,8 @@ namespace Engine {
 		[[nodiscard]] Status RegisterParticles(ScriptApiRegistry& api);
 		// M26 (Docs/Decisions/0037-m26-contract.md decision 26): the Terrain proxy's methods.
 		[[nodiscard]] Status RegisterTerrain(ScriptApiRegistry& api);
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 10): the Navigation module and its NavigationRaycast alias.
+		[[nodiscard]] Status RegisterNavigation(ScriptApiRegistry& api);
 
 	}
 

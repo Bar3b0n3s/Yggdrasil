@@ -41,8 +41,9 @@
 // "debugView" names any RenderDebugView (including "AO", "ShadowCascades" and "Overdraw"; ParseRenderDebugView ignores
 // ASCII case), which the handler sets on the extracted snapshot; absent or empty is Lit. An unknown name is
 // InvalidParams at /debugView listing the valid names. "annotate" is parsed strictly into capture-only labels, colliders,
-// bounds and axes; invalid members and entity references retain their parameter paths. Extraction uses project quality
-// settings and the target scene's selection without changing either the editor's viewport options or the scene.
+// bounds, axes and (M30, Docs/Decisions/0045-m30-navigation.md decision 12) the navigation mesh; invalid members and entity
+// references retain their parameter paths. Extraction uses project quality settings and the target scene's selection
+// without changing either the editor's viewport options or the scene.
 
 namespace Engine {
 
@@ -73,7 +74,7 @@ namespace Engine {
 		uint32_t Height = 360;
 		std::string Camera{};    // an EntityRef of a camera entity of the target scene (M7)
 		std::string DebugView{}; // a debug view name (M8; see the file comment); empty: Lit
-		VariantValue Annotate{}; // {labels, colliders, bounds, axes} (M9)
+		VariantValue Annotate{}; // {labels, colliders, bounds, axes} (M9), navMesh (M30)
 		// 1 to MaxViewportScreenshotDimension. Absent, it is the larger of Width and Height when either is given (ADR 0038,
 		// friction F05: the PNG has the requested size), else 1024 (the default 640 x 360 fits it).
 		uint32_t MaxDimension = 1024;
@@ -107,11 +108,13 @@ namespace Engine {
 		RenderAnnotations Annotations{};
 		std::vector<std::string> LabelReferences{}; // unresolved EntityRefs for labels:[ids], in request order
 		bool Colliders = false;
+		// M30 (decision 12): the scene's baked navigation mesh as polygon edges (RenderViewFlags::Navigation).
+		bool NavMesh = false;
 	};
 
 	// Strict object: labels = "all"|"selection"|[EntityRefs]; "selected" aliases "selection", "none" disables labels.
 	// Strings ignore ASCII case; array strings are exact EntityRefs (UUID/prefix/path), never enum spellings. Up to 1000
-	// nonempty refs; [] selects Explicit with no labels. colliders/bounds/axes booleans default false. Absent labels=None.
+	// nonempty refs; [] selects Explicit with no labels. colliders/bounds/axes/navMesh booleans default false. Absent labels=None.
 	// Pure parse only: array refs stay owned in LabelReferences; no lookup/selection mutation. Unknown members and wrong
 	// types/count/values return InvalidArgument at /annotate/member[/index]. No partial options returned on failure.
 	[[nodiscard]] Result<ViewportAnnotationOptions> ParseViewportAnnotations(const VariantValue& value);

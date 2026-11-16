@@ -1,15 +1,21 @@
 #include "TestsPCH.h"
 #include "Support/NavigationTestScene.h"
 
+#include "EditorCore/Navigation/NavMeshBuilder.h"
+#include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/NavModifierComponent.h"
 #include "Engine/Scene/Components/NavigationComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/NavigationBakeInput.h"
 #include "Engine/Scene/Scene.h"
+
+#include <doctest/doctest.h>
 
 #include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
+#include <utility>
 
 namespace Engine {
 
@@ -65,6 +71,15 @@ namespace Engine {
 			settings.CellHeight = 0.1f;
 			navigation.AddComponent<NavigationComponent>(settings);
 			return navigation;
+		}
+
+		NavMeshData BakeNavigationScene(const Scene& scene, AssetManager& assets)
+		{
+			const Result<NavigationBakeInput> input = CollectNavigationBakeInput(scene, PhysicsLayerTable(), assets);
+			REQUIRE_MESSAGE(input.has_value(), input.error().ToString());
+			Result<NavMeshData> mesh = BuildNavMesh(*input);
+			REQUIRE_MESSAGE(mesh.has_value(), mesh.error().ToString());
+			return std::move(*mesh);
 		}
 
 		bool IsInsideFootprint(const glm::vec3& point, const glm::vec3& center, const glm::vec3& halfExtents, float margin)

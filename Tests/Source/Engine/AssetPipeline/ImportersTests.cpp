@@ -138,7 +138,7 @@ namespace Engine {
 			agent.Areas = { 1, 1 };
 			agent.DetailMeshes = { 0, 3, 0, 1, 3, 3, 1, 1 };
 			agent.DetailVertices = { 0, 0, 0, 2, 0, 0, 2, 0, 2, 0, 0, 0, 2, 0, 2, 0, 0, 2 };
-			agent.DetailTriangles = { 0, 1, 2, 0, 0, 1, 2, 0 };
+			agent.DetailTriangles = { 0, 1, 2, NavMeshDetailBoundaryEdges, 0, 1, 2, NavMeshDetailBoundaryEdges };
 			REQUIRE(ValidateNavMeshData(navigation).has_value());
 			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.navmesh"), WriteNavMeshSource(navigation)).has_value());
 

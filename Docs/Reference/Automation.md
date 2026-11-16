@@ -3431,7 +3431,7 @@ Renders a view of the target scene afresh at width x height (the game view throu
 | `height` | `UInt32` |  | `360` | The rendered height in pixels, before maxDimension. |
 | `camera` | `String` |  | `""` | A camera entity of the target scene (an EntityRef) to render through instead of the view's camera. |
 | `debugView` | `String` |  | `""` | A debug view to render instead of the lit image: a RenderDebugView name, ignoring case ("Lit", the default, also for ""). A data view stores each value v as round(255 v), except LightCount's heat map: 0 lights black, 1 to 2 blue, 3 to 4 cyan, 5 to 8 green, 9 to 16 yellow, 17 to 32 orange (1, 0.5, 0), more red. |
-| `annotate` | `Variant` |  | `null` | Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds and axes are booleans. Unknown members and invalid references are rejected. |
+| `annotate` | `Variant` |  | `null` | Capture-only annotations: labels=all, selection (selected), none or an EntityRef array; colliders, bounds, axes and navMesh (the scene's baked navigation mesh as polygon edges) are booleans. Unknown members and invalid references are rejected. |
 | `maxDimension` | `UInt32` |  | `1024` | The larger side of the PNG at most this many pixels, the image downscaled to fit. Absent, it is the larger of width and height when either is given, so the PNG has the requested size, and 1024 otherwise. |
 | `inline` | `Bool` |  | `false` | Also return the PNG as base64 in "data" when it is at most 30 KB; a larger one is only written (inlineOmitted). |
 | `keep` | `Bool` |  | `false` | Write the PNG into Library/Automation/Kept/ (user://Automation/Kept/ without a writable project and in the Runtime), which no later editor session prunes, instead of Library/Automation/Out/. |
@@ -3478,6 +3478,7 @@ Patches the scene viewport's overlays, debug view and 2D mode and the Game view'
 | `gameResolution` | `Array<UInt32>` |  | `[]` | The Game view's resolution [width, height], each 1 to 8192, or [0, 0] for free resolution. |
 | `mode2D` | `Bool` |  | `false` | The scene view's 2D mode: turning it on makes the scene camera orthographic, looking down -Z at its target's X and Y; it then pans and zooms only, and its gizmos move in X and Y, rotate about Z and scale in X and Y. Turning it off keeps the camera. |
 | `uiPreview` | `Bool` |  | `false` | Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring. |
+| `navMesh` | `Bool` |  | `false` | Show the scene's baked navigation mesh as polygon edges. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -3490,6 +3491,7 @@ Patches the scene viewport's overlays, debug view and 2D mode and the Game view'
 | `gameResolution` | `Array<UInt32>` | The Game view's resolution [width, height]; [0, 0] is free resolution. |
 | `mode2D` | `Bool` | Whether the scene view is in its 2D mode. |
 | `uiPreview` | `Bool` | Show the scene view as the game frames it, through its primary camera with its UI, for UI authoring. |
+| `navMesh` | `Bool` | Whether the scene's baked navigation mesh is shown. |
 
 Example: Show colliders.
 

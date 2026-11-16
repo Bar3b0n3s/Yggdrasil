@@ -51,6 +51,22 @@ namespace Engine {
 			}
 			if (!IsFinite(agent.BoundsMin) || !IsFinite(agent.BoundsMax) || glm::any(glm::greaterThan(agent.BoundsMin, agent.BoundsMax)))
 				return MakeError(ErrorCode::Validation, "its bounds are not finite, or their minimum exceeds their maximum");
+			if (glm::any(glm::greaterThan(glm::abs(agent.BoundsMin), glm::vec3(MaxNavMeshCoordinate)))
+				|| glm::any(glm::greaterThan(glm::abs(agent.BoundsMax), glm::vec3(MaxNavMeshCoordinate))))
+			{
+				return MakeError(ErrorCode::Validation, "its bounds reach beyond {} metres of the origin", MaxNavMeshCoordinate);
+			}
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				const double cells = (static_cast<double>(agent.BoundsMax[axis]) - static_cast<double>(agent.BoundsMin[axis])) / static_cast<double>(agent.CellSize);
+				if (cells > static_cast<double>(MaxNavMeshBoundsCells))
+				{
+					return MakeError(ErrorCode::Validation, "its bounds span {} cells of {} metres along {}; a mesh spans at most {}", cells, agent.CellSize,
+						"XYZ"[axis], MaxNavMeshBoundsCells);
+				}
+			}
+			if (agent.GetPolygonCount() > 0 && (agent.BoundsMax.x <= agent.BoundsMin.x || agent.BoundsMax.z <= agent.BoundsMin.z))
+				return MakeError(ErrorCode::Validation, "its bounds have no width along X or Z, though it has polygons");
 			if (agent.VerticesPerPolygon < NavMeshMinVerticesPerPolygon || agent.VerticesPerPolygon > NavMeshMaxVerticesPerPolygon)
 			{
 				return MakeError(ErrorCode::Validation, "its polygons have {} vertex slots; a polygon has {} to {}", agent.VerticesPerPolygon,
@@ -78,10 +94,20 @@ namespace Engine {
 				return MakeError(ErrorCode::Validation, "it holds {} detail triangle bytes; a mesh holds 4 per detail triangle and at most {} detail triangles",
 					agent.DetailTriangles.size(), MaxNavMeshDetailTriangles);
 			}
+			const glm::dvec3 cell(agent.CellSize, agent.CellHeight, agent.CellSize);
+			const glm::dvec3 lowest = glm::dvec3(agent.BoundsMin) - cell * static_cast<double>(MaxNavMeshDetailMarginCells);
+			const glm::dvec3 highest = glm::dvec3(agent.BoundsMax) + cell * static_cast<double>(MaxNavMeshDetailMarginCells);
 			for (size_t index = 0; index < agent.DetailVertices.size(); ++index)
 			{
-				if (!std::isfinite(agent.DetailVertices[index]))
+				const float coordinate = agent.DetailVertices[index];
+				if (!std::isfinite(coordinate))
 					return MakeError(ErrorCode::Validation, "detail vertex {}'s coordinate {} is not finite", index / 3, index % 3);
+				const size_t axis = index % 3;
+				if (static_cast<double>(coordinate) < lowest[static_cast<int>(axis)] || static_cast<double>(coordinate) > highest[static_cast<int>(axis)])
+				{
+					return MakeError(ErrorCode::Validation, "detail vertex {}'s coordinate {} is {}, more than {} cells outside the bounds", index / 3, axis, coordinate,
+						MaxNavMeshDetailMarginCells);
+				}
 			}
 			return {};
 		}
@@ -149,6 +175,7 @@ namespace Engine {
 				return MakeError(ErrorCode::Validation, "polygon {}'s detail triangles {} to {} are outside the {} detail triangles, or more than {}", polygon,
 					triangleBase, triangleBase + triangleCount, agent.DetailTriangles.size() / 4, MaxNavMeshDetailTrianglesPerPolygon);
 			}
+			bool boundary = false;
 			for (uint64_t triangle = triangleBase; triangle < triangleBase + triangleCount; ++triangle)
 			{
 				for (size_t corner = 0; corner < 3; ++corner)
@@ -157,7 +184,10 @@ namespace Engine {
 					if (index >= vertexCount)
 						return MakeError(ErrorCode::Validation, "polygon {}'s detail triangle {} names vertex {} of {}", polygon, triangle, index, vertexCount);
 				}
+				boundary = boundary || (agent.DetailTriangles[static_cast<size_t>(triangle) * 4 + 3] & NavMeshDetailBoundaryEdges) != 0;
 			}
+			if (!boundary)
+				return MakeError(ErrorCode::Validation, "polygon {}'s detail mesh has no triangle with an edge on the polygon's boundary", polygon);
 			extraVertices += static_cast<size_t>(vertexCount - own);
 			if (extraVertices > MaxNavMeshExtraDetailVertices)
 				return MakeError(ErrorCode::Validation, "the detail meshes have more than {} vertices beyond their polygons'", MaxNavMeshExtraDetailVertices);
