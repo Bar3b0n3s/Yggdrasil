@@ -131,7 +131,9 @@ namespace Engine {
 	// dropped at every request and every Update, so the system tracks at most MaxAudioVoices of them.
 	//
 	// Pause and stop (§10.2). SetPaused(true) pauses every voice of the system (sources and one-shots; new voices start
-	// paused) and SetPaused(false) resumes them where they were; both are idempotent. Destroying the system is Stop: every
+	// paused) and SetPaused(false) resumes them where they were; both are idempotent. M35's SetWorldPaused(true) does the
+	// same for the voices outside the Ui group, whose group (a source's Group field as last applied, a one-shot's group)
+	// decides, and SetWorldPaused(false) resumes them; a voice is paused while either pause or its source's own Pause holds it. Destroying the system is Stop: every
 	// voice it started is released, its clips unregistered and the engine's group volumes restored (see "Mixer").
 	//
 	// Mixer (§11.5 Audio.SetGroupVolume and GetGroupVolume, bound to scripts in M13). The group volumes a game sets belong to
@@ -168,6 +170,10 @@ namespace Engine {
 		// Play-mode pause (§10.2; PlaySession::SetPaused).
 		void SetPaused(bool paused);
 		[[nodiscard]] bool IsPaused() const;
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world pause's hold on the world's voices
+		// (PlaySession while its world is paused with the sounds choice Pause; see "Pause and stop").
+		void SetWorldPaused(bool paused);
+		[[nodiscard]] bool IsWorldPaused() const;
 
 		// The AudioSource methods of §11.5 (bound to scripts in M13), for an effectively enabled entity of this system's scene
 		// with an AudioSourceComponent. Play restarts a playing source from the start; Stop releases its voice; Pause and

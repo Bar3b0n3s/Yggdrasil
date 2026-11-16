@@ -519,6 +519,94 @@ namespace Engine {
 			CHECK(system.IsPlaying(source));
 		}
 
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world pause holds the world's voices, every group's
+		// but Ui, so a menu still sounds; a voice is paused while either pause or its own Pause holds it.
+		TEST_CASE("AudioSystem: a world pause holds the voices outside the Ui group and resume continues them")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			const Entity source = fixture.AddSource("Source", clip, glm::vec3(0.0f));
+			TransformSystem::Update(fixture.GetScene());
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+			const Result<AudioVoiceHandle> effect = system.PlayOneShot(clip, std::nullopt);
+			const Result<AudioVoiceHandle> click = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Ui);
+			REQUIRE(effect.has_value());
+			REQUIRE(click.has_value());
+			fixture.Frame(system);
+			const auto isPaused = [&fixture](AudioVoiceHandle voice)
+			{
+				const Result<AudioVoiceInfo> info = fixture.GetEngine().GetVoiceInfo(voice);
+				REQUIRE(info.has_value());
+				return info->Paused;
+			};
+			const auto sourceVoice = [&fixture, &source]()
+			{
+				for (const AudioVoiceInfo& voice : fixture.GetEngine().GetVoices())
+				{
+					if (voice.Owner == source.GetUUID().GetValue())
+						return voice;
+				}
+				FAIL("the source has no voice");
+				return AudioVoiceInfo{};
+			};
+			REQUIRE(sourceVoice().Settings.Group == AudioGroup::Sfx);
+
+			system.SetWorldPaused(true);
+			CHECK(system.IsWorldPaused());
+			CHECK_FALSE(system.IsPaused());
+			CHECK(sourceVoice().Paused);
+			CHECK(isPaused(*effect));
+			CHECK_FALSE(isPaused(*click));
+			const uint64_t heldCursor = sourceVoice().CursorFrames;
+			const uint64_t clickCursor = fixture.GetEngine().GetVoiceInfo(*click)->CursorFrames;
+			fixture.Frame(system);
+			CHECK(sourceVoice().CursorFrames == heldCursor);
+			CHECK(fixture.GetEngine().GetVoiceInfo(*click)->CursorFrames == clickCursor + 800);
+			// Voices started while the world is paused: the world's start held, the Ui group's play.
+			const Result<AudioVoiceHandle> lateEffect = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Music);
+			const Result<AudioVoiceHandle> lateClick = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Ui);
+			REQUIRE(lateEffect.has_value());
+			REQUIRE(lateClick.has_value());
+			CHECK(isPaused(*lateEffect));
+			CHECK_FALSE(isPaused(*lateClick));
+			// A source moved into the Ui group plays on at the next update; its own Pause still holds it after the resume.
+			source.Patch<AudioSourceComponent>([](AudioSourceComponent& component)
+			{
+				component.Group = AudioGroup::Ui;
+			});
+			fixture.Frame(system);
+			CHECK_FALSE(sourceVoice().Paused);
+			source.Patch<AudioSourceComponent>([](AudioSourceComponent& component)
+			{
+				component.Group = AudioGroup::Sfx;
+			});
+			fixture.Frame(system);
+			CHECK(sourceVoice().Paused);
+
+			// The play-mode pause holds every voice, whatever the world pause.
+			system.SetPaused(true);
+			system.SetWorldPaused(false);
+			CHECK(isPaused(*effect));
+			CHECK(isPaused(*click));
+			system.SetPaused(false);
+			CHECK_FALSE(isPaused(*effect));
+			CHECK_FALSE(isPaused(*lateEffect));
+			CHECK_FALSE(sourceVoice().Paused);
+			REQUIRE(system.Pause(source).has_value());
+			system.SetWorldPaused(true);
+			system.SetWorldPaused(false);
+			CHECK_FALSE(system.IsPlaying(source));
+			// Resuming the source while the world is paused leaves it held by the world pause, then the resume releases it.
+			system.SetWorldPaused(true);
+			REQUIRE(system.Resume(source).has_value());
+			CHECK(sourceVoice().Paused);
+			system.SetWorldPaused(false);
+			CHECK_FALSE(sourceVoice().Paused);
+			CHECK(system.IsPlaying(source));
+		}
+
 		TEST_CASE("AudioSystem: PlayOneShot is non-spatial without a position and plays in the Sfx group by default")
 		{
 			AudioSceneFixture fixture;

@@ -87,6 +87,18 @@ namespace Engine {
 				const std::optional<glm::quat>& rotation, UUID parent) override;
 			void MarkTeleported(UUID entity) override;
 			[[nodiscard]] Status SetTimeScale(double scale) override;
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 1): with WorldPaused set, the host has a world and
+			// records Time.PauseWorld's and Time.ResumeWorld's requests there (and WorldSounds); without it, the default, it
+			// refuses them as a host without a world does (IScriptHost's defaults).
+			[[nodiscard]] Status RequestWorldPause(bool paused, WorldPauseSounds sounds) override
+			{
+				if (!WorldPaused.has_value())
+					return IScriptHost::RequestWorldPause(paused, sounds);
+				WorldPaused = paused;
+				WorldSounds = sounds;
+				return {};
+			}
+			[[nodiscard]] bool IsWorldPaused() const override { return WorldPaused.value_or(false); }
 			[[nodiscard]] Status SetCursorMode(CursorMode mode) override;
 			[[nodiscard]] CursorMode GetCursorMode() const override { return Cursor; }
 			[[nodiscard]] Status RequestSceneLoad(AssetHandle scene, Json parameters) override;
@@ -100,6 +112,8 @@ namespace Engine {
 			[[nodiscard]] UiSystem* GetUi() override { return Ui; }
 
 			ScriptFrameState Frame{};
+			std::optional<bool> WorldPaused{}; // M35: the recorded world pause; nullopt for a host without a world
+			WorldPauseSounds WorldSounds = WorldPauseSounds::Pause;
 			ScriptEnvironment Environment{ .IsEditor = true, .Platform = "Test", .Version = "1" };
 			uint64_t Generation = 1;
 			InputState Input{};

@@ -184,6 +184,9 @@ namespace Engine {
 		uint32_t OneShotRequests = 0;
 		// SetPaused (play-mode pause).
 		bool Paused = false;
+		// SetWorldPaused (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world's voices, every group's but
+		// Ui, are held.
+		bool WorldPaused = false;
 		// Mix initialization can precede voice startup; either path restores the captured host mix on destruction.
 		bool MixInitialized = false;
 		bool Started = false;
@@ -204,6 +207,10 @@ namespace Engine {
 		void ReleaseVoice(AudioVoiceHandle& voice);
 		// Drops the handles of one-shot voices that ended or were stolen, keeping the others in start order.
 		void PruneOneShots();
+		// Whether a voice of `group` is held by the system's pauses: the play-mode pause, or the world pause outside the Ui group.
+		[[nodiscard]] bool IsHeld(AudioGroup group) const { return Paused || (WorldPaused && group != AudioGroup::Ui); }
+		// Pauses or resumes every voice of the system by IsHeld and the sources' own Pause (SetPaused, SetWorldPaused).
+		void ApplyPauses();
 		// The clip `handle` as the voice plays it (see AudioSystemSpecification::Assets).
 		[[nodiscard]] ResolvedAudioClip ResolveClip(AssetHandle handle);
 		// The engine registration of `handle`'s current version, registered on first use.
@@ -321,7 +328,7 @@ namespace Engine {
 		if (Utils::IsFiniteVector(transform.Position) && Utils::IsFiniteVector(transform.Velocity))
 			description.Transform = transform;
 		description.Priority = Utils::GetSourcePriority(description.Settings.Group);
-		description.StartPaused = Paused || runtime.Paused;
+		description.StartPaused = IsHeld(description.Settings.Group) || runtime.Paused;
 		description.Owner = entity.GetUUID().GetValue();
 		ENGINE_TRY_ASSIGN(runtime.Voice, Audio->PlayVoice(description));
 		runtime.Settings = description.Settings;
@@ -418,10 +425,17 @@ namespace Engine {
 		const AudioVoiceSettings settings = Utils::MakeVoiceSettings(source);
 		if (settings != runtime.Settings)
 		{
+			const bool groupChanged = settings.Group != runtime.Settings.Group;
 			if (const Status applied = Audio->SetVoiceSettings(runtime.Voice, settings); !applied)
 				ENGINE_CORE_WARN("AudioSystem: updating the AudioSource of '{}' failed: {}", TargetScene->GetEntityPath(entity), applied.error().ToString());
 			else
 				runtime.Settings = settings;
+			// A source that moved into or out of the Ui group while the world is paused follows the world pause's rule.
+			if (groupChanged && WorldPaused && runtime.Settings.Group == settings.Group)
+			{
+				if (const Status held = Audio->SetVoicePaused(runtime.Voice, IsHeld(settings.Group) || runtime.Paused); !held)
+					ENGINE_CORE_WARN("AudioSystem: pausing a voice failed: {}", held.error().ToString());
+			}
 		}
 		if (settings.Spatial && finitePosition)
 		{
@@ -634,28 +648,51 @@ namespace Engine {
 		});
 	}
 
+	void AudioSystem::State::ApplyPauses()
+	{
+		const auto apply = [this](AudioVoiceHandle voice, bool voicePaused)
+		{
+			if (!Audio->IsVoiceAlive(voice))
+				return;
+			if (const Status set = Audio->SetVoicePaused(voice, voicePaused); !set)
+				ENGINE_CORE_WARN("AudioSystem: pausing a voice failed: {}", set.error().ToString());
+		};
+		for (auto [entity, runtime] : TargetScene->GetRegistry().view<AudioSourceRuntime>().each())
+			apply(runtime.Voice, IsHeld(runtime.Settings.Group) || runtime.Paused);
+		for (const AudioVoiceHandle voice : OneShots)
+		{
+			// A one-shot's group is the engine's record of the voice (PlayOneShot's `group`).
+			const Result<AudioVoiceInfo> info = Audio->GetVoiceInfo(voice);
+			apply(voice, IsHeld(info ? info->Settings.Group : AudioGroup::Sfx));
+		}
+	}
+
 	void AudioSystem::SetPaused(bool paused)
 	{
 		State& state = *m_State;
 		if (state.Paused == paused)
 			return;
 		state.Paused = paused;
-		const auto apply = [&state](AudioVoiceHandle voice, bool voicePaused)
-		{
-			if (!state.Audio->IsVoiceAlive(voice))
-				return;
-			if (const Status set = state.Audio->SetVoicePaused(voice, voicePaused); !set)
-				ENGINE_CORE_WARN("AudioSystem: pausing a voice failed: {}", set.error().ToString());
-		};
-		for (auto [entity, runtime] : state.TargetScene->GetRegistry().view<AudioSourceRuntime>().each())
-			apply(runtime.Voice, paused || runtime.Paused);
-		for (const AudioVoiceHandle voice : state.OneShots)
-			apply(voice, paused);
+		state.ApplyPauses();
 	}
 
 	bool AudioSystem::IsPaused() const
 	{
 		return m_State->Paused;
+	}
+
+	void AudioSystem::SetWorldPaused(bool paused)
+	{
+		State& state = *m_State;
+		if (state.WorldPaused == paused)
+			return;
+		state.WorldPaused = paused;
+		state.ApplyPauses();
+	}
+
+	bool AudioSystem::IsWorldPaused() const
+	{
+		return m_State->WorldPaused;
 	}
 
 	Status AudioSystem::Play(Entity entity)
@@ -708,7 +745,7 @@ namespace Engine {
 		AudioSourceRuntime& runtime = state.GetRuntime(entity);
 		if (!runtime.Paused || !state.Audio->IsVoiceAlive(runtime.Voice))
 			return {};
-		ENGINE_TRY(state.Audio->SetVoicePaused(runtime.Voice, state.Paused));
+		ENGINE_TRY(state.Audio->SetVoicePaused(runtime.Voice, state.IsHeld(runtime.Settings.Group)));
 		runtime.Paused = false;
 		return {};
 	}
@@ -747,7 +784,7 @@ namespace Engine {
 		if (position.has_value())
 			description.Transform.Position = *position;
 		description.Priority = AudioSystemEffectPriority;
-		description.StartPaused = state.Paused;
+		description.StartPaused = state.IsHeld(group);
 		ENGINE_TRY_ASSIGN(const AudioVoiceHandle voice, state.Audio->PlayVoice(description));
 		// The new voice may have stolen a tracked one-shot; ended and stolen voices leave the list before it grows.
 		state.PruneOneShots();

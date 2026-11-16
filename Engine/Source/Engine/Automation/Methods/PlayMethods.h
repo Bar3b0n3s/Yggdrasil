@@ -123,6 +123,12 @@ namespace Engine {
 		uint32_t MaxEntities = 0;
 		// The game input as the last tick's step view saw it (PlayInput::GetSummary(InputPhase::Step)).
 		PlayInputSummary Input{};
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 5): the world pause beside the run state, which it is
+		// not (a paused world's session runs on): whether the next tick runs with the world paused and with which sounds
+		// choice (PlaySession::IsWorldPaused, GetWorldPauseSounds), and the world's clock (GetWorldTick, ToAutomationCounter).
+		bool WorldPaused = false;
+		WorldPauseSounds WorldSounds = WorldPauseSounds::Pause;
+		uint32_t WorldTick = 0;
 	};
 
 	// play.stop's result: where the session ended.
@@ -154,6 +160,13 @@ namespace Engine {
 	struct PlaySetTimeScaleParams
 	{
 		float Scale = 1.0f; // required; 0 to PlaySession::MaxTimeScale
+	};
+
+	// M35 (decision 5): play.setWorldPaused {paused, sounds?}.
+	struct PlaySetWorldPausedParams
+	{
+		bool Paused = false; // required
+		WorldPauseSounds Sounds = WorldPauseSounds::Pause;
 	};
 
 	struct PlayWaitForParams
@@ -192,6 +205,11 @@ namespace Engine {
 		// play.setTimeScale. Errors: InvalidState "not playing" or for another client of a lockstep session; InvalidParams for
 		// a scale out of range.
 		[[nodiscard]] Result<PlayStateResult> PlaySetTimeScale(AutomationMethodContext& context, const PlaySetTimeScaleParams& params);
+		// M35 (decision 5): play.setWorldPaused, PlaySession::RequestWorldPause, which the next tick applies. Errors:
+		// InvalidState "not playing", for another client of a lockstep session, while an input recording is active (a
+		// recording reproduces its world pauses from its scripts) and while a play.step, play.waitFor, input.replay or
+		// input.record verification advances the session (PlaySession::IsStepping).
+		[[nodiscard]] Result<PlayStateResult> PlaySetWorldPaused(AutomationMethodContext& context, const PlaySetWorldPausedParams& params);
 		// M13: pending, with the same admission, session-serial checks, frame budget and cancellation as play.step.
 		// Compiles once before advancing; evaluates in the play VM after each tick. Lua truthiness decides satisfaction;
 		// timeout returns satisfied:false and the last value, script faults return a located Error. No dry run/batch.
@@ -207,10 +225,10 @@ namespace Engine {
 
 	// Registers PlayMode, PlayRunState, PlayStepRender, PlayStartParams, PlayStateResult, PlayStopResult, PlayStepParams,
 	// PlayStepResult, PlaySetTimeScaleParams and PlayWaitForParams/Result (after RegisterInputMethodTypes, whose InputEventParams and PlayInputSummary
-	// they use).
+	// they use), and M35's WorldPauseSounds and PlaySetWorldPausedParams.
 	void RegisterPlayMethodTypes(TypeRegistry& registry);
 
-	// Registers the play methods: play.pause, play.resume, play.step, play.state and play.setTimeScale for every host
+	// Registers the play methods: play.pause, play.resume, play.step, play.state, play.setTimeScale and M35's play.setWorldPaused for every host
 	// and play.waitFor (AvailableInRuntime), play.start and play.stop only when `includeEditorMethods`. Flags: play.start, play.stop and
 	// play.step and play.waitFor are tools (§13.8: play_start, play_stop, play_step, play_waitFor); none supports a dry run (§13.4: play.* return
 	// Unsupported for dryRun); none is AllowedInBatch (they are not commands); none is available in the launcher state;

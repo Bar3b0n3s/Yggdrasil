@@ -219,7 +219,7 @@ namespace Engine {
 			auto* thread = call.Engine->m_State->FindThread(call.State);
 			if (thread == nullptr || !thread->Running || !lua_isyieldable(call.State))
 				return MakeError(ErrorCode::Script, "Task.Wait can only be used inside Task.Spawn, Task.Delay or a Test.Case body");
-			const uint64_t now = call.Engine->GetHost().GetFrameState().Tick;
+			const uint64_t now = call.Engine->m_State->GetClockTick(thread->WorldClock);
 			const uint64_t delay = std::max(uint64_t{ 1 }, ticks);
 			if (delay > std::numeric_limits<uint64_t>::max() - now)
 				return MakeError(ErrorCode::InvalidArgument, "The wait exceeds the simulation tick range");
@@ -264,7 +264,9 @@ namespace Engine {
 				ENGINE_CORE_ASSERT(indexed, "A new coroutine already belongs to a live reference");
 				record.Owner = owner;
 				record.Origin = origin;
-				record.Due = state.Engine.GetHost().GetFrameState().Tick;
+				// M35 (decision 2): a world behaviour's thread counts the world's ticks, which hold while the world is paused.
+				record.WorldClock = state.UsesWorldClock(owner);
+				record.Due = state.GetClockTick(record.WorldClock);
 				const Status pushed = PushFunction(call, function);
 				if (!pushed)
 					return Lua::RaiseError(call, pushed.error());
@@ -296,10 +298,17 @@ namespace Engine {
 			if (record->Wait && record->Wait->Kind != ScriptWaitKind::Ticks)
 			{
 				// Due remains the wait's timeout; predicates, error claims and audio readiness poll every fixed tick.
-				const uint64_t now = engine.GetHost().GetFrameState().Tick;
+				const uint64_t now = engine.m_State->GetClockTick(record->WorldClock);
 				return now == std::numeric_limits<uint64_t>::max() ? now : now + 1;
 			}
 			return record->Due;
+		}
+
+		bool ScriptEngineAccess::UsesWorldClock(ScriptEngine& engine, ScriptReference thread)
+		{
+			engine.m_State->AssertOwner();
+			const auto found = engine.m_State->References.find(thread.Index);
+			return found != engine.m_State->References.end() && found->second.WorldClock;
 		}
 
 		Status ScriptEngineAccess::ValidateTask(ScriptEngine& engine, ScriptReference thread)

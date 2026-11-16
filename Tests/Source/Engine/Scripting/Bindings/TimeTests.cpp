@@ -36,6 +36,24 @@ return Time.GetTimeScale() == 0
 			const auto frame = fixture.Evaluate("return Time.GetDeltaTime() == 0.0625 and Time.GetInterpolationAlpha() == 0.25 and Time.GetTime() == 3.125");
 			REQUIRE(frame.has_value());
 			CHECK(frame->Value.Get() == Json(true));
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decisions 1 and 2): the world pause reaches the host, and the
+			// world's clock is the session's less the ticks the host says the pause held.
+			fixture.WorldPaused = false;
+			fixture.Frame.WorldHeldTicks = 5;
+			const auto world = fixture.Evaluate(R"(
+assert(not Time.IsWorldPaused())
+Time.PauseWorld("Finish")
+assert(Time.IsWorldPaused())
+Time.ResumeWorld()
+assert(not Time.IsWorldPaused())
+Time.PauseWorld()
+assert(Time.GetTick() == 20 and Time.GetTime() == 2.5)
+return Time.IsWorldPaused() and Time.GetSessionTick() == 25 and Time.GetSessionTime() == 3.125
+)");
+			REQUIRE(world.has_value());
+			CHECK(world->Value.Get() == Json(true));
+			CHECK(fixture.WorldPaused == std::optional<bool>(true));
+			CHECK(fixture.WorldSounds == WorldPauseSounds::Pause);
 			const auto coverage = fixture.GetApi().GetCoverage(mode);
 			REQUIRE(coverage.has_value());
 			for (const auto& counter : coverage->Members)

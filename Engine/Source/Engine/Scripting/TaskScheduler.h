@@ -37,6 +37,10 @@ namespace Engine {
 		// Stable due-task snapshot, ordered by due tick then creation sequence. Spawned tasks already ran their first
 		// slice; they cannot run a second slice in this snapshot. Wait(0)/WaitTicks(0) resume no earlier than next tick.
 		// Host frame state is the sole clock. Script faults publish once through ScriptEngine and cancel the owner.
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): a task of an instance that does not run while the
+		// world is paused counts the world's ticks (Tick - WorldHeldTicks), so its delay and waits hold while the world is
+		// paused and it is not resumed then; every other task (an instance's that runs while paused, a test case's, one
+		// without an instance owner) counts the session's ticks. Each task's due tick is on its own clock.
 		void ResumeDue();
 		[[nodiscard]] size_t GetCount() const;
 	private:

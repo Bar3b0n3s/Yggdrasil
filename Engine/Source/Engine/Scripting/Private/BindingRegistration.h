@@ -47,6 +47,8 @@ namespace Engine {
 			std::string Name{};
 			std::vector<ScriptFieldSchema> Fields{};
 			uint32_t CaseTimeoutTicks = 0;
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): a Behaviour class's RunsWhileWorldPaused.
+			bool RunsWhileWorldPaused = false;
 			ErrorLocation Location{};
 		};
 

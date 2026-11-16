@@ -68,6 +68,11 @@ namespace Engine {
 			bool Started = false;
 			bool FaultDisabled = false;
 			bool DestroyPrepared = false;
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): the behaviour's class declares
+			// RunsWhileWorldPaused = true, so its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks run while the world is paused
+			// and its tasks count the session's ticks. Read from the registration when the instance is created and when its
+			// script is hot-reloaded.
+			bool RunsWhileWorldPaused = false;
 			std::map<std::string, VariantValue> Overrides{};
 			// Physics callbacks (of both worlds, interleaved as they arrived) and animation events that arrived before OnStart,
 			// in dispatch order; delivered after the start flush (§9.4 pairs).
@@ -102,6 +107,10 @@ namespace Engine {
 			bool Running = false;
 			bool Cancelled = false;
 			bool Started = false;
+			// M35 (decision 2): the thread counts the world's ticks (an instance's that does not run while the world is paused),
+			// which hold while the world is paused, so it neither resumes nor comes due then; otherwise the session's ticks (a
+			// test case's, a task of an instance that runs while paused, a task without an instance owner). Due is in its clock.
+			bool WorldClock = false;
 			uint64_t Due = 0;
 			std::optional<Detail::ScriptTestWait> Wait{};
 			std::optional<ScriptCaseResume> Terminal{};
@@ -181,7 +190,14 @@ namespace Engine {
 		void DeliverPendingEvents();
 		// Unreferences the instance's table, erases it and marks the lifecycle order for a refresh. Returns the next one.
 		std::map<InstanceKey, Instance>::iterator EraseInstance(std::map<InstanceKey, Instance>::iterator instance);
+		// OnFixedUpdate, OnUpdate or OnLateUpdate of the started instances, in (ExecutionOrder, canonical entity, slot) order;
+		// while the host's frame state holds the world pause (M35, decision 2), only of those that run while it is paused.
 		void Phase(std::string_view callback);
+		// M35 (decision 2): whether a thread or task of `owner` counts the world's ticks (see Reference::WorldClock): an owner
+		// with an entity whose instance (entity, slot) does not run while the world is paused, or no longer exists.
+		[[nodiscard]] bool UsesWorldClock(const ScriptTaskOwner& owner) const;
+		// The current tick of a clock: the host's session tick, or with `worldClock` the world's (Tick - WorldHeldTicks).
+		[[nodiscard]] uint64_t GetClockTick(bool worldClock) const;
 		// An error without an entity takes the owner's; an error of the owner's entity names the owner's slot
 		// (ScriptError::Slot). The instance the error names is the one the DisableInstance policy disables.
 		void Publish(ScriptError error, ScriptTaskOwner owner = {}, bool caseBody = false, bool alreadyLogged = false,

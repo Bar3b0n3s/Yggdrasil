@@ -63,6 +63,8 @@ namespace Engine {
 			int Old = LUA_NOREF;
 			int Candidate = LUA_NOREF;
 			int Canonical = LUA_NOREF;
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): a Behaviour's RunsWhileWorldPaused, as reloaded.
+			bool RunsWhileWorldPaused = false;
 		};
 
 		struct ReloadMetadata
@@ -80,6 +82,7 @@ namespace Engine {
 			Ref<const ScriptData> Data{};
 			int Table = LUA_NOREF;
 			bool Recreated = false;
+			bool RunsWhileWorldPaused = false;
 		};
 
 		void CopyContents(lua_State* vm, int target, int source)
@@ -629,6 +632,7 @@ namespace Engine {
 						ENGINE_TRY_ASSIGN(auto registration, Detail::InspectScriptRegistration(call, -1));
 						if (registration.Kind != ScriptKind::Behaviour || !lua_istable(call.State, -1))
 							return MakeError(ErrorCode::Validation, "reload Behaviour did not return an authenticated class");
+						module.RunsWhileWorldPaused = registration.RunsWhileWorldPaused;
 					}
 					const bool newTable = lua_istable(call.State, -1);
 					lua_pop(call.State, 1);
@@ -785,7 +789,7 @@ namespace Engine {
 					lua_pop(call.State, 1);
 					if (!recreated)
 						ENGINE_TRY(AddPatch(call.State, roots, patches, instance.Table, candidateReference));
-					instances.push_back({ key.Entity, key.Slot, module->Data, recreated ? candidateReference : instance.Table, recreated });
+					instances.push_back({ key.Entity, key.Slot, module->Data, recreated ? candidateReference : instance.Table, recreated, module->RunsWhileWorldPaused });
 				}
 				ENGINE_TRY(call.PrepareHostMutation());
 				ReserveAndPatch(call, patches);
@@ -839,6 +843,7 @@ namespace Engine {
 			if (found == m_State->Instances.end())
 				continue;
 			found->second.Script = update.Data;
+			found->second.RunsWhileWorldPaused = update.RunsWhileWorldPaused;
 			found->second.FaultDisabled = false;
 			m_State->DisabledHistory.erase(found->first);
 			if (update.Recreated)

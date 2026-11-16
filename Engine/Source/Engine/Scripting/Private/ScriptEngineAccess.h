@@ -84,6 +84,9 @@ namespace Engine {
 				ScriptTaskOwner owner, ScriptThreadKind kind);
 			[[nodiscard]] static Result<ScriptCaseResume> ResumeThread(ScriptEngine& engine, ScriptReference thread);
 			[[nodiscard]] static Result<uint64_t> GetDueTick(ScriptEngine& engine, ScriptReference thread);
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): whether the task counts the world's ticks
+			// (ScriptEngine::State::Reference::WorldClock), its due tick then on that clock; false for a released reference.
+			[[nodiscard]] static bool UsesWorldClock(ScriptEngine& engine, ScriptReference thread);
 			[[nodiscard]] static Status ValidateTask(ScriptEngine& engine, ScriptReference thread);
 			static void CancelThread(ScriptEngine& engine, ScriptReference thread);
 		};

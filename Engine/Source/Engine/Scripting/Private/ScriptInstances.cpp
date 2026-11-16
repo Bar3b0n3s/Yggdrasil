@@ -261,7 +261,10 @@ namespace Engine {
 			// owns its table. Either way nothing remains to create; the unreferenced table is collected.
 			const auto current = Instances.find(key);
 			if (current != Instances.end() && current->second.Serial == serial)
+			{
 				current->second.Table = lua_ref(call.State, table);
+				current->second.RunsWhileWorldPaused = registration->RunsWhileWorldPaused;
+			}
 			return 0;
 		};
 		const ScriptTaskOwner owner{ .Entity = key.Entity, .Case = CurrentOwner.Case, .Slot = key.Slot };
@@ -616,8 +619,34 @@ namespace Engine {
 			return;
 		}
 		const auto snapshot = OrderedInstances(true);
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): while the world is paused only the behaviours that
+		// run while it is paused receive the phase's callback; the others hold, as the world's systems do.
+		const bool worldPaused = Engine.GetHost().GetFrameState().WorldPaused;
 		for (const InstanceKey key : snapshot)
+		{
+			if (worldPaused)
+			{
+				const auto found = Instances.find(key);
+				if (found == Instances.end() || !found->second.RunsWhileWorldPaused)
+					continue;
+			}
 			Invoke(key, callback);
+		}
+	}
+
+	bool ScriptEngine::State::UsesWorldClock(const ScriptTaskOwner& owner) const
+	{
+		if (!owner.Entity.IsValid())
+			return false;
+		const auto found = Instances.find({ owner.Entity, owner.Slot });
+		return found == Instances.end() || !found->second.RunsWhileWorldPaused;
+	}
+
+	uint64_t ScriptEngine::State::GetClockTick(bool worldClock) const
+	{
+		const ScriptFrameState frame = Engine.GetHost().GetFrameState();
+		// The held ticks never exceed the session's: the world's clock starts with the session's and only falls behind it.
+		return worldClock ? frame.Tick - std::min(frame.WorldHeldTicks, frame.Tick) : frame.Tick;
 	}
 
 }
