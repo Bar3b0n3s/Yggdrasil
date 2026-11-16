@@ -29,6 +29,8 @@ Milestones run in phases: the milestones of a phase are developed in parallel, e
 | 5 | M34 Characters and input | A character pushes light Dynamic bodies only through its own contacts and is never launched by them; a trigger as a Button action; input bindings checked by `project.setSettings` and `project.validate`; a Camera ray from an explicit pose (World Tree's briefs 11 and 10) | Roadmap M34; ADR 0042 decisions 2 and 3 |
 | 5 | M35 Pause and entity state | A world pause that keeps the UI running; instances kept across an unflushed disable; a prefab instance's overrides applied together and their drops reported (World Tree's briefs 12 and 13; brief 13's third item, a script-field patch at instantiation that leaves references in prefab space, added after the fork) | Roadmap M35; ADR 0042 decisions 2 and 3 |
 | 5 | During phase 5, on main | An editor without a graphics device defers an environment's GPU bake instead of failing its import, and play refuses only a scene that references an asset in error (World Tree's brief 14) | ADR 0042 decision 2; ADR 0051 |
+| After phase 5 (proposed; the owner's go-ahead at phase 5's end) | Contact surfaces and characters | Friction, restitution and a surface velocity per collider, as a component of its own; the collider and surface a character stands on; Kinematic bodies that push characters and a squeezed report (World Tree's brief 15, brief 16's second and third parts) | ADR 0042 decision 6 |
+| After phase 5 (proposed; the owner's go-ahead at phase 5's end) | Joints | Hinge, slider, distance and fixed joints with limits, motors and breaking, from scripts and automation, in every run mode (World Tree's brief 16, first part) | ADR 0042 decision 6 |
 
 ## 2. Deferred features
 
