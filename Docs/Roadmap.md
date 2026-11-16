@@ -703,10 +703,12 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 - A world pause that scripts set and clear and automation reads and sets, distinct from the host's session pause (`play.pause`): while it holds, the world's phases (the native step, animation, physics and 2D physics, particles) do not step, bodies keep their velocities, only the behaviours that opt in run their callbacks and tasks, and the world's clock holds; the input and UI phases, the `OnUi*` callbacks and the start and destroy flushes run as today; the world's sounds pause or finish by the pause's choice while the `Ui` group plays on; the world pause is part of the state hash.
 - An entity switched off and on again before the disable is flushed keeps its behaviours' instances.
 - A prefab instance's rebuild applying each entity's overrides together, validated as one write, with every dropped override reported in `scene.open`'s diagnostics.
+- `prefab.instantiate {components}` mapping a script slot's member references before merging a field patch, or refusing the reference it cannot store.
 
 **Acceptance**
 - A case pauses the world with bodies in flight and particles live, finds them where they were 60 ticks later while a menu still takes pointer and navigation input, and sees them moving again after the resume; a replay that pauses and resumes verifies at one hash in Debug, Release and Dist.
 - A behaviour whose entity was instantiated, switched off and on, and given a state in one tick starts with that state (a regression test that fails before the fix).
 - An instance whose `UiRect` anchors override the prefab's together keeps both after the prefab file changes and the scene is opened again; a dropped override appears in `scene.open`'s diagnostics.
+- An instance created with only one script field patched names its own members in the slot's other entity fields, and nothing is logged.
 
 **Parallelization**: W35.1 (the world pause), then W35.2 (entity state), which may run beside W35.1 as a stream of its own, since it changes other files.

@@ -27,7 +27,8 @@ Milestones run in phases: the milestones of a phase are developed in parallel, e
 | 5 | M32 Fog and SSR's cost (before M33) | Distance and height fog, the sun glow; SSR's trace limited to glossy pixels, a half-resolution option (World Tree's brief 09) | Roadmap M32; ADR 0042 decisions 2 and 3 |
 | 5 | M33 Particle look (lands last, with M30) | Flipbooks, rotation, soft particles, alignment, HDR intensity, motion vectors, fog on particles | Roadmap M33; ADR 0042 decisions 2 and 3 |
 | 5 | M34 Characters and input | A character pushes light Dynamic bodies only through its own contacts and is never launched by them; a trigger as a Button action; input bindings checked by `project.setSettings` and `project.validate`; a Camera ray from an explicit pose (World Tree's briefs 11 and 10) | Roadmap M34; ADR 0042 decisions 2 and 3 |
-| 5 | M35 Pause and entity state | A world pause that keeps the UI running; instances kept across an unflushed disable; a prefab instance's overrides applied together and their drops reported (World Tree's briefs 12 and 13) | Roadmap M35; ADR 0042 decisions 2 and 3 |
+| 5 | M35 Pause and entity state | A world pause that keeps the UI running; instances kept across an unflushed disable; a prefab instance's overrides applied together and their drops reported (World Tree's briefs 12 and 13; brief 13's third item, a script-field patch at instantiation that leaves references in prefab space, added after the fork) | Roadmap M35; ADR 0042 decisions 2 and 3 |
+| 5 | During phase 5, on main | An editor without a graphics device defers an environment's GPU bake instead of failing its import, and play refuses only a scene that references an asset in error (World Tree's brief 14) | ADR 0042 decision 2; ADR 0051 |
 
 ## 2. Deferred features
 
