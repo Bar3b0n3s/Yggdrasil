@@ -41,7 +41,8 @@ namespace Engine {
 				"Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture.",
 				{ .Min = -1000.0, .Max = 1000.0 })
 			.Field("UVScroll", &MaterialParametersComponent::UVScroll,
-				"How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only.",
+				"How fast the texture coordinates move, in texture units per second of the world's clock, added to UVOffset; it advances in play "
+				"only, and holds while the world is paused.",
 				{ .Min = -1000.0, .Max = 1000.0, .Unit = "1/s" })
 			.Field("DissolveAmount", &MaterialParametersComponent::DissolveAmount,
 				"How much of the surface has dissolved, from 0 (none) to 1 (all), by a built-in noise over the first texture coordinates; shadows "

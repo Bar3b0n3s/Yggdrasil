@@ -376,6 +376,8 @@ namespace Engine {
 	//     test case and the tasks without an instance owner): ScriptFrameState::WorldPaused;
 	//   - the world's clock (GetWorldTick; Time.GetTick and Time.GetTime) holds, while GetTick counts on, and a world
 	//     behaviour's tasks count the world's clock (ScriptFrameState::WorldHeldTicks);
+	//   - the world's presentation holds with its clock: render extraction's SimulationTime, the time of a MaterialParameters
+	//     scroll, is the rendered time of the world's clock (batch 1's landing of M31 with M35; ADR 0042's execution order);
 	//   - the AudioSystem holds the voices outside the Ui group when the pause's sounds choice is Pause (SetWorldPaused);
 	// and every other phase runs as before: the input, text, UI input, start flush, UI events, transform updates, destroy
 	// flushes and layouts, so a menu works, deterministically from latched input. The world's systems step on the world's
@@ -681,9 +683,9 @@ namespace Engine {
 		// refresh), and InterpolationResetTag on every entity whose world matrix changed outside the fixed steps (the
 		// comparison of FrameTransformUpdate), so a write made since the last step (entity.update {target: "play"} at the safe
 		// point, the editor) shows at once and is never interpolated from its stale pose. Then ExtractRenderSnapshot with
-		// `request` and GetViewAlpha() in place of request.Alpha (M31: and the session's rendered time at that alpha in place
-		// of request.SimulationTime, as its game view's extraction passes it). The simulation state (the state hash) is
-		// unchanged. Errors: those of ExtractRenderSnapshot.
+		// `request` and GetViewAlpha() in place of request.Alpha (M31: and the rendered time of the world's clock at that alpha
+		// in place of request.SimulationTime, as its game view's extraction passes it, held while the world is paused). The
+		// simulation state (the state hash) is unchanged. Errors: those of ExtractRenderSnapshot.
 		[[nodiscard]] Result<RenderSnapshot> ExtractView(const RenderExtractionRequest& request);
 		// The interpolation alpha of a view between ticks (ExtractView): 1 while the session is paused or in lockstep and when
 		// its last frame phase ran through Tick() (a ManualClock frame, play.step); otherwise the Alpha of the last FrameUpdate

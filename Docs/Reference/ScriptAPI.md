@@ -3196,7 +3196,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `vector`
 
-How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only.
+How fast the texture coordinates move, in texture units per second of the world's clock, added to UVOffset; it advances in play only, and holds while the world is paused.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

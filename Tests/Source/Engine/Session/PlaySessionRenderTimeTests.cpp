@@ -142,6 +142,54 @@ namespace Engine {
 			CHECK(session.GetTick() == tick);
 		}
 
+		// Batch 1's landing (M31 with M35; ADR 0042's execution-order rule): the scroll is the world's, so it renders at the
+		// world's clock. While the world is paused, its views hold the scroll where the last world step left it, at any alpha,
+		// though the session ticks on; after the resume it scrolls on from there, every world tick counted once.
+		TEST_CASE("PlaySession: a world pause holds a scroll at the world's clock at any alpha, and the resume scrolls on from there")
+		{
+			ScrollingSession scrolling;
+			PlaySession& session = *scrolling.Session;
+			for (int tick = 0; tick < 32; ++tick)
+				session.Tick();
+			REQUIRE(scrolling.GetScroll() == 0.0625f);
+			const auto frame = [&session](double alpha)
+			{
+				session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 128.0, .UnscaledDeltaTime = 1.0 / 128.0, .Alpha = alpha, .FrameIndex = 0 });
+			};
+			const auto viewScroll = [&session]()
+			{
+				const Result<RenderSnapshot> view = session.ExtractView(RenderExtractionRequest{ .Camera = RenderCameraSource::Explicit });
+				REQUIRE_MESSAGE(view.has_value(), view.error().ToString());
+				REQUIRE(view->Meshes.size() == 1);
+				return view->Meshes[0].Parameters.UVOffset.x;
+			};
+
+			REQUIRE(session.RequestWorldPause(true));
+			for (int tick = 0; tick < 8; ++tick)
+				session.Tick();
+			REQUIRE(session.GetTick() == 40);
+			REQUIRE(session.GetWorldTick() == 32);
+			CHECK(scrolling.GetScroll() == 0.0625f);
+			for (const double alpha : { 0.0, 0.25, 0.5, 0.75, 1.0 })
+			{
+				CAPTURE(alpha);
+				frame(alpha);
+				CHECK(scrolling.GetScroll() == 0.0625f);
+				CHECK(viewScroll() == 0.0625f);
+			}
+
+			// The first world step after the resume interpolates from the held state: 32 world ticks at alpha 0, 33 at alpha 1.
+			REQUIRE(session.RequestWorldPause(false));
+			session.Tick();
+			REQUIRE(session.GetWorldTick() == 33);
+			CHECK(scrolling.GetScroll() == static_cast<float>(33.0 / 64.0 * 0.125));
+			frame(0.0);
+			CHECK(scrolling.GetScroll() == 0.0625f);
+			frame(0.5);
+			CHECK(scrolling.GetScroll() == static_cast<float>(32.5 / 64.0 * 0.125));
+			CHECK(viewScroll() == scrolling.GetScroll());
+		}
+
 		TEST_CASE("PlaySession: its first view renders a scroll at time 0")
 		{
 			ScrollingSession scrolling;

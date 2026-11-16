@@ -2854,7 +2854,7 @@
 					"maxItems": 2
 				},
 				"UVScroll": {
-					"description": "How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only.",
+					"description": "How fast the texture coordinates move, in texture units per second of the world's clock, added to UVOffset; it advances in play only, and holds while the world is paused.",
 					"type": "array",
 					"prefixItems": [
 						{

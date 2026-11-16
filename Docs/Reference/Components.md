@@ -1694,7 +1694,7 @@ Per-entity overrides on top of every material of the entity's MeshRenderer: a ti
 | `Emissive` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The linear colour of the glow added to every material's emission, scaled by EmissiveStrength. |
 | `EmissiveStrength` | `Float` | `0` | 0 to 1000 |  |  | How bright the added glow is: Emissive times this, in the units of a material's emission; 0 adds none. |
 | `UVOffset` | `Vec2` | `[0,0]` | -1000 to 1000 |  |  | Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture. |
-| `UVScroll` | `Vec2` | `[0,0]` | -1000 to 1000 | 1/s |  | How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only. |
+| `UVScroll` | `Vec2` | `[0,0]` | -1000 to 1000 | 1/s |  | How fast the texture coordinates move, in texture units per second of the world's clock, added to UVOffset; it advances in play only, and holds while the world is paused. |
 | `DissolveAmount` | `Float` | `0` | 0 to 1 |  |  | How much of the surface has dissolved, from 0 (none) to 1 (all), by a built-in noise over the first texture coordinates; shadows dissolve too. |
 | `DissolveEdgeColor` | `Color3` | `[1,0.5,0.1]` | 0 to 1 |  |  | The linear colour of the glow along the dissolve's edge, scaled by DissolveEdgeStrength. |
 | `DissolveEdgeStrength` | `Float` | `2` | 0 to 1000 |  |  | How bright the dissolve's edge glows: DissolveEdgeColor times this, in the units of a material's emission. |
@@ -1716,7 +1716,7 @@ Script members of `MaterialParameters`:
 | `Opacity` | proxy field | `number` | read/write | All | The fade, from 1 (solid) to 0 (gone): a dithered see-through pattern on Opaque and Mask materials, which keep their depth, sorting and shadow, and a factor of a Blend material's alpha. |
 | `Tint` | proxy field | `Color` | read/write | All | The linear colour that multiplies the base colour of every material. |
 | `UVOffset` | proxy field | `vector` | read/write | All | Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture. |
-| `UVScroll` | proxy field | `vector` | read/write | All | How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only. |
+| `UVScroll` | proxy field | `vector` | read/write | All | How fast the texture coordinates move, in texture units per second of the world's clock, added to UVOffset; it advances in play only, and holds while the world is paused. |
 
 ## Structs
 

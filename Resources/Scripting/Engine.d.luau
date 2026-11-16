@@ -825,7 +825,7 @@ declare extern type MaterialParameters with
 	Tint: Color
 	-- Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture. [All modes; Runtime|Test; pure/read; setter mutates]
 	UVOffset: vector
-	-- How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- How fast the texture coordinates move, in texture units per second of the world's clock, added to UVOffset; it advances in play only, and holds while the world is paused. [All modes; Runtime|Test; pure/read; setter mutates]
 	UVScroll: vector
 end
 

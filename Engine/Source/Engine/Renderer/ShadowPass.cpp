@@ -439,6 +439,19 @@ namespace Engine {
 				signature.UpdateU64(candidate.Draw.ReflectedVariant);
 				signature.UpdateU64(mask ? materialHandle.GetValue() : 0U);
 				signature.UpdateU64(mask ? material.Generation : 0U);
+				// M31's parameters (batch 1's landing): a Mask caster's fragment shader reads its instance record, the dissolve's
+				// amount and noise scale and the texture-coordinate offset under DrawFlagMaterialParameters, so a dissolve, a
+				// scroll or a new offset redraws the map; Opacity is hashed with them, though the casters ignore a fade today, so
+				// the map never depends on which of the record's Mask values Shadow.slang reads. An Opaque caster reads none.
+				const bool parameters = mask && (candidate.Record.Flags & DrawFlagMaterialParameters) != 0;
+				signature.UpdateU64(parameters ? 1U : 0U);
+				if (parameters)
+				{
+					Utils::HashShadowValue(signature, candidate.Record.DissolveAmount);
+					Utils::HashShadowValue(signature, candidate.Record.DissolveNoiseScale);
+					Utils::HashShadowValue(signature, candidate.Record.Opacity);
+					Utils::HashShadowValue(signature, candidate.Record.UVOffset);
+				}
 				signature.UpdateU64(source.Vertices != nullptr ? 1U : 0U);
 				if (source.Vertices != nullptr)
 				{

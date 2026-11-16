@@ -3,7 +3,7 @@
 A reference page of the `luau-gameplay` skill (`skills/luau-gameplay`): pausing a game's world while its menus keep working. The signatures are in `reference/ScriptAPI` (section `Time`).
 
 **Pause the world, not the session.** `Time.PauseWorld()` freezes the world from the next fixed step on, and `Time.ResumeWorld()` lets it run again; `Time.IsWorldPaused()` reads the state the next step runs with. While the world is paused:
-- physics and 2D physics do not step (bodies keep their velocities and fall on from where they hung), animators, sprite animators, particle emitters and the native module's systems hold;
+- physics and 2D physics do not step (bodies keep their velocities and fall on from where they hung), animators, sprite animators, particle emitters and the native module's systems hold, and so does a `MaterialParameters` scroll (`UVScroll`), which moves with the world's clock;
 - `OnFixedUpdate`, `OnUpdate`, `OnLateUpdate` and tasks (`Task.Wait`, `Task.Delay`) run only for behaviours whose class sets `RunsWhileWorldPaused = true` before its `Script.Define` call, which reads it; every other behaviour holds, its waits and delays included. A visual-scripting graph cannot opt in, so write a pause menu as a Luau behaviour;
 - the world's clock holds: `Time.GetTick()` and `Time.GetTime()` (the world's) stop, so gameplay timers built on them stop too, while `Time.GetSessionTick()` and `Time.GetSessionTime()` (the session's) count every fixed step for the behaviours that run; outside a pause the two clocks agree;
 - input, the UI (pointer, focus, navigation, typing), every `OnUi*` callback, `OnStart`, `OnDestroy` and entity creation run as always, so a pause menu can show, take input and spawn its own entities;

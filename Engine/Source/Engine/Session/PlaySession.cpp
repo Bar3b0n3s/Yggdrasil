@@ -602,11 +602,18 @@ namespace Engine {
 		// The RenderExtraction phase's work: the game view through the primary camera at `alpha`.
 		void ExtractGameView(float alpha);
 		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 3): the simulation time a view at `alpha` renders at,
-		// RenderExtractionRequest::SimulationTime: (Tick - 1 + alpha) fixed steps, between the last two simulated states that
-		// alpha interpolates (Tick fixed steps at alpha 1, Time.GetTime's value in the frame phase), 0 before the first tick.
+		// RenderExtractionRequest::SimulationTime, on the world's clock (batch 1's landing with M35: the scroll is the world's,
+		// ADR 0042's execution-order rule, so it holds behind a world pause): (WorldTick - 1 + alpha) fixed steps, between the
+		// last two world states that alpha interpolates (WorldTick fixed steps at alpha 1, Time.GetTime's value in the frame
+		// phase); WorldTick fixed steps at any alpha while the last fixed step held the world, whose poses then stand still;
+		// 0 before the world's first tick.
 		[[nodiscard]] double GetRenderTime(float alpha) const
 		{
-			return Tick == 0 ? 0.0 : (static_cast<double>(Tick - 1) + static_cast<double>(alpha)) * FixedDelta;
+			if (WorldTick == 0)
+				return 0.0;
+			if (WorldPaused)
+				return static_cast<double>(WorldTick) * FixedDelta;
+			return (static_cast<double>(WorldTick - 1) + static_cast<double>(alpha)) * FixedDelta;
 		}
 		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 24): how the UiInput phase maps the pointer's view
 		// coordinates to the scene pixels the layout is in. Since M22's landing ("Landing", decisions 3 and 24): the game
