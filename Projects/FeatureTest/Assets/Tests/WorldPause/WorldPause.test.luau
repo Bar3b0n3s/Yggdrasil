@@ -151,6 +151,8 @@ return Test.Suite("WorldPause", function()
 		Test.WaitTicks(2)
 		Test.ExpectEqual(menu.Clicks.Resume, 1)
 		Test.ExpectEqual(Time.IsWorldPaused(), false, "the menu resumed the world")
+		-- The resume takes effect at the next fixed step, which runs at the world's held tick, so the clock moves on at the one after.
+		Test.WaitTicks(2)
 		Test.Expect(Time.GetTick() > worldTick, "and the world runs again")
 	end)
 

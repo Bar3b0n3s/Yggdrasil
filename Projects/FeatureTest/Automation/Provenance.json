@@ -6212,7 +6212,7 @@
 		},
 		{
 			"Path": "Assets/Tests/WorldPause/WorldPause.test.luau",
-			"XXH64": "4b4d17e248b8430d",
+			"XXH64": "c87a07fbf23889d6",
 			"Method": "script.write",
 			"RequestId": 7,
 			"Client": "batch",
