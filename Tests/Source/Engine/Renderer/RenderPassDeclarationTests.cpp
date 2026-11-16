@@ -14,6 +14,7 @@
 #include "Engine/Renderer/GtaoPass.h"
 #include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/Lights2DPass.h"
+#include "Engine/Renderer/ParticlePass.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/QuadBatcher.h"
 #include "Engine/Renderer/RenderStage.h"
@@ -156,9 +157,10 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("Ui") == 0);
 			// M23: the point shadows draw with the Shadows declaration's caster pipelines.
 			CHECK(GetDeclaredPipelineCountOf("PointShadows") == 0);
-			// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decision 7): the particles record with the QuadBatcher's Hdr and
-			// HdrAdditive pipelines.
-			CHECK(GetDeclaredPipelineCountOf("Particles") == 0);
+			// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the particles record with their own program's pipelines
+			// (M26's drew with the QuadBatcher's Hdr and HdrAdditive).
+			CHECK(GetDeclaredPipelineCountOf("Particles") == ParticlePass::PipelineCount);
+			CHECK(ParticlePass::GetLayoutDescriptions().size() == ParticlePass::PipelineCount);
 			// M26 (decision 22, stream T-C): the terrain pass's prepass and picking prepass, and its forward pass.
 			CHECK(GetDeclaredPipelineCountOf("TerrainDepthNormal") == TerrainPass::DepthNormalPipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("TerrainForward") == TerrainPass::ForwardPipelineCount);
@@ -215,8 +217,9 @@ namespace Engine {
 			CHECK(SceneRendererPipelines::MeshPipelineCount == 24);
 			// 64 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines and M22's LdrDepth (60 on M23's branch);
 			// 65 with M26's QuadBatcher HdrAdditive (Docs/Decisions/0037-m26-contract.md decision 7), 67 with its Exposure pass
-			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22).
-			CHECK(GetDeclaredPipelineCount() == 73);
+			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22); 76 with M33's Particles pass
+			// (Docs/Decisions/0048-m33-particle-look.md decision 4).
+			CHECK(GetDeclaredPipelineCount() == 76);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -244,7 +247,8 @@ namespace Engine {
 			CHECK((lights - 1)->Name == "Sprites");
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 6);
 			CHECK(QuadBatcher::PipelineCount == 6);
-			CHECK(GetDeclaredPipelineCount() == 73);
+			// 76 since M33's Particles pass (Docs/Decisions/0048-m33-particle-look.md decision 4).
+			CHECK(GetDeclaredPipelineCount() == 76);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -273,8 +277,9 @@ namespace Engine {
 			// M17's 54, M18's 4, M21's 3 (Lights2D, the QuadBatcher's HdrLit and Normals), M22's 1 (the QuadBatcher's LdrDepth),
 			// M23's 2 (the LightClusters and Skinning passes, Docs/Decisions/0034-m23-contract.md decisions 5 and 27) and M26's 9
 			// (the QuadBatcher's HdrAdditive, Docs/Decisions/0037-m26-contract.md decision 7, the Exposure pass's 2, the Taa pass's
-			// 1 and the Ssr pass's 2, decision 13, and the terrain pass's 3, decision 22).
-			static_assert(GetDeclaredPipelineCount() == 73);
+			// 1 and the Ssr pass's 2, decision 13, and the terrain pass's 3, decision 22) and M33's 3 (the Particles pass,
+			// Docs/Decisions/0048-m33-particle-look.md decision 4).
+			static_assert(GetDeclaredPipelineCount() == 76);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

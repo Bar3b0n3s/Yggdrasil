@@ -22,14 +22,17 @@
 // deltaTime) is called on each extracted snapshot right before its Render:
 //   - when the history is empty or Reset was called since its last Apply, the snapshot has no camera, or the camera changed
 //     its projection kind, its viewport size or its entity (a cut), the snapshot's history is reset:
-//     CameraData::PreviousViewProjection and every MeshDrawItem::PreviousWorld are emptied and DeltaTime is 0;
+//     CameraData::PreviousViewProjection, every MeshDrawItem::PreviousWorld and every ParticleItem::PreviousPosition are
+//     emptied and DeltaTime is 0;
 //   - otherwise PreviousViewProjection is the previous Apply's unjittered Projection * View, each mesh item's PreviousWorld
 //     is the previous Apply's World of the item with the same Entity (empty for an item it did not see, or whose previous
-//     World is not finite; items of one entity matched in order), and DeltaTime is `deltaTime` (0 when it is negative or
-//     not finite);
+//     World is not finite; items of one entity matched in order), each particle's PreviousPosition is the previous Apply's
+//     Position of the particle with the same emitter entity and Serial (M33, Docs/Decisions/0048-m33-particle-look.md
+//     decision 6: empty for a particle it did not see, or whose previous Position is not finite), and DeltaTime is
+//     `deltaTime` (0 when it is negative or not finite);
 //   - Jitter is GetTaaJitter(frame) when the snapshot's Post.AntiAliasing is Taa and its Output is not PixelArt, else (0, 0),
 //     where frame counts the Applies since the last reset (0 at the reset);
-//   - then it records the snapshot's camera and items as the next Apply's previous frame.
+//   - then it records the snapshot's camera, items and particles as the next Apply's previous frame.
 // Deterministic: it reads only the snapshot and its own state, never the wall clock; its matching is by Entity through a
 // sorted vector (never an unordered container's iteration).
 //
@@ -74,6 +77,14 @@ namespace Engine {
 	private:
 		std::optional<CameraData> m_Camera{};
 		std::vector<std::pair<UUID, glm::mat4>> m_Worlds{}; // the previous Apply's mesh items, sorted by Entity (stable)
+		// M33 (decision 6): the previous Apply's particles, sorted by (emitter entity, serial).
+		struct ParticlePosition
+		{
+			UUID Emitter{};
+			uint64_t Serial = 0;
+			glm::vec3 Position = glm::vec3(0.0f);
+		};
+		std::vector<ParticlePosition> m_Particles{};
 		uint32_t m_Frame = 0;
 		bool m_ResetPending = true;
 	};

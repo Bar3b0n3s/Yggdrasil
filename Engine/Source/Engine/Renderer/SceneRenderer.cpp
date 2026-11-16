@@ -134,7 +134,8 @@ namespace Engine {
 			+ FxaaPass::PipelineCount + DebugRenderer::PipelineCount + TextRenderer::PipelineCount + BrdfLut::PipelineCount
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
 			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount
-			+ ExposurePass::PipelineCount + TaaPass::PipelineCount + SsrPass::PipelineCount + TerrainPass::PipelineCount);
+			+ ExposurePass::PipelineCount + TaaPass::PipelineCount + SsrPass::PipelineCount + TerrainPass::PipelineCount
+			+ ParticlePass::PipelineCount);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
 	static_assert(SceneRendererPipelines::DebugViewPipelineCount == Utils::ForwardVariantCount);
 	// The Scene program's specialization constant takes RenderDebugView's values (Shared/DrawConstants.h).
@@ -588,13 +589,15 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(created.Taa, TaaPass::Create(device, pipelines));
 		// M26 (C26.1, C-TERR; decision 22, stream T-C): its forward pipeline shares the mesh forward passes' set-0 layout.
 		ENGINE_TRY_ASSIGN(created.Terrain, TerrainPass::Create(device, pipelines, *created.Layouts.ForwardView));
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the particles' own program.
+		ENGINE_TRY_ASSIGN(created.Particles, ParticlePass::Create(device, pipelines));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
 			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
 			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount()
 			+ created.Exposure->GetPipelineCount() + created.Taa->GetPipelineCount() + created.Ssr->GetPipelineCount()
-			+ created.Terrain->GetPipelineCount();
+			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -635,6 +638,7 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, SsrPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, TaaPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, TerrainPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, ParticlePass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -673,6 +677,9 @@ namespace Engine {
 					.setDepthAttachment(targets.SceneDepth)));
 		ENGINE_TRY_ASSIGN(targets.ForwardFramebuffer,
 			device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneColor).setDepthAttachment(targets.SceneDepth)));
+		// M33 (decision 4): the particles' colour and motion targets, each alone.
+		ENGINE_TRY_ASSIGN(targets.ParticleColorFramebuffer, device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneColor)));
+		ENGINE_TRY_ASSIGN(targets.ParticleVelocityFramebuffer, device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(targets.SceneVelocity)));
 		// The overlays test against SceneDepth without writing it (their pipelines disable depth writes). The attachment is
 		// not marked read-only: NVRHI stores a read-only depth attachment with STORE_OP_STORE, a depth write the read-only
 		// state's barriers do not cover (synchronization validation reports the next layout transition), and keeping
@@ -2478,37 +2485,94 @@ namespace Engine {
 		// wireframe show none.
 		if (snapshot.Particles.empty() || !frame.HasCamera || !frame.IsLit || frame.Wireframe)
 			return;
-		ENGINE_CORE_ASSERT(Pipelines->Quads != nullptr, "the pipeline set has no QuadBatcher");
-		if (Pipelines->Quads == nullptr)
+		ENGINE_CORE_ASSERT(Pipelines->Particles != nullptr, "the pipeline set has no Particles pass");
+		if (Pipelines->Particles == nullptr)
 		{
-			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no QuadBatcher; the particles are not drawn"));
+			frame.KeepFirstError(MakeError(ErrorCode::InvalidState, "the scene renderer's pipelines have no Particles pass; the particles are not drawn"));
 			return;
 		}
+		ResolveParticleFlipbooks(snapshot.ParticleEmitters);
 		const glm::mat4 viewProjection = frame.Camera.Projection * frame.Camera.View;
-		frame.KeepFirstError(PlanParticlePass(snapshot.ParticleEmitters, snapshot.Particles, frame.Camera.View, viewProjection, ParticlePlan));
+		frame.KeepFirstError(PlanParticlePass(snapshot.ParticleEmitters, snapshot.Particles, ParticleFlipbooks, frame.Camera.View, viewProjection, ParticlePlan));
 		if (!ParticlePlan.Quads.empty())
 		{
 			nvrhi::ICommandList& commandList = *frame.CommandList;
 			frame.Recording->BeginPass("Particles", &commandList);
 			RenderPassCounters counters;
-			const Result<uint32_t> drawn = RecordParticlePass(commandList, ParticleBindings,
+			const Result<uint32_t> drawn = Pipelines->Particles->Record(commandList, ParticleBindings,
 				{ .Plan = &ParticlePlan,
-					.Quads = Pipelines->Quads.get(),
 					.Resources = Cache,
-					.Framebuffer = Targets.ForwardFramebuffer,
-					.ViewProjection = viewProjection,
+					.ColorFramebuffer = Targets.ParticleColorFramebuffer,
+					.VelocityFramebuffer = frame.Taa ? Targets.ParticleVelocityFramebuffer.Get() : nullptr,
+					.ViewConstants = ViewConstantsBuffer,
+					.SceneDepth = Targets.SceneDepth,
 					.Sampler = frame.PixelArt ? QuadSampler::Point : QuadSampler::Linear },
-				ParticleQuads, counters);
+				counters);
 			frame.Recording->EndPass(counters);
 			if (!drawn)
 				frame.KeepFirstError(std::unexpected(drawn.error()));
 		}
 		// An outsized render keeps no memory after it (as the Sprites stage's quad vectors, M21's milestone review).
-		constexpr size_t Kept = QuadBatcher::MaxQuadsPerRecord;
-		if (ParticlePlan.Quads.capacity() > Kept)
+		if (ParticlePlan.Quads.capacity() > ParticlePass::MaxQuadsPerBatch)
 			std::vector<ParticlePassQuad>().swap(ParticlePlan.Quads);
-		if (ParticleQuads.capacity() > Kept)
-			std::vector<QuadDraw>().swap(ParticleQuads);
+	}
+
+	void SceneRenderer::State::ResolveParticleFlipbooks(std::span<const ParticleEmitterItem> emitters)
+	{
+		ParticleFlipbooks.clear();
+		if (std::ranges::none_of(emitters, [](const ParticleEmitterItem& emitter)
+		{
+			return emitter.Sheet.IsValid();
+		}))
+			return;
+		// The sheets of this render, each loaded once: null for one that is missing or fails to load, which draws nothing and is
+		// reported with GetOrPlaceholder's codes (AssetManager.h), as the sprites' sheets.
+		std::vector<std::pair<AssetHandle, AssetRef<SpriteSheetData>>> sheets;
+		ParticleFlipbooks.resize(emitters.size());
+		for (size_t index = 0; index < emitters.size(); ++index)
+		{
+			const ParticleEmitterItem& emitter = emitters[index];
+			if (!emitter.Sheet.IsValid())
+				continue;
+			const SpriteSheetData* sheet = nullptr;
+			if (const auto found = std::ranges::find(sheets, emitter.Sheet, &std::pair<AssetHandle, AssetRef<SpriteSheetData>>::first); found != sheets.end())
+				sheet = found->second.get();
+			else
+			{
+				const Result<AssetRef<Asset>> loaded = Assets->Load(emitter.Sheet);
+				AssetRef<SpriteSheetData> resolved = loaded.has_value() ? AssetCast<SpriteSheetData>(*loaded) : nullptr;
+				if (resolved == nullptr)
+					Utils::ReportSpriteSheetFailure(*Assets, emitter.Sheet, loaded.has_value() ? nullptr : &loaded.error());
+				sheet = sheets.emplace_back(emitter.Sheet, std::move(resolved)).second.get();
+			}
+			if (sheet == nullptr)
+				continue;
+			// The range (decision 5): [FirstFrame, FirstFrame + FrameCount), FrameCount 0 to the sheet's last frame; an empty
+			// range or one past the sheet's frames draws nothing (PARTICLE_FRAME_OUT_OF_RANGE).
+			const size_t frameTotal = sheet->Frames.size();
+			if (emitter.FirstFrame >= frameTotal)
+				continue;
+			const size_t count = emitter.FrameCount != 0 ? emitter.FrameCount : frameTotal - emitter.FirstFrame;
+			if (count > frameTotal - emitter.FirstFrame)
+				continue;
+			ParticleFlipbook& flipbook = ParticleFlipbooks[index];
+			flipbook.Texture = sheet->Texture.IsValid() ? sheet->Texture.GetHandle() : BuiltinAssetHandles::WhiteTexture;
+			const GpuTexture& mirror = Cache->GetTexture(flipbook.Texture);
+			if (mirror.Texture == nullptr)
+				continue; // not even the placeholder could be created (GpuResourceCache.h)
+			// A missing or failed texture's placeholder is drawn whole over each quad, as a sprite's; a sheet without a texture
+			// samples its white texel whatever the rectangle.
+			const bool whole = mirror.IsPlaceholder;
+			const glm::vec2 size(static_cast<float>(std::max(mirror.Texture->getDesc().width, 1U)), static_cast<float>(std::max(mirror.Texture->getDesc().height, 1U)));
+			flipbook.Frames.reserve(count);
+			for (size_t frame = emitter.FirstFrame; frame < emitter.FirstFrame + count; ++frame)
+			{
+				const SpriteRect& rect = sheet->Frames[frame].Rect;
+				flipbook.Frames.push_back(whole ? glm::vec4(0.0f, 0.0f, 1.0f, 1.0f)
+												: glm::vec4(static_cast<float>(rect.X) / size.x, static_cast<float>(rect.Y) / size.y,
+													  static_cast<float>(rect.X + rect.Width) / size.x, static_cast<float>(rect.Y + rect.Height) / size.y));
+			}
+		}
 	}
 
 	void SceneRenderer::State::AddSpriteQuad(const QuadDraw& quad, bool lit)

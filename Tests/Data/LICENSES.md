@@ -159,6 +159,19 @@ format 4 Unicode character map and a legacy `kern` table that kerns `A` and `V`.
 `Warm.cube` is a 9 x 9 x 9 warm grade (red lifted, blue lowered) over the domain [0, 1], with a title, a comment and both
 domain lines (M26, Docs/Decisions/0037-m26-contract.md decision 15).
 
+## Generated particle fixtures (`Assets/Particles/`)
+
+| | |
+|---|---|
+| Files | `Tests/Data/Assets/Particles/Flame.png` |
+| Origin | First-party: written by `Tests/Data/Generate/MakeParticleFixtures.py` from the PNG specification, with the Python standard library only (stored deflate blocks). Every texel is an integer function of its frame and position computed in the script; no third-party image or tool output is included. |
+| License | First-party: the same terms as the repository's code; no third-party rights |
+| Reproduce | `python Tests/Data/Generate/MakeParticleFixtures.py` writes it; `--check` verifies that the committed file is byte-identical to a fresh generation |
+
+`Flame.png` is a 128 x 128 RGBA flipbook of sixteen 32 x 32 flame frames in a 4 x 4 grid, its tip swaying and flickering
+from frame to frame (M33, Docs/Decisions/0048-m33-particle-look.md decision 8); FeatureTest's scaffolds import a copy from
+`Projects/FeatureTest/Scaffold/Sources/Particles/`.
+
 ## Recorded soak samples (`Hardening/`)
 
 | | |

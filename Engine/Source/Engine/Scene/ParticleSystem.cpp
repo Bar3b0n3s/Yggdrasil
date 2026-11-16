@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Assert.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Entity.h"
@@ -110,9 +111,11 @@ namespace Engine {
 			if (steps > 0)
 			{
 				const glm::mat4 world = Utils::GetEmitterWorld(entity);
+				// M33 (Docs/Decisions/0048-m33-particle-look.md decision 2): the look draws its particles' angles and frames.
+				const ParticleLookComponent* look = entity.TryGetComponent<ParticleLookComponent>();
 				const uint32_t cappedBefore = state.State.Capped;
 				for (uint64_t step = 0; step < steps; ++step)
-					StepParticleEmitter(emitter, world, m_FixedDelta, state.State);
+					StepParticleEmitter(emitter, world, m_FixedDelta, state.State, look);
 				m_Stats.Steps = Utils::SaturatingAdd(m_Stats.Steps, steps);
 				m_Stats.Capped = Utils::SaturatingAdd(m_Stats.Capped, state.State.Capped - cappedBefore);
 			}

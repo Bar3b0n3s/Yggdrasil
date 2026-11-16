@@ -409,6 +409,20 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "ParticleLook.jsonl",
+			"IdSeed": 3001,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenParticleLook.jsonl",
+			"IdSeed": 3002,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/GoldenParticleLook",
+				"Assets/Textures/GoldenParticleLook"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

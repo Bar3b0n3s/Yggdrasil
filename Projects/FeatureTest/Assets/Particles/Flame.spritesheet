@@ -1,0 +1,264 @@
+{
+	"Format": "SpriteSheet",
+	"Version": 1,
+	"Texture": "98ff47d5d6208ff8",
+	"Frames": [
+		{
+			"Name": "",
+			"Rect": {
+				"X": 0,
+				"Y": 0,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 32,
+				"Y": 0,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 64,
+				"Y": 0,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 96,
+				"Y": 0,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 0,
+				"Y": 32,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 32,
+				"Y": 32,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 64,
+				"Y": 32,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 96,
+				"Y": 32,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 0,
+				"Y": 64,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 32,
+				"Y": 64,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 64,
+				"Y": 64,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 96,
+				"Y": 64,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 0,
+				"Y": 96,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 32,
+				"Y": 96,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 64,
+				"Y": 96,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		},
+		{
+			"Name": "",
+			"Rect": {
+				"X": 96,
+				"Y": 96,
+				"Width": 32,
+				"Height": 32
+			},
+			"Pivot": [0.5, 0.5],
+			"Borders": {
+				"Left": 0,
+				"Top": 0,
+				"Right": 0,
+				"Bottom": 0
+			}
+		}
+	],
+	"Clips": []
+}

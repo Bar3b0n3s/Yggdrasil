@@ -8,8 +8,8 @@
 #include <cstddef>
 #include <string_view>
 
-// The Particles category (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 4): the contract registers the
-// ParticleEmitter, so these cases are live; its behaviour is frozen by the skipped cases of the simulation and the pass.
+// The Particles category (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 4): the ParticleEmitter, and
+// M33's ParticleLook after it (Docs/Decisions/0048-m33-particle-look.md decision 1).
 
 namespace Engine {
 
@@ -76,6 +76,44 @@ namespace Engine {
 			emitter.ColorOverLife.clear();
 			emitter.SizeOverLife = { { .Time = 0.0f, .Size = 1.0f }, { .Time = 1.0f, .Size = 0.0f } };
 			CHECK(CountParticlesErrors(*registry, info, &emitter) == 0);
+		}
+
+		TEST_CASE("ParticlesRegistration: the ParticleLook follows the ParticleEmitter in Particles, requiring it")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo& emitter = RequireParticlesComponent(*registry, "ParticleEmitter");
+			const ComponentInfo& look = RequireParticlesComponent(*registry, "ParticleLook");
+			const ComponentInfo& volume = RequireParticlesComponent(*registry, "IrradianceVolume");
+			// ADR 0042's phase-5 ledger: appended to the Particles category, right after the emitter, before M26's Probes.
+			CHECK(look.GetIndex() == emitter.GetIndex() + 1);
+			CHECK(volume.GetIndex() == look.GetIndex() + 1);
+			CHECK(look.GetCategory() == "Particles");
+			CHECK(look.GetVersion() == 1);
+			REQUIRE(look.GetRequires().size() == 1);
+			CHECK(look.GetRequires()[0] == &emitter);
+			CHECK(look.GetExcludes().empty());
+			CHECK(look.FindField("SpriteSheet")->GetMeta().AssetFilter == "SpriteSheet");
+			CHECK(look.FindField("FrameMode")->GetKind() == FieldType::Enum);
+			CHECK(look.FindField("Alignment")->GetKind() == FieldType::Enum);
+			CHECK(look.FindField("StartRotation")->GetKind() == FieldType::Vec2);
+			CHECK(look.FindField("Spin")->GetKind() == FieldType::Vec2);
+			REQUIRE(registry->FindEnum("ParticleFrameMode") != nullptr);
+			REQUIRE(registry->FindEnum("ParticleAlignment") != nullptr);
+		}
+
+		TEST_CASE("ParticlesRegistration: a look's angle and spin are ranges whose minimum does not exceed their maximum")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo& info = RequireParticlesComponent(*registry, "ParticleLook");
+			ParticleLookComponent look;
+			CHECK(CountParticlesErrors(*registry, info, &look) == 0);
+			look.StartRotation = glm::vec2(-45.0f, 45.0f);
+			look.Spin = glm::vec2(-90.0f, 180.0f);
+			CHECK(CountParticlesErrors(*registry, info, &look) == 0);
+			look.StartRotation = glm::vec2(45.0f, -45.0f);
+			CHECK(CountParticlesErrors(*registry, info, &look) == 1);
+			look.Spin = glm::vec2(10.0f, 5.0f);
+			CHECK(CountParticlesErrors(*registry, info, &look) == 2);
 		}
 	}
 

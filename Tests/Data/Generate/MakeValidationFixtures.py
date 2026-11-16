@@ -77,7 +77,8 @@ COMPONENT_ORDER = [
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
-    "Animator", "SkinnedMesh", "ParticleEmitter", "IrradianceVolume", "ReflectionProbe", "Terrain", "TerrainCollider",
+    "Animator", "SkinnedMesh", "ParticleEmitter", "ParticleLook", "IrradianceVolume", "ReflectionProbe", "Terrain",
+    "TerrainCollider",
     "ValidatorTarget", "ValidatorFollower",
 ]
 
@@ -984,6 +985,16 @@ return Script.Define("Jumper", Jumper)
                   meta("3a7e000000000014", "Texture", "Texture", TEXTURE_SETTINGS))
     item.entities.append(entity("e000000000000041", "Ground", {
         "Transform": transform(), "Terrain": {"Heightfield": "3a7e000000000013", "SplatMap": "3a7e000000000014"}}))
+
+    # M33 (Docs/Decisions/0048-m33-particle-look.md decision 9): a ParticleLook whose flipbook range of two frames
+    # from frame 0 ends past its one-frame sheet.
+    item = fixture("PARTICLE_FRAME_OUT_OF_RANGE")
+    item.add_json("Project/Assets/Particles/Flame.spritesheet", sprite_sheet([("Flame", 0, 0)], [], 16))
+    item.add_json("Project/Assets/Particles/Flame.spritesheet.meta",
+                  meta("3a7e000000000015", "SpriteSheet", "SpriteSheet"))
+    item.entities.append(entity("e000000000000042", "Flame", {
+        "Transform": transform(), "ParticleEmitter": {},
+        "ParticleLook": {"SpriteSheet": "3a7e000000000015", "FrameCount": 2}}))
 
     return fixtures
 

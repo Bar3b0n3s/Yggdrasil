@@ -43,7 +43,12 @@
 // their views draw no particles) gives one ParticleEmitterItem, even without a live particle, and its live particles in
 // emission order: each at Alpha between its PreviousPosition and its Position (Position at Alpha 1), through the emitter's
 // rendered world matrix for a Local emitter, its size its StartSize times SizeOverLife and its colour ColorOverLife at its
-// age over its lifetime (ParticleSimulation.h's EvaluateParticleSize and EvaluateParticleColor).
+// age over its lifetime (ParticleSimulation.h's EvaluateParticleSize and EvaluateParticleColor). M33
+// (Docs/Decisions/0048-m33-particle-look.md decision 3): each particle also takes its angle at Alpha between its last two
+// steps', its world velocity (a Local emitter's through its rendered world matrix), its flipbook phase and its serial, and,
+// with the entity's ParticleLook, its colour's RGB times the look's Intensity; the item takes the look's flipbook range,
+// alignment, stretch and soft distance, and a Flat look's plane from the emitter's rendered world matrix (an emitter without
+// a look takes ParticleEmitterItem's defaults, which draw as M26 did).
 //
 // Pure function of the scene's components and the request: no asset access, no clock, no randomness; vectors in canonical
 // order (§5.1), so a deterministic scene gives an identical snapshot in every configuration. Only IEEE-exact operations and

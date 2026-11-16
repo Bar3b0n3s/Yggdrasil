@@ -73,6 +73,7 @@ namespace Engine {
 		{
 			m_Frame = 0;
 			m_Worlds.clear();
+			m_Particles.clear();
 			camera.PreviousViewProjection.reset();
 			camera.DeltaTime = 0.0f;
 		}
@@ -117,6 +118,30 @@ namespace Engine {
 			first = last;
 		}
 
+		// M33 (decision 6): each particle's previous position, by its emitter's entity and its serial. The previous particles
+		// are sorted by (emitter, serial), and an emitter's particles are in emission order, so their serials ascend: one
+		// lookup of the emitter's block, then a merge.
+		const auto byKey = [](const ParticlePosition& entry, const std::pair<UUID, uint64_t>& key)
+		{
+			return entry.Emitter != key.first ? entry.Emitter < key.first : entry.Serial < key.second;
+		};
+		for (const ParticleEmitterItem& emitter : snapshot.ParticleEmitters)
+		{
+			if (emitter.First > snapshot.Particles.size() || emitter.Count > snapshot.Particles.size() - emitter.First)
+				continue;
+			auto match = std::lower_bound(m_Particles.begin(), m_Particles.end(), std::pair<UUID, uint64_t>(emitter.Entity, 0), byKey);
+			for (uint32_t index = emitter.First; index < emitter.First + emitter.Count; ++index)
+			{
+				ParticleItem& particle = snapshot.Particles[index];
+				particle.PreviousPosition.reset();
+				while (match != m_Particles.end() && match->Emitter == emitter.Entity && match->Serial < particle.Serial)
+					++match;
+				if (match != m_Particles.end() && match->Emitter == emitter.Entity && match->Serial == particle.Serial
+					&& std::isfinite(match->Position.x) && std::isfinite(match->Position.y) && std::isfinite(match->Position.z))
+					particle.PreviousPosition = match->Position;
+			}
+		}
+
 		// This frame becomes the next Apply's previous one.
 		if (snapshot.HasCamera)
 			m_Camera = camera;
@@ -126,6 +151,18 @@ namespace Engine {
 		m_Worlds.reserve(order.size());
 		for (const size_t index : order)
 			m_Worlds.emplace_back(items[index].Entity, items[index].World);
+		m_Particles.clear();
+		for (const ParticleEmitterItem& emitter : snapshot.ParticleEmitters)
+		{
+			if (emitter.First > snapshot.Particles.size() || emitter.Count > snapshot.Particles.size() - emitter.First)
+				continue;
+			for (uint32_t index = emitter.First; index < emitter.First + emitter.Count; ++index)
+				m_Particles.push_back({ .Emitter = emitter.Entity, .Serial = snapshot.Particles[index].Serial, .Position = snapshot.Particles[index].Position });
+		}
+		std::ranges::sort(m_Particles, [](const ParticlePosition& left, const ParticlePosition& right)
+		{
+			return left.Emitter != right.Emitter ? left.Emitter < right.Emitter : left.Serial < right.Serial;
+		});
 		m_ResetPending = false;
 	}
 

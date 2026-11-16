@@ -2476,7 +2476,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2615,6 +2615,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `ParticleEmitter?`
 
 The entity's ParticleEmitter component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.ParticleLook
+
+`ParticleLook?`
+
+The entity's ParticleLook component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3339,6 +3347,106 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `AssetRef?`
 
 The particle's texture; null uses the built-in soft disc (engine://Textures/Particle).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## ParticleLook
+
+How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter.
+
+### ParticleLook.Alignment
+
+`ParticleAlignment`
+
+How each particle's quad is laid: facing the camera, along its velocity, or flat.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.BlendFrames
+
+`boolean`
+
+Whether OverLife cross-fades each frame into the next, so a short range plays smoothly.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.FirstFrame
+
+`number`
+
+The first frame of the flipbook's range, an index into the sheet's frames.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.FrameCount
+
+`number`
+
+The number of frames in the flipbook's range; 0 takes every frame from FirstFrame to the sheet's last.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.FrameCycles
+
+`number`
+
+How many times OverLife plays the frame range over a particle's life.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.FrameMode
+
+`ParticleFrameMode`
+
+Whether the range plays over each particle's life or one frame is picked per particle.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.Intensity
+
+`number`
+
+Multiplies the particles' colour (not their opacity), so above 1 they are brighter than white and bloom.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.SoftDistance
+
+`number`
+
+The depth over which a particle fades out as it nears the surface behind it, in metres; 0 cuts it hard where it meets it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.Spin
+
+`vector`
+
+The range a new particle's spin is drawn from, in degrees per second: (minimum, maximum); positive turns counter-clockwise as seen.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.SpriteSheet
+
+`AssetRef?`
+
+The flipbook's sprite sheet, whose frames replace the emitter's Texture; null draws the emitter's Texture whole.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.StartRotation
+
+`vector`
+
+The range a new particle's angle is drawn from, in degrees: (minimum, maximum); positive turns counter-clockwise as seen.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ParticleLook.VelocityStretch
+
+`number`
+
+With Velocity alignment, the quad's length is its size plus its speed across the view times this, in seconds.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -6542,6 +6650,16 @@ What a type of a game's native module is.
 
 - `Resource`: One value per play session, part of the state hash, never saved.
 
+## ParticleAlignment
+
+How a particle's quad is laid in the world.
+
+- `Camera`: A square facing the camera, turned by the particle's angle.
+
+- `Velocity`: Stretched along the particle's velocity across the view, for sparks, embers and rain; its angle is not used.
+
+- `Flat`: A square in the emitter's local XZ plane (its normal the emitter's +Y), for ground rings and ripples, turned about that normal by the particle's angle.
+
 ## ParticleBlend
 
 How a particle's colour reaches the image.
@@ -6561,6 +6679,14 @@ Where a ParticleEmitter's new particles start and which way they move.
 - `Cone`: On a disc of ShapeRadius in the local XY plane, moving within ConeAngle of the local -Z axis.
 
 - `Box`: Uniformly inside a box of BoxHalfExtents, moving down the local -Z axis.
+
+## ParticleFrameMode
+
+Which frame of a ParticleLook's flipbook range a particle shows.
+
+- `OverLife`: The range played over the particle's life, FrameCycles times.
+
+- `Random`: One frame of the range picked per particle at its birth and held.
 
 ## ParticleSimulationSpace
 

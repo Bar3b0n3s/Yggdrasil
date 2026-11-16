@@ -3,6 +3,8 @@
 #include "Engine/Scene/SpriteValidation.h"
 
 #include "Engine/Asset/SpriteSheetData.h"
+#include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
@@ -12,11 +14,13 @@
 #include "Support/SceneTestFixture.h"
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 // The sprite validation codes (Docs/Decisions/0032-m21-contract.md decision 12): stream A's two (the sorting layer and the
 // frame) and stream B's clip, each in a case of its own so each stream proves its checks alone; C21.2's stream T1 extends the
-// sorting-layer check to TilemapRenderer (decision 30).
+// sorting-layer check to TilemapRenderer (decision 30); M33 adds a ParticleLook's flipbook range
+// (Docs/Decisions/0048-m33-particle-look.md decision 9).
 
 namespace Engine {
 
@@ -153,6 +157,42 @@ namespace Engine {
 			CHECK(issues[0].Field == "SortingLayer");
 			// A disabled entity's tilemap is not checked.
 			typo.SetActive(false);
+			CHECK(FindSpriteSceneIssues(scene, nullptr, layers).empty());
+		}
+		// M33 (decision 9): a flipbook range must start at one of the sheet's frames and end within them, FrameCount 0 running
+		// to its last; the finding is located at FirstFrame when the range starts past the sheet, else at FrameCount.
+		TEST_CASE("SpriteValidation: a ParticleLook whose flipbook range starts or ends past its sheet's frames is PARTICLE_FRAME_OUT_OF_RANGE")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const TypedAssetHandle<AssetType::SpriteSheet> sheet = PublishHeroSheet(assets); // one frame
+			const auto addLook = [&scene](std::string_view name, ParticleLookComponent look)
+			{
+				Entity entity = scene.CreateEntity(name);
+				entity.AddComponent<ParticleEmitterComponent>();
+				entity.AddComponent<ParticleLookComponent>(look);
+				return entity;
+			};
+			static_cast<void>(addLook("Whole", ParticleLookComponent{ .SpriteSheet = sheet }));
+			static_cast<void>(addLook("One", ParticleLookComponent{ .SpriteSheet = sheet, .FrameCount = 1 }));
+			static_cast<void>(addLook("NoSheet", ParticleLookComponent{ .FirstFrame = 9 }));
+			const Entity past = addLook("Past", ParticleLookComponent{ .SpriteSheet = sheet, .FirstFrame = 1 });
+			const Entity overlong = addLook("Long", ParticleLookComponent{ .SpriteSheet = sheet, .FrameCount = 2 });
+
+			const std::vector<std::string> layers = { "Default" };
+			const std::vector<SpriteSceneIssue> issues = FindSpriteSceneIssues(scene, &assets, layers);
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].Code == ParticleFrameOutOfRangeCode);
+			CHECK(issues[0].Entity == past.GetUUID());
+			CHECK(issues[0].Component == "ParticleLook");
+			CHECK(issues[0].Field == "FirstFrame");
+			CHECK(issues[1].Code == ParticleFrameOutOfRangeCode);
+			CHECK(issues[1].Entity == overlong.GetUUID());
+			CHECK(issues[1].Field == "FrameCount");
+			for (const SpriteSceneIssue& issue : issues)
+				CHECK(issue.Severity == DiagnosticSeverity::Warning);
+			// Without an asset manager no sheet loads, so nothing is checked.
 			CHECK(FindSpriteSceneIssues(scene, nullptr, layers).empty());
 		}
 	}

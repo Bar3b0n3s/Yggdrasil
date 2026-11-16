@@ -101,6 +101,9 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> Lights2DPrograms = { "Lights2D" };
 		inline constexpr std::array<std::string_view, 1> Lights2DRows = { "Lights2D" };
 		inline constexpr std::array<std::string_view, 2> Lights2DTargets = { "Lights2DNormals", "Lights2DLight" };
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the Particles program (Passes/Particles.slang,
+		// Renderer/ParticlePass.h).
+		inline constexpr std::array<std::string_view, 1> ParticlesPrograms = { "Particles" };
 		inline constexpr std::array<std::string_view, 1> ParticlesRows = { "Particles" };
 		// M26 (C26.1, R-TAA; decision 17, stream X-C): the Taa program (Passes/Taa.slang, Renderer/TaaPass.h).
 		inline constexpr std::array<std::string_view, 1> TaaPrograms = { "Taa" };
@@ -137,7 +140,8 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 73 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and
+	// The pass list, in stats order (see the file comment). 76 pipelines at startup (73 at M26's landing, below, and M33's
+	// Particles 3, Docs/Decisions/0048-m33-particle-look.md decision 4): M17's 54 plus the QuadBatcher's 2 and
 	// the output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites
 	// records with the QuadBatcher's), the QuadBatcher's LdrDepth 1 (M22, C22.3, Docs/Decisions/0033-m22-contract.md
 	// decision 57; M22's Ui adds none of its own), M23's LightClusters 1 and Skinning 1, M26's QuadBatcher HdrAdditive 1
@@ -202,11 +206,13 @@ namespace Engine {
 		// Lights2D program's (Renderer/Lights2DPass.h); with the QuadBatcher's HdrLit and Normals, 61 startup pipelines on M21's
 		// tree (62 with M22's LdrDepth).
 		{ .Name = "Lights2D", .Stage = RenderStage::Sprites, .PipelineCount = 1, .Programs = Detail::Lights2DPrograms, .StatsRows = Detail::Lights2DRows, .Targets = Detail::Lights2DTargets },
-		// M26 (C26.1, C-PART; decisions 7 and 13): the snapshot's particles as camera-facing QuadBatcher quads into SceneColor,
-		// depth-tested against SceneDepth without writing it, after the 3D forward passes and the sprites and before the HDR post
-		// chain, so TAA, bloom and exposure see them (Renderer/ParticlePass.h); with the QuadBatcher's Hdr pipeline and, for
-		// additive emitters, its HdrAdditive one, so it declares none of its own.
-		{ .Name = "Particles", .Stage = RenderStage::Sprites, .StatsRows = Detail::ParticlesRows },
+		// M26 (C26.1, C-PART; decisions 7 and 13): the snapshot's particles into SceneColor, tested against SceneDepth without
+		// writing it, after the 3D forward passes and the sprites and before the HDR post chain, so TAA, bloom and exposure see
+		// them (Renderer/ParticlePass.h). M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the Particles program's
+		// three pipelines of ParticlePass, ParticlesAlpha and ParticlesAdditive into SceneColor and ParticlesVelocity into
+		// SceneVelocity in a view with TAA, SceneDepth read as a texture; before M33 it drew with the QuadBatcher's Hdr and
+		// HdrAdditive pipelines and declared none.
+		{ .Name = "Particles", .Stage = RenderStage::Sprites, .PipelineCount = 3, .Programs = Detail::ParticlesPrograms, .StatsRows = Detail::ParticlesRows },
 		// M26 (C26.1, R-TAA; decisions 10, 13 and 17): the jittered HDR image resolved against its history (TaaHistory), first
 		// in HdrPost so bloom and exposure read the resolved image; recorded only with AntiAliasing Taa in a Lit view outside
 		// the wireframe and pixel-art mode. TaaPass's one compute pipeline of the program Taa (stream X-C).

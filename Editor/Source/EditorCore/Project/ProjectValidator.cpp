@@ -190,6 +190,9 @@ namespace Engine {
 			// M24's (ADR 0028's phase-3 ledger).
 			TerrainNoHeightfieldCode,
 			TerrainSplatNotRawCode,
+			// M33 (Scene/SpriteValidation.h, Docs/Decisions/0048-m33-particle-look.md decision 9), appended after main's (ADR
+			// 0042's phase-5 ledger: after the earlier landers' at M33's merge).
+			ParticleFrameOutOfRangeCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -416,6 +419,11 @@ namespace Engine {
 				"A Terrain's SplatMap is not imported as a data texture (Usage Linear and Compression None): its weights are decoded as sRGB "
 				"colour or blurred by block compression, and terrain.edit cannot paint it.",
 				"Set the splat map's Usage to Linear and its Compression to None with asset.setImportSettings." },
+			ValidationCodeInfo{ ParticleFrameOutOfRangeCode, "Warning", false,
+				"A ParticleLook's flipbook range (FirstFrame, and FrameCount frames or to the sheet's last) is empty or ends past its "
+				"SpriteSheet's frames; the emitter's particles draw nothing.",
+				"Keep FirstFrame and FirstFrame + FrameCount within the sheet's frame count (FrameCount 0 runs to its last frame), or add "
+				"the frames to the sheet." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -810,8 +818,8 @@ namespace Engine {
 		}
 
 		// The sprite checks (M21, Scene/SpriteValidation.h): SPRITE_UNKNOWN_SORTING_LAYER against the project's
-		// SortingLayers.Layers, and SPRITE_FRAME_OUT_OF_RANGE and SPRITE_UNKNOWN_CLIP against each sheet that loads; none is
-		// fixable.
+		// SortingLayers.Layers, and SPRITE_FRAME_OUT_OF_RANGE, SPRITE_UNKNOWN_CLIP and M33's PARTICLE_FRAME_OUT_OF_RANGE against
+		// each sheet that loads; none is fixable.
 		static void CheckSprites(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const std::vector<std::string>& layers = editor.GetProject().GetSettings().SortingLayers.Layers;

@@ -54,6 +54,7 @@ Every component of the type registry, in canonical component order: the order of
 | `Animator` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow. |
 | `SkinnedMesh` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights. |
 | `ParticleEmitter` | Particles | Serializable, ScriptVisible, EditorVisible, Removable | Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision. |
+| `ParticleLook` | Particles | Serializable, ScriptVisible, EditorVisible, Removable | How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter. |
 | `IrradianceVolume` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it. |
 | `ReflectionProbe` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it. |
 | `Terrain` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit. |
@@ -1557,6 +1558,48 @@ Script members of `ParticleEmitter`:
 | `Speed` | proxy field | `vector` | read/write | All | The range a new particle's speed is drawn from, in metres per second: (minimum, maximum). |
 | `Texture` | proxy field | `AssetRef?` | read/write | All | The particle's texture; null uses the built-in soft disc (engine://Textures/Particle). |
 
+## ParticleLook
+
+How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter.
+
+- Category: Particles
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `ParticleEmitter`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `SpriteSheet` | `AssetRef(SpriteSheet)` | `null` |  |  |  | The flipbook's sprite sheet, whose frames replace the emitter's Texture; null draws the emitter's Texture whole. |
+| `FirstFrame` | `UInt32` | `0` | 0 to 65535 |  |  | The first frame of the flipbook's range, an index into the sheet's frames. |
+| `FrameCount` | `UInt32` | `0` | 0 to 65536 |  |  | The number of frames in the flipbook's range; 0 takes every frame from FirstFrame to the sheet's last. |
+| `FrameMode` | `ParticleFrameMode` | `"OverLife"` |  |  |  | Whether the range plays over each particle's life or one frame is picked per particle. |
+| `FrameCycles` | `Float` | `1` | 0.01 to 1000 |  |  | How many times OverLife plays the frame range over a particle's life. |
+| `BlendFrames` | `Bool` | `false` |  |  |  | Whether OverLife cross-fades each frame into the next, so a short range plays smoothly. |
+| `StartRotation` | `Vec2` | `[0,0]` | -360 to 360 | deg |  | The range a new particle's angle is drawn from, in degrees: (minimum, maximum); positive turns counter-clockwise as seen. |
+| `Spin` | `Vec2` | `[0,0]` | -3600 to 3600 | deg/s |  | The range a new particle's spin is drawn from, in degrees per second: (minimum, maximum); positive turns counter-clockwise as seen. |
+| `Alignment` | `ParticleAlignment` | `"Camera"` |  |  |  | How each particle's quad is laid: facing the camera, along its velocity, or flat. |
+| `VelocityStretch` | `Float` | `0.1` | 0 to 100 | s |  | With Velocity alignment, the quad's length is its size plus its speed across the view times this, in seconds. |
+| `SoftDistance` | `Float` | `0` | 0 to 1000 | m |  | The depth over which a particle fades out as it nears the surface behind it, in metres; 0 cuts it hard where it meets it. |
+| `Intensity` | `Float` | `1` | 0 to 1000 |  |  | Multiplies the particles' colour (not their opacity), so above 1 they are brighter than white and bloom. |
+
+Script members of `ParticleLook`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Alignment` | proxy field | `ParticleAlignment` | read/write | All | How each particle's quad is laid: facing the camera, along its velocity, or flat. |
+| `BlendFrames` | proxy field | `boolean` | read/write | All | Whether OverLife cross-fades each frame into the next, so a short range plays smoothly. |
+| `FirstFrame` | proxy field | `number` | read/write | All | The first frame of the flipbook's range, an index into the sheet's frames. |
+| `FrameCount` | proxy field | `number` | read/write | All | The number of frames in the flipbook's range; 0 takes every frame from FirstFrame to the sheet's last. |
+| `FrameCycles` | proxy field | `number` | read/write | All | How many times OverLife plays the frame range over a particle's life. |
+| `FrameMode` | proxy field | `ParticleFrameMode` | read/write | All | Whether the range plays over each particle's life or one frame is picked per particle. |
+| `Intensity` | proxy field | `number` | read/write | All | Multiplies the particles' colour (not their opacity), so above 1 they are brighter than white and bloom. |
+| `SoftDistance` | proxy field | `number` | read/write | All | The depth over which a particle fades out as it nears the surface behind it, in metres; 0 cuts it hard where it meets it. |
+| `Spin` | proxy field | `vector` | read/write | All | The range a new particle's spin is drawn from, in degrees per second: (minimum, maximum); positive turns counter-clockwise as seen. |
+| `SpriteSheet` | proxy field | `AssetRef?` | read/write | All | The flipbook's sprite sheet, whose frames replace the emitter's Texture; null draws the emitter's Texture whole. |
+| `StartRotation` | proxy field | `vector` | read/write | All | The range a new particle's angle is drawn from, in degrees: (minimum, maximum); positive turns counter-clockwise as seen. |
+| `VelocityStretch` | proxy field | `number` | read/write | All | With Velocity alignment, the quad's length is its size plus its speed across the view times this, in seconds. |
+
 ## IrradianceVolume
 
 A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.
@@ -1860,6 +1903,16 @@ How a moving body is checked for collisions between steps.
 | `Discrete` | Collisions are checked at the end of each step (fast bodies can tunnel through thin ones). |
 | `LinearCast` | Continuous collision detection along the step's motion; prevents tunnelling. |
 
+### ParticleAlignment
+
+How a particle's quad is laid in the world.
+
+| Value | Description |
+|---|---|
+| `Camera` | A square facing the camera, turned by the particle's angle. |
+| `Velocity` | Stretched along the particle's velocity across the view, for sparks, embers and rain; its angle is not used. |
+| `Flat` | A square in the emitter's local XZ plane (its normal the emitter's +Y), for ground rings and ripples, turned about that normal by the particle's angle. |
+
 ### ParticleBlend
 
 How a particle's colour reaches the image.
@@ -1879,6 +1932,15 @@ Where a ParticleEmitter's new particles start and which way they move.
 | `Sphere` | Uniformly inside a sphere of ShapeRadius, moving away from its centre. |
 | `Cone` | On a disc of ShapeRadius in the local XY plane, moving within ConeAngle of the local -Z axis. |
 | `Box` | Uniformly inside a box of BoxHalfExtents, moving down the local -Z axis. |
+
+### ParticleFrameMode
+
+Which frame of a ParticleLook's flipbook range a particle shows.
+
+| Value | Description |
+|---|---|
+| `OverLife` | The range played over the particle's life, FrameCycles times. |
+| `Random` | One frame of the range picked per particle at its birth and held. |
 
 ### ParticleSimulationSpace
 

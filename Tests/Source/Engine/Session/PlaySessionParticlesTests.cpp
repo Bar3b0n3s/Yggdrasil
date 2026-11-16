@@ -6,6 +6,7 @@
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSystem.h"
@@ -24,7 +25,8 @@
 
 // The play session's particles (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decisions 5 and 6, stream P-A): the
 // Particles frame phase's place (ADR 0028's phase-3 execution order), the live guard that particles never change the state
-// hash, the phase's stepping and the script entries' runtime state.
+// hash, the phase's stepping and the script entries' runtime state; and M33's ParticleLook, whose particles' angles, spins
+// and frames stay out of the hash too (Docs/Decisions/0048-m33-particle-look.md decision 2).
 
 namespace Engine {
 
@@ -110,6 +112,42 @@ namespace Engine {
 					Test::RunTicks(**session, 60);
 					CHECK(std::format("{:016x}", (*session)->ComputeStateHash()) == expected);
 				}
+			}
+		}
+
+		// M33 (decision 2): a look draws its particles' angles, spins and frames from the emitter's second stream into the runtime
+		// state, which nothing hashes: the session's hash after 60 ticks is the same with the particles as after they are removed.
+		TEST_CASE("PlaySession: a ParticleLook's turning, spinning particles never change the state hash")
+		{
+			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
+			{
+				CAPTURE(static_cast<int>(mode));
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				static_cast<void>(Test::AddGround(scene));
+				scene.CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+				Entity emitter = AddFallingEmitter(scene);
+				emitter.AddComponent<ParticleLookComponent>(ParticleLookComponent{ .FrameMode = ParticleFrameMode::Random,
+					.StartRotation = glm::vec2(-180.0f, 180.0f),
+					.Spin = glm::vec2(-720.0f, 720.0f),
+					.Alignment = ParticleAlignment::Flat,
+					.SoftDistance = 0.25f,
+					.Intensity = 8.0f });
+				Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, mode));
+				REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+				Test::RunTicks(**session, 60);
+				Entity sparks = (*session)->GetScene().FindEntityByPath("/Box/Sparks");
+				REQUIRE(sparks.HasComponent<ParticleStateComponent>());
+				const ParticleEmitterState& state = sparks.GetComponent<ParticleStateComponent>().State;
+				CHECK(state.HasLook);
+				REQUIRE_FALSE(state.Particles.empty());
+				CHECK(std::ranges::any_of(state.Particles, [](const Particle& particle)
+				{
+					return particle.Spin != 0.0f;
+				}));
+				const uint64_t withParticles = (*session)->ComputeStateHash();
+				sparks.RemoveComponent<ParticleStateComponent>();
+				CHECK((*session)->ComputeStateHash() == withParticles);
 			}
 		}
 

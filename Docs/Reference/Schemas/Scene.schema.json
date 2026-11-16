@@ -2573,6 +2573,103 @@
 			},
 			"additionalProperties": false
 		},
+		"ParticleLook": {
+			"description": "How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter.",
+			"type": "object",
+			"properties": {
+				"SpriteSheet": {
+					"description": "The flipbook's sprite sheet, whose frames replace the emitter's Texture; null draws the emitter's Texture whole.",
+					"type": ["string", "null"],
+					"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+					"x-assetType": "SpriteSheet"
+				},
+				"FirstFrame": {
+					"description": "The first frame of the flipbook's range, an index into the sheet's frames.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 65535
+				},
+				"FrameCount": {
+					"description": "The number of frames in the flipbook's range; 0 takes every frame from FirstFrame to the sheet's last.",
+					"type": "integer",
+					"minimum": 0,
+					"maximum": 65536
+				},
+				"FrameMode": {
+					"description": "Whether the range plays over each particle's life or one frame is picked per particle.",
+					"enum": ["OverLife", "Random"]
+				},
+				"FrameCycles": {
+					"description": "How many times OverLife plays the frame range over a particle's life.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 1000
+				},
+				"BlendFrames": {
+					"description": "Whether OverLife cross-fades each frame into the next, so a short range plays smoothly.",
+					"type": "boolean"
+				},
+				"StartRotation": {
+					"description": "The range a new particle's angle is drawn from, in degrees: (minimum, maximum); positive turns counter-clockwise as seen.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -360,
+							"maximum": 360
+						},
+						{
+							"type": "number",
+							"minimum": -360,
+							"maximum": 360
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Spin": {
+					"description": "The range a new particle's spin is drawn from, in degrees per second: (minimum, maximum); positive turns counter-clockwise as seen.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -3600,
+							"maximum": 3600
+						},
+						{
+							"type": "number",
+							"minimum": -3600,
+							"maximum": 3600
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"Alignment": {
+					"description": "How each particle's quad is laid: facing the camera, along its velocity, or flat.",
+					"enum": ["Camera", "Velocity", "Flat"]
+				},
+				"VelocityStretch": {
+					"description": "With Velocity alignment, the quad's length is its size plus its speed across the view times this, in seconds.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"SoftDistance": {
+					"description": "The depth over which a particle fades out as it nears the surface behind it, in metres; 0 cuts it hard where it meets it.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"Intensity": {
+					"description": "Multiplies the particles' colour (not their opacity), so above 1 they are brighter than white and bloom.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				}
+			},
+			"additionalProperties": false
+		},
 		"IrradianceVolume": {
 			"description": "A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.",
 			"type": "object",
@@ -3330,6 +3427,9 @@
 						},
 						"ParticleEmitter": {
 							"$ref": "#/$defs/ParticleEmitter"
+						},
+						"ParticleLook": {
+							"$ref": "#/$defs/ParticleLook"
 						},
 						"IrradianceVolume": {
 							"$ref": "#/$defs/IrradianceVolume"

@@ -12,7 +12,8 @@
 #include <utility>
 
 // The temporal-state section's view history (M26, C26.1, R-TAA-VEL, R-TAA; Docs/Decisions/0037-m26-contract.md decisions 10
-// and 11, stream X-C): the jitter sequence, the history's previous camera and worlds, and the captures' warm-up rule.
+// and 11, stream X-C): the jitter sequence, the history's previous camera and worlds, and the captures' warm-up rule; and
+// M33's particles' previous positions (Docs/Decisions/0048-m33-particle-look.md decision 6).
 
 namespace Engine {
 
@@ -184,6 +185,66 @@ namespace Engine {
 			history.Apply(continued, 0.016f);
 			CHECK(continued.Camera.PreviousViewProjection.has_value());
 			CHECK(continued.Camera.DeltaTime == 0.016f);
+		}
+
+		// M33 (decision 6): what a particle's motion vectors start from is where the view drew it last, matched by its
+		// emitter and its serial, so a particle that died, a newcomer and another emitter's particle of the same serial never
+		// borrow a position, and a reset forgets them all.
+		TEST_CASE("TemporalHistory: a particle's previous position is its drawn position in the view's last render, matched by emitter and serial")
+		{
+			const auto addEmitter = [](RenderSnapshot& snapshot, UUID entity, std::initializer_list<std::pair<uint64_t, float>> particles)
+			{
+				snapshot.ParticleEmitters.push_back(ParticleEmitterItem{ .First = static_cast<uint32_t>(snapshot.Particles.size()),
+					.Count = static_cast<uint32_t>(particles.size()),
+					.Entity = entity });
+				for (const auto& [serial, x] : particles)
+					snapshot.Particles.push_back(ParticleItem{ .Position = glm::vec3(x, 1.0f, 0.0f), .Serial = serial });
+			};
+			RenderViewHistory history;
+			RenderSnapshot first = MakeSnapshot(0.0f, 0.0f);
+			addEmitter(first, UUID(0xE1), { { 4, 1.0f }, { 5, 2.0f }, { 7, 3.0f } });
+			addEmitter(first, UUID(0xE2), { { 5, 50.0f } });
+			history.Apply(first, 0.016f);
+			for (const ParticleItem& particle : first.Particles)
+				CHECK_FALSE(particle.PreviousPosition.has_value()); // the history's first frame is a reset
+
+			// Serial 4 died and 8 is new; the second emitter's serial 5 is its own.
+			RenderSnapshot second = MakeSnapshot(0.0f, 0.0f);
+			addEmitter(second, UUID(0xE2), { { 5, 51.0f }, { 6, 60.0f } });
+			addEmitter(second, UUID(0xE1), { { 5, 2.5f }, { 7, 3.5f }, { 8, 0.0f } });
+			history.Apply(second, 0.016f);
+			REQUIRE(second.Particles.size() == 5);
+			REQUIRE(second.Particles[0].PreviousPosition.has_value());
+			CHECK(*second.Particles[0].PreviousPosition == glm::vec3(50.0f, 1.0f, 0.0f));
+			CHECK_FALSE(second.Particles[1].PreviousPosition.has_value());
+			REQUIRE(second.Particles[2].PreviousPosition.has_value());
+			CHECK(*second.Particles[2].PreviousPosition == glm::vec3(2.0f, 1.0f, 0.0f));
+			REQUIRE(second.Particles[3].PreviousPosition.has_value());
+			CHECK(*second.Particles[3].PreviousPosition == glm::vec3(3.0f, 1.0f, 0.0f));
+			CHECK_FALSE(second.Particles[4].PreviousPosition.has_value());
+
+			// The same snapshot again (a capture's warm-up) draws no motion: each particle's previous position is its own.
+			RenderSnapshot again = second;
+			history.Apply(again, 0.0f);
+			for (const ParticleItem& particle : again.Particles)
+			{
+				REQUIRE(particle.PreviousPosition.has_value());
+				CHECK(*particle.PreviousPosition == particle.Position);
+			}
+
+			// A reset forgets every particle, and a position that was not finite is no previous position.
+			RenderSnapshot broken = again;
+			broken.Particles[0].Position = glm::vec3(std::numeric_limits<float>::infinity());
+			history.Apply(broken, 0.016f);
+			RenderSnapshot afterBroken = again;
+			history.Apply(afterBroken, 0.016f);
+			CHECK_FALSE(afterBroken.Particles[0].PreviousPosition.has_value());
+			CHECK(afterBroken.Particles[1].PreviousPosition.has_value());
+			history.Reset();
+			RenderSnapshot reset = again;
+			history.Apply(reset, 0.016f);
+			for (const ParticleItem& particle : reset.Particles)
+				CHECK_FALSE(particle.PreviousPosition.has_value());
 		}
 	}
 

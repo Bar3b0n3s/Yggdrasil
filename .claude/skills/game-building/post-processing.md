@@ -29,7 +29,7 @@ A reference page of the `game-building` skill (`skills/game-building`), for its 
 ## Anti-aliasing
 
 - `AntiAliasing` `"Fxaa"` (the default) smooths edges on the final image in one pass; `"Taa"` jitters the camera by a sub-pixel offset every frame and resolves each frame against the view's history, reprojected by each pixel's motion and clamped to its neighbourhood, which smooths thin and moving edges and specular shimmer better; `"None"` keeps hard edges.
-- TAA needs a few frames after a reset to resolve: the first frame after play starts, a scene change or a camera cut shows the plain jittered image. Particles write no motion vectors, so they ghost slightly behind fast camera or object motion under TAA; a terrain carries the camera's motion but not its own, so only a moving terrain ghosts.
+- TAA needs a few frames after a reset to resolve: the first frame after play starts, a scene change or a camera cut shows the plain jittered image. Particles write the motion they were drawn with where they are at least half opaque, so they stay sharp under TAA and only their faint fringes ghost slightly; a terrain carries the camera's motion but not its own, so only a moving terrain ghosts.
 - Pixel-art mode ignores TAA (it acts as `"None"`), as it ignores FXAA.
 
 ## Screenshots, goldens and tests

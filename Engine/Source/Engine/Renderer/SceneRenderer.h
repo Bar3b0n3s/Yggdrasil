@@ -189,8 +189,8 @@ namespace Engine {
 		// TonemapPass (1), FxaaPass (1), DebugRenderer (2), TextRenderer (2), BrdfLut (1), ShadowPass (6), DepthPyramid
 		// (2), GTAO (2), LightClusterPass (1, M23), Selection (8), the data-view composite (1), QuadBatcher (6: M18's
 		// 2, M21's HdrLit and Normals, M22's LdrDepth and M26's HdrAdditive), UpscalePass (2), M21's Lights2DPass (1),
-		// M26's ExposurePass (2), M26's TaaPass (1), SsrPass (2) and TerrainPass (3: TerrainDepthNormal's prepass and
-		// picking prepass, TerrainForward's forward pass): 73, the declarations' sum (GetDeclaredPipelineCount,
+		// M26's ExposurePass (2), M26's TaaPass (1), SsrPass (2), TerrainPass (3: TerrainDepthNormal's prepass and picking
+		// prepass, TerrainForward's forward pass) and M33's ParticlePass (3): 76, the declarations' sum (GetDeclaredPipelineCount,
 		// RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 

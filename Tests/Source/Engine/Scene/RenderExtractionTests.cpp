@@ -12,6 +12,7 @@
 #include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
@@ -978,6 +979,90 @@ namespace Engine {
 			REQUIRE_MESSAGE(editSnapshot.has_value(), editSnapshot.error().ToString());
 			CHECK(editSnapshot->ParticleEmitters.empty());
 			CHECK(editSnapshot->Particles.empty());
+		}
+
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 3): a look's particles carry their angle at the extraction's
+		// alpha, their world velocity, their flipbook phase and their serial, their colour brightened by the look's intensity,
+		// and its item the look's settings; an emitter without a look keeps the defaults that draw as M26 did.
+		TEST_CASE("RenderExtraction: a ParticleLook's particles carry their angle, velocity, frame phase and intensity, and its item the look")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			const TypedAssetHandle<AssetType::SpriteSheet> sheet(AssetHandle(0x7114000000000002ull));
+			const ParticleEmitterComponent emitter{ .SimulationSpace = ParticleSimulationSpace::Local,
+				.ColorOverLife = { ParticleColorKey{ .Time = 0.0f, .Color = glm::vec4(0.5f, 0.25f, 0.125f, 0.75f) } } };
+			const Particle spinning{ .Position = glm::vec3(0.0f, 2.0f, 0.0f),
+				.PreviousPosition = glm::vec3(0.0f, 1.0f, 0.0f),
+				.Velocity = glm::vec3(0.0f, 0.0f, -3.0f),
+				.Age = 0.5f,
+				.Lifetime = 2.0f,
+				.Rotation = 1.0f,
+				.PreviousRotation = 0.5f,
+				.FrameDraw = 0.625f,
+				.Serial = 41 };
+			// The emitter turned 90 degrees about +Y and moved to (5, 0, 0): its local -Z is world -X and its local X world -Z.
+			Entity looked = scene.CreateEntity("Looked");
+			looked.AddComponent<ParticleEmitterComponent>(emitter);
+			looked.AddComponent<ParticleStateComponent>().State.Particles = { spinning };
+			looked.AddComponent<ParticleLookComponent>(ParticleLookComponent{ .SpriteSheet = sheet,
+				.FirstFrame = 2,
+				.FrameCount = 6,
+				.FrameCycles = 3.0f,
+				.BlendFrames = true,
+				.Alignment = ParticleAlignment::Flat,
+				.VelocityStretch = 0.5f,
+				.SoftDistance = 0.25f,
+				.Intensity = 4.0f });
+			looked.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(5.0f, 0.0f, 0.0f);
+				transform.Rotation = glm::angleAxis(glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+			});
+			Entity plain = scene.CreateEntity("Plain");
+			plain.AddComponent<ParticleEmitterComponent>(emitter);
+			plain.AddComponent<ParticleStateComponent>().State.Particles = { spinning };
+			TransformSystem::Update(scene);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .Alpha = 0.5f });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->ParticleEmitters.size() == 2);
+			REQUIRE(snapshot->Particles.size() == 2);
+			const ParticleEmitterItem& item = snapshot->ParticleEmitters[0];
+			CHECK(item.Sheet == sheet.GetHandle());
+			CHECK(item.FirstFrame == 2);
+			CHECK(item.FrameCount == 6);
+			CHECK(item.BlendFrames);
+			CHECK(item.Alignment == RenderParticleAlignment::Flat);
+			CHECK(item.VelocityStretch == 0.5f);
+			CHECK(item.SoftDistance == 0.25f);
+			CHECK(Test::ApproxEqual(item.PlaneRight, glm::vec3(0.0f, 0.0f, -1.0f), 1e-6f));
+			CHECK(Test::ApproxEqual(item.PlaneUp, glm::vec3(-1.0f, 0.0f, 0.0f), 1e-6f));
+			const ParticleItem& particle = snapshot->Particles[0];
+			CHECK(particle.Rotation == 0.75f);
+			CHECK(Test::ApproxEqual(particle.Velocity, glm::vec3(-3.0f, 0.0f, 0.0f), 1e-5f));
+			CHECK(particle.FramePhase == 0.25f * 3.0f);
+			CHECK(particle.Serial == 41);
+			CHECK_FALSE(particle.PreviousPosition.has_value());
+			CHECK(particle.Color == glm::vec4(2.0f, 1.0f, 0.5f, 0.75f));
+
+			// Without a look: M26's look, and the particle's own angle, velocity and serial all the same.
+			const ParticleEmitterItem& bare = snapshot->ParticleEmitters[1];
+			CHECK_FALSE(bare.Sheet.IsValid());
+			CHECK_FALSE(bare.BlendFrames);
+			CHECK(bare.Alignment == RenderParticleAlignment::Camera);
+			CHECK(bare.SoftDistance == 0.0f);
+			CHECK(snapshot->Particles[1].Color == glm::vec4(0.5f, 0.25f, 0.125f, 0.75f));
+			CHECK(snapshot->Particles[1].FramePhase == 0.25f);
+
+			// Random frames take the particle's pick and never blend; a dying particle's OverLife phase stays below its cycles.
+			looked.GetComponent<ParticleLookComponent>().FrameMode = ParticleFrameMode::Random;
+			plain.GetComponent<ParticleStateComponent>().State.Particles[0].Age = 2.0f;
+			const Result<RenderSnapshot> random = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .Alpha = 1.0f });
+			REQUIRE_MESSAGE(random.has_value(), random.error().ToString());
+			CHECK_FALSE(random->ParticleEmitters[0].BlendFrames);
+			CHECK(random->Particles[0].FramePhase == 0.625f);
+			CHECK(random->Particles[0].Rotation == 1.0f);
+			CHECK(random->Particles[1].FramePhase < 1.0f);
 		}
 
 		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B).

@@ -21,7 +21,8 @@
 //      state and whenever;
 //   3. steps the state once per tick between its LastTick and `tick` (none when `tick` is not past LastTick), at most
 //      MaxParticleStepsPerPhase times (a longer gap is dropped: the state jumps to `tick`), each step StepParticleEmitter with
-//      the session's FixedDelta and the entity's current world matrix (WorldTransform), and sets LastTick to `tick`.
+//      the session's FixedDelta, the entity's current world matrix (WorldTransform) and its ParticleLook, or null without one
+//      (M33, Docs/Decisions/0048-m33-particle-look.md decision 2), and sets LastTick to `tick`.
 // So a paused session (no tick) freezes its particles, a lockstep frame of one tick steps once, and a frame that ran N ticks
 // steps N times (up to the cap); the frame's delta time is never read. An entity that lost its ParticleEmitter or became
 // disabled loses its state (its particles end at once). Nothing it writes is hashed or serialized

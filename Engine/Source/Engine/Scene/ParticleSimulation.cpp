@@ -13,8 +13,9 @@
 #include <limits>
 
 // The particle simulation of one emitter (ParticleSimulation.h; M26, stream P-A, Docs/Decisions/0037-m26-contract.md decision
-// 5). On the simulation path: IEEE-exact operations (+, -, *, /, sqrt, floor), DetMath and the emitter's seeded Random only, so
-// a step gives the same bits in every configuration.
+// 5; M33's look, Docs/Decisions/0048-m33-particle-look.md decision 2). On the simulation path: IEEE-exact operations (+, -, *,
+// /, sqrt, floor), DetMath and the emitter's two seeded Random streams only, so a step gives the same bits in every
+// configuration.
 
 namespace Engine {
 
@@ -88,9 +89,15 @@ namespace Engine {
 			return range.x + (range.y - range.x) * draw;
 		}
 
-		// A new particle (the header's draw order: shape, speed, lifetime, size), posed by `emitterWorld` in World space.
-		static Particle SpawnParticle(const ParticleEmitterComponent& emitter, const glm::mat4& emitterWorld, Random& generator)
+		// M33 (decision 2): the tag MakeParticleLookSeed hashes with the state's seed, "Look" in ASCII.
+		constexpr uint64_t ParticleLookSeedTag = 0x6b6f6f4c;
+
+		// A new particle (the header's draw order: shape, speed, lifetime, size, then, with a look, its angle, spin and frame
+		// from the second stream), posed by `emitterWorld` in World space.
+		static Particle SpawnParticle(const ParticleEmitterComponent& emitter, const ParticleLookComponent* look, const glm::mat4& emitterWorld,
+			ParticleEmitterState& state)
 		{
+			Random& generator = state.Generator;
 			std::array<float, ShapeDraws> draws{};
 			for (float& draw : draws)
 				draw = generator.NextFloat();
@@ -111,6 +118,14 @@ namespace Engine {
 			particle.Age = 0.0f;
 			particle.Lifetime = lifetime;
 			particle.StartSize = size;
+			if (look != nullptr)
+			{
+				particle.Rotation = DrawInRange(look->StartRotation, state.LookGenerator.NextFloat()) * RadiansPerDegree;
+				particle.PreviousRotation = particle.Rotation;
+				particle.Spin = DrawInRange(look->Spin, state.LookGenerator.NextFloat()) * RadiansPerDegree;
+				particle.FrameDraw = state.LookGenerator.NextFloat();
+			}
+			particle.Serial = state.Emitted++;
 			return particle;
 		}
 
@@ -121,10 +136,11 @@ namespace Engine {
 		}
 
 		// Emits up to `count` particles while fewer than `cap` live; the rest are dropped and counted in Capped (drawing nothing).
-		static void Emit(const ParticleEmitterComponent& emitter, const glm::mat4& emitterWorld, uint64_t count, size_t cap, ParticleEmitterState& state)
+		static void Emit(const ParticleEmitterComponent& emitter, const ParticleLookComponent* look, const glm::mat4& emitterWorld, uint64_t count,
+			size_t cap, ParticleEmitterState& state)
 		{
 			for (; count > 0 && state.Particles.size() < cap; --count)
-				state.Particles.push_back(SpawnParticle(emitter, emitterWorld, state.Generator));
+				state.Particles.push_back(SpawnParticle(emitter, look, emitterWorld, state));
 			state.Capped = SaturatingAdd(state.Capped, count);
 		}
 
@@ -186,6 +202,14 @@ namespace Engine {
 
 	}
 
+	uint64_t MakeParticleLookSeed(uint64_t seed)
+	{
+		XXH64Hasher hasher;
+		hasher.UpdateU64(seed);
+		hasher.UpdateU64(Utils::ParticleLookSeedTag);
+		return hasher.Digest();
+	}
+
 	uint64_t MakeParticleEmitterSeed(UUID entity, uint32_t seed)
 	{
 		XXH64Hasher hasher;
@@ -194,9 +218,12 @@ namespace Engine {
 		return hasher.Digest();
 	}
 
-	void StepParticleEmitter(const ParticleEmitterComponent& emitter, const glm::mat4& emitterWorld, float deltaTime, ParticleEmitterState& state)
+	void StepParticleEmitter(const ParticleEmitterComponent& emitter, const glm::mat4& emitterWorld, float deltaTime, ParticleEmitterState& state,
+		const ParticleLookComponent* look)
 	{
 		ENGINE_CORE_ASSERT(std::isfinite(deltaTime) && deltaTime > 0.0f, "A particle step of {} s", deltaTime);
+		if (look != nullptr)
+			state.HasLook = true;
 
 		// 1. Integrate and age every live particle; those that reach their lifetime die, the survivors keeping their order.
 		const float drag = std::max(0.0f, 1.0f - emitter.Drag * deltaTime);
@@ -208,6 +235,8 @@ namespace Engine {
 			particle.Velocity *= drag;
 			particle.Position += particle.Velocity * deltaTime;
 			particle.Age += deltaTime;
+			particle.PreviousRotation = particle.Rotation;
+			particle.Rotation += particle.Spin * deltaTime;
 		}
 		std::erase_if(state.Particles, [](const Particle& particle)
 		{
@@ -220,18 +249,18 @@ namespace Engine {
 		if (cycling)
 		{
 			if (state.CycleTime == 0.0f)
-				Utils::Emit(emitter, emitterWorld, emitter.Burst, cap, state);
+				Utils::Emit(emitter, look, emitterWorld, emitter.Burst, cap, state);
 			if (std::isfinite(emitter.Rate) && emitter.Rate > 0.0f)
 			{
 				state.EmitAccumulator += emitter.Rate * deltaTime;
 				const float whole = std::floor(state.EmitAccumulator);
 				state.EmitAccumulator -= whole;
-				Utils::Emit(emitter, emitterWorld, Utils::WholeParticles(whole), cap, state);
+				Utils::Emit(emitter, look, emitterWorld, Utils::WholeParticles(whole), cap, state);
 			}
 		}
 		const uint32_t pending = state.PendingEmits;
 		state.PendingEmits = 0;
-		Utils::Emit(emitter, emitterWorld, pending, cap, state);
+		Utils::Emit(emitter, look, emitterWorld, pending, cap, state);
 
 		// 3. The cycle: a looping emitter restarts at exactly 0 (so every cycle bursts), a one-shot one stays at Duration.
 		if (cycling)
@@ -282,6 +311,19 @@ namespace Engine {
 		Utils::HashFloat(hasher, state.EmitAccumulator);
 		Utils::HashU32(hasher, state.PendingEmits);
 		hasher.UpdateU64(state.Steps);
+		// M33 (decision 2): the look's part, only for a state a ParticleLook has stepped, so M26's digests keep their values.
+		if (state.HasLook)
+		{
+			for (const Particle& particle : state.Particles)
+			{
+				Utils::HashFloat(hasher, particle.Rotation);
+				Utils::HashFloat(hasher, particle.PreviousRotation);
+				Utils::HashFloat(hasher, particle.Spin);
+				Utils::HashFloat(hasher, particle.FrameDraw);
+			}
+			for (const uint64_t word : state.LookGenerator.GetState())
+				hasher.UpdateU64(word);
+		}
 		return hasher.Digest();
 	}
 
