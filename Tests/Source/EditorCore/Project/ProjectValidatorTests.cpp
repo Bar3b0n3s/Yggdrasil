@@ -1958,8 +1958,9 @@ end
 			{
 				CAPTURE(std::string(code));
 				const bool listed = std::find(codes.begin(), codes.end(), code) != codes.end();
-				// Every asset code but the runtime-only upload failure is a validator code.
-				CHECK(listed == (code != AssetUploadFailedCode));
+				// Every asset code but the two of this process (the upload failure and the deferred environment bake) is a
+				// validator code.
+				CHECK(listed == (code != AssetUploadFailedCode && code != AssetBakeDeferredCode));
 			}
 			CHECK(std::find(codes.begin(), codes.end(), PrefabMissingAssetCode) != codes.end());
 		}

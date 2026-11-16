@@ -719,7 +719,9 @@ namespace Engine {
 		input.ClampLuminanceMax = settings.MaxLuminance;
 
 		// The bake needs a GPU (§8.6). An editor without one is served a cooked bake under the same cache key before the
-		// importer is ever called (EditorAssetManager, §7.4), so reaching this point means no cache holds it.
+		// importer is ever called (EditorAssetManager, §7.4), so reaching this point means no cache holds it. The source is
+		// decoded first, so a broken one fails above; this Unsupported, the importer's only one, is the bake the manager
+		// defers to an editor with a GPU (World Tree brief 14).
 		IEnvironmentBaker* baker = context.GetEnvironmentBaker();
 		if (baker == nullptr)
 		{

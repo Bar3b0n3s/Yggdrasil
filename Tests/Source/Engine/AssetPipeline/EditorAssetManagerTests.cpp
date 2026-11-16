@@ -1490,30 +1490,225 @@ namespace Engine {
 			CHECK(environment->Skybox.Texels == baked.Skybox.Texels);
 		}
 
-		TEST_CASE("EditorAssetManager: without a GPU an environment no cache holds fails with the GPU hint")
+		// World Tree brief 14 (§7.4): an editor without a graphics device defers the bake of an environment no cache holds to
+		// the next editor with a GPU. The import succeeds with a warning naming the deferred bake and the GPU hint, and it is
+		// not an asset error. Before the fix the import failed with ASSET_IMPORT_FAILED, an asset error that blocked play of
+		// every scene.
+		TEST_CASE("EditorAssetManager: without a GPU an environment no cache holds defers its bake with a warning, not an asset error")
 		{
 			Test::AssetTestFixture fixture;
-			fixture.WriteProjectFile("Assets/Environments/Blue.hdr", MakeFlatHdr(16, glm::vec3(0.125f, 0.25f, 1.0f)));
+			EditorAssetManager& manager = fixture.GetManager();
+			const Buffer blue = MakeFlatHdr(16, glm::vec3(0.125f, 0.25f, 1.0f));
+			fixture.WriteProjectFile("Assets/Environments/Blue.hdr", blue);
 			fixture.OpenProject(false);
-			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Environments/Blue.hdr").value_or(AssetHandle());
+			const AssetHandle handle = manager.Resolve("Assets/Environments/Blue.hdr").value_or(AssetHandle());
 			REQUIRE(handle.IsValid());
 			// A bake of other bytes has another key and is not used.
 			StoreEnvironmentBake(fixture, "cache://", AssetHandle(0x0123456789abcdefull), ComputeEnvironmentKey(fixture, MakeFlatHdr(16, glm::vec3(1.0f))),
 				MakeBakedEnvironment(0x3C00));
+
+			// It does not load here: Load returns the importer's Unsupported with the GPU hint, and the state stays Unloaded.
+			const Result<AssetRef<Asset>> loaded = manager.Load(handle);
+			REQUIRE_FALSE(loaded.has_value());
+			CHECK(loaded.error().GetCode() == ErrorCode::Unsupported);
+			CHECK(loaded.error().GetHint() == EnvironmentImporter::GpuHint);
+			CHECK(manager.GetState(handle) == AssetState::Unloaded);
+			// A replay's fingerprint leaves an asset whose cooked hash is Unsupported out (ReplayFingerprint.cpp).
+			const Result<uint64_t> hash = manager.GetCookedHash(handle);
+			REQUIRE_FALSE(hash.has_value());
+			CHECK(hash.error().GetCode() == ErrorCode::Unsupported);
+
+			// An import (asset.import, asset.reimport) succeeds, its one diagnostic the deferral's warning.
+			const Result<AssetImportOutcome> imported = manager.Reimport(handle);
+			REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+			CHECK(imported->Handle == handle);
+			CHECK(imported->SubAssets.empty());
+			REQUIRE(imported->Diagnostics.size() == 1);
+			const AssetDiagnostic& warning = imported->Diagnostics.front();
+			CHECK(warning.Severity == DiagnosticSeverity::Warning);
+			CHECK(warning.Code == AssetBakeDeferredCode);
+			CHECK(warning.Asset == handle);
+			CHECK(warning.Path == "Assets/Environments/Blue.hdr");
+			CHECK(warning.Message.find("deferred to the next editor with a GPU") != std::string::npos);
+			CHECK(warning.Hint == EnvironmentImporter::GpuHint);
+
+			// The manager records the warning, not an asset error, and no AssetImportFailed event.
+			CHECK(CountDiagnostics(manager, AssetBakeDeferredCode, handle) == 1);
+			CHECK(CountDiagnostics(manager, AssetImportFailedCode, handle) == 0);
+			CHECK_FALSE(manager.HasErrorDiagnostics());
+			CHECK(manager.GetErrorDiagnostics().empty());
+			const std::array failedEvents = { EngineEventType::AssetImportFailed };
+			CHECK(fixture.GetEventLog().Read(0, failedEvents).Events.empty());
+			// Nothing is cached for it: the next editor with a GPU bakes the source.
+			const AssetCache cache(fixture.GetVfs(), Test::ParseVfsPath("cache://"));
+			const Result<std::optional<CachedImport>> own = cache.Find(handle, ComputeEnvironmentKey(fixture, blue));
+			REQUIRE(own.has_value());
+			CHECK_FALSE(own->has_value());
+		}
+
+		TEST_CASE("EditorAssetManager: without a GPU an environment source that cannot be decoded is still an asset error")
+		{
+			// World Tree brief 14: only the bake is deferred. A source the importer cannot decode fails as before, and the
+			// deferral and the failure replace each other as the source changes.
+			Test::AssetTestFixture fixture;
+			EditorAssetManager& manager = fixture.GetManager();
+			fixture.WriteProjectText("Assets/Environments/Broken.hdr", "#?RADIANCE\nnot an image");
+			fixture.OpenProject(false);
+			const AssetHandle handle = manager.Resolve("Assets/Environments/Broken.hdr").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
 			{
-				const Test::ExpectLog failure(LogLevel::Error, "Assets/Environments/Blue.hdr");
-				const Result<AssetRef<Asset>> loaded = fixture.GetManager().Load(handle);
+				const Test::ExpectLog failure(LogLevel::Error, "Assets/Environments/Broken.hdr");
+				const Result<AssetRef<Asset>> loaded = manager.Load(handle);
 				REQUIRE_FALSE(loaded.has_value());
-				CHECK(loaded.error().GetCode() == ErrorCode::Unsupported);
-				CHECK(loaded.error().GetHint() == "start the editor with a GPU once to bake this environment");
+				CHECK(loaded.error().GetCode() == ErrorCode::ImportFailed);
 			}
-			const std::span<const AssetDiagnostic> diagnostics = fixture.GetManager().GetDiagnostics();
-			const auto diagnostic = std::ranges::find_if(diagnostics, [handle](const AssetDiagnostic& candidate)
+			CHECK(manager.GetState(handle) == AssetState::Failed);
+			CHECK(CountDiagnostics(manager, AssetImportFailedCode, handle) == 1);
+			CHECK(CountDiagnostics(manager, AssetBakeDeferredCode, handle) == 0);
+			CHECK(manager.HasErrorDiagnostics());
+
+			// Repaired, the source decodes, and its bake is deferred: the warning replaces the error.
+			fixture.WriteProjectFile("Assets/Environments/Broken.hdr", MakeFlatHdr(16, glm::vec3(0.5f)));
+			REQUIRE(manager.Refresh().has_value());
+			CHECK(manager.GetState(handle) == AssetState::Unloaded);
+			CHECK(CountDiagnostics(manager, AssetImportFailedCode, handle) == 0);
+			CHECK(CountDiagnostics(manager, AssetBakeDeferredCode, handle) == 1);
+			CHECK_FALSE(manager.HasErrorDiagnostics());
+
+			// Broken again, it is an asset error again, without the warning.
+			fixture.WriteProjectText("Assets/Environments/Broken.hdr", "not an image");
 			{
-				return candidate.Asset == handle && candidate.Code == AssetImportFailedCode;
-			});
-			REQUIRE(diagnostic != diagnostics.end());
-			CHECK(diagnostic->Hint == "start the editor with a GPU once to bake this environment");
+				const Test::ExpectLog failure(LogLevel::Error, "Assets/Environments/Broken.hdr");
+				REQUIRE(manager.Refresh().has_value());
+			}
+			CHECK(CountDiagnostics(manager, AssetImportFailedCode, handle) == 1);
+			CHECK(CountDiagnostics(manager, AssetBakeDeferredCode, handle) == 0);
+			CHECK(manager.HasErrorDiagnostics());
+		}
+
+		TEST_CASE("EditorAssetManager: a deferred environment bake is baked by the next editor with a GPU, whose bake every editor then loads")
+		{
+			// World Tree brief 14: the deferral is remembered by this session only, never cached, so the next manager with an
+			// environment baker (an editor with a graphics device) imports and bakes the source, and an editor without one
+			// then loads that bake from the cache.
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectFile("Assets/Environments/Orange.hdr", MakeFlatHdr(16, glm::vec3(2.0f, 0.5f, 0.125f)));
+			fixture.OpenProject(false);
+			const AssetHandle handle = fixture.GetManager().Resolve("Assets/Environments/Orange.hdr").value_or(AssetHandle());
+			REQUIRE(handle.IsValid());
+			REQUIRE(fixture.GetManager().Reimport(handle).has_value());
+			REQUIRE(CountDiagnostics(fixture.GetManager(), AssetBakeDeferredCode, handle) == 1);
+			fixture.GetManager().CloseProject();
+
+			LosableBaker baker;
+			const AssetProjectSpecification project{ .AssetsRoot = fixture.ProjectPath("Assets"), .CacheRoot = Test::ParseVfsPath("cache://"), .ReadOnly = false, .HotReload = false };
+			{
+				EditorAssetManager withGpu({
+					.Vfs = &fixture.GetVfs(),
+					.Jobs = &fixture.GetJobSystem(),
+					.MainThread = &fixture.GetMainThreadQueue(),
+					.Events = &fixture.GetEventLog(),
+					.Registry = &fixture.GetRegistry(),
+					.IdGenerator = &fixture.GetGenerator(),
+					.Importers = &fixture.GetImporters(),
+					.Loaders = &fixture.GetLoaders(),
+					.EnvironmentBaker = &baker,
+				});
+				const Result<AssetRefreshReport> opened = withGpu.OpenProject(project);
+				REQUIRE_MESSAGE(opened.has_value(), opened.error().ToString());
+				const Result<AssetRef<Asset>> baked = withGpu.Load(handle);
+				REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
+				CHECK(baker.Bakes == 1);
+				CHECK(withGpu.GetState(handle) == AssetState::Loaded);
+				CHECK(CountDiagnostics(withGpu, AssetBakeDeferredCode, handle) == 0);
+			}
+
+			// The editor without a device opens the project again (the manager with the baker closed it as it went) and loads the
+			// stored bake.
+			fixture.OpenProject(false);
+			const Result<AssetRef<Asset>> loaded = fixture.GetManager().Load(handle);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			const AssetRef<EnvironmentData> environment = AssetCast<EnvironmentData>(*loaded);
+			REQUIRE(environment != nullptr);
+			CHECK(environment->IrradianceSH9 == MakeBakedEnvironment(0x3C00).IrradianceSH9);
+			CHECK(CountDiagnostics(fixture.GetManager(), AssetBakeDeferredCode, handle) == 0);
+		}
+
+		// World Tree brief 14 (§12.4): editor play refuses only a scene that references an asset in error, so the manager names
+		// the errors of what a scene document reaches: its components' references and what those reference, through the
+		// dependency graph.
+		TEST_CASE("EditorAssetManager: FindReferencedAssetErrors names the assets in error a document reaches, directly or through what they reference")
+		{
+			Test::AssetTestFixture fixture;
+			EditorAssetManager& manager = fixture.GetManager();
+			fixture.WriteProjectText("Assets/Textures/Broken.png", "not a png");
+			fixture.WriteProjectFile("Assets/Textures/Good.png", Test::MakeTestPng(4, 4));
+			fixture.WriteProjectFile("Assets/Environments/Sky.hdr", MakeFlatHdr(16, glm::vec3(0.5f)));
+			fixture.OpenProject(false);
+			const AssetHandle broken = manager.Resolve("Assets/Textures/Broken.png").value_or(AssetHandle());
+			const AssetHandle good = manager.Resolve("Assets/Textures/Good.png").value_or(AssetHandle());
+			const AssetHandle sky = manager.Resolve("Assets/Environments/Sky.hdr").value_or(AssetHandle());
+			REQUIRE(broken.IsValid());
+			REQUIRE(good.IsValid());
+			REQUIRE(sky.IsValid());
+			{
+				const Test::ExpectLog failure(LogLevel::Error, "Assets/Textures/Broken.png");
+				REQUIRE_FALSE(manager.Load(broken).has_value());
+			}
+			REQUIRE_FALSE(manager.Load(sky).has_value()); // a deferred bake: a warning, no error
+
+			// Materials over each texture, and one whose own source does not import; the refresh imports them, so the graph
+			// knows what each references.
+			const auto material = [](AssetHandle texture)
+			{
+				return std::format(R"({{"Format": "Material", "Version": 2, "BaseColorMap": "{}"}})", texture.ToString());
+			};
+			fixture.WriteProjectText("Assets/Materials/OverBroken.material", material(broken));
+			fixture.WriteProjectText("Assets/Materials/OverGood.material", material(good));
+			fixture.WriteProjectText("Assets/Materials/Unrelated.material", "{ \"Format\": \"Material\", ");
+			{
+				const Test::ExpectLog failure(LogLevel::Error, "Assets/Materials/Unrelated.material");
+				REQUIRE(manager.Refresh().has_value());
+			}
+			const AssetHandle overBroken = manager.Resolve("Assets/Materials/OverBroken.material").value_or(AssetHandle());
+			const AssetHandle overGood = manager.Resolve("Assets/Materials/OverGood.material").value_or(AssetHandle());
+			const AssetHandle unrelated = manager.Resolve("Assets/Materials/Unrelated.material").value_or(AssetHandle());
+			REQUIRE(manager.GetDependencyGraph().GetDependencies(overBroken) == std::vector<AssetHandle>{ broken });
+			const std::vector<AssetDiagnostic> errors = manager.GetErrorDiagnostics();
+			REQUIRE(errors.size() == 2);
+			CHECK(errors[0].Asset == unrelated); // in GetDiagnostics' order: Assets/Materials/ before Assets/Textures/
+			CHECK(errors[1].Asset == broken);
+
+			// A scene document whose box uses `materials` and whose world uses the environment.
+			const auto scene = [sky](std::initializer_list<AssetHandle> materials)
+			{
+				Json box = Json::object();
+				box["ID"] = "00000000000000b1";
+				box["Name"] = "Box";
+				box["Components"]["MeshRenderer"]["Mesh"] = BuiltinAssetHandles::CubeMesh.ToString();
+				box["Components"]["MeshRenderer"]["Materials"] = Json::array();
+				for (const AssetHandle handle : materials)
+					box["Components"]["MeshRenderer"]["Materials"].push_back(handle.ToString());
+				Json world = Json::object();
+				world["ID"] = "00000000000000b2";
+				world["Name"] = "World";
+				world["Components"]["Environment"]["Environment"] = sky.ToString();
+				Json document = Json::object();
+				document["Entities"] = Json::array({ box, world });
+				return document;
+			};
+			// Through a material, the texture in error; the unrelated material is not named.
+			const std::vector<AssetDiagnostic> throughMaterial = manager.FindReferencedAssetErrors(scene({ overBroken, overGood }), nullptr);
+			REQUIRE(throughMaterial.size() == 1);
+			CHECK(throughMaterial.front().Asset == broken);
+			CHECK(throughMaterial.front().Code == AssetImportFailedCode);
+			// Directly, the material in error.
+			const std::vector<AssetDiagnostic> direct = manager.FindReferencedAssetErrors(scene({ unrelated }), nullptr);
+			REQUIRE(direct.size() == 1);
+			CHECK(direct.front().Asset == unrelated);
+			// A document that reaches no asset in error, its deferred environment bake included, names none.
+			CHECK(manager.FindReferencedAssetErrors(scene({ overGood }), nullptr).empty());
+			CHECK(manager.FindReferencedAssetErrors(Json::object(), nullptr).empty());
 		}
 	}
 

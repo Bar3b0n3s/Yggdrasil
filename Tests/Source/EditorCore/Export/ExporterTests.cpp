@@ -1367,6 +1367,42 @@ namespace Engine {
 			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
 		}
 
+		TEST_CASE("Exporter: an editor without a GPU refuses a project environment whose bake it deferred, with the GPU hint")
+		{
+			// World Tree brief 14: the import of an environment this editor cannot bake succeeds with a deferral warning, not
+			// an asset error, so the asset-error check lets it through; the bake check still refuses the export at validation.
+			Test::EditorTestFixture fixture("ExportDeferredEnvironment");
+			MakeExportableProject(fixture);
+			EditorContext& editor = fixture.GetEditor();
+			const Result<Buffer> hdr = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+			REQUIRE_MESSAGE(hdr.has_value(), hdr.error().ToString());
+			const Result<VfsPath> path = VfsPath::Create("project", "Assets/Sky.hdr");
+			REQUIRE(path.has_value());
+			REQUIRE(editor.WriteProjectFile(*path, *hdr).has_value());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const AssetHandle sky = editor.GetAssets().Resolve("Assets/Sky.hdr").value_or(AssetHandle());
+			REQUIRE(std::ranges::any_of(editor.GetAssets().GetDiagnostics(), [sky](const AssetDiagnostic& diagnostic)
+			{
+				return diagnostic.Asset == sky && diagnostic.Code == AssetBakeDeferredCode;
+			}));
+			REQUIRE_FALSE(editor.GetAssets().HasErrorDiagnostics());
+			const Test::TempDirectory binaries("ExportBinaries");
+			Result<Scope<Exporter>> exporter = Exporter::Start(editor, MakeSpecification(MakeRealBinaryRoot(binaries)));
+			REQUIRE(exporter.has_value());
+			const std::optional<Result<ExportReport>> outcome = RunToEnd(**exporter);
+			REQUIRE(outcome.has_value());
+			REQUIRE_FALSE(outcome->has_value());
+			const Error& error = outcome->error();
+			INFO(error.ToString());
+			CHECK(error.GetCode() == ErrorCode::Validation);
+			CHECK((*exporter)->GetPhase() == ExportPhase::Validate);
+			REQUIRE(error.GetIssues().size() == 1);
+			CHECK(error.GetIssues().front().Message.find("Assets/Sky.hdr") != std::string::npos);
+			CHECK(error.GetIssues().front().Hint == EnvironmentImporter::GpuHint);
+			std::error_code exists;
+			CHECK_FALSE(std::filesystem::exists(fixture.GetProjectRoot() / "Build", exists));
+		}
+
 		TEST_CASE("Exporter: an editor without a GPU exports a project environment from the bake a GPU editor cooked" * doctest::test_suite(Test::GpuSuite))
 		{
 			// §14.2 step 1 "using cooked environment bakes" (ADR 0024 decision 2): the bake a GPU editor stored in Library/Cache

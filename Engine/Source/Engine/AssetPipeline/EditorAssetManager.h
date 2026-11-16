@@ -54,8 +54,13 @@
 // cache entry, then another source's (a copy of the same bytes, AssetCache::FindSourcesWithKey, in handle order), then the
 // engine cooked cache's (a copy of a built-in HDRI), adopting only an import that read nothing but its source and produced
 // just its main artifact. A bake taken from another entry is stored under the source's own handle too. Only when no cache
-// holds one does the importer run and fail with Unsupported and the hint "start the editor with a GPU once to bake this
-// environment" (ASSET_IMPORT_FAILED).
+// holds one does the importer run: it reads and decodes the source (a source it cannot read or decode fails as any import
+// does, ASSET_IMPORT_FAILED) and then reports Unsupported with the hint "start the editor with a GPU once to bake this
+// environment". World Tree brief 14: that bake is deferred to the next editor with a GPU, not an asset error. The import
+// succeeds without an artifact, with the ASSET_BAKE_DEFERRED warning (the hint its hint) as its outcome's diagnostic and
+// the manager's; the attempt is remembered like a failure, so Load and GetCookedHash return the Unsupported error without
+// importing again until an input changes (the last good version, if any, stays in use), and GetState is Unloaded. Nothing
+// of it is cached: an editor with a GPU imports the source as usual and bakes it.
 //
 // Duplicated handles keep their original file (AssetRegistry::Scan's keeper rule). The manager passes the scan the
 // locations of the last session, which it keeps in the local, gitignored <CacheRoot>/AssetLocations.json (canonical
@@ -69,6 +74,7 @@ namespace Engine {
 	class AssetLoaderRegistry;
 	class EventLog;
 	class IEnvironmentBaker;
+	class IFieldSchemaSource;
 	class IScriptDiagnosticsProvider;
 	class ImporterRegistry;
 	class MainThreadQueue;
@@ -185,6 +191,7 @@ namespace Engine {
 		// until it, a dependency file, its settings or its importer changes. M18's milestone review: except a GPU bake's Gpu
 		// error while the baker's device is lost (IEnvironmentBaker::IsDeviceLost), which is the loss's: it is returned with
 		// a Warn line and no diagnostic or event, and the next Load (a refresh, for a source imported before) imports again.
+		// A deferred environment bake (the file comment; World Tree brief 14) returns its remembered Unsupported error.
 		[[nodiscard]] Result<AssetRef<Asset>> Load(AssetHandle handle) override;
 		[[nodiscard]] JobHandle<AssetRef<Asset>> LoadAsync(AssetHandle handle) override;
 		[[nodiscard]] AssetState GetState(AssetHandle handle) const override;
@@ -200,6 +207,16 @@ namespace Engine {
 		// for the null handle, a procedural built-in and a dependency file; NotFound for an unknown handle; the remembered
 		// failure of a source whose import failed with nothing published; the import's errors.
 		[[nodiscard]] Result<uint64_t> GetCookedHash(AssetHandle handle) override;
+		// World Tree brief 14 (§12.4: editor play refuses only a scene that references an asset in error): the diagnostics of
+		// GetErrorDiagnostics that name an asset the canonical scene or prefab document `document` (SceneSerializer's
+		// "Entities", each with "Components") reaches, in GetDiagnostics' order. It reaches the assets its components
+		// reference through AssetRef values, found as the scene and prefab importers find them (a Script component's Fields
+		// typed by `schemas`, the editor's script field schemas; null: those are not followed), each sub-asset's source, and
+		// transitively what the dependency graph says each of them references (§7.5: a prefab's meshes and materials, a
+		// material's textures, a script's required scripts). Only the edges of the imports this editor has run are known, as
+		// are the errors themselves (an import that failed): an asset never imported here reaches nothing further. Built-ins
+		// reach nothing further either. Main thread.
+		[[nodiscard]] std::vector<AssetDiagnostic> FindReferencedAssetErrors(const Json& document, const IFieldSchemaSource* schemas) const;
 		// M13: latest attempted check, including failed imports; NotFound when no Script attempt is known. Copies owned
 		// ranges/fingerprint/root hash; no pointer into a worker or checker survives. A failed reimport updates this record
 		// but preserves the last good loaded artifact. Cache hits restore it; dry runs save/restore it with other state.
@@ -255,9 +272,10 @@ namespace Engine {
 		[[nodiscard]] Result<AssetRefreshReport> Refresh();
 
 		// Imports the main asset `handle` again, bypassing the cache, rewrites its .meta when its sub-assets changed, and
-		// publishes the result (a new version of every artifact that changed). Synchronous. Errors: InvalidState without a
-		// project; NotFound; InvalidArgument for a sub-asset, dependency or built-in handle; the import's errors (the last good
-		// version stays in use and the failure is recorded as a diagnostic, §7.5).
+		// publishes the result (a new version of every artifact that changed). Synchronous. A deferred environment bake (the
+		// file comment) succeeds with the ASSET_BAKE_DEFERRED warning among the outcome's diagnostics. Errors: InvalidState
+		// without a project; NotFound; InvalidArgument for a sub-asset, dependency or built-in handle; the import's errors (the
+		// last good version stays in use and the failure is recorded as a diagnostic, §7.5).
 		[[nodiscard]] Result<AssetImportOutcome> Reimport(AssetHandle handle);
 
 		// Reimport on a job, published on the main thread (asset.reimport is a pending operation, §13.2). Errors in the handle:

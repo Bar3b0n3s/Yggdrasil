@@ -41,9 +41,12 @@ namespace Engine {
 	// texel is decoded); a non-finite or negative texel is ImportFailed naming the first one. Compression Auto then stores
 	// both baked cubes as BC6H blocks (CompressTextureBlocks, every face of every level), None keeps them RGBA16F.
 	// Without a baker (--renderer none, tools) the import is Unsupported with the hint "start the editor with a GPU once to
-	// bake this environment": a cooked bake under the same cache key (the project's Library/Cache, or the engine cooked
-	// cache for the built-ins, §7.5) is used before the importer is ever called, so an environment baked once on a GPU loads
-	// everywhere ("test_renderer_none_environment_import_uses_cached_bake").
+	// bake this environment", once the source has been read and decoded (a source that cannot be is ImportFailed, as with
+	// a baker): a cooked bake under the same cache key (the project's Library/Cache, or the engine cooked cache for the
+	// built-ins, §7.5) is used before the importer is ever called, so an environment baked once on a GPU loads everywhere
+	// ("test_renderer_none_environment_import_uses_cached_bake"). Unsupported means that and nothing else: the
+	// EditorAssetManager defers such a bake to the next editor with a GPU, a warning rather than an asset error (World Tree
+	// brief 14, EditorAssetManager.h).
 	//
 	// Runs on the main thread (RequiresMainThread), because the bake records GPU work (§4.11). Deterministic for a device
 	// class: the same source, settings and device give identical cooked bytes (the decoders read every texel they return

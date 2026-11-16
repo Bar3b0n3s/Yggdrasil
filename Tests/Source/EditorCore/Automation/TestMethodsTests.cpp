@@ -786,9 +786,10 @@ namespace Engine {
 
 		// Decision 2 (the review of W19.1): a recording takes its session's start fingerprint, so test.run {record} on a scene
 		// that references an asset whose import fails is refused (the recording invalidated with the import's error, naming
-		// the asset) and writes nothing; input.record's start is refused before that by the play gate (asset errors block play, §12.4). A
-		// playback's own fingerprint only explains a hash that differs, so test.run's replays still play to their verdicts,
-		// naming the fingerprint's error as the change, and the run reports its suites.
+		// the asset) and writes nothing; input.record's start is refused before that by the play gate (a scene that
+		// references an asset in error does not play, §12.4). A playback's own fingerprint only explains a hash that differs,
+		// so test.run's replays still play to their verdicts, naming the fingerprint's error as the change, and the run
+		// reports its suites.
 		TEST_CASE("TestMethods: test.run {record} refuses a scene with an asset it cannot fingerprint, while its replays still play to their verdicts")
 		{
 			Test::AutomationFixture fixture("TestRecordFingerprintRefusal");

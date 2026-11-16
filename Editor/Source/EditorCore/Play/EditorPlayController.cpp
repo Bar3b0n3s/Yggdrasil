@@ -6,6 +6,8 @@
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
 #include "Engine/App/EngineContext.h"
+#include "Engine/Asset/AssetDiagnostic.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/AssetDependencyGraph.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
@@ -91,6 +93,27 @@ namespace Engine {
 		{
 			const std::optional<JsonReader> seed = JsonReader(document).FindMember("Seed");
 			return seed.has_value() ? seed->ReadUInt32().value_or(0u) : 0u;
+		}
+
+		// World Tree brief 14 (§12.4): the asset gate of editor play. `document` is the scene a play request plays, which
+		// `scene` names. InvalidState naming the first asset in error that the scene references, directly or through the
+		// assets it references (EditorAssetManager::FindReferencedAssetErrors, its Script fields typed by the project's
+		// script field schemas, which loads the project's scripts as every session does), with the count of any others;
+		// success when it references none, whatever else of the project is in error.
+		static Status CheckSceneAssets(EditorContext& editor, const Json& document, std::string_view scene)
+		{
+			ENGINE_TRY_ASSIGN(const Ref<const ScriptFieldSchemaSource> schemas, editor.GetScriptSchemaSnapshot());
+			const std::vector<AssetDiagnostic> errors = editor.GetAssets().FindReferencedAssetErrors(document, schemas.get());
+			if (errors.empty())
+				return {};
+			const AssetDiagnostic& first = errors.front();
+			std::string message = std::format("{} references the asset '{}' ({}), directly or through other assets, and it is in error: {}: {}", scene,
+				first.Path, first.Asset.ToString(), first.Code, first.Message);
+			if (errors.size() > 1)
+				message += std::format(" (and {} more asset error{} it references)", errors.size() - 1, errors.size() == 2 ? "" : "s");
+			return std::unexpected(Error(ErrorCode::InvalidState, std::move(message))
+					.WithHint("fix the asset (asset.info lists its diagnostics) or remove the reference: a scene that references no asset in error "
+							  "plays"));
 		}
 
 	}
@@ -396,17 +419,26 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "timeScale is outside the supported range");
 		if (!options.Parameters.IsNull() && !options.Parameters.Get().is_object())
 			return MakeError(ErrorCode::InvalidArgument, "play parameters must be an object");
+		// The asset gate (§12.4) has something to find only while an asset is in error; otherwise it reads nothing.
+		const bool assetErrors = editor.GetAssets().HasErrorDiagnostics();
 		if (options.ScenePath.empty())
 		{
 			if (!editor.HasScene())
 				return MakeError(ErrorCode::InvalidState, "no scene is open");
-			return {};
+			if (!assetErrors)
+				return {};
+			// What PrepareSession plays: the open scene with its unsaved edits.
+			ENGINE_TRY_ASSIGN(const Json document, SceneSerializer::ToJson(editor.GetScene()));
+			const std::optional<VfsPath>& saved = editor.GetScenePath();
+			return Utils::CheckSceneAssets(editor, document,
+				saved.has_value() ? std::format("the open scene '{}'", saved->GetPath()) : std::string("the open scene"));
 		}
 		ENGINE_TRY_ASSIGN(const VfsPath path, Utils::ResolvePlayScenePath(options.ScenePath));
 		ENGINE_TRY_ASSIGN(const std::string text, editor.GetVfs().ReadText(path));
 		ENGINE_TRY_ASSIGN(const Json document, JsonReader::Parse(text));
-		static_cast<void>(document);
-		return {};
+		if (!assetErrors)
+			return {};
+		return Utils::CheckSceneAssets(editor, document, std::format("the scene '{}'", path.GetPath()));
 	}
 
 	Status EditorPlayController::CheckPlayScripts(const ProjectSettings& project)
@@ -433,8 +465,6 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "a play or test session is already active");
 		if (!editor.HasProject())
 			return MakeError(ErrorCode::InvalidState, "no project is open");
-		if (editor.GetAssets().HasErrorDiagnostics())
-			return std::unexpected(Error(ErrorCode::InvalidState, "the project has asset errors: fix them first").WithHint("project.validate lists the failures"));
 		ENGINE_TRY(ValidatePlayRequest(options));
 		ENGINE_TRY(CheckPlayScripts(editor.GetProject().GetSettings()));
 		ENGINE_TRY(editor.PrepareForPlay());
@@ -970,9 +1000,8 @@ namespace Engine {
 	{
 		State& state = *m_State;
 		EditorContext& editor = *state.Editor;
-		if (editor.GetAssets().HasErrorDiagnostics())
-			return MakeError(ErrorCode::InvalidState, "the project has asset errors: fix them before replacing play");
-		// Prepare without callbacks or mixer/time ownership. Every fallible step leaves the original session untouched.
+		// Its callers validated the request, the asset gate included (ValidatePlayRequest). Prepare without callbacks or
+		// mixer/time ownership. Every fallible step leaves the original session untouched.
 		AudioEngine* audio = editor.GetEngine().GetAudioEngine();
 		const auto baseline = state.MixerBaseline.has_value() ? state.MixerBaseline
 			: audio != nullptr                                ? std::optional(Utils::ReadMixerVolumes(*audio))

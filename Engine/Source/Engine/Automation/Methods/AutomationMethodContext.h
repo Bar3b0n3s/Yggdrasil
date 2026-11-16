@@ -101,9 +101,9 @@ namespace Engine {
 		// play.start (editor only, Automation/Methods/PlayMethods.h): starts a session of `options.ScenePath` (empty: the open
 		// edit scene, through the serializer copy of §5.6) with the project's settings and `options`; the requesting client
 		// (GetRequest().Client) owns lockstep when options.Lockstep. Appends PlayStateChanged. Errors: InvalidState while a
-		// session runs, without an open scene, or while the project has asset diagnostics of severity Error ("fix them first";
-		// §7.2); the errors of PlaySession::Create; NotFound or Validation for options.ScenePath; Unsupported in the Runtime,
-		// whose session starts with the process.
+		// session runs, without an open scene, or when the scene references an asset in error, which it names (World Tree
+		// brief 14, §12.4; EditorPlayController::Start); the errors of PlaySession::Create; NotFound or Validation for
+		// options.ScenePath; Unsupported in the Runtime, whose session starts with the process.
 		[[nodiscard]] virtual Status StartPlay(const PlayStartOptions& options) = 0;
 
 		// play.stop (editor only): destroys the session (§5.6 Stop: the edit scene was never touched) and appends

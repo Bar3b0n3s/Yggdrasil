@@ -559,6 +559,11 @@ namespace Engine {
 			REQUIRE_FALSE(exr.has_value());
 			CHECK(exr.error().GetCode() == ErrorCode::Unsupported);
 			CHECK(exr.error().GetHint() == EnvironmentImporter::GpuHint);
+			// Unsupported means only the bake, which the EditorAssetManager defers to an editor with a GPU (World Tree brief
+			// 14): a source the importer cannot decode is ImportFailed without a baker too, an asset error.
+			const Result<ImportResult> garbage = ImportEnvironment(fixture, "Broken.hdr", AsBytes("#?RADIANCE\nnot an image"), DefaultSettings(), nullptr);
+			REQUIRE_FALSE(garbage.has_value());
+			CHECK(garbage.error().GetCode() == ErrorCode::ImportFailed);
 		}
 
 		// M23 rewrote version 1's case ".exr is refused with the Poly Haven hint and broken .hdr files fail precisely": a .exr

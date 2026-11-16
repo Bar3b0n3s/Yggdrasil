@@ -11,16 +11,20 @@
 
 namespace Engine {
 
+	class IFieldSchemaSource;
 	class TypeRegistry;
 
 	namespace Utils {
 
 		// Every valid asset handle the components of a canonical scene or prefab document ("Entities", each with
 		// "Components") reference through AssetRef fields, found through `registry` (frozen): AssetRef fields at any depth of
-		// arrays, maps and structs, and Variant values whose schema resolves to an AssetRef without external schemas (a
-		// PrefabOverride's Value targeting a MeshRenderer's Mesh). Unknown components, which have no schema, contribute
-		// nothing. Sorted and unique. Pure.
-		[[nodiscard]] std::vector<AssetHandle> CollectDocumentAssetReferences(const Json& document, const TypeRegistry& registry);
+		// arrays, maps and structs, and Variant values whose schema resolves to an AssetRef, through `schemas` when given (a
+		// Script component's Fields, typed by each slot's script, as the replay fingerprint reads them; World Tree brief 14's
+		// play gate passes the editor's script field schemas) and otherwise without external schemas (a PrefabOverride's Value
+		// targeting a MeshRenderer's Mesh; the importers pass none, since a scene imports without its scripts' schemas).
+		// Unknown components, which have no schema, contribute nothing. Sorted and unique. Pure.
+		[[nodiscard]] std::vector<AssetHandle> CollectDocumentAssetReferences(const Json& document, const TypeRegistry& registry,
+			const IFieldSchemaSource* schemas = nullptr);
 
 	}
 

@@ -19,7 +19,8 @@
 // Codes. §13.7 lists every code of the finished engine; each milestone adds the codes its subsystems can detect. The M4
 // validator reports the scene, entity, component and build codes below. Load diagnostics of scene files are reported under
 // these codes through MapLoadCode (ADR 0006 decision 35). M6 adds the asset codes of Engine/Asset/AssetDiagnostic.h, under
-// the same constants (every one but AssetUploadFailedCode, a runtime-only code): the registry's scan diagnostics with
+// the same constants (every one but AssetUploadFailedCode and AssetBakeDeferredCode, which describe this process, not the
+// project; the deferred bake since World Tree brief 14): the registry's scan diagnostics with
 // their fixes (AssetRegistry::PlanFix applied as AssetEditCommand or AssetMoveCommand inside the fix transaction), the
 // asset manager's import diagnostics, ASSET_MISSING and ASSET_TYPE_MISMATCH for asset references in scene components,
 // materials and prefabs, PATH_CASE_MISMATCH, and PREFAB_MISSING_ASSET for an instance whose prefab asset is not registered.

@@ -14,8 +14,9 @@
 
 namespace Engine {
 
-	// The asset codes (§13.7 spelling). The project validator reports every one of them except AssetUploadFailedCode under
-	// the same code (EditorCore/Project/ProjectValidator.h).
+	// The asset codes (§13.7 spelling). The project validator reports every one of them except AssetUploadFailedCode and
+	// AssetBakeDeferredCode, which describe this process rather than the project, under the same code
+	// (EditorCore/Project/ProjectValidator.h).
 	//
 	// Error: a reference names a handle no registry knows (a component field, a material's texture slot, a prefab's mesh),
 	// or a load asked for one. The caller gets the type's placeholder (§7.2). Recorded by AssetManager::GetOrPlaceholder as
@@ -63,6 +64,12 @@ namespace Engine {
 	// Error, runtime only (never a project.validate code): GpuResourceCache could not create an asset's GPU mirror (device
 	// out of memory, --gpu-inject-fault=oom-texture) and uses the placeholder's mirror instead (§8.14 item 7).
 	inline constexpr std::string_view AssetUploadFailedCode = "ASSET_UPLOAD_FAILED";
+	// Warning, editor only (never a project.validate code; World Tree brief 14, Architecture §7.4): an environment needs a
+	// GPU bake that this editor cannot run (no graphics device: --renderer none or no Vulkan device) and no cooked bake of it
+	// exists, so its import is deferred to the next editor with a GPU, which bakes it. It is not an asset error: until then
+	// the environment does not load here (an editor without a device draws nothing anyway), and the hint says to start
+	// the editor with a GPU once. A source that cannot be read or decoded is ASSET_IMPORT_FAILED instead.
+	inline constexpr std::string_view AssetBakeDeferredCode = "ASSET_BAKE_DEFERRED";
 
 	// One asset diagnostic. Plain value; thread-compatible.
 	struct AssetDiagnostic
@@ -82,7 +89,7 @@ namespace Engine {
 	};
 
 	// The asset codes, in §13.7 order (AssetContentSkippedCode after AssetVertexColorsIgnoredCode, ADR 0010 decision 5)
-	// followed by AssetUploadFailedCode.
+	// followed by the two that describe this process, AssetUploadFailedCode and AssetBakeDeferredCode.
 	[[nodiscard]] std::span<const std::string_view> GetAssetDiagnosticCodes();
 
 	// One line for logs and the console: "<Code> <Path>: <Message>[ (hint: <Hint>)]".

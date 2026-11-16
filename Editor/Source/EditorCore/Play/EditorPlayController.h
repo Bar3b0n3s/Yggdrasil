@@ -50,11 +50,11 @@ namespace Engine {
 		// options.TimeScale, and lockstep owned by options.LockstepOwner when options.Lockstep. While a session is in lockstep
 		// the editor defers asset and script reloads until it ends (§7.5 race rule 4, EditorAssetManager); a reload during
 		// ordinary play marks the session modified. Appends PlayStateChanged ("Play" or "Simulate", or "Paused"). Errors:
-		// InvalidState while a session runs, without a project, without an open scene (for an empty ScenePath), or while
-		// the asset manager has error diagnostics (EditorAssetManager::HasErrorDiagnostics; §7.2: "fix them first", the
-		// hint names project.validate); InvalidArgument for a time scale outside [0, PlaySession::MaxTimeScale]; for
-		// ScenePath the errors of EditorMethodContext::ResolveProjectPath's rules and of the load; those of
-		// PlaySession::Create. Nothing changes on error.
+		// InvalidState while a session runs, without a project, without an open scene (for an empty ScenePath), or when the
+		// scene it plays references an asset in error (ValidatePlayRequest's asset gate, which names the asset; World Tree
+		// brief 14: the rest of the project stays playable); InvalidArgument for a time scale outside
+		// [0, PlaySession::MaxTimeScale]; for ScenePath the errors of EditorMethodContext::ResolveProjectPath's rules and of
+		// the load; those of PlaySession::Create. Nothing changes on error.
 		[[nodiscard]] Status Start(const PlayStartOptions& options);
 
 		// Stops the session (§5.6 Stop): destroys it, applies the reloads deferred while it was in lockstep, carries the play
@@ -177,7 +177,12 @@ namespace Engine {
 		[[nodiscard]] Status CheckTestAdmission(ClientId client, bool ownerRestart = false) const;
 		// The checks of a play request that have no side effect (the lifecycle rule: PrepareForPlay runs only after the
 		// requested session is validated): a project, the time scale, parameters that are an object, and the scene: an open
-		// one, or ScenePath resolved, read and parsed. Nothing changes on error.
+		// one, or ScenePath resolved, read and parsed. Then the asset gate (§12.4; World Tree brief 14): InvalidState when
+		// that scene (the open one with its unsaved edits, or the file) references an asset in error, directly or through
+		// prefabs, materials, required scripts or its Script fields' assets (EditorAssetManager::FindReferencedAssetErrors),
+		// naming the first; an asset in error that it does not reference refuses nothing. While an asset is in error the gate
+		// loads the project's scripts for their field schemas, as the session would; otherwise it reads nothing. Start,
+		// StartRecording and StartReplay all run it, so ReplaceSession checks no asset itself. Nothing changes on error.
 		[[nodiscard]] Status ValidatePlayRequest(const PlayStartOptions& options) const;
 		[[nodiscard]] Status CheckPlayScripts(const ProjectSettings& project);
 		[[nodiscard]] Status ReplaceSession(const PlayStartOptions& options, ProjectSettings project);

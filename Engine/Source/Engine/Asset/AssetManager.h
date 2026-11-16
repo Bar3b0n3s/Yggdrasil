@@ -173,10 +173,17 @@ namespace Engine {
 		[[nodiscard]] std::span<const AssetDiagnostic> GetDiagnostics() const;
 
 		// True when a recorded diagnostic that describes the state of an asset has severity Error: ASSET_IMPORT_FAILED and
-		// the scan's errors (export refuses to run, §7.2; play is blocked, §12.4). The reference diagnostics of
-		// GetOrPlaceholder and the runtime-only ASSET_UPLOAD_FAILED (a GPU failure of this process, not a property of the
-		// project) are not counted. A handle's diagnostics are removed when it is unregistered.
+		// the scan's errors (export refuses to run, §7.2; editor play refuses a scene that references such an asset, §12.4).
+		// The reference diagnostics of GetOrPlaceholder and the runtime-only ASSET_UPLOAD_FAILED (a GPU failure of this
+		// process, not a property of the project) are not counted, nor is any warning (ASSET_BAKE_DEFERRED among them). A
+		// handle's diagnostics are removed when it is unregistered.
 		[[nodiscard]] bool HasErrorDiagnostics() const;
+
+		// World Tree brief 14 (§12.4: editor play refuses only a scene that references an asset in error): the diagnostics
+		// HasErrorDiagnostics counts, in GetDiagnostics' order; empty exactly when HasErrorDiagnostics is false. An asset
+		// is in error when one of them names it (AssetDiagnostic::Asset); one that names no asset (a .meta that cannot be
+		// read) concerns no registered asset.
+		[[nodiscard]] std::vector<AssetDiagnostic> GetErrorDiagnostics() const;
 
 		// Records `diagnostic` (replacing an equal one) and logs it once per (Code, Asset, Subject): Error severity at Error,
 		// Warning at Warn, through the Engine logger. Renderer/GpuResourceCache reports upload failures here (§8.14 item 7).

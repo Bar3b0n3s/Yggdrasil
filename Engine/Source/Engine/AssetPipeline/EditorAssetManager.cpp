@@ -9,6 +9,7 @@
 #include "Engine/AssetPipeline/AssetHotReloader.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
 #include "Engine/AssetPipeline/ImporterRegistry.h"
+#include "Engine/AssetPipeline/Private/DocumentAssetReferences.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/EventLog.h"
 #include "Engine/Core/Hash.h"
@@ -67,6 +68,9 @@ namespace Engine {
 			std::vector<AssetHandle> LookedUp{};  // standalone assets the last successful import found by path, sorted
 			// A remembered failure (§7.2): Load returns it without importing again until an input changes.
 			std::optional<Error> Failure{};
+			// World Tree brief 14: Failure is a GPU bake deferred to an editor with a GPU (ImportOutput::DeferredBake), reported
+			// as the AssetBakeDeferredCode warning, not as an asset error. Meaningful only while Failure holds a value.
+			bool DeferredBake = false;
 		};
 
 		// Everything one import needs, built on the main thread and read by the import (on a job or inline).
@@ -110,6 +114,10 @@ namespace Engine {
 			// M18's milestone review: the importer failed with Gpu while its environment baker's device was lost, so the failure
 			// is the loss's, not the source's (IEnvironmentBaker::IsDeviceLost): ApplyImport does not remember it.
 			bool FailedOnLostDevice = false;
+			// World Tree brief 14 (§7.4): the importer decoded the source but needs a GPU bake this editor cannot run, and no
+			// cache held one (ImportRequest::ReuseBakes, then EnvironmentImporter's Unsupported): the bake is deferred to the
+			// next editor with a GPU, which ApplyImport records as a warning and publishes as an import without artifacts.
+			bool DeferredBake = false;
 		};
 
 		// A cooked bake an import may reuse (ImportRequest::ReuseBakes), and whether it is the source's own cache entry.
@@ -143,8 +151,11 @@ namespace Engine {
 		constexpr std::string_view EngineCacheScheme = "enginecache";
 
 		// The codes an import reports for its source and artifacts: cleared by the next successful import.
-		constexpr std::array<std::string_view, 5> ImportDiagnosticCodes = { AssetImportFailedCode, AssetTangentsApproximatedCode,
-			AssetUnsupportedUvSetCode, AssetVertexColorsIgnoredCode, AssetContentSkippedCode };
+		constexpr std::array<std::string_view, 6> ImportDiagnosticCodes = { AssetImportFailedCode, AssetTangentsApproximatedCode,
+			AssetUnsupportedUvSetCode, AssetVertexColorsIgnoredCode, AssetContentSkippedCode, AssetBakeDeferredCode };
+
+		// The codes of an import attempt that published nothing: a failure or a deferred bake, each replacing the other.
+		constexpr std::array<std::string_view, 2> AttemptDiagnosticCodes = { AssetImportFailedCode, AssetBakeDeferredCode };
 
 	}
 
@@ -238,6 +249,24 @@ namespace Engine {
 				}
 			}
 			return {};
+		}
+
+		// World Tree brief 14 (§7.4): the warning of a GPU bake deferred to an editor with a GPU (ImportOutput::DeferredBake),
+		// whose import failed with `error` (EnvironmentImporter's Unsupported, the hint naming the GPU).
+		static AssetDiagnostic MakeDeferredBakeDiagnostic(AssetHandle source, const VfsPath& sourcePath, const Error& error)
+		{
+			return {
+				.Severity = DiagnosticSeverity::Warning,
+				.Code = std::string(AssetBakeDeferredCode),
+				.Asset = source,
+				.Path = RelativeText(sourcePath),
+				.Message = std::format("the GPU bake of '{}' is deferred to the next editor with a GPU: this editor has no graphics device (--renderer none "
+									   "or no Vulkan device) and no cooked bake of it exists, so it does not load here",
+					RelativeText(sourcePath)),
+				.Hint = error.GetHint(),
+				.Subject = {},
+				.AutoFixable = false,
+			};
 		}
 
 		static std::vector<SubAssetEntry> MakeSubAssetEntries(const ImportResult& result)
@@ -443,6 +472,10 @@ namespace Engine {
 				// while that device is lost is the loss (M18's milestone review; decision 28).
 				output.FailedOnLostDevice = imported.error().GetCode() == ErrorCode::Gpu && request.EnvironmentBaker != nullptr
 					&& request.Importer->RequiresMainThread() && request.EnvironmentBaker->IsDeviceLost();
+				// Without a baker an environment importer that decoded its source fails with Unsupported and nothing else
+				// (EnvironmentImporter.h): the bake no cache held is deferred (World Tree brief 14). Every other failure, a
+				// source it cannot read or decode, stays one.
+				output.DeferredBake = request.ReuseBakes && imported.error().GetCode() == ErrorCode::Unsupported;
 				return fail(std::move(imported).error());
 			}
 			if (Status valid = ValidateImportResult(*imported, request.Metadata, request.Importer->GetId()); !valid.has_value())
@@ -1130,11 +1163,15 @@ namespace Engine {
 			};
 		}
 
-		void RecordFailure(AssetHandle source, const Error& error, const VfsPath& sourcePath, CachedImport attempt)
+		// Remembers the import attempt of `source` that published nothing, `error` (Load returns it without importing again
+		// until an input changes), and the inputs it used; `deferredBake`: a GPU bake deferred to an editor with a GPU. Its
+		// earlier attempt's diagnostic goes; the caller reports this one's.
+		void RememberAttempt(AssetHandle source, const Error& error, const VfsPath& sourcePath, CachedImport attempt, bool deferredBake)
 		{
 			ImportRecord& import = Imports[source];
 			import.SourcePath = sourcePath;
 			import.Failure = error;
+			import.DeferredBake = deferredBake;
 			import.ScriptCheck = std::move(attempt.ScriptCheck);
 			import.RecheckPending = false;
 			// The inputs the failed import used: an unchanged .meta must not make it look stale (only a change retries it).
@@ -1155,7 +1192,12 @@ namespace Engine {
 			// Preserve the failed attempt's misses as well as hits, including requires outside the source's directory.
 			import.Lookups = std::move(attempt.Lookups);
 			std::ranges::sort(import.Reads, std::less<>(), &ImportDependencyRead::Path);
-			Self->ClearDiagnostics(source, std::array<std::string_view, 1>{ AssetImportFailedCode });
+			Self->ClearDiagnostics(source, AttemptDiagnosticCodes);
+		}
+
+		void RecordFailure(AssetHandle source, const Error& error, const VfsPath& sourcePath, CachedImport attempt)
+		{
+			RememberAttempt(source, error, sourcePath, std::move(attempt), false);
 			Self->ReportDiagnostic({
 				.Severity = DiagnosticSeverity::Error,
 				.Code = std::string(AssetImportFailedCode),
@@ -1167,6 +1209,19 @@ namespace Engine {
 				.AutoFixable = false,
 			});
 			AppendEvent(EngineEventType::AssetImportFailed, source, sourcePath, error.ToString());
+		}
+
+		// World Tree brief 14 (§7.4): `source` needs a GPU bake this editor cannot run, and no cache holds one. It is not an
+		// asset error: the attempt is remembered as a failure is (Load returns `error`, Unsupported with the GPU hint, without
+		// importing again until an input changes, and the last good version, if any, stays in use) but reported as the
+		// AssetBakeDeferredCode warning, without an AssetImportFailed event. The next editor with a GPU bakes it. Returns the
+		// import's outcome: the source without artifacts, the warning its one diagnostic.
+		AssetImportOutcome RecordDeferredBake(AssetHandle source, const Error& error, const VfsPath& sourcePath, CachedImport attempt)
+		{
+			RememberAttempt(source, error, sourcePath, std::move(attempt), true);
+			AssetDiagnostic warning = Utils::MakeDeferredBakeDiagnostic(source, sourcePath, error);
+			Self->ReportDiagnostic(warning);
+			return AssetImportOutcome{ .Handle = source, .SubAssets = {}, .Diagnostics = { std::move(warning) }, .FromCache = false };
 		}
 
 		// M18's milestone review (Docs/Decisions/0029-m18-contract.md decision 28: on a lost device a Gpu error is the loss, as
@@ -1186,8 +1241,10 @@ namespace Engine {
 
 		// Publishes a finished import of `source` on the main thread: dependency metas, the .meta's sub-assets, the cache, the
 		// artifacts (a new version of each that changed), diagnostics, graph edges and path dependents. Returns the outcome,
-		// or the import's error (recorded as a remembered failure). `reload`: a reimport of something already published,
-		// which appends AssetReloaded; `scheduleDependents`: reimport the published asset's dependents afterwards (hot reload).
+		// or the import's error (recorded as a remembered failure); a deferred GPU bake (World Tree brief 14) is remembered
+		// too but succeeds, with its warning and no artifact (RecordDeferredBake). `reload`: a reimport of something already
+		// published, which appends AssetReloaded; `scheduleDependents`: reimport the published asset's dependents afterwards
+		// (hot reload).
 		// `context`: the write context the import kept when its ticket began (GetTicketContext), which the publication's
 		// writes carry and the tickets it begins keep.
 		Result<AssetImportOutcome> ApplyImport(AssetHandle source, const AssetReimportTicket& ticket, ImportOutput output, bool reload,
@@ -1204,6 +1261,8 @@ namespace Engine {
 				LogCacheWarning(*output.CacheWarning);
 			if (output.Failure.has_value())
 			{
+				if (output.DeferredBake)
+					return RecordDeferredBake(source, *output.Failure, sourcePath, std::move(output.Import));
 				if (output.FailedOnLostDevice)
 					ForgetLostDeviceFailure(source, *output.Failure, sourcePath);
 				else
@@ -1365,6 +1424,17 @@ namespace Engine {
 			}
 		}
 
+		// The remembered error of `source`'s deferred GPU bake (World Tree brief 14: Unsupported with the GPU hint), or null
+		// when its last import attempt was no deferral. An import that defers its bake succeeds without an artifact, so a load
+		// that finds none after it returns this error.
+		[[nodiscard]] const Error* FindDeferredBake(AssetHandle source) const
+		{
+			const auto import = Imports.find(source);
+			if (import == Imports.end() || !import->second.Failure.has_value() || !import->second.DeferredBake)
+				return nullptr;
+			return &*import->second.Failure;
+		}
+
 		// Imports `source` on the calling (main) thread and publishes the result.
 		Result<AssetImportOutcome> ImportNow(AssetHandle source, bool useCache, bool reload)
 		{
@@ -1397,7 +1467,11 @@ namespace Engine {
 					ENGINE_TRY(ImportNow(source, useCache, reload));
 					const auto loaded = Loaded.find(requested);
 					if (loaded == Loaded.end() || loaded->second.Value == nullptr)
+					{
+						if (const Error* deferred = FindDeferredBake(source))
+							return std::unexpected(*deferred);
 						return MakeError(ErrorCode::NotFound, "the import of {} did not produce {}", source.ToString(), requested.ToString());
+					}
 					return loaded->second.Value;
 				}();
 				if (artifact.IsValid() && value.has_value())
@@ -2081,7 +2155,11 @@ namespace Engine {
 			return describe(std::move(imported).error());
 		const auto loaded = m_State->Loaded.find(handle);
 		if (loaded == m_State->Loaded.end() || loaded->second.Value == nullptr)
+		{
+			if (const Error* deferred = m_State->FindDeferredBake(source))
+				return describe(*deferred);
 			return describe(Error(ErrorCode::NotFound, std::format("the import of '{}' no longer produces this asset", path)));
+		}
 		AssetRef<Asset> value = loaded->second.Value;
 		NotifyLoaded(handle);
 		return value;
@@ -2127,8 +2205,9 @@ namespace Engine {
 		const AssetHandle source = location->Record->Metadata.Handle;
 		if (m_State->InFlight.contains(source))
 			return AssetState::Loading;
+		// A deferred GPU bake (World Tree brief 14) is not a failure: the environment stays Unloaded until a GPU editor bakes it.
 		if (const auto import = m_State->Imports.find(source); import != m_State->Imports.end() && import->second.Failure.has_value())
-			return AssetState::Failed;
+			return import->second.DeferredBake ? AssetState::Unloaded : AssetState::Failed;
 		return AssetState::Unloaded;
 	}
 
@@ -2211,12 +2290,42 @@ namespace Engine {
 					return std::unexpected(Error(*import->second.Failure).WithContext(std::format("while hashing asset {} ('{}')", handle.ToString(), path)));
 				if (Result<AssetImportOutcome> imported = m_State->ImportNow(source, true, false); !imported.has_value())
 					return std::unexpected(std::move(imported).error().WithContext(std::format("while hashing asset {} ('{}')", handle.ToString(), path)));
+				// A deferred bake (World Tree brief 14) has no artifact: its Unsupported error, as the remembered one above.
+				if (const Error* deferred = m_State->FindDeferredBake(source))
+					return std::unexpected(Error(*deferred).WithContext(std::format("while hashing asset {} ('{}')", handle.ToString(), path)));
 			}
 		}
 		const auto loaded = m_State->Loaded.find(handle);
 		if (loaded == m_State->Loaded.end() || loaded->second.Value == nullptr)
 			return MakeError(ErrorCode::NotFound, "the import of '{}' no longer produces asset {}", GetReferencePath(handle), handle.ToString());
 		return loaded->second.ContentHash;
+	}
+
+	std::vector<AssetDiagnostic> EditorAssetManager::FindReferencedAssetErrors(const Json& document, const IFieldSchemaSource* schemas) const
+	{
+		std::vector<AssetDiagnostic> errors = GetErrorDiagnostics();
+		if (errors.empty())
+			return errors;
+		// Everything the document reaches: its references, each sub-asset's source, and what the dependency graph says each
+		// source references.
+		std::set<AssetHandle> reached;
+		std::vector<AssetHandle> pending = Utils::CollectDocumentAssetReferences(document, *m_State->Specification.Registry, schemas);
+		while (!pending.empty())
+		{
+			const AssetHandle handle = pending.back();
+			pending.pop_back();
+			if (!reached.insert(handle).second)
+				continue;
+			if (const std::optional<AssetRegistry::Location> location = m_State->Registry.Locate(handle); location.has_value())
+				pending.push_back(location->Record->Metadata.Handle);
+			for (const AssetHandle dependency : m_State->Graph.GetDependencies(handle))
+				pending.push_back(dependency);
+		}
+		std::erase_if(errors, [&reached](const AssetDiagnostic& diagnostic)
+		{
+			return !diagnostic.Asset.IsValid() || !reached.contains(diagnostic.Asset);
+		});
+		return errors;
 	}
 
 	void EditorAssetManager::WaitIdle()
@@ -2430,13 +2539,17 @@ namespace Engine {
 		return jobs.Submit([shared, ticket, queue, alive, serial, state, reload, context = state->GetTicketContext()]() mutable -> Result<AssetImportOutcome>
 		{
 			ImportOutput output = Utils::RunImport(*shared);
-			Result<AssetImportOutcome> outcome = output.Failure.has_value() ? Result<AssetImportOutcome>(std::unexpected(*output.Failure))
-																			: Result<AssetImportOutcome>(AssetImportOutcome{
-																				  .Handle = shared->Metadata.Handle,
-																				  .SubAssets = Utils::MakeSubAssetEntries(output.Import.Import),
-																				  .Diagnostics = output.Import.Import.Diagnostics,
-																				  .FromCache = output.FromCache,
-																			  });
+			Result<AssetImportOutcome> outcome = AssetImportOutcome{
+				.Handle = shared->Metadata.Handle,
+				.SubAssets = Utils::MakeSubAssetEntries(output.Import.Import),
+				.Diagnostics = output.Import.Import.Diagnostics,
+				.FromCache = output.FromCache,
+			};
+			// As ApplyImport publishes it: a deferred GPU bake succeeds with its warning (World Tree brief 14).
+			if (output.Failure.has_value() && output.DeferredBake)
+				outcome->Diagnostics = { Utils::MakeDeferredBakeDiagnostic(shared->Metadata.Handle, shared->SourcePath, *output.Failure) };
+			else if (output.Failure.has_value())
+				outcome = std::unexpected(*output.Failure);
 			queue->Post([output = std::move(output), ticket, alive, serial, state, reload, context = std::move(context)]() mutable
 			{
 				if (alive.expired())

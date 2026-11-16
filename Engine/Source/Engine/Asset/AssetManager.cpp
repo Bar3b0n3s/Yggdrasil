@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <format>
+#include <iterator>
 #include <map>
 #include <set>
 #include <tuple>
@@ -54,6 +55,12 @@ namespace Engine {
 		{
 			return diagnostic.Severity == DiagnosticSeverity::Error && diagnostic.Code != AssetMissingCode
 				&& diagnostic.Code != AssetTypeMismatchCode && diagnostic.Code != AssetUploadFailedCode;
+		}
+
+		// Every scan diagnostic of severity Error describes the state of an asset or its .meta.
+		static bool IsScanError(const AssetDiagnostic& diagnostic)
+		{
+			return diagnostic.Severity == DiagnosticSeverity::Error;
 		}
 
 		static bool DiagnosticLess(const AssetDiagnostic& left, const AssetDiagnostic& right)
@@ -248,11 +255,17 @@ namespace Engine {
 
 	bool AssetManager::HasErrorDiagnostics() const
 	{
-		const auto isError = [](const AssetDiagnostic& diagnostic)
-		{
-			return diagnostic.Severity == DiagnosticSeverity::Error;
-		};
-		return std::ranges::any_of(m_State->Shared.Recorded, Utils::CountsAsAssetError) || std::ranges::any_of(m_State->Shared.Scan, isError);
+		return std::ranges::any_of(m_State->Shared.Recorded, Utils::CountsAsAssetError) || std::ranges::any_of(m_State->Shared.Scan, Utils::IsScanError);
+	}
+
+	std::vector<AssetDiagnostic> AssetManager::GetErrorDiagnostics() const
+	{
+		std::vector<AssetDiagnostic> errors;
+		std::ranges::copy_if(m_State->Shared.Recorded, std::back_inserter(errors), Utils::CountsAsAssetError);
+		std::ranges::copy_if(m_State->Shared.Scan, std::back_inserter(errors), Utils::IsScanError);
+		// GetDiagnostics' order (RebuildMerged): the recorded ones before the scan's equal ones.
+		std::ranges::stable_sort(errors, Utils::DiagnosticLess);
+		return errors;
 	}
 
 	void AssetManager::ReportDiagnostic(AssetDiagnostic diagnostic)

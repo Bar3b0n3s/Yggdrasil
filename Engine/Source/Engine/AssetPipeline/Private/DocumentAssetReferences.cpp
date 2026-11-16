@@ -16,12 +16,12 @@ namespace Engine {
 	namespace {
 
 		// Walks component JSON by its registered schema, the way PrefabInstantiator remaps entity references, and collects
-		// the valid handles of AssetRef values.
+		// the valid handles of AssetRef values. Variant values resolve through the registry and `schemas` (null: none).
 		class AssetReferenceCollector
 		{
 		public:
-			AssetReferenceCollector(const TypeRegistry& registry, std::vector<AssetHandle>& handles)
-				: m_Registry(registry), m_Handles(handles)
+			AssetReferenceCollector(const TypeRegistry& registry, const IFieldSchemaSource* schemas, std::vector<AssetHandle>& handles)
+				: m_Registry(registry), m_Schemas(schemas), m_Handles(handles)
 			{
 			}
 
@@ -105,9 +105,10 @@ namespace Engine {
 						context.OwnerType = ownerType;
 						context.OwnerJson = &owner;
 						context.Key = key;
+						context.Schemas = m_Schemas;
 						const Result<const FieldInfo*> resolved = field.ResolveVariant(context);
 						if (!resolved || *resolved == &field)
-							return; // unresolvable without external schemas (script fields): kept verbatim by every reader
+							return; // unresolvable (script fields without their schemas): kept verbatim by every reader
 						const FieldInfo& schema = **resolved;
 						CollectValue(value, schema.GetType(), schema, ownerType, ownerJson, {});
 						return;
@@ -132,12 +133,13 @@ namespace Engine {
 			}
 		private:
 			const TypeRegistry& m_Registry;
+			const IFieldSchemaSource* m_Schemas = nullptr;
 			std::vector<AssetHandle>& m_Handles; // the caller's output
 		};
 
 	}
 
-	std::vector<AssetHandle> Utils::CollectDocumentAssetReferences(const Json& document, const TypeRegistry& registry)
+	std::vector<AssetHandle> Utils::CollectDocumentAssetReferences(const Json& document, const TypeRegistry& registry, const IFieldSchemaSource* schemas)
 	{
 		std::vector<AssetHandle> handles;
 		if (!document.is_object())
@@ -146,7 +148,7 @@ namespace Engine {
 		if (entities == document.end() || !entities->is_array())
 			return handles;
 
-		const AssetReferenceCollector collector(registry, handles);
+		const AssetReferenceCollector collector(registry, schemas, handles);
 		for (const Json& entity : *entities)
 			collector.CollectEntity(entity);
 		std::ranges::sort(handles);

@@ -8,8 +8,13 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/EnvironmentData.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/Automation/Methods/ScreenshotMethods.h"
 #include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/EventLog.h"
@@ -20,6 +25,8 @@
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/GlfwLibrary.h"
 #include "Engine/Platform/Window.h"
+#include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
@@ -30,6 +37,7 @@
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
 #include "Support/ExpectLog.h"
+#include "Support/PhysicsTestScene.h"
 #include "Support/TestData.h"
 #include "Support/TestOptions.h"
 #include "Support/WaitUntil.h"
@@ -42,6 +50,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <format>
+#include <initializer_list>
 #include <optional>
 #include <span>
 #include <string>
@@ -118,6 +127,63 @@ namespace Engine {
 		// Recording resolves the saved scene's asset handle before replacing the session.
 		REQUIRE(editor.GetAssets().Refresh().has_value());
 		return entity.GetUUID();
+	}
+
+	// Writes `text` to project-relative `path` through the editor's write path (World Tree brief 14's play gate cases).
+	static void WritePlayProjectText(EditorContext& editor, std::string_view path, std::string_view text)
+	{
+		const Result<VfsPath> file = VfsPath::Create("project", path);
+		REQUIRE(file.has_value());
+		REQUIRE(editor.WriteProjectFile(*file, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+	}
+
+	// Adds an entity "Box" drawing the built-in cube with `materials` to the open scene.
+	static void AddPlayBox(EditorContext& editor, std::initializer_list<AssetHandle> materials)
+	{
+		MeshRendererComponent renderer;
+		renderer.Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+		for (const AssetHandle material : materials)
+			renderer.Materials.push_back(TypedAssetHandle<AssetType::Material>(material));
+		editor.GetScene().CreateEntity("Box").AddComponent<MeshRendererComponent>(std::move(renderer));
+	}
+
+	// Saves the open scene to its file, as scene.save does.
+	static void SaveOpenPlayScene(EditorContext& editor)
+	{
+		REQUIRE(editor.GetScenePath().has_value());
+		const Result<std::string> text = SceneSerializer::SaveToString(editor.GetScene());
+		REQUIRE_MESSAGE(text.has_value(), (text ? std::string() : text.error().ToString()));
+		REQUIRE(editor.WriteProjectFile(*editor.GetScenePath(), std::as_bytes(std::span(text->data(), text->size()))).has_value());
+		REQUIRE(editor.MarkSceneSaved(*editor.GetScenePath()).has_value());
+		REQUIRE(editor.GetAssets().Refresh().has_value());
+	}
+
+	// Stores what an editor with a GPU stores in Library/Cache for the environment `source` of `bytes` with the default import
+	// settings: a valid bake (a 4² skybox with 3 mips and the specular cube, every texel 0) under the source's cache key.
+	static void StorePlayEnvironmentBake(EditorContext& editor, AssetHandle source, std::span<const std::byte> bytes)
+	{
+		const Result<VariantValue> settings = editor.GetAssets().MergeImportSettings(EnvironmentImporter::Id, VariantValue(), Json::object());
+		REQUIRE_MESSAGE(settings.has_value(), (settings ? std::string() : settings.error().ToString()));
+		const uint64_t key = AssetCache::ComputeKey(bytes, EnvironmentImporter::Id, EnvironmentImporter::Version, settings->Get(), EngineCookVersion);
+		const auto cube = [](uint32_t faceSize, uint32_t mipCount)
+		{
+			return CubeMapData{ .FaceSize = faceSize, .MipCount = mipCount, .Texels = Buffer(ComputeCubeMapByteSize(faceSize, mipCount)) };
+		};
+		EnvironmentData environment;
+		environment.Skybox = cube(4, 3);
+		environment.Specular = cube(EnvironmentData::SpecularFaceSize, EnvironmentData::SpecularMipCount);
+		CachedImport bake;
+		bake.Import.Artifacts.push_back(ImportedArtifact{
+			.Handle = source,
+			.Type = AssetType::Environment,
+			.SubAssetKey = {},
+			.Cooked = CookEnvironment(environment, EnvironmentImporter::Version),
+		});
+		const Result<VfsPath> root = VfsPath::Parse("cache://");
+		REQUIRE(root.has_value());
+		AssetCache cache(editor.GetVfs(), *root);
+		const Status stored = cache.Store(source, key, bake);
+		REQUIRE_MESSAGE(stored.has_value(), (stored ? std::string() : stored.error().ToString()));
 	}
 
 	static void CheckEditorWindowHost()
@@ -1011,6 +1077,136 @@ return Script.Define("Host", Host)
 			CHECK(outside.error().GetCode() == ErrorCode::InvalidArgument);
 			CHECK_FALSE(play.IsPlaying());
 			CHECK(play.GetPlayStateName() == "Edit");
+		}
+
+		// World Tree brief 14 (§12.4): an asset in error refuses play only of a scene that references it, directly or through
+		// other assets, naming it. Before, any asset error of the project refused play.start, input.record and input.replay of
+		// every scene.
+		TEST_CASE("EditorPlayController: play refuses only a scene that references an asset in error, naming it, while every other scene plays")
+		{
+			Test::EditorTestFixture fixture("PlayAssetGate");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			EditorAssetManager& assets = editor.GetAssets();
+			EditorPlayController& play = editor.GetPlay();
+			// A material whose source does not import, and a texture whose source does not import under a material that does.
+			WritePlayProjectText(editor, "Assets/Materials/Broken.material", "{ \"Format\": \"Material\", ");
+			WritePlayProjectText(editor, "Assets/Textures/Broken.png", "not a png");
+			{
+				const Test::ExpectLog material(LogLevel::Error, "Assets/Materials/Broken.material");
+				const Test::ExpectLog texture(LogLevel::Error, "Assets/Textures/Broken.png");
+				REQUIRE(assets.Refresh().has_value());
+			}
+			const AssetHandle brokenMaterial = assets.Resolve("Assets/Materials/Broken.material").value_or(AssetHandle());
+			const AssetHandle brokenTexture = assets.Resolve("Assets/Textures/Broken.png").value_or(AssetHandle());
+			REQUIRE(brokenMaterial.IsValid());
+			REQUIRE(brokenTexture.IsValid());
+			WritePlayProjectText(editor, "Assets/Materials/OverBroken.material",
+				std::format(R"({{"Format": "Material", "Version": 2, "BaseColorMap": "{}"}})", brokenTexture.ToString()));
+			REQUIRE(assets.Refresh().has_value());
+			const AssetHandle overBroken = assets.Resolve("Assets/Materials/OverBroken.material").value_or(AssetHandle());
+			REQUIRE(overBroken.IsValid());
+			REQUIRE(assets.HasErrorDiagnostics());
+
+			// A scene that references none of them plays.
+			fixture.CreateAndOpenScene("Assets/Scenes/Clean.scene");
+			AddPlayBox(editor, {});
+			SaveOpenPlayScene(editor);
+			REQUIRE(play.Start({}).has_value());
+			REQUIRE(play.Stop().has_value());
+
+			// A scene whose box uses the material over the broken texture is refused, naming the texture and the scene.
+			fixture.CreateAndOpenScene("Assets/Scenes/Textured.scene");
+			AddPlayBox(editor, { overBroken });
+			SaveOpenPlayScene(editor);
+			const Status refused = play.Start({});
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(refused.error().GetMessageText().find("Assets/Textures/Broken.png") != std::string::npos);
+			CHECK(refused.error().GetMessageText().find("Assets/Scenes/Textured.scene") != std::string::npos);
+			CHECK_FALSE(play.IsPlaying());
+			// So is its recording, the path input.record and input.replay take (ReplaceSession), while the clean scene's file
+			// plays and records with the textured scene open.
+			const Status recordingRefused = play.StartRecording(PlayStartOptions{ .Lockstep = true, .LockstepOwner = 7, .ScenePath = "Assets/Scenes/Textured.scene" }, false);
+			REQUIRE_FALSE(recordingRefused.has_value());
+			CHECK(recordingRefused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK_FALSE(play.IsPlaying());
+			REQUIRE(play.Start(PlayStartOptions{ .ScenePath = "Assets/Scenes/Clean.scene" }).has_value());
+			REQUIRE(play.Stop().has_value());
+			REQUIRE(play.StartRecording(PlayStartOptions{ .Lockstep = true, .LockstepOwner = 7, .ScenePath = "Assets/Scenes/Clean.scene" }, false).has_value());
+			REQUIRE(play.Stop().has_value());
+
+			// A Script field that names the material in error refuses its scene too: the gate reads the fields with the project's
+			// script field schemas.
+			const Result<VfsPath> scriptPath = VfsPath::Create("project", "Assets/Scripts/Painter.luau");
+			REQUIRE(scriptPath.has_value());
+			REQUIRE(editor.GetScriptService() != nullptr);
+			const auto written = editor.GetScriptService()->Write(*scriptPath, "local Painter = {Fields = {Look = Field.Asset(\"Material\")}}\n"
+																			   "return Script.Define(\"Painter\", Painter)\n");
+			REQUIRE_MESSAGE(written.has_value(), (written ? std::string() : written.error().ToString()));
+			fixture.CreateAndOpenScene("Assets/Scenes/Painted.scene");
+			ScriptSlot painter;
+			painter.Script.SetHandle(written->Script);
+			painter.Fields["Look"] = VariantValue(Json(brokenMaterial.ToString()));
+			editor.GetScene().CreateEntity("Painter").AddComponent<ScriptComponent>(ScriptComponent{ { std::move(painter) } });
+			SaveOpenPlayScene(editor);
+			const Status painted = play.Start({});
+			REQUIRE_FALSE(painted.has_value());
+			CHECK(painted.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(painted.error().GetMessageText().find("Assets/Materials/Broken.material") != std::string::npos);
+		}
+
+		// World Tree brief 14 (ADR 0042 decision 2): the state hash never depends on whether a bake exists, since an environment
+		// is not simulation state. Every test editor has no graphics device, so it defers the bake of a new HDR; a scene that
+		// references the environment plays, and reaches the state hash it reaches once the environment's bake (a GPU editor's,
+		// in Library/Cache) is loaded.
+		TEST_CASE("EditorPlayController: a scene referencing an environment whose bake is deferred plays to the state hash it has with the bake")
+		{
+			Test::EditorTestFixture fixture("PlayDeferredBake");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			EditorAssetManager& assets = editor.GetAssets();
+			EditorPlayController& play = editor.GetPlay();
+			const Result<Buffer> hdr = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+			REQUIRE_MESSAGE(hdr.has_value(), hdr.error().ToString());
+			const Result<VfsPath> skyPath = VfsPath::Create("project", "Assets/Environments/Sky.hdr");
+			REQUIRE(skyPath.has_value());
+			REQUIRE(editor.WriteProjectFile(*skyPath, *hdr).has_value());
+			REQUIRE(assets.Refresh().has_value());
+			const AssetHandle sky = assets.Resolve("Assets/Environments/Sky.hdr").value_or(AssetHandle());
+			REQUIRE(sky.IsValid());
+			REQUIRE(assets.GetState(sky) == AssetState::Unloaded);
+			REQUIRE_FALSE(assets.HasErrorDiagnostics());
+
+			fixture.CreateAndOpenScene();
+			Scene& scene = editor.GetScene();
+			scene.CreateEntity("World").AddComponent<EnvironmentComponent>(EnvironmentComponent{ .Environment = TypedAssetHandle<AssetType::Environment>(sky) });
+			static_cast<void>(Test::AddGround(scene));
+			static_cast<void>(Test::AddSphereBody(scene, "Ball", glm::vec3(0.0f, 3.0f, 0.0f), 0.5f, BodyType::Dynamic));
+			// The state hash at tick 0 and after the ball fell for a second.
+			const auto play60Ticks = [&play]()
+			{
+				REQUIRE(play.Start(PlayStartOptions{ .Lockstep = true }).has_value());
+				PlaySession* session = play.GetSession();
+				REQUIRE(session != nullptr);
+				const uint64_t start = session->ComputeStateHash();
+				for (int tick = 0; tick < 60; ++tick)
+					session->Tick();
+				const uint64_t end = session->ComputeStateHash();
+				REQUIRE(play.Stop().has_value());
+				return std::pair(start, end);
+			};
+			const std::pair<uint64_t, uint64_t> deferred = play60Ticks();
+			CHECK(deferred.first != deferred.second);
+
+			// A GPU editor's bake of the environment is in Library/Cache; a reimport loads it.
+			StorePlayEnvironmentBake(editor, sky, *hdr);
+			const Result<AssetImportOutcome> reimported = assets.Reimport(sky);
+			REQUIRE_MESSAGE(reimported.has_value(), reimported.error().ToString());
+			CHECK(reimported->FromCache);
+			CHECK(reimported->Diagnostics.empty());
+			REQUIRE(assets.GetState(sky) == AssetState::Loaded);
+			CHECK(play60Ticks() == deferred);
 		}
 
 		TEST_CASE("EditorPlayController: the session seed is the project's Seed xor the scene's, unless one is given")

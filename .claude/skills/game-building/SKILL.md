@@ -163,7 +163,7 @@ A demo milestone adds its Roadmap acceptance. **Tetris (M25, rebuilt in place as
 
 - **Arrays replace.** A settings patch with `"Suites": [one entry]` drops every other suite.
 - **Unsaved scene.** Recording, replay verification, test runs (every suite bound to a scene and every replay) and export use the saved files, while `play_start` plays the active scene with its unsaved edits: `scene_save` first.
-- **Renderer none.** The bridge's default editor cannot take screenshots (`Unsupported`), and a `Test.Screenshot` call errors its case there; relaunch with `renderer: "vulkan"`.
+- **Renderer none.** The bridge's default editor cannot take screenshots (`Unsupported`), and a `Test.Screenshot` call errors its case there; relaunch with `renderer: "vulkan"`. An HDR environment it imports without a cooked bake in `Library/Cache` gets the warning `ASSET_BAKE_DEFERRED` instead of an import error: its scenes play and test there, and an editor launched with `renderer: "vulkan"` bakes it when it first loads it (a scene that shows it, or `engine_call {method: "asset.reimport"}`; an export needs that bake).
 - **Lockstep ownership.** Only the client that started lockstep may step it; a disconnect releases it.
 - **Large results** over 48 KB come back as `{path, truncated: true, summary}`: read the file, or a test run's `jsonPath` and `junitPath` reports, with the bridge's `result_read` (`game-debugging`), never another file tool.
 - **Hot reload pauses for determinism.** Lockstep, recording, replay and test sessions defer script and asset reloads until the session ends (`game-debugging`).

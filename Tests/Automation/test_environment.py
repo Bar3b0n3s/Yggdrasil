@@ -2,8 +2,10 @@
 test_environment_import_and_screenshot and test_renderer_none_environment_import_uses_cached_bake): a Radiance .hdr is
 imported, baked on the GPU, lights the scene (its SH9 and specular cube on a white sphere) and shows as its skybox; a
 cooked bake is reused by an editor without a device (under its own handle, and for a copy of the same bytes, which has
-the same cache key), and an environment no cache holds is Unsupported there with the hint to bake it once with a GPU
-(Docs/Decisions/0013-m8-decisions.md decision 9). M23 (Docs/Decisions/0034-m23-contract.md decisions 14 and 18): an
+the same cache key) (Docs/Decisions/0013-m8-decisions.md decision 9), and since World Tree brief 14 (ADR 0042 decision
+2) an environment no cache holds imports there with its bake deferred to the next editor with a GPU, a warning with the
+hint to bake it once with a GPU and no asset error, so its scenes still play and test. M23
+(Docs/Decisions/0034-m23-contract.md decisions 14 and 18): an
 OpenEXR .exr imports the same way (EnvironmentImporter version 2), and its Compression import setting, Auto by default,
 stores the baked cubes as BC6H or, with None, as RGBA16F, both showing the same skybox.
 """
@@ -252,18 +254,74 @@ class EnvironmentTests(AutomationTestCase):
         report = client.call("project.validate", {"scope": "project"})
         self.assertNotIn("ASSET_IMPORT_FAILED", [diagnostic["code"] for diagnostic in report["diagnostics"]], report)
 
-        # An environment no cache holds cannot be baked here: the import fails with the GPU hint, and so does its
-        # diagnostic.
+        # An environment no cache holds cannot be baked here: World Tree brief 14 defers its bake to the next editor
+        # with a GPU, so the import succeeds with that warning and the GPU hint, and no asset error is reported.
         other = self.directory / "Sources" / "Blue.hdr"
         write_hdr(other, 64, (0.1, 0.2, 1.0))
-        with self.assertRaises(engine_client.EngineError) as raised:
-            client.call("asset.import", {"source": str(other), "destDir": "Assets/Environments"})
-        self.assertIn(GPU_HINT, json.dumps(raised.exception.data))
+        imported = client.call("asset.import", {"source": str(other), "destDir": "Assets/Environments"})
+        deferred = [diagnostic for diagnostic in imported["diagnostics"]
+                    if diagnostic["code"] == "ASSET_BAKE_DEFERRED"]
+        self.assertEqual(len(deferred), 1, imported)
+        self.assertEqual(deferred[0]["severity"], "Warning")
+        self.assertEqual(deferred[0]["hint"], GPU_HINT)
         report = client.call("project.validate", {"scope": "project"})
-        failed = [diagnostic for diagnostic in report["diagnostics"] if diagnostic["code"] == "ASSET_IMPORT_FAILED"]
-        self.assertEqual(len(failed), 1, report)
-        self.assertIn("Blue.hdr", failed[0]["file"])
-        self.assertIn(GPU_HINT, failed[0]["hint"] + failed[0]["message"])
+        self.assertNotIn("ASSET_IMPORT_FAILED", [diagnostic["code"] for diagnostic in report["diagnostics"]], report)
+        client.call("session.shutdown")
+        self.assertEqual(self.editors[-1].wait(), EXIT_SUCCESS, self.editors[-1].output())
+
+    def test_renderer_none_environment_import_defers_its_bake_and_its_scene_plays_and_tests(self) -> None:
+        # World Tree brief 14 (ADR 0042 decision 2): an editor without a graphics device imported an HDR it could not
+        # bake as an asset error, which then refused play.start of every scene of the project. The import now succeeds
+        # with a warning that defers the bake to the next editor with a GPU, and the scene that uses the environment
+        # plays, records and replays here.
+        client, root = self.open_editor_with_scene()
+        source = self.directory / "Sources" / "Blue.hdr"
+        write_hdr(source, 64, (0.1, 0.2, 1.0))
+        imported = client.call("asset.import", {"source": str(source), "destDir": "Assets/Environments"})
+        environment = imported["asset"]
+        self.assertEqual(environment["type"], "Environment", imported)
+        self.assertTrue((root / "Assets" / "Environments" / "Blue.hdr.meta").is_file())
+        codes = [diagnostic["code"] for diagnostic in imported["diagnostics"]]
+        self.assertEqual(codes, ["ASSET_BAKE_DEFERRED"], imported)
+        warning = imported["diagnostics"][0]
+        self.assertEqual(warning["severity"], "Warning")
+        self.assertEqual(warning["path"], "Assets/Environments/Blue.hdr")
+        self.assertIn("deferred to the next editor with a GPU", warning["message"])
+        self.assertEqual(warning["hint"], GPU_HINT)
+        info = client.call("asset.info", {"asset": environment["id"]})
+        self.assertEqual(info["state"], "Unloaded", info)
+        self.assertEqual([diagnostic["code"] for diagnostic in info["diagnostics"]], ["ASSET_BAKE_DEFERRED"], info)
+        report = client.call("project.validate", {"scope": "project"})
+        self.assertNotIn("ASSET_IMPORT_FAILED", [diagnostic["code"] for diagnostic in report["diagnostics"]], report)
+
+        # The scene that uses the environment plays.
+        self.set_environment(client, environment["id"])
+        client.call("entity.create", {"name": "Ball", "components": {
+            "Transform": {"Translation": [0, 3, -5]}, "RigidBody": {"Type": "Dynamic"},
+            "SphereCollider": {"Radius": 0.5}}})
+        client.call("scene.save")
+        client.call("play.start", {"lockstep": True})
+        stepped = client.call("play.step", {"ticks": 30})
+        self.assertEqual(stepped["tick"], 30)
+        client.call("play.stop")
+
+        # Its suite runs and records a replay, which then verifies at its hashes.
+        client.call("script.write", {"path": "Assets/Tests/Sky.test.luau", "source": (
+            'return Test.Suite("Sky", function()\n'
+            'Test.Case("the scene plays under the unbaked sky", function()\n'
+            'Test.WaitTicks(30)\n'
+            'Test.Expect(Scene.FindByName("World") ~= nil)\n'
+            'Test.Expect(Scene.FindByName("Ball") ~= nil)\n'
+            'end)\nend)')})
+        client.call("project.setSettings", {"patch": {"Testing": {"Suites": [
+            {"Script": "Assets/Tests/Sky.test.luau", "Scene": "Assets/Scenes/Main.scene", "Modes": ["Editor"]}]}}})
+        replay = "Assets/Tests/Replays/Sky.replay"
+        recorded = engine_client.load_offloaded(client.call("test.run", {"record": replay}, timeout=120.0))
+        self.assertTrue(recorded["passed"], recorded)
+        self.assertTrue((root / replay).is_file())
+        client.call("project.setSettings", {"patch": {"Testing": {"Replays": [replay]}}})
+        verified = engine_client.load_offloaded(client.call("test.run", timeout=120.0))
+        self.assertTrue(verified["passed"], verified)
         client.call("session.shutdown")
         self.assertEqual(self.editors[-1].wait(), EXIT_SUCCESS, self.editors[-1].output())
 
