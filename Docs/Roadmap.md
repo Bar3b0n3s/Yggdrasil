@@ -1,8 +1,8 @@
 # Roadmap
 
-Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged). Amended on 2026-11-15 by `Docs/Decisions/0042-world-tree-engine-program.md` (the World Tree engine program: M28 to M33, first in phases 5 and 6, then, by the product owner's answers of the same day, in one phase, phase 5, without hardening; M34 joined that phase the same day by the lead's decision).
+Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged). Amended on 2026-11-15 by `Docs/Decisions/0042-world-tree-engine-program.md` (the World Tree engine program: M28 to M33, first in phases 5 and 6, then, by the product owner's answers of the same day, in one phase, phase 5, without hardening; M34 and then M35 joined that phase the same day by the lead's decisions).
 
-The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work. After them, the World Tree engine program (M28 to M34 in one phase, phase 5, `Docs/Decisions/0042-world-tree-engine-program.md`) adds what the World Tree showcase game asked for.
+The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work. After them, the World Tree engine program (M28 to M35 in one phase, phase 5, `Docs/Decisions/0042-world-tree-engine-program.md`) adds what the World Tree showcase game asked for.
 
 ## Rules for every milestone
 
@@ -47,15 +47,16 @@ The roadmap goes from an empty repository to a finished engine and editor (M15),
 | M25 Tetris rebuilt in place as pixel art (phase 3, lands before M26) | phase 2 | M24, M26 |
 | M26 Effects, post-processing and terrain (phase 3, lands last) | phase 2 | M24, M25 |
 | M27 Rolling Ball 3D (phase 4) | phase 3 | — |
-| M28 Game services (phase 5) | M27 | M29 to M34 |
-| M29 Light limits (phase 5) | M27 | M28, M30 to M34 |
-| M30 Navigation (phase 5, lands last, with M33) | M27 | M28, M29, M31 to M34 |
-| M31 Material parameters (phase 5) | M27 | M28 to M30, M32 to M34 |
-| M32 Fog and SSR's cost (phase 5, lands before M33) | M27 | M28 to M31, M33, M34 |
-| M33 Particle look (phase 5, lands last, with M30) | M27 | M28 to M32, M34 |
-| M34 Characters and input (phase 5) | M27 | M28 to M33 |
+| M28 Game services (phase 5) | M27 | M29 to M35 |
+| M29 Light limits (phase 5) | M27 | M28, M30 to M35 |
+| M30 Navigation (phase 5, lands last, with M33) | M27 | M28, M29, M31 to M35 |
+| M31 Material parameters (phase 5) | M27 | M28 to M30, M32 to M35 |
+| M32 Fog and SSR's cost (phase 5, lands before M33) | M27 | M28 to M31, M33 to M35 |
+| M33 Particle look (phase 5, lands last, with M30) | M27 | M28 to M32, M34, M35 |
+| M34 Characters and input (phase 5) | M27 | M28 to M33, M35 |
+| M35 Pause and entity state (phase 5) | M27 | M28 to M34 |
 
-Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last; phase 5 (M28 to M34, one phase without a hardened gate, `Docs/Decisions/0042-world-tree-engine-program.md` decision 2) M28, M29, M31, M32 and M34 in readiness order, M32 before M33, then M30 and M33 in readiness order. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
+Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last; phase 5 (M28 to M35, one phase without a hardened gate, `Docs/Decisions/0042-world-tree-engine-program.md` decision 2) M28, M29, M31, M32, M34 and M35 in readiness order, M32 before M33, then M30 and M33 in readiness order. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
 
 ---
 
@@ -569,17 +570,21 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M28 — Game services
 
-**Scope.** Phase 5, in readiness order with M29, M31, M32 and M34. World Tree's briefs 4 and 3 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3): display settings and a performance readout for scripts (wave W28.1), then save data for scripts (W28.2). New platform capabilities get Windows backends only (`Docs/Decisions/0028-backlog-program.md` decision 10). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M29, M31, M32, M34 and M35. World Tree's briefs 4 and 3 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3): display settings and a performance readout for scripts, with text that shows frame-paced values outside the state hash and decisions on frame time recorded as input (wave W28.1), then save data for scripts, with the session's audio mix kept across `Scene.Load` (W28.2). New platform capabilities get Windows backends only (`Docs/Decisions/0028-backlog-program.md` decision 10). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - Display settings from scripts: the window mode (windowed, borderless, exclusive), the resolution from the monitor's modes and VSync, applied at a frame boundary and persisted by the engine; they do nothing in the editor's game view, headless runs and fixed-view sessions.
 - A performance readout for scripts in every configuration, Dist included, frame-paced like `ParticleEmitter:GetParticleCount`; `stats.get` gains the counters it lacks.
+- A `UiText` presentation string for frame-paced values, set outside the fixed step and never serialized, hashed or laid out; frame-time signals posted in the frame phase, latched by the next fixed step, recorded by `input.record` and played back by replays.
 - A `SaveData` script namespace: a per-game key-value store with atomic commits, durable on Windows, a 1 MiB cap and a corrupt store survived; stores of their own for suites, replays (the header records the seed), lockstep and editor play; methods and an editor panel that read, seed and clear the editor's play store.
+- The session's audio mix kept across `Scene.Load` and `Scene.Reload` (each scene's replacement resets it to 1 today, against `Audio.SetGroupVolume`'s documented lifetime).
 
 **Acceptance**
 - In a Dist export, the game keeps rendering after each switch of window mode and resolution, and the choice is restored at the next launch.
 - The readout shows changing counts in Dist; reading it in `OnFixedUpdate` raises the documented error.
+- A replay whose HUD shows the frame time through presentation text verifies at one hash in Debug, Release and Dist; a run ended by a frame-time signal verifies at its hash in every mode, the signal played back from the replay.
 - Options and progress saved in one Dist run are restored at the next; a replay whose game reads the store verifies at one hash whatever the machine's store holds; a seeded store opens a gated branch in a test; a store truncated by hand is reported and the game still starts.
+- A group volume set before `Scene.Load` holds after it, in editor play and in the Runtime (a regression test that fails before the fix).
 
 **Parallelization**: W28.1, then W28.2; both change the hosts' session and script-host files.
 
@@ -587,7 +592,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M29 — Light limits
 
-**Scope.** Phase 5, in readiness order with M28, M31, M32 and M34. World Tree's brief 7 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M28, M31, M32, M34 and M35. World Tree's brief 7 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - A `Rendering` setting for the shaded lights per view (256, 512, 1,024 or 2,048; 256 by default), with the cluster mask sized at run time.
@@ -625,7 +630,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M31 — Material parameters
 
-**Scope.** Phase 5, in readiness order with M28, M29, M32 and M34. World Tree's brief 5 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M28, M29, M32, M34 and M35. World Tree's brief 5 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - A per-entity material-parameter component: a tint, an emissive colour and strength, a texture-coordinate offset and a scroll by simulation time, a dissolve with an edge colour, and a dithered fade for walls that hide the player; skinned meshes included, carried in the instance record so that instancing keeps its batches.
@@ -640,7 +645,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M32 — Fog and SSR's cost
 
-**Scope.** Phase 5, in readiness order with M28, M29, M31 and M34, landing before M33. World Tree's briefs 2 and 9 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
+**Scope.** Phase 5, in readiness order with M28, M29, M31, M34 and M35, landing before M33. World Tree's briefs 2 and 9 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3). Its milestone end runs `CI.py --require-clang-cl`.
 
 **Deliverables**
 - A unique-per-scene `Fog` component: exponential distance fog, height fog, a colour with an optional ambient tint, a sun glow, and the skybox fogged or not; applied alike to opaque and transparent meshes, terrain, sprites and the SSR composite (particles in M33), and animatable from scripts and automation.
@@ -672,7 +677,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M34 — Characters and input
 
-**Scope.** Phase 5, in readiness order with M28, M29, M31 and M32. World Tree's briefs 11 and 10 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3), added to the phase by the lead's decision of 2026-11-15. Its milestone end runs `CI.py --require-clang-cl`, without the hardening stage (ADR 0042, the owner's answer 9).
+**Scope.** Phase 5, in readiness order with M28, M29, M31, M32 and M35. World Tree's briefs 11 and 10 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3), added to the phase by the lead's decision of 2026-11-15. Its milestone end runs `CI.py --require-clang-cl`, without the hardening stage (ADR 0042, the owner's answer 9).
 
 **Deliverables**
 - Characters versus Dynamic bodies: a character's inner body never moves a Dynamic body through the solver; a character pushes Dynamic bodies only through `CharacterVirtual`'s own contacts and mass; it is never launched by standing on or stepping onto a light Dynamic body; a pushed light body slides along the ground and never passes through static geometry.
@@ -687,3 +692,21 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 - A replay that aims with `ScreenToWorldRayFrom` in the fixed step verifies at one hash in Debug, Release and Dist.
 
 **Parallelization**: W34.1 (characters versus Dynamic bodies), then W34.2 (the input bindings and the aim ray).
+
+---
+
+## M35 — Pause and entity state
+
+**Scope.** Phase 5, in readiness order with M28, M29, M31, M32 and M34. World Tree's briefs 12 and 13 (`Docs/Decisions/0042-world-tree-engine-program.md` decisions 2 and 3), added to the phase by the lead's decision of 2026-11-15, at the triage before the phase forks. Its milestone end runs `CI.py --require-clang-cl`, without the hardening stage (ADR 0042, the owner's answer 9).
+
+**Deliverables**
+- A world pause that scripts set and clear and automation reads and sets, distinct from the host's session pause (`play.pause`): while it holds, the world's phases (the native step, animation, physics and 2D physics, particles) do not step, bodies keep their velocities, only the behaviours that opt in run their callbacks and tasks, and the world's clock holds; the input and UI phases, the `OnUi*` callbacks and the start and destroy flushes run as today; the world's sounds pause or finish by the pause's choice while the `Ui` group plays on; the world pause is part of the state hash.
+- An entity switched off and on again before the disable is flushed keeps its behaviours' instances.
+- A prefab instance's rebuild applying each entity's overrides together, validated as one write, with every dropped override reported in `scene.open`'s diagnostics.
+
+**Acceptance**
+- A case pauses the world with bodies in flight and particles live, finds them where they were 60 ticks later while a menu still takes pointer and navigation input, and sees them moving again after the resume; a replay that pauses and resumes verifies at one hash in Debug, Release and Dist.
+- A behaviour whose entity was instantiated, switched off and on, and given a state in one tick starts with that state (a regression test that fails before the fix).
+- An instance whose `UiRect` anchors override the prefab's together keeps both after the prefab file changes and the scene is opened again; a dropped override appears in `scene.open`'s diagnostics.
+
+**Parallelization**: W35.1 (the world pause), then W35.2 (entity state), which may run beside W35.1 as a stream of its own, since it changes other files.
