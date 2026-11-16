@@ -2,6 +2,7 @@
 
 - **Status:** accepted. The product owner, 2026-11-15, after the setup gate of the World Tree program ran for hours on one editor method ("if we're taking hours and hours for a few changes, we're doing something wrong"), on the lead's proposal: "yes, adopt 1 and 2". Lead-owned.
 - **Date:** 2026-11-15.
+- **Amended 2026-11-16 (the first batch gate):** decision 4's measurement, in "The first batch gate" below.
 - **Decided by:** the product owner; recorded by the lead.
 - **Base:** main `bb51e110` (phase 5 forked: M28 to M35, `Docs/Decisions/0042-world-tree-engine-program.md`).
 - **Authority:** amends `Docs/Decisions/0023-verification-without-duplicate-work.md` for commits straight to main outside a milestone, and `Docs/Decisions/0042-world-tree-engine-program.md` decisions 6 and 8 and its merge train; Architecture §15.9; `AGENTS.md`'s Commit gate.
@@ -18,6 +19,25 @@
 2. **Only a fully gated tree is pushed.** Main is pushed to `origin` only at a tree that a full gate passed (a milestone-end or batch `CI.py`, or `PreCommit.py` when no milestone follows), with nothing after it but documentation-only commits. A commit landed on targeted checks is covered by the next full gate; a full gate that fails on it is fixed like any red gate (ADR 0023 decision 5).
 3. **Phase 5 lands in two batch gates** (ADR 0042 decision 6's "Landing together", made the rule): the first batch takes whichever of M28, M29, M31, M32, M34 and M35 are ready when the lead calls it; the second takes the rest, with M30 and M33 (M32 before M33 holds). Each batch is a landing branch from current main that merges its milestones in the merge train's order, each with its adaptations and its one review pass (its own diff and its merge), runs the targeted suites the merges touched, then one `CI.py --require-clang-cl` on the merged tree, and main fast-forwards to it. The second batch does the last lander's duties (`EngineVersionString` 0.6.0, FeatureTest and the editor-UI goldens on the merged tree), then main is pushed and the work pauses (ADR 0042, answer 8). A batch gate that fails on one milestone may land without it; that milestone joins the next batch. The first batch gate also runs the suites the setup gate skipped (ADR 0042 decision 2).
 4. **Next: the gate itself.** The lead measures the first batch gate's stages and proposes what the full gate runs twice or slowly for no extra assurance (for example the gpu suite's second API cap, or the unit suite in Debug as well as Release), to the product owner (`Docs/Backlog.md` §3).
+
+## The first batch gate
+
+Batch 1 (M29, M35, M31, M32 and M34 on `landing/batch1`, `9ac024e2`) ran one `CI.py --require-clang-cl` from 14:51 to 17:19 UTC on 2026-11-16, green in every stage at its first run: 8,892 s, 2 h 28 min, against the 6 h a milestone end was planned at. Its stages:
+
+| Stage | Time | Note |
+|---|---|---|
+| Setup, generate and the static checks | about 20 min | `CheckBuildConfig.py` 13.2 min (the workspace and 19 fixtures at about 40 s each), `Lint.py` 6.1 min, the rest under a minute |
+| Builds (Debug, Release, Dist) | 2.4 min | linked from the vendor cache |
+| unit Debug, Release | 30.4 min, 4.7 min | 5,165 and 5,164 cases |
+| gpu Debug (Vulkan 1.4, 1.3) | 17.7 min, 17.5 min | 596 cases each |
+| gpu Release (Vulkan 1.4, 1.3) | 6.2 min, 6.1 min | 596 cases each |
+| golden Release | 6.1 min | 52 goldens |
+| feature Debug, Release | 1.2 min, 0.1 min | |
+| automation Release | 13.7 min | 873 tests, method coverage 121/121 |
+| export, determinism, games | 0.4 min, 5.3 min, 9.1 min | 17 replays in four runs; four demos |
+| portability (generate, clang-cl Release and Dist) | 6.6 min | |
+
+The candidates for decision 4's proposal, where a stage repeats work for little assurance: `CheckBuildConfig.py`'s fixtures (13 min each gate, proving the checker still fails on fixtures that change only when the checker or the build files do) and the gpu suite's Vulkan 1.3 cap in Release as well as Debug (6 min). Together about 19 min of 148; the rest checks something no other stage does (Debug's iterator and heap checks, Release's optimizer, the 1.3 fallback, the four run modes). The lead puts them to the product owner at phase 5's end.
 
 ## Consequences
 
