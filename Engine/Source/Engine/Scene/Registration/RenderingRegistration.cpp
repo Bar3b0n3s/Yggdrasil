@@ -243,7 +243,8 @@ namespace Engine {
 			.Field("Range", &PointLightComponent::Range, "The distance at which the light's falloff reaches zero, in metres.",
 				{ .Min = Utils::MinRenderLength, .Unit = "m" })
 			.Field("CastShadows", &PointLightComponent::CastShadows,
-				"Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).")
+				"Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full "
+				"resolution; the shadow budget applies).")
 			.Field("SourceRadius", &PointLightComponent::SourceRadius,
 				"The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae.", { .Min = 0.0, .Unit = "m" });
 

@@ -10,6 +10,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <tuple>
 #include <utility>
 
 // The point-shadow plan (PointShadowMaps.h; Docs/Decisions/0034-m23-contract.md decision 3).
@@ -83,6 +84,7 @@ namespace Engine {
 				return std::nullopt;
 			PointShadowLight planned;
 			planned.LightIndex = index;
+			planned.Position = light.Position;
 			planned.NearClip = nearClip;
 			planned.FarClip = light.Range;
 			for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
@@ -145,22 +147,28 @@ namespace Engine {
 		}
 
 		// M29 (decision 3): the best `count` of `positions` (indices into candidates, in their order), a candidate for which
-		// `held` is true ranking with its importance times LightHysteresis; ties, and every rank without importance, keep the
-		// order. Returns the chosen positions in their order.
+		// `held` is true ranking with its importance times LightHysteresis, ties as CullLights breaks them (entity UUID, then
+		// snapshot index); without importance the first `count` in order. Returns the chosen positions in their order.
 		const auto chooseBest = [&candidates, &importance](std::vector<size_t> positions, size_t count, const auto& held)
 		{
 			if (positions.size() <= count)
 				return positions;
 			if (!importance.empty())
 			{
-				std::ranges::stable_sort(positions, [&candidates, &held](size_t left, size_t right)
+				std::ranges::sort(positions, [&candidates, &held](size_t left, size_t right)
 				{
 					const auto rank = [&candidates, &held](size_t position)
 					{
 						const Candidate& candidate = candidates[position];
 						return held(candidate) ? candidate.Importance * LightHysteresis : candidate.Importance;
 					};
-					return rank(left) > rank(right);
+					const float leftRank = rank(left);
+					const float rightRank = rank(right);
+					if (leftRank != rightRank)
+						return leftRank > rightRank;
+					const PointShadowLight& a = candidates[left].Planned;
+					const PointShadowLight& b = candidates[right].Planned;
+					return std::tie(a.Entity, a.LightIndex) < std::tie(b.Entity, b.LightIndex);
 				});
 			}
 			positions.resize(count);
@@ -186,7 +194,8 @@ namespace Engine {
 			Candidate& candidate = candidates[position];
 			candidate.Planned.Tier = std::ranges::binary_search(full, position) ? PointShadowTier::Full : PointShadowTier::Half;
 			const uint32_t capacity = candidate.Planned.Tier == PointShadowTier::Full ? MaxFullPointShadowLights : MaxHalfPointShadowLights;
-			if (candidate.Previous != nullptr && candidate.Previous->Tier == candidate.Planned.Tier && candidate.Previous->Layer < capacity)
+			if (candidate.Previous != nullptr && candidate.Previous->Tier == candidate.Planned.Tier && candidate.Previous->Layer < capacity
+				&& !taken[std::to_underlying(candidate.Planned.Tier)][candidate.Previous->Layer])
 			{
 				candidate.Planned.Layer = candidate.Previous->Layer;
 				taken[std::to_underlying(candidate.Planned.Tier)][candidate.Planned.Layer] = true;

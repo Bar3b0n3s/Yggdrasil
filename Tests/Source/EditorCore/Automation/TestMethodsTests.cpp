@@ -938,13 +938,15 @@ namespace Engine {
 				return image;
 			};
 			Test::AutomationTestClient client(fixture.GetEditor(), std::move(specification));
-			CallTestMethod(client, "project.setSettings", Json{ { "patch", Json{ { "Rendering", Json{ { "ShadowMapSize", 512 }, { "SsaoHalfResolution", true } } } } } });
+			CallTestMethod(client, "project.setSettings",
+				Json{ { "patch", Json{ { "Rendering", Json{ { "ShadowMapSize", 512 }, { "SsaoHalfResolution", true }, { "MaxShadedLights", 512 } } } } } });
 			WriteSuite(client, "return Test.Suite('Shot', function() Test.Case('capture', function() Test.Screenshot('Shot') end) end)");
 			const Json result = CallTestMethod(client, "test.run", Json::object());
 			CHECK(result["passed"] == Json(true));
 			REQUIRE(captured.has_value());
 			CHECK(captured->Quality.ShadowMapSize == 512);
 			CHECK(captured->Quality.SsaoHalfResolution);
+			CHECK(captured->Quality.MaxShadedLights == 512); // M29 (Docs/Decisions/0044-m29-light-limits.md decision 1)
 		}
 
 		// ADR 0022 decision 15 and "Integration": Test.ReloadScript takes the play-mode reload's type gate

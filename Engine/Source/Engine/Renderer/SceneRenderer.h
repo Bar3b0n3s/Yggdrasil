@@ -28,7 +28,7 @@
 //      deformed vertices bound as vertex binding 0 by every later pass instead of the mesh's, its previous positions kept.
 //   2. Directional cascades and 3. spot shadow atlas: shared shadow pipelines, per-view depth targets and constants (b1).
 //      Then M23's point-light shadow cubes (PointShadowMaps.h, the PointShadows row after SpotShadows): six faces for each of
-//      at most four shadow-casting point lights, drawn with the shadow casters' pipelines.
+//      at most 16 shadow-casting point lights in two tiers (M29), drawn with the shadow casters' pipelines.
 //   4. Depth/normal prepass: SceneDepth (reverse-Z) and SceneNormals (octahedral view-space normals, normal-mapped); Mask
 //      materials discard below AlphaCutoff here and in the forward pass. Picking adds the same visible surfaces to EntityId.
 //      M26 (Docs/Decisions/0037-m26-contract.md decisions 11 and 14): also SceneVelocity, the motion vectors (from the
@@ -365,7 +365,8 @@ namespace Engine {
 		// Errors returned before recording (nothing recorded, no OnSubmitted needed): InvalidState while the previous Render
 		// awaits its OnSubmitted (also asserted), or between the pipeline set's ReleaseGpuObjects and its CreatePipelines (a
 		// programmer error, also asserted); InvalidArgument for a debug view outside RenderDebugView or a
-		// Quality.ShadowMapSize that is not a power of two in [256, 8192]; a debug view's pipeline error other than Gpu (an
+		// Quality.ShadowMapSize that is not a power of two in [256, 8192] or (M29) a Quality.MaxShadedLights other than 256, 512,
+		// 1024 or 2048 (IsValidMaxShadedLights); a debug view's pipeline error other than Gpu (an
 		// invalid shader), or its Gpu error on a lost device; Gpu when a lazily created target of the Prepare stage or (M23)
 		// the view's instance buffer cannot be created. Partial errors (the view is still recorded, the first error is
 		// returned): InvalidArgument for a non-finite camera matrix (the view clears as without a camera) or world matrix

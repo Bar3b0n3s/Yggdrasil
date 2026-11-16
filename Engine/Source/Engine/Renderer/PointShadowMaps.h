@@ -66,7 +66,8 @@ namespace Engine {
 		uint32_t LightIndex = 0; // into the snapshot's Lights
 		UUID Entity{};           // M29: the light's entity, which the next render's hysteresis matches
 		PointShadowTier Tier = PointShadowTier::Full;
-		uint32_t Layer = 0; // its faces are its tier's cube array's layers 6 * Layer to 6 * Layer + 5
+		uint32_t Layer = 0;                   // its faces are its tier's cube array's layers 6 * Layer to 6 * Layer + 5
+		glm::vec3 Position = glm::vec3(0.0f); // the light's world position, the faces' origin
 		// ComputePointShadowFaceViewProjection of each face, in PointShadowFaceCount order.
 		std::array<glm::mat4, PointShadowFaceCount> FaceViewProjections{};
 		float NearClip = 0.05f; // max(SourceRadius, 0.05), at most Range / 2

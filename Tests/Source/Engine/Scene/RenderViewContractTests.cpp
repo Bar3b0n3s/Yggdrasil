@@ -105,6 +105,15 @@ namespace Engine {
 				REQUIRE_FALSE(result.has_value());
 				CHECK(result.error().GetCode() == ErrorCode::InvalidArgument);
 			}
+			// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): a shaded-light cap other than 256, 512, 1024 or 2048.
+			for (uint32_t cap : { 0u, 300u, 4096u })
+			{
+				RenderExtractionRequest request;
+				request.Quality.MaxShadedLights = cap;
+				const auto result = ExtractRenderSnapshot(fixture.GetScene(), request);
+				REQUIRE_FALSE(result.has_value());
+				CHECK(result.error().GetCode() == ErrorCode::InvalidArgument);
+			}
 			RenderExtractionRequest request;
 			request.Flags = static_cast<RenderViewFlags>(1u << 31);
 			CHECK_FALSE(ExtractRenderSnapshot(fixture.GetScene(), request).has_value());

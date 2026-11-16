@@ -27,6 +27,7 @@ namespace Engine {
 
 		constexpr AssetHandle CacheStripMesh(0x5c29000000000001);
 		constexpr AssetHandle CacheBlendMaterial(0x5c29000000000002);
+		constexpr AssetHandle CacheMaskMaterial(0x5c29000000000003);
 
 		// A strip of two quads along +Y facing +Z (1 m wide, 2 m tall), skinned to two joints (the bottom row to joint 0, the
 		// top to joint 1, the middle half to each), with one morph target that pushes the top row 0.5 m along +Z.
@@ -80,6 +81,7 @@ namespace Engine {
 				return item;
 			};
 			snapshot.Meshes.push_back(caster(glm::vec3(-1.5f, 0.0f, -4.0f), 0.3f, 41));
+			snapshot.Meshes.back().Materials = { CacheMaskMaterial }; // a Mask caster, whose material is part of its signature
 			MeshDrawItem strip = caster(glm::vec3(1.5f, 0.0f, -4.0f), 0.3f, 42);
 			strip.Mesh = CacheStripMesh;
 			strip.JointPalette = { glm::mat4(1.0f), glm::mat4(1.0f) };
@@ -111,12 +113,23 @@ namespace Engine {
 			snapshot.Camera.PreviousViewProjection = continues ? std::optional<glm::mat4>(snapshot.Camera.Projection * snapshot.Camera.View) : std::nullopt;
 		}
 
+		// The Mask caster's material (a white base colour, so every texel passes its alpha test), published again with each
+		// call: a new asset version, so a new GpuMaterial::Generation.
+		void PublishMaskMaterial(Test::SceneRendererIntegrationFixture& fixture, float cutoff)
+		{
+			Ref<MaterialData> mask = CreateRef<MaterialData>();
+			mask->AlphaMode = AlphaMode::Mask;
+			mask->AlphaCutoff = cutoff;
+			fixture.Assets().Publish(CacheMaskMaterial, mask);
+		}
+
 		void PublishCacheAssets(Test::SceneRendererIntegrationFixture& fixture)
 		{
 			fixture.Assets().Publish(CacheStripMesh, MakeCacheStrip());
 			Ref<MaterialData> blend = CreateRef<MaterialData>();
 			blend->AlphaMode = AlphaMode::Blend;
 			fixture.Assets().Publish(CacheBlendMaterial, blend);
+			PublishMaskMaterial(fixture, 0.5f);
 		}
 
 	}
@@ -164,8 +177,9 @@ namespace Engine {
 		}
 
 		// Each kind of change to a caster in a map's range (its transform, its skinning pose, its morph weights, its
-		// visibility, its material, a caster added) and a moved light draws that map again, while the maps it does not reach
-		// stay cached; a caster outside every map moving redraws none. Each image equals the render without the cache.
+		// visibility, its material, its Mask material or mesh published again, a caster added) and a moved light draws that map
+		// again, while the maps it does not reach stay cached; a caster outside every map moving redraws none; new shadow targets
+		// and a shader reload draw every map. Each image equals the render without the cache.
 		TEST_CASE("ShadowCache: a moved, skinned, morphed, hidden, re-materialized or added caster, or a moved light, draws its map again")
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -175,46 +189,63 @@ namespace Engine {
 			struct Change
 			{
 				std::string_view Name{};
-				std::function<void(RenderSnapshot&)> Apply{};
+				std::function<void(RenderSnapshot&, Test::SceneRendererIntegrationFixture&)> Apply{};
 				uint32_t CachedPoints = 0;
 				uint32_t CachedSpots = 0;
 			};
 			const std::vector<Change> changes = {
-				{ "a moved caster", [](RenderSnapshot& snapshot)
+				{ "a moved caster", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[CasterA].World = glm::translate(glm::mat4(1.0f), glm::vec3(-0.1f, 0.0f, 0.0f)) * snapshot.Meshes[CasterA].World;
 			}, 1, 0 },
-				{ "a skinned caster posed", [](RenderSnapshot& snapshot)
+				{ "a skinned caster posed", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[SkinnedB].JointPalette[1] = glm::translate(glm::mat4(1.0f), glm::vec3(0.25f, 0.0f, 0.0f));
 			}, 1, 1 },
-				{ "a morphed caster", [](RenderSnapshot& snapshot)
+				{ "a morphed caster", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[SkinnedB].MorphWeights[0] = 1.0f;
 			}, 1, 1 },
-				{ "a hidden caster", [](RenderSnapshot& snapshot)
+				{ "a hidden caster", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[CasterA].CastShadows = false;
 			}, 1, 0 },
-				{ "a re-materialized caster", [](RenderSnapshot& snapshot)
+				{ "a re-materialized caster", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[CasterA].Materials = { CacheBlendMaterial };
 			}, 1, 0 },
-				{ "an added caster", [](RenderSnapshot& snapshot)
+				{ "an added caster", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				MeshDrawItem added = snapshot.Meshes[CasterA];
 				added.World = glm::translate(glm::mat4(1.0f), glm::vec3(1.5f, 0.6f, -3.8f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.15f));
 				added.Entity = UUID(44);
 				snapshot.Meshes.push_back(added);
 			}, 1, 1 },
-				{ "a moved light", [](RenderSnapshot& snapshot)
+				{ "a moved light", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Lights[LightA].Position.x -= 0.1f;
 			}, 1, 1 },
-				{ "a caster outside every map moved", [](RenderSnapshot& snapshot)
+				{ "a caster outside every map moved", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[FarCaster].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.3f, 0.0f, 0.0f)) * snapshot.Meshes[FarCaster].World;
 			}, 2, 1 },
+				{ "a Mask material published again", [](RenderSnapshot&, Test::SceneRendererIntegrationFixture& fixture)
+			{
+				PublishMaskMaterial(fixture, 0.25f);
+			}, 1, 0 },
+				{ "a mesh published again", [](RenderSnapshot&, Test::SceneRendererIntegrationFixture& fixture)
+			{
+				fixture.Assets().Publish(CacheStripMesh, MakeCacheStrip());
+			}, 1, 1 },
+				{ "new shadow targets", [](RenderSnapshot&, Test::SceneRendererIntegrationFixture& fixture)
+			{
+				fixture.Renderer().ReleaseTargets();
+			}, 0, 0 },
+				{ "a shader reload", [](RenderSnapshot&, Test::SceneRendererIntegrationFixture& fixture)
+			{
+				const Status reloaded = fixture.Pipelines().ReloadShaders();
+				REQUIRE_MESSAGE(reloaded.has_value(), reloaded.error().ToString());
+			}, 0, 0 },
 			};
 			for (const Change& change : changes)
 			{
@@ -231,7 +262,7 @@ namespace Engine {
 
 				RenderSnapshot changed = base;
 				++changed.FrameIndex;
-				change.Apply(changed);
+				change.Apply(changed, fixture);
 				const Image cached = fixture.Render(changed);
 				const RenderStats stats = fixture.Renderer().GetRenderStats();
 				CHECK(stats.CachedPointShadows == change.CachedPoints);

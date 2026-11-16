@@ -14,6 +14,7 @@
 #include "Engine/Renderer/BrdfLut.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/LightClusters.h"
+#include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderSnapshot.h"
@@ -901,6 +902,12 @@ namespace Engine {
 					CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 0);
 					CHECK(setup.GetRenderer().GetRenderStats().MaxShadedLights == cap);
 				}
+				// A cap other than the four is refused before anything is recorded, as an invalid shadow map size is.
+				snapshot.Quality.MaxShadedLights = 300;
+				const Status refused = Render(gpu.GetDevice(), setup.GetRenderer(), snapshot);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				snapshot.Quality.MaxShadedLights = 2048;
 				const Image clustered = RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot);
 				snapshot.Quality.ClusteredLights = false;
 				CHECK(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot).Pixels == clustered.Pixels);
@@ -910,6 +917,92 @@ namespace Engine {
 				static_cast<void>(RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot));
 				CHECK(setup.GetRenderer().GetLastStats().Lights == 512);
 				CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 488);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 3; the review): the renderer carries its choices at the caps from
+		// one render to the next while the view continues its history, and forgets them at a reset. At the shaded-light cap,
+		// 255 strong fillers far from the cube take all but one place, and the held light (lighting the cube's left edge) and a
+		// newcomer (its right edge) compete for the last; at the point-shadow cap, 15 strong shadowed fillers take all but one
+		// shadow, and the held light and the newcomer, each casting a blocker's shadow onto the cube's face, compete for the
+		// sixteenth. A newcomer 1.2 times as important keeps out with the history and wins after a reset.
+		TEST_CASE("SceneRenderer: a light held at a cap keeps its place while the view continues its history, and loses it after a reset"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::AssetTestFixture assets;
+			{
+				RendererSetup setup(gpu, assets, 128, 128);
+				const auto red = [](const Image& image, uint32_t x)
+				{
+					return std::to_integer<int>(image.GetRow(64)[4 * static_cast<size_t>(x)]);
+				};
+				// The cube's front face spans pixels 52 to 76; x = -0.37 m and +0.37 m on it are pixels 55 and 73.
+				constexpr uint32_t Left = 55;
+				constexpr uint32_t Right = 73;
+				const auto render = [&gpu, &setup](RenderSnapshot snapshot, bool continuesHistory)
+				{
+					if (continuesHistory)
+						snapshot.Camera.PreviousViewProjection = snapshot.Camera.Projection * snapshot.Camera.View;
+					return RenderToImage(gpu.GetDevice(), setup.GetRenderer(), snapshot);
+				};
+
+				// The shaded-light cap.
+				const auto makeShaded = [](float newcomer)
+				{
+					RenderSnapshot snapshot = MakeCubeSnapshot(128, 128, 0.0f);
+					snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+					for (uint32_t index = 0; index < DefaultMaxShadedLights - 1; ++index)
+						snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point, .Intensity = 1000.0f, .Position = glm::vec3(0.0f, 1.5f, 0.0f), .Range = 0.01f, .Entity = UUID(100 + index) });
+					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point, .Intensity = 1.0f, .Position = glm::vec3(-0.6f, 0.0f, 1.2f), .Range = 1.0f, .Entity = UUID(1) });
+					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point, .Intensity = newcomer, .Position = glm::vec3(0.6f, 0.0f, 1.2f), .Range = 1.0f, .Entity = UUID(2) });
+					return snapshot;
+				};
+				const Image first = render(makeShaded(0.5f), false);
+				CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 1);
+				CHECK(red(first, Left) > red(first, Right) + 10); // the held light shades, the newcomer is dropped
+				const Image kept = render(makeShaded(1.2f), true);
+				CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 1);
+				CHECK(red(kept, Left) > red(kept, Right) + 10);
+				const Image afresh = render(makeShaded(1.2f), false);
+				CHECK(red(afresh, Right) > red(afresh, Left) + 10);
+
+				// The point-shadow cap.
+				const auto makeShadowed = [](float newcomer)
+				{
+					RenderSnapshot snapshot = MakeCubeSnapshot(128, 128, 0.0f);
+					snapshot.Environment.FallbackColor = glm::vec3(0.0f);
+					snapshot.Meshes[0].CastShadows = false;
+					for (const float x : { -0.75f, 0.75f })
+					{
+						snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(x, 0.0f, 0.85f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.3f)),
+							.Mesh = BuiltinAssetHandles::CubeMesh,
+							.Entity = UUID(x < 0.0f ? 11 : 12) });
+					}
+					for (uint32_t index = 0; index < MaxPointShadowLights - 1; ++index)
+					{
+						snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point, .Intensity = 1000.0f, .Position = glm::vec3(0.0f, 1.5f, 0.0f), .Range = 0.2f, .SourceRadius = 0.0f, .CastShadows = true, .Entity = UUID(200 + index) });
+					}
+					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point, .Intensity = 0.5f, .Position = glm::vec3(-1.2f, 0.0f, 1.2f), .Range = 2.5f, .SourceRadius = 0.0f, .CastShadows = true, .Entity = UUID(1) });
+					snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Point, .Intensity = 0.5f * newcomer, .Position = glm::vec3(1.2f, 0.0f, 1.2f), .Range = 2.5f, .SourceRadius = 0.0f, .CastShadows = true, .Entity = UUID(2) });
+					return snapshot;
+				};
+				// Each light's blocker shadows x = -0.3 m (the held light's) or +0.3 m (the newcomer's): pixels 57 and 71. The
+				// other light reaches both, so a shadow that falls removes one light's share from its spot only.
+				constexpr uint32_t HeldShadow = 57;
+				constexpr uint32_t NewcomerShadow = 71;
+				const Image shadowFirst = render(makeShadowed(0.5f), false);
+				CHECK(setup.GetRenderer().GetRenderStats().ShadowedPointLights == MaxPointShadowLights);
+				CHECK(setup.GetRenderer().GetRenderStats().DroppedPointShadows == 1);
+				const Image shadowKept = render(makeShadowed(1.2f), true);
+				const Image shadowAfresh = render(makeShadowed(1.2f), false);
+				CHECK(setup.GetRenderer().GetRenderStats().DroppedPointShadows == 1);
+				// Kept: the held light shadows its spot and the newcomer lights its own unshadowed; afresh, the reverse.
+				CHECK(red(shadowKept, HeldShadow) + 10 < red(shadowAfresh, HeldShadow));
+				CHECK(red(shadowKept, NewcomerShadow) > red(shadowAfresh, NewcomerShadow) + 10);
+				CHECK(red(shadowFirst, HeldShadow) + 10 < red(shadowAfresh, HeldShadow));
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

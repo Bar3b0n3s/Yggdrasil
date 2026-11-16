@@ -588,16 +588,20 @@ namespace Engine {
 			const RenderingSettings original = editor.GetProject().GetSettings().Rendering;
 			CHECK(cache.GetRenderQuality().ShadowMapSize == original.ShadowMapSize);
 			CHECK(cache.GetRenderQuality().SsaoHalfResolution == original.SsaoHalfResolution);
+			CHECK(cache.GetRenderQuality().MaxShadedLights == original.MaxShadedLights);
 			const auto first = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
 			REQUIRE(first);
 			REQUIRE(cache.Request(MakeContentThumbnailRequest(editor, cache, texture)));
 			REQUIRE(rendered.size() == 2);
 
-			const auto setQuality = [&fixture](uint32_t shadowMapSize, bool halfResolution)
+			const auto setQuality = [&fixture](uint32_t shadowMapSize, bool halfResolution, uint32_t maxShadedLights)
 			{
-				REQUIRE(fixture.Call("project.setSettings", Json{ { "patch", Json{ { "Rendering", Json{ { "ShadowMapSize", shadowMapSize }, { "SsaoHalfResolution", halfResolution } } } } } }));
+				REQUIRE(fixture.Call("project.setSettings",
+					Json{ { "patch",
+						Json{ { "Rendering",
+							Json{ { "ShadowMapSize", shadowMapSize }, { "SsaoHalfResolution", halfResolution }, { "MaxShadedLights", maxShadedLights } } } } } }));
 			};
-			setQuality(original.ShadowMapSize == 512 ? 1024 : 512, !original.SsaoHalfResolution);
+			setQuality(original.ShadowMapSize == 512 ? 1024 : 512, !original.SsaoHalfResolution, original.MaxShadedLights);
 			CHECK(cache.GetRenderQuality().ShadowMapSize == editor.GetProject().GetSettings().Rendering.ShadowMapSize);
 			CHECK(cache.GetRenderQuality().SsaoHalfResolution == !original.SsaoHalfResolution);
 			// The captured material image stays displayable until regenerated; a texture's decoded preview has no quality.
@@ -625,13 +629,28 @@ namespace Engine {
 			CHECK(reused->Cached);
 			CHECK(reused->Path == second->Path);
 			CHECK_FALSE(FileSystem::Exists(FileSystem::PathFromUtf8(first->Path)));
-			setQuality(original.ShadowMapSize, original.SsaoHalfResolution);
+			setQuality(original.ShadowMapSize, original.SsaoHalfResolution, original.MaxShadedLights);
 			cache.Reset();
 			REQUIRE(cache.BindProject(3));
 			const auto restored = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
 			REQUIRE(restored);
 			CHECK_FALSE(restored->Cached);
 			CHECK(rendered.size() == 4);
+
+			// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): the shaded-light cap alone changes the quality, so the
+			// captured image goes stale and the new one takes a disk entry of its own key.
+			setQuality(original.ShadowMapSize, original.SsaoHalfResolution, original.MaxShadedLights == 1024 ? 2048 : 1024);
+			CHECK(cache.GetRenderQuality().MaxShadedLights == editor.GetProject().GetSettings().Rendering.MaxShadedLights);
+			CHECK(cache.GetRenderQuality().MaxShadedLights != original.MaxShadedLights);
+			const auto capStale = cache.Find(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(capStale);
+			REQUIRE(capStale->has_value());
+			CHECK((*capStale)->Stale);
+			const auto capped = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(capped);
+			CHECK_FALSE(capped->Cached);
+			CHECK(capped->Path != restored->Path);
+			CHECK(rendered.size() == 5);
 		}
 
 		TEST_CASE("ThumbnailCache: a sorting-layer change marks captured images stale and keys their disk entries")

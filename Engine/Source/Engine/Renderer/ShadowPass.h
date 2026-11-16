@@ -70,6 +70,24 @@ namespace Engine {
 		std::vector<MeshInstanceBatch> Batches{};
 	};
 
+	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4; the review): a world-space box of the shadow pass's culling,
+	// which ShadowPass::Record tests before any view's frustum: for each shadowed light (a point light's cube of Range, a spot
+	// tile's frustum's box), the caster draws whose box overlaps the light's are the only ones its views cull further.
+	struct ShadowBox
+	{
+		glm::vec3 Centre = glm::vec3(0.0f);
+		glm::vec3 HalfExtent = glm::vec3(0.0f);
+	};
+
+	// The box of a caster draw's local `bounds` moved by its `world` matrix: the box of the moved corners, so it holds every
+	// moved point of the bounds whatever the matrix's rotation, scale or shear. Empty bounds, which no shadow view culls,
+	// give an infinite box at the world matrix's origin.
+	[[nodiscard]] ShadowBox ComputeShadowCasterBox(const Aabb& bounds, const glm::mat4& world);
+	// Whether a caster's box may reach a light's: overlapping on every axis, with a margin against rounding of a thousandth of
+	// the half extents, a hundred-thousandth of the centres' coordinates and a tenth of a millimetre, so a caster it rejects
+	// lies wholly outside and no view inside the light's box records it.
+	[[nodiscard]] bool ShadowBoxesOverlap(const ShadowBox& caster, const ShadowBox& light);
+
 	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): the static shadow cache, per-view renderer state that
 	// ShadowPass::Record reads and writes: the signature of what each point-shadow layer group of either tier and the spot atlas
 	// hold (0: nothing reusable). A point light's signature hashes its tier, layer group, face size, clip planes and each face's
@@ -111,8 +129,8 @@ namespace Engine {
 		const PointShadowSet* Points = nullptr;                        // borrowed for Record only
 		nvrhi::ITexture* PointTarget = nullptr;                        // GetPointTargetDesc(Full), the Full tier's cubes
 		std::span<const nvrhi::FramebufferHandle> PointFramebuffers{}; // CreateFramebuffers(PointTarget), one per layer
-		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): the Half tier's cubes (GetPointTargetDesc(Half)); null
-		// while no planned light is Half.
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): the Half tier's cubes (GetPointTargetDesc(Half)); may be
+		// non-null while no planned light is Half, and is read only for Half lights (then required).
 		nvrhi::ITexture* PointHalfTarget = nullptr;
 		std::span<const nvrhi::FramebufferHandle> PointHalfFramebuffers{}; // CreateFramebuffers(PointHalfTarget), one per layer
 		// M29 (decision 4): the view's static shadow cache, read and written by Record; null draws every map.

@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <numeric>
 #include <span>
 #include <tuple>
@@ -112,16 +113,58 @@ namespace Engine {
 			});
 		}
 
+		// M29 (decision 4; the review): the draws (ascending indices) whose box (`boxes`, ComputeShadowCasterBox of each)
+		// overlaps `light`'s: the only draws a view inside that box can record. A point light's six faces lie inside its cube
+		// of Range; a spot tile's frustum inside the box of its eight corners.
+		static void SelectShadowCandidates(std::span<const ShadowBox> boxes, const ShadowBox& light, std::vector<uint32_t>& candidates)
+		{
+			candidates.clear();
+			for (uint32_t index = 0; index < boxes.size(); ++index)
+			{
+				if (ShadowBoxesOverlap(boxes[index], light))
+					candidates.push_back(index);
+			}
+		}
+
+		// The box of a view's frustum: the eight corners of its clip volume (x and y in [-1, 1], reverse-Z depth in [0, 1]) moved
+		// to world space through the inverse view-projection.
+		[[nodiscard]] static ShadowBox GetShadowFrustumBox(const glm::mat4& viewProjection)
+		{
+			const glm::mat4 inverse = glm::inverse(viewProjection);
+			glm::vec3 lower(std::numeric_limits<float>::infinity());
+			glm::vec3 upper(-std::numeric_limits<float>::infinity());
+			for (uint32_t corner = 0; corner < 8; ++corner)
+			{
+				const glm::vec4 world = inverse
+					* glm::vec4((corner & 1U) != 0 ? 1.0f : -1.0f, (corner & 2U) != 0 ? 1.0f : -1.0f, (corner & 4U) != 0 ? 1.0f : 0.0f, 1.0f);
+				const glm::vec3 point = glm::vec3(world) / world.w;
+				lower = glm::min(lower, point);
+				upper = glm::max(upper, point);
+			}
+			return { .Centre = (lower + upper) * 0.5f, .HalfExtent = (upper - lower) * 0.5f };
+		}
+
+		// The candidates `viewProjection` does not cull (IsOutsideShadow), in order: the one culling that a view's signature
+		// hashes and RecordView records, so the two agree by construction.
+		static void CullShadowView(const ShadowCasterSet& casters, std::span<const uint32_t> candidates, const glm::mat4& viewProjection, bool pancake,
+			std::vector<uint32_t>& visible)
+		{
+			visible.clear();
+			for (const uint32_t index : candidates)
+			{
+				const ShadowCasterDraw& draw = casters.Draws[index];
+				if (!IsOutsideShadow(draw.Bounds, viewProjection * draw.World, pancake))
+					visible.push_back(index);
+			}
+		}
+
 		// M29 (decision 4): one shadow view (a cube face or a spot tile) into a map's signature: its view-projection and the
-		// signatures of the draws its frustum does not cull, in draw order, as RecordView records them.
-		static void HashShadowView(XXH64Hasher& hasher, const ShadowCasterSet& casters, const glm::mat4& viewProjection)
+		// signatures of its visible draws (CullShadowView), in draw order.
+		static void HashShadowView(XXH64Hasher& hasher, const ShadowCasterSet& casters, const glm::mat4& viewProjection, std::span<const uint32_t> visible)
 		{
 			HashShadowValue(hasher, viewProjection);
-			for (const ShadowCasterDraw& draw : casters.Draws)
-			{
-				if (!IsOutsideShadow(draw.Bounds, viewProjection * draw.World, false))
-					hasher.UpdateU64(draw.Signature);
-			}
+			for (const uint32_t index : visible)
+				hasher.UpdateU64(casters.Draws[index].Signature);
 		}
 
 	}
@@ -146,11 +189,23 @@ namespace Engine {
 
 		// The Mask casters' material sets (null for Opaque casters), one per draw of `casters`, from the caller's cache.
 		[[nodiscard]] Result<std::vector<nvrhi::IBindingSet*>> ResolveMaterialSets(PassBindingCache& bindings, const ShadowCasterSet& casters);
-		// One face: every batch's runs of the draws the face's frustum does not cull, each one instanced draw. `reflected`: the
-		// face's projection is a reflection (a point-shadow face), so the draws use their ReflectedVariant.
+		// One face: the runs of `visible` (the face's CullShadowView, ascending) that are adjacent draws of one batch
+		// (`batchOf`: each draw's batch), each one instanced draw. `reflected`: the face's projection is a reflection (a
+		// point-shadow face), so the draws use their ReflectedVariant.
 		[[nodiscard]] Status RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
 			std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport,
-			nvrhi::IBuffer& casterConstants, uint32_t slot, const ShadowCasterConstants& constants, RenderPassCounters& counters, bool reflected);
+			nvrhi::IBuffer& casterConstants, uint32_t slot, std::span<const uint32_t> visible, std::span<const uint32_t> batchOf, RenderPassCounters& counters,
+			bool reflected);
+
+		// M29 (the review): CPU buffers every Record reuses, so a steady-state record allocates nothing: the casters' boxes
+		// and batches, every draw (a cascade's candidates), a light's candidates, and the visible draws of a cascade or point
+		// face and of each spot tile.
+		std::vector<ShadowBox> Boxes{};
+		std::vector<uint32_t> BatchOf{};
+		std::vector<uint32_t> EveryDraw{};
+		std::vector<uint32_t> Candidates{};
+		std::array<std::vector<uint32_t>, PointShadowFaceCount> FaceVisible{};
+		std::array<std::vector<uint32_t>, MaxSpotShadowLights> TileVisible{};
 	};
 
 	ShadowPass::ShadowPass(ConstructionKey /*key*/)
@@ -159,6 +214,23 @@ namespace Engine {
 	}
 
 	ShadowPass::~ShadowPass() = default;
+
+	ShadowBox ComputeShadowCasterBox(const Aabb& bounds, const glm::mat4& world)
+	{
+		if (bounds.IsEmpty())
+			return { .Centre = glm::vec3(world[3]), .HalfExtent = glm::vec3(std::numeric_limits<float>::infinity()) };
+		const glm::vec3 centre = (bounds.Min + bounds.Max) * 0.5f;
+		const glm::vec3 halfExtent = (bounds.Max - bounds.Min) * 0.5f;
+		// Each world axis's reach is the sum of the local half extents along it (the absolute matrix).
+		return { .Centre = glm::vec3(world * glm::vec4(centre, 1.0f)),
+			.HalfExtent = glm::abs(glm::vec3(world[0])) * halfExtent.x + glm::abs(glm::vec3(world[1])) * halfExtent.y + glm::abs(glm::vec3(world[2])) * halfExtent.z };
+	}
+
+	bool ShadowBoxesOverlap(const ShadowBox& caster, const ShadowBox& light)
+	{
+		const glm::vec3 reach = (caster.HalfExtent + light.HalfExtent) * 1.001f + (glm::abs(caster.Centre) + glm::abs(light.Centre)) * 1e-5f + glm::vec3(1e-4f);
+		return glm::all(glm::lessThanEqual(glm::abs(caster.Centre - light.Centre), reach));
+	}
 
 	Result<Scope<ShadowPass>> ShadowPass::Create(GraphicsDevice& device, PipelineFactory& pipelines)
 	{
@@ -407,7 +479,8 @@ namespace Engine {
 
 	Status ShadowPass::State::RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
 		std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport,
-		nvrhi::IBuffer& casterConstants, uint32_t slot, const ShadowCasterConstants& constants, RenderPassCounters& counters, bool reflected)
+		nvrhi::IBuffer& casterConstants, uint32_t slot, std::span<const uint32_t> visible, std::span<const uint32_t> batchOf, RenderPassCounters& counters,
+		bool reflected)
 	{
 		// The slot's range of the caller's buffer (NVRHI binds constant-buffer ranges in whole 256-byte units): the same desc
 		// every frame, so the caller's cache keeps the sets.
@@ -448,31 +521,25 @@ namespace Engine {
 			++counters.DrawCalls;
 			counters.Triangles += draw.IndexCount / 3 * count;
 		};
-		const bool pancake = constants.Bias.z != 0.0f;
-		for (const MeshInstanceBatch& batch : casters.Batches)
+		// The runs of the visible draws: adjacent draws of one batch, whose instance records are adjacent. Batches cover the
+		// draws in order, so these are the runs each batch's visible draws form, recorded in the same order.
+		uint32_t runFirst = 0;
+		uint32_t runCount = 0;
+		for (const uint32_t index : visible)
 		{
-			// The runs of the batch's draws inside the face's frustum: adjacent draws, whose instance records are adjacent.
-			uint32_t runFirst = batch.First;
-			uint32_t runCount = 0;
-			for (uint32_t index = batch.First; index < batch.First + batch.Count; ++index)
+			if (runCount != 0 && (index != runFirst + runCount || batchOf[index] != batchOf[runFirst]))
 			{
-				const ShadowCasterDraw& draw = casters.Draws[index];
-				ENGINE_CORE_ASSERT(index == batch.First || draw.Instance == casters.Draws[index - 1].Instance + 1,
-					"the instance records of a batch's draws must be adjacent");
-				if (Utils::IsOutsideShadow(draw.Bounds, constants.ViewProjection * draw.World, pancake))
-				{
-					if (runCount != 0)
-						recordRun(runFirst, runCount);
-					runCount = 0;
-					continue;
-				}
-				if (runCount == 0)
-					runFirst = index;
-				++runCount;
-			}
-			if (runCount != 0)
 				recordRun(runFirst, runCount);
+				runCount = 0;
+			}
+			ENGINE_CORE_ASSERT(runCount == 0 || casters.Draws[index].Instance == casters.Draws[index - 1].Instance + 1,
+				"the instance records of a batch's draws must be adjacent");
+			if (runCount == 0)
+				runFirst = index;
+			++runCount;
 		}
+		if (runCount != 0)
+			recordRun(runFirst, runCount);
 		return {};
 	}
 
@@ -497,6 +564,16 @@ namespace Engine {
 					&& inputs.Instances->getDesc().byteSize >= (static_cast<uint64_t>(casters.Draws.back().Instance) + 1) * sizeof(InstanceRecord)),
 			"Shadow casters need the view's Instances buffer holding their records");
 		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::IBindingSet*> materialSets, m_State->ResolveMaterialSets(bindings, casters));
+		State& state = *m_State;
+		state.Boxes.clear();
+		for (const ShadowCasterDraw& draw : casters.Draws)
+			state.Boxes.push_back(ComputeShadowCasterBox(draw.Bounds, draw.World));
+		state.BatchOf.assign(casters.Draws.size(), 0);
+		for (uint32_t batch = 0; batch < casters.Batches.size(); ++batch)
+			for (uint32_t index = casters.Batches[batch].First; index < casters.Batches[batch].First + casters.Batches[batch].Count; ++index)
+				state.BatchOf[index] = batch;
+		state.EveryDraw.resize(casters.Draws.size());
+		std::iota(state.EveryDraw.begin(), state.EveryDraw.end(), 0U);
 
 		// Every slot this record uses, written with one command before any draw: cascades in slots [0, 4), spot tiles from
 		// slot MaxShadowCascades, point faces from ShadowCasterFirstPointSlot. Each slot is ShadowCasterSlotStride bytes, so
@@ -565,9 +642,10 @@ namespace Engine {
 					"Cascade framebuffer {} does not attach slice {} of the cascade target", index, index);
 				if (!casters.Draws.empty())
 				{
-					ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *framebuffer,
+					Utils::CullShadowView(casters, state.EveryDraw, constants[index].ViewProjection, constants[index].Bias.z != 0.0f, state.FaceVisible[0]);
+					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *framebuffer,
 						nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, index,
-						constants[index], scope.Counters, false));
+						state.FaceVisible[0], state.BatchOf, scope.Counters, false));
 				}
 			}
 			result.DrawCalls += scope.Counters.DrawCalls;
@@ -587,13 +665,16 @@ namespace Engine {
 			// M29 (decision 4): the atlas is cleared whole (NVRHI clears whole subresources), so it is reused or drawn whole.
 			XXH64Hasher signature;
 			signature.UpdateU64(desc.width);
-			for (const SpotShadowTile& tile : inputs.Spots->Tiles)
+			for (size_t index = 0; index < inputs.Spots->Tiles.size(); ++index)
 			{
+				const SpotShadowTile& tile = inputs.Spots->Tiles[index];
+				Utils::SelectShadowCandidates(state.Boxes, Utils::GetShadowFrustumBox(tile.ViewProjection), state.Candidates);
+				Utils::CullShadowView(casters, state.Candidates, tile.ViewProjection, false, state.TileVisible[index]);
 				signature.UpdateU64(tile.Slot);
 				signature.UpdateU64(tile.Size);
 				Utils::HashShadowValue(signature, tile.NearClip);
 				Utils::HashShadowValue(signature, tile.FarClip);
-				Utils::HashShadowView(signature, casters, tile.ViewProjection);
+				Utils::HashShadowView(signature, casters, tile.ViewProjection, state.TileVisible[index]);
 			}
 			const uint64_t atlas = Utils::FinishShadowSignature(signature);
 			const bool cached = inputs.Cache != nullptr && inputs.Cache->Atlas == atlas;
@@ -612,8 +693,8 @@ namespace Engine {
 				const float size = static_cast<float>(tile.Size - 2 * SpotShadowGuardTexels);
 				if (!casters.Draws.empty())
 				{
-					ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *inputs.AtlasFramebuffer,
-						nvrhi::Viewport(left, left + size, top, top + size, 0, 1), *inputs.CasterConstants, slot, constants[slot],
+					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *inputs.AtlasFramebuffer,
+						nvrhi::Viewport(left, left + size, top, top + size, 0, 1), *inputs.CasterConstants, slot, state.TileVisible[index], state.BatchOf,
 						scope.Counters, false));
 				}
 			}
@@ -659,8 +740,13 @@ namespace Engine {
 				signature.UpdateU64(desc.width);
 				Utils::HashShadowValue(signature, light.NearClip);
 				Utils::HashShadowValue(signature, light.FarClip);
-				for (const glm::mat4& viewProjection : light.FaceViewProjections)
-					Utils::HashShadowView(signature, casters, viewProjection);
+				// Every face lies inside the light's cube of FarClip (the Range) around it.
+				Utils::SelectShadowCandidates(state.Boxes, ShadowBox{ .Centre = light.Position, .HalfExtent = glm::vec3(light.FarClip) }, state.Candidates);
+				for (uint32_t face = 0; face < PointShadowFaceCount; ++face)
+				{
+					Utils::CullShadowView(casters, state.Candidates, light.FaceViewProjections[face], false, state.FaceVisible[face]);
+					Utils::HashShadowView(signature, casters, light.FaceViewProjections[face], state.FaceVisible[face]);
+				}
 				const uint64_t map = Utils::FinishShadowSignature(signature);
 				uint64_t* held = nullptr;
 				if (inputs.Cache != nullptr)
@@ -684,9 +770,9 @@ namespace Engine {
 					const uint32_t slot = ShadowCasterFirstPointSlot + static_cast<uint32_t>(index) * PointShadowFaceCount + face;
 					if (!casters.Draws.empty())
 					{
-						ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *framebuffer,
+						ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *framebuffer,
 							nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, slot,
-							constants[slot], scope.Counters, true));
+							state.FaceVisible[face], state.BatchOf, scope.Counters, true));
 					}
 				}
 				if (held != nullptr)

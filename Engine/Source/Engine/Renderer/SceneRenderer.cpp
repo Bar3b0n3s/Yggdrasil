@@ -1592,8 +1592,11 @@ namespace Engine {
 			for (uint32_t index = 0; index < snapshot.Lights.size(); ++index)
 			{
 				const LightData& light = snapshot.Lights[index];
+				// M29 (the review): the type first, so a view of thousands of point lights searches its list for none of them.
+				if (light.Type != RenderLightType::Directional || !light.CastShadows)
+					continue;
 				const auto visible = std::find(culled.Visible.begin(), culled.Visible.end(), index);
-				if (light.Type != RenderLightType::Directional || !light.CastShadows || visible == culled.Visible.end())
+				if (visible == culled.Visible.end())
 					continue;
 				auto planned = BuildShadowCascades(camera, light, index, snapshot.Quality.ShadowMapSize);
 				if (!planned)

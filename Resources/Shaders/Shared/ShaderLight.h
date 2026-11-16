@@ -30,7 +30,7 @@ inline constexpr uint32_t ShaderLightNoShadowSlot = 0xFFFFFFFF;
 #endif
 
 	// One light of the view's light list: t0 of descriptor set 0 (§8.4 "t0 Lights (StructuredBuffer)"), at most
-	// MaxVisibleLights entries (Renderer/RenderPrepare.h) in CullLights' order (directional lights first), of which
+	// RenderQualitySettings::MaxShadedLights entries in CullLights' order (Renderer/RenderPrepare.h; directional lights first), of which
 	// ViewConstants::LightCount are valid. Written once per view by the scene renderer from the snapshot's LightData (§8.5
 	// artist units):
 	//   - Position (world space; point and spot) and Direction (world space, unit: where the light shines, its local -Z);

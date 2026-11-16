@@ -131,13 +131,14 @@ namespace Engine {
 		};
 		if (ranked.size() > MaxSpotShadowLights)
 		{
-			std::ranges::sort(ranked, [&byImportance, &previousTile](const RankedShadowSpot& left, const RankedShadowSpot& right)
+			std::ranges::sort(ranked, [&previousTile](const RankedShadowSpot& left, const RankedShadowSpot& right)
 			{
 				const float leftRank = previousTile(left) != nullptr ? left.Importance * LightHysteresis : left.Importance;
 				const float rightRank = previousTile(right) != nullptr ? right.Importance * LightHysteresis : right.Importance;
 				if (leftRank != rightRank)
 					return leftRank > rightRank;
-				return byImportance(left, right);
+				// Ties as CullLights breaks them (ADR 0044 decision 3): entity UUID, then snapshot index.
+				return std::tie(left.Entity, left.Index) < std::tie(right.Entity, right.Index);
 			});
 			result.Dropped = static_cast<uint32_t>(ranked.size() - MaxSpotShadowLights);
 			ranked.resize(MaxSpotShadowLights);

@@ -84,7 +84,7 @@ namespace Engine {
 	TEST_SUITE(Test::GpuSuite)
 	{
 		// Record checks its inputs before it records anything: every buffer, a grid of at least one cluster and a mask
-		// buffer that holds the grid's clusters.
+		// buffer that holds the grid's clusters (M29: and a word count of 1 to MaxLightClusterWordCount).
 		TEST_CASE("LightClusterPass: Record refuses missing buffers and a mask buffer smaller than its grid's")
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -117,6 +117,11 @@ namespace Engine {
 				withoutLights.Lights = nullptr;
 				LightClusterPassInputs emptyGrid = complete;
 				emptyGrid.Grid = {};
+				// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): a word count of 0, or beyond the 2,048-light ceiling's.
+				LightClusterPassInputs noWords = complete;
+				noWords.Grid.WordCount = 0;
+				LightClusterPassInputs tooManyWords = complete;
+				tooManyWords.Grid.WordCount = MaxLightClusterWordCount + 1;
 				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
 				REQUIRE(list.has_value());
 				PassBindingCache bindings;
@@ -127,7 +132,7 @@ namespace Engine {
 				});
 				(*list)->open();
 				// `complete`'s mask buffer holds one cluster fewer than the grid has.
-				for (const LightClusterPassInputs& inputs : { complete, withoutLights, emptyGrid })
+				for (const LightClusterPassInputs& inputs : { complete, withoutLights, emptyGrid, noWords, tooManyWords })
 				{
 					const Status refused = (*pass)->Record(**list, recording, bindings, inputs);
 					REQUIRE_FALSE(refused.has_value());
