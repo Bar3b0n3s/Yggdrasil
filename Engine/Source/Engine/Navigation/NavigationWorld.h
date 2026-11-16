@@ -55,8 +55,9 @@ namespace Engine {
 	struct NavigationPath
 	{
 		std::vector<glm::vec3> Corners{}; // at least one
-		// True when the corners end at the goal's point on the mesh; false for the partial path to the reachable point
-		// closest to an unreachable goal, and for a path cut at a cap (the corners, the corridor or the node pool).
+		// True when the corners end at the goal's point on the mesh, a path of exactly the corner cap included; false for the
+		// partial path to the reachable point closest to an unreachable goal, and for a path cut at a cap (the corners, the
+		// corridor or the node pool).
 		bool Complete = false;
 	};
 

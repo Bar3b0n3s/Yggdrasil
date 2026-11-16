@@ -346,14 +346,14 @@ namespace Engine {
 			&cornerCount, static_cast<int>(maxCorners), 0);
 		if (dtStatusFailed(straightened) || cornerCount <= 0)
 			return std::nullopt;
-		if (dtStatusDetail(straightened, DT_BUFFER_TOO_SMALL))
-			complete = false;
 
 		NavigationPath path;
-		path.Complete = complete;
 		path.Corners.reserve(static_cast<size_t>(cornerCount));
 		for (int corner = 0; corner < cornerCount; ++corner)
 			path.Corners.push_back(Utils::ToVector(&corners[static_cast<size_t>(corner) * 3]));
+		// Detour reports a full corner buffer even when the corner that filled it is the end (the review of W30.2), so the
+		// path reaches its goal when its last corner is the goal's point, which Detour appends unchanged.
+		path.Complete = complete && path.Corners.back() == end;
 		return path;
 	}
 

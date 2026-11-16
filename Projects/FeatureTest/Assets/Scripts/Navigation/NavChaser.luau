@@ -1,8 +1,8 @@
 --!strict
 -- Navigation.scene's chasers (M30; Docs/Decisions/0045-m30-navigation.md decision 13): each finds a path to the Warden
--- with Navigation.FindPath in the fixed step every RepathTicks steps (three times a second at 20), staggered by Offset,
--- and walks its corners at Speed. The husks are the Small agent type, the brute the Large one; Navigation.replay records
--- them chasing the Warden around the lava channel.
+-- with Navigation.FindPath in the fixed step every RepathTicks steps (3.2 times a second at 20 and FeatureTest's 64 Hz),
+-- staggered by Offset, and walks its corners at Speed. The husks are the Small agent type, the brute the Large one;
+-- Navigation.replay records them chasing the Warden around the lava channel.
 export type NavChaser = ScriptInstance & {
 	Agent: string,
 	Speed: number,

@@ -13,10 +13,11 @@ then a --renderer none editor measures:
   - navigation/150Agents/tickMs (M30, Docs/Decisions/0045-m30-navigation.md decision 13; World Tree's brief 1, "150
     agents each asking for a path two or three times a second must fit comfortably in a 60 Hz fixed step"): the baked
     Assets/Scenes/Navigation.scene saved as a copy with 150 more of its chasers
-    (Assets/Scripts/Navigation/NavChaser.luau), each finding a path to its Warden with Navigation.FindPath 2.5 times a
-    second (every 24 fixed steps, staggered, about 6 paths a tick), half of them the Small agent type and half the
-    Large; in a lockstep session, the play.step time per tick of 8 calls of 30 ticks with render "None", after a
-    warm-up;
+    (Assets/Scripts/Navigation/NavChaser.luau) on walkable floor, each finding a path to its Warden with
+    Navigation.FindPath every 24 fixed steps (2.67 times a second at FeatureTest's 64 Hz, staggered: about 6 paths a
+    tick), half of them the Small agent type and half the Large; in a lockstep session, the play.step time per tick of
+    8 calls of 30 ticks with render "None", after a warm-up. The metric is captured only when every one of the 150
+    found a path that reaches the Warden;
   - replay/Determinism/tickMs: Assets/Tests/Replays/Determinism.replay replayed 3 times.
 --only selects some of the parts (playCopy, scenes, navigation, replay), a development aid for one measurement.
 
@@ -57,7 +58,21 @@ NAVIGATION_SCENE = "Assets/Scenes/Navigation.scene"
 NAVIGATION_PERF_SCENE = "Assets/Scenes/PerfNavigation150.scene"  # beside the scene it copies
 NAVIGATION_CHASER = "Assets/Scripts/Navigation/NavChaser.luau"
 NAVIGATION_AGENTS = 150
-NAVIGATION_REPATH_TICKS = 24  # 2.5 paths a second at 60 Hz
+NAVIGATION_REPATH_TICKS = 24  # 2.67 paths a second at FeatureTest's 64 Hz
+# The chasers' starts: 15 columns by 10 rows of Navigation.scene's floor, each within NavigationEndpointSearchDistance
+# (2 m) of floor both agent types walk on: south of the lava channel and north of it, beside the pillar, short of the
+# ramp and the platform (whose interior is more than 2 m from any floor).
+NAVIGATION_COLUMNS = tuple(-8.4 + 1.2 * column for column in range(15))
+NAVIGATION_ROWS = (-8.6, -8.0, -7.4, -2.6, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0)
+# Counts the perf chasers that never found a path reaching the Warden.
+NAVIGATION_STUCK_CODE = """local stuck = 0
+for index = 0, 149 do
+    local chaser = Scene.FindByName(string.format("PerfChaser%03d", index))
+    if chaser == nil or chaser:GetScript("NavChaser").Complete < 1 then
+        stuck += 1
+    end
+end
+return stuck"""
 NAVIGATION_METRIC = "navigation/150Agents/tickMs"
 CAPTURE_PARTS = ("playCopy", "scenes", "navigation", "replay")
 GENERATED_SCENE = "Assets/Perf/Entities1000.scene"
@@ -279,10 +294,10 @@ class Capture:
         """navigation/150Agents/tickMs (module docstring); an engine error makes it a warning."""
         ops = []
         for index in range(NAVIGATION_AGENTS):
-            column, row = index % 10, index // 10
+            column, row = index % len(NAVIGATION_COLUMNS), index // len(NAVIGATION_COLUMNS)
             fields = {"Agent": "Small" if index % 2 == 0 else "Large", "Speed": 3,
                       "RepathTicks": NAVIGATION_REPATH_TICKS, "Offset": index % NAVIGATION_REPATH_TICKS}
-            translation = [-9.0 + 2.0 * column, 0.0, -9.0 + 1.25 * row]
+            translation = [NAVIGATION_COLUMNS[column], 0.0, NAVIGATION_ROWS[row]]
             scripts = [{"Script": NAVIGATION_CHASER, "Fields": fields}]
             ops.append({"method": "entity.create",
                         "params": {"name": f"PerfChaser{index:03}",
@@ -300,6 +315,7 @@ class Capture:
             playing = True
             self.call(client, "play.step", {"ticks": WARM_UP_TICKS, "render": "None"}, timeout=STEP_TIMEOUT_SECONDS)
             metric = perf.summarize(NAVIGATION_METRIC, "ms", self.step_chunks(client, "None"))
+            stuck = int(self.call(client, "script.eval", {"context": "play", "code": NAVIGATION_STUCK_CODE})["value"])
         except (self.engine_client.EngineError, ValueError) as error:
             engine_error = isinstance(error, self.engine_client.EngineError)
             detail = f"{error.method}: {error.detail}" if engine_error else str(error)
@@ -311,6 +327,10 @@ class Capture:
                     self.call(client, "play.stop", {})
                 except self.engine_client.EngineError as error:
                     self.warnings.append(f"{NAVIGATION_METRIC}: play.stop failed: {error.detail}")
+        if stuck > 0:
+            self.warnings.append(f"{NAVIGATION_METRIC}: {stuck} of {NAVIGATION_AGENTS} agents never found a path to "
+                                 f"the Warden; not captured")
+            return
         self.metrics.append(metric)
         self.console.print(f"  {NAVIGATION_METRIC}: median {metric.median:.3f} ms per tick")
 

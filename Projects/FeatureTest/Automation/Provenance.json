@@ -3988,7 +3988,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/Navigation/NavChaser.luau",
-			"XXH64": "e66693cd0645561c",
+			"XXH64": "28f44d42ea8d83c1",
 			"Method": "script.write",
 			"RequestId": 2,
 			"Client": "batch",
@@ -5652,7 +5652,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Navigation/Navigation.test.luau",
-			"XXH64": "ad2fc6b0e80771b7",
+			"XXH64": "5df07e565594649d",
 			"Method": "script.write",
 			"RequestId": 6,
 			"Client": "batch",
@@ -5956,7 +5956,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Navigation.replay",
-			"XXH64": "fefa873326aacb87",
+			"XXH64": "f1916f947b2e6480",
 			"Method": "input.record",
 			"RequestId": 8,
 			"Client": "batch",

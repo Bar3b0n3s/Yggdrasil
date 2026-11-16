@@ -4,7 +4,7 @@
 -- walkable and a costly mud NavModifier, under a Navigation component of two agent types, Small (0.35 m) and Large
 -- (0.9 m). The committed bake loads as a NavMesh in every run mode (gate 9's .navmesh), the scene holds every Navigation
 -- and NavModifier field at a non-default value (gates 1 and 1b), and the cases below call every member of the Navigation
--- namespace on the session's mesh (gate 4). NavigationReplay.jsonl (IdSeed 2702) adds the Warden and the chasers that
+-- namespace on the session's mesh (gate 2). NavigationReplay.jsonl (IdSeed 2702) adds the Warden and the chasers that
 -- Navigation.replay records.
 local function insideLava(point: vector): boolean
 	return math.abs(point.x + 3) < 7 and math.abs(point.z + 5) < 1

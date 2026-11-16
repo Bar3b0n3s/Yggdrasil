@@ -546,7 +546,7 @@ namespace Engine {
 			REQUIRE(setup.Call("entity.create", ParseJson(R"({"name":"Camera","components":{"Transform":{"Translation":[0,18,22],"EulerAngles":[-40,0,0]},"Camera":{"Primary":true}}})")));
 			REQUIRE(setup.Call("scene.save", Json::object()));
 			DebugDrawList expected;
-			const size_t lines = AppendNavigationDebugDraw(editor.GetScene(), editor.GetAssets(), 1.0f, expected);
+			const size_t lines = AppendNavigationDebugDraw(editor.GetScene(), editor.GetAssets(), expected);
 			REQUIRE(lines > 0);
 			for (const char* target : { "edit", "play" })
 			{

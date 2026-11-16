@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -146,10 +147,10 @@ namespace Engine {
 
 	TEST_SUITE("Navigation")
 	{
-		TEST_CASE("NavigationWorld: a path goes around the pillar, up the ramp and never across the lava, and the large agent keeps its clearance")
+		// Roadmap M30's acceptance, verbatim (the arena has one pillar; World Tree's brief 1 asks the same of "a path from one
+		// corner to the other").
+		TEST_CASE("NavigationWorld: In a test arena with pillars, a ramp and a lava channel marked not walkable, a path goes around the pillars, up the ramp and never across the lava, and the large agent keeps its clearance")
 		{
-			// Roadmap M30 and World Tree's brief 1: "a path from one corner to the other goes around the pillars, up the ramp
-			// and never across the lava; the large agent's path keeps its larger clearance".
 			const NavMeshData mesh = BakeArena();
 			Scope<NavigationWorld> world = CreateWorld(mesh);
 			REQUIRE(world->GetAgentCount() == 2);
@@ -251,6 +252,28 @@ namespace Engine {
 			CHECK(cut->Corners[1] == full->Corners[1]);
 		}
 
+		// The review of W30.2: Detour reports a full corner buffer even when the corner that filled it is the goal.
+		TEST_CASE("NavigationWorld: a reachable path of exactly its corner cap reaches its goal")
+		{
+			const NavMeshData mesh = BakeArena();
+			Scope<NavigationWorld> world = CreateWorld(mesh);
+			const glm::vec3 from(-6.0f, 0.0f, -8.0f);
+			const glm::vec3 to(-6.0f, 0.0f, -2.0f);
+			const std::optional<NavigationPath> full = world->FindPath(Small, from, to, AnyCorners);
+			REQUIRE(full.has_value());
+			REQUIRE(full->Complete);
+			REQUIRE(full->Corners.size() >= 3);
+			const std::optional<NavigationPath> exact = world->FindPath(Small, from, to, full->Corners.size());
+			REQUIRE(exact.has_value());
+			CHECK(exact->Complete);
+			CHECK(exact->Corners == full->Corners);
+			// A goal at the start: its one corner is the goal.
+			const std::optional<NavigationPath> here = world->FindPath(Small, glm::vec3(0.0f), glm::vec3(0.0f), 1);
+			REQUIRE(here.has_value());
+			CHECK(here->Complete);
+			CHECK(here->Corners.size() == 1);
+		}
+
 		TEST_CASE("NavigationWorld: the closest point lies on the mesh within the distance, or there is none")
 		{
 			const NavMeshData mesh = BakeArena();
@@ -350,6 +373,43 @@ namespace Engine {
 				repeated.push_back(*world->FindRandomPointAround(Small, center, 3.0f, again));
 			CHECK(repeated == points);
 			CHECK(again.GetState() == random.GetState());
+		}
+
+		// The review of W30.2: validation checks a neighbour only against the polygon count, so a polygon may name itself
+		// across an edge, which a walk leaving by that edge would re-enter forever.
+		TEST_CASE("NavigationWorld: a walk that would re-enter its polygon forever ends blocked at the mesh's polygon count")
+		{
+			NavMeshData mesh = MakeHandMadeMesh(false);
+			// Polygon 1's edge 2, from vertex 5 to vertex 4 along x = 4, names polygon 1 itself.
+			mesh.Agents[0].Polygons[1 * 2 * NavMeshMaxVerticesPerPolygon + NavMeshMaxVerticesPerPolygon + 2] = 1;
+			REQUIRE(ValidateNavMeshData(mesh).has_value());
+			Scope<NavigationWorld> world = CreateWorld(mesh);
+			const std::optional<NavigationRaycast> ray = world->Raycast(0, glm::vec3(0.5f, 0.0f, 1.0f), glm::vec3(6.0f, 0.0f, 1.0f));
+			REQUIRE(ray.has_value());
+			CHECK_FALSE(ray->Clear);
+			CHECK(ray->Normal == glm::vec3(0.0f));
+			CHECK(ray->Fraction == doctest::Approx(3.5f / 5.5f));
+			CHECK(ray->Point.x == doctest::Approx(4.0f));
+		}
+
+		// The review of W30.2: after its attempts miss, a random point around a center settles for the drawn polygon's point
+		// nearest the center, still within the radius.
+		TEST_CASE("NavigationWorld: a random point around a center settles within its radius after the attempts miss")
+		{
+			Scope<NavigationWorld> world = CreateWorld(MakeHandMadeMesh(false));
+			// A 1 cm circle inside a 2 x 2 m polygon: no drawn point lands in it.
+			const glm::vec3 center(1.0f, 0.0f, 1.0f);
+			Random random(21);
+			const std::optional<glm::vec3> point = world->FindRandomPointAround(0, center, 0.01f, random);
+			REQUIRE(point.has_value());
+			const float dx = point->x - center.x;
+			const float dz = point->z - center.z;
+			CHECK(dx * dx + dz * dz <= 0.01f * 0.01f);
+			// Every attempt draws three times: the polygon, then the point's two coordinates.
+			Random expected(21);
+			for (uint32_t draw = 0; draw < 3 * MaxNavigationRandomPointAttempts; ++draw)
+				static_cast<void>(expected.NextU64());
+			CHECK(random.GetState() == expected.GetState());
 		}
 
 		TEST_CASE("NavigationWorld: queries keep no state, so equal calls give equal results whatever ran before")

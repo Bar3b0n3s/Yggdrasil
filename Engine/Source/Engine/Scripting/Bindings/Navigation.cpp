@@ -8,7 +8,6 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
 
-#include <cmath>
 #include <format>
 #include <optional>
 #include <string>

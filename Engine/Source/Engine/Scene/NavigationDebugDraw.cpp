@@ -3,12 +3,10 @@
 
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/NavMeshData.h"
-#include "Engine/Core/Assert.h"
 #include "Engine/Renderer/DebugDrawList.h"
 #include "Engine/Scene/NavigationValidation.h"
 
 #include <array>
-#include <cmath>
 
 // The navigation view (NavigationDebugDraw.h; Docs/Decisions/0045-m30-navigation.md decision 12).
 
@@ -21,9 +19,8 @@ namespace Engine {
 		return glm::vec4(Colors[agent % Colors.size()], border ? 1.0f : 0.4f);
 	}
 
-	size_t AppendNavigationDebugDraw(const Scene& scene, AssetManager& assets, float alpha, DebugDrawList& debug)
+	size_t AppendNavigationDebugDraw(const Scene& scene, AssetManager& assets, DebugDrawList& debug)
 	{
-		ENGINE_CORE_ASSERT(std::isfinite(alpha) && alpha >= 0.0f && alpha <= 1.0f, "AppendNavigationDebugDraw's alpha is in [0, 1]");
 		const AssetHandle handle = FindSceneNavMesh(scene);
 		if (!handle.IsValid())
 			return 0;
@@ -50,8 +47,7 @@ namespace Engine {
 					// An edge between two polygons is drawn once, from the polygon of the lower index.
 					if (neighbour != NavMeshNullIndex && neighbour < polygon)
 						continue;
-					glm::vec4 color = GetNavigationDebugColor(agentIndex, neighbour == NavMeshNullIndex);
-					color.a *= alpha;
+					const glm::vec4 color = GetNavigationDebugColor(agentIndex, neighbour == NavMeshNullIndex);
 					debug.AddLine(GetNavMeshVertexPosition(agent, values[edge]) + lift, GetNavMeshVertexPosition(agent, values[(edge + 1) % count]) + lift, color);
 					++lines;
 				}

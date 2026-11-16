@@ -131,9 +131,10 @@ namespace Engine {
 			// M21 (decision 28): the 2D colliders after the 3D ones, told asleep from awake by the session's 2D system.
 			AppendColliderDebugDraw(BuildCollider2DDebugDraw(scene, layers, physics2D, &assets, { .Alpha = snapshot.Alpha }), debug);
 		}
-		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): the baked navigation mesh's polygon edges, after the colliders.
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 12): the baked navigation mesh's polygon edges, after the colliders,
+		// at their own colour: the mesh has no pose, so the snapshot's interpolation alpha does not apply to it.
 		if (HasFlag(snapshot.Flags, RenderViewFlags::Navigation))
-			static_cast<void>(AppendNavigationDebugDraw(scene, assets, snapshot.Alpha, debug));
+			static_cast<void>(AppendNavigationDebugDraw(scene, assets, debug));
 		snapshot.AnnotationDraw = std::move(debug);
 		snapshot.Icons = std::move(icons);
 		return {};

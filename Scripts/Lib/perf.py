@@ -22,8 +22,8 @@ The metrics are "playCopy/1000Entities" (ms: per cycle, the round trip of a lock
 in FeatureTest (about 0.7 s on the reference machine, with or without a renderer), cancels and the difference is the
 serializer copy of the entities that §5.6 budgets; the median of 5 cycles is compared with the budget),
 "replay/Determinism/tickMs" (ms per tick of the 600-tick replay in a --renderer none editor),
-"navigation/150Agents/tickMs" (M30: ms per tick of a lockstep session in which 150 agents each find a path 2.5 times a
-second, in a --renderer none editor; Perf.py's docstring) and, per scene, "scene/<Name>/frameMs" and
+"navigation/150Agents/tickMs" (M30: ms per tick of a lockstep session in which 150 agents each find a path every 24
+fixed steps, in a --renderer none editor; Perf.py's docstring) and, per scene, "scene/<Name>/frameMs" and
 "scene/<Name>/simulationMs", the same summaries as the scene rows.
 """
 
@@ -41,8 +41,9 @@ PERF_FORMAT = "PerfCapture"
 PERF_VERSION = 1
 PERF_REPORT_NAME = "Perf.json"
 # Tracked budgets, in the metric's unit (§5.6: "1,000 entities copy in under 30 ms (Release)"; ADR 0012 handed it to
-# this capture; M30's navigation case, half of the 60 Hz fixed step, World Tree's brief 1's "fit comfortably in a 60 Hz
-# fixed step", Docs/Decisions/0045-m30-navigation.md decision 13). Exceeding one is a warning.
+# this capture; M30's navigation case, about half of FeatureTest's 15.6 ms fixed step at 64 Hz, World Tree's brief 1's
+# "fit comfortably in a 60 Hz fixed step", Docs/Decisions/0045-m30-navigation.md decision 13). Exceeding one is a
+# warning.
 BUDGETS = {"playCopy/1000Entities": 30.0, "navigation/150Agents/tickMs": 8.0}
 
 _CAPTURE_MEMBERS = {"format": str, "version": int, "commit": str, "config": str, "host": dict, "metrics": list,
