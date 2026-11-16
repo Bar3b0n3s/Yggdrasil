@@ -50,6 +50,30 @@ namespace Engine {
 		glm::vec2 WindowSize{ 0.0f };
 	};
 
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): Application.GetStats, the performance readout. Frame-paced
+	// observations, never simulation state: a fixed-step gameplay callback cannot read them (ParticleEmitter:GetParticleCount's
+	// rule). The render counters are the game view's last rendered frame (its passes' draw calls, triangles and GPU times,
+	// the GPU times of the frame the profiler last read back); without a renderer RenderAvailable is false and they are 0.
+	struct ScriptPerformanceStats
+	{
+		bool RenderAvailable = false;
+		bool GpuAvailable = false;
+		double Fps = 0.0;
+		double CpuMilliseconds = 0.0;
+		double GpuMilliseconds = 0.0;
+		uint32_t VisibleLights = 0;
+		uint32_t DroppedLights = 0;
+		uint32_t ShadowedLights = 0; // the shadowed spot and point lights
+		uint32_t DrawCalls = 0;
+		uint64_t Triangles = 0;
+		uint32_t Particles = 0; // the live particles after the last Particles phase
+		uint32_t SkinnedMeshes = 0;
+		uint32_t Bodies = 0; // the 3D and 2D worlds' bodies
+		uint32_t ActiveBodies = 0;
+		uint32_t Entities = 0;
+		uint64_t ScriptHeapBytes = 0;
+	};
+
 	struct ScriptActionState
 	{
 		bool Down = false;
@@ -148,6 +172,24 @@ namespace Engine {
 		// wherever it was created; every other host (the edit evaluation, test fixtures without a session) keeps the
 		// default, which does nothing.
 		virtual void SynchronizePhysicsBodies() {}
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): Application.GetStats's counters. A play session's host
+		// answers from its session and its host's frame statistics; every other host (the edit evaluation, test fixtures
+		// without a session) keeps the default, Unsupported.
+		[[nodiscard]] virtual Result<ScriptPerformanceStats> GetPerformanceStats() const
+		{
+			return MakeError(ErrorCode::Unsupported, "this host has no performance readout");
+		}
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): Input.PostSignal, a live frame-time signal for the next
+		// fixed step: true when the session takes live signals (ordinary play and recordings), false where it ignores them
+		// (replays, suites, FeatureTest runs and lockstep sessions without a recorder, which take only played-back and
+		// injected signals). Errors: InvalidArgument for a name the signal's rules refuse, or a tick already full of signals.
+		// Every other host keeps the default, Unsupported.
+		[[nodiscard]] virtual Result<bool> PostSignal(std::string_view /*name*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "this host takes no signals: Input.PostSignal works in a running play session");
+		}
+		// Input.WasSignalled: whether `name` was signalled in `phase`'s view (PlayInput::WasSignalled). Default: false.
+		[[nodiscard]] virtual bool WasSignalled(InputPhase /*phase*/, std::string_view /*name*/) const { return false; }
 	};
 
 }

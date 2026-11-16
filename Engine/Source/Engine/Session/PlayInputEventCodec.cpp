@@ -14,7 +14,9 @@ namespace Engine {
 
 	namespace {
 
-		constexpr std::array<std::string_view, 9> Types = { "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text" };
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): "Signal", the frame-time signal, appended.
+		constexpr std::array<std::string_view, 10> Types = { "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text",
+			"Signal" };
 		constexpr std::array<std::string_view, 3> States = { "Down", "Up", "Tap" };
 
 		bool EqualName(std::string_view a, std::string_view b)
@@ -60,7 +62,7 @@ namespace Engine {
 				return EqualName(type, name);
 			});
 			if (found == Types.end())
-				return std::unexpected(root.MakeLocatedError(ErrorCode::InvalidArgument, "unknown input event type").WithHint("use action, key, mouseButton, mouseMove, mouseDelta, scroll, gamepadButton, gamepadAxis or text"));
+				return std::unexpected(root.MakeLocatedError(ErrorCode::InvalidArgument, "unknown input event type").WithHint("use action, key, mouseButton, mouseMove, mouseDelta, scroll, gamepadButton, gamepadAxis, text or signal"));
 			e.Type = static_cast<PlayInputEventType>(found - Types.begin());
 			std::vector<std::string_view> allowed{ "type" };
 			if (allowTick)
@@ -100,7 +102,12 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(out.y, y.ReadFloat());
 				return {};
 			};
-			if (e.Type == PlayInputEventType::Action)
+			if (e.Type == PlayInputEventType::Signal)
+			{
+				allowed.push_back("name");
+				ENGINE_TRY_ASSIGN(e.Name, root.ReadMember<std::string>("name"));
+			}
+			else if (e.Type == PlayInputEventType::Action)
 			{
 				allowed.push_back("name");
 				ENGINE_TRY_ASSIGN(e.Name, root.ReadMember<std::string>("name"));
@@ -190,7 +197,7 @@ namespace Engine {
 	Result<StampedPlayInputEvent> DecodeReplayEvent(const ReplayEvent& e, const InputActionMap& actions, std::string_view pointer)
 	{
 		Json value = { { "tick", e.Tick }, { "type", e.Type } };
-		if (e.Type == "Action" || !e.Name.empty())
+		if (e.Type == "Action" || e.Type == "Signal" || !e.Name.empty())
 			value["name"] = e.Name;
 		if (e.State)
 			value["state"] = *e.State;
@@ -254,7 +261,8 @@ namespace Engine {
 				result.AxisName = GamepadAxisToString(e.Axis);
 				result.Value = e.Value;
 				break;
-			case PlayInputEventType::Text: result.Text = e.Text; break;
+			case PlayInputEventType::Text:   result.Text = e.Text; break;
+			case PlayInputEventType::Signal: result.Name = e.Name; break;
 		}
 		// Reuse the Asset validator for fields that do not depend on a project's action map.
 		ReplayDocument document;

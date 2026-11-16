@@ -194,6 +194,12 @@ namespace Engine {
 		// IScriptHost::OnScriptPhase of the session's VM, forwarded for the host's automation watchdog (§13.2 Busy names
 		// "Script:<Script>.<Callback>"). Called on every protected script entry and exit: keep it cheap.
 		virtual void OnScriptPhase(std::string_view script, std::string_view callback) = 0;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the host's part of the performance readout
+		// (Application.GetStats): its frame loop's Fps and CpuMilliseconds, and the render counters of the view the session's
+		// game renders into (AddRenderStatistics of its last RenderStats). The session fills the rest (SessionStatistics, the
+		// script heap). A host without a frame loop or renderer keeps the default, which fills nothing (RenderAvailable stays
+		// false).
+		virtual void ReadFrameStatistics(ScriptPerformanceStats& /*stats*/) const {}
 	};
 
 	// Instrumentation of the step order (§5.7 "documented and tested"; "PlaySession: step order matches the documented

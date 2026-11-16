@@ -62,6 +62,24 @@ class InputTests(AutomationTestCase):
         client.call("play.step", {"ticks": 1})
         self.assertEqual(client.call("play.state")["input"]["down"], [])
 
+    def test_input_inject_queues_a_frame_time_signal_for_input_was_signalled(self) -> None:
+        # M28 (Docs/Decisions/0043-m28-game-services.md decision 6): automation injects the signals a lockstep session
+        # takes; Input.WasSignalled reads the tick's latch, and a script's live post is ignored in lockstep.
+        client, _ = self.open_editor_with_scene()
+        client.call("play.start", {"lockstep": True})
+        injected = client.call("input.inject", {"events": [{"type": "signal", "name": "FrameTimeExceeded"}]})
+        self.assertEqual((injected["tick"], injected["queued"]), (0, 1))
+        client.call("play.step", {"ticks": 1})
+        latched = client.call("script.eval", {"context": "play",
+                                              "code": "return Input.WasSignalled('FrameTimeExceeded')"})
+        self.assertEqual(latched["value"], True)
+        posted = client.call("script.eval", {"context": "play", "code": "return Input.PostSignal('Live')"})
+        self.assertEqual(posted["value"], False)
+        with self.assertRaises(engine_client.EngineError) as caught:
+            client.call("input.inject", {"events": [{"type": "signal"}]})
+        self.assert_engine_error(caught.exception, -32602)
+        client.call("play.stop")
+
     def test_input_inject_needs_a_play_session(self) -> None:
         client, _ = self.open_editor_with_scene()
         with self.assertRaises(engine_client.EngineError) as raised:

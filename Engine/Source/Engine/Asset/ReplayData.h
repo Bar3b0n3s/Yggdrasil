@@ -12,6 +12,7 @@
 
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -22,15 +23,22 @@
 namespace Engine {
 
 	inline constexpr std::string_view ReplayFormatName = "Replay";
-	// Version 2 adds Checkpoints, version 3 the start fingerprint (Fingerprint, below). A version 1 file migrates with no
-	// checkpoints (only its FinalStateHash is compared, as before), and a version 1 or 2 file with a null Fingerprint;
-	// project.upgrade rewrites both canonically.
-	inline constexpr uint32_t ReplayFormatVersion = 3;
+	// Version 2 adds Checkpoints, version 3 the start fingerprint (Fingerprint, below), version 4 (M28,
+	// Docs/Decisions/0043-m28-game-services.md decision 7) the header's SaveData and the Signal event type. A version 1 file
+	// migrates with no checkpoints (only its FinalStateHash is compared, as before), a version 1 or 2 file with a null
+	// Fingerprint, and a version 1 to 3 file with an empty SaveData (and holds no Signal event: one is refused there);
+	// project.upgrade rewrites them canonically.
+	inline constexpr uint32_t ReplayFormatVersion = 4;
 	// The first version with the start fingerprint (Docs/Decisions/0030-m19-contract.md decision 2, A-FPRINT), reserved for
 	// M19 by the phase 1 ledger: ReplayFormatVersion, ReplayData::FormatVersion and ReplayImporter::Version are 3. A version 1
 	// or 2 file migrates to version 3 with a null Fingerprint (nothing recorded, so nothing can be named), which
 	// project.upgrade writes (Tests/Data/Formats/Replay/v2.upgraded.replay); every recording writes a fingerprint.
 	inline constexpr uint32_t ReplayFingerprintFormatVersion = 3;
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): the first version with the header's SaveData and the Signal
+	// event type, whose Name holds 1 to MaxReplaySignalNameBytes bytes (Scripting's MaxScriptSignalNameBytes, which Session
+	// checks equal).
+	inline constexpr uint32_t ReplaySaveDataFormatVersion = 4;
+	inline constexpr size_t MaxReplaySignalNameBytes = 64;
 	// A replay header's EngineVersion: every recorder (input.record, test.run's record, the Runtime's recordings) writes the
 	// running engine's version, EngineVersionString (Core/BuildId.h; session.hello's engineVersion), never the build id, so
 	// a commit rewrites no replay (Docs/Decisions/0030-m19-contract.md decision 13). Before ADR 0038 (friction F10) they
@@ -64,11 +72,16 @@ namespace Engine {
 		// The run mode that recorded the replay ("Editor", "Release" or "Dist"), never the build configuration, so a replay's
 		// bytes do not depend on it (§9.1). Informational; never a reason to select a different expected hash.
 		std::string Config{};
+		// Version 4 (M28, decision 7): the session's save-data store at the recording's start, an object of the store's
+		// values by key (Null storage normalizes to an empty object; files always write an object), canonical as Parameters
+		// are (CanonicalizeReplayParameters: numbers as float), which seeds every playback's store.
+		VariantValue SaveData{};
 	};
 
 	// Asset-owned wire vocabulary, not Session's PlayInputEvent (§3). Type/State/control names use canonical file
 	// spellings. Only the fields belonging to Type are serialized; readers reject inappropriate present members.
-	// Type: Action, Key, MouseButton, MouseMove, MouseDelta, Scroll, GamepadButton, GamepadAxis or Text.
+	// Type: Action, Key, MouseButton, MouseMove, MouseDelta, Scroll, GamepadButton, GamepadAxis, Text or (version 4) Signal,
+	// whose Name is the signal's.
 	// State: Down, Up or Tap; Action selects State OR Value. The source reader checks device names/ranges through
 	// Platform, while Session checks project action names when adapting this value to PlayInputEvent.
 	struct ReplayEvent
@@ -197,7 +210,7 @@ namespace Engine {
 	struct ReplayData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::Replay;
-		static constexpr uint16_t FormatVersion = 3;
+		static constexpr uint16_t FormatVersion = 4;
 
 		ReplayData();
 

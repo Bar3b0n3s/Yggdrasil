@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 3,
+	"Version": 4,
 	"Scene": {
 		"Handle": "4581c009b1536bd7",
 		"Path": "Assets/Scenes/Level3.scene"
@@ -12,6 +12,7 @@
 	"FixedHz": 60,
 	"EngineVersion": "0.5.0",
 	"Config": "Editor",
+	"SaveData": {},
 	"Fingerprint": {
 		"Entities": [
 			{

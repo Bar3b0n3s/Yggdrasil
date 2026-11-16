@@ -47,6 +47,7 @@ namespace Engine {
 		constexpr std::array<std::string_view, 3> GamepadButtonMembers = { "gamepad", "button", "state" };
 		constexpr std::array<std::string_view, 3> GamepadAxisMembers = { "gamepad", "axis", "value" };
 		constexpr std::array<std::string_view, 1> TextMembers = { "text" };
+		constexpr std::array<std::string_view, 1> SignalMembers = { "name" };
 
 		constexpr std::array<std::string_view, 1> RequiredName = { "name" };
 		constexpr std::array<std::string_view, 1> RequiredKey = { "key" };
@@ -70,6 +71,7 @@ namespace Engine {
 				case PlayInputEventType::GamepadButtonInput: return { GamepadButtonMembers, RequiredButton };
 				case PlayInputEventType::GamepadAxisInput:   return { GamepadAxisMembers, RequiredAxisValue };
 				case PlayInputEventType::Text:               return { TextMembers, TextMembers };
+				case PlayInputEventType::Signal:             return { SignalMembers, RequiredName };
 			}
 			return {};
 		}
@@ -147,7 +149,7 @@ namespace Engine {
 			};
 			if (!has("type"))
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("{}/type", pointer), "an input event needs a type",
-					"give type: action, key, mouseButton, mouseMove, mouseDelta, scroll, gamepadButton, gamepadAxis or text"));
+					"give type: action, key, mouseButton, mouseMove, mouseDelta, scroll, gamepadButton, gamepadAxis, text or signal"));
 
 			const EventShape shape = Utils::GetEventShape(event.Type);
 			const std::string_view typeName = PlayInputEventTypeToString(event.Type);
@@ -247,6 +249,9 @@ namespace Engine {
 				case PlayInputEventType::Text:
 					converted.Text = event.Text;
 					break;
+				case PlayInputEventType::Signal:
+					converted.Name = event.Name;
+					break;
 			}
 
 			const Status valid = ValidatePlayInputEvent(converted, actions);
@@ -291,7 +296,10 @@ namespace Engine {
 			.Entry(PlayInputEventType::Scroll, "Scroll", "Scrolling by a delta (x right-positive, y up-positive).")
 			.Entry(PlayInputEventType::GamepadButtonInput, "GamepadButton", "A gamepad button going down or up.")
 			.Entry(PlayInputEventType::GamepadAxisInput, "GamepadAxis", "A gamepad axis taking a value.")
-			.Entry(PlayInputEventType::Text, "Text", "Typed text, one character event per code point.");
+			.Entry(PlayInputEventType::Text, "Text", "Typed text, one character event per code point.")
+			.Entry(PlayInputEventType::Signal, "Signal",
+				"A frame-time signal (name): a decision a script took on frame-paced observations (Input.PostSignal), which the tick latches "
+				"for Input.WasSignalled. Replays from version 4 carry it.");
 
 		registry.Enum<PlayInputEventState>("InputEventState", "The state of a button-like input event (§13.6).")
 			.Entry(PlayInputEventState::Down, "Down", "Pressed on its tick.")

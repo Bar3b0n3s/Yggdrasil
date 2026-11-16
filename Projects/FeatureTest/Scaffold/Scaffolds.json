@@ -409,6 +409,11 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "GameServices.jsonl",
+			"IdSeed": 2501,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

@@ -1359,6 +1359,9 @@ namespace Engine {
 		stats.DroppedSpotShadows = frame.Spots.Dropped;
 		stats.ShadowedPointLights = static_cast<uint32_t>(frame.Points.Lights.size());
 		stats.DroppedPointShadows = frame.Points.Dropped;
+		stats.VisibleLights = state.Stats.Lights;
+		stats.DroppedLights = state.Stats.DroppedLights;
+		stats.SkinnedMeshes = frame.SkinnedMeshes;
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1964,6 +1967,8 @@ namespace Engine {
 			if (recorded[index].has_value())
 			{
 				entry.Deformed = true;
+				if (ItemDeforms[entry.SnapshotIndex].SkinJointCount > 0)
+					++frame.SkinnedMeshes;
 				continue;
 			}
 			const MeshDrawItem& item = snapshot.Meshes[entry.SnapshotIndex];

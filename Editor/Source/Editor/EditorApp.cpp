@@ -75,6 +75,7 @@
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Session/PlaySession.h"
+#include "Engine/Session/SessionStatistics.h"
 #include "Engine/Testing/TestResults.h"
 
 #include <imgui.h>
@@ -550,6 +551,19 @@ namespace Engine {
 		const bool listens = options.ListensForAutomation(headless);
 		if (state.Editor != nullptr)
 		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the performance readout's frame and Game view
+			// observations, which Application.GetStats reads in editor play.
+			state.Editor->GetPlay().SetFrameStatisticsSource([&app](ScriptPerformanceStats& stats)
+			{
+				const FrameLoopStatistics timing = app.GetFrameStatistics();
+				stats.Fps = timing.Fps;
+				stats.CpuMilliseconds = timing.CpuMilliseconds;
+				if (app.m_State->Views == nullptr)
+					return;
+				const SceneRenderer* renderer = app.m_State->Views->GetRenderer(ViewportView::Game);
+				if (renderer != nullptr && app.m_State->Views->GetImage(ViewportView::Game).Texture != 0)
+					AddRenderStatistics(stats, renderer->GetRenderStats());
+			});
 			AutomationServerSpecification serverSpecification;
 			serverSpecification.Listen = listens;
 			serverSpecification.PreferenceListeningAllowed = !options.IsOneShot();

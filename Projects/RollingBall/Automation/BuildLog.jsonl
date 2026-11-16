@@ -1210,3 +1210,7 @@
 {"type": "response", "time": "2026-11-15T19:15:31.793Z", "client": "engine-mcp", "id": 69, "requestLine": 1209, "ok": true, "summary": "scenes 1; rev 1718"}
 {"type": "request", "time": "2026-11-15T19:16:57.366Z", "client": "engine-mcp", "id": 70, "method": "session.shutdown", "params": {"save": false, "force": false}}
 {"type": "response", "time": "2026-11-15T19:16:57.384Z", "client": "engine-mcp", "id": 70, "requestLine": 1211, "ok": true, "summary": "savedFiles 0; saved no; rev 1718"}
+{"type":"request","time":"2026-11-16T03:33:43.122Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-11-16T03:33:44.476Z","client":"cli","id":1,"requestLine":1213,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-16T03:33:44.479Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-11-16T03:33:44.933Z","client":"cli","id":2,"requestLine":1215,"ok":true,"summary":"ok"}

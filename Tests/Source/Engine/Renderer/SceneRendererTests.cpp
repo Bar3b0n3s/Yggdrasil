@@ -867,6 +867,10 @@ namespace Engine {
 				CHECK(warning.GetMatchCount() == 1); // once per renderer
 				CHECK(setup.GetRenderer().GetLastStats().Lights == MaxVisibleLights);
 				CHECK(setup.GetRenderer().GetLastStats().DroppedLights == 5);
+				// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the published RenderStats carry both counts, which
+				// stats.get and the performance readout report.
+				CHECK(setup.GetRenderer().GetRenderStats().VisibleLights == MaxVisibleLights);
+				CHECK(setup.GetRenderer().GetRenderStats().DroppedLights == 5);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

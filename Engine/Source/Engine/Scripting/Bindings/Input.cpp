@@ -104,6 +104,34 @@ namespace Engine {
 			return 1;
 		}
 
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a frame-time signal. A decision taken on frame-paced
+		// observations (Application.GetStats) is posted as input from the frame phase, which the next fixed step latches and
+		// a recording records; a fixed-step gameplay callback acts directly instead, so posting there raises.
+		static int InputPostSignal(ScriptCall& call)
+		{
+			const std::string name = Lua::Check<std::string>(call, 1);
+			IScriptHost& host = call.Engine->GetHost();
+			const bool gameplay = call.Execution != nullptr && call.Execution->Origin == ScriptExecutionOrigin::Gameplay;
+			if (gameplay && host.GetFrameState().Phase == InputPhase::Step)
+			{
+				return Lua::RaiseError(call, "a signal records a decision taken on frame-paced observations, so it is posted from the frame phase "
+											 "(OnUpdate, OnLateUpdate); a fixed-step callback decides deterministically and acts directly");
+			}
+			const Result<bool> posted = host.PostSignal(name);
+			if (!posted)
+				return Lua::RaiseError(call, posted.error());
+			Lua::Push(call, *posted);
+			return 1;
+		}
+
+		static int InputWasSignalled(ScriptCall& call)
+		{
+			const std::string name = Lua::Check<std::string>(call, 1);
+			const IScriptHost& host = call.Engine->GetHost();
+			Lua::Push(call, host.WasSignalled(host.GetFrameState().Phase, name));
+			return 1;
+		}
+
 		template<typename Code, auto Name>
 		static Status RegisterInputEnum(ScriptApiRegistry& api, std::string name, std::string description, size_t count)
 		{
@@ -164,6 +192,17 @@ namespace Engine {
 					"Returns the characters typed in the latched view as UTF-8: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) "
 					"the tick's committed characters, in the frame phase (OnUpdate, OnLateUpdate) those of every tick since the previous frame; "
 					"empty when none were typed.",
+					read)
+				.Function("PostSignal", &Utils::InputPostSignal, "(name: string) -> boolean",
+					"Posts the frame-time signal name (1 to 64 bytes of UTF-8) for the next fixed step, where Input.WasSignalled reads it: a "
+					"decision taken on frame-paced observations (ending a run whose frame time stays over a budget) recorded as input, so "
+					"input.record records it and a replay plays it back. Returns whether the session takes live signals: ordinary play and "
+					"recordings do; replays, test runs and lockstep sessions ignore them (false) and take only played-back signals and those "
+					"Test.InjectSignal or input.inject injects. A name already posted for the same tick counts once; a tick takes at most 64 "
+					"distinct signals. A fixed-step gameplay callback raises an error: it decides deterministically and acts directly.")
+				.Function("WasSignalled", &Utils::InputWasSignalled, "(name: string) -> boolean",
+					"Returns whether the signal name was latched: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) by this "
+					"tick, in the frame phase (OnUpdate, OnLateUpdate) by any tick since the previous frame.",
 					read);
 			return {};
 		}

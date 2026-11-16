@@ -184,6 +184,32 @@ class Physics2DTests(AutomationTestCase):
         client.call("play.stop")
         self.assertEqual(client.call("stats.get")["bodies"], 0)
 
+    def test_stats_count_the_awake_bodies_of_both_worlds_and_the_live_particles(self) -> None:
+        # M28 (Docs/Decisions/0043-m28-game-services.md decision 4): stats.get's activeBodies (both worlds' awake
+        # bodies) and particles (the session's live particles after its last Particles phase), the counters the readout
+        # shares.
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Ground", "components": {
+            "Transform": {"Translation": [0, -2, 0]}, "RigidBody": {"Type": "Static"}, "BoxCollider": {}}})
+        client.call("entity.create", {"name": "Ball", "components": {
+            "Transform": {"Translation": [0, 5, 0]}, "RigidBody": {"Type": "Dynamic"}, "SphereCollider": {}}})
+        client.call("entity.create", {"name": "Crate", "components": {
+            "Transform": {"Translation": [10, 5, 0]}, "RigidBody2D": {"Type": "Dynamic"}, "BoxCollider2D": {}}})
+        client.call("entity.create", {"name": "Sparks", "components": {
+            "Transform": {}, "ParticleEmitter": {"Rate": 120}}})
+        stats = client.call("stats.get", {"views": False})
+        self.assertEqual((stats["activeBodies"], stats["particles"]), (0, 0))
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 30})
+        stats = client.call("stats.get", {"views": False})
+        # The two falling bodies are awake; the static ground never is.
+        self.assertEqual(stats["bodies"], 3)
+        self.assertEqual(stats["activeBodies"], 2)
+        self.assertGreater(stats["particles"], 0)
+        client.call("play.stop")
+        stats = client.call("stats.get", {"views": False})
+        self.assertEqual((stats["activeBodies"], stats["particles"]), (0, 0))
+
 
 if __name__ == "__main__":
     unittest.main()

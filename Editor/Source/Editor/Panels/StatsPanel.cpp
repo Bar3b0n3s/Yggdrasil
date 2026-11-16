@@ -125,6 +125,8 @@ namespace Engine {
 			Utils::DrawSupportingMetric("Dropped simulation time", std::format("{:.3f} s", m_Stats.DroppedSeconds));
 			Utils::DrawSupportingMetric("Entities", std::to_string(m_Stats.Entities));
 			Utils::DrawSupportingMetric("Physics bodies", std::to_string(m_Stats.Bodies));
+			Utils::DrawSupportingMetric("Active bodies", std::to_string(m_Stats.ActiveBodies));
+			Utils::DrawSupportingMetric("Live particles", std::to_string(m_Stats.Particles));
 			Utils::DrawSupportingMetric("Audio voices", std::to_string(m_Stats.Voices));
 			ImGui::EndTable();
 		}
@@ -162,6 +164,9 @@ namespace Engine {
 				Utils::DrawSupportingMetric("CPU preparation", std::format("{:.2f} ms", view.CpuMilliseconds));
 				Utils::DrawSupportingMetric("CPU frame", view.Frame);
 				Utils::DrawSupportingMetric("GPU frame", view.GpuAvailable ? view.GpuFrame : "Unavailable");
+				Utils::DrawSupportingMetric("Lights", std::to_string(view.Lights));
+				Utils::DrawSupportingMetric("Dropped lights", std::to_string(view.DroppedLights));
+				Utils::DrawSupportingMetric("Skinned meshes", std::to_string(view.SkinnedMeshes));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

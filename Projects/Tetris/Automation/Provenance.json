@@ -380,11 +380,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay",
-			"XXH64": "da48a8845dccdda0",
-			"Method": "test.run",
-			"RequestId": 12,
-			"Client": "engine-mcp",
-			"TranscriptLine": 213
+			"XXH64": "009a41230c28d918",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 389
 		},
 		{
 			"Path": "Assets/Tests/Replays/LineClear.replay.meta",
@@ -396,11 +396,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay",
-			"XXH64": "64da0885957bc39f",
-			"Method": "test.run",
-			"RequestId": 11,
-			"Client": "engine-mcp",
-			"TranscriptLine": 211
+			"XXH64": "f37fe65cc313d6d9",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 389
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay.meta",
@@ -412,11 +412,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Restart.replay",
-			"XXH64": "98c958d76ffff452",
-			"Method": "test.run",
-			"RequestId": 13,
-			"Client": "engine-mcp",
-			"TranscriptLine": 215
+			"XXH64": "8d02060bbc7f353e",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 389
 		},
 		{
 			"Path": "Assets/Tests/Replays/Restart.replay.meta",

@@ -98,9 +98,10 @@ namespace Engine {
 		// pointer is non-owning and valid until play.stop.
 		[[nodiscard]] virtual PlaySession* GetPlaySession() const = 0;
 
-		// play.start (editor only, Automation/Methods/PlayMethods.h): starts a session of `options.ScenePath` (empty: the open
-		// edit scene, through the serializer copy of §5.6) with the project's settings and `options`; the requesting client
-		// (GetRequest().Client) owns lockstep when options.Lockstep. Appends PlayStateChanged. Errors: InvalidState while a
+		// play.start (editor only, Automation/Methods/PlayMethods.h): refreshes the project's assets (as input.record does,
+		// ADR 0043 decision 2; only for a start the play controller would admit), then starts a session of `options.ScenePath`
+		// (empty: the open edit scene, through the serializer copy of §5.6) with the project's settings and `options`; the
+		// requesting client (GetRequest().Client) owns lockstep when options.Lockstep. Appends PlayStateChanged. Errors: InvalidState while a
 		// session runs, without an open scene, or while the project has asset diagnostics of severity Error ("fix them first";
 		// §7.2); the errors of PlaySession::Create; NotFound or Validation for options.ScenePath; Unsupported in the Runtime,
 		// whose session starts with the process.

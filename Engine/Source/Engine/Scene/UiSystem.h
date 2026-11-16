@@ -8,6 +8,8 @@
 
 #include <glm/glm.hpp>
 
+#include <optional>
+#include <string>
 #include <vector>
 
 // The play session's UI (M22, C22.1, R-UI-CORE; Docs/Decisions/0033-m22-contract.md decisions 3 and 4): the two layouts of
@@ -55,7 +57,8 @@ namespace Engine {
 		// The UiLayout phase, the session's start and its scene replacements (see the file comment): ComputeUiLayout(scene,
 		// sceneSize) becomes the step's layout and the current one.
 		void LayoutStep(const Scene& scene, glm::uvec2 sceneSize);
-		// The FrameUiLayout phase: ComputeUiLayout(scene, sceneSize) becomes the frame's layout and the current one.
+		// The FrameUiLayout phase: ComputeUiLayout(scene, sceneSize) becomes the frame's layout and the current one; a
+		// presentation text whose element `scene` no longer holds, or no longer holds a UiText, is dropped (M28).
 		void LayoutFrame(const Scene& scene, glm::uvec2 sceneSize);
 
 		// The current layout (see the file comment); an empty table before the first layout (a session's: its Activate).
@@ -147,8 +150,18 @@ namespace Engine {
 		[[nodiscard]] size_t GetQueuedEventCount() const { return m_Events.size(); }
 
 		// A scene replacement (Scene.Load, Scene.Reload): the interaction state returns to its default and the queue is
-		// emptied, before the replacement's LayoutStep.
+		// emptied, before the replacement's LayoutStep; the presentation texts are cleared too (M28).
 		void ResetInteraction();
+
+		// --- Presentation texts (M28, Docs/Decisions/0043-m28-game-services.md decision 5) -------------------------------
+
+		// UiText:SetPresentationText: sets `element`'s presentation text, drawn in place of its UiText's Text
+		// (AppendUiDrawItems), or clears it with nullopt. Never serialized, hashed (AppendStateHash leaves it out) or recorded;
+		// layout and hit testing never read it. The caller checks the element holds a UiText and the text's size.
+		void SetPresentationText(UUID element, std::optional<std::string> text);
+		// The element's presentation text; nullptr when none is set.
+		[[nodiscard]] const std::string* FindPresentationText(UUID element) const;
+		[[nodiscard]] const UiPresentationTexts& GetPresentationTexts() const { return m_PresentationTexts; }
 
 		// The state hash's ui block (decision 29; ADR 0028's ledger: after the physics2d block): nothing while the
 		// interaction state IsEmpty and the event queue is empty, so every scene without a canvas (which keeps both empty)
@@ -166,6 +179,7 @@ namespace Engine {
 		bool m_FrameLayoutCurrent = false;
 		UiInteractionState m_Interaction{};
 		std::vector<UiEvent> m_Events{};
+		UiPresentationTexts m_PresentationTexts{};
 	};
 
 }

@@ -1493,7 +1493,7 @@
 								},
 								"type": {
 									"description": "The event type (required).",
-									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 								},
 								"name": {
 									"description": "action: the project action's name (exact, case-sensitive).",
@@ -2026,7 +2026,7 @@
 		{
 			"name": "play_start",
 			"method": "play.start",
-			"description": "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. Returns the session's state.",
+			"description": "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. The editor refreshes the project's assets first, as input.record does, so a scene file written since the last refresh plays with its scene asset. Returns the session's state.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "PlayStartParams",
@@ -2111,7 +2111,7 @@
 								},
 								"type": {
 									"description": "The event type (required).",
-									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 								},
 								"name": {
 									"description": "action: the project action's name (exact, case-sensitive).",

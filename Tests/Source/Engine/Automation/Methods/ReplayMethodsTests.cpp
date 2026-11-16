@@ -620,6 +620,47 @@ namespace Engine {
 			CHECK(replayed["withoutInput"] == Json(false));
 		}
 
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a recording takes a live frame-time signal, which its tick
+		// latches and the recording records as an input event; the replay plays it back and verifies, and its input check
+		// (the replay without its input) diverges, since the signal decided the run.
+		TEST_CASE("ReplayMethods: input.record records a live frame-time signal and input.replay plays it back")
+		{
+			Test::AutomationFixture fixture("RecordSignal");
+			const std::string source = "local Horde = {}\n"
+									   "function Horde:OnFixedUpdate()\n"
+									   "\tif Input.WasSignalled(\"FrameTimeExceeded\") then self.Entity.Name = \"Ended\" end\n"
+									   "end\n"
+									   "return Script.Define(\"Horde\", Horde)\n";
+			CallReplayMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Horde.luau" }, { "source", source } });
+			CallReplayMethod(fixture, "entity.create",
+				Json{ { "name", "Run" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Horde.luau" } } }) } } } } } });
+			CallReplayMethod(fixture, "scene.save");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" } });
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 10 }, { "render", "none" } });
+			// The frame-phase decision (an evaluation stands in for the game's OnUpdate): a recording takes live signals.
+			const Json posted = CallReplayMethod(fixture, "script.eval", Json{ { "context", "play" }, { "code", "return Input.PostSignal('FrameTimeExceeded')" } });
+			CHECK(posted["value"] == Json(true));
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 10 }, { "render", "none" } });
+			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Signal.replay" } });
+			CHECK(saved["events"] == Json(1));
+			const ReplayDocument replay = ReadRecordedReplay(fixture.GetEditor(), "Assets/Tests/Signal.replay");
+			CHECK(replay.Version == 4);
+			REQUIRE(replay.Events.size() == 1);
+			CHECK(replay.Events[0].Tick == 10);
+			CHECK(replay.Events[0].Type == "Signal");
+			CHECK(replay.Events[0].Name == "FrameTimeExceeded");
+			CHECK(replay.Header.SaveData.Get() == Json::object());
+
+			const Json replayed = CallReplayMethod(fixture, "input.replay", Json{ { "path", "Assets/Tests/Signal.replay" }, { "verify", true }, { "strictHash", true } });
+			CHECK(replayed["passed"] == Json(true));
+			CHECK(replayed["stateHash"] == saved["stateHash"]);
+			// Without its signal the run never ends: the input check fails, as a replay that depends on its input does.
+			const Result<Json> without = fixture.Call("input.replay",
+				Json{ { "path", "Assets/Tests/Signal.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true }, { "continuePastCheckpoint", true } });
+			REQUIRE_FALSE(without.has_value());
+			CHECK(without.error().GetCode() == ErrorCode::Validation);
+		}
+
 		// ADR 0038, friction F10: a new recording's header recorded "0.1.0" whatever the engine. It records the running
 		// engine's version (EngineVersionString, session.hello's engineVersion). The header's EngineVersion is informational:
 		// neither verification nor any state hash reads it, so a replay recorded by an earlier version still verifies.

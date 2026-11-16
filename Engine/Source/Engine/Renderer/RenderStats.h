@@ -56,6 +56,12 @@ namespace Engine {
 		uint32_t DroppedPointShadows = 0;
 		uint32_t MemoryAllocationCount = 0; // tracked Vulkan device allocations, not NVRHI object count
 		uint32_t MaxMemoryAllocationCount = 0;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the lights the frame shaded after culling (at most
+		// MaxVisibleLights), the visible lights beyond that cap (RENDER_LIGHT_LIMIT_EXCEEDED's), and the skinned meshes the
+		// Deform stage deformed for the frame (a mesh with a skin; a morph-only mesh is not counted).
+		uint32_t VisibleLights = 0;
+		uint32_t DroppedLights = 0;
+		uint32_t SkinnedMeshes = 0;
 	};
 
 	struct RenderPassCounters

@@ -516,7 +516,14 @@ namespace Engine {
 
 	Status EditorMethodContext::StartPlay(const PlayStartOptions& options)
 	{
-		return m_Editor->GetPlay().Start(options);
+		// play.start refreshes the project's assets first, as input.record does (StartRecordingSession), so a scene file
+		// written since the last refresh plays with its scene asset (Scene.GetCurrent, the play scene's summary; ADR 0043
+		// decision 2). Only a start the controller would admit refreshes: a refused start (a session or test run active, no
+		// project) changes nothing.
+		EditorPlayController& play = m_Editor->GetPlay();
+		if (m_Editor->HasProject() && !play.IsPlaying() && !play.IsTestRunActive())
+			ENGINE_TRY(Utils::RefreshAssets(*m_Editor));
+		return play.Start(options);
 	}
 
 	Status EditorMethodContext::StopPlay()

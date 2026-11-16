@@ -1855,7 +1855,7 @@ Example: Half speed.
 
 ### play.start
 
-Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. Returns the session's state.
+Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. The editor refreshes the project's assets first, as input.record does, so a scene file written since the last refresh plays with its scene asset. Returns the session's state.
 
 - Flags: tool `play_start`
 - Timeout: 60 s
@@ -3065,6 +3065,8 @@ Reads host and displayed-view statistics without waiting for the GPU or advancin
 | `maxMemoryAllocationCount` | `UInt32` | Vulkan device allocation limit, zero without a device. |
 | `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' gameResolution). The Runtime supplies game only. |
 | `deviceLosses` | `UInt32` | The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none. |
+| `activeBodies` | `UInt32` | Awake physics bodies of the play session, the 3D world's and the 2D world's together; 0 without a session. |
+| `particles` | `UInt32` | Live particles of the play session after its last Particles phase; 0 without a session. |
 
 Example: Inspect current host and renderer observations.
 

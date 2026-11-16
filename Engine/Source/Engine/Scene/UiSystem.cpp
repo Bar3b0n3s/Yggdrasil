@@ -3,6 +3,7 @@
 
 #include "Engine/Core/Hash.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
+#include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiTextInput.h"
@@ -181,6 +182,12 @@ namespace Engine {
 	{
 		m_FrameLayout = ComputeUiLayout(scene, sceneSize);
 		m_FrameLayoutCurrent = true;
+		// M28 (decision 5): a presentation text outlives neither its element nor the element's UiText.
+		std::erase_if(m_PresentationTexts, [&scene](const auto& entry)
+		{
+			const ConstEntity entity = scene.FindEntityByID(entry.first);
+			return !entity.IsValid() || !entity.HasComponent<UiTextComponent>();
+		});
 	}
 
 	const UiLayoutTable& UiSystem::GetLayout() const
@@ -422,6 +429,21 @@ namespace Engine {
 	{
 		m_Interaction = {};
 		m_Events.clear();
+		m_PresentationTexts.clear();
+	}
+
+	void UiSystem::SetPresentationText(UUID element, std::optional<std::string> text)
+	{
+		if (text.has_value())
+			m_PresentationTexts.insert_or_assign(element, std::move(*text));
+		else
+			m_PresentationTexts.erase(element);
+	}
+
+	const std::string* UiSystem::FindPresentationText(UUID element) const
+	{
+		const auto found = m_PresentationTexts.find(element);
+		return found != m_PresentationTexts.end() ? &found->second : nullptr;
 	}
 
 	void UiSystem::AppendStateHash(XXH64Hasher& hasher) const

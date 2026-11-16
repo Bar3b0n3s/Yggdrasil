@@ -11,6 +11,7 @@
 #include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UiScrollViewComponent.h"
 #include "Engine/Scene/Components/UiSliderComponent.h"
+#include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -24,6 +25,8 @@
 #include <bit>
 #include <cstdint>
 #include <format>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -136,6 +139,57 @@ namespace Engine {
 			CHECK_FALSE(ui.IsFrameLayoutCurrent());
 			CHECK(&ui.GetLayout() == &ui.GetStepLayout());
 			CHECK(ui.GetStepLayout().Nodes[0].Min == glm::vec2(5.0f, 0.0f));
+		}
+
+		TEST_CASE("UiSystem: presentation texts stay out of the state hash and go with their element, its UiText or the scene")
+		{
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 5).
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = scene.CreateEntity("Canvas");
+			canvas.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
+			Entity fps = scene.CreateEntity("Fps", canvas);
+			fps.AddComponent<UiRectComponent>(UiRectComponent{});
+			fps.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "--" });
+			Entity count = scene.CreateEntity("Count", canvas);
+			count.AddComponent<UiRectComponent>(UiRectComponent{});
+			count.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "0" });
+
+			UiSystem ui;
+			const auto digest = [&ui]()
+			{
+				XXH64Hasher hasher(0);
+				ui.AppendStateHash(hasher);
+				return hasher.Digest();
+			};
+			const uint64_t before = digest();
+			ui.SetPresentationText(fps.GetUUID(), std::string("16.7 ms"));
+			ui.SetPresentationText(count.GetUUID(), std::string("42"));
+			CHECK(digest() == before);
+			REQUIRE(ui.FindPresentationText(fps.GetUUID()) != nullptr);
+			CHECK(*ui.FindPresentationText(fps.GetUUID()) == "16.7 ms");
+			ui.SetPresentationText(fps.GetUUID(), std::string("33.3 ms"));
+			CHECK(*ui.FindPresentationText(fps.GetUUID()) == "33.3 ms");
+			ui.SetPresentationText(fps.GetUUID(), std::nullopt);
+			CHECK(ui.FindPresentationText(fps.GetUUID()) == nullptr);
+
+			// The frame's layout drops a text whose element lost its UiText or is gone.
+			ui.SetPresentationText(fps.GetUUID(), std::string("60 fps"));
+			count.RemoveComponent<UiTextComponent>();
+			ui.LayoutFrame(scene, glm::uvec2(100, 50));
+			CHECK(ui.FindPresentationText(count.GetUUID()) == nullptr);
+			REQUIRE(ui.FindPresentationText(fps.GetUUID()) != nullptr);
+			scene.DestroyEntity(fps);
+			ui.LayoutFrame(scene, glm::uvec2(100, 50));
+			CHECK(ui.GetPresentationTexts().empty());
+
+			// A scene replacement clears them.
+			Entity again = scene.CreateEntity("Again", canvas);
+			again.AddComponent<UiRectComponent>(UiRectComponent{});
+			again.AddComponent<UiTextComponent>(UiTextComponent{});
+			ui.SetPresentationText(again.GetUUID(), std::string("x"));
+			ui.ResetInteraction();
+			CHECK(ui.GetPresentationTexts().empty());
 		}
 
 		// Decision 24: hover follows the pointer, a press focuses and presses the widget under it, and a release over the

@@ -42,8 +42,12 @@ namespace Engine {
 	//     which passes RenderExtractionRequest::Alpha here, since the scene's own alpha is the frame's only inside the play
 	//     session's RenderExtraction phase). `worldOnly` appends only World canvases' items: the editor's scene view (the
 	//     Explicit camera source) draws them, as it draws the world, while it draws no Screen canvas (decision 7).
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): `presentation` (the play session's UiSystem presentation
+	// texts; null elsewhere) gives an element's UiText a presentation text, drawn in place of its Text while it is set (an
+	// empty presentation text draws nothing); a text input's TextElement keeps drawing the input's Text. Only the drawn string
+	// changes: the element's rectangle and the layout never read it.
 	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* interaction = nullptr,
-		bool worldOnly = false, float alpha = 1.0f);
+		bool worldOnly = false, float alpha = 1.0f, const UiPresentationTexts* presentation = nullptr);
 
 	// The UI's capture annotations (viewport.screenshot's annotations, §8.13): with snapshot.Annotations.Bounds, an Outline in
 	// yellow (1, 1, 0, 1) around every element that has a draw item in snapshot.Ui; with a label mode other than None, a

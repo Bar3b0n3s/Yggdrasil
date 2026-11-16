@@ -22,7 +22,7 @@ namespace Engine {
 		// cache key, so artifacts cooked by an older version are rebuilt instead of failing to load. 3 (the phase 1 ledger's,
 		// Docs/Decisions/0030-m19-contract.md decision 2): the cooked replay carries the start fingerprint
 		// (ReplayData::FormatVersion 3).
-		static constexpr uint32_t Version = 3;
+		static constexpr uint32_t Version = 4;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

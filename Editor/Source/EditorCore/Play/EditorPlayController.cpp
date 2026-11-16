@@ -186,6 +186,14 @@ namespace Engine {
 			FormatScriptPhase(PhaseText, script, callback);
 			PhaseMarker->SetScriptPhase(PhaseText);
 		}
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the editor application's frame loop and game view
+		// observations of the performance readout (SetFrameStatisticsSource); empty in an editor without a frame loop.
+		std::function<void(ScriptPerformanceStats&)> FrameStatistics{};
+		void ReadFrameStatistics(ScriptPerformanceStats& stats) const override
+		{
+			if (FrameStatistics)
+				FrameStatistics(stats);
+		}
 		// The serial of the next session (PlaySessionSpecification::Serial): sessions are counted from 1 and never share one.
 		uint64_t NextSerial = 1;
 		// True while this controller holds the asset manager's reload deferral (§7.5 race rule 4): from the start of a lockstep
@@ -819,6 +827,11 @@ namespace Engine {
 	{
 		environment.IsEditor = true;
 		m_State->Environment = std::move(environment);
+	}
+
+	void EditorPlayController::SetFrameStatisticsSource(std::function<void(ScriptPerformanceStats&)> source)
+	{
+		m_State->FrameStatistics = std::move(source);
 	}
 
 	ScriptEnvironment EditorPlayController::GetScriptEnvironment() const

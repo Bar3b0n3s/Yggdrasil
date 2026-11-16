@@ -12670,7 +12670,7 @@
 							},
 							"type": {
 								"description": "The event type (required).",
-								"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+								"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 							},
 							"name": {
 								"description": "action: the project action's name (exact, case-sensitive).",
@@ -15787,7 +15787,7 @@
 		{
 			"name": "play.start",
 			"domain": "play",
-			"description": "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. Returns the session's state.",
+			"description": "Starts a play session of the open scene (or of scene) through the serializer copy; with lockstep, ticks advance only through this client's play.step. The editor refreshes the project's assets first, as input.record does, so a scene file written since the last refresh plays with its scene asset. Returns the session's state.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -16184,7 +16184,7 @@
 							},
 							"type": {
 								"description": "The event type (required).",
-								"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text"]
+								"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 							},
 							"name": {
 								"description": "action: the project action's name (exact, case-sensitive).",
@@ -26113,6 +26113,18 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"activeBodies": {
+						"description": "Awake physics bodies of the play session, the 3D world's and the 2D world's together; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"particles": {
+						"description": "Live particles of the play session after its last Particles phase; 0 without a session.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -26213,6 +26225,24 @@
 							},
 							"historyFrames": {
 								"description": "Renders since the view's temporal history (motion vectors, TAA's jitter and history, auto-exposure's adaptation) last started afresh: 0 at its first render, after a scene change, play starting or stopping, or a camera cut; one more each render after.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"lights": {
+								"description": "Lights the frame shaded after culling, at most the per-view cap.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"droppedLights": {
+								"description": "Visible lights beyond the per-view cap, left unshaded (RENDER_LIGHT_LIMIT_EXCEEDED's).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"skinnedMeshes": {
+								"description": "Meshes with a skin the frame deformed (morph-only meshes are not counted).",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -27615,6 +27645,10 @@
 							"active": {
 								"description": "Whether the entity is active now, it and every ancestor; false for an inactive canvas or element that includeInactive lists, laid out and measured as if it were active.",
 								"type": "boolean"
+							},
+							"presentationText": {
+								"description": "The play session's presentation text of its UiText (UiText:SetPresentationText), cut as text is, which it draws in place of text (textBounds measures what it draws); empty when none is set and in the edit scene. Never serialized or hashed.",
+								"type": "string"
 							}
 						},
 						"additionalProperties": false

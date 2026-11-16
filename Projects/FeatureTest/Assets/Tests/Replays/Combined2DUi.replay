@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 3,
+	"Version": 4,
 	"Scene": {
 		"Handle": "0c54e137b38ddf34",
 		"Path": "Assets/Scenes/Combined2DUiGolden/Combined2DUi.scene"
@@ -10,6 +10,7 @@
 	"FixedHz": 64,
 	"EngineVersion": "0.5.0",
 	"Config": "Editor",
+	"SaveData": {},
 	"Fingerprint": {
 		"Entities": [
 			{

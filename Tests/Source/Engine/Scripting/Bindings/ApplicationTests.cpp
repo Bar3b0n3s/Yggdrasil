@@ -20,6 +20,8 @@ namespace Engine {
 assert(Application.IsEditor() and not Application.IsHeadless() and Application.IsFocused())
 assert(Application.GetPlatform() == "TestPlatform" and Application.GetVersion() == "7.8.9")
 assert(Application.GetWindowSize() == vector.create(800, 600, 0))
+-- M28: the fixture is no play session, so it has no performance readout.
+assert(not pcall(Application.GetStats))
 Application.Quit(-12)
 return Time.GetTick() == 0
 )");

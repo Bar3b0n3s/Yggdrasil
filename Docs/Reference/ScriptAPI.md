@@ -14,6 +14,14 @@ Returns the host platform name.
 
 All modes; Runtime|Test; pure/read.
 
+### Application.GetStats
+
+`() -> PerformanceStats`
+
+Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most the per-view cap, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.
+
+All modes; Runtime|Test; pure/read.
+
 ### Application.GetVersion
 
 `() -> string`
@@ -448,6 +456,14 @@ All modes; Runtime|Test; pure/read.
 
 Argument 1: MouseButton.
 
+### Input.PostSignal
+
+`(name: string) -> boolean`
+
+Posts the frame-time signal name (1 to 64 bytes of UTF-8) for the next fixed step, where Input.WasSignalled reads it: a decision taken on frame-paced observations (ending a run whose frame time stays over a budget) recorded as input, so input.record records it and a replay plays it back. Returns whether the session takes live signals: ordinary play and recordings do; replays, test runs and lockstep sessions ignore them (false) and take only played-back signals and those Test.InjectSignal or input.inject injects. A name already posted for the same tick counts once; a tick takes at most 64 distinct signals. A fixed-step gameplay callback raises an error: it decides deterministically and acts directly.
+
+All modes; Runtime|Test; mutates.
+
 ### Input.SetCursorMode
 
 `(mode: CursorMode) -> ()`
@@ -457,6 +473,14 @@ Changes cursor visibility/capture; refused during read-only evaluation.
 All modes; Runtime|Test; mutates.
 
 Argument 1: CursorMode.
+
+### Input.WasSignalled
+
+`(name: string) -> boolean`
+
+Returns whether the signal name was latched: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) by this tick, in the frame phase (OnUpdate, OnLateUpdate) by any tick since the previous frame.
+
+All modes; Runtime|Test; pure/read.
 
 ## Loc
 
@@ -1239,6 +1263,14 @@ All modes; Test; mutates.
 `(delta: vector) -> ()`
 
 Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next unapplied input tick.
+
+All modes; Test; mutates.
+
+### Test.InjectSignal
+
+`(name: string) -> ()`
+
+Queue the frame-time signal name (1 to 64 bytes of UTF-8) for the next unapplied input tick, where Input.WasSignalled reads it: how a test takes the decisions a live session posts with Input.PostSignal, which test runs ignore.
 
 All modes; Test; mutates.
 
@@ -5566,6 +5598,14 @@ The font; null uses its canvas's Font, or the default font when the canvas names
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### UiText.GetPresentationText
+
+`(self: UiText) -> string?`
+
+Returns the presentation text SetPresentationText set, or nil. Frame-paced: a fixed-step gameplay callback raises an error.
+
+All modes; Runtime|Test; pure/read.
+
 ### UiText.LineSpacing
 
 `number`
@@ -5581,6 +5621,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### UiText.SetPresentationText
+
+`(self: UiText, text: string?) -> ()`
+
+Shows text (at most 4096 bytes of UTF-8) in place of the element's Text until it is cleared with nil, the element or its UiText is removed, or the scene is replaced: frame-paced text such as a frame time or a performance readout, never serialized, hashed or recorded, so it never splits a replay. Layout and hit testing keep the authored Text's element. A fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error: set it in OnUpdate or OnLateUpdate.
+
+All modes; Runtime|Test; mutates.
 
 ### UiText.Size
 
@@ -6221,6 +6269,8 @@ The type of an input event (§13.6).
 - `GamepadAxis`: A gamepad axis taking a value.
 
 - `Text`: Typed text, one character event per code point.
+
+- `Signal`: A frame-time signal (name): a decision a script took on frame-paced observations (Input.PostSignal), which the tick latches for Input.WasSignalled. Replays from version 4 carry it.
 
 ## InputRecordAction
 
@@ -7009,6 +7059,12 @@ First contact from the receiving body's side, with collider identities for compo
 `{Min: number?, Max: number?, Step: number?, Tooltip: string?}`
 
 Editor metadata and numeric validation bounds for a field.
+
+## PerformanceStats
+
+`{RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number}`
+
+The performance readout of Application.GetStats: frame-paced observations, never simulation state.
 
 ## RaycastHit
 

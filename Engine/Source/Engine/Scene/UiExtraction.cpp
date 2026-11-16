@@ -184,7 +184,7 @@ namespace Engine {
 	}
 
 	void AppendUiDrawItems(const Scene& scene, const UiLayoutTable& table, UiDrawList& list, const UiInteractionState* interaction, bool worldOnly,
-		float alpha)
+		float alpha, const UiPresentationTexts* presentation)
 	{
 		for (const UiCanvasLayout& canvas : table.Canvases)
 		{
@@ -248,6 +248,12 @@ namespace Engine {
 				// A text input's TextElement draws the input's Text, with the caret while the input has focus (an empty Text
 				// then draws only the caret); an unfocused empty input draws nothing here (its Placeholder shows).
 				const std::string* drawn = &text->Text;
+				// M28 (decision 5): a presentation text the session's scripts set draws in place of the authored Text.
+				if (presentation != nullptr)
+				{
+					if (const auto shown = presentation->find(node.Entity); shown != presentation->end())
+						drawn = &shown->second;
+				}
 				bool caret = false;
 				uint32_t caretByte = 0;
 				if (const auto found = std::ranges::lower_bound(textInputElements, node.Entity, {}, &std::pair<UUID, UUID>::first);

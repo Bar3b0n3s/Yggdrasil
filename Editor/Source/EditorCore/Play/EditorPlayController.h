@@ -11,6 +11,7 @@
 #include "Engine/Session/PlaySession.h"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -91,6 +92,11 @@ namespace Engine {
 		// is the game view's (the Game panel's image when available, else the project's window size; PlaySession.h).
 		void SetScriptEnvironment(ScriptEnvironment environment);
 		[[nodiscard]] ScriptEnvironment GetScriptEnvironment() const;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the editor application's part of the performance readout
+		// (IPlaySessionHost::ReadFrameStatistics): its frame loop's Fps and CpuMilliseconds and the Game view's render
+		// counters. EditorApp sets it; without one (an editor context without a frame loop) the readout has the session's
+		// counters only.
+		void SetFrameStatisticsSource(std::function<void(ScriptPerformanceStats&)> source);
 
 		[[nodiscard]] bool IsPlaying() const;
 		// The running session; nullptr in Edit mode. Valid until Stop.

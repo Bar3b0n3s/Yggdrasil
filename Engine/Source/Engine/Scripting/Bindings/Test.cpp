@@ -407,6 +407,14 @@ namespace Engine {
 			return Inject(call, { { "type", "text" }, { "text", std::move(text) } });
 		}
 
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a frame-time signal, as a replay plays one back; the input
+		// path checks the name (1 to MaxScriptSignalNameBytes bytes of UTF-8).
+		static int InjectSignal(ScriptCall& call)
+		{
+			std::string name = Lua::Check<std::string>(call, 1);
+			return Inject(call, { { "type", "signal" }, { "name", std::move(name) } });
+		}
+
 		static int Screenshot(ScriptCall& call)
 		{
 			IScriptTestHost& host = Host(call);
@@ -679,6 +687,10 @@ namespace Engine {
 				.Function("InjectMouseMove", Utils::InjectMouseMove, "(position: vector) -> ()", "Queue a mouse move to a finite XY position in view coordinates for the next unapplied input tick.", mutation)
 				.Function("InjectScroll", Utils::InjectScroll, "(delta: vector) -> ()", "Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next unapplied input tick.", mutation)
 				.Function("InjectText", Utils::InjectText, "(text: string) -> ()", "Queue committed text (non-empty UTF-8) for the next unapplied input tick, as typed characters.", mutation)
+				.Function("InjectSignal", Utils::InjectSignal, "(name: string) -> ()",
+					"Queue the frame-time signal name (1 to 64 bytes of UTF-8) for the next unapplied input tick, where Input.WasSignalled reads it: "
+					"how a test takes the decisions a live session posts with Input.PostSignal, which test runs ignore.",
+					mutation)
 				.Function("Screenshot", Utils::Screenshot, "(name: string) -> ()",
 					std::format("Capture a screenshot through the owning host; a suite takes at most {} screenshots, and a later call raises an error without capturing.", MaxScriptTestScreenshotsPerSuite), mutation)
 				.Function("ReloadScript", Utils::ReloadScript, "(asset: AssetRef) -> ()", "Synchronously reload a script in an editor test.", editor)

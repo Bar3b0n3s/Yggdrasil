@@ -90,7 +90,7 @@ export type InputActionType = "Button" | "Axis"
 export type InputEventState = "Down" | "Up" | "Tap"
 
 -- The type of an input event (§13.6).
-export type InputEventType = "Action" | "Key" | "MouseButton" | "MouseMove" | "MouseDelta" | "Scroll" | "GamepadButton" | "GamepadAxis" | "Text"
+export type InputEventType = "Action" | "Key" | "MouseButton" | "MouseMove" | "MouseDelta" | "Scroll" | "GamepadButton" | "GamepadAxis" | "Text" | "Signal"
 
 -- Start a fresh recording or stop and save it.
 export type InputRecordAction = "Start" | "Stop"
@@ -259,6 +259,9 @@ export type CollisionContact = {Point: vector, Normal: vector, RelativeSpeed: nu
 
 -- Editor metadata and numeric validation bounds for a field.
 export type FieldOptions = {Min: number?, Max: number?, Step: number?, Tooltip: string?}
+
+-- The performance readout of Application.GetStats: frame-paced observations, never simulation state.
+export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number}
 
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
@@ -1529,10 +1532,14 @@ declare extern type UiText with
 	Color: Color
 	-- The font; null uses its canvas's Font, or the default font when the canvas names none. [All modes; Runtime|Test; pure/read; setter mutates]
 	Font: AssetRef?
+	-- Returns the presentation text SetPresentationText set, or nil. Frame-paced: a fixed-step gameplay callback raises an error. [All modes; Runtime|Test; pure/read]
+	GetPresentationText: (self: UiText) -> string?
 	-- Multiplies the font's line height. [All modes; Runtime|Test; pure/read; setter mutates]
 	LineSpacing: number
 	-- Whether the text catches the pointer for its nearest widget; false lets the pointer pass through it. [All modes; Runtime|Test; pure/read; setter mutates]
 	RaycastTarget: boolean
+	-- Shows text (at most 4096 bytes of UTF-8) in place of the element's Text until it is cleared with nil, the element or its UiText is removed, or the scene is replaced: frame-paced text such as a frame time or a performance readout, never serialized, hashed or recorded, so it never splits a replay. Layout and hit testing keep the authored Text's element. A fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error: set it in OnUpdate or OnLateUpdate. [All modes; Runtime|Test; mutates]
+	SetPresentationText: (self: UiText, text: string?) -> ()
 	-- The em size in canvas units. [All modes; Runtime|Test; pure/read; setter mutates]
 	Size: number
 	-- The UTF-8 text; a line feed starts a new line. Scripts read localized strings with Loc.Get. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1577,6 +1584,8 @@ end
 declare Application: {
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
 	GetPlatform: () -> string,
+	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most the per-view cap, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
+	GetStats: () -> PerformanceStats,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,
 	-- Returns the size of the session's view in view coordinates as vector(width, height, 0): the game view's image in ordinary play, the project's Window.Width x Window.Height in lockstep, recording, replay and test sessions. [All modes; Runtime|Test; pure/read]
@@ -1695,8 +1704,12 @@ declare Input: {
 	IsMouseButtonPressed: (button: MouseButton) -> boolean,
 	-- Returns this phase's mouse-button release edge. [All modes; Runtime|Test; pure/read]
 	IsMouseButtonReleased: (button: MouseButton) -> boolean,
+	-- Posts the frame-time signal name (1 to 64 bytes of UTF-8) for the next fixed step, where Input.WasSignalled reads it: a decision taken on frame-paced observations (ending a run whose frame time stays over a budget) recorded as input, so input.record records it and a replay plays it back. Returns whether the session takes live signals: ordinary play and recordings do; replays, test runs and lockstep sessions ignore them (false) and take only played-back signals and those Test.InjectSignal or input.inject injects. A name already posted for the same tick counts once; a tick takes at most 64 distinct signals. A fixed-step gameplay callback raises an error: it decides deterministically and acts directly. [All modes; Runtime|Test; mutates]
+	PostSignal: (name: string) -> boolean,
 	-- Changes cursor visibility/capture; refused during read-only evaluation. [All modes; Runtime|Test; mutates]
 	SetCursorMode: (mode: CursorMode) -> (),
+	-- Returns whether the signal name was latched: in the fixed step (OnFixedUpdate, tasks, physics and UI callbacks) by this tick, in the frame phase (OnUpdate, OnLateUpdate) by any tick since the previous frame. [All modes; Runtime|Test; pure/read]
+	WasSignalled: (name: string) -> boolean,
 }
 
 -- Localized strings from string tables (.stringtable assets) in the project's locale (Localization.Locale): a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's.
@@ -1919,6 +1932,8 @@ declare Test: {
 	InjectMouseMove: (position: vector) -> (),
 	-- Queue a scroll of a finite XY delta (wheel steps, y up-positive) for the next unapplied input tick. [All modes; Test; mutates]
 	InjectScroll: (delta: vector) -> (),
+	-- Queue the frame-time signal name (1 to 64 bytes of UTF-8) for the next unapplied input tick, where Input.WasSignalled reads it: how a test takes the decisions a live session posts with Input.PostSignal, which test runs ignore. [All modes; Test; mutates]
+	InjectSignal: (name: string) -> (),
 	-- Queue committed text (non-empty UTF-8) for the next unapplied input tick, as typed characters. [All modes; Test; mutates]
 	InjectText: (text: string) -> (),
 	-- Synchronously reload a script in an editor test. [EditorOnly; Test; mutates]

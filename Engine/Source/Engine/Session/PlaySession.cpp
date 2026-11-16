@@ -42,6 +42,7 @@
 #include "Engine/Scripting/ScriptProxy.h"
 #include "Engine/Session/NativeWorld.h"
 #include "Engine/Session/ReplayRecorder.h"
+#include "Engine/Session/SessionStatistics.h"
 
 #include <algorithm>
 #include <array>
@@ -513,6 +514,35 @@ namespace Engine {
 		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
 		// M22 (C22.3, decision 46): the text latch, which Input.GetText reads.
 		[[nodiscard]] std::string_view GetText(InputPhase phase) const override { return Input.GetText(phase); }
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): Application.GetStats: the host's frame and render
+		// observations, the session's counters and the VM's heap.
+		[[nodiscard]] Result<ScriptPerformanceStats> GetPerformanceStats() const override
+		{
+			ScriptPerformanceStats stats;
+			if (Host != nullptr)
+				Host->ReadFrameStatistics(stats);
+			const SessionStatistics counters = ReadSessionStatistics(Session);
+			stats.Entities = counters.Entities;
+			stats.Bodies = counters.Bodies;
+			stats.ActiveBodies = counters.ActiveBodies;
+			stats.Particles = counters.Particles;
+			if (Scripts != nullptr)
+				stats.ScriptHeapBytes = Scripts->GetMemoryState().UsedBytes;
+			return stats;
+		}
+		// M28 (decision 6): live signals reach ordinary play and recordings only; replays, suites, FeatureTest runs and
+		// lockstep sessions without a recorder take the signals their input carries (played back or injected). The name is
+		// checked first, so a malformed one raises whatever the session.
+		[[nodiscard]] Result<bool> PostSignal(std::string_view name) override
+		{
+			ENGINE_TRY(ValidatePlayInputEvent(PlayInputEvent{ .Type = PlayInputEventType::Signal, .Name = std::string(name) }, Input.GetActions()));
+			const bool recording = Recorder != nullptr && Recorder->IsRecording();
+			if (TestMode || (Lockstep && !recording))
+				return false;
+			ENGINE_TRY(Input.QueueSignal(name));
+			return true;
+		}
+		[[nodiscard]] bool WasSignalled(InputPhase phase, std::string_view name) const override { return Input.WasSignalled(phase, name); }
 		// ADR 0038 decision 14: before each round of a start flush, the bodies of both worlds whose components changed, from
 		// world matrices brought up to date first, so an entity has its body from its OnStart on.
 		void SynchronizePhysicsBodies() override
@@ -1130,7 +1160,8 @@ namespace Engine {
 			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize, .SsaoHalfResolution = Project.Rendering.SsaoHalfResolution },
 			.SortingLayers = Project.SortingLayers.Layers,
 			// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state.
-			.UiInteraction = &Ui.GetInteraction() };
+			.UiInteraction = &Ui.GetInteraction(),
+			.UiPresentation = &Ui.GetPresentationTexts() };
 		Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(*RuntimeScene, request);
 		if (snapshot)
 		{
@@ -2088,6 +2119,7 @@ namespace Engine {
 		view.Alpha = GetViewAlpha();
 		// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state, as in its game view.
 		view.UiInteraction = &m_State->Ui.GetInteraction();
+		view.UiPresentation = &m_State->Ui.GetPresentationTexts();
 		ENGINE_TRY_ASSIGN(auto snapshot, ExtractRenderSnapshot(*m_State->RuntimeScene, view));
 		snapshot.DebugDraw.Append(m_State->DebugDraw);
 		return snapshot;

@@ -23,7 +23,9 @@ namespace Engine {
 
 	namespace {
 
-		constexpr std::array<std::string_view, 9> EventTypes = { "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text" };
+		// M28 (decision 7): "Signal" from version 4, appended, so the cooked tags of the others keep their values.
+		constexpr std::array<std::string_view, 10> EventTypes = { "Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text",
+			"Signal" };
 		constexpr std::array<std::string_view, 3> States = { "Down", "Up", "Tap" };
 
 		Error Invalid(std::string pointer, std::string message)
@@ -108,7 +110,7 @@ namespace Engine {
 		Json EventJson(const ReplayEvent& e)
 		{
 			Json j = { { "Tick", e.Tick }, { "Type", e.Type } };
-			if (e.Type == "Action" || !e.Name.empty())
+			if (e.Type == "Action" || e.Type == "Signal" || !e.Name.empty())
 				j["Name"] = e.Name;
 			if (e.State)
 				j["State"] = *e.State;
@@ -159,8 +161,10 @@ namespace Engine {
 				out = glm::vec2(xv, yv);
 				return {};
 			};
-			if (e.Type == "Action")
+			if (e.Type == "Action" || e.Type == "Signal")
 				ENGINE_TRY(string("Name", e.Name));
+			if (e.Type == "Signal" && (e.Name.empty() || e.Name.size() > MaxReplaySignalNameBytes))
+				return std::unexpected(Invalid(r.GetPointer() + "/Name", std::format("a signal's name holds 1 to {} bytes", MaxReplaySignalNameBytes)));
 			if (e.Type == "Key")
 			{
 				ENGINE_TRY(string("Key", e.KeyName));
@@ -264,6 +268,8 @@ namespace Engine {
 				w.WriteString(e.ButtonName);
 				state();
 			}
+			else if (e.Type == "Signal")
+				w.WriteString(e.Name);
 			else if (e.Type == "GamepadAxis")
 			{
 				w.WriteU32(e.Gamepad);
@@ -346,6 +352,10 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(e.AxisName, r.ReadString());
 				ENGINE_TRY_ASSIGN(float value, r.ReadF32());
 				e.Value = value;
+			}
+			else if (kind == 9)
+			{
+				ENGINE_TRY_ASSIGN(e.Name, r.ReadString());
 			}
 			else
 			{
@@ -572,6 +582,12 @@ namespace Engine {
 			ENGINE_TRY(parameters.ExpectType(JsonType::Object));
 			ENGINE_TRY(CheckTree(parameters));
 		}
+		if (!d.Header.SaveData.IsNull())
+		{
+			JsonReader saveData(d.Header.SaveData.Get(), "/SaveData");
+			ENGINE_TRY(saveData.ExpectType(JsonType::Object));
+			ENGINE_TRY(CheckTree(saveData));
+		}
 		ENGINE_TRY(Hash(d.FinalStateHash, "/FinalStateHash"));
 		if (d.Events.size() > std::numeric_limits<uint32_t>::max() || d.Expect.size() > std::numeric_limits<uint32_t>::max()
 			|| d.Checkpoints.size() > std::numeric_limits<uint32_t>::max())
@@ -624,12 +640,15 @@ namespace Engine {
 		d.Version = ReplayFormatVersion;
 		const bool hasCheckpoints = fileVersion >= 2;
 		const bool hasFingerprint = fileVersion >= ReplayFingerprintFormatVersion;
-		constexpr std::array<std::string_view, 14> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
+		const bool hasSaveData = fileVersion >= ReplaySaveDataFormatVersion;
+		constexpr std::array<std::string_view, 15> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
+		constexpr std::array<std::string_view, 14> KeysVersion3 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
 		constexpr std::array<std::string_view, 13> KeysVersion2 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
 		constexpr std::array<std::string_view, 12> KeysVersion1 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "FinalTick", "FinalStateHash" };
-		const std::span<const std::string_view> known = hasFingerprint ? std::span<const std::string_view>(Keys)
-			: hasCheckpoints                                           ? std::span<const std::string_view>(KeysVersion2)
-																	   : std::span<const std::string_view>(KeysVersion1);
+		const std::span<const std::string_view> known = hasSaveData ? std::span<const std::string_view>(Keys)
+			: hasFingerprint                                        ? std::span<const std::string_view>(KeysVersion3)
+			: hasCheckpoints                                        ? std::span<const std::string_view>(KeysVersion2)
+																	: std::span<const std::string_view>(KeysVersion1);
 		ENGINE_TRY(Unknown(root, known, report, strictUnknowns));
 		ENGINE_TRY_ASSIGN(auto scene, root.GetMember("Scene"));
 		constexpr std::array<std::string_view, 2> SceneKeys = { "Handle", "Path" };
@@ -644,6 +663,15 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(d.Header.FixedHz, root.ReadMember<uint32_t>("FixedHz"));
 		ENGINE_TRY_ASSIGN(d.Header.EngineVersion, root.ReadMember<std::string>("EngineVersion"));
 		ENGINE_TRY_ASSIGN(d.Header.Config, root.ReadMember<std::string>("Config"));
+		if (hasSaveData)
+		{
+			ENGINE_TRY_ASSIGN(auto saveData, root.GetMember("SaveData"));
+			ENGINE_TRY(saveData.ExpectType(JsonType::Object));
+			ENGINE_TRY(CheckTree(saveData));
+			d.Header.SaveData.Set(saveData.GetValue());
+		}
+		else
+			d.Header.SaveData.Set(Json::object());
 		if (hasFingerprint)
 		{
 			ENGINE_TRY_ASSIGN(const JsonReader fingerprint, root.GetMember("Fingerprint"));
@@ -657,6 +685,8 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(auto item, events.GetElement(i));
 			ENGINE_TRY_ASSIGN(auto event, ReadEvent(item));
+			if (!hasSaveData && event.Type == "Signal")
+				return std::unexpected(Invalid(std::format("/Events/{}/Type", i), "unknown or noncanonical replay event type: Signal needs version 4"));
 			d.Events.push_back(std::move(event));
 		}
 		ENGINE_TRY_ASSIGN(auto expectations, root.GetMember("Expect"));
@@ -700,7 +730,7 @@ namespace Engine {
 	Result<Json> ReplayToJson(const ReplayDocument& d)
 	{
 		ENGINE_TRY(ValidateReplayDocument(d));
-		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "Fingerprint", d.Fingerprint ? FingerprintJson(*d.Fingerprint) : Json(nullptr) }, { "Events", Json::array() }, { "Expect", Json::array() }, { "Checkpoints", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
+		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "SaveData", d.Header.SaveData.IsNull() ? Json::object() : d.Header.SaveData.Get() }, { "Fingerprint", d.Fingerprint ? FingerprintJson(*d.Fingerprint) : Json(nullptr) }, { "Events", Json::array() }, { "Expect", Json::array() }, { "Checkpoints", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
 		for (const auto& e : d.Events)
 			j["Events"].push_back(EventJson(e));
 		for (const auto& e : d.Expect)
@@ -742,6 +772,9 @@ namespace Engine {
 		w.WriteU32(d.Header.FixedHz);
 		w.WriteString(d.Header.EngineVersion);
 		w.WriteString(d.Header.Config);
+		ENGINE_TRY_ASSIGN(auto saveData, JsonWriter::Write(d.Header.SaveData.IsNull() ? Json::object() : d.Header.SaveData.Get(), JsonStyle::Minified));
+		ENGINE_TRY(Text(saveData, "/SaveData"));
+		w.WriteString(saveData);
 		w.WriteU32(static_cast<uint32_t>(d.Events.size()));
 		for (const auto& e : d.Events)
 			WriteEvent(w, e);
@@ -787,6 +820,10 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(d.Header.FixedHz, r.ReadU32());
 		ENGINE_TRY_ASSIGN(d.Header.EngineVersion, r.ReadString());
 		ENGINE_TRY_ASSIGN(d.Header.Config, r.ReadString());
+		ENGINE_TRY_ASSIGN(auto saveDataText, r.ReadString());
+		ENGINE_TRY_ASSIGN(auto saveData, JsonReader::Parse(saveDataText));
+		ENGINE_TRY(JsonReader(saveData, "/SaveData").ExpectType(JsonType::Object));
+		d.Header.SaveData.Set(std::move(saveData));
 		ENGINE_TRY_ASSIGN(uint32_t count, r.ReadU32());
 		if (count > r.GetRemaining() / 9)
 			return std::unexpected(Invalid("/Events", "event count exceeds remaining payload"));

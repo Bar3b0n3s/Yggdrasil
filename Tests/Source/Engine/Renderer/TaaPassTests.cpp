@@ -541,6 +541,9 @@ namespace Engine {
 
 				snapshot.Meshes[0].JointPalette = pose(0.0f);
 				render(snapshot);
+				// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the render stats count the skinned mesh the Deform
+				// stage deformed.
+				CHECK(setup.Renderer().GetRenderStats().SkinnedMeshes == 1);
 				RenderSnapshot continued = snapshot;
 				continued.Camera.PreviousViewProjection = viewProjection;
 				continued.Meshes[0].PreviousWorld = world;

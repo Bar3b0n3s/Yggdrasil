@@ -4,10 +4,14 @@
 
 #include "EditorCore/Commands/SceneEdit.h"
 #include "EditorCore/EditorContext.h"
+#include "EditorCore/Play/EditorPlayController.h"
+#include "Engine/Asset/AssetRegistry.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Session/PlaySession.h"
 #include "Support/AutomationTestClient.h"
 
 #include <format>
@@ -376,6 +380,46 @@ return Script.Define("Fields", Fields)
 			REQUIRE_MESSAGE(edit.has_value(), edit.error().ToString());
 			CHECK((*edit)["scene"]["path"] == Json("Assets/Scenes/Main.scene"));
 			CHECK((*edit)["scene"]["name"] == Json("Main"));
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
+		TEST_CASE("EditorMethodContext: play.start refreshes the assets first, so a scene file written since the last refresh plays with its scene asset")
+		{
+			Test::AutomationFixture setup("ContextPlayRefresh");
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Written.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("entity.create", Json{ { "name", "Piece" } }).has_value());
+			REQUIRE(setup.Call("scene.close", Json{ { "save", true } }).has_value());
+			// The file is on disk, but no refresh has registered it yet.
+			const VfsPath written = VfsPath::Create("project", "Assets/Scenes/Written.scene").value();
+			REQUIRE(editor.GetVfs().Exists(written));
+			REQUIRE(editor.GetAssets().GetRegistry().FindBySourcePath(written) == nullptr);
+
+			REQUIRE(setup.Call("play.start", Json{ { "scene", "Assets/Scenes/Written.scene" }, { "paused", true } }).has_value());
+			const AssetRecord* record = editor.GetAssets().GetRegistry().FindBySourcePath(written);
+			REQUIRE(record != nullptr);
+			const PlaySession* session = editor.GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			CHECK(session->GetCurrentSceneAsset() == record->Metadata.Handle);
+			const Result<Json> read = setup.Call("scene.tree", Json{ { "format", "Json" } });
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK((*read)["scene"]["path"] == Json("Assets/Scenes/Written.scene"));
+			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
+		}
+
+		TEST_CASE("EditorMethodContext: play.start refused while a session runs leaves the assets unrefreshed")
+		{
+			Test::AutomationFixture setup("ContextPlayRefreshRefused");
+			EditorContext& editor = setup.GetEditor();
+			REQUIRE(setup.Call("play.start", Json{ { "paused", true } }).has_value());
+			REQUIRE(setup.Call("scene.new", Json{ { "path", "Assets/Scenes/Late.scene" }, { "keepOpen", true } }).has_value());
+			REQUIRE(setup.Call("scene.close", Json{ { "save", true } }).has_value());
+			const VfsPath late = VfsPath::Create("project", "Assets/Scenes/Late.scene").value();
+			REQUIRE(editor.GetAssets().GetRegistry().FindBySourcePath(late) == nullptr);
+			const Result<Json> refused = setup.Call("play.start", Json{ { "scene", "Assets/Scenes/Late.scene" } });
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(editor.GetAssets().GetRegistry().FindBySourcePath(late) == nullptr);
 			REQUIRE(setup.Call("play.stop", Json::object()).has_value());
 		}
 

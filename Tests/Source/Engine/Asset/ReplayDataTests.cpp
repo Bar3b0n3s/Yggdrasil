@@ -261,10 +261,11 @@ namespace Engine {
 		}
 
 		// M16 friction S2-01 (FX-4): version 2 adds the state-hash checkpoints. A version 1 file still loads, migrated with
-		// none (only its final hash is compared, as before), and writes back canonically in the current version (3, with a
-		// null start fingerprint, Docs/Decisions/0030-m19-contract.md decision 2), the bytes project.upgrade then writes
+		// none (only its final hash is compared, as before), and writes back canonically in the current version (4, with a
+		// null start fingerprint, Docs/Decisions/0030-m19-contract.md decision 2, and an empty SaveData,
+		// Docs/Decisions/0043-m28-game-services.md decision 7), the bytes project.upgrade then writes
 		// (Tests/Data/Formats/Replay/v1.upgraded.replay).
-		TEST_CASE("ReplayData: a version 1 replay migrates to version 3 with no checkpoints")
+		TEST_CASE("ReplayData: a version 1 replay migrates to the current version with no checkpoints")
 		{
 			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Replay/v1.replay");
 			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v1.upgraded.replay");
@@ -278,6 +279,7 @@ namespace Engine {
 			CHECK(migrated->Version == ReplayFormatVersion);
 			CHECK(migrated->Checkpoints.empty());
 			CHECK_FALSE(migrated->Fingerprint.has_value());
+			CHECK(migrated->Header.SaveData.Get() == Json::object());
 			CHECK(migrated->FinalStateHash == "3e0c91a2b4d5f607");
 			const auto text = ReplayToText(*migrated);
 			REQUIRE(text.has_value());
@@ -448,10 +450,92 @@ namespace Engine {
 		}
 
 		// Docs/Decisions/0030-m19-contract.md decision 2 (A-FPRINT): version 3 adds the start fingerprint after Config. A
-		// version 2 file (the reserved fixture Formats/Replay/v2) migrates to version 3 with a null one, nothing recorded, and
-		// writes back as the bytes project.upgrade writes (Formats/Replay/v2.upgraded); in version 2 a Fingerprint member is
-		// unknown, and version 3 requires it.
-		TEST_CASE("ReplayData: a version 2 replay migrates to version 3 with a null fingerprint")
+		// version 2 file (the reserved fixture Formats/Replay/v2) migrates to the current version with a null one, nothing
+		// recorded, and writes back as the bytes project.upgrade writes (Formats/Replay/v2.upgraded, version 4 since M28); in
+		// version 2 a Fingerprint member is unknown, and version 3 requires it.
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): version 4 adds the header's SaveData after Config and the
+		// Signal event type. A version 3 file (Formats/Replay/v3, which v2's upgrade wrote before M28) migrates with an empty
+		// SaveData and writes back as the bytes project.upgrade writes (Formats/Replay/v3.upgraded); in version 3 a SaveData
+		// member is unknown and a Signal event is refused, and version 4 requires SaveData.
+		TEST_CASE("ReplayData: a version 3 replay migrates to version 4 with an empty save-data store, and refuses what version 4 adds")
+		{
+			const Result<std::string> v3 = Test::ReadTestDataText("Formats/Replay/v3.replay");
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v3.upgraded.replay");
+			REQUIRE(v3.has_value());
+			REQUIRE(upgraded.has_value());
+			CHECK(ReplayFormatVersion == 4);
+			ReplayLoadReport report;
+			const auto migrated = ReplayFromText(*v3, report, true);
+			REQUIRE_MESSAGE(migrated.has_value(), migrated.error().ToString());
+			CHECK(report.FileVersion == 3);
+			CHECK(report.Diagnostics.empty());
+			CHECK(migrated->Version == 4);
+			CHECK(migrated->Header.SaveData.Get() == Json::object());
+			const auto text = ReplayToText(*migrated);
+			REQUIRE(text.has_value());
+			CHECK(*text == *upgraded);
+			const auto again = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(report.FileVersion == 4);
+			CHECK(ReplayToText(*again).value_or("") == *upgraded);
+
+			// Version 3 knows neither member nor event type.
+			auto withSaveData = JsonReader::Parse(*v3);
+			REQUIRE(withSaveData.has_value());
+			(*withSaveData)["SaveData"] = Json::object();
+			CHECK_FALSE(ReplayFromJson(*withSaveData, report, true).has_value());
+			auto withSignal = JsonReader::Parse(*v3);
+			REQUIRE(withSignal.has_value());
+			(*withSignal)["Events"].push_back(Json{ { "Tick", 400 }, { "Type", "Signal" }, { "Name", "FrameTimeExceeded" } });
+			CHECK_FALSE(ReplayFromJson(*withSignal, report, true).has_value());
+			// Version 4 requires SaveData, an object.
+			auto withoutSaveData = JsonReader::Parse(*upgraded);
+			REQUIRE(withoutSaveData.has_value());
+			withoutSaveData->erase("SaveData");
+			CHECK_FALSE(ReplayFromJson(*withoutSaveData, report, true).has_value());
+			(*withoutSaveData)["SaveData"] = Json::array();
+			CHECK_FALSE(ReplayFromJson(*withoutSaveData, report, true).has_value());
+		}
+
+		TEST_CASE("ReplayData: version 4 keeps the save-data store and the signals through text and cooking")
+		{
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v3.upgraded.replay");
+			REQUIRE(upgraded.has_value());
+			ReplayLoadReport report;
+			auto document = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			document->Header.SaveData.Set(Json{ { "Best", 12.5 }, { "Realms", Json::array({ "Fire" }) }, { "Volume", Json{ { "Music", 0.25 } } } });
+			document->Events.push_back(ReplayEvent{ .Tick = 400, .Type = "Signal", .Name = "FrameTimeExceeded" });
+			const auto text = ReplayToText(*document);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const auto read = ReplayFromText(*text, report, true);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(read->Header.SaveData.Get() == document->Header.SaveData.Get());
+			REQUIRE(read->Events.size() == document->Events.size());
+			CHECK(read->Events.back().Type == "Signal");
+			CHECK(read->Events.back().Name == "FrameTimeExceeded");
+
+			const std::vector<ReplayBytecodeExpectation> bytecode;
+			ReplayDocument withoutExpect = *read;
+			withoutExpect.Expect.clear();
+			const auto cookedPlain = CookReplay(withoutExpect, bytecode, 1);
+			REQUIRE_MESSAGE(cookedPlain.has_value(), cookedPlain.error().ToString());
+			const auto loaded = LoadCookedReplay(*cookedPlain);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			CHECK((*loaded)->Header.SaveData.Get() == document->Header.SaveData.Get());
+			REQUIRE_FALSE((*loaded)->Events.empty());
+			CHECK((*loaded)->Events.back().Type == "Signal");
+			CHECK((*loaded)->Events.back().Name == "FrameTimeExceeded");
+
+			// A signal's name holds 1 to 64 bytes.
+			ReplayDocument bad = withoutExpect;
+			bad.Events.back().Name.clear();
+			CHECK_FALSE(ReplayToText(bad).has_value());
+			bad.Events.back().Name = std::string(65, 'x');
+			CHECK_FALSE(ReplayToText(bad).has_value());
+		}
+
+		TEST_CASE("ReplayData: a version 2 replay migrates to the current version with a null fingerprint")
 		{
 			const Result<std::string> v2 = Test::ReadTestDataText("Formats/Replay/v2.replay");
 			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v2.upgraded.replay");
@@ -462,18 +546,18 @@ namespace Engine {
 			REQUIRE_MESSAGE(migrated.has_value(), migrated.error().ToString());
 			CHECK(report.FileVersion == 2);
 			CHECK(report.Diagnostics.empty());
-			CHECK(ReplayFormatVersion == ReplayFingerprintFormatVersion);
-			CHECK(migrated->Version == ReplayFingerprintFormatVersion);
+			CHECK(ReplayFingerprintFormatVersion == 3);
+			CHECK(migrated->Version == ReplayFormatVersion);
 			CHECK_FALSE(migrated->Fingerprint.has_value());
 			REQUIRE(migrated->Checkpoints.size() == 2);
 			CHECK(migrated->FinalStateHash == "3e0c91a2b4d5f607");
 			const auto text = ReplayToText(*migrated);
 			REQUIRE(text.has_value());
 			CHECK(*text == *upgraded);
-			// The written form reads back unchanged, as version 3.
+			// The written form reads back unchanged, in the current version.
 			const auto again = ReplayFromText(*upgraded, report, true);
 			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
-			CHECK(report.FileVersion == ReplayFingerprintFormatVersion);
+			CHECK(report.FileVersion == ReplayFormatVersion);
 			CHECK(ReplayToText(*again).value_or("") == *upgraded);
 
 			// Version 2 has no Fingerprint: one there is an unknown member (a warning, an error when strict) and is ignored.
@@ -499,7 +583,7 @@ namespace Engine {
 		TEST_CASE("ReplayData: the start fingerprint round trips through the source and cooked replays and is validated")
 		{
 			auto d = Document();
-			d.Version = ReplayFingerprintFormatVersion;
+			d.Version = ReplayFormatVersion;
 			ReplayFingerprint fingerprint;
 			fingerprint.Entities = {
 				{ .Entity = UUID(0x11), .Path = "/Camera", .Hash = "00000000000000a1", .Components = { { .Component = "Transform", .Hash = "00000000000000b1" }, { .Component = "Camera", .Hash = "00000000000000c1" } } },
@@ -522,7 +606,7 @@ namespace Engine {
 			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
 			const auto artifact = ReadCookedArtifact(*cooked);
 			REQUIRE(artifact.has_value());
-			CHECK(artifact->Header.FormatVersion == ReplayFingerprintFormatVersion);
+			CHECK(artifact->Header.FormatVersion == ReplayData::FormatVersion);
 			const auto loaded = LoadCookedReplay(*cooked);
 			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
 			REQUIRE((*loaded)->Fingerprint.has_value());

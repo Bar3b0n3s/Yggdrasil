@@ -109,7 +109,8 @@ namespace Engine {
 		[[nodiscard]] EntitySummary MakeEntitySummary(ConstEntity entity) const override;
 
 		// The shared services of AutomationMethodContext over the editor: the play controller's session, StartPlay and StopPlay
-		// (EditorContext::GetPlay, which records the addressed open scene as the new session's played scene), the server's
+		// (EditorContext::GetPlay, which records the addressed open scene as the new session's played scene; StartPlay refreshes
+		// the project's assets first, as StartRecordingSession does, when the controller would admit the start), the server's
 		// client names, the engine's event log, the server's view capture
 		// (ScreenshotCaptures::View; Unsupported without a device), the editor's scene-view camera
 		// (EditorContext::GetSceneViewCamera) and output files (AutomationServer::WriteOutputFile).

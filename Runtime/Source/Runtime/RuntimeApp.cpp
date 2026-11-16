@@ -52,6 +52,7 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
 #include "Engine/Session/ReplayPlayer.h"
+#include "Engine/Session/SessionStatistics.h"
 #include "Engine/Testing/CoverageGates.h"
 #include "Engine/Testing/FeatureTestRunner.h"
 #include "Runtime/RuntimeCursor.h"
@@ -314,6 +315,7 @@ namespace Engine {
 		[[nodiscard]] CursorMode GetScriptCursorMode() const override;
 		void OnScriptError(const ScriptError& error, bool fatal) override;
 		void OnScriptPhase(std::string_view script, std::string_view callback) override;
+		void ReadFrameStatistics(ScriptPerformanceStats& stats) const override;
 		// The droppedSeconds baseline of the session just installed (TimingSession).
 		void BeginSessionTiming()
 		{
@@ -379,6 +381,17 @@ namespace Engine {
 		environment.Platform = "macOS";
 #endif
 		return environment;
+	}
+
+	void RuntimeApp::State::ReadFrameStatistics(ScriptPerformanceStats& stats) const
+	{
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): the frame loop's and the game view's renderer's last
+		// observations, in every configuration, Dist included.
+		const FrameLoopStatistics frame = App.GetFrameStatistics();
+		stats.Fps = frame.Fps;
+		stats.CpuMilliseconds = frame.CpuMilliseconds;
+		if (Renderer != nullptr)
+			AddRenderStatistics(stats, Renderer->GetRenderStats());
 	}
 
 	Status RuntimeApp::State::SetScriptCursorMode(CursorMode mode)

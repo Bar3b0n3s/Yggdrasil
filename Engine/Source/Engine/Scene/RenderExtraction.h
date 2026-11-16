@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <map>
 #include <memory_resource>
 #include <string>
 #include <vector>
@@ -99,6 +100,10 @@ namespace Engine {
 		// session sets it for its game view and its views between ticks (PlaySession's RenderExtraction phase and
 		// ExtractView); null (every other host, the edit scene) draws every widget Normal, or Disabled when not interactable.
 		const UiInteractionState* UiInteraction = nullptr;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): the play session's UI presentation texts (UiSystem),
+		// drawn in place of their elements' Text; a borrowed pointer valid for the call, set where UiInteraction is, null
+		// elsewhere (every element then draws its Text).
+		const std::map<UUID, std::string>* UiPresentation = nullptr; // a UiPresentationTexts (Scene/UiInteraction.h)
 	};
 
 	// The scene's primary camera: the first entity in canonical order (§5.1) that is effectively enabled (no

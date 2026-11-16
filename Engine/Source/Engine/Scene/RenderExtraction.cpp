@@ -809,7 +809,7 @@ namespace Engine {
 		// Screen canvas, each at the request's alpha, as the meshes (the milestone review).
 		const RenderOutputMapping mapping = ComputeRenderOutputMapping(request.Width, request.Height, snapshot.Output);
 		AppendUiDrawItems(scene, ComputeUiLayout(scene, glm::uvec2(mapping.SceneWidth, mapping.SceneHeight)), snapshot.Ui, request.UiInteraction,
-			request.Camera == RenderCameraSource::Explicit, request.Alpha);
+			request.Camera == RenderCameraSource::Explicit, request.Alpha, request.UiPresentation);
 		// Moved, so the containers keep `resource` (a copy would allocate from the default resource).
 		return Result<RenderSnapshot>(std::move(snapshot));
 	}

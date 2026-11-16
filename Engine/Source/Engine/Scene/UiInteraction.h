@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -216,6 +217,11 @@ namespace Engine {
 
 		bool operator==(const UiInteractionState&) const = default;
 	};
+
+	// M28 (Docs/Decisions/0043-m28-game-services.md decision 5): the presentation texts of a play session's UiText elements
+	// (UiText:SetPresentationText), by element id: frame-paced text drawn in place of an element's Text, held by UiSystem
+	// beside the interaction state but never serialized, hashed or recorded, and never read by layout or hit testing.
+	using UiPresentationTexts = std::map<UUID, std::string>;
 
 	// The UI events (decision 27), each delivered by the UiEvents phase to its callback, bubbling from Target.
 	enum class UiEventKind : uint8_t

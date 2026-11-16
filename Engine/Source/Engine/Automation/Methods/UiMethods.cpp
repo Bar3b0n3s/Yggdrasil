@@ -364,15 +364,16 @@ namespace Engine {
 
 		// The text boxes of the elements of `table` (a layout of `scene`) that draw text, by entity: the draw items
 		// AppendUiDrawItems makes of the layout, with the play session's `interaction` (null for the edit scene), which places a
-		// focused text input's caret, each text item measured by MeasureUiTreeText; none without an asset manager.
+		// focused text input's caret, and its `presentation` texts (M28; null for the edit scene), which an element draws in place
+		// of its Text, each text item measured by MeasureUiTreeText; none without an asset manager.
 		static std::map<UUID, UiTreeTextBox> MeasureUiTreeTexts(const Scene& scene, const UiLayoutTable& table, const UiInteractionState* interaction,
-			AssetManager* assets)
+			const UiPresentationTexts* presentation, AssetManager* assets)
 		{
 			std::map<UUID, UiTreeTextBox> boxes;
 			if (assets == nullptr)
 				return boxes;
 			UiDrawList list;
-			AppendUiDrawItems(scene, table, list, interaction);
+			AppendUiDrawItems(scene, table, list, interaction, false, 1.0f, presentation);
 			for (const UiDrawItem& item : list.Items)
 			{
 				if (item.Kind != UiDrawKind::Text)
@@ -472,6 +473,8 @@ namespace Engine {
 			const AssetManager* Assets = nullptr;
 			// The play session's interaction state when Target is its scene (C22.2, decision 31); null for the edit scene.
 			const UiInteractionState* Interaction = nullptr;
+			// M28 (decision 5): the play session's presentation texts when Target is its scene; null for the edit scene.
+			const UiPresentationTexts* Presentation = nullptr;
 			uint32_t DepthLimit = 0; // 0: unlimited
 			UiTreeResult* Result = nullptr;
 			bool Text = false;
@@ -648,6 +651,11 @@ namespace Engine {
 					entry.Text = CutUiText(textInput->Text, MaxUiTreeTextBytes);
 				else if (const UiTextComponent* text = entity.TryGetComponent<UiTextComponent>())
 					entry.Text = CutUiText(text->Text, MaxUiTreeTextBytes);
+				if (writer.Presentation != nullptr && entity.HasComponent<UiTextComponent>())
+				{
+					if (const auto shown = writer.Presentation->find(node.Entity); shown != writer.Presentation->end())
+						entry.PresentationText = CutUiText(shown->second, MaxUiTreeTextBytes);
+				}
 				entry.Interactable = interaction.Interactable;
 				entry.Focused = interaction.Focused;
 				entry.Hovered = interaction.Hovered;
@@ -710,11 +718,13 @@ namespace Engine {
 			const PlaySession* session = context.GetPlaySession();
 			const bool played = session != nullptr && &session->GetScene() == scene;
 			const UiInteractionState* interaction = played ? &session->GetUi().GetInteraction() : nullptr;
-			const std::map<UUID, Utils::UiTreeTextBox> textBoxes = Utils::MeasureUiTreeTexts(laidOut, table, interaction, context.GetAssets());
+			const UiPresentationTexts* presentation = played ? &session->GetUi().GetPresentationTexts() : nullptr;
+			const std::map<UUID, Utils::UiTreeTextBox> textBoxes = Utils::MeasureUiTreeTexts(laidOut, table, interaction, presentation, context.GetAssets());
 			const Utils::UiTreeWriter writer{ .Target = &laidOut,
 				.Source = scene,
 				.Assets = context.GetAssets(),
 				.Interaction = interaction,
+				.Presentation = presentation,
 				.DepthLimit = params.Depth,
 				.Result = &result,
 				.Text = params.Format == SceneTreeFormat::Text,
@@ -778,7 +788,10 @@ namespace Engine {
 			.Field("textOverflows", &UiTreeEntry::TextOverflows, "Whether textBounds reaches beyond rect on a side (by more than 0.01 pixel).")
 			.Field("active", &UiTreeEntry::Active,
 				"Whether the entity is active now, it and every ancestor; false for an inactive canvas or element that includeInactive "
-				"lists, laid out and measured as if it were active.");
+				"lists, laid out and measured as if it were active.")
+			.Field("presentationText", &UiTreeEntry::PresentationText,
+				"The play session's presentation text of its UiText (UiText:SetPresentationText), cut as text is, which it draws in place of "
+				"text (textBounds measures what it draws); empty when none is set and in the edit scene. Never serialized or hashed.");
 
 		registry.Struct<UiTreeParams>("UiTreeParams", "The params of ui.tree.")
 			.Field("canvas", &UiTreeParams::Canvas, "An entity with a UiCanvas whose UI alone is listed; omitted: every canvas.")
