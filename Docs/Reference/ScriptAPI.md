@@ -1014,7 +1014,7 @@ Behaviour class registration.
 
 `<T>(name: string, class: T) -> T`
 
-Authenticate a behaviour class and return the exact same table.
+Authenticate a behaviour class and return the exact same table. The class may set RunsWhileWorldPaused = true (a boolean, read when an instance is created): its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks then run while the world is paused (Time.PauseWorld), as a pause menu's must, and its tasks count the session's ticks; every other behaviour holds then.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -1342,11 +1342,27 @@ Returns monotonic wall-clock seconds from an unspecified epoch. Nondeterministic
 
 All modes; Runtime|Test; pure/read.
 
+### Time.GetSessionTick
+
+`() -> number`
+
+Returns the session's current tick, which counts every fixed step, paused world or not: the clock of the behaviours that run while the world is paused.
+
+All modes; Runtime|Test; pure/read.
+
+### Time.GetSessionTime
+
+`() -> number`
+
+Returns the session's simulation seconds: its tick multiplied by the fixed delta, counting while the world is paused.
+
+All modes; Runtime|Test; pure/read.
+
 ### Time.GetTick
 
 `() -> number`
 
-Returns the current simulation tick.
+Returns the world's current simulation tick, which holds while the world is paused (Time.PauseWorld); it equals Time.GetSessionTick in a session that never paused.
 
 All modes; Runtime|Test; pure/read.
 
@@ -1354,7 +1370,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> number`
 
-Returns simulation seconds: tick multiplied by fixed delta.
+Returns the world's simulation seconds: its tick multiplied by the fixed delta. It holds while the world is paused (Time.PauseWorld).
 
 All modes; Runtime|Test; pure/read.
 
@@ -1365,6 +1381,32 @@ All modes; Runtime|Test; pure/read.
 Returns the current session time scale.
 
 All modes; Runtime|Test; pure/read.
+
+### Time.IsWorldPaused
+
+`() -> boolean`
+
+Returns whether the world is paused for the next fixed step: the latest Time.PauseWorld or Time.ResumeWorld, which takes effect then.
+
+All modes; Runtime|Test; pure/read.
+
+### Time.PauseWorld
+
+`(sounds: WorldPauseSounds?) -> ()`
+
+Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices outside the Ui group, Finish lets them play on. Not the host's session pause (play.pause), which stops every tick. Refused during read-only evaluation.
+
+All modes; Runtime|Test; mutates.
+
+Argument 1: WorldPauseSounds (optional); default Pause.
+
+### Time.ResumeWorld
+
+`() -> ()`
+
+Resumes the world from the next fixed step on, its bodies with the velocities they had, its held voices playing again. Refused during read-only evaluation.
+
+All modes; Runtime|Test; mutates.
 
 ### Time.SetTimeScale
 
@@ -6991,6 +7033,14 @@ Which view viewport.screenshot renders.
 - `Scene`: The target scene through the editor's scene-view camera (the editor only).
 
 - `Game`: The target scene through its primary camera: what the game shows.
+
+## WorldPauseSounds
+
+What a world pause does to the world's playing voices; the Ui group's play on either way.
+
+- `Pause`: The voices outside the Ui group pause until the world resumes.
+
+- `Finish`: The voices play on to their end.
 
 ## AnimationEvent
 

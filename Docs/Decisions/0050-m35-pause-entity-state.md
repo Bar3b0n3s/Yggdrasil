@@ -1,7 +1,8 @@
 # 0050 — M35 Pause and entity state
 
 - **Status:** accepted; M35's milestone record. M35 has no contract (the lead's decision of 2026-11-15 for phase 5: one builder works the waves in order, and no interface freezes between parallel streams, so AGENTS.md rule 3 asks for none). This record makes ADR 0042 decision 3's M35 defaults exact; where ADR 0042 says "C35.1 names it" or "C35.1's choice", the builder decided it here (decisions 1 to 13). It is committed on `milestone/m35` with W35.1's first checkpoint and amended as each wave lands. The lead runs one independent review pass of each wave, and the milestone end (merge main, the milestone review, `CI.py --require-clang-cl`) is the lead's. Lead-owned.
-- **Date:** 2026-11-15 (the record and W35.1).
+- **Amended 2026-11-16 (the checkpoints):** W35.1 (`986d23b0`), W35.2 (`a91e50be`) and FeatureTest's world-pause scaffolds with the regenerated references; decision 12's FeatureTest half.
+- **Date:** 2026-11-15 (the record and W35.1); 2026-11-16 (W35.2, FeatureTest, decision 12's FeatureTest half).
 - **Base:** main `bb51e110` (phase 5's reservation ledger extended to M35, ADR 0042), branch `milestone/m35`, milestone slot `D:/Engine/.claude/worktrees/m35`. The lead's ledger amendment of 2026-11-15 on main `77d42dd0` (M35 owns the prefab-rebuild reports and brief 13's third item, below) is merged at the milestone end.
 - **Authority:** Roadmap "Rules for every milestone" and M35; ADR 0042 decisions 2, 3 (M35), 5 and 6 and its phase 5 reservation ledger (the state-hash blocks, the execution order, the allocations, the single-owner files `Session/PlaySession.*`' world-pause regions, `Scene/AudioSystem.*`'s world voices, `Scripting/Private/ScriptInstances.cpp`, `Scripting/TaskScheduler.*`, `Scripting/ScriptTime.h`, `Scripting/Bindings/Time.cpp`, `Automation/Methods/PlayMethods.*`'s world pause, `Scene/PrefabInstantiator.*`, `Scene/LoadReport.h` and `scene.open`'s diagnostics; and, from `77d42dd0`, the prefab-rebuild reports of `PrefabMethods.*`, the import results' rebuild diagnostics in `AssetMethods.*` and `Private/AssetMethodSupport.cpp`, and `EditorContext`'s `UpdatePrefabInstances` and `CreatePrefabUpdateCommand`); ADR 0028 decisions 11, 15 and 17; ADR 0023; Architecture §5.6, §5.7, §10.2, §11.3, §11.5, §13.5 and §13.7; World Tree's briefs 12 and 13 (`Projects/WorldTree/Design/EngineTasks/12-Pause.md`, `13-InstanceStateLoss.md`).
 
@@ -82,7 +83,7 @@ Tests: "PrefabMethods: a rebuild keeps overrides valid only together and reports
 
 ### 12. Which committed replays the instance fix moves (W35.2)
 
-The instance fix changes a run only where a script switches an entity with a Script component off and on before the disable is flushed. The test that finds the committed replays it moves is their verification at their committed hashes on W35.2's tree: the determinism suite (FeatureTest's 14 replays in the Debug and Release editors) and the games suite's editor halves (the demos' 8: Tetris 3, Rolling Ball 3, Breakout 1, NativeTest 1). The result, and the bridge window a moved demo replay would need, are recorded here when W35.2 lands.
+The instance fix changes a run only where a script switches an entity with a Script component off and on before the disable is flushed. The test that finds the committed replays it moves is their verification at their committed hashes on W35.2's tree: the determinism suite (FeatureTest's 14 replays in the Debug and Release editors) and the games suite's editor halves (the demos' 8: Tetris 3, Rolling Ball 3, Breakout 1, NativeTest 1). FeatureTest: `Scaffold.py` on W35.2's tree (both waves) recorded all of FeatureTest's 14 committed replays again byte for byte (only the new `WorldPause.replay` was added), so the instance fix and the world pause move none of them. The demos' eight are still to be verified by the games suite's editor halves on this tree; the result, and the bridge window a moved demo replay would need (none expected: no demo script switches a scripted entity off and on within a tick; Tetris's `setActive` toggles unscripted cells, Rolling Ball's banner once per state change), are recorded here then.
 
 ### 13. W35.2's coverage and documents
 
@@ -114,6 +115,8 @@ Roadmap M35's acceptance and the brief's "How the game will check it", with the 
 
 ## Before milestone completion
 
-- [ ] W35.1 committed, its review pass taken and every finding fixed.
-- [ ] W35.2 committed, its review pass taken and every finding fixed; decisions 10, 12 and 13 made exact.
+- [x] W35.1 committed (`986d23b0`); [ ] the lead's review pass taken and every finding fixed.
+- [x] W35.2 committed (`a91e50be`), decisions 8 to 11 and 13 exact; [ ] the lead's review pass taken and every finding fixed.
+- [ ] Each bug fix's regression case run alone without its fix and seen to fail (decisions 8, 9 and 11).
+- [ ] The wave-end suites: unit unfiltered (Debug, and Release for the simulation path), feature (Debug, Release), automation, determinism, export (Release, Dist) and the games suite's editor halves (decision 12's demo half); `Scaffold.py --check`; `GenerateDocs.py --check`.
 - [ ] The milestone end: main merged (the ledger amendment `77d42dd0`, and the world-pause block after M28's save-data block if M28 landed first), the milestone review, `CI.py --require-clang-cl` green, main fast-forwarded.

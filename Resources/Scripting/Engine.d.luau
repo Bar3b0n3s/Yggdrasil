@@ -251,6 +251,9 @@ export type ValidationScope = "Project" | "Scene"
 -- Which view viewport.screenshot renders.
 export type ViewportView = "Scene" | "Game"
 
+-- What a world pause does to the world's playing voices; the Ui group's play on either way.
+export type WorldPauseSounds = "Pause" | "Finish"
+
 -- An animation clip's named event that an Animator layer's time passed: its name, the 1-based layer, the layer's clip and the event's time in it.
 export type AnimationEvent = {Name: string, Layer: number, Clip: AssetRef, Time: number}
 
@@ -1859,7 +1862,7 @@ declare Scene: {
 
 -- Behaviour class registration.
 declare Script: {
-	-- Authenticate a behaviour class and return the exact same table. [All modes; LoadTime|Runtime|Test; pure/read]
+	-- Authenticate a behaviour class and return the exact same table. The class may set RunsWhileWorldPaused = true (a boolean, read when an instance is created): its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks then run while the world is paused (Time.PauseWorld), as a pause menu's must, and its tasks count the session's ticks; every other behaviour holds then. [All modes; LoadTime|Runtime|Test; pure/read]
 	Define: <T>(name: string, class: T) -> T,
 }
 
@@ -1947,12 +1950,22 @@ declare Time: {
 	GetInterpolationAlpha: () -> number,
 	-- Returns monotonic wall-clock seconds from an unspecified epoch. Nondeterministic; never use for gameplay. [All modes; Runtime|Test; pure/read]
 	GetRealTime: () -> number,
-	-- Returns the current simulation tick. [All modes; Runtime|Test; pure/read]
+	-- Returns the session's current tick, which counts every fixed step, paused world or not: the clock of the behaviours that run while the world is paused. [All modes; Runtime|Test; pure/read]
+	GetSessionTick: () -> number,
+	-- Returns the session's simulation seconds: its tick multiplied by the fixed delta, counting while the world is paused. [All modes; Runtime|Test; pure/read]
+	GetSessionTime: () -> number,
+	-- Returns the world's current simulation tick, which holds while the world is paused (Time.PauseWorld); it equals Time.GetSessionTick in a session that never paused. [All modes; Runtime|Test; pure/read]
 	GetTick: () -> number,
-	-- Returns simulation seconds: tick multiplied by fixed delta. [All modes; Runtime|Test; pure/read]
+	-- Returns the world's simulation seconds: its tick multiplied by the fixed delta. It holds while the world is paused (Time.PauseWorld). [All modes; Runtime|Test; pure/read]
 	GetTime: () -> number,
 	-- Returns the current session time scale. [All modes; Runtime|Test; pure/read]
 	GetTimeScale: () -> number,
+	-- Returns whether the world is paused for the next fixed step: the latest Time.PauseWorld or Time.ResumeWorld, which takes effect then. [All modes; Runtime|Test; pure/read]
+	IsWorldPaused: () -> boolean,
+	-- Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices outside the Ui group, Finish lets them play on. Not the host's session pause (play.pause), which stops every tick. Refused during read-only evaluation. [All modes; Runtime|Test; mutates]
+	PauseWorld: (sounds: WorldPauseSounds?) -> (),
+	-- Resumes the world from the next fixed step on, its bodies with the velocities they had, its held voices playing again. Refused during read-only evaluation. [All modes; Runtime|Test; mutates]
+	ResumeWorld: () -> (),
 	-- Sets the session time scale in [0, 100]; refused during read-only evaluation. At 0 frames run without a fixed step, so an entity created meanwhile (in OnUpdate, OnLateUpdate or by an evaluation) gets no OnStart or OnUpdate until the first tick after the scale returns: spawn what must run while paused before setting the scale to 0, or pause with a flag. [All modes; Runtime|Test; mutates]
 	SetTimeScale: (scale: number) -> (),
 }

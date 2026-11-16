@@ -409,6 +409,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "WorldPause.jsonl",
+			"IdSeed": 3201,
+			"Renderer": "none"
+		},
+		{
+			"File": "WorldPauseReplay.jsonl",
+			"IdSeed": 3202,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

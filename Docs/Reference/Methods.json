@@ -720,6 +720,13 @@
 							"type": "string"
 						}
 					},
+					"rebuildDiagnostics": {
+						"description": "With replace of a prefab: the diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PrefabRebuildDiagnostic"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -792,6 +799,37 @@
 							"type": {
 								"description": "Its type.",
 								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"PrefabRebuildDiagnostic": {
+						"description": "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.",
+						"type": "object",
+						"properties": {
+							"scene": {
+								"description": "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).",
+								"type": "string"
+							},
+							"severity": {
+								"description": "How serious it is.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What happened: which override was dropped and why.",
+								"type": "string"
+							},
+							"pointer": {
+								"description": "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The instance root (16 hex digits).",
+								"type": "string"
 							}
 						},
 						"additionalProperties": false
@@ -1269,6 +1307,13 @@
 							"$ref": "#/$defs/AssetDiagnosticInfo"
 						}
 					},
+					"rebuildDiagnostics": {
+						"description": "For a prefab: the diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PrefabRebuildDiagnostic"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -1321,6 +1366,37 @@
 							},
 							"hint": {
 								"description": "How to fix it; empty when there is no hint.",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PrefabRebuildDiagnostic": {
+						"description": "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.",
+						"type": "object",
+						"properties": {
+							"scene": {
+								"description": "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).",
+								"type": "string"
+							},
+							"severity": {
+								"description": "How serious it is.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What happened: which override was dropped and why.",
+								"type": "string"
+							},
+							"pointer": {
+								"description": "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The instance root (16 hex digits).",
 								"type": "string"
 							}
 						},
@@ -1395,6 +1471,13 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"rebuildDiagnostics": {
+						"description": "For a prefab: the diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PrefabRebuildDiagnostic"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -1421,6 +1504,37 @@
 							"type": {
 								"description": "Its type.",
 								"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"PrefabRebuildDiagnostic": {
+						"description": "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.",
+						"type": "object",
+						"properties": {
+							"scene": {
+								"description": "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).",
+								"type": "string"
+							},
+							"severity": {
+								"description": "How serious it is.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What happened: which override was dropped and why.",
+								"type": "string"
+							},
+							"pointer": {
+								"description": "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The instance root (16 hex digits).",
+								"type": "string"
 							}
 						},
 						"additionalProperties": false
@@ -15414,6 +15528,20 @@
 						"description": "The game input as the last tick's step view saw it.",
 						"$ref": "#/$defs/PlayInputSummary"
 					},
+					"worldPaused": {
+						"description": "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.",
+						"type": "boolean"
+					},
+					"worldSounds": {
+						"description": "The world pause's choice for the world's voices: Pause or Finish.",
+						"enum": ["Pause", "Finish"]
+					},
+					"worldTick": {
+						"description": "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -15566,6 +15694,20 @@
 					"input": {
 						"description": "The game input as the last tick's step view saw it.",
 						"$ref": "#/$defs/PlayInputSummary"
+					},
+					"worldPaused": {
+						"description": "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.",
+						"type": "boolean"
+					},
+					"worldSounds": {
+						"description": "The world pause's choice for the world's voices: Pause or Finish.",
+						"enum": ["Pause", "Finish"]
+					},
+					"worldTick": {
+						"description": "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -15727,6 +15869,20 @@
 						"description": "The game input as the last tick's step view saw it.",
 						"$ref": "#/$defs/PlayInputSummary"
 					},
+					"worldPaused": {
+						"description": "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.",
+						"type": "boolean"
+					},
+					"worldSounds": {
+						"description": "The world pause's choice for the world's voices: Pause or Finish.",
+						"enum": ["Pause", "Finish"]
+					},
+					"worldTick": {
+						"description": "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -15780,6 +15936,185 @@
 					"description": "Half speed.",
 					"params": {
 						"scale": 0.5
+					}
+				}
+			]
+		},
+		{
+			"name": "play.setWorldPaused",
+			"domain": "play",
+			"description": "Pauses or resumes the play session's world from its next tick on, as Time.PauseWorld and Time.ResumeWorld do: the world's physics, animation, particles and native systems hold, bodies keep their velocities, and only behaviours whose class sets RunsWhileWorldPaused update, while ticks, input, the UI and its callbacks run on. Not play.pause, which stops every tick. Refused while an input recording is active or a play.step, play.waitFor or replay advances the session. Returns the session's state.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["paused"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PlaySetWorldPausedParams",
+				"description": "The params of play.setWorldPaused.",
+				"type": "object",
+				"properties": {
+					"paused": {
+						"description": "Pause (true) or resume (false) the world from the next tick on (required).",
+						"type": "boolean"
+					},
+					"sounds": {
+						"description": "A pause's choice for the world's voices: Pause (the default) or Finish; the Ui group's play on either way.",
+						"enum": ["Pause", "Finish"]
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["paused"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PlayStateResult",
+				"description": "A play session's state (play.state, and the result of play.start, pause, resume and setTimeScale).",
+				"type": "object",
+				"properties": {
+					"state": {
+						"description": "Edit, Play, Simulate or Paused (as _meta.playState).",
+						"enum": ["Edit", "Play", "Simulate", "Paused"]
+					},
+					"mode": {
+						"description": "Play or Simulate; tells them apart while Paused.",
+						"enum": ["Play", "Simulate"]
+					},
+					"tick": {
+						"description": "The next tick: the ticks run so far.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"stateHash": {
+						"description": "The state hash (16 lowercase hex digits); empty in Edit. It covers the simulated world (every entity with its serialized components, the tick, the session's Random state, the id draws and every body's physics state), never script tables, audio or input.",
+						"type": "string"
+					},
+					"lockstep": {
+						"description": "Ticks advance only through the owner's play.step.",
+						"type": "boolean"
+					},
+					"lockstepOwner": {
+						"description": "The name of the client that owns lockstep; empty without lockstep.",
+						"type": "string"
+					},
+					"ownedByCaller": {
+						"description": "The requesting client owns lockstep.",
+						"type": "boolean"
+					},
+					"timeScale": {
+						"description": "The time scale (1 is real time).",
+						"type": "number"
+					},
+					"modified": {
+						"description": "An asset or script reloaded during play (§7.5).",
+						"type": "boolean"
+					},
+					"recording": {
+						"description": "An input recording is active.",
+						"type": "boolean"
+					},
+					"stopped": {
+						"description": "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.",
+						"type": "boolean"
+					},
+					"stopError": {
+						"description": "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs."
+					},
+					"entityCount": {
+						"description": "The entities of the play scene.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"maxEntities": {
+						"description": "The project's entity cap of a session (Simulation.MaxEntities).",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"input": {
+						"description": "The game input as the last tick's step view saw it.",
+						"$ref": "#/$defs/PlayInputSummary"
+					},
+					"worldPaused": {
+						"description": "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.",
+						"type": "boolean"
+					},
+					"worldSounds": {
+						"description": "The world pause's choice for the world's voices: Pause or Finish.",
+						"enum": ["Pause", "Finish"]
+					},
+					"worldTick": {
+						"description": "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"PlayInputSummary": {
+						"description": "The game input as one phase's view saw it, by binding name, each list sorted.",
+						"type": "object",
+						"properties": {
+							"down": {
+								"description": "The controls and actions held (\"Key.Space\", \"Action.Jump\").",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"pressed": {
+								"description": "The controls and actions that went down since the view before.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"released": {
+								"description": "The controls and actions that went up since the view before.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"axes": {
+								"description": "The non-zero gamepad axes (\"Gamepad.LeftX\") and Axis actions (\"Action.MoveX\").",
+								"type": "object",
+								"additionalProperties": {
+									"type": "number"
+								}
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Pause the world, holding its sounds.",
+					"params": {
+						"paused": true,
+						"sounds": "Pause"
 					}
 				}
 			]
@@ -15916,6 +16251,20 @@
 					"input": {
 						"description": "The game input as the last tick's step view saw it.",
 						"$ref": "#/$defs/PlayInputSummary"
+					},
+					"worldPaused": {
+						"description": "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.",
+						"type": "boolean"
+					},
+					"worldSounds": {
+						"description": "The world pause's choice for the world's voices: Pause or Finish.",
+						"enum": ["Pause", "Finish"]
+					},
+					"worldTick": {
+						"description": "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -16072,6 +16421,20 @@
 					"input": {
 						"description": "The game input as the last tick's step view saw it.",
 						"$ref": "#/$defs/PlayInputSummary"
+					},
+					"worldPaused": {
+						"description": "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.",
+						"type": "boolean"
+					},
+					"worldSounds": {
+						"description": "The world pause's choice for the world's voices: Pause or Finish.",
+						"enum": ["Pause", "Finish"]
+					},
+					"worldTick": {
+						"description": "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -16544,6 +16907,13 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"rebuildDiagnostics": {
+						"description": "The diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PrefabRebuildDiagnostic"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -16588,6 +16958,37 @@
 							},
 							"path": {
 								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PrefabRebuildDiagnostic": {
+						"description": "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.",
+						"type": "object",
+						"properties": {
+							"scene": {
+								"description": "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).",
+								"type": "string"
+							},
+							"severity": {
+								"description": "How serious it is.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What happened: which override was dropped and why.",
+								"type": "string"
+							},
+							"pointer": {
+								"description": "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The instance root (16 hex digits).",
 								"type": "string"
 							}
 						},
@@ -20330,6 +20731,13 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"rebuildDiagnostics": {
+						"description": "The diagnostics of the instance's rebuild, every override it dropped among them (also logged).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PrefabRebuildDiagnostic"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -20355,6 +20763,37 @@
 							},
 							"path": {
 								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PrefabRebuildDiagnostic": {
+						"description": "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.",
+						"type": "object",
+						"properties": {
+							"scene": {
+								"description": "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).",
+								"type": "string"
+							},
+							"severity": {
+								"description": "How serious it is.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What happened: which override was dropped and why.",
+								"type": "string"
+							},
+							"pointer": {
+								"description": "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The instance root (16 hex digits).",
 								"type": "string"
 							}
 						},
@@ -23769,7 +24208,7 @@
 						"type": "boolean"
 					},
 					"diagnostics": {
-						"description": "The load warnings, also logged.",
+						"description": "The load warnings, also logged, then the warnings of the rebuild of its prefab instances: each override the rebuild dropped (PREFAB_STALE_OVERRIDE, located at the instance root's /Components/Prefab/Overrides/<i>, entity the instance root).",
 						"type": "array",
 						"items": {
 							"$ref": "#/$defs/SceneLoadIssue"
