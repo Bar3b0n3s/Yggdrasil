@@ -200,7 +200,7 @@
 					},
 					"type": {
 						"description": "Only assets of this type; None lists every type.",
-						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield"]
+						"enum": ["None", "Scene", "Prefab", "Mesh", "Material", "Texture", "Environment", "AudioClip", "Script", "Font", "Replay", "SpriteSheet", "Tilemap", "StringTable", "Skeleton", "AnimationClip", "IrradianceVolume", "Lut", "Heightfield", "NavMesh"]
 					},
 					"recursive": {
 						"description": "Also list the folders below dir.",
@@ -2022,6 +2022,34 @@
 			"mutates": true,
 			"supportsDryRun": true,
 			"timeoutSeconds": 60
+		},
+		{
+			"name": "navigation_bake",
+			"method": "navigation.bake",
+			"description": "Bakes an edit scene's navigation mesh: voxelizes the static colliders on the Navigation component's layers for each of its agent types, marks its NavModifiers, writes the mesh for the saved scene (Assets/Navigation/<the scene's path below Assets/ without .scene>.navmesh, so Assets/Scenes/Arena.scene bakes into Assets/Navigation/Scenes/Arena.navmesh), imports it and sets the component's NavMesh in one undoable edit. CPU only. Two bakes of one scene write byte-identical files.",
+			"inputSchema": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "NoParams",
+				"description": "The params of a method that takes none: an empty object.",
+				"type": "object",
+				"properties": {
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					},
+					"scene": {
+						"description": "The open scene this request addresses: its project path or its id from scene.list; absent, the active scene.",
+						"type": ["string", "integer"],
+						"minimum": 1,
+						"maximum": 4294967295
+					}
+				},
+				"additionalProperties": false
+			},
+			"mutates": true,
+			"supportsDryRun": false,
+			"timeoutSeconds": 600
 		},
 		{
 			"name": "play_start",

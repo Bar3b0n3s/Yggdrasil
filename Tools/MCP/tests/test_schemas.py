@@ -22,8 +22,9 @@ from engine_mcp import server  # noqa: E402
 # (Docs/Decisions/0031-m20-contract.md decision 14), M21's tilemap_paint (Docs/Decisions/0032-m21-contract.md
 # decision 26), M22's ui_tree and ui_create_widget (Docs/Decisions/0033-m22-contract.md decisions 8 and 32), M23's
 # animation_preview (Docs/Decisions/0034-m23-contract.md decision 32), M24's graph tools (Docs/Decisions/
-# 0035-m24-contract.md decisions 12 and 14) and M26's lighting_bake, terrain_edit and terrain_import_heightmap
-# (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23).
+# 0035-m24-contract.md decisions 12 and 14), M26's lighting_bake, terrain_edit and terrain_import_heightmap
+# (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23) and M30's navigation_bake (Docs/Decisions/
+# 0045-m30-navigation.md decision 8).
 PROXIED_TOOLS = {
     "project_create", "project_open", "project_save", "project_get_settings", "project_set_settings",
     "project_validate", "project_export", "project_upgrade",
@@ -44,6 +45,7 @@ PROXIED_TOOLS = {
     "graph_create", "graph_read", "graph_nodes", "graph_add_node", "graph_remove_nodes", "graph_connect",
     "graph_disconnect", "graph_set_values", "graph_set_members", "graph_live_values",
     "lighting_bake",
+    "navigation_bake",
     "terrain_edit", "terrain_import_heightmap",
 }
 MAX_SCHEMA_BYTES = 4096

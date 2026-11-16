@@ -5816,6 +5816,8 @@ The kind of a loadable asset (§7.1).
 
 - `Heightfield`: A terrain's heightfield (.heightfield): a square grid of at most 1025 x 1025 16-bit height samples that a Terrain lays out.
 
+- `NavMesh`: A scene's baked navigation mesh (.navmesh, written by navigation.bake): each agent type's walkable polygons, which the Navigation script namespace's queries read.
+
 ## Attenuation
 
 How a spatial sound's volume falls off with distance.
@@ -6541,6 +6543,14 @@ What a type of a game's native module is.
 - `Component`: Data on entities, saved in scenes and prefabs as Native.<Name>.
 
 - `Resource`: One value per play session, part of the state hash, never saved.
+
+## NavModifierKind
+
+What a NavModifier does to the navigation mesh inside its box.
+
+- `NotWalkable`: No agent walks there: the box cuts a hole in the navigation mesh.
+
+- `Cost`: Walkable at Cost times the distance, so paths avoid it unless no cheaper way exists.
 
 ## ParticleBlend
 

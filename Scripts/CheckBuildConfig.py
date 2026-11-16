@@ -27,13 +27,13 @@ and configuration:
 3. a Jolt consumer is compiled for another instruction set than JoltPhysics. Jolt/Core/Core.h derives JPH_USE_AVX2,
    JPH_USE_AVX, JPH_USE_F16C, JPH_USE_LZCNT, JPH_USE_TZCNT and more from the compiler's predefined __AVX2__,
    __AVX__, ... macros, and those are not part of JPH_VERSION_ID, so VerifyJoltVersionID() cannot catch a mismatch;
-4. a first-party project, JoltPhysics, MikkTSpace, Luau, HarfBuzz, SheenBidi, CMP_Core or tinyexr uses a non-precise
-   floating-point model: MSVC FloatingPointModel=Fast, /fp:fast, /fp:contract or /Qfast_transcendentals; GCC/Clang (and
-   clang-cl's /clang: options) -ffast-math, -Ofast, -ffp-model=fast or any component of -ffast-math in effect (unsafe,
-   associative or reciprocal math, finite math only, no NaNs or infinities, no signed zeros, no trapping math, limited
-   complex range, approximate functions, fast excess precision), or an effective -ffp-contract other than "off" (it
-   must be explicit: GCC's C++ default is "fast", clang-cl's is "on"). C sources are checked with the C compiler's
-   flags;
+4. a first-party project, JoltPhysics, MikkTSpace, Luau, HarfBuzz, SheenBidi, CMP_Core, tinyexr, Recast or Detour uses
+   a non-precise floating-point model: MSVC FloatingPointModel=Fast, /fp:fast, /fp:contract or
+   /Qfast_transcendentals; GCC/Clang (and clang-cl's /clang: options) -ffast-math, -Ofast, -ffp-model=fast or any
+   component of -ffast-math in effect (unsafe, associative or reciprocal math, finite math only, no NaNs or infinities,
+   no signed zeros, no trapping math, limited complex range, approximate functions, fast excess precision), or an
+   effective -ffp-contract other than "off" (it must be explicit: GCC's C++ default is "fast", clang-cl's is "on"). C
+   sources are checked with the C compiler's flags;
 5. the solution builds EditorCore, Editor or Tests in Dist, or does not build Engine or Runtime in Dist;
 6. a Windows project does not select x64 host tools (the 32-bit linker can exhaust its address space);
 7. AddressSanitizer is not instrumented alike (MSVC's STL marks the translation units that use its container
@@ -166,6 +166,12 @@ VENDOR_ABI_FAMILIES: dict[str, DefineFamily] = {
     # tinyexr: its configuration macros (TINYEXR_USE_MINIZ, TINYEXR_USE_STB_ZLIB, TINYEXR_USE_THREAD and
     # TINYEXR_USE_OPENMP), which the library and its consumers set alike (Vendor/tinyexr/VENDOR.md).
     "tinyexr": DefineFamily(prefixes=("TINYEXR_",)),
+    # M30 (Docs/Decisions/0045-m30-navigation.md): Recast reads no configuration macro in its headers
+    # (RC_MAX_LAYERS_DEF and RC_MAX_NEIS_DEF are RecastLayers.cpp's own, left at their defaults), and Detour's
+    # DT_POLYREF64 and DT_VIRTUAL_QUERYFILTER change the layout of dtPolyRef and dtQueryFilter, so the library and
+    # every consumer leave both families empty (Vendor/Recast/VENDOR.md, Vendor/Detour/VENDOR.md).
+    "Recast": DefineFamily(prefixes=("RC_",)),
+    "Detour": DefineFamily(prefixes=("DT_",)),
 }
 GLOBAL_ABI_DEFINES = ("NDEBUG",)
 
@@ -199,8 +205,12 @@ JOLT_PROJECT = "JoltPhysics"
 # CMP_Core (M23): compressed texture blocks are cooked into the asset cache, which must be identical from every
 # configuration of one compiler (Docs/Decisions/0034-m23-contract.md), and tinyexr (M23): an OpenEXR image's decoded
 # texels, its half-float conversion among them, are baked into a cooked environment under the same
-# configuration-independent key (decision 14).
-PRECISE_VENDOR_PROJECTS = (JOLT_PROJECT, "MikkTSpace", "Luau", "HarfBuzz", "SheenBidi", "CMP_Core", "tinyexr")
+# configuration-independent key (decision 14). Recast and Detour (M30, Docs/Decisions/0045-m30-navigation.md): a
+# bake's NavMesh file must be byte-identical from the Debug and Release editors, and Detour's path queries run on the
+# simulation path (§9.1).
+PRECISE_VENDOR_PROJECTS = (
+    JOLT_PROJECT, "MikkTSpace", "Luau", "HarfBuzz", "SheenBidi", "CMP_Core", "tinyexr", "Recast", "Detour"
+)
 DETERMINISM_DEFINE = "JPH_CROSS_PLATFORM_DETERMINISTIC"
 NOT_IN_DIST = ("EditorCore", "Editor", "Tests")
 BUILT_IN_DIST = ("Engine", "Runtime")
@@ -1123,7 +1133,8 @@ def check_floating_point(workspace: GeneratedWorkspace, first_party: set[str], f
                     findings.append(
                         f"[{target.name}] {config}: {unit_location(name, unit)} uses a non-precise floating-point "
                         f"model: {problem} (first-party projects, JoltPhysics, MikkTSpace, Luau, HarfBuzz, SheenBidi, "
-                        "CMP_Core and tinyexr must use the precise model, Docs/Architecture.md section 2.2)"
+                        "CMP_Core, tinyexr, Recast and Detour must use the precise model, Docs/Architecture.md section "
+                        "2.2)"
                     )
 
 

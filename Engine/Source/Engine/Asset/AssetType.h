@@ -47,7 +47,10 @@ namespace Engine {
 		// merge of main renumbers them only if a sibling lands a type first (the values live only in cooked headers).
 		IrradianceVolume,
 		Lut,
-		Heightfield
+		Heightfield,
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 4): 19, a scene's baked navigation mesh, phase 5's one new type
+		// (ADR 0042's phase-5 reservation ledger).
+		NavMesh
 	};
 
 	// The PascalCase name of `type` ("AudioClip"), the spelling used in .meta files, reflected AssetFilter metadata, the
@@ -76,6 +79,7 @@ namespace Engine {
 			case AssetType::IrradianceVolume: return "IrradianceVolume";
 			case AssetType::Lut:              return "Lut";
 			case AssetType::Heightfield:      return "Heightfield";
+			case AssetType::NavMesh:          return "NavMesh";
 		}
 		return "None";
 	}
@@ -104,6 +108,7 @@ namespace Engine {
 			AssetType::IrradianceVolume,
 			AssetType::Lut,
 			AssetType::Heightfield,
+			AssetType::NavMesh,
 		};
 		for (const AssetType type : Types)
 		{

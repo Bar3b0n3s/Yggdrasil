@@ -15,7 +15,7 @@ export type AssetCreateType = "Material" | "Scene" | "Prefab" | "SoundEffect" | 
 export type AssetState = "Unloaded" | "Loading" | "Loaded" | "Failed"
 
 -- The kind of a loadable asset (§7.1).
-export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Tilemap" | "StringTable" | "Skeleton" | "AnimationClip" | "IrradianceVolume" | "Lut" | "Heightfield"
+export type AssetType = "None" | "Scene" | "Prefab" | "Mesh" | "Material" | "Texture" | "Environment" | "AudioClip" | "Script" | "Font" | "Replay" | "SpriteSheet" | "Tilemap" | "StringTable" | "Skeleton" | "AnimationClip" | "IrradianceVolume" | "Lut" | "Heightfield" | "NavMesh"
 
 -- How a spatial sound's volume falls off with distance.
 export type Attenuation = "None" | "Inverse" | "Linear" | "Exponential"
@@ -115,6 +115,9 @@ export type MouseButton = "Left" | "Right" | "Middle" | "Button4" | "Button5" | 
 
 -- What a type of a game's native module is.
 export type NativeTypeRole = "Component" | "Resource"
+
+-- What a NavModifier does to the navigation mesh inside its box.
+export type NavModifierKind = "NotWalkable" | "Cost"
 
 -- How a particle's colour reaches the image.
 export type ParticleBlend = "Alpha" | "Additive"

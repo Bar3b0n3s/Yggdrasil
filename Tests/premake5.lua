@@ -92,3 +92,5 @@ project "Tests"
 	UseSheenBidi()
 	UseCMPCore()
 	UseTinyExr()
+	UseRecast()
+	UseDetour()

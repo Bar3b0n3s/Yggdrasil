@@ -49,6 +49,8 @@ project "EditorCore"
 	UseSheenBidi()
 	UseCMPCore()
 	UseTinyExr()
+	UseRecast()
+	UseDetour()
 
 project "Editor"
 	kind "ConsoleApp"
@@ -101,3 +103,5 @@ project "Editor"
 	UseSheenBidi()
 	UseCMPCore()
 	UseTinyExr()
+	UseRecast()
+	UseDetour()

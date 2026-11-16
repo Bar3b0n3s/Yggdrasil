@@ -19,6 +19,8 @@
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
+#include "Engine/Scene/Components/NavModifierComponent.h"
+#include "Engine/Scene/Components/NavigationComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
@@ -94,7 +96,11 @@ namespace Engine {
 		// Particles (Registration/ParticlesRegistration.cpp), Probes (Registration/ProbesRegistration.cpp) and Terrain
 		// (Registration/TerrainRegistration.cpp; M26, Docs/Decisions/0037-m26-contract.md decision 4). ADR 0028's phase-3
 		// ledger: M26's components go in categories of their own after Animation, in that order; M24 adds none.
-		ParticleEmitterComponent, IrradianceVolumeComponent, ReflectionProbeComponent, TerrainComponent, TerrainColliderComponent>;
+		ParticleEmitterComponent, IrradianceVolumeComponent, ReflectionProbeComponent, TerrainComponent, TerrainColliderComponent,
+		// Navigation (Registration/NavigationRegistration.cpp; M30, Docs/Decisions/0045-m30-navigation.md decision 5). ADR 0042's
+		// phase-5 ledger: phase 5's new categories go after Terrain in landing order (M30's Navigation, M31's
+		// MaterialParameters, M32's Fog); a later lander keeps its category after main's at its merge.
+		NavigationComponent, NavModifierComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -115,8 +121,10 @@ namespace Engine {
 	void RegisterParticlesComponents(TypeRegistry& registry);
 	void RegisterProbesComponents(TypeRegistry& registry);
 	void RegisterTerrainComponents(TypeRegistry& registry);
+	// M30 (Docs/Decisions/0045-m30-navigation.md decision 5), after Terrain, in ADR 0042's phase-5 ledger's landing order.
+	void RegisterNavigationComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the twelve functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the thirteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

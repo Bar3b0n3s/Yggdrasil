@@ -169,6 +169,12 @@ namespace Engine {
 					path({ { 0.48f, 0.55f }, { 0.48f, 0.85f } });
 					path({ { 0.68f, 0.2f }, { 0.68f, 0.85f } });
 					break;
+				case EditorIcon::NavMesh:
+					// Two polygons sharing an edge, crossed by a path of corners: a navigation mesh.
+					path({ { 0.1f, 0.8f }, { 0.2f, 0.25f }, { 0.55f, 0.15f }, { 0.45f, 0.85f }, { 0.1f, 0.8f } });
+					path({ { 0.55f, 0.15f }, { 0.9f, 0.4f }, { 0.8f, 0.9f }, { 0.45f, 0.85f } });
+					path({ { 0.22f, 0.65f }, { 0.48f, 0.5f }, { 0.75f, 0.7f } });
+					break;
 			}
 			return segments;
 		}
@@ -210,6 +216,7 @@ namespace Engine {
 			case AssetType::IrradianceVolume: return EditorIcon::IrradianceVolume;
 			case AssetType::Lut:              return EditorIcon::Lut;
 			case AssetType::Heightfield:      return EditorIcon::Heightfield;
+			case AssetType::NavMesh:          return EditorIcon::NavMesh;
 		}
 		return EditorIcon::Folder;
 	}

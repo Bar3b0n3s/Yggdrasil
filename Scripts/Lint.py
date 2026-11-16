@@ -1749,7 +1749,7 @@ ABI_MACRO_PATTERN = re.compile(
     r"_GLIBCXX_ASSERTIONS|_GLIBCXX_USE_CXX11_ABI|_LIBCPP_ABI_\w+|_LIBCPP_HARDENING_MODE|LUA_USE_LONGJMP|LUA_API|"
     r"LUACODE_API|LUA_VECTOR_\w+|LUAU_\w+|IMGUI_\w+|ImTextureID|ImDrawIdx|USE_IMGUI_API|IMGUIZMO_NAMESPACE|"
     r"_GLFW_\w+|GLFW_DLL|GLM_\w+|JSON_\w+|NLOHMANN_\w+|ENTT_\w+|HB_\w+|SB_CONFIG_\w+|CMP_\w+|OPUS_\w+|OP_\w+|"
-    r"TINYEXR_\w+)$"
+    r"TINYEXR_\w+|RC_\w+|DT_\w+)$"
 )
 # Per-translation-unit switches of those families that are meant to be set in source: they enable an operator set
 # in the file that asks for it and change no layout.

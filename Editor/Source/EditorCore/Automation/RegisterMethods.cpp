@@ -13,6 +13,7 @@
 #include "EditorCore/Automation/GraphMethods.h"
 #include "EditorCore/Automation/LightingMethods.h"
 #include "EditorCore/Automation/NativeMethods.h"
+#include "EditorCore/Automation/NavigationMethods.h"
 #include "EditorCore/Automation/ObserveMethods.h"
 #include "EditorCore/Automation/PrefabMethods.h"
 #include "EditorCore/Automation/ProfilerMethods.h"
@@ -77,6 +78,8 @@ namespace Engine {
 		RegisterLightingMethodTypes(registry);
 		// M26 (Docs/Decisions/0037-m26-contract.md decisions 20 and 23): terrain.importHeightmap and terrain.edit.
 		RegisterTerrainMethodTypes(registry);
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 8): navigation.bake; phase 5 appends in landing order (M28's first).
+		RegisterNavigationMethodTypes(registry);
 	}
 
 	void RegisterEditorMethods(MethodRegistry& methods, const EditorMethodOptions& options)
@@ -107,6 +110,7 @@ namespace Engine {
 		RegisterGraphLiveValueMethods(methods); // M24 W24.2, decision 14
 		RegisterLightingMethods(methods);       // M26, Docs/Decisions/0037-m26-contract.md decision 8
 		RegisterTerrainMethods(methods);        // M26, Docs/Decisions/0037-m26-contract.md decisions 20 and 23
+		RegisterNavigationMethods(methods);     // M30, Docs/Decisions/0045-m30-navigation.md decision 8
 		if (options.TestHooks)
 			RegisterDebugMethods(methods);
 	}

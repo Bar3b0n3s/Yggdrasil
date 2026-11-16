@@ -32,7 +32,8 @@ namespace Engine {
 		Graph,            // M24: two nodes joined by a link, a Script asset of the Graph importer (Docs/Decisions/0035-m24-contract.md decision 15)
 		IrradianceVolume, // M26: a box of probe spheres (Docs/Decisions/0037-m26-contract.md decision 3)
 		Lut,              // M26: a cube of graded colour cells (Docs/Decisions/0037-m26-contract.md decision 3)
-		Heightfield       // M26: a ridge of hills over a grid (Docs/Decisions/0037-m26-contract.md decision 3)
+		Heightfield,      // M26: a ridge of hills over a grid (Docs/Decisions/0037-m26-contract.md decision 3)
+		NavMesh           // M30: a path of corners across two joined polygons (Docs/Decisions/0045-m30-navigation.md decision 4)
 	};
 
 	// First-party vector glyphs drawn with ImDrawList lines, no downloaded assets or icon licence. Main thread, inside an

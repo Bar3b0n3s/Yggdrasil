@@ -28,6 +28,7 @@ namespace Engine {
 				AssetType::IrradianceVolume,
 				AssetType::Lut,
 				AssetType::Heightfield,
+				AssetType::NavMesh,
 			};
 			for (const AssetType type : Types)
 			{
@@ -66,6 +67,9 @@ namespace Engine {
 			static_assert(std::to_underlying(AssetType::IrradianceVolume) == 16);
 			static_assert(std::to_underlying(AssetType::Lut) == 17);
 			static_assert(std::to_underlying(AssetType::Heightfield) == 18);
+			// M30's navigation meshes (Docs/Decisions/0045-m30-navigation.md decision 4): 19, phase 5's one new type (ADR 0042's
+			// phase-5 reservation ledger).
+			static_assert(std::to_underlying(AssetType::NavMesh) == 19);
 			CHECK(AssetTypeToString(static_cast<AssetType>(999)) == "None");
 		}
 	}

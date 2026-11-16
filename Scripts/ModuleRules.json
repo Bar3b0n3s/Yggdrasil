@@ -114,6 +114,12 @@
 		],
 		"tinyexr": [
 			"Vendor/tinyexr"
+		],
+		"Recast": [
+			"Vendor/Recast/Include"
+		],
+		"Detour": [
+			"Vendor/Detour/Include"
 		]
 	},
 	"GlobalThirdParty": {
@@ -381,6 +387,21 @@
 			}
 		},
 		{
+			"Name": "Navigation",
+			"Layer": 3,
+			"Includes": [
+				"Core",
+				"Asset"
+			],
+			"Notes": "M30 (Docs/Decisions/0045-m30-navigation.md): the run-time navigation mesh and its queries, ECS-agnostic like Physics and Animation: a NavMesh asset's validated payload (Asset/NavMeshData.h) built into Detour's mesh, and the path, closest-point, surface-ray and random-point queries scripts call in the fixed step, so it is on the simulation path (Banned.SimulationPathModules: DetMath only). Detour is private to it (no public header exposes its types, section 3 rule 3); Recast, the editor's bake, is EditorCore's (Navigation/NavMeshBuilder.cpp) and never reaches the Runtime. Beside Scene at layer 3, so Scripting's bindings and Session's play session reach it; it includes no other layer-3 module.",
+			"ThirdParty": {
+				"Public": [],
+				"Private": [
+					"Detour"
+				]
+			}
+		},
+		{
 			"Name": "Scripting",
 			"Layer": 4,
 			"Includes": [],
@@ -524,7 +545,7 @@
 				"Editor/Source/EditorPCH.h",
 				"Editor/Source/EditorPCH.cpp"
 			],
-			"Notes": "UI-free: every Engine module except ImGui, and no third-party headers of its own beyond the global ones (glm, nlohmann), except LuauAnalysis in the script type checker (section 3). The type checker may also include the Luau Ast/Common headers that the Analysis API is written in. EditorPCH.h is shared with Editor and follows the stricter EditorCore rules.",
+			"Notes": "UI-free: every Engine module except ImGui, and no third-party headers of its own beyond the global ones (glm, nlohmann), except LuauAnalysis in the script type checker (section 3) and Recast in the navigation bake's builder (M30, Docs/Decisions/0045-m30-navigation.md). The type checker may also include the Luau Ast/Common headers that the Analysis API is written in. EditorPCH.h is shared with Editor and follows the stricter EditorCore rules.",
 			"Modules": {
 				"Allow": [
 					"*"
@@ -542,6 +563,9 @@
 				"Deny": []
 			},
 			"RestrictedThirdParty": {
+				"Recast": [
+					"Editor/Source/EditorCore/Navigation/NavMeshBuilder.cpp"
+				],
 				"LuauAnalysis": [
 					"Editor/Source/EditorCore/Scripting/ScriptTypeChecker.cpp"
 				],
@@ -704,7 +728,8 @@
 			"Scripting",
 			"Session",
 			"Native",
-			"Animation"
+			"Animation",
+			"Navigation"
 		],
 		"SimulationPathExceptions": [],
 		"TryCatchFiles": [

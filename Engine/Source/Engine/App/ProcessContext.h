@@ -17,9 +17,9 @@
 #include <vector>
 
 // Process-level initialization (Architecture §4.1 level 1, §3 rule 5). GLFW, the logger registry, the profiler, the
-// crash handler, Luau's flags and assert hook, Jolt's process-level state and the Vulkan loader are
-// process-global, so exactly one ProcessContext initializes them, created first by RunApplication or the Tests main and
-// destroyed last, after every EngineContext.
+// crash handler, Luau's flags and assert hook, Jolt's process-level state, Detour's and Recast's allocator and assert
+// hooks and the Vulkan loader are process-global, so exactly one ProcessContext initializes them, created first by
+// RunApplication or the Tests main and destroyed last, after every EngineContext.
 
 namespace Engine {
 
@@ -35,6 +35,10 @@ namespace Engine {
 		// CMP_Core's process-level state, set once before any import worker compresses a texture; nothing to shut down. The
 		// values are not persisted, so the step takes its place in the order rather than the end.
 		TextureCodecs,
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 2): InitializeNavigationRuntime (Navigation/NavigationRuntime.h),
+		// Detour's allocator and assert hooks, then ProcessContextSpecification::NavMeshBuildHooks' Install when set
+		// (Recast's, the editor's bake). Teardown removes Recast's, then verifies that no Detour allocation is live.
+		Navigation,
 		VulkanLoader, // VulkanDispatch::Initialize (§8.1); only when VulkanLoaderPolicy is not None
 		Glfw          // GlfwLibrary::Initialize with the chosen platform, handing GLFW the loader (glfwInitVulkanLoader)
 	};
@@ -45,6 +49,16 @@ namespace Engine {
 		None,       // no loader: RendererMode::None (logic-only processes)
 		Required,   // a missing loader fails Create with Unsupported and NoVulkanLoaderMessage (exit code 3, §8.1)
 		IfAvailable // a missing loader is a warning, and the step completes without one (Tests: GPU tests skip)
+	};
+
+	// A vendored library's process-level hooks that only some applications link (M30: Recast, which the editor's
+	// navigation.bake runs and the Runtime never links, Docs/Decisions/0045-m30-navigation.md decision 2): the application
+	// hands the functions to its process context, which calls Install in their step and Remove at its teardown. Both null:
+	// none. Each runs on the main thread, must not fail, and leaves the library's state as it found it after Remove.
+	struct ProcessLibraryHooks
+	{
+		void (*Install)() = nullptr;
+		void (*Remove)() = nullptr;
 	};
 
 	struct ProcessContextSpecification
@@ -81,6 +95,10 @@ namespace Engine {
 		bool ShowErrorDialogs = false;
 		// Jolt's process-level state (the Physics step): the worker threads of the job system every PhysicsWorld steps on.
 		PhysicsEngineSpecification Physics{};
+		// M30: Recast's hooks (EditorCore/Navigation/NavMeshBuilder.h), installed by the Navigation step after Detour's. The
+		// editor (ApplicationSpecification::NavMeshBuildHooks) and the Tests main pass them; the Runtime, which never bakes,
+		// passes none.
+		ProcessLibraryHooks NavMeshBuildHooks{};
 	};
 
 	// An application's step in the fatal-error path (§4.6): the editor's autosave of the open scene and dirty native assets
@@ -191,7 +209,7 @@ namespace Engine {
 		bool m_IsVulkanLoaderAvailable = false;
 	};
 
-	// "Log", "Profiler", "CrashHandler", "Scripting", "Physics", "VulkanLoader" or "Glfw".
+	// "Log", "Profiler", "CrashHandler", "Scripting", "Physics", "TextureCodecs", "Navigation", "VulkanLoader" or "Glfw".
 	[[nodiscard]] std::string_view ProcessContextStepToString(ProcessContextStep step);
 
 	// The build description written into crash reports and the startup log line: "<Debug|Release|Dist>

@@ -229,11 +229,12 @@ namespace Engine {
 			// The required readers of decision 13 and of later milestones' new readers (M23's Ogg Opus and OpenEXR decodes,
 			// Docs/Decisions/0034-m23-contract.md decision 19, and its skeleton and animation clip payloads, decision 24; M24's graph
 			// document, Docs/Decisions/0035-m24-contract.md decision 11; M26's irradiance volumes, LUTs and heightfields,
-			// Docs/Decisions/0037-m26-contract.md decision 24); Targets.json may list more.
+			// Docs/Decisions/0037-m26-contract.md decision 24; M30's navigation meshes, Docs/Decisions/0045-m30-navigation.md
+			// decision 4); Targets.json may list more.
 			const std::vector<std::string> required = { "AnimationClipData", "AssetMetadata", "AudioClipData", "AudioDecoder", "AudioDecoderOpus",
 				"AutosaveRecovery", "BinaryReader", "BuiltinAssetCatalog", "Bindings", "CookedFormat", "DecodePng", "EditorPreferences", "EnvironmentData",
 				"EnvironmentImporter", "EnvironmentImporterExr", "FontData", "FontImporter", "Framing", "GameManifest", "GltfImporter", "GraphDocument",
-				"HeightfieldData", "IrradianceVolumeData", "JsonReader", "JsonRpc", "LutData", "MaterialData", "MeshData", "PakReader", "PakToc",
+				"HeightfieldData", "IrradianceVolumeData", "JsonReader", "JsonRpc", "LutData", "MaterialData", "MeshData", "NavMeshData", "PakReader", "PakToc",
 				"PlayInputEventCodec", "Prefab", "ProjectLock", "ProjectSerializer", "ReplayData",
 				"SceneSerializer", "ScriptCompiler", "ScriptData", "ShaderReflection", "SkeletonData", "SoundEffect", "TextureData", "TextureImporter" };
 			const Json& listed = (*targets)["Targets"];

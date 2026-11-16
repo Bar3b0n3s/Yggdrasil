@@ -2,6 +2,7 @@
 
 #include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/IrradianceVolumeData.h"
+#include "Engine/Asset/NavMeshData.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/AssetPipeline/Graph/GraphDocument.h"
 #include "Engine/AssetPipeline/IAssetImporter.h"
@@ -123,6 +124,23 @@ namespace Engine {
 					volume.Probes[probe].SH9[coefficient] = glm::vec3(static_cast<float>(probe), static_cast<float>(coefficient), 0.25f);
 			}
 			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.irradiance"), WriteIrradianceVolumeSource(volume)).has_value());
+			// M30 (Docs/Decisions/0045-m30-navigation.md decision 4): the binary source navigation.bake writes, a mesh of one
+			// agent type over a square of two triangles in the costly area 1.
+			NavMeshData navigation;
+			navigation.InputHash = 0x5eedULL;
+			navigation.AreaCosts = { 3.0f };
+			NavMeshAgent& agent = navigation.Agents.emplace_back();
+			agent.Name = "Deterministic";
+			agent.VerticesPerPolygon = 3;
+			agent.BoundsMax = glm::vec3(2.0f, 0.0f, 2.0f);
+			agent.Vertices = { 0, 0, 0, 10, 0, 0, 10, 0, 10, 0, 0, 10 };
+			agent.Polygons = { 0, 1, 2, NavMeshNullIndex, NavMeshNullIndex, 1, 0, 2, 3, 0, NavMeshNullIndex, NavMeshNullIndex };
+			agent.Areas = { 1, 1 };
+			agent.DetailMeshes = { 0, 3, 0, 1, 3, 3, 1, 1 };
+			agent.DetailVertices = { 0, 0, 0, 2, 0, 0, 2, 0, 2, 0, 0, 0, 2, 0, 2, 0, 0, 2 };
+			agent.DetailTriangles = { 0, 1, 2, 0, 0, 1, 2, 0 };
+			REQUIRE(ValidateNavMeshData(navigation).has_value());
+			REQUIRE(vfs.WriteFileAtomic(Test::ParseVfsPath("project://Assets/Deterministic.navmesh"), WriteNavMeshSource(navigation)).has_value());
 
 			std::vector<VfsPath> sources;
 			for (const std::string_view root : { "project://Assets", "engine://Fonts", "engine://Audio" })

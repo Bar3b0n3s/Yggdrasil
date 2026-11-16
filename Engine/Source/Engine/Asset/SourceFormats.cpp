@@ -27,6 +27,7 @@ namespace Engine {
 			{ .Importer = "IrradianceVolume", .Extension = ".irradiance", .MainType = AssetType::IrradianceVolume, .Importable = true },
 			{ .Importer = "Lut", .Extension = ".cube", .MainType = AssetType::Lut, .Importable = true },
 			{ .Importer = "Material", .Extension = ".material", .MainType = AssetType::Material, .Importable = true },
+			{ .Importer = "NavMesh", .Extension = ".navmesh", .MainType = AssetType::NavMesh, .Importable = true },
 			{ .Importer = "Prefab", .Extension = ".prefab", .MainType = AssetType::Prefab, .Importable = true },
 			{ .Importer = "Replay", .Extension = ".replay", .MainType = AssetType::Replay, .Importable = true },
 			{ .Importer = "Scene", .Extension = ".scene", .MainType = AssetType::Scene, .Importable = true },

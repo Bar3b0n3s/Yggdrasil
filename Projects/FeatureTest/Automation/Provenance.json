@@ -2243,6 +2243,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Navigation/Scenes/Navigation.navmesh",
+			"XXH64": "9525bf704e338eb2",
+			"Method": "navigation.bake",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Navigation/Scenes/Navigation.navmesh.meta",
+			"XXH64": "335ec44ce219e3ee",
+			"Method": "navigation.bake",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Prefabs/Cart.prefab",
 			"XXH64": "d7720f945e8b9843",
 			"Method": "prefab.create",
@@ -3344,6 +3360,22 @@
 			"Method": "edit.batch",
 			"RequestId": 10,
 			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Navigation.scene",
+			"XXH64": "58706285a41b6df7",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Navigation.scene.meta",
+			"XXH64": "e2cfe50a54e798ce",
+			"Method": "ui",
+			"RequestId": null,
+			"Client": "ui",
 			"TranscriptLine": null
 		},
 		{
@@ -5587,6 +5619,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Navigation/Navigation.test.luau",
+			"XXH64": "afa0b68512c139bf",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Navigation/Navigation.test.luau.meta",
+			"XXH64": "aed1f41aeafacb02",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/NestedPrefabs/NestedPrefabs.test.luau",
 			"XXH64": "eb404c52c6ab5a84",
 			"Method": "script.write",
@@ -6596,7 +6644,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "4b5f36050a5af65a",
+			"XXH64": "9ef937c0a932759e",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

@@ -75,7 +75,10 @@ namespace Engine {
 				"A baked irradiance volume (.irradiance, written by lighting.bake): a grid of probes' SH9 irradiance that an IrradianceVolume component lights with.")
 			.Entry(AssetType::Lut, "Lut", "A colour-grading 3D lookup table (.cube, or a built-in LUT) that a PostProcess applies after its tonemap curve.")
 			.Entry(AssetType::Heightfield, "Heightfield",
-				"A terrain's heightfield (.heightfield): a square grid of at most 1025 x 1025 16-bit height samples that a Terrain lays out.");
+				"A terrain's heightfield (.heightfield): a square grid of at most 1025 x 1025 16-bit height samples that a Terrain lays out.")
+			.Entry(AssetType::NavMesh, "NavMesh",
+				"A scene's baked navigation mesh (.navmesh, written by navigation.bake): each agent type's walkable polygons, which the Navigation script "
+				"namespace's queries read.");
 
 		registry.Struct<AssetSummary>("AssetSummary", "An asset's canonical id with its readable path and type.")
 			.Field("id", &AssetSummary::Id, "The asset's handle: 16 lowercase hex digits.")

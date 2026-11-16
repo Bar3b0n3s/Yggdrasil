@@ -39,6 +39,7 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
+#include "Engine/Scene/Components/NavigationComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -46,6 +47,7 @@
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/NavigationTestScene.h"
 #include "Support/TestOptions.h"
 #include "Support/WindowedChild.h"
 
@@ -925,6 +927,40 @@ namespace Engine {
 				gpu.GetDevice().WaitForIdle();
 			}
 			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		TEST_CASE("EditorLayer: the Tools menu's Bake navigation bakes the active scene through navigation.bake")
+		{
+			// M30 (Docs/Decisions/0045-m30-navigation.md decision 8): the item between Reload shaders and Bake lighting, enabled by
+			// IsNavigationBakeAvailable, submits navigation.bake without params, so the menu bakes the active scene's navigation
+			// exactly as the method does, without a renderer.
+			LayerUiHarness ui;
+			EditorContext& editor = ui.Environment.GetEditor();
+			static_cast<void>(Test::AddNavigationArena(editor.GetScene()));
+			ui.Draw();
+			ui.Draw();
+			// Open the real Tools menu, the main menu bar's last (as the Reload shaders case does), and click its second item.
+			const ImGuiWindow* bar = ImGui::FindWindowByName("##MainMenuBar");
+			REQUIRE(bar != nullptr);
+			const float spacing = ImGui::GetStyle().ItemSpacing.x;
+			const float label = ImGui::CalcTextSize("Tools").x;
+			const float x = bar->Pos.x + bar->DC.MenuBarOffset.x - 2 * spacing - label + spacing / 2 + label / 2;
+			ui.Click({ x, ImGui::GetFrameHeight() / 2 });
+			auto& popups = ImGui::GetCurrentContext()->OpenPopupStack;
+			REQUIRE_FALSE(popups.empty());
+			const ImGuiWindow* menu = popups.back().Window;
+			REQUIRE(menu != nullptr);
+			ui.Click({ menu->Pos.x + menu->Size.x / 2,
+				menu->DC.CursorStartPos.y + ImGui::GetTextLineHeightWithSpacing() + ImGui::GetTextLineHeight() / 2 });
+			const auto baked = [&editor]()
+			{
+				return editor.GetScene().FindEntityByPath("/Navigation").GetComponent<NavigationComponent>().NavMesh.GetHandle();
+			};
+			// The bake runs at the next safe point, outside the ImGui traversal.
+			CHECK_FALSE(baked().IsValid());
+			REQUIRE(ui.SafePoint());
+			CHECK(baked().IsValid());
+			CHECK(editor.GetHistory().GetUndoLabel().find("Bake Navigation") != std::string::npos);
 		}
 
 		TEST_CASE("EditorLayer: first thumbnail load invalidates version zero and the next request succeeds")

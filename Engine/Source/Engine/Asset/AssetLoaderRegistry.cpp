@@ -12,6 +12,7 @@
 #include "Engine/Asset/LutData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/NavMeshData.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/SkeletonData.h"
@@ -139,6 +140,11 @@ namespace Engine {
 			return LoadCookedHeightfield(cooked);
 		}
 
+		static Result<AssetRef<NavMeshData>> LoadNavMesh(std::span<const std::byte> cooked, const AssetLoadContext& /*context*/)
+		{
+			return LoadCookedNavMesh(cooked);
+		}
+
 	}
 
 	AssetLoaderRegistry::AssetLoaderRegistry() = default;
@@ -217,6 +223,8 @@ namespace Engine {
 		registry.Register(CreateScope<PayloadLoader<IrradianceVolumeData, &Utils::LoadIrradianceVolume>>());
 		registry.Register(CreateScope<PayloadLoader<LutData, &Utils::LoadLut>>());
 		registry.Register(CreateScope<PayloadLoader<HeightfieldData, &Utils::LoadHeightfield>>());
+		// M30 (Docs/Decisions/0045-m30-navigation.md decision 4).
+		registry.Register(CreateScope<PayloadLoader<NavMeshData, &Utils::LoadNavMesh>>());
 	}
 
 	std::optional<uint16_t> GetCookedFormatVersion(AssetType type)
@@ -242,6 +250,7 @@ namespace Engine {
 			case AssetType::IrradianceVolume: return IrradianceVolumeData::FormatVersion;
 			case AssetType::Lut:              return LutData::FormatVersion;
 			case AssetType::Heightfield:      return HeightfieldData::FormatVersion;
+			case AssetType::NavMesh:          return NavMeshData::FormatVersion;
 		}
 		return std::nullopt;
 	}

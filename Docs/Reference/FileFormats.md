@@ -1005,6 +1005,7 @@ The files the editor imports from `Assets/`, by importer and extension (§7.4). 
 | IrradianceVolume | `.irradiance` | IrradianceVolume | 1 | none | yes |
 | Lut | `.cube` | Lut | 1 | none | yes |
 | Material | `.material` | Material | 2 | none | yes |
+| NavMesh | `.navmesh` | NavMesh | 1 | none | yes |
 | Prefab | `.prefab` | Prefab | 1 | none | yes |
 | Replay | `.replay` | Replay | 3 | none | yes |
 | Scene | `.scene` | Scene | 1 | none | yes |
