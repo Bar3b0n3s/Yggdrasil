@@ -55,7 +55,7 @@ python Scripts/GenerateDocs.py --config Debug  # rebuild Editor first; the whole
 python Scripts/CheckBuildConfig.py  # ABI defines, JPH_CROSS_PLATFORM_DETERMINISTIC, Jolt ISA, FP model, Dist solution, the vendor-cache entries a build would link (--no-vendor-cache leaves them out)
 python Scripts/Format.py --check  # without --check it rewrites files, never a Native/ source (native.write's)
 python Scripts/Lint.py  # --self-test: every seeded Tests/Data/Lint fixture fails as expected; --mode clang|regex; --allow-contract-stubs: contract mode
-python Scripts/PreCommit.py  # the gate of a commit straight to main outside a milestone (ADR 0023, ADR 0028 decision 11): generate, static checks, Debug build, unit + gpu + golden + feature + automation + games (Debug editor); --gpu-optional without a Vulkan device
+python Scripts/PreCommit.py  # a change straight to main too broad to scope (ADR 0051; otherwise its targeted checks): generate, static checks, Debug build, unit + gpu + golden + feature + automation + games (Debug editor); --gpu-optional without a Vulkan device
 python Scripts/CI.py  # all stages; --stages build,unit for a subset; --gpu-optional as for PreCommit; --milestone (every stage plus hardening, clang-cl required, no other selection option) or --require-clang-cl (below); holds the gate, gpu and build locks
 ```
 
