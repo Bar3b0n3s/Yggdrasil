@@ -5,14 +5,14 @@ A reference page of the `luau-gameplay` skill (`skills/luau-gameplay`): pausing 
 **Pause the world, not the session.** `Time.PauseWorld()` freezes the world from the next fixed step on, and `Time.ResumeWorld()` lets it run again; `Time.IsWorldPaused()` reads the state the next step runs with. While the world is paused:
 - physics and 2D physics do not step (bodies keep their velocities and fall on from where they hung), animators, sprite animators, particle emitters and the native module's systems hold;
 - `OnFixedUpdate`, `OnUpdate`, `OnLateUpdate` and tasks (`Task.Wait`, `Task.Delay`) run only for behaviours whose class sets `RunsWhileWorldPaused = true`; every other behaviour holds, its waits and delays included;
-- the world's clock holds: `Time.GetTick()` and `Time.GetTime()` stop, so gameplay timers built on them stop too, while `Time.GetSessionTick()` and `Time.GetSessionTime()` count every fixed step for the behaviours that run;
+- the world's clock holds: `Time.GetTick()` and `Time.GetTime()` (the world's) stop, so gameplay timers built on them stop too, while `Time.GetSessionTick()` and `Time.GetSessionTime()` (the session's) count every fixed step for the behaviours that run; outside a pause the two clocks agree;
 - input, the UI (pointer, focus, navigation, typing), every `OnUi*` callback, `OnStart`, `OnDestroy` and entity creation run as always, so a pause menu can show, take input and spawn its own entities.
 
 It is not the time scale: `Time.SetTimeScale(0)` stops every tick and the UI with it. Nor is it the editor's or automation's pause (`play.pause`), which stops the whole session; automation reads the world pause in `play.state`'s `worldPaused` and sets it with `play.setWorldPaused`.
 
 **Sounds.** `Time.PauseWorld("Pause")` (the default) holds every playing voice outside the `Ui` group until the world resumes; `Time.PauseWorld("Finish")` lets them play on to their end. Voices of the `Ui` group always play, so play a menu's sounds in it (`Audio.PlayOneShot(clip, nil, 1, "Ui")`, or an AudioSource whose `Group` is `Ui`).
 
-**Pause from the fixed step.** The pause takes effect at the next fixed step, so a tick runs wholly paused or wholly not. Request it from `OnFixedUpdate`, a UI callback or a task, as every simulated write, so a replay reproduces it in every frame grouping. It is session state: it survives `Scene.Load` and `Scene.Reload`, so resume before loading a scene that must run (a defeat panel's Restart). The world pause and the world's clock are in the state hash once a session first pauses.
+**Pause from the fixed step.** The pause takes effect at the next fixed step, so a tick runs wholly paused or wholly not. Request it from `OnFixedUpdate`, a UI callback or a task, as every simulated write, so a replay reproduces it in every frame grouping. It is session state, like the time scale: it survives `Scene.Load` and `Scene.Reload`. So a pause menu or a defeat panel that loads or restarts a scene calls `Time.ResumeWorld()` first; otherwise the new scene starts with its world paused and only its `RunsWhileWorldPaused` behaviours running, which soft-locks a scene without a menu of its own. The world pause and the world's clock are in the state hash once a session first pauses.
 
 A pause menu that opens on Escape and closes with its Resume button:
 

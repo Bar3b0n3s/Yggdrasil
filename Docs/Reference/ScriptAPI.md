@@ -1354,7 +1354,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> number`
 
-Returns the session's simulation seconds: its tick multiplied by the fixed delta, counting while the world is paused.
+Returns the session's simulation seconds: its tick multiplied by the fixed delta, which counts on while the world is paused (Time.GetTime, the world's, holds).
 
 All modes; Runtime|Test; pure/read.
 
@@ -1394,7 +1394,7 @@ All modes; Runtime|Test; pure/read.
 
 `(sounds: WorldPauseSounds?) -> ()`
 
-Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices outside the Ui group, Finish lets them play on. Not the host's session pause (play.pause), which stops every tick. Refused during read-only evaluation.
+Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices outside the Ui group, Finish lets them play on. Not the host's session pause (play.pause), which stops every tick. The pause is the session's, like the time scale: it lasts across Scene.Load and Scene.Reload, so call Time.ResumeWorld before loading or restarting a scene, or the new scene starts with its world paused. Refused during read-only evaluation.
 
 All modes; Runtime|Test; mutates.
 
