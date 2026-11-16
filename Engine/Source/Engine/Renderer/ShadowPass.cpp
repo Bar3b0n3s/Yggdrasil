@@ -439,18 +439,22 @@ namespace Engine {
 				signature.UpdateU64(candidate.Draw.ReflectedVariant);
 				signature.UpdateU64(mask ? materialHandle.GetValue() : 0U);
 				signature.UpdateU64(mask ? material.Generation : 0U);
-				// M31's parameters (batch 1's landing): a Mask caster's fragment shader reads its instance record, the dissolve's
-				// amount and noise scale and the texture-coordinate offset under DrawFlagMaterialParameters, so a dissolve, a
-				// scroll or a new offset redraws the map; Opacity is hashed with them, though the casters ignore a fade today, so
-				// the map never depends on which of the record's Mask values Shadow.slang reads. An Opaque caster reads none.
+				// M31's parameters (batch 1's landing and its review, finding 2): exactly the instance-record values a Mask
+				// caster's fragment shader (Shadow.slang's PSMain) reads under DrawFlagMaterialParameters. The dissolve's amount
+				// always; its noise scale only while the amount is above 0 and below 1, the only amounts that sample the noise;
+				// the texture-coordinate offset only for a Mask material, whose alpha test samples at it (an Opaque material's
+				// dissolve tests no alpha and samples the noise without the offset). A fade and a tint never reach a shadow, and an
+				// Opaque caster reads no record value.
 				const bool parameters = mask && (candidate.Record.Flags & DrawFlagMaterialParameters) != 0;
 				signature.UpdateU64(parameters ? 1U : 0U);
 				if (parameters)
 				{
-					Utils::HashShadowValue(signature, candidate.Record.DissolveAmount);
-					Utils::HashShadowValue(signature, candidate.Record.DissolveNoiseScale);
-					Utils::HashShadowValue(signature, candidate.Record.Opacity);
-					Utils::HashShadowValue(signature, candidate.Record.UVOffset);
+					const float dissolve = candidate.Record.DissolveAmount;
+					Utils::HashShadowValue(signature, dissolve);
+					if (dissolve > 0.0f && dissolve < 1.0f)
+						Utils::HashShadowValue(signature, candidate.Record.DissolveNoiseScale);
+					if (material.AlphaMode == AlphaMode::Mask)
+						Utils::HashShadowValue(signature, candidate.Record.UVOffset);
 				}
 				signature.UpdateU64(source.Vertices != nullptr ? 1U : 0U);
 				if (source.Vertices != nullptr)

@@ -130,7 +130,7 @@ namespace Engine {
 	// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 2), after Terrain, in ADR 0042's phase-5 ledger's landing order.
 	void RegisterFogComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the thirteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the fourteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

@@ -65,8 +65,7 @@ namespace Engine {
 		// An 8 x 8 m receiver at z = -5 seen from the origin; point light A at (-1.5, 0, -3) with a caster below it, point
 		// light B at (1.5, 0, -3) with the skinned strip below it, each casting into a cube of 2.5 m around it that the other's
 		// caster stays outside; a spot light at (-1.5, 0, -2) whose cone holds caster A alone; and a caster above both cubes.
-		// `parameters`: caster A's material parameters (M31).
-		RenderSnapshot MakeCacheScene(Test::SceneRendererIntegrationFixture& fixture, const MeshMaterialParameters& parameters = {})
+		RenderSnapshot MakeCacheScene(Test::SceneRendererIntegrationFixture& fixture)
 		{
 			RenderSnapshot snapshot = fixture.Snapshot();
 			snapshot.Environment.FallbackColor = glm::vec3(0.0f);
@@ -83,7 +82,6 @@ namespace Engine {
 			};
 			snapshot.Meshes.push_back(caster(glm::vec3(-1.5f, 0.0f, -4.0f), 0.3f, 41));
 			snapshot.Meshes.back().Materials = { CacheMaskMaterial }; // a Mask caster, whose material is part of its signature
-			snapshot.Meshes.back().Parameters = parameters;
 			MeshDrawItem strip = caster(glm::vec3(1.5f, 0.0f, -4.0f), 0.3f, 42);
 			strip.Mesh = CacheStripMesh;
 			strip.JointPalette = { glm::mat4(1.0f), glm::mat4(1.0f) };
@@ -143,15 +141,18 @@ namespace Engine {
 			uint32_t CachedSpots = 0;
 		};
 
-		// For each change: the scene (caster A with `parameters`) drawn afresh and then reused, the change rendered continuing
+		// For each change: the scene (after `prepare`, when given) drawn afresh and then reused, the change rendered continuing
 		// the history, its cached counts checked, and its image compared with a render of the changed scene without the cache.
-		void CheckCacheChanges(Test::SceneRendererIntegrationFixture& fixture, const std::vector<CacheChange>& changes, const MeshMaterialParameters& parameters = {})
+		void CheckCacheChanges(Test::SceneRendererIntegrationFixture& fixture, const std::vector<CacheChange>& changes,
+			const std::function<void(RenderSnapshot&)>& prepare = {})
 		{
 			for (const CacheChange& change : changes)
 			{
 				CAPTURE(change.Name);
 				// The base, drawn afresh and then reused.
-				RenderSnapshot base = MakeCacheScene(fixture, parameters);
+				RenderSnapshot base = MakeCacheScene(fixture);
+				if (prepare)
+					prepare(base);
 				SetHistory(base, false);
 				static_cast<void>(fixture.Render(base));
 				SetHistory(base, true);
@@ -284,40 +285,63 @@ namespace Engine {
 			CheckCacheChanges(fixture, changes);
 		}
 
-		// M31's material parameters (batch 1's landing; the review of W31.1, finding 4): a Mask caster's instance record takes
-		// part in its depth, so a change of its dissolve, its noise scale, its fade or its texture offset draws the maps it
-		// reaches again, while a change the casters never read (its tint) keeps them. Caster A, a Mask caster in light A's
-		// cube and the spot's cone, starts tinted, so its record already holds the parameters and each change moves one value.
-		TEST_CASE("ShadowCache: a Mask caster's dissolve, noise scale, fade or texture offset draws its map again, and its tint does not")
+		// M31's material parameters (batch 1's landing; the review of W31.1, finding 4, and the landing's review, finding 2): a
+		// Mask caster's map depends on exactly the record values Shadow.slang reads, so a change of its dissolve, of its noise
+		// scale while it dissolves partly, or of a Mask material's texture offset draws the maps it reaches again, while a change
+		// the casters never read keeps them: its tint, its fade, the noise scale of a caster dissolved whole and the offset of an
+		// Opaque material that dissolves (its alpha is never tested).
+		TEST_CASE("ShadowCache: a Mask caster's dissolve, noise scale or texture offset draws its map again, and its tint and fade do not")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::SceneRendererIntegrationFixture fixture(gpu);
 			PublishCacheAssets(fixture);
-			const MeshMaterialParameters tinted{ .Tint = glm::vec3(0.5f, 0.75f, 1.0f) };
-			const std::vector<CacheChange> changes = {
-				{ "a caster dissolved", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			// Caster A, a Mask material's caster in light A's cube and the spot's cone, tinted and half dissolved, so its record
+			// holds the parameters and each change moves one value.
+			const std::vector<CacheChange> read = {
+				{ "a caster dissolved further", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
-				snapshot.Meshes[CasterA].Parameters.DissolveAmount = 1.0f;
+				snapshot.Meshes[CasterA].Parameters.DissolveAmount = 0.75f;
 			}, 1, 0 },
-				{ "a caster's noise scaled", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+				{ "a half-dissolved caster's noise scaled", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[CasterA].Parameters.DissolveNoiseScale = 4.0f;
+			}, 1, 0 },
+				{ "a Mask material's texture offset scrolled", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Parameters.UVOffset = glm::vec2(0.25f, 0.0f);
 			}, 1, 0 },
 				{ "a caster faded", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[CasterA].Parameters.Opacity = 0.5f;
-			}, 1, 0 },
-				{ "a caster's texture offset scrolled", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
-			{
-				snapshot.Meshes[CasterA].Parameters.UVOffset = glm::vec2(0.25f, 0.0f);
-			}, 1, 0 },
+			}, 2, 1 },
 				{ "a caster tinted again", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
 			{
 				snapshot.Meshes[CasterA].Parameters.Tint = glm::vec3(1.0f, 0.5f, 0.25f);
 			}, 2, 1 },
 			};
-			CheckCacheChanges(fixture, changes, tinted);
+			CheckCacheChanges(fixture, read, [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Parameters = { .Tint = glm::vec3(0.5f, 0.75f, 1.0f), .DissolveAmount = 0.5f };
+			});
+
+			// Caster A dissolved whole, which casts nothing whatever its noise; the skinned strip, an Opaque material's caster in
+			// light B's cube, half dissolved, which tests no alpha and samples its noise without the offset.
+			const std::vector<CacheChange> unread = {
+				{ "a caster dissolved whole has its noise scaled", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[CasterA].Parameters.DissolveNoiseScale = 4.0f;
+			}, 2, 1 },
+				{ "an Opaque material's texture offset scrolled", [](RenderSnapshot& snapshot, Test::SceneRendererIntegrationFixture&)
+			{
+				snapshot.Meshes[SkinnedB].Parameters.UVOffset = glm::vec2(0.25f, 0.0f);
+			}, 2, 1 },
+			};
+			CheckCacheChanges(fixture, unread, [](RenderSnapshot& snapshot)
+			{
+				snapshot.Meshes[CasterA].Parameters = { .DissolveAmount = 1.0f };
+				snapshot.Meshes[SkinnedB].Parameters = { .DissolveAmount = 0.5f };
+			});
 		}
 	}
 

@@ -38,7 +38,8 @@
 	},
 	"Rendering": {
 		"ShadowMapSize": 2048,
-		"SsaoHalfResolution": false
+		"SsaoHalfResolution": false,
+		"SsrHalfResolution": false
 	},
 	"Scripting": {
 		"MemoryLimitMB": 256,
