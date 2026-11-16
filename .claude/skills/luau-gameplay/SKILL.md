@@ -12,6 +12,7 @@ The API is served by `docs.get` (a connected editor answers it): `reference/Scri
 Reference pages beside this file, each a `docs.get` topic and a file in this skill's directory:
 - `skills/luau-gameplay/sprites-2d` ([sprites-2d.md](sprites-2d.md)): sprites, sprite animation, 2D lights, tilemaps and the 2D physics world in scripts: their fields, methods, the `Physics2D` module and the 2D callbacks.
 - `skills/luau-gameplay/animation` ([animation.md](animation.md)): skeletal and morph animation in scripts: the `Animator` and `SkinnedMesh` fields and methods, script-driven blending, root motion, `OnAnimationEvent` and `Test.GetPoseDigest`.
+- `skills/luau-gameplay/characters-and-input` ([characters-and-input.md](characters-and-input.md)): how a character meets Dynamic bodies: the push, light bodies that never move it, and tuning it with `Mass`.
 
 ## Script shape
 

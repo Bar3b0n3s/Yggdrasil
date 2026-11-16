@@ -17,17 +17,21 @@
 // layers and the pairs of them that collide (PhysicsSettings.Layers and .Collisions, §6.1); the matrix is symmetric. Jolt
 // sees object layers, which add the body's kind to the project layer:
 //
-//     object layer = (layerIndex << 2) | kind,   kind in {Static, Moving, Sensor}
+//     object layer = (layerIndex << 2) | kind,   kind in {Static, Moving, Sensor, Character}
 //
 // and three broad-phase layers, NonMoving, Moving and Sensor. Two object layers collide when
 //
 //     matrix[a >> 2][b >> 2] && !(both Static) && !(Sensor and Static) && !(both Sensor)
+//                            && (neither is Character || the other is Sensor)
 //
 // so sensors never pay for static geometry or for each other, as Jolt recommends (sensors are Kinematic and kept active,
-// so they still see sleeping bodies, §9.2). The three Jolt filter interfaces (BroadPhaseLayerInterface,
+// so they still see sleeping bodies, §9.2), and a character's inner body meets sensors only: the solver never resolves a
+// contact between it and a Dynamic body, which it would push with infinite mass (M34, Docs/Decisions/0049-m34-characters-
+// input.md decision 1; Physics/CharacterController.h). The three Jolt filter interfaces (BroadPhaseLayerInterface,
 // ObjectVsBroadPhaseLayerFilter, ObjectLayerPairFilter) are small classes in Physics/Private/ over a PhysicsLayerTable.
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 4). The encoding helpers below are complete;
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 4); M34 adds the Character kind, reviewed as
+// a change to a frozen interface (ADR 0049 decision 1). The encoding helpers below are complete;
 // PhysicsLayerTable is a plain value type, thread-compatible (the world's filters read it from Jolt's worker threads, which
 // never write it).
 
@@ -44,9 +48,10 @@ namespace Engine {
 	// The kind part of an object layer.
 	enum class PhysicsObjectKind : uint8_t
 	{
-		Static = 0, // static bodies (explicit or implicit)
-		Moving = 1, // kinematic and dynamic bodies, and character inner bodies
-		Sensor = 2  // trigger bodies (explicit Kinematic triggers and implicit sensor bodies)
+		Static = 0,   // static bodies (explicit or implicit)
+		Moving = 1,   // kinematic and dynamic bodies
+		Sensor = 2,   // trigger bodies (explicit Kinematic triggers and implicit sensor bodies)
+		Character = 3 // character inner bodies (M34): seen by queries and sensors, never by the solver's other bodies
 	};
 
 	// Jolt's broad-phase layers.
@@ -78,21 +83,25 @@ namespace Engine {
 		return static_cast<PhysicsObjectKind>(static_cast<uint32_t>(objectLayer) & 3u);
 	}
 
-	// The broad-phase layer of an object layer: Static -> NonMoving, Moving -> Moving, Sensor -> Sensor.
+	// The broad-phase layer of an object layer: Static -> NonMoving, Moving and Character -> Moving, Sensor -> Sensor.
 	[[nodiscard]] constexpr PhysicsBroadPhaseLayer GetPhysicsBroadPhaseLayer(PhysicsObjectLayer objectLayer)
 	{
 		switch (GetPhysicsObjectKind(objectLayer))
 		{
-			case PhysicsObjectKind::Static: return PhysicsBroadPhaseLayer::NonMoving;
-			case PhysicsObjectKind::Moving: return PhysicsBroadPhaseLayer::Moving;
-			case PhysicsObjectKind::Sensor: return PhysicsBroadPhaseLayer::Sensor;
+			case PhysicsObjectKind::Static:    return PhysicsBroadPhaseLayer::NonMoving;
+			case PhysicsObjectKind::Moving:    return PhysicsBroadPhaseLayer::Moving;
+			case PhysicsObjectKind::Sensor:    return PhysicsBroadPhaseLayer::Sensor;
+			case PhysicsObjectKind::Character: return PhysicsBroadPhaseLayer::Moving;
 		}
 		return PhysicsBroadPhaseLayer::Moving;
 	}
 
-	// The kind rule of the pair filter, without the matrix: !(both Static) && !(Sensor and Static) && !(both Sensor).
+	// The kind rule of the pair filter, without the matrix: !(both Static) && !(Sensor and Static) && !(both Sensor), and a
+	// Character meets a Sensor only. Symmetric.
 	[[nodiscard]] constexpr bool PhysicsObjectKindsCollide(PhysicsObjectKind a, PhysicsObjectKind b)
 	{
+		if (a == PhysicsObjectKind::Character || b == PhysicsObjectKind::Character)
+			return a == PhysicsObjectKind::Sensor || b == PhysicsObjectKind::Sensor;
 		if (a == PhysicsObjectKind::Static)
 			return b == PhysicsObjectKind::Moving;
 		if (a == PhysicsObjectKind::Sensor)

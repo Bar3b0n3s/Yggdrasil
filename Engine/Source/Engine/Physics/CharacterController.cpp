@@ -14,9 +14,11 @@
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/MotionProperties.h>
 #include <Jolt/Physics/Character/CharacterID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/CollisionGroup.h>
+#include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
 
 #include <algorithm>
@@ -34,18 +36,29 @@
 // mInnerBodyIDOverride would have to name. The controller then does what CharacterVirtual does for an inner body it owns:
 // it places the body at the character's padded base after every update and teleport (SetPositionAndRotation without
 // activation; the body never sleeps), it keeps the character's own collision from seeing it (the body filter), and it
-// removes it with the character.
+// removes it with the character. M34 (Docs/Decisions/0049-m34-characters-input.md decision 1): the body's object layer
+// has the Character kind (PhysicsLayers.h), which pairs with sensors only, so the solver never resolves a contact between
+// it and a Dynamic body: placed rather than swept, it would push that body with infinite mass (World Tree's brief 11:
+// shards driven through the floor, and a character launched by the shard it stood on). The character's own collision
+// meets other characters' inner bodies as it did before (CharacterObjectLayerFilter), so characters still block each other.
+//
+// Dynamic bodies (M34, ADR 0049 decision 2). The character pushes Dynamic bodies through CharacterVirtual's own contacts
+// alone, with a strength of its Mass times PushAcceleration. A Dynamic body lighter than the character
+// (IsLighterThanCharacter) never moves it: it cannot push it or carry it up a surface of its own (the recorder), it gives
+// it none of its velocity as its ground (Update), it is never a stair (WalkStairs, Jolt's step without light bodies) and it carries at most its own weight
+// from the character (PushGround, which replaces CharacterVirtual's weight impulse).
 //
 // Contacts. A CharacterContactRecorder records the character's contacts during ExtendedUpdate; Update then appends each as
 // a ContactEvent with FromCharacter, BodyA the inner body, ColliderA 0 (the capsule is the character's only collider) and
-// SubShapeA CharacterContactSubShape. A dynamic body touching the inner body is also reported by the world's own listener
-// (inner body versus body, SubShapeA the capsule's empty sub-shape ID, all bits set); the two sources never share a
-// sub-shape key, and each reports every removal of what it added, so the session's per-pair reference count stays exact.
+// SubShapeA CharacterContactSubShape. A sensor touching the inner body is reported by the world's own listener (inner body
+// versus sensor, SubShapeA the capsule's empty sub-shape ID, all bits set), which the character's recorder refuses; the
+// two sources never share a sub-shape key, and each reports every removal of what it added, so the session's per-pair
+// reference count stays exact.
 //
 // Range. A character never leaves the range physics places bodies in (IsPlaceablePhysicsPose): an update that would
 // carry it beyond MaxPhysicsCoordinate leaves it where it was, with no velocity, and logs a warning once per controller.
-// The weight Jolt applies to what the character stands on (its mass times the gravity times the step, CharacterVirtual::
-// Update) is capped at MaxGroundImpulse, so no mass and gravity within their bounds can overflow a light body's velocity.
+// The weight the character puts on what it stands on (its mass times the gravity times the step, PushGround) is capped at
+// MaxGroundImpulse, so no mass and gravity within their bounds can overflow a body's velocity.
 
 namespace Engine {
 
@@ -63,11 +76,17 @@ namespace Engine {
 		// The squared length (m/s^2) below which a gravity counts as none (CharacterController::Update).
 		constexpr float MinGravityLengthSq = 1.0e-20f;
 
-		// The largest impulse, in N s, that one update's weight may put on the body the character stands on: Jolt applies
-		// mass * gravity * deltaTime there (CharacterVirtual::Update), and on the lightest body (1 g, 2 mm across) a larger
-		// one could make a velocity whose squared length overflows, which Jolt asserts on. A character of MaxPhysicsMass
-		// under the Earth's gravity at 1 Hz stays just below it.
+		// The largest impulse, in N s, that one update's weight may put on the body the character stands on (PushGround:
+		// mass * gravity * deltaTime): on the lightest body (1 g, 2 mm across) a larger one could make a velocity whose
+		// squared length overflows, which Jolt asserts on. A character of MaxPhysicsMass under the Earth's gravity at 1 Hz
+		// stays just below it.
 		constexpr double MaxGroundImpulse = 1.0e10;
+
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 2): the acceleration whose force on the character's Mass
+		// is the most it pushes a Dynamic body with (CharacterVirtual's strength, in N): the force of its weight under the
+		// Earth's gravity, whatever the world's gravity, so a character pushes what is lighter than it on any ground whose
+		// friction coefficient is at most 1.
+		constexpr float PushAcceleration = 9.81f;
 
 		// `velocity` shortened to at most MaxCharacterSpeed (a terminal speed: a fall under a large gravity never builds a
 		// velocity that carries the character out of Jolt's bounds). Scaled by its largest component first, so a long but
@@ -119,6 +138,31 @@ namespace Engine {
 			return {};
 		}
 
+		// The character's own collision with object layers (CharacterVirtual's queries): the pair rule of a Moving body on
+		// the character's layer, with another character's inner body (the Character kind, which the solver pairs with
+		// sensors only) met as the Moving body it is, so characters block each other as they did before M34.
+		class CharacterObjectLayerFilter final : public JPH::ObjectLayerFilter
+		{
+		public:
+			// `layers` is a documented back-reference to the world's table, which outlives the update that uses the filter.
+			CharacterObjectLayerFilter(const PhysicsLayerTable& layers, uint32_t layer)
+				: m_Layers(&layers), m_Layer(MakePhysicsObjectLayer(layer, PhysicsObjectKind::Moving))
+			{
+			}
+
+			bool ShouldCollide(JPH::ObjectLayer layer) const override
+			{
+				const auto other = static_cast<PhysicsObjectLayer>(layer);
+				const PhysicsObjectLayer seen = GetPhysicsObjectKind(other) == PhysicsObjectKind::Character
+					? MakePhysicsObjectLayer(GetPhysicsLayerIndex(other), PhysicsObjectKind::Moving)
+					: other;
+				return m_Layers->ShouldCollide(m_Layer, seen);
+			}
+		private:
+			const PhysicsLayerTable* m_Layers = nullptr;
+			PhysicsObjectLayer m_Layer = 0;
+		};
+
 		// The character's own collision (CharacterVirtual's queries): never its inner body, and no body of its collision
 		// group, decided by the inner body's CollisionGroup as the world installed it (its GroupFilter), so the rule is the
 		// world's own.
@@ -160,7 +204,7 @@ namespace Engine {
 		JPH::CollisionGroup Group{};
 		// The capsule, shared by the CharacterVirtual (its Jolt shape) and the inner body.
 		Ref<const PhysicsShape> Shape{};
-		CharacterContactRecorder Contacts;
+		Scope<CharacterContactRecorder> Contacts;
 		// Declared after the recorder it reports to, so it is destroyed first.
 		Scope<JPH::CharacterVirtual> Character;
 		// Whether Update logged that it kept the character in range (once per controller).
@@ -184,10 +228,107 @@ namespace Engine {
 				World->SetPose(InnerBody, pose, false);
 		}
 
+		// Whether `body` is a Dynamic body lighter than the character (see the file comment).
+		[[nodiscard]] bool IsLightBody(const JPH::BodyID& body) const
+		{
+			return IsLighterThanCharacter(World->m_State->System->GetBodyLockInterfaceNoLock(), body, Character->GetMass());
+		}
+
+		// Whether `contact` of the last update is a stair against a movement at `velocity`: CharacterVirtual::CanWalkStairs's
+		// test (collided and kept, the character pushing into it, a surface too steep to walk), and not a light body.
+		[[nodiscard]] bool IsStair(const JPH::CharacterContact& contact, JPH::Vec3Arg velocity) const
+		{
+			const bool steep = contact.mHadCollision && !contact.mWasDiscarded && contact.mSurfaceNormal.Dot(velocity - contact.mLinearVelocity) < 0.0f
+				&& Character->IsSlopeTooSteep(contact.mSurfaceNormal);
+			return steep && !(contact.mMotionTypeB == JPH::EMotionType::Dynamic && IsLightBody(contact.mBodyB));
+		}
+
+		// The stair step of CharacterVirtual::ExtendedUpdate, which Update runs with its own stairs off: when the update
+		// moved the character less far along `desired` than it asked and a stair (IsStair) holds it back, WalkStairs up to
+		// StepHeight towards the stair that opposes the movement most. A light body is never a stair, so the character
+		// pushes it instead of climbing it.
+		void WalkStairs(float deltaTime, JPH::Vec3Arg desired, JPH::RVec3Arg previousPosition, const JPH::CharacterVirtual::ExtendedUpdateSettings& settings,
+			const JPH::BroadPhaseLayerFilter& broadPhaseFilter, const JPH::ObjectLayerFilter& objectLayerFilter, const JPH::BodyFilter& bodyFilter,
+			const JPH::ShapeFilter& shapeFilter)
+		{
+			JPH::CharacterVirtual& character = *Character;
+			const JPH::Vec3 up = character.GetUp();
+			if (!(StepHeight > 0.0f) || !character.IsSupported())
+				return;
+			const JPH::Vec3 horizontal = desired - desired.Dot(up) * up;
+			const JPH::Vec3 desiredStep = horizontal * deltaTime;
+			const float desiredLength = desiredStep.Length();
+			if (horizontal.IsNearZero(1.0e-6f) || !(desiredLength > 0.0f))
+				return;
+			const JPH::Vec3 forward = desiredStep / desiredLength;
+			JPH::Vec3 achieved = JPH::Vec3(character.GetPosition() - previousPosition);
+			achieved -= achieved.Dot(up) * up;
+			const float achievedLength = std::max(0.0f, achieved.Dot(forward));
+			if (achievedLength + 1.0e-4f >= desiredLength)
+				return;
+
+			const JPH::CharacterVirtual::ContactList& contacts = character.GetActiveContacts();
+			const bool blocked = std::any_of(contacts.begin(), contacts.end(), [this, &horizontal](const JPH::CharacterContact& contact)
+			{
+				return IsStair(contact, horizontal);
+			});
+			if (!blocked)
+				return;
+			JPH::Vec3 direction = forward;
+			float bestCosine = settings.mWalkStairsCosAngleForwardContact;
+			for (const JPH::CharacterContact& contact : contacts)
+			{
+				if (!IsStair(contact, desired))
+					continue;
+				// The stair's normal made horizontal and turned to point along the movement.
+				JPH::Vec3 towards = contact.mSurfaceNormal.Dot(up) * up - contact.mSurfaceNormal;
+				const float length = towards.Length();
+				if (!(length > 1.0e-6f))
+					continue;
+				towards /= length;
+				const float cosine = towards.Dot(forward);
+				if (cosine > bestCosine)
+				{
+					direction = towards;
+					bestCosine = cosine;
+				}
+			}
+			const JPH::Vec3 stepForward = direction * std::max(settings.mWalkStairsMinStepForward, desiredLength - achievedLength);
+			const JPH::Vec3 stepForwardTest = direction * settings.mWalkStairsStepForwardTest;
+			static_cast<void>(character.WalkStairs(deltaTime, up * StepHeight, stepForward, stepForwardTest, settings.mWalkStairsStepDownExtra,
+				broadPhaseFilter, objectLayerFilter, bodyFilter, shapeFilter, *World->m_State->TempAllocator));
+		}
+
+		// The weight the character puts on the Dynamic body it stands on, as CharacterVirtual::Update puts it (its mass times
+		// the gravity's part along the ground's normal, over the step, at the ground's contact point), which Update turns off
+		// in Jolt: at most the body's own weight for a light body, and capped at MaxGroundImpulse.
+		void PushGround(float deltaTime, const glm::vec3& gravity)
+		{
+			const JPH::CharacterVirtual& character = *Character;
+			const JPH::BodyID ground = character.GetGroundBodyID();
+			const JPH::Vec3 joltGravity = Detail::ToJolt(gravity);
+			const float normalDotGravity = character.GetGroundNormal().Dot(joltGravity);
+			if (ground.IsInvalid() || !(normalDotGravity < 0.0f))
+				return;
+			double mass = character.GetMass();
+			{
+				const JPH::BodyLockRead lock(World->m_State->System->GetBodyLockInterfaceNoLock(), ground);
+				if (!lock.SucceededAndIsInBroadPhase() || !lock.GetBody().IsDynamic())
+					return;
+				if (IsLighterThanCharacter(lock.GetBody(), character.GetMass()))
+					mass = 1.0 / static_cast<double>(lock.GetBody().GetMotionProperties()->GetInverseMass());
+			}
+			// |impulse| = mass * |n . g| * deltaTime, along the gravity.
+			const double gravityLength = glm::length(glm::dvec3(gravity));
+			const double magnitude = std::min(mass * -static_cast<double>(normalDotGravity) * static_cast<double>(deltaTime), Utils::MaxGroundImpulse);
+			const JPH::Vec3 impulse = joltGravity * static_cast<float>(magnitude / gravityLength);
+			World->m_State->System->GetBodyInterfaceNoLock().AddImpulse(ground, impulse, character.GetGroundPosition());
+		}
+
 		// Appends the recorded contacts to the world's buffer (see the file comment).
 		void AppendContacts()
 		{
-			const std::vector<CharacterContactRecord> records = Contacts.Drain();
+			const std::vector<CharacterContactRecord> records = Contacts->Drain();
 			if (records.empty())
 				return;
 			ContactBuffer& buffer = World->GetContactBuffer();
@@ -247,6 +388,7 @@ namespace Engine {
 		settings.mUp = JPH::Vec3::sAxisY();
 		settings.mMaxSlopeAngle = JPH::DegreesToRadians(description.MaxSlopeAngle);
 		settings.mMass = description.Mass;
+		settings.mMaxStrength = description.Mass * Utils::PushAcceleration;
 		// Contacts below the centre of the lower hemisphere support the character (the capsule's base is at the origin).
 		settings.mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -description.Radius);
 
@@ -261,6 +403,9 @@ namespace Engine {
 		Result<BodyHandle> inner = world.CreateBody(innerBody);
 		if (!inner)
 			return std::unexpected(std::move(inner).error().WithContext("while creating a character controller's inner body"));
+		// The Character kind (see the file comment), set before any step can pair the new body with a Dynamic one.
+		const JPH::BodyID innerID = Detail::ToJoltBodyID(*inner).value_or(JPH::BodyID());
+		world.m_State->System->GetBodyInterface().SetObjectLayer(innerID, MakePhysicsObjectLayer(description.Layer, PhysicsObjectKind::Character));
 
 		Scope<CharacterController> controller = CreateScope<CharacterController>(ConstructionKey());
 		State& state = *controller->m_State;
@@ -274,7 +419,7 @@ namespace Engine {
 		{
 			// The world's own body, just created, always reads; without its group the character would collide with the bodies
 			// of its own group.
-			const JPH::BodyLockRead lock(world.m_State->System->GetBodyLockInterface(), Detail::ToJoltBodyID(*inner).value_or(JPH::BodyID()));
+			const JPH::BodyLockRead lock(world.m_State->System->GetBodyLockInterface(), innerID);
 			ENGINE_CORE_ASSERT(lock.Succeeded(), "CharacterController::Create: the inner body {} the world just created cannot be read", inner->GetValue());
 			if (lock.Succeeded())
 				state.Group = lock.GetBody().GetCollisionGroup();
@@ -283,9 +428,10 @@ namespace Engine {
 		// The character's ID only matters between characters, which never collide here; it is the inner body's, so it is
 		// deterministic too.
 		settings.mID = JPH::CharacterID(inner->GetValue());
+		state.Contacts = CreateScope<CharacterContactRecorder>(world.m_State->System->GetBodyLockInterfaceNoLock());
 		state.Character = CreateScope<JPH::CharacterVirtual>(&settings, Detail::ToJolt(description.Pose.Position), Detail::ToJoltRotation(rotation),
 			description.UserData, world.m_State->System.get());
-		state.Character->SetListener(&state.Contacts);
+		state.Character->SetListener(state.Contacts.get());
 		return controller;
 	}
 
@@ -298,48 +444,46 @@ namespace Engine {
 
 		State& state = *m_State;
 		JPH::CharacterVirtual& character = *state.Character;
-		// A gravity so weak that its squared length underflows counts as none: CharacterVirtual divides by its length when it
-		// pushes the body the character stands on.
+		// A gravity so weak that its squared length underflows counts as none: PushGround divides by its length.
 		const glm::vec3 effectiveGravity = glm::dot(gravity, gravity) < Utils::MinGravityLengthSq ? glm::vec3(0.0f) : gravity;
 
 		// The velocity for the step (CharacterController.h, ADR 0014 decision 8): the desired horizontal velocity, plus on
 		// the ground its vertical velocity and the desired vertical part (a jump), else the previous vertical velocity plus
 		// gravity; with InheritGroundVelocity, on the ground also the ground's horizontal velocity (ADR 0030 decision 36), so
 		// a platform moving at v carries the character v * t. The platform the character stands on may have moved since the
-		// last update, so its velocity is read first.
+		// last update, so its velocity is read first; a light body's is none (M34, see the file comment), so a shard the
+		// character stands on never launches it.
 		character.UpdateGroundVelocity();
 		const JPH::Vec3 up = character.GetUp();
 		const JPH::Vec3 desired = Detail::ToJolt(desiredVelocity);
 		const JPH::Vec3 desiredVertical = desired.Dot(up) * up;
 		const JPH::Vec3 currentVertical = character.GetLinearVelocity().Dot(up) * up;
-		const JPH::Vec3 groundVelocity = character.GetGroundVelocity();
+		const JPH::Vec3 groundVelocity = state.IsLightBody(character.GetGroundBodyID()) ? JPH::Vec3::sZero() : character.GetGroundVelocity();
 		const JPH::Vec3 groundVertical = groundVelocity.Dot(up) * up;
 		const bool grounded = character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround
 			&& (currentVertical - groundVertical).Dot(up) < Utils::LeavingGroundSpeed;
 		const JPH::Vec3 vertical = grounded ? groundVertical + desiredVertical : currentVertical + Detail::ToJolt(effectiveGravity) * deltaTime;
 		const JPH::Vec3 carried = grounded && state.InheritGroundVelocity ? groundVelocity - groundVertical : JPH::Vec3::sZero();
-		character.SetLinearVelocity(Utils::ClampSpeed(desired - desiredVertical + carried + vertical));
+		const JPH::Vec3 stepVelocity = Utils::ClampSpeed(desired - desiredVertical + carried + vertical);
+		character.SetLinearVelocity(stepVelocity);
 
-		// Walk stairs up to StepHeight, and stick to the floor over steps and slopes down to the same height.
+		// Stick to the floor over steps and slopes down to StepHeight; the stairs up to it are the controller's own step
+		// (State::WalkStairs), which leaves light bodies out.
 		JPH::CharacterVirtual::ExtendedUpdateSettings update;
-		update.mWalkStairsStepUp = up * state.StepHeight;
+		update.mWalkStairsStepUp = JPH::Vec3::sZero();
 		update.mStickToFloorStepDown = -up * state.StepHeight;
 
 		JPH::PhysicsSystem& system = *state.World->m_State->System;
 		const JPH::ObjectLayer layer = MakePhysicsObjectLayer(state.Layer, PhysicsObjectKind::Moving);
 		const JPH::DefaultBroadPhaseLayerFilter broadPhaseFilter = system.GetDefaultBroadPhaseLayerFilter(layer);
-		const JPH::DefaultObjectLayerFilter objectLayerFilter = system.GetDefaultLayerFilter(layer);
+		const Utils::CharacterObjectLayerFilter objectLayerFilter(state.World->GetLayers(), state.Layer);
 		const Utils::CharacterBodyFilter bodyFilter(Detail::ToJoltBodyID(state.InnerBody).value_or(JPH::BodyID()), state.Group);
 		const JPH::ShapeFilter shapeFilter;
-		// The gravity Jolt sees only pushes the ground (see the file comment): shortened so the weight stays within
-		// MaxGroundImpulse. It never underflows: the cap allows at least 10 m/s^2 at MaxPhysicsMass over a whole second.
-		JPH::Vec3 groundGravity = Detail::ToJolt(effectiveGravity);
-		const double weight = static_cast<double>(character.GetMass()) * glm::length(glm::dvec3(effectiveGravity)) * static_cast<double>(deltaTime);
-		if (weight > Utils::MaxGroundImpulse)
-			groundGravity = groundGravity * static_cast<float>(Utils::MaxGroundImpulse / weight);
 		const JPH::RVec3 previousPosition = character.GetPosition();
-		character.ExtendedUpdate(deltaTime, groundGravity, update, broadPhaseFilter, objectLayerFilter, bodyFilter, shapeFilter,
+		// No gravity reaches Jolt, whose only use of it is the weight on the ground: PushGround puts that weight below.
+		character.ExtendedUpdate(deltaTime, JPH::Vec3::sZero(), update, broadPhaseFilter, objectLayerFilter, bodyFilter, shapeFilter,
 			*state.World->m_State->TempAllocator);
+		state.WalkStairs(deltaTime, stepVelocity, previousPosition, update, broadPhaseFilter, objectLayerFilter, bodyFilter, shapeFilter);
 
 		// Never beyond the range the world places bodies in (see the file comment).
 		if (!IsWithinPhysicsRange(Detail::ToGlm(character.GetPosition())))
@@ -354,6 +498,7 @@ namespace Engine {
 			character.SetLinearVelocity(JPH::Vec3::sZero());
 		}
 
+		state.PushGround(deltaTime, effectiveGravity);
 		state.PlaceInnerBody();
 		state.AppendContacts();
 	}

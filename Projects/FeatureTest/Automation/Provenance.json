@@ -2403,6 +2403,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/CharacterDebris.scene",
+			"XXH64": "3c3e5fd1b0fe34c1",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/CharacterDebris.scene.meta",
+			"XXH64": "e0b0379bbd538b6d",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Combined2DUiGolden/Combined2DUi.scene",
 			"XXH64": "561804a66b56514f",
 			"Method": "scene.save",
@@ -5347,6 +5363,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/CharacterDebris/CharacterDebris.test.luau",
+			"XXH64": "f2284c22bec0df79",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/CharacterDebris/CharacterDebris.test.luau.meta",
+			"XXH64": "77d2ca49dc822edc",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Components/AuthoredValues.luau",
 			"XXH64": "6cec8b686fbc785e",
 			"Method": "script.write",
@@ -6596,7 +6628,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "4b5f36050a5af65a",
+			"XXH64": "7b6add2d6d79b1be",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

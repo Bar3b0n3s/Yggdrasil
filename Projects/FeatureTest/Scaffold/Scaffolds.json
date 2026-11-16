@@ -409,6 +409,11 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "CharacterDebris.jsonl",
+			"IdSeed": 3101,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"
