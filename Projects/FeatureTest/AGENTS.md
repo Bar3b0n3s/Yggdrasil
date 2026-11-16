@@ -67,7 +67,9 @@ serves its skills and generated reference through automation (`docs.get {}` list
   M23's `GoldenPointShadows.jsonl`, `GoldenTextured.jsonl`, `GoldenClusteredLights.jsonl` and `GoldenSkinnedPose.jsonl`
   and M26's `GoldenParticles.jsonl`, `GoldenProbes.jsonl` (its bake under `Assets/Lighting/Scenes/GoldenProbes/`),
   `GoldenAutoExposure.jsonl`, `GoldenLut.jsonl` (its LUT under `Assets/Luts/GoldenLut/`), `GoldenTaa.jsonl`,
-  `GoldenSsr.jsonl` and `GoldenTerrain.jsonl` (its heightfield and splat map under `Assets/Heightfields/GoldenTerrain/`)
+  `GoldenSsr.jsonl` and `GoldenTerrain.jsonl` (its heightfield and splat map under `Assets/Heightfields/GoldenTerrain/`),
+  and M33's `GoldenParticleLook.jsonl` (its copy of the flame flipbook and its sheet under
+  `Assets/Textures/GoldenParticleLook/`)
   write their scenes under `Assets/Scenes/Golden<Name>/` and their materials, textures or models under the matching
   `Assets/<Kind>/Golden<Name>/`, each exactly its `GoldenDirectories`.
   `asset.import` reads only project paths and absolute ones, so imported files come from `Scaffold/Sources/`,

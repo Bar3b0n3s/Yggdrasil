@@ -2419,6 +2419,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Particles/Flame.spritesheet",
+			"XXH64": "653ad0b24932702e",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Particles/Flame.spritesheet.meta",
+			"XXH64": "16f7c50d876dd5cc",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Prefabs/Cart.prefab",
 			"XXH64": "d7720f945e8b9843",
 			"Method": "prefab.create",
@@ -3695,6 +3711,22 @@
 			"XXH64": "bd9b062ca133254f",
 			"Method": "prefab.create",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/ParticleLook.scene",
+			"XXH64": "4cc14329883ca326",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/ParticleLook.scene.meta",
+			"XXH64": "26d689d579d23803",
+			"Method": "edit.batch",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5219,6 +5251,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Api/ParticleLook.test.luau",
+			"XXH64": "bb66b9163d3621d5",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/ParticleLook.test.luau.meta",
+			"XXH64": "e4774450daab1ef6",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Api/Physics.test.luau",
 			"XXH64": "b802c550885bbcfd",
 			"Method": "script.write",
@@ -6707,6 +6755,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Textures/GoldenParticleLook/Flame.png",
+			"XXH64": "20c9d53f8bff0d12",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenParticleLook/Flame.png.meta",
+			"XXH64": "512db2af17874161",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenParticleLook/Flame.spritesheet",
+			"XXH64": "a8f7ef354b5ff36d",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/GoldenParticleLook/Flame.spritesheet.meta",
+			"XXH64": "ea3ff21e2a367173",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Textures/GoldenTextured/Auto/Baseline.jpeg",
 			"XXH64": "36b779160455f24f",
 			"Method": "asset.import",
@@ -6941,6 +7021,22 @@
 		{
 			"Path": "Assets/Textures/Lights2DGolden/Normal.png.meta",
 			"XXH64": "3df14adc81d5d48c",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Particles/Flame.png",
+			"XXH64": "20c9d53f8bff0d12",
+			"Method": "asset.import",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Textures/Particles/Flame.png.meta",
+			"XXH64": "e038caeeffa94975",
 			"Method": "asset.import",
 			"RequestId": 1,
 			"Client": "batch",

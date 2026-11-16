@@ -35,6 +35,12 @@ namespace Engine {
 	// Warning, not fixable: a SpriteAnimator's Clip is not empty and names no clip of its SpriteRenderer's sheet (a sheet
 	// that loads, or no sheet); it plays nothing.
 	inline constexpr std::string_view SpriteUnknownClipCode = "SPRITE_UNKNOWN_CLIP";
+	// M33 (Docs/Decisions/0048-m33-particle-look.md decision 9): warning, not fixable: a ParticleLook's flipbook range (its
+	// FirstFrame and FrameCount, 0 to the sheet's last frame) is empty or ends past the frames of its SpriteSheet (a sheet
+	// that loads); the emitter's particles draw nothing. Appended after main's codes in both of ProjectValidator.cpp's code
+	// tables (ADR 0042's phase-5 ledger), with its Tests/Data/Validation/PARTICLE_FRAME_OUT_OF_RANGE/ fixture and its row in
+	// the game-debugging skill's validation-codes page.
+	inline constexpr std::string_view ParticleFrameOutOfRangeCode = "PARTICLE_FRAME_OUT_OF_RANGE";
 
 	// One sprite validation finding.
 	struct SpriteSceneIssue
@@ -42,8 +48,8 @@ namespace Engine {
 		std::string Code{}; // one of the codes above
 		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
 		UUID Entity{};
-		std::string Component{}; // "SpriteRenderer", "SpriteAnimator" or "TilemapRenderer"
-		std::string Field{};     // "SortingLayer", "Frame" or "Clip"
+		std::string Component{}; // "SpriteRenderer", "SpriteAnimator", "TilemapRenderer" or (M33) "ParticleLook"
+		std::string Field{};     // "SortingLayer", "Frame" or "Clip"; (M33) "FirstFrame" or "FrameCount"
 		std::string Message{};
 		std::string Hint{};
 
@@ -51,9 +57,10 @@ namespace Engine {
 	};
 
 	// The sprite checks over `scene` (effectively enabled entities, canonical order; an entity's SpriteRenderer, then its
-	// SpriteAnimator, then its TilemapRenderer) with the project's sorting layers `sortingLayers` (SortingLayers.Layers);
-	// sheets load through `assets` (null: the frame and clip checks are skipped). Pure function of its inputs otherwise;
-	// main thread.
+	// SpriteAnimator, then its TilemapRenderer, then (M33) its ParticleLook: PARTICLE_FRAME_OUT_OF_RANGE, located at FirstFrame
+	// when the range starts past the sheet's frames or is empty there, else at FrameCount) with the project's sorting layers
+	// `sortingLayers` (SortingLayers.Layers); sheets load through `assets` (null: the frame, clip and flipbook checks are
+	// skipped). Pure function of its inputs otherwise; main thread.
 	[[nodiscard]] std::vector<SpriteSceneIssue> FindSpriteSceneIssues(const Scene& scene, AssetManager* assets, std::span<const std::string> sortingLayers);
 
 	// Warning, not fixable (M21's milestone review, closing Backlog §6's frame past its texture): a sprite sheet's frame whose

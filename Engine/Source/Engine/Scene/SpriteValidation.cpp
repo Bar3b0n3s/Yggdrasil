@@ -4,6 +4,7 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
+#include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
@@ -88,6 +89,40 @@ namespace Engine {
 				issues.push_back(Detail::MakeUnknownClipIssue(entity.GetUUID(), scene.GetEntityPath(entity), animator->Clip, lookup));
 		}
 
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 9): PARTICLE_FRAME_OUT_OF_RANGE of `entity`'s ParticleLook
+		// `look`, when its sheet loads: the range [FirstFrame, FirstFrame + n) with n FrameCount, or the frames from FirstFrame
+		// to the sheet's last when it is 0, must be non-empty and inside the sheet's frames, as the renderer draws it. A sheet
+		// that does not load is the asset checks' finding.
+		static void FindParticleLookIssues(ConstEntity entity, const ParticleLookComponent& look, AssetManager& assets,
+			std::vector<SpriteSceneIssue>& issues)
+		{
+			if (!look.SpriteSheet.IsValid())
+				return;
+			const Result<AssetRef<Asset>> loaded = assets.Load(look.SpriteSheet.GetHandle());
+			const AssetRef<SpriteSheetData> sheet = loaded.has_value() ? AssetCast<SpriteSheetData>(*loaded) : nullptr;
+			if (sheet == nullptr)
+				return;
+			const uint64_t frames = sheet->Frames.size();
+			const bool startsInside = look.FirstFrame < frames;
+			if (startsInside && (look.FrameCount == 0 || static_cast<uint64_t>(look.FirstFrame) + look.FrameCount <= frames))
+				return;
+			const std::string path = assets.GetReferencePath(look.SpriteSheet.GetHandle());
+			issues.push_back(SpriteSceneIssue{
+				.Code = std::string(ParticleFrameOutOfRangeCode),
+				.Severity = DiagnosticSeverity::Warning,
+				.Entity = entity.GetUUID(),
+				.Component = "ParticleLook",
+				.Field = startsInside ? "FrameCount" : "FirstFrame",
+				.Message = startsInside
+					? std::format("the particle look's frames {} to {} end past sprite sheet '{}', which has {} frames; its particles draw nothing",
+						  look.FirstFrame, static_cast<uint64_t>(look.FirstFrame) + look.FrameCount - 1, path, frames)
+					: std::format("the particle look's FirstFrame {} is not an index of sprite sheet '{}', which has {} frames; its particles draw nothing",
+						  look.FirstFrame, path, frames),
+				.Hint = "Keep FirstFrame and FirstFrame + FrameCount within the sheet's frame count (FrameCount 0 runs to its last frame), or add the "
+						"frames to the sheet.",
+			});
+		}
+
 	}
 
 	std::vector<SpriteSceneIssue> FindSpriteSceneIssues(const Scene& scene, AssetManager* assets, std::span<const std::string> sortingLayers)
@@ -103,6 +138,8 @@ namespace Engine {
 				Utils::FindUnknownClip(scene, entity, *assets, issues);
 			if (const TilemapRendererComponent* tilemap = entity.TryGetComponent<TilemapRendererComponent>())
 				Utils::FindTilemapRendererIssues(entity, *tilemap, sortingLayers, issues);
+			if (const ParticleLookComponent* look = entity.TryGetComponent<ParticleLookComponent>(); look != nullptr && assets != nullptr)
+				Utils::FindParticleLookIssues(entity, *look, *assets, issues);
 		});
 		return issues;
 	}

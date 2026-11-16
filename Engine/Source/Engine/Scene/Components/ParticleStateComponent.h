@@ -26,6 +26,11 @@ namespace Engine {
 		// The session tick the state was last stepped to; empty until a Particles phase anchors it (a state Emit made before
 		// its emitter's first phase has none, whatever tick it was made at, so it never catches up the ticks before it).
 		std::optional<uint64_t> LastTick{};
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 6): which state of the entity this is, set by the Particles
+		// phase when it anchors the state (ParticleSystem.h: one more than the last it gave, never 0 once anchored) and carried
+		// by render extraction, so the view history never matches the serials of a state made again (a disable and enable, a
+		// removed and re-added ParticleEmitter) with its predecessor's. Not part of the simulation's state or its digest.
+		uint64_t Incarnation = 0;
 	};
 
 }

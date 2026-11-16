@@ -1,0 +1,222 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "ParticleLook",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"ParticleEmitter": 1,
+		"ParticleLook": 1
+	},
+	"Entities": [
+		{
+			"ID": "7e5d06a7b4c95868",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.6, 7],
+					"Rotation": [-0.087155744, 0, 0, 0.9961947],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.02, 0.03]
+				}
+			}
+		},
+		{
+			"ID": "c75c8d2710a57f51",
+			"Name": "Floor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [10, 1, 10]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "df2ec60b14dd93ba",
+			"Name": "Flame",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 30,
+					"Burst": 0,
+					"MaxParticles": 64,
+					"Seed": 31,
+					"Lifetime": [0.8, 1.2],
+					"Speed": [0.6, 1],
+					"Size": [0.5, 0.8],
+					"Shape": "Cone",
+					"ShapeRadius": 0.15,
+					"ConeAngle": 10,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [],
+					"SizeOverLife": []
+				},
+				"ParticleLook": {
+					"SpriteSheet": "a2f3bfc616d94db6",
+					"FirstFrame": 0,
+					"FrameCount": 0,
+					"FrameMode": "OverLife",
+					"FrameCycles": 2,
+					"BlendFrames": true,
+					"StartRotation": [-20, 20],
+					"Spin": [-30, 30],
+					"Alignment": "Camera",
+					"VelocityStretch": 0.1,
+					"SoftDistance": 0.4,
+					"Intensity": 1.5
+				}
+			}
+		},
+		{
+			"ID": "1a76723c81051d0a",
+			"Name": "Sparks",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 40,
+					"Burst": 0,
+					"MaxParticles": 128,
+					"Seed": 32,
+					"Lifetime": [0.4, 0.8],
+					"Speed": [3, 5],
+					"Size": [0.03, 0.05],
+					"Shape": "Sphere",
+					"ShapeRadius": 0.1,
+					"ConeAngle": 25,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, -6, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [],
+					"SizeOverLife": []
+				},
+				"ParticleLook": {
+					"SpriteSheet": null,
+					"FirstFrame": 0,
+					"FrameCount": 0,
+					"FrameMode": "OverLife",
+					"FrameCycles": 1,
+					"BlendFrames": false,
+					"StartRotation": [0, 0],
+					"Spin": [0, 0],
+					"Alignment": "Velocity",
+					"VelocityStretch": 0.06,
+					"SoftDistance": 0,
+					"Intensity": 6
+				}
+			}
+		},
+		{
+			"ID": "8eeb9c218778e766",
+			"Name": "Ring",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-2, 0.02, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 2,
+					"Burst": 0,
+					"MaxParticles": 8,
+					"Seed": 33,
+					"Lifetime": [1.5, 1.5],
+					"Speed": [0, 0],
+					"Size": [1.5, 1.5],
+					"Shape": "Point",
+					"ShapeRadius": 0.25,
+					"ConeAngle": 25,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Alpha",
+					"ColorOverLife": [],
+					"SizeOverLife": [
+						{
+							"Time": 0,
+							"Size": 0.2
+						},
+						{
+							"Time": 1,
+							"Size": 1
+						}
+					]
+				},
+				"ParticleLook": {
+					"SpriteSheet": "a2f3bfc616d94db6",
+					"FirstFrame": 4,
+					"FrameCount": 8,
+					"FrameMode": "Random",
+					"FrameCycles": 1,
+					"BlendFrames": false,
+					"StartRotation": [0, 360],
+					"Spin": [10, 20],
+					"Alignment": "Flat",
+					"VelocityStretch": 0.1,
+					"SoftDistance": 0,
+					"Intensity": 1
+				}
+			}
+		}
+	]
+}

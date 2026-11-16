@@ -37,7 +37,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 54);
+			static_assert(BuiltinComponents::Size == 55);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -576,6 +576,24 @@ namespace Engine {
 			CHECK(parameters.Opacity == 1.0f);
 		}
 
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 1): every default reproduces the look of an emitter without one.
+		TEST_CASE("BuiltinComponents: a ParticleLook's defaults follow the component table and change nothing")
+		{
+			const ParticleLookComponent look;
+			CHECK_FALSE(look.SpriteSheet.IsValid());
+			CHECK(look.FirstFrame == 0);
+			CHECK(look.FrameCount == 0);
+			CHECK(look.FrameMode == ParticleFrameMode::OverLife);
+			CHECK(look.FrameCycles == 1.0f);
+			CHECK_FALSE(look.BlendFrames);
+			CHECK(look.StartRotation == glm::vec2(0.0f));
+			CHECK(look.Spin == glm::vec2(0.0f));
+			CHECK(look.Alignment == ParticleAlignment::Camera);
+			CHECK(look.VelocityStretch == 0.1f);
+			CHECK(look.SoftDistance == 0.0f);
+			CHECK(look.Intensity == 1.0f);
+		}
+
 		TEST_CASE("BuiltinComponents: every listed type is registered in list order")
 		{
 			TypeRegistry registry;
@@ -671,8 +689,10 @@ namespace Engine {
 				"Animator",
 				"SkinnedMesh",
 				// M26 (Docs/Decisions/0037-m26-contract.md decision 4): ADR 0028's phase-3 ledger's categories after Animation,
-				// Particles, Probes and Terrain in that order.
+				// Particles, Probes and Terrain in that order. M33's ParticleLook follows the emitter (Docs/Decisions/0048-m33-particle-look.md
+				// decision 1).
 				"ParticleEmitter",
+				"ParticleLook",
 				"IrradianceVolume",
 				"ReflectionProbe",
 				"Terrain",

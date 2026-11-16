@@ -22,6 +22,7 @@
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PolygonCollider2DComponent.h"
@@ -95,8 +96,11 @@ namespace Engine {
 		AnimatorComponent, SkinnedMeshComponent,
 		// Particles (Registration/ParticlesRegistration.cpp), Probes (Registration/ProbesRegistration.cpp) and Terrain
 		// (Registration/TerrainRegistration.cpp; M26, Docs/Decisions/0037-m26-contract.md decision 4). ADR 0028's phase-3
-		// ledger: M26's components go in categories of their own after Animation, in that order; M24 adds none.
-		ParticleEmitterComponent, IrradianceVolumeComponent, ReflectionProbeComponent, TerrainComponent, TerrainColliderComponent,
+		// ledger: M26's components go in categories of their own after Animation, in that order; M24 adds none. M33's
+		// ParticleLook follows the ParticleEmitter in Particles (Docs/Decisions/0048-m33-particle-look.md decision 1; ADR 0042's
+		// phase-5 ledger, the ParticleEmitter and categories rows).
+		ParticleEmitterComponent, ParticleLookComponent, IrradianceVolumeComponent, ReflectionProbeComponent, TerrainComponent,
+		TerrainColliderComponent,
 		// MaterialParameters (Registration/MaterialParametersRegistration.cpp; M31, Docs/Decisions/0046-m31-material-parameters.md
 		// decision 1). ADR 0042's phase-5 ledger: phase 5's categories (M30's Navigation, M31's MaterialParameters, M32's Fog)
 		// are appended after Terrain in landing order.

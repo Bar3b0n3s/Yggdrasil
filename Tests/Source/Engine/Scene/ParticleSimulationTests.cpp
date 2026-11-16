@@ -13,7 +13,8 @@
 #include <string>
 #include <vector>
 
-// The particle simulation of one emitter (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 5, stream P-A).
+// The particle simulation of one emitter (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 5, stream P-A), and
+// M33's look: the second stream, the angles and the serials (Docs/Decisions/0048-m33-particle-look.md decision 2).
 
 namespace Engine {
 
@@ -36,17 +37,32 @@ namespace Engine {
 			return emitter;
 		}
 
-		// `steps` steps of `emitter`, which moves along +X by 0.1 m a step.
-		ParticleEmitterState Run(const ParticleEmitterComponent& emitter, UUID entity, uint32_t steps)
+		// `steps` steps of `emitter` with `look` (or none), the emitter moving along +X by 0.1 m a step.
+		ParticleEmitterState Run(const ParticleEmitterComponent& emitter, UUID entity, uint32_t steps, const ParticleLookComponent* look = nullptr)
 		{
 			ParticleEmitterState state(MakeParticleEmitterSeed(entity, emitter.Seed));
 			for (uint32_t step = 0; step < steps; ++step)
 			{
 				const glm::mat4 world = glm::translate(glm::mat4(1.0f), glm::vec3(0.1f * static_cast<float>(step), 1.0f, 0.0f));
-				StepParticleEmitter(emitter, world, FixedDelta, state);
+				StepParticleEmitter(emitter, world, FixedDelta, state, look);
 			}
 			return state;
 		}
+
+		// A look that turns, spins and picks frames, with other fields off their defaults too (they do not reach the step).
+		ParticleLookComponent MakeSpinningLook()
+		{
+			ParticleLookComponent look;
+			look.FrameMode = ParticleFrameMode::Random;
+			look.StartRotation = glm::vec2(-90.0f, 90.0f);
+			look.Spin = glm::vec2(-180.0f, 360.0f);
+			look.Alignment = ParticleAlignment::Flat;
+			look.SoftDistance = 0.5f;
+			look.Intensity = 4.0f;
+			return look;
+		}
+
+		constexpr float RadiansPerDegree = 0.0174532925199432957692f;
 
 		// An emitter of `burst` particles at its first step that live long, move at `speed` and emit nothing else.
 		ParticleEmitterComponent MakeBurst(ParticleEmitterShape shape, uint32_t burst, float speed)
@@ -312,6 +328,115 @@ namespace Engine {
 			CHECK(stopped.PendingEmits == 0);
 			CHECK(stopped.CycleTime == 0.0f);
 			CHECK(stopped.Cycles == 0);
+		}
+
+		// M33 (decision 2): the look's draws come from a stream of their own, so the first stream's particles, and the digest of
+		// an emitter that never had a look, are those of M26.
+		TEST_CASE("ParticleSimulation: a ParticleLook draws angle, spin and frame from a second stream, so the first stream's particles are unchanged")
+		{
+			const ParticleEmitterComponent emitter = MakeFountain();
+			const ParticleLookComponent look = MakeSpinningLook();
+			const ParticleEmitterState plain = Run(emitter, UUID(0x4401), 120);
+			const ParticleEmitterState looked = Run(emitter, UUID(0x4401), 120, &look);
+			REQUIRE(plain.Particles.size() == looked.Particles.size());
+			REQUIRE_FALSE(plain.Particles.empty());
+			CHECK(plain.Generator.GetState() == looked.Generator.GetState());
+			CHECK_FALSE(plain.HasLook);
+			CHECK(looked.HasLook);
+			// The look's stream was drawn; the plain state's was not.
+			const ParticleEmitterState fresh(MakeParticleEmitterSeed(UUID(0x4401), emitter.Seed));
+			CHECK(plain.LookGenerator.GetState() == fresh.LookGenerator.GetState());
+			CHECK(looked.LookGenerator.GetState() != plain.LookGenerator.GetState());
+			for (size_t index = 0; index < plain.Particles.size(); ++index)
+			{
+				const Particle& before = plain.Particles[index];
+				const Particle& after = looked.Particles[index];
+				CAPTURE(index);
+				CHECK(before.Position == after.Position);
+				CHECK(before.PreviousPosition == after.PreviousPosition);
+				CHECK(before.Velocity == after.Velocity);
+				CHECK(before.Age == after.Age);
+				CHECK(before.Lifetime == after.Lifetime);
+				CHECK(before.StartSize == after.StartSize);
+				CHECK(before.Serial == after.Serial);
+				CHECK(before.Rotation == 0.0f);
+				CHECK(before.Spin == 0.0f);
+				CHECK(before.FrameDraw == 0.0f);
+				CHECK(after.Spin >= -180.0f * RadiansPerDegree);
+				CHECK(after.Spin <= 360.0f * RadiansPerDegree);
+				CHECK(after.FrameDraw >= 0.0f);
+				CHECK(after.FrameDraw < 1.0f);
+			}
+			// The look's part of the digest is there only for the looked state.
+			CHECK(ComputeParticleDigest(plain) != ComputeParticleDigest(looked));
+			ParticleEmitterState stripped = looked;
+			for (Particle& particle : stripped.Particles)
+			{
+				particle.Rotation = 0.0f;
+				particle.PreviousRotation = 0.0f;
+				particle.Spin = 0.0f;
+				particle.FrameDraw = 0.0f;
+			}
+			stripped.LookGenerator = plain.LookGenerator;
+			stripped.HasLook = false;
+			CHECK(ComputeParticleDigest(stripped) == ComputeParticleDigest(plain));
+			CHECK(MakeParticleLookSeed(1) != MakeParticleLookSeed(2));
+			CHECK(MakeParticleLookSeed(1) != 1);
+		}
+
+		// The digest of an emitter with a look, committed from Debug and confirmed in Release; FeatureTest's ParticleLook suite
+		// checks one in the Editor, Release and Dist runs (decision 8).
+		TEST_CASE("ParticleSimulation: a seeded emitter with a ParticleLook hashes to its committed digest in every configuration")
+		{
+			const ParticleLookComponent look = MakeSpinningLook();
+			const ParticleEmitterState state = Run(MakeFountain(), UUID(0x7a1c3e5f20b4d608), 240, &look);
+			CHECK_FALSE(state.Particles.empty());
+			CHECK(std::format("{:016x}", ComputeParticleDigest(state)) == std::string("965089b021ea1ccd"));
+		}
+
+		TEST_CASE("ParticleSimulation: a particle turns by its spin each step, keeping its previous angle for the drawing")
+		{
+			const ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Point, 1, 0.0f);
+			ParticleLookComponent look;
+			look.StartRotation = glm::vec2(30.0f, 30.0f);
+			look.Spin = glm::vec2(90.0f, 90.0f);
+			ParticleEmitterState state(MakeParticleEmitterSeed(UUID(0x4402), 0));
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state, &look);
+			REQUIRE(state.Particles.size() == 1);
+			// Born at its start angle, which it held the step it was born.
+			CHECK(state.Particles[0].Rotation == 30.0f * RadiansPerDegree);
+			CHECK(state.Particles[0].PreviousRotation == 30.0f * RadiansPerDegree);
+			CHECK(state.Particles[0].Spin == 90.0f * RadiansPerDegree);
+			float expected = 30.0f * RadiansPerDegree;
+			for (int step = 0; step < 3; ++step)
+			{
+				// A step without the look still turns the particles the look gave a spin.
+				StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state, step == 1 ? nullptr : &look);
+				const float previous = expected;
+				expected += 90.0f * RadiansPerDegree * FixedDelta;
+				CHECK(state.Particles[0].PreviousRotation == previous);
+				CHECK(state.Particles[0].Rotation == expected);
+			}
+		}
+
+		TEST_CASE("ParticleSimulation: every new particle takes the next serial, with or without a look")
+		{
+			ParticleEmitterComponent emitter = MakeBurst(ParticleEmitterShape::Point, 3, 0.0f);
+			emitter.Lifetime = glm::vec2(1.5f * FixedDelta, 1.5f * FixedDelta); // dies at its second step
+			emitter.Duration = 2.0f * FixedDelta;                               // a burst every other step
+			const ParticleLookComponent look = MakeSpinningLook();
+			ParticleEmitterState state(MakeParticleEmitterSeed(UUID(0x4403), 0));
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state);
+			REQUIRE(state.Particles.size() == 3);
+			CHECK(state.Particles[0].Serial == 0);
+			CHECK(state.Particles[2].Serial == 2);
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state, &look);
+			StepParticleEmitter(emitter, glm::mat4(1.0f), FixedDelta, state, &look);
+			// The first burst died at the third step, whose cycle's burst took serials 3 to 5.
+			REQUIRE(state.Particles.size() == 3);
+			CHECK(state.Particles[0].Serial == 3);
+			CHECK(state.Particles[2].Serial == 5);
+			CHECK(state.Emitted == 6);
 		}
 	}
 

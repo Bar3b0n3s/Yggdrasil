@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
+#include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/ValidationContext.h"
@@ -14,9 +15,9 @@
 
 // The Particles category (M26, C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 4; ADR 0028's phase-3 ledger:
 // M26's components go in categories of their own after Animation, Particles, Probes and Terrain in that order): the
-// ParticleEmitter, whose presentation-only simulation the Particles frame phase advances (Scene/ParticleSystem.h).
-// Registered by the contract, so every W26.1 and W26.2 stream builds on the final entries; no scene of FeatureTest or of
-// the audited projects holds it, so no canonical file or state hash changes.
+// ParticleEmitter, whose presentation-only simulation the Particles frame phase advances (Scene/ParticleSystem.h), then
+// M33's ParticleLook (Docs/Decisions/0048-m33-particle-look.md decision 1; ADR 0042's phase-5 ledger, the ParticleEmitter
+// row), how the emitter's particles look, in a component of its own so the emitter stays version 1.
 
 namespace Engine {
 
@@ -75,6 +76,19 @@ namespace Engine {
 			emitter.Burst = std::min(emitter.Burst, emitter.MaxParticles);
 			MakeCurveValid(emitter.ColorOverLife);
 			MakeCurveValid(emitter.SizeOverLife);
+		}
+
+		// M33 (decision 1): the look's angle and spin are ranges like the emitter's.
+		static void ValidateParticleLook(const ParticleLookComponent& look, ValidationContext& context)
+		{
+			CheckRange(look.StartRotation, "StartRotation", context);
+			CheckRange(look.Spin, "Spin", context);
+		}
+
+		static void MakeParticleLookValid(ParticleLookComponent& look, Random& /*random*/)
+		{
+			OrderRange(look.StartRotation);
+			OrderRange(look.Spin);
 		}
 
 	}
@@ -148,6 +162,56 @@ namespace Engine {
 				"At most eight size factors over a particle's life, in ascending Time, interpolated linearly; empty keeps the start size.")
 			.Validate(&Utils::ValidateParticleEmitter)
 			.Generate(&Utils::MakeParticleEmitterValid);
+
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 1).
+		registry.Enum<ParticleFrameMode>("ParticleFrameMode", "Which frame of a ParticleLook's flipbook range a particle shows.")
+			.Entry(ParticleFrameMode::OverLife, "OverLife", "The range played over the particle's life, FrameCycles times.")
+			.Entry(ParticleFrameMode::Random, "Random", "One frame of the range picked per particle at its birth and held.");
+
+		registry.Enum<ParticleAlignment>("ParticleAlignment", "How a particle's quad is laid in the world.")
+			.Entry(ParticleAlignment::Camera, "Camera", "A square facing the camera, turned by the particle's angle.")
+			.Entry(ParticleAlignment::Velocity, "Velocity",
+				"Stretched along the particle's velocity across the view, for sparks, embers and rain; its angle is not used.")
+			.Entry(ParticleAlignment::Flat, "Flat",
+				"A square in the emitter's local XZ plane (its normal the emitter's +Y), for ground rings and ripples, turned about that "
+				"normal by the particle's angle.");
+
+		RegisterComponent<ParticleLookComponent>(registry, "ParticleLook",
+			"How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, "
+			"alignment and HDR intensity. Presentation only, like the emitter.")
+			.Category("Particles")
+			.Version(1)
+			.Requires<ParticleEmitterComponent>()
+			.Field("SpriteSheet", &ParticleLookComponent::SpriteSheet,
+				"The flipbook's sprite sheet, whose frames replace the emitter's Texture; null draws the emitter's Texture whole.")
+			.Field("FirstFrame", &ParticleLookComponent::FirstFrame, "The first frame of the flipbook's range, an index into the sheet's frames.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxSpriteSheetFrames - 1) })
+			.Field("FrameCount", &ParticleLookComponent::FrameCount,
+				"The number of frames in the flipbook's range; 0 takes every frame from FirstFrame to the sheet's last.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxSpriteSheetFrames) })
+			.Field("FrameMode", &ParticleLookComponent::FrameMode, "Whether the range plays over each particle's life or one frame is picked per particle.")
+			.Field("FrameCycles", &ParticleLookComponent::FrameCycles, "How many times OverLife plays the frame range over a particle's life.",
+				{ .Min = static_cast<double>(MinParticleFrameCycles), .Max = static_cast<double>(MaxParticleFrameCycles) })
+			.Field("BlendFrames", &ParticleLookComponent::BlendFrames,
+				"Whether OverLife cross-fades each frame into the next, so a short range plays smoothly.")
+			.Field("StartRotation", &ParticleLookComponent::StartRotation,
+				"The range a new particle's angle is drawn from, in degrees: (minimum, maximum); positive turns counter-clockwise as seen.",
+				{ .Min = -static_cast<double>(MaxParticleStartRotation), .Max = static_cast<double>(MaxParticleStartRotation), .Unit = "deg" })
+			.Field("Spin", &ParticleLookComponent::Spin,
+				"The range a new particle's spin is drawn from, in degrees per second: (minimum, maximum); positive turns counter-clockwise as seen.",
+				{ .Min = -static_cast<double>(MaxParticleSpin), .Max = static_cast<double>(MaxParticleSpin), .Unit = "deg/s" })
+			.Field("Alignment", &ParticleLookComponent::Alignment, "How each particle's quad is laid: facing the camera, along its velocity, or flat.")
+			.Field("VelocityStretch", &ParticleLookComponent::VelocityStretch,
+				"With Velocity alignment, the quad's length is its size plus its speed across the view times this, in seconds.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxParticleVelocityStretch), .Unit = "s" })
+			.Field("SoftDistance", &ParticleLookComponent::SoftDistance,
+				"The depth over which a particle fades out as it nears the surface behind it, in metres; 0 cuts it hard where it meets it.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxParticleSoftDistance), .Unit = "m" })
+			.Field("Intensity", &ParticleLookComponent::Intensity,
+				"Multiplies the particles' colour (not their opacity), so above 1 they are brighter than white and bloom.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxParticleIntensity) })
+			.Validate(&Utils::ValidateParticleLook)
+			.Generate(&Utils::MakeParticleLookValid);
 	}
 
 }

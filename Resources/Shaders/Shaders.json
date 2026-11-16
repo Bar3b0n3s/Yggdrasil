@@ -193,6 +193,24 @@
 			]
 		},
 		{
+			"Name": "Particles",
+			"File": "Passes/Particles.slang",
+			"Entries": [
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSColor",
+					"Stage": "fragment"
+				},
+				{
+					"Name": "PSVelocity",
+					"Stage": "fragment"
+				}
+			]
+		},
+		{
 			"Name": "Quad",
 			"File": "Passes/Quad.slang",
 			"Entries": [

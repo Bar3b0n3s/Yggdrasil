@@ -41,6 +41,13 @@ namespace Engine {
 			return true;
 		}
 
+		// Whether every value of a particle's recorded draw is finite.
+		static bool IsFiniteDraw(const ParticleDrawState& draw)
+		{
+			return std::isfinite(draw.Position.x) && std::isfinite(draw.Position.y) && std::isfinite(draw.Position.z) && std::isfinite(draw.Size)
+				&& std::isfinite(draw.Rotation) && std::isfinite(draw.Velocity.x) && std::isfinite(draw.Velocity.y) && std::isfinite(draw.Velocity.z);
+		}
+
 		// Whether `camera` is another camera than `previous` for the history: another entity, projection kind or viewport.
 		static bool IsCut(const CameraData& camera, const CameraData& previous)
 		{
@@ -73,6 +80,7 @@ namespace Engine {
 		{
 			m_Frame = 0;
 			m_Worlds.clear();
+			m_Particles.clear();
 			camera.PreviousViewProjection.reset();
 			camera.DeltaTime = 0.0f;
 		}
@@ -117,6 +125,37 @@ namespace Engine {
 			first = last;
 		}
 
+		// M33 (decision 6): each particle's previous draw, by its emitter's entity and incarnation and its serial. The previous
+		// particles are sorted by that key, and an emitter's particles are in emission order, so their serials ascend: one
+		// lookup of the emitter's block, then a merge.
+		const auto byKey = [](const ParticleRecord& entry, const ParticleRecord& key)
+		{
+			if (entry.Emitter != key.Emitter)
+				return entry.Emitter < key.Emitter;
+			if (entry.Incarnation != key.Incarnation)
+				return entry.Incarnation < key.Incarnation;
+			return entry.Serial < key.Serial;
+		};
+		const auto sameState = [](const ParticleRecord& entry, const ParticleEmitterItem& emitter)
+		{
+			return entry.Emitter == emitter.Entity && entry.Incarnation == emitter.Incarnation;
+		};
+		for (const ParticleEmitterItem& emitter : snapshot.ParticleEmitters)
+		{
+			if (emitter.First > snapshot.Particles.size() || emitter.Count > snapshot.Particles.size() - emitter.First)
+				continue;
+			auto match = std::lower_bound(m_Particles.begin(), m_Particles.end(), ParticleRecord{ .Emitter = emitter.Entity, .Incarnation = emitter.Incarnation }, byKey);
+			for (uint32_t index = emitter.First; index < emitter.First + emitter.Count; ++index)
+			{
+				ParticleItem& particle = snapshot.Particles[index];
+				particle.Previous.reset();
+				while (match != m_Particles.end() && sameState(*match, emitter) && match->Serial < particle.Serial)
+					++match;
+				if (match != m_Particles.end() && sameState(*match, emitter) && match->Serial == particle.Serial && Utils::IsFiniteDraw(match->Draw))
+					particle.Previous = match->Draw;
+			}
+		}
+
 		// This frame becomes the next Apply's previous one.
 		if (snapshot.HasCamera)
 			m_Camera = camera;
@@ -126,6 +165,42 @@ namespace Engine {
 		m_Worlds.reserve(order.size());
 		for (const size_t index : order)
 			m_Worlds.emplace_back(items[index].Entity, items[index].World);
+		// The emitters' blocks in key order (each block already ascends by serial, so only the blocks are sorted); an outsized
+		// frame's capacity is released afterwards.
+		std::vector<size_t> blocks;
+		blocks.reserve(snapshot.ParticleEmitters.size());
+		for (size_t index = 0; index < snapshot.ParticleEmitters.size(); ++index)
+		{
+			const ParticleEmitterItem& emitter = snapshot.ParticleEmitters[index];
+			if (emitter.First <= snapshot.Particles.size() && emitter.Count <= snapshot.Particles.size() - emitter.First)
+				blocks.push_back(index);
+		}
+		std::ranges::sort(blocks, [&snapshot](size_t left, size_t right)
+		{
+			const ParticleEmitterItem& first = snapshot.ParticleEmitters[left];
+			const ParticleEmitterItem& second = snapshot.ParticleEmitters[right];
+			return first.Entity != second.Entity ? first.Entity < second.Entity : first.Incarnation < second.Incarnation;
+		});
+		m_Particles.clear();
+		for (const size_t block : blocks)
+		{
+			const ParticleEmitterItem& emitter = snapshot.ParticleEmitters[block];
+			const size_t begin = m_Particles.size();
+			for (uint32_t index = emitter.First; index < emitter.First + emitter.Count; ++index)
+			{
+				const ParticleItem& particle = snapshot.Particles[index];
+				m_Particles.push_back({ .Emitter = emitter.Entity,
+					.Incarnation = emitter.Incarnation,
+					.Serial = particle.Serial,
+					.Draw = { .Position = particle.Position, .Size = particle.Size, .Rotation = particle.Rotation, .Velocity = particle.Velocity } });
+			}
+			// Snapshot data no extraction makes (serials out of order) is sorted, so the lookups above stay valid.
+			const auto first = m_Particles.begin() + static_cast<std::ptrdiff_t>(begin);
+			if (!std::is_sorted(first, m_Particles.end(), byKey))
+				std::sort(first, m_Particles.end(), byKey);
+		}
+		if (m_Particles.capacity() > std::max<size_t>(4 * m_Particles.size(), MaxRetainedParticleRecords))
+			std::vector<ParticleRecord>(m_Particles.begin(), m_Particles.end()).swap(m_Particles);
 		m_ResetPending = false;
 	}
 

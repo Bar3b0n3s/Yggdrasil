@@ -15,6 +15,7 @@
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
+#include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
@@ -152,38 +153,101 @@ namespace Engine {
 			item.MorphWeights = Detail::MergeAnimatedMorphWeights(skinned.MorphWeights, animated);
 		}
 
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 3): the largest float below 1, the most an OverLife phase's age
+		// over lifetime reaches, so a dying particle never wraps to its range's first frame.
+		constexpr float LastParticleAge = 0.99999994f;
+
+		static RenderParticleAlignment ToRenderParticleAlignment(ParticleAlignment alignment)
+		{
+			switch (alignment)
+			{
+				case ParticleAlignment::Camera:   return RenderParticleAlignment::Camera;
+				case ParticleAlignment::Velocity: return RenderParticleAlignment::Velocity;
+				case ParticleAlignment::Flat:     return RenderParticleAlignment::Flat;
+			}
+			return RenderParticleAlignment::Camera;
+		}
+
+		// `axis` normalized, or `fallback` when it is not finite or has no length (a degenerate emitter scale).
+		static glm::vec3 NormalizeAxisOr(const glm::vec3& axis, const glm::vec3& fallback)
+		{
+			const float length = std::sqrt(glm::dot(axis, axis));
+			if (!std::isfinite(length) || !(length > 0.0f))
+				return fallback;
+			return axis / length;
+		}
+
 		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7; stream P-B): appends one emitter's live particles
 		// (its runtime state's, in emission order) to snapshot.Particles and its item to snapshot.ParticleEmitters, even when
 		// none is alive. A particle is drawn at `alpha` between its PreviousPosition and its Position (its Position at 1), in
 		// world space, through `emitterWorld` (the emitter's rendered world matrix) for a Local emitter; its size is its
 		// StartSize times SizeOverLife and its colour ColorOverLife, both at its age over its lifetime as of its last step
 		// (clamped to [0, 1]; extraction does not know the fixed step, so the curves are not interpolated between steps).
-		static void AppendParticleItems(const ParticleEmitterComponent& emitter, const ParticleStateComponent& state, const glm::mat4& emitterWorld,
-			float alpha, UUID entity, RenderSnapshot& snapshot)
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 3): with the emitter's ParticleLook `look` (or null), each
+		// particle also takes its angle at `alpha` between its last two steps', its world velocity, its flipbook phase and its
+		// serial, and its colour's RGB times the look's Intensity; the item takes the look's flipbook, alignment, stretch and
+		// soft distance, and for Flat the plane of `emitterWorld`'s local +X and -Z axes.
+		static void AppendParticleItems(const ParticleEmitterComponent& emitter, const ParticleLookComponent* look, const ParticleStateComponent& state,
+			const glm::mat4& emitterWorld, float alpha, UUID entity, RenderSnapshot& snapshot)
 		{
 			const auto first = static_cast<uint32_t>(snapshot.Particles.size());
 			const bool local = emitter.SimulationSpace == ParticleSimulationSpace::Local;
+			const bool random = look != nullptr && look->FrameMode == ParticleFrameMode::Random;
+			const float frameCycles = look != nullptr ? look->FrameCycles : 1.0f;
 			for (const Particle& particle : state.State.Particles)
 			{
 				glm::vec3 position = alpha >= 1.0f ? particle.Position : particle.PreviousPosition + (particle.Position - particle.PreviousPosition) * alpha;
+				glm::vec3 velocity = particle.Velocity;
 				if (local)
+				{
 					position = glm::vec3(emitterWorld * glm::vec4(position, 1.0f));
+					velocity = glm::vec3(emitterWorld * glm::vec4(velocity, 0.0f));
+				}
 				// A NaN ratio (a zero age over a zero lifetime, which the fields' range excludes) takes the curves' start.
 				const float ratio = particle.Age / particle.Lifetime;
 				const float normalizedAge = ratio >= 1.0f ? 1.0f : (ratio > 0.0f ? ratio : 0.0f);
+				glm::vec4 color = EvaluateParticleColor(emitter, normalizedAge);
+				if (look != nullptr)
+				{
+					color.r *= look->Intensity;
+					color.g *= look->Intensity;
+					color.b *= look->Intensity;
+				}
 				snapshot.Particles.push_back(ParticleItem{
 					.Position = position,
 					.Size = particle.StartSize * EvaluateParticleSize(emitter, normalizedAge),
-					.Color = EvaluateParticleColor(emitter, normalizedAge),
+					.Color = color,
+					.Rotation = alpha >= 1.0f ? particle.Rotation : particle.PreviousRotation + (particle.Rotation - particle.PreviousRotation) * alpha,
+					.Velocity = velocity,
+					.FramePhase = random ? particle.FrameDraw : std::min(normalizedAge, Utils::LastParticleAge) * frameCycles,
+					.Serial = particle.Serial,
 				});
 			}
-			snapshot.ParticleEmitters.push_back(ParticleEmitterItem{
+			ParticleEmitterItem item{
 				.Texture = emitter.Texture.GetHandle(),
 				.Blend = emitter.Blend == ParticleBlend::Additive ? RenderParticleBlend::Additive : RenderParticleBlend::Alpha,
 				.First = first,
 				.Count = static_cast<uint32_t>(snapshot.Particles.size()) - first,
 				.Entity = entity,
-			});
+				.Incarnation = state.Incarnation,
+			};
+			if (look != nullptr)
+			{
+				item.FrameCycles = look->FrameCycles;
+				item.Sheet = look->SpriteSheet.GetHandle();
+				item.FirstFrame = look->FirstFrame;
+				item.FrameCount = look->FrameCount;
+				item.BlendFrames = look->BlendFrames && !random;
+				item.Alignment = Utils::ToRenderParticleAlignment(look->Alignment);
+				item.VelocityStretch = look->VelocityStretch;
+				item.SoftDistance = look->SoftDistance;
+				if (look->Alignment == ParticleAlignment::Flat)
+				{
+					item.PlaneRight = Utils::NormalizeAxisOr(glm::vec3(emitterWorld[0]), glm::vec3(0.0f));
+					item.PlaneUp = Utils::NormalizeAxisOr(-glm::vec3(emitterWorld[2]), glm::vec3(0.0f));
+				}
+			}
+			snapshot.ParticleEmitters.push_back(item);
 		}
 
 		static RenderProjection ToRenderProjection(ProjectionType projection)
@@ -831,13 +895,14 @@ namespace Engine {
 			}
 			// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): an emitter with a runtime state (a play scene's,
 			// once its first Particles phase made it; an edit scene holds none, so its views draw no particles), in canonical
-			// order. Only a Local emitter's particles need its rendered matrix.
+			// order. Only a Local emitter's particles and a Flat look's plane (M33) need its rendered matrix.
 			if (const ParticleEmitterComponent* emitter = entity.TryGetComponent<ParticleEmitterComponent>(); emitter != nullptr)
 			{
 				if (const ParticleStateComponent* particles = entity.TryGetComponent<ParticleStateComponent>(); particles != nullptr)
 				{
-					const bool local = emitter->SimulationSpace == ParticleSimulationSpace::Local;
-					Utils::AppendParticleItems(*emitter, *particles, local ? getWorld() : glm::mat4(1.0f), request.Alpha, id, snapshot);
+					const ParticleLookComponent* look = entity.TryGetComponent<ParticleLookComponent>();
+					const bool posed = emitter->SimulationSpace == ParticleSimulationSpace::Local || (look != nullptr && look->Alignment == ParticleAlignment::Flat);
+					Utils::AppendParticleItems(*emitter, look, *particles, posed ? getWorld() : glm::mat4(1.0f), request.Alpha, id, snapshot);
 				}
 			}
 			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16): the baked probes, in canonical order, in

@@ -205,6 +205,10 @@ namespace Engine {
 			nvrhi::TextureHandle Bloom{}; // BloomPass::GetChainDesc
 			nvrhi::FramebufferHandle PrepassFramebuffer{};
 			nvrhi::FramebufferHandle ForwardFramebuffer{};
+			// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the Particles pass's targets, SceneColor alone and
+			// SceneVelocity alone (no depth attachment: the particles read SceneDepth as a texture).
+			nvrhi::FramebufferHandle ParticleColorFramebuffer{};
+			nvrhi::FramebufferHandle ParticleVelocityFramebuffer{};
 			std::array<nvrhi::FramebufferHandle, 2> OverlayFramebuffers{}; // each LDR target with SceneDepth (tested, not written)
 			// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D pass's targets, created by the first
 			// render that draws a lit 2D item (SceneRenderer::State::EnsureLights2DTargets) and kept like the other lazily
@@ -449,6 +453,9 @@ namespace Engine {
 		Scope<TaaPass> Taa{};
 		// M26 (C26.1, C-TERR; decisions 22 and 29, stream T-C): the terrain passes' pipelines and layouts (place 1).
 		Scope<TerrainPass> Terrain{};
+		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the Particles pass's pipelines, samplers and buffers
+		// (place 1).
+		Scope<ParticlePass> Particles{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -490,9 +497,9 @@ namespace Engine {
 		PassBindingCache SpriteBindings{};
 		// M21 (C21.2, decision 22): the Lights2D pass's set (its view's Lights2DNormals).
 		PassBindingCache Lights2DBindings{};
-		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): the Particles pass's sets, the QuadBatcher's one
-		// per texture and sampler (place 2 of ADR 0029 decision 27), released with the others (ClearBindings,
-		// ReleaseUnusedBindings).
+		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): the Particles pass's sets, one per texture and
+		// sampler (place 2 of ADR 0029 decision 27; M33's own program since Docs/Decisions/0048-m33-particle-look.md decision 4,
+		// each with the view's constants and SceneDepth), released with the others (ClearBindings, ReleaseUnusedBindings).
 		PassBindingCache ParticleBindings{};
 		// M26 (C26.1, R-AEX; decision 15, stream X-A): the Exposure pass's two sets (its view's SceneColor, bloom chain and
 		// exposure buffers).
@@ -609,12 +616,12 @@ namespace Engine {
 		// render rebuilds it.
 		std::vector<Detail::TilemapDrawCache> TilemapCaches{};
 		std::vector<uint8_t> TilemapChunksDrawn{};
-		// M26 (C26.1, C-PART; decision 7): the Particles pass's plan of the render (ParticlePass.h) and its records' quads, whose
-		// textures are borrowed from the GpuResourceCache's mirrors for the record only. CPU state reused by every render,
-		// keeping room for at most QuadBatcher::MaxQuadsPerRecord quads after it (RecordParticles); a device loss's release
-		// drops it with the rest of the state.
+		// M26 (C26.1, C-PART; decision 7): the Particles pass's plan of the render (ParticlePass.h), and M33's flipbooks of its
+		// emitters (Docs/Decisions/0048-m33-particle-look.md decision 5). CPU state reused by every render, keeping room for at
+		// most ParticlePass::MaxQuadsPerBatch quads after it (RecordParticles); a device loss's release drops it with the rest
+		// of the state.
 		ParticlePassPlan ParticlePlan{};
-		std::vector<QuadDraw> ParticleQuads{};
+		std::vector<ParticleFlipbook> ParticleFlipbooks{};
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
 		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 3): the previous render's shaded point and spot lights
@@ -787,12 +794,19 @@ namespace Engine {
 		// The sprites and tilemaps of RecordSpritesStage, with C21.2's 2D lights (the Sprites and Lights2D rows).
 		void RecordSpritesAndTilemaps(Detail::SceneRendererFrame& frame);
 		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7): the Particles row, in a Lit view with a camera
-		// (not the wireframe) whose snapshot holds particles: PlanParticlePass of the snapshot's ParticleEmitters and Particles
-		// with the frame's camera into ParticlePlan, then RecordParticlePass into the forward passes' framebuffer (SceneColor
-		// with SceneDepth) with ParticleBindings, the Linear sampler and the Point one in pixel-art mode (ParticlePass.h). A
-		// plan without quads records nothing (no row). A planning or recording error is kept as frame's error; the plan and
-		// the quads keep room for at most QuadBatcher::MaxQuadsPerRecord quads afterwards.
+		// (not the wireframe) whose snapshot holds particles: M33's flipbooks resolved into ParticleFlipbooks
+		// (Docs/Decisions/0048-m33-particle-look.md decision 5: each emitter's Sheet through the AssetManager, a missing or
+		// failed one reported as the sprites' are, and its texture's size through the GpuResourceCache), PlanParticlePass of
+		// the snapshot's ParticleEmitters and Particles with the frame's camera into ParticlePlan, then the Particles pass's
+		// Record into ParticleColorFramebuffer and, with frame.Taa, ParticleVelocityFramebuffer, with the view's constants,
+		// SceneDepth, ParticleBindings, the Linear sampler and the Point one in pixel-art mode (ParticlePass.h). A plan without
+		// quads records nothing (no row). A planning or recording error is kept as frame's error; the plan keeps room for at
+		// most ParticlePass::MaxQuadsPerBatch quads afterwards.
 		void RecordParticles(Detail::SceneRendererFrame& frame);
+		// M33 (decision 5): ParticleFlipbooks for `emitters`: empty when none has a Sheet, else one per emitter, each with a
+		// Sheet resolved to its texture and its range's texture rectangles (none for a sheet that is missing, fails to load or
+		// whose range does not fit it).
+		void ResolveParticleFlipbooks(std::span<const ParticleEmitterItem> emitters);
 		// C21.2 (decision 22): appends `quad` to SpriteQuads and its lit-ness to SpriteQuadLit, in the 2D draw order.
 		void AddSpriteQuad(const QuadDraw& quad, bool lit);
 		// M21 (C21.2, decision 24): appends to SpriteQuads the quads of `tilemap`'s tiles that the Sprites stage draws, in the

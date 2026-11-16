@@ -116,11 +116,17 @@ export type MouseButton = "Left" | "Right" | "Middle" | "Button4" | "Button5" | 
 -- What a type of a game's native module is.
 export type NativeTypeRole = "Component" | "Resource"
 
+-- How a particle's quad is laid in the world.
+export type ParticleAlignment = "Camera" | "Velocity" | "Flat"
+
 -- How a particle's colour reaches the image.
 export type ParticleBlend = "Alpha" | "Additive"
 
 -- Where a ParticleEmitter's new particles start and which way they move.
 export type ParticleEmitterShape = "Point" | "Sphere" | "Cone" | "Box"
+
+-- Which frame of a ParticleLook's flipbook range a particle shows.
+export type ParticleFrameMode = "OverLife" | "Random"
 
 -- Which space a ParticleEmitter's live particles move in.
 export type ParticleSimulationSpace = "World" | "Local"
@@ -642,6 +648,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "Animator"): Animator?
 	function GetComponent(self, name: "SkinnedMesh"): SkinnedMesh?
 	function GetComponent(self, name: "ParticleEmitter"): ParticleEmitter?
+	function GetComponent(self, name: "ParticleLook"): ParticleLook?
 	function GetComponent(self, name: "IrradianceVolume"): IrradianceVolume?
 	function GetComponent(self, name: "ReflectionProbe"): ReflectionProbe?
 	function GetComponent(self, name: "Terrain"): Terrain?
@@ -684,6 +691,8 @@ declare extern type Entity with
 	Name: string
 	-- The entity's ParticleEmitter component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	ParticleEmitter: ParticleEmitter?
+	-- The entity's ParticleLook component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	ParticleLook: ParticleLook?
 	-- The entity's PixelPerfectCamera component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PixelPerfectCamera: PixelPerfectCamera?
 	-- The entity's PointLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -938,6 +947,34 @@ declare extern type ParticleEmitter with
 	Speed: vector
 	-- The particle's texture; null uses the built-in soft disc (engine://Textures/Particle). [All modes; Runtime|Test; pure/read; setter mutates]
 	Texture: AssetRef?
+end
+
+-- How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter.
+declare extern type ParticleLook with
+	-- How each particle's quad is laid: facing the camera, along its velocity, or flat. [All modes; Runtime|Test; pure/read; setter mutates]
+	Alignment: ParticleAlignment
+	-- Whether OverLife cross-fades each frame into the next, so a short range plays smoothly. [All modes; Runtime|Test; pure/read; setter mutates]
+	BlendFrames: boolean
+	-- The first frame of the flipbook's range, an index into the sheet's frames. [All modes; Runtime|Test; pure/read; setter mutates]
+	FirstFrame: number
+	-- The number of frames in the flipbook's range; 0 takes every frame from FirstFrame to the sheet's last. [All modes; Runtime|Test; pure/read; setter mutates]
+	FrameCount: number
+	-- How many times OverLife plays the frame range over a particle's life. [All modes; Runtime|Test; pure/read; setter mutates]
+	FrameCycles: number
+	-- Whether the range plays over each particle's life or one frame is picked per particle. [All modes; Runtime|Test; pure/read; setter mutates]
+	FrameMode: ParticleFrameMode
+	-- Multiplies the particles' colour (not their opacity), so above 1 they are brighter than white and bloom. [All modes; Runtime|Test; pure/read; setter mutates]
+	Intensity: number
+	-- The depth over which a particle fades out as it nears the surface behind it, in metres; 0 cuts it hard where it meets it. [All modes; Runtime|Test; pure/read; setter mutates]
+	SoftDistance: number
+	-- The range a new particle's spin is drawn from, in degrees per second: (minimum, maximum); positive turns counter-clockwise as seen. [All modes; Runtime|Test; pure/read; setter mutates]
+	Spin: vector
+	-- The flipbook's sprite sheet, whose frames replace the emitter's Texture; null draws the emitter's Texture whole. [All modes; Runtime|Test; pure/read; setter mutates]
+	SpriteSheet: AssetRef?
+	-- The range a new particle's angle is drawn from, in degrees: (minimum, maximum); positive turns counter-clockwise as seen. [All modes; Runtime|Test; pure/read; setter mutates]
+	StartRotation: vector
+	-- With Velocity alignment, the quad's length is its size plus its speed across the view times this, in seconds. [All modes; Runtime|Test; pure/read; setter mutates]
+	VelocityStretch: number
 end
 
 -- Renders the entity's camera at a reference resolution, upscaled by the largest whole factor that fits the view in a letterbox.

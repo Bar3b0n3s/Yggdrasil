@@ -34,7 +34,9 @@ namespace Engine {
 			const ComponentInfo& emitter = RequireProbesComponent(*registry, "ParticleEmitter");
 			const ComponentInfo& volume = RequireProbesComponent(*registry, "IrradianceVolume");
 			const ComponentInfo& probe = RequireProbesComponent(*registry, "ReflectionProbe");
-			CHECK(volume.GetIndex() == emitter.GetIndex() + 1);
+			// After the Particles category, which ends with M33's ParticleLook (Docs/Decisions/0048-m33-particle-look.md decision 1).
+			CHECK(volume.GetIndex() == RequireProbesComponent(*registry, "ParticleLook").GetIndex() + 1);
+			CHECK(volume.GetIndex() > emitter.GetIndex());
 			CHECK(probe.GetIndex() == volume.GetIndex() + 1);
 			for (const ComponentInfo* info : { &volume, &probe })
 			{

@@ -22,8 +22,9 @@
 // current neighbourhood in YCoCg and blended with the fixed TaaFeedback, with no random term, into the other history image,
 // which it then copies into SceneColor, so bloom, exposure and the tonemap read the resolved image and the next render's
 // pass reads it as its history. A reset (the snapshot's history reset, the view's first pass, history images created
-// again) resolves to the current image exactly. Particles write no motion vectors, so they ghost slightly under motion (a
-// kept limit, Backlog §6).
+// again) resolves to the current image exactly. Particles write their motion in the Particles pass (M33,
+// Docs/Decisions/0048-m33-particle-look.md decision 6) where their alpha is at least half; fainter ones ghost slightly (a kept
+// limit, Backlog §6).
 //
 // The pass is created by SceneRendererPipelines::CreatePipelines (the placement rule's place 1, ADR 0029 decision 27); the
 // two history images are each SceneRenderer's (place 2: SceneRendererTargets::TaaHistory, from GetHistoryDesc), created by
