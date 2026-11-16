@@ -707,6 +707,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Materials/Fog/Ground.material",
+			"XXH64": "5f4622a5b41bcb4b",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Fog/Ground.material.meta",
+			"XXH64": "cd3eac7fe771dbba",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Fog/Stone.material",
+			"XXH64": "ab0dfe8e2e4618b1",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/Fog/Stone.material.meta",
+			"XXH64": "dd2a97815fb91d17",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Materials/Golden/AlphaModes/BlendBlue.material",
 			"XXH64": "82239d48e78fb55c",
 			"Method": "project.upgrade",
@@ -1631,6 +1663,86 @@
 			"XXH64": "e8922046e4df1332",
 			"Method": "asset.create",
 			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Ember.material",
+			"XXH64": "bf688fe4818e3012",
+			"Method": "asset.create",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Ember.material.meta",
+			"XXH64": "02323364d510a283",
+			"Method": "asset.create",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Glass.material",
+			"XXH64": "5e97e3c0d087718d",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Glass.material.meta",
+			"XXH64": "989c41fe755fd675",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Ground.material",
+			"XXH64": "f62c22fce552ccb9",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Ground.material.meta",
+			"XXH64": "aec349ad491e94ac",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Moss.material",
+			"XXH64": "92baef412e46251d",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Moss.material.meta",
+			"XXH64": "60d892a09cc14699",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Stone.material",
+			"XXH64": "a26a8276818f10d5",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenFog/Stone.material.meta",
+			"XXH64": "330db5f0d4083acf",
+			"Method": "asset.create",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2659,6 +2771,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Fog.scene",
+			"XXH64": "c760354a23016d13",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Fog.scene.meta",
+			"XXH64": "3570925cae7fb687",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Formats.scene",
 			"XXH64": "191e5ca279825a5b",
 			"Method": "scene.save",
@@ -2831,6 +2959,70 @@
 			"XXH64": "15b3f984e4b7ac78",
 			"Method": "edit.batch",
 			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogHollow.scene",
+			"XXH64": "8b3a6de5594c18b3",
+			"Method": "scene.save",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogHollow.scene.meta",
+			"XXH64": "fe63a4847dac7812",
+			"Method": "edit.batch",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogPillars.scene",
+			"XXH64": "da5abb3966c82755",
+			"Method": "scene.save",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogPillars.scene.meta",
+			"XXH64": "a736f331d8ec67f7",
+			"Method": "edit.batch",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogSunGlow.scene",
+			"XXH64": "18412c0d4e21e05f",
+			"Method": "scene.save",
+			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogSunGlow.scene.meta",
+			"XXH64": "9d6c57d29fc0a41a",
+			"Method": "edit.batch",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogTransparent.scene",
+			"XXH64": "87f498f3a15e4336",
+			"Method": "scene.save",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenFog/FogTransparent.scene.meta",
+			"XXH64": "79dd4894600eb9bc",
+			"Method": "edit.batch",
+			"RequestId": 16,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5395,6 +5587,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Fog/Fog.test.luau",
+			"XXH64": "54a53590fd9c81e2",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Fog/Fog.test.luau.meta",
+			"XXH64": "a5f2a161b8acba47",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Formats/AssetFormats.test.luau",
 			"XXH64": "a30a818d43101ce2",
 			"Method": "script.write",
@@ -6596,7 +6804,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "4b5f36050a5af65a",
+			"XXH64": "845c971059adeed9",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

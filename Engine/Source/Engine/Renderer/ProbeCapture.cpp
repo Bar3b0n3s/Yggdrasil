@@ -277,8 +277,8 @@ namespace Engine {
 		// before the HDR chain, so bloom, exposure, the tonemap, the LUT and FXAA never reach it; of the post settings that
 		// write SceneColor before the read, TAA (a view's resolve and jitter) and SSR (a view-dependent screen-space
 		// reflection, which a 90-degree face would trace only within its own image and fade at its edges, seaming the cube)
-		// are off, and GTAO is kept as the scene sets it (ProbeCapture.h). The camera and its clear colour are set per face by
-		// Capture.
+		// are off, and GTAO is kept as the scene sets it (ProbeCapture.h); so is the fog (M32). The camera and its clear colour
+		// are set per face by Capture.
 		[[nodiscard]] static RenderSnapshot MakeCaptureSnapshot(const RenderSnapshot& source)
 		{
 			RenderSnapshot snapshot = source;
@@ -294,6 +294,9 @@ namespace Engine {
 			snapshot.Post.AntiAliasing = RenderAntiAliasing::None;
 			snapshot.Post.SsrEnabled = false;
 			snapshot.Quality.Probes = false;
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 4): a probe bakes the light, which the view's fog then covers
+			// where the probe's light is shaded.
+			snapshot.Fog = {};
 			snapshot.DebugView = RenderDebugView::Lit;
 			snapshot.Flags = RenderViewFlags::None;
 			snapshot.SelectedEntities.clear();

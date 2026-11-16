@@ -182,6 +182,14 @@ namespace Engine {
 						Utils::DrawSupportingMetric("Draw calls", std::to_string(pass.DrawCalls));
 						Utils::DrawSupportingMetric("Dispatches", std::to_string(pass.Dispatches));
 						Utils::DrawSupportingMetric("Triangles", std::to_string(pass.Triangles));
+						// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): what the SSR trace covered, from its completed frame.
+						if (pass.Name == "SSR")
+						{
+							Utils::DrawSupportingMetric("Half resolution", view.SsrHalfResolution ? "Yes" : "No");
+							Utils::DrawSupportingMetric("Traced tiles",
+								view.SsrAreaFrame.empty() ? "Unavailable" : std::format("{} of {}", view.SsrTracedTiles, view.SsrTiles));
+							Utils::DrawSupportingMetric("Traced pixels", view.SsrAreaFrame.empty() ? "Unavailable" : std::to_string(view.SsrTracedPixels));
+						}
 						ImGui::EndTable();
 					}
 					ImGui::TreePop();

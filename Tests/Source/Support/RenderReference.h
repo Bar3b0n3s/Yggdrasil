@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Renderer/RenderSnapshot.h"
+#include "Shared/FogConstants.h"
 
 #include <glm/glm.hpp>
 
@@ -132,6 +133,21 @@ namespace Engine {
 		// crosses nothing). The oracle of point-light shadow visibility: exact geometry, without the shadow map's bias,
 		// resolution or filtering, so a test compares it with the renderer away from shadow edges.
 		[[nodiscard]] bool IsPointLightVisible(const glm::dvec3& receiver, const glm::dvec3& light, std::span<const ReferenceTriangle> occluders);
+
+		// --- Fog (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 3) ------------------------------------------------------
+
+		// The fog of the world point `position` under `fog` (Shared/FogConstants.h's members; Enabled is not read): rgb the fog's
+		// colour, Color plus SunColor times max(dot(ray, SunDirection), 0)^SunGlowExponent along the unit view ray, and a its
+		// amount, min(1 - e^(-tau), MaxOpacity). tau integrates Density plus HeightDensity e^(-HeightFalloff (h - BaseHeight))
+		// over the view depths t from StartDistance to the point's depth z, h moving linearly from the eye point's height (t =
+		// 0) to the point's (t = z); the eye point is CameraPosition, or for an orthographic fog the point moved back along
+		// ViewForward to the camera's plane. Integrated numerically (Simpson's rule, 4,096 intervals), not by the shaders'
+		// closed form.
+		[[nodiscard]] glm::dvec4 EvaluateFog(const FogConstants& fog, const glm::dvec3& position);
+		// The fog of the sky along the unit world `direction` from the eye point `eye`: the same colour, and an amount of
+		// MaxOpacity with distance fog (Density > 0) or a ray that does not climb, else the height fog integrated to infinite
+		// depth (numerically, to the depth where the density has fallen by e^-60).
+		[[nodiscard]] glm::dvec4 EvaluateSkyFog(const FogConstants& fog, const glm::dvec3& direction, const glm::dvec3& eye);
 
 	}
 

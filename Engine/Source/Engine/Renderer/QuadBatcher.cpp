@@ -6,6 +6,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Shared/FogConstants.h"
 #include "Shared/QuadVertex.h"
 
 #include <algorithm>
@@ -30,10 +31,12 @@
 // with the vertex buffer's capacity and is written through the recording command list the first time a capacity is used,
 // so creating the batcher records no command list.
 //
-// Two binding layouts: Hdr, Ldr, M22's LdrDepth and M26's HdrAdditive bind the texture and the sampler; M21's HdrLit and
-// Normals (decision 22) also bind a second texture, HdrLit's light accumulation or the Normals batch's normal map (the white
-// texture without one, with the push constants' HasNormalMap 0; NormalMapTwoChannel 1 for a map that stores x and y only,
-// M23's milestone review).
+// Four binding layouts: Ldr and M22's LdrDepth bind the texture and the sampler; M21's Normals (decision 22) also binds a
+// second texture, the Normals batch's normal map (the white texture without one, with the push constants' HasNormalMap 0;
+// NormalMapTwoChannel 1 for a map that stores x and y only, M23's milestone review); M32's fogged targets (Hdr and M26's
+// HdrAdditive, then M21's HdrLit with its light accumulation as the second texture) add the view's fog constants at b1
+// (Docs/Decisions/0047-m32-fog-ssr.md decision 5): QuadBatchInputs::Fog, or the batcher's own neutral buffer (Enabled 0)
+// for a record without it, so every set of a fogged target binds one.
 
 namespace Engine {
 
@@ -60,15 +63,27 @@ namespace Engine {
 		// A quad's two triangles over its corners (top left, top right, bottom right, bottom left).
 		constexpr std::array<uint32_t, IndicesPerQuad> QuadCornerIndices = { 0, 1, 2, 0, 2, 3 };
 
+		// The register of the fog constants (b1: the push constants hold slot 0).
+		constexpr uint32_t QuadFogConstantsSlot = 1;
+
 		// Whether `target` binds the lit layout's second texture (QuadLitTexture, t1).
 		static bool IsLitQuadTarget(QuadBatchTarget target)
 		{
 			return target == QuadBatchTarget::HdrLit || target == QuadBatchTarget::Normals;
 		}
 
-		// A quad pipeline's layout: the texture and the sampler, and for the lit entries (VSLit) the second texture.
-		static PipelineLayoutDescription MakeQuadDescription(std::string name, std::string fragmentEntry, bool lit)
+		// M32: whether `target` meets the view's fog (its fragment entry reads the fog constants at b1): the HDR targets.
+		static bool IsFoggedQuadTarget(QuadBatchTarget target)
 		{
+			return target == QuadBatchTarget::Hdr || target == QuadBatchTarget::HdrLit || target == QuadBatchTarget::HdrAdditive;
+		}
+
+		// A quad pipeline's layout: the texture and the sampler, for the lit entries the second texture, and for the fogged ones
+		// (M32) the fog constants; the lit and fogged entries draw with VSLit, which passes the batch-space position on.
+		static PipelineLayoutDescription MakeQuadDescription(std::string name, std::string fragmentEntry, QuadBatchTarget target)
+		{
+			const bool lit = IsLitQuadTarget(target);
+			const bool fogged = IsFoggedQuadTarget(target);
 			nvrhi::BindingLayoutDesc layout;
 			layout.visibility = nvrhi::ShaderType::All;
 			layout.registerSpace = 0;
@@ -77,22 +92,29 @@ namespace Engine {
 			if (lit)
 				layout.bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(1));
 			layout.bindings.push_back(nvrhi::BindingLayoutItem::Sampler(0));
+			if (fogged)
+				layout.bindings.push_back(nvrhi::BindingLayoutItem::ConstantBuffer(QuadFogConstantsSlot));
 			layout.bindings.push_back(nvrhi::BindingLayoutItem::PushConstants(0, sizeof(QuadConstants)));
-			return {
+			PipelineLayoutDescription description{
 				.Name = std::move(name),
 				.Program = std::string(QuadProgram),
-				.Entries = { lit ? "VSLit" : "VSMain", std::move(fragmentEntry) },
+				.Entries = { lit || fogged ? "VSLit" : "VSMain", std::move(fragmentEntry) },
 				.BindingLayouts = { layout },
 			};
+			if (fogged)
+				description.ConstantBuffers = { { .Set = 0, .Register = QuadFogConstantsSlot, .ByteSize = sizeof(FogConstants) } };
+			return description;
 		}
 
 		// LdrDepth shades as Ldr does (its fragment entry); only its depth state differs. M26's HdrAdditive shades as Hdr does;
-		// only its blend state differs.
+		// only its blend state (and, M32, its fog mode) differs.
 		static std::vector<PipelineLayoutDescription> MakeQuadDescriptions()
 		{
-			return { MakeQuadDescription("QuadHdr", "PSHdr", false), MakeQuadDescription("QuadLdr", "PSLdr", false),
-				MakeQuadDescription("QuadHdrLit", "PSHdrLit", true), MakeQuadDescription("QuadNormals", "PSNormals", true),
-				MakeQuadDescription("QuadLdrDepth", "PSLdr", false), MakeQuadDescription("QuadHdrAdditive", "PSHdr", false) };
+			return { MakeQuadDescription("QuadHdr", "PSHdr", QuadBatchTarget::Hdr), MakeQuadDescription("QuadLdr", "PSLdr", QuadBatchTarget::Ldr),
+				MakeQuadDescription("QuadHdrLit", "PSHdrLit", QuadBatchTarget::HdrLit),
+				MakeQuadDescription("QuadNormals", "PSNormals", QuadBatchTarget::Normals),
+				MakeQuadDescription("QuadLdrDepth", "PSLdr", QuadBatchTarget::LdrDepth),
+				MakeQuadDescription("QuadHdrAdditive", "PSHdr", QuadBatchTarget::HdrAdditive) };
 		}
 
 		static std::vector<nvrhi::VertexAttributeDesc> MakeQuadVertexAttributes()
@@ -206,6 +228,9 @@ namespace Engine {
 		std::array<GraphicsPipeline, PipelineCount> Pipelines{};
 		std::array<nvrhi::SamplerHandle, 2> Samplers{}; // QuadSampler's values
 		nvrhi::TextureHandle White{};                   // 1x1 opaque white: a quad without a texture samples it
+		// M32: the fog constants of a record without the view's fog (FogConstants' defaults, Enabled 0), bound by the fogged
+		// targets' sets.
+		nvrhi::BufferHandle NoFog{};
 		nvrhi::BufferHandle Vertices{};
 		nvrhi::BufferHandle Indices{};
 		uint32_t VertexCapacity = 0; // quads
@@ -334,18 +359,24 @@ namespace Engine {
 		State& state = *batcher->m_State;
 		state.Device = &device;
 		std::vector<PipelineLayoutDescription> descriptions = Utils::MakeQuadDescriptions();
-		// Hdr, Ldr, LdrDepth and HdrAdditive share one binding layout, so one binding set per texture and sampler serves them;
-		// HdrLit and Normals share the lit one.
-		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> sharedLayouts,
+		// Pipelines of one layout shape share one binding layout, so one binding set per texture and sampler (and fog buffer)
+		// serves them: Hdr and HdrAdditive (fogged), Ldr and LdrDepth, HdrLit (lit, fogged) and Normals (lit).
+		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> foggedLayouts,
 			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadHdrPipeline]), "while creating the quad pipelines"));
-		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> litLayouts,
+		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> plainLayouts,
+			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadLdrPipeline]), "while creating the quad pipelines"));
+		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> litFoggedLayouts,
 			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadHdrLitPipeline]), "while creating the quad pipelines"));
+		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::BindingLayoutHandle> litLayouts,
+			WithContext(pipelines.CreateBindingLayouts(descriptions[Utils::QuadNormalsPipeline]), "while creating the quad pipelines"));
 		for (size_t index = 0; index < descriptions.size(); ++index)
 		{
 			const auto target = static_cast<QuadBatchTarget>(index);
+			const bool lit = Utils::IsLitQuadTarget(target);
+			const bool fogged = Utils::IsFoggedQuadTarget(target);
+			const std::vector<nvrhi::BindingLayoutHandle>& layouts = lit ? (fogged ? litFoggedLayouts : litLayouts) : (fogged ? foggedLayouts : plainLayouts);
 			ENGINE_TRY_ASSIGN(state.Pipelines[index],
-				WithContext(pipelines.CreateGraphicsPipeline(Utils::MakeQuadSpecification(std::move(descriptions[index]), target,
-								Utils::IsLitQuadTarget(target) ? litLayouts : sharedLayouts)),
+				WithContext(pipelines.CreateGraphicsPipeline(Utils::MakeQuadSpecification(std::move(descriptions[index]), target, layouts)),
 					"while creating the quad pipelines"));
 		}
 		ENGINE_TRY_ASSIGN(state.Samplers[static_cast<size_t>(QuadSampler::Point)],
@@ -379,11 +410,21 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(state.Indices, WithContext(device.CreateBuffer(indexDesc), "while creating the quad batcher"));
 		state.IndexCapacity = Utils::InitialQuadCapacity;
 
+		nvrhi::BufferDesc noFogDesc;
+		noFogDesc.byteSize = sizeof(FogConstants);
+		noFogDesc.isConstantBuffer = true;
+		noFogDesc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+		noFogDesc.keepInitialState = true;
+		noFogDesc.debugName = "QuadBatcher.NoFog";
+		ENGINE_TRY_ASSIGN(state.NoFog, WithContext(device.CreateBuffer(noFogDesc), "while creating the quad batcher"));
+
 		// Not an immediate command list: a caller may have the frame's immediate list open (NVRHI's validation allows one).
 		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle commandList,
 			WithContext(device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)), "while creating the quad batcher"));
 		CommandListRecording recording(device, *commandList);
 		commandList->clearTextureFloat(state.White, nvrhi::AllSubresources, nvrhi::Color(1.0f));
+		const FogConstants noFog{};
+		commandList->writeBuffer(state.NoFog, &noFog, sizeof(noFog));
 		state.WriteIndices(*commandList);
 		recording.Execute();
 		return batcher;
@@ -493,6 +534,7 @@ namespace Engine {
 		// the buffers.
 		const auto pipeline = static_cast<size_t>(inputs.Target);
 		const bool lit = Utils::IsLitQuadTarget(inputs.Target);
+		const bool fogged = Utils::IsFoggedQuadTarget(inputs.Target);
 		nvrhi::IBindingLayout& layout = *state.Pipelines[pipeline].BindingLayouts[0];
 		std::vector<nvrhi::IBindingSet*> sets;
 		sets.reserve(batches.size());
@@ -507,6 +549,8 @@ namespace Engine {
 				desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(1, second != nullptr ? second : state.White.Get()));
 			}
 			desc.bindings.push_back(nvrhi::BindingSetItem::Sampler(0, state.Samplers[static_cast<size_t>(batch.Sampler)]));
+			if (fogged)
+				desc.bindings.push_back(nvrhi::BindingSetItem::ConstantBuffer(Utils::QuadFogConstantsSlot, inputs.Fog != nullptr ? inputs.Fog : state.NoFog.Get()));
 			desc.bindings.push_back(nvrhi::BindingSetItem::PushConstants(0, sizeof(QuadConstants)));
 			ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, WithContext(bindings.GetOrCreate(*state.Device, desc, layout), "while recording the quads"));
 			sets.push_back(set);
@@ -547,7 +591,11 @@ namespace Engine {
 			state.IndexCapacity = state.VertexCapacity;
 			state.WriteIndices(commandList);
 		}
-		QuadConstants constants{ .Transform = inputs.Transform };
+		// M32: the fogged targets meet the view's fog when the record has it; the additive one fades rather than tints.
+		uint32_t fogMode = QuadFogModeNone;
+		if (fogged && inputs.Fog != nullptr)
+			fogMode = inputs.Target == QuadBatchTarget::HdrAdditive ? QuadFogModeFade : QuadFogModeBlend;
+		QuadConstants constants{ .Transform = inputs.Transform, .FogMode = fogMode };
 		nvrhi::GraphicsState graphics;
 		graphics.pipeline = state.Pipelines[pipeline].Pipeline;
 		graphics.framebuffer = inputs.Framebuffer;

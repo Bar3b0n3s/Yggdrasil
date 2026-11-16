@@ -2778,6 +2778,92 @@
 			},
 			"additionalProperties": false
 		},
+		"Fog": {
+			"description": "The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene).",
+			"type": "object",
+			"properties": {
+				"Color": {
+					"description": "The fog's linear colour.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"AmbientTint": {
+					"description": "How much the environment's ambient light tints Color: 0 keeps Color, 1 multiplies it by the ambient light.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"Density": {
+					"description": "The distance fog's density: the share of light it absorbs per metre of view depth, as an exponent.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"StartDistance": {
+					"description": "The view depth, in metres, where fog begins.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100000
+				},
+				"MaxOpacity": {
+					"description": "The most fog any point receives, from none (0) to fully fogged (1).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"HeightDensity": {
+					"description": "The height fog's density per metre at BaseHeight; 0 has no height fog.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"HeightFalloff": {
+					"description": "How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent.",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 100
+				},
+				"BaseHeight": {
+					"description": "The world height, in metres, where the height fog has HeightDensity.",
+					"type": "number"
+				},
+				"SunGlow": {
+					"description": "How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"SunGlowExponent": {
+					"description": "How tightly the sun glow gathers around the light's direction: higher is tighter.",
+					"type": "number",
+					"minimum": 1,
+					"maximum": 1000
+				},
+				"FogSkybox": {
+					"description": "Whether the skybox is fogged too, as if it lay infinitely far away.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -3341,6 +3427,9 @@
 						},
 						"TerrainCollider": {
 							"$ref": "#/$defs/TerrainCollider"
+						},
+						"Fog": {
+							"$ref": "#/$defs/Fog"
 						}
 					},
 					"additionalProperties": true

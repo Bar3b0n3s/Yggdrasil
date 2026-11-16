@@ -1455,7 +1455,7 @@ namespace Engine {
 		request.Camera = RenderCameraSource::Primary;
 		request.Width = width;
 		request.Height = height;
-		request.Quality = { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution };
+		request.Quality = { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution, .SsrHalfResolution = rendering.SsrHalfResolution };
 		request.SortingLayers = session.GetProjectSettings().SortingLayers.Layers;
 		return request;
 	}

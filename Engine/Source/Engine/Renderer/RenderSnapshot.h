@@ -44,8 +44,10 @@
 // (IrradianceVolumeItem, ReflectionProbeItem) and the terrains (TerrainItem); the camera's temporal inputs (the previous
 // view-projection, the jitter and the frame's delta time, the temporal-state section, decision 10) and the mesh item's
 // PreviousWorld filled from the view's history (decision 11); and PostProcess version 2's settings, where the AntiAliasing
-// enum replaces FxaaEnabled (decision 12). Additions are frozen-header changes reviewed by their contract owner; no member
-// here changes meaning. A plain value type: copyable, movable, thread-compatible.
+// enum replaces FxaaEnabled (decision 12). M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 4 and 12; ADR 0042's phase-5
+// ledger) added the fog (RenderFog, Fog) after the terrains and the half-resolution SSR trace to the quality settings after
+// SsaoHalfResolution. Additions are frozen-header changes reviewed by their contract owner; no member here changes meaning.
+// A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
 // Icons, M21's Sprites, Tilemaps and Lights2D, the commands of DebugDraw and AnnotationDraw, and M22's Ui items and
@@ -128,6 +130,10 @@ namespace Engine {
 	{
 		uint32_t ShadowMapSize = 2048; // power of two, [256, 8192]
 		bool SsaoHalfResolution = false;
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 11; ADR 0042's phase-5 ledger: the members copied from Rendering
+		// settings after SsaoHalfResolution, in landing order): ProjectSettings.Rendering.SsrHalfResolution, the SSR pass's trace
+		// at half resolution (Renderer/SsrPass.h).
+		bool SsrHalfResolution = false;
 		// M23 (C23.1, decisions 2 and 5): the reference paths the renderer's tests compare its fast paths with, on in every
 		// host (no project setting copies them). Instancing false draws every mesh item's submesh with its own draw, which an
 		// instanced render equals byte for byte (R-INST); ClusteredLights false shades every pixel with every light of the
@@ -627,6 +633,27 @@ namespace Engine {
 		uint32_t PickId = 0; // 0: not pickable; otherwise PickTable[PickId - 1] is Entity, as a mesh item's
 	};
 
+	// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 3 and 4): the scene's FogComponent, from render extraction: the first
+	// effectively enabled one in canonical order (it is unique per scene), with Enabled set; Enabled false (the defaults) when
+	// the scene has none, which renders exactly as a renderer without fog did. The renderer fogs a Lit view with a camera
+	// (Renderer/FogConstants.h: the model, the passes it reaches); lighting.bake's probe captures turn it off
+	// (Renderer/ProbeCapture.h). The members are the component's (Scene/Components/FogComponent.h); colours are linear.
+	struct RenderFog
+	{
+		bool Enabled = false;
+		glm::vec3 Color = glm::vec3(0.5f, 0.55f, 0.6f);
+		float AmbientTint = 0.0f;
+		float Density = 0.02f;      // per metre of view depth
+		float StartDistance = 0.0f; // metres of view depth
+		float MaxOpacity = 1.0f;    // [0, 1]
+		float HeightDensity = 0.0f; // per metre at BaseHeight
+		float HeightFalloff = 0.5f; // per metre of height
+		float BaseHeight = 0.0f;    // world metres
+		float SunGlow = 0.0f;       // a multiple of the first directional light's Color * Intensity
+		float SunGlowExponent = 8.0f;
+		bool FogSkybox = true;
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
 	// is deterministic; Sprites (M21) are in draw order instead.
 	struct RenderSnapshot
@@ -700,6 +727,9 @@ namespace Engine {
 		// M26 (C26.1, C-TERR; decision 22): the terrains, drawn in TerrainDepthNormal and TerrainForward. A pickable terrain's
 		// PickId follows the meshes' in PickTable.
 		std::pmr::vector<TerrainItem> Terrains{};
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 4; ADR 0042's phase-5 ledger: new members after Terrains): the scene's
+		// fog, drawn by the forward passes, the terrains, the skybox, the SSR composite and the Sprites stage's quads of a Lit view.
+		RenderFog Fog{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

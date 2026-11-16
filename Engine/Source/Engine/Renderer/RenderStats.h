@@ -56,6 +56,30 @@ namespace Engine {
 		uint32_t DroppedPointShadows = 0;
 		uint32_t MemoryAllocationCount = 0; // tracked Vulkan device allocations, not NVRHI object count
 		uint32_t MaxMemoryAllocationCount = 0;
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 11 and 13; ADR 0042's phase-5 ledger: appended after M28's and M29's
+		// rows in landing order): the snapshot's RenderQualitySettings::SsrHalfResolution this frame rendered with; and the SSR
+		// trace's area in the completed GPU frame SsrAreaFrameIndex (read back, as the GPU timings are, once that frame's
+		// submission completed): the trace image's 8 x 8 tiles (SsrTiles), those the trace covered (SsrTracedTiles) and the
+		// trace pixels that traced in them (SsrTracedPixels; at half resolution each stands for four scene pixels).
+		// SsrAreaAvailable is false, and the counts 0, while no completed frame recorded SSR, or the last completed frame
+		// recorded none.
+		bool SsrHalfResolution = false;
+		bool SsrAreaAvailable = false;
+		uint64_t SsrAreaFrameIndex = 0;
+		uint32_t SsrTiles = 0;
+		uint32_t SsrTracedTiles = 0;
+		uint32_t SsrTracedPixels = 0;
+	};
+
+	// M32 (decision 13): the SSR area of one completed frame, which RenderStatsHistory::PublishSsrArea merges into the
+	// latest stats: unavailable when the frame recorded no SSR.
+	struct RenderSsrAreaSample
+	{
+		bool Available = false;
+		uint64_t FrameIndex = 0;
+		uint32_t Tiles = 0;
+		uint32_t TracedTiles = 0;
+		uint32_t TracedPixels = 0;
 	};
 
 	struct RenderPassCounters
@@ -121,6 +145,10 @@ namespace Engine {
 		// plus its StartMilliseconds, with its Depth, so profiler.capture's Chrome trace shows them beside the CPU zones; a
 		// frame is merged once, however often it is published.
 		void PublishGpu(const GpuTimingFrame& frame);
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): the SSR area of a completed frame, as PublishGpu publishes its
+		// timings: a sample older than the last published one is ignored; otherwise it sets RenderStats' SsrArea members (the
+		// counts 0 when unavailable), which PublishCpu then keeps.
+		void PublishSsrArea(const RenderSsrAreaSample& sample);
 		// Owns this value; reference valid until the next Publish/Reset. A renderer keeps one history for its lifetime (a scene
 		// replacement does not reset it: rows carry their frame indices); Reset returns it to the unavailable state.
 		[[nodiscard]] const RenderStats& GetLatest() const;
@@ -129,6 +157,8 @@ namespace Engine {
 		RenderStats m_Latest{};
 		uint64_t m_LastGpuFrameIndex = 0;
 		bool m_HasGpuFrame = false;
+		uint64_t m_LastSsrAreaFrameIndex = 0;
+		bool m_HasSsrArea = false;
 	};
 
 }

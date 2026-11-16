@@ -391,6 +391,10 @@
 			"File": "Passes/Ssr.slang",
 			"Entries": [
 				{
+					"Name": "CSClassify",
+					"Stage": "compute"
+				},
+				{
 					"Name": "CSTrace",
 					"Stage": "compute"
 				},

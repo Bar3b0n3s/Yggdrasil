@@ -590,6 +590,8 @@ declare extern type Entity with
 	Environment: Environment?
 	-- Find the first exact child name in depth-first sibling order; recursive defaults false. [All modes; Runtime|Test; pure/read]
 	FindChild: (self: Entity, name: string, recursive: boolean?) -> Entity?
+	-- The entity's Fog component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Fog: Fog?
 	-- Copy the children in sibling order. [All modes; Runtime|Test; pure/read]
 	GetChildren: (self: Entity) -> {Entity}
 	-- Get a component proxy, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -639,6 +641,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "ReflectionProbe"): ReflectionProbe?
 	function GetComponent(self, name: "Terrain"): Terrain?
 	function GetComponent(self, name: "TerrainCollider"): TerrainCollider?
+	function GetComponent(self, name: "Fog"): Fog?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -761,6 +764,32 @@ end
 
 -- An authenticated immutable Field constructor descriptor.
 declare extern type FieldDescriptor with
+end
+
+-- The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene).
+declare extern type Fog with
+	-- How much the environment's ambient light tints Color: 0 keeps Color, 1 multiplies it by the ambient light. [All modes; Runtime|Test; pure/read; setter mutates]
+	AmbientTint: number
+	-- The world height, in metres, where the height fog has HeightDensity. [All modes; Runtime|Test; pure/read; setter mutates]
+	BaseHeight: number
+	-- The fog's linear colour. [All modes; Runtime|Test; pure/read; setter mutates]
+	Color: Color
+	-- The distance fog's density: the share of light it absorbs per metre of view depth, as an exponent. [All modes; Runtime|Test; pure/read; setter mutates]
+	Density: number
+	-- Whether the skybox is fogged too, as if it lay infinitely far away. [All modes; Runtime|Test; pure/read; setter mutates]
+	FogSkybox: boolean
+	-- The height fog's density per metre at BaseHeight; 0 has no height fog. [All modes; Runtime|Test; pure/read; setter mutates]
+	HeightDensity: number
+	-- How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent. [All modes; Runtime|Test; pure/read; setter mutates]
+	HeightFalloff: number
+	-- The most fog any point receives, from none (0) to fully fogged (1). [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxOpacity: number
+	-- The view depth, in metres, where fog begins. [All modes; Runtime|Test; pure/read; setter mutates]
+	StartDistance: number
+	-- How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. [All modes; Runtime|Test; pure/read; setter mutates]
+	SunGlow: number
+	-- How tightly the sun glow gathers around the light's direction: higher is tighter. [All modes; Runtime|Test; pure/read; setter mutates]
+	SunGlowExponent: number
 end
 
 -- A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.

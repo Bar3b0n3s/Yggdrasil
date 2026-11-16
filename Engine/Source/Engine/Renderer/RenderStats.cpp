@@ -81,6 +81,12 @@ namespace Engine {
 	{
 		stats.GpuAvailable = m_Latest.GpuAvailable;
 		stats.GpuFrameIndex = m_Latest.GpuFrameIndex;
+		// M32: the SSR area belongs to its completed frame, as the GPU timings do.
+		stats.SsrAreaAvailable = m_Latest.SsrAreaAvailable;
+		stats.SsrAreaFrameIndex = m_Latest.SsrAreaFrameIndex;
+		stats.SsrTiles = m_Latest.SsrTiles;
+		stats.SsrTracedTiles = m_Latest.SsrTracedTiles;
+		stats.SsrTracedPixels = m_Latest.SsrTracedPixels;
 		for (RenderPassStats& pass : stats.Passes)
 		{
 			pass.GpuAvailable = false;
@@ -134,6 +140,19 @@ namespace Engine {
 		}
 	}
 
+	void RenderStatsHistory::PublishSsrArea(const RenderSsrAreaSample& sample)
+	{
+		if (m_HasSsrArea && sample.FrameIndex < m_LastSsrAreaFrameIndex)
+			return;
+		m_Latest.SsrAreaAvailable = sample.Available;
+		m_Latest.SsrAreaFrameIndex = sample.FrameIndex;
+		m_Latest.SsrTiles = sample.Available ? sample.Tiles : 0;
+		m_Latest.SsrTracedTiles = sample.Available ? sample.TracedTiles : 0;
+		m_Latest.SsrTracedPixels = sample.Available ? sample.TracedPixels : 0;
+		m_LastSsrAreaFrameIndex = sample.FrameIndex;
+		m_HasSsrArea = true;
+	}
+
 	const RenderStats& RenderStatsHistory::GetLatest() const
 	{
 		return m_Latest;
@@ -144,6 +163,8 @@ namespace Engine {
 		m_Latest = {};
 		m_LastGpuFrameIndex = 0;
 		m_HasGpuFrame = false;
+		m_LastSsrAreaFrameIndex = 0;
+		m_HasSsrArea = false;
 	}
 
 	struct RenderRecordingContext::State

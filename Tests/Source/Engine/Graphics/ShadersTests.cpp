@@ -22,6 +22,7 @@
 #include "Shared/EnvironmentBakeConstants.h"
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/ExposureConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/ImGuiConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/ProbeConstants.h"
@@ -386,7 +387,7 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(SsrConstants, MaxRoughness),
 					ENGINE_TEST_SHARED_FIELD(SsrConstants, Intensity),
 					ENGINE_TEST_SHARED_FIELD(SsrConstants, PyramidLevels),
-					ENGINE_TEST_SHARED_FIELD(SsrConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(SsrConstants, HalfResolution),
 					ENGINE_TEST_SHARED_FIELD(SsrConstants, Padding1),
 					ENGINE_TEST_SHARED_FIELD(SsrConstants, Padding2),
 				},
@@ -506,6 +507,34 @@ namespace Engine {
 				.Entry = "PSForward",
 				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
 			},
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): b5 of the forward passes, the view's fog.
+			{
+				.Name = "FogConstants",
+				.Size = sizeof(FogConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(FogConstants, Color),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, Density),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, CameraPosition),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, StartDistance),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, ViewForward),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, MaxOpacity),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, SunDirection),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, SunGlowExponent),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, SunColor),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, HeightDensity),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, HeightFalloff),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, BaseHeight),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, Enabled),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, FogSkybox),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, Orthographic),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, Padding2),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
 			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): b4 of the forward passes.
 			{
 				.Name = "ProbeConstants",
@@ -596,7 +625,7 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, Transform),
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, HasNormalMap),
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, NormalMapTwoChannel),
-					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(QuadConstants, FogMode),
 					ENGINE_TEST_SHARED_FIELD(QuadConstants, Padding1),
 				},
 				.Program = "Quad",

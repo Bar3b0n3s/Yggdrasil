@@ -137,7 +137,7 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 73 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and
+	// The pass list, in stats order (see the file comment). 74 pipelines at startup: M17's 54 plus the QuadBatcher's 2 and
 	// the output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites
 	// records with the QuadBatcher's), the QuadBatcher's LdrDepth 1 (M22, C22.3, Docs/Decisions/0033-m22-contract.md
 	// decision 57; M22's Ui adds none of its own), M23's LightClusters 1 and Skinning 1, M26's QuadBatcher HdrAdditive 1
@@ -150,6 +150,7 @@ namespace Engine {
 	// 13): TerrainDepthNormal 2 (the terrain prepass and picking prepass, program Terrain), TerrainForward 1 (Terrain),
 	// Ssr 2 (the trace and the composite, program Ssr), Taa 1 (Taa), Exposure 2 (the histogram and the adaptation, program
 	// Exposure) and the QuadBatcher's HdrAdditive 1 for additive particles (Particles declares none): 73 at M26's landing.
+	// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) adds Ssr's classification 1: 74.
 	inline constexpr std::array ScenePassDeclarations = std::to_array<RenderPassDeclaration>({
 		{ .Name = "Prepare", .Stage = RenderStage::Prepare, .StatsRows = Detail::PrepareRows },
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27): the skinned and morphed meshes' vertices, deformed by
@@ -181,9 +182,9 @@ namespace Engine {
 		{ .Name = "Skybox", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::SkyboxPrograms, .StatsRows = Detail::SkyboxRows, .Targets = Detail::SceneColorTargets },
 		// M26 (C26.1, R-SSR; decisions 13 and 18): glossy reflections traced over the opaque image with the depth pyramid into
 		// SsrColor, falling back to the probes, composited into SceneColor before the transparent pass draws over them;
-		// recorded only with PostProcess's SsrEnabled. SsrPass's two pipelines of the program Ssr (stream X-D): the trace and the
-		// composite.
-		{ .Name = "Ssr", .Stage = RenderStage::Forward, .PipelineCount = 2, .Programs = Detail::SsrPrograms, .StatsRows = Detail::SsrRows, .Targets = Detail::SsrTargets },
+		// recorded only with PostProcess's SsrEnabled. SsrPass's three pipelines of the program Ssr (stream X-D's trace and
+		// composite, and M32's classification, which lists the tiles the trace and the composite cover).
+		{ .Name = "Ssr", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::SsrPrograms, .StatsRows = Detail::SsrRows, .Targets = Detail::SsrTargets },
 		// Blend, for the three cull modes.
 		{ .Name = "ForwardTransparent", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::ForwardTransparentRows, .Targets = Detail::SceneColorTargets },
 		// The Overdraw data view's additive pass, for the three cull modes.

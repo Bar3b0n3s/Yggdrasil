@@ -9,6 +9,7 @@
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/ViewConstants.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/RenderReference.h"
@@ -120,10 +121,15 @@ namespace Engine {
 				Result<nvrhi::BufferHandle> viewBuffer = m_Device.CreateBuffer(bufferDesc);
 				bufferDesc.byteSize = sizeof(EnvironmentConstants);
 				Result<nvrhi::BufferHandle> environmentBuffer = m_Device.CreateBuffer(bufferDesc);
+				// M32: the view's fog, disabled (FogConstants' defaults), so the sky is unfogged.
+				bufferDesc.byteSize = sizeof(FogConstants);
+				Result<nvrhi::BufferHandle> fogBuffer = m_Device.CreateBuffer(bufferDesc);
 				REQUIRE(viewBuffer.has_value());
 				REQUIRE(environmentBuffer.has_value());
+				REQUIRE(fogBuffer.has_value());
 				m_ViewBuffer = *viewBuffer;
 				m_EnvironmentBuffer = *environmentBuffer;
+				m_FogBuffer = *fogBuffer;
 			}
 
 			[[nodiscard]] SkyboxPass& GetPass() { return *m_Pass; }
@@ -174,6 +180,8 @@ namespace Engine {
 				(*commandList)->open();
 				(*commandList)->writeBuffer(m_ViewBuffer, &view, sizeof(view));
 				(*commandList)->writeBuffer(m_EnvironmentBuffer, &environment, sizeof(environment));
+				const FogConstants fog{};
+				(*commandList)->writeBuffer(m_FogBuffer, &fog, sizeof(fog));
 				(*commandList)->clearTextureFloat(m_Color, nvrhi::AllSubresources, nvrhi::Color(clearColor.r, clearColor.g, clearColor.b, clearColor.a));
 				if (depth.empty())
 				{
@@ -186,7 +194,7 @@ namespace Engine {
 				}
 				PassBindingCache bindings;
 				const Status recorded = m_Pass->Record(**commandList, bindings,
-					{ .Framebuffer = m_Framebuffer, .ViewConstants = m_ViewBuffer, .EnvironmentConstants = m_EnvironmentBuffer, .Skybox = m_Cube });
+					{ .Framebuffer = m_Framebuffer, .ViewConstants = m_ViewBuffer, .EnvironmentConstants = m_EnvironmentBuffer, .FogConstants = m_FogBuffer, .Skybox = m_Cube });
 				(*commandList)->close();
 				REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
 				m_Device.ExecuteCommandList(**commandList);
@@ -205,6 +213,7 @@ namespace Engine {
 			nvrhi::FramebufferHandle m_Framebuffer;
 			nvrhi::BufferHandle m_ViewBuffer;
 			nvrhi::BufferHandle m_EnvironmentBuffer;
+			nvrhi::BufferHandle m_FogBuffer;
 		};
 
 	}

@@ -16,7 +16,9 @@ namespace Engine {
 	// DepthPyramidPass::MaxMipCount) and PostProcessSettings' SSR settings made usable (SsrPass.h's MakeSsrConstants): the
 	// distance a reflected ray travels (MaxDistance, metres), the thickness a surface is assumed behind its depth (Thickness,
 	// metres), the perceptual roughness above which only the probes reflect (MaxRoughness, [0, 1]) and the share of the probes'
-	// reflection the traced one replaces (Intensity, [0, 1]).
+	// reflection the traced one replaces (Intensity, [0, 1]). M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 11): whether the
+	// trace runs at half resolution (HalfResolution, 1 with RenderQualitySettings::SsrHalfResolution), in the first padding
+	// word.
 	struct SsrConstants
 	{
 		UInt2 ImageSize;
@@ -26,7 +28,7 @@ namespace Engine {
 		float MaxRoughness = 0.6f;
 		float Intensity = 1.0f;
 		uint32_t PyramidLevels = 1;
-		uint32_t Padding0 = 0;
+		uint32_t HalfResolution = 0;
 		uint32_t Padding1 = 0;
 		uint32_t Padding2 = 0;
 	};
@@ -36,7 +38,7 @@ namespace Engine {
 	static_assert(offsetof(SsrConstants, ImageSize) == 0 && offsetof(SsrConstants, InverseImageSize) == 8
 		&& offsetof(SsrConstants, MaxDistance) == 16 && offsetof(SsrConstants, Thickness) == 20
 		&& offsetof(SsrConstants, MaxRoughness) == 24 && offsetof(SsrConstants, Intensity) == 28
-		&& offsetof(SsrConstants, PyramidLevels) == 32 && offsetof(SsrConstants, Padding0) == 36
+		&& offsetof(SsrConstants, PyramidLevels) == 32 && offsetof(SsrConstants, HalfResolution) == 36
 		&& offsetof(SsrConstants, Padding1) == 40 && offsetof(SsrConstants, Padding2) == 44);
 
 }

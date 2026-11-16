@@ -118,8 +118,19 @@ namespace Engine {
 			return;
 		state.TargetPool->EndFrame();
 		if (state.PendingTimingSlot)
+		{
 			state.TimingSubmissions[*state.PendingTimingSlot] = submissionId;
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): what the submitted render recorded in its slot, read once the
+			// submission completed.
+			if (state.SsrAreaSlots.size() < state.TimingSubmissions.size())
+				state.SsrAreaSlots.resize(state.TimingSubmissions.size());
+			Detail::SceneRendererSsrAreaSlot& slot = state.SsrAreaSlots[*state.PendingTimingSlot];
+			slot.FrameIndex = state.PendingSsrArea.FrameIndex;
+			slot.Recorded = state.PendingSsrArea.Recorded;
+			slot.Submitted = true;
+		}
 		state.PendingTimingSlot.reset();
+		state.PendingSsrArea = {};
 		state.PendingSubmission = false;
 		state.SubmittedPicking = state.RecordedPicking && state.ImageGeneration == state.Generation;
 	}

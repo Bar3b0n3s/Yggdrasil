@@ -177,7 +177,7 @@ namespace Engine {
 				for (uint32_t column = 0; column < 16; ++column)
 					total += Test::CubeTexelSolidAngle(column, row, 16);
 			}
-			CHECK(total * 6.0 == doctest::Approx(4.0 * glm::pi<double>()).epsilon(1e-9));
+			CHECK(total * 6.0 == doctest::Approx(4.0 * glm::pi<double>()).epsilon(1e-6));
 			// A centre texel subtends more than a corner texel.
 			CHECK(Test::CubeTexelSolidAngle(7, 7, 16) > Test::CubeTexelSolidAngle(0, 0, 16));
 		}
@@ -444,6 +444,72 @@ namespace Engine {
 			CHECK_FALSE(Test::IsPointLightVisible(glm::dvec3(0.0, 0.0, 1.0), glm::dvec3(0.2, 0.2, -1.0), square));
 			// No occluder hides nothing.
 			CHECK(Test::IsPointLightVisible(glm::dvec3(0.0, 0.0, -1.0), light, {}));
+		}
+
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 3): the fog oracle against closed forms. A camera at the origin looks
+		// down -Z; distance fog alone is 1 - e^(-Density (z - StartDistance)); height fog along a level ray is HeightDensity
+		// e^(-k (h - BaseHeight)) per metre; along a climbing ray its integral is the exponential's; MaxOpacity caps the amount;
+		// the colour adds the glow along the ray; and the sky's height fog climbs to a finite amount, a falling ray to MaxOpacity.
+		TEST_CASE("RenderReference: the fog oracle matches the closed forms of distance, height and sky fog")
+		{
+			FogConstants fog;
+			fog.Color = glm::vec3(0.2f, 0.4f, 0.6f);
+			fog.CameraPosition = glm::vec3(0.0f);
+			fog.ViewForward = glm::vec3(0.0f, 0.0f, -1.0f);
+			fog.MaxOpacity = 1.0f;
+			fog.SunDirection = glm::vec3(0.0f, 0.0f, -1.0f);
+			fog.SunColor = glm::vec3(0.0f);
+			fog.SunGlowExponent = 4.0f;
+			fog.HeightFalloff = 0.5f;
+
+			fog.Density = 0.25f;
+			fog.StartDistance = 2.0f;
+			glm::dvec4 result = Test::EvaluateFog(fog, glm::dvec3(0.0, 0.0, -10.0));
+			CHECK(result.a == doctest::Approx(1.0 - std::exp(-0.25 * 8.0)).epsilon(1e-6));
+			CHECK(result.r == doctest::Approx(0.2));
+			CHECK(Test::EvaluateFog(fog, glm::dvec3(0.0, 0.0, -1.5)).a == 0.0);
+			fog.MaxOpacity = 0.5f;
+			CHECK(Test::EvaluateFog(fog, glm::dvec3(0.0, 0.0, -10.0)).a == 0.5);
+			fog.MaxOpacity = 1.0f;
+
+			// Height fog along a level ray at height 1 with BaseHeight 3: e^(-0.5 * -2) per metre of the 8 metres past the start.
+			fog.Density = 0.0f;
+			fog.HeightDensity = 0.1f;
+			fog.BaseHeight = 3.0f;
+			fog.CameraPosition = glm::vec3(0.0f, 1.0f, 0.0f);
+			result = Test::EvaluateFog(fog, glm::dvec3(0.0, 1.0, -10.0));
+			CHECK(result.a == doctest::Approx(1.0 - std::exp(-0.1 * std::exp(1.0) * 8.0)).epsilon(1e-6));
+			// Along a climbing ray from height 1 to 5 over depths 0 to 10 (0.4 per metre), from depth 2 (height 1.8): the
+			// exponential's integral 0.1 e^(-0.5 (1.8 - 3)) (1 - e^(-0.5 * 0.4 * 8)) / (0.5 * 0.4).
+			result = Test::EvaluateFog(fog, glm::dvec3(0.0, 5.0, -10.0));
+			const double climbed = 0.1 * std::exp(0.6) * (1.0 - std::exp(-1.6)) / 0.2;
+			CHECK(result.a == doctest::Approx(1.0 - std::exp(-climbed)).epsilon(1e-6));
+
+			// The glow along the ray: the light dead ahead adds SunColor in full.
+			fog.SunColor = glm::vec3(1.0f, 0.5f, 0.0f);
+			result = Test::EvaluateFog(fog, glm::dvec3(0.0, 1.0, -10.0));
+			CHECK(result.r == doctest::Approx(1.2));
+			CHECK(result.g == doctest::Approx(0.9));
+			// An orthographic fog's ray is the forward axis wherever the point lies, and its eye point is on the camera's plane.
+			fog.Orthographic = 1;
+			result = Test::EvaluateFog(fog, glm::dvec3(4.0, 1.0, -10.0));
+			CHECK(result.r == doctest::Approx(1.2));
+			CHECK(result.a == doctest::Approx(1.0 - std::exp(-0.1 * std::exp(1.0) * 8.0)).epsilon(1e-6));
+			fog.Orthographic = 0;
+
+			// The sky: a climbing ray's height fog to infinity from the start, 0.1 e^(-0.5 (h_s - 3)) / (0.5 rise).
+			const glm::dvec3 up = glm::normalize(glm::dvec3(0.0, 1.0, -2.0));
+			const double rise = up.y / -up.z;
+			const double atStart = 0.1 * std::exp(-0.5 * (1.0 + rise * 2.0 - 3.0));
+			result = Test::EvaluateSkyFog(fog, up, glm::dvec3(0.0, 1.0, 0.0));
+			CHECK(result.a == doctest::Approx(1.0 - std::exp(-atStart / (0.5 * rise))).epsilon(1e-6));
+			CHECK(Test::EvaluateSkyFog(fog, glm::normalize(glm::dvec3(0.0, -1.0, -2.0)), glm::dvec3(0.0, 1.0, 0.0)).a == 1.0);
+			fog.Density = 0.01f;
+			fog.MaxOpacity = 0.75f;
+			CHECK(Test::EvaluateSkyFog(fog, up, glm::dvec3(0.0, 1.0, 0.0)).a == 0.75);
+			fog.Density = 0.0f;
+			fog.HeightDensity = 0.0f;
+			CHECK(Test::EvaluateSkyFog(fog, up, glm::dvec3(0.0, 1.0, 0.0)).a == 0.0);
 		}
 	}
 

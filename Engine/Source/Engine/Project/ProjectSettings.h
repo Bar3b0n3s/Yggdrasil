@@ -82,11 +82,14 @@ namespace Engine {
 		std::map<std::string, InputActionSettings> Actions;
 	};
 
-	// Registry struct "RenderingSettings" (§6.1 "Rendering"). ShadowMapSize is a power of two in [256, 8192].
+	// Registry struct "RenderingSettings" (§6.1 "Rendering"). ShadowMapSize is a power of two in [256, 8192]. M32
+	// (Docs/Decisions/0047-m32-fog-ssr.md decision 12; ADR 0042's phase-5 ledger: appended after SsaoHalfResolution in landing
+	// order): SsrHalfResolution traces screen-space reflections at half resolution (Renderer/SsrPass.h).
 	struct RenderingSettings
 	{
 		uint32_t ShadowMapSize = 2048;
 		bool SsaoHalfResolution = false;
+		bool SsrHalfResolution = false;
 	};
 
 	// Registry struct "ScriptingSettings" (§6.1 "Scripting", §11.1). MemoryLimitMB >= 1 (soft limit, plus 16 MB headroom);

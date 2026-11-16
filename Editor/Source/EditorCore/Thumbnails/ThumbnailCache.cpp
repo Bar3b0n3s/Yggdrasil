@@ -173,7 +173,7 @@ namespace Engine {
 			if (!Context.HasProject())
 				return {};
 			const RenderingSettings& rendering = Context.GetProject().GetSettings().Rendering;
-			return { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution };
+			return { .ShadowMapSize = rendering.ShadowMapSize, .SsaoHalfResolution = rendering.SsaoHalfResolution, .SsrHalfResolution = rendering.SsrHalfResolution };
 		}
 
 		// The project's sorting layers, which captures extract with (EditorHostThumbnails): a prefab's sprites draw in them
@@ -196,6 +196,7 @@ namespace Engine {
 			XXH64Hasher hasher;
 			hasher.UpdateU64(quality.ShadowMapSize);
 			hasher.UpdateU64(quality.SsaoHalfResolution ? 1u : 0u);
+			hasher.UpdateU64(quality.SsrHalfResolution ? 1u : 0u);
 			const std::span<const std::string> layers = GetSortingLayers();
 			hasher.UpdateU64(layers.size());
 			for (const std::string& layer : layers)

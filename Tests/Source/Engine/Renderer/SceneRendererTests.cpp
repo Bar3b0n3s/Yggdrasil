@@ -469,7 +469,7 @@ namespace Engine {
 			// 17) + SSR 2 (M26: the trace and the composite, ADR 0037 decision 18) + terrain 3 (M26: the prepass, the picking
 			// prepass and the forward pass, ADR 0037 decision 22). Each material debug view adds its 9 forward variants the first
 			// time it renders, 45 for the five.
-			static_assert(SceneRendererPipelines::StartupPipelineCount == 73);
+			static_assert(SceneRendererPipelines::StartupPipelineCount == 74);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::AssetTestFixture assets;
@@ -477,8 +477,8 @@ namespace Engine {
 				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
 				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
 				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
-				CHECK((*pipelines)->GetPipelineCount() == 73);
-				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 73);
+				CHECK((*pipelines)->GetPipelineCount() == 74);
+				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 74);
 				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(),
 					{ .Width = 16, .Height = 16 });
 				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
@@ -489,13 +489,13 @@ namespace Engine {
 					snapshot.DebugView = view;
 					static_cast<void>(RenderToImage(gpu.GetDevice(), **renderer, snapshot));
 				}
-				CHECK((*pipelines)->GetPipelineCount() == 73 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 74 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 				// EnsureDebugView, which Render called, has no effect for Lit or for a view that exists.
 				const Status lit = (*pipelines)->EnsureDebugView(RenderDebugView::Lit);
 				const Status existing = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
 				CHECK(lit.has_value());
 				CHECK(existing.has_value());
-				CHECK((*pipelines)->GetPipelineCount() == 73 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 74 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

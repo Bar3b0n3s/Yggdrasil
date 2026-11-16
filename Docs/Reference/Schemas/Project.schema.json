@@ -212,6 +212,10 @@
 				"SsaoHalfResolution": {
 					"description": "Computes ambient occlusion at half resolution.",
 					"type": "boolean"
+				},
+				"SsrHalfResolution": {
+					"description": "Traces screen-space reflections at half resolution, upsampled with the depth-aware filter: a quarter of the rays, softer reflections.",
+					"type": "boolean"
 				}
 			},
 			"additionalProperties": false

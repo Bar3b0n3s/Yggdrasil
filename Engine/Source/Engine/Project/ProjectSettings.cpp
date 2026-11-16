@@ -466,6 +466,8 @@ namespace Engine {
 			.Field("ShadowMapSize", &RenderingSettings::ShadowMapSize, "Shadow map resolution in texels: a power of two from 256 to 8192.",
 				{ .Min = Utils::MinShadowMapSize, .Max = Utils::MaxShadowMapSize, .Unit = "px" })
 			.Field("SsaoHalfResolution", &RenderingSettings::SsaoHalfResolution, "Computes ambient occlusion at half resolution.")
+			.Field("SsrHalfResolution", &RenderingSettings::SsrHalfResolution,
+				"Traces screen-space reflections at half resolution, upsampled with the depth-aware filter: a quarter of the rays, softer reflections.")
 			.Validate(&Utils::ValidateRendering)
 			.Generate(&Utils::GenerateRendering);
 

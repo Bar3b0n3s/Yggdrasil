@@ -14,6 +14,7 @@
 #include "Engine/Renderer/TerrainLod.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShadowConstants.h"
@@ -116,6 +117,7 @@ namespace Engine {
 					{ .Set = 0, .Register = ShadowConstantsRegister, .ByteSize = sizeof(ShadowConstants) },
 					{ .Set = 0, .Register = LightClusterConstantsRegister, .ByteSize = sizeof(LightClusterConstants) },
 					{ .Set = 0, .Register = ProbeConstantsRegister, .ByteSize = sizeof(ProbeConstants) },
+					{ .Set = 0, .Register = FogConstantsRegister, .ByteSize = sizeof(FogConstants) },
 					{ .Set = 1, .Register = TerrainConstantsRegister, .ByteSize = sizeof(TerrainConstants) },
 				},
 			};

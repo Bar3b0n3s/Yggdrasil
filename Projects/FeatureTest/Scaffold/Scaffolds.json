@@ -409,6 +409,20 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Fog.jsonl",
+			"IdSeed": 2901,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenFog.jsonl",
+			"IdSeed": 2902,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenFog",
+				"Assets/Scenes/GoldenFog"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

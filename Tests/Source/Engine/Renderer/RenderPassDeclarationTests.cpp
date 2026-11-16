@@ -216,7 +216,7 @@ namespace Engine {
 			// 64 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines and M22's LdrDepth (60 on M23's branch);
 			// 65 with M26's QuadBatcher HdrAdditive (Docs/Decisions/0037-m26-contract.md decision 7), 67 with its Exposure pass
 			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22).
-			CHECK(GetDeclaredPipelineCount() == 73);
+			CHECK(GetDeclaredPipelineCount() == 74);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -244,7 +244,7 @@ namespace Engine {
 			CHECK((lights - 1)->Name == "Sprites");
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 6);
 			CHECK(QuadBatcher::PipelineCount == 6);
-			CHECK(GetDeclaredPipelineCount() == 73);
+			CHECK(GetDeclaredPipelineCount() == 74);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -274,7 +274,7 @@ namespace Engine {
 			// M23's 2 (the LightClusters and Skinning passes, Docs/Decisions/0034-m23-contract.md decisions 5 and 27) and M26's 9
 			// (the QuadBatcher's HdrAdditive, Docs/Decisions/0037-m26-contract.md decision 7, the Exposure pass's 2, the Taa pass's
 			// 1 and the Ssr pass's 2, decision 13, and the terrain pass's 3, decision 22).
-			static_assert(GetDeclaredPipelineCount() == 73);
+			static_assert(GetDeclaredPipelineCount() == 74);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

@@ -15,8 +15,9 @@
 //   - PSForward (TerrainForward) shades like Passes/Scene.slang's ShadeForward: GGX, the DFG LUT's multi-scatter
 //     compensation, geometric specular anti-aliasing, the view's lights through M23's light loop (Common/LightLoop.slang) with
 //     the view's shadows when the terrain receives them, the environment's image-based lighting replaced inside their boxes
-//     by the baked probes (Common/Probes.slang), and GTAO; a terrain has no emission and no occlusion map. A material debug
-//     view (TerrainConstants::DebugView) outputs its quantity, linear, with alpha 1.
+//     by the baked probes (Common/Probes.slang), and GTAO; a terrain has no emission and no occlusion map; then, in a fogged
+//     view, the fog in front of it (M32, Common/Fog.slang). A material debug view (TerrainConstants::DebugView) outputs its
+//     quantity, linear, with alpha 1.
 // The surface: up to four layers weighted by the splat map's channels (red layer 0 to alpha layer 3) over their sum, layer 0
 // alone without a splat map or where the weights sum to 0; each layer's base colour (times its tint) and tangent-space normal
 // map tiled every Tiling metres in local XZ, its roughness and metallic constants. The smooth geometric normal is the
@@ -30,6 +31,7 @@
 
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/ProbeConstants.h"
@@ -64,6 +66,8 @@ TextureCubeArray<float> PointShadowMaps : register(t12, space0);
 ConstantBuffer<ProbeConstants> Probes : register(b4, space0);
 StructuredBuffer<float4> IrradianceProbes : register(t13, space0);
 TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
+// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Common/Fog.slang), read by PSForward's lit output.
+ConstantBuffer<FogConstants> Fog : register(b5, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -85,6 +89,7 @@ Texture2D<float4> LayerNormal3 : register(t9, space1);
 // The forward pass's light loop and the probes' indirect term over the declarations above, as Scene.slang includes them.
 #include "Common/LightLoop.slang"
 #include "Common/Probes.slang"
+#include "Common/Fog.slang"
 
 struct TerrainVertexInput
 {
@@ -404,5 +409,7 @@ float4 PSForward(TerrainVertexOutput input, bool isFrontFace : SV_IsFrontFace) :
 	const float occlusion = SampleGtao(AmbientOcclusion, LinearViewDepth, SceneNormals, uint2(input.Position.xy));
 	radiance += irradiance * specular.DiffuseColor * saturate(float3(1.0) - multiScatter) * MultiBounceAmbientOcclusion(occlusion, specular.DiffuseColor);
 	radiance += prefiltered * multiScatter * (SpecularOcclusion(specular.NDotV, occlusion, specular.Alpha) * HorizonOcclusion(specular.Reflection, surface.GeometricNormal));
+	if (Fog.Enabled != 0)
+		radiance = ApplyFog(radiance, EvaluateFog(input.WorldPosition));
 	return float4(radiance, 1.0);
 }

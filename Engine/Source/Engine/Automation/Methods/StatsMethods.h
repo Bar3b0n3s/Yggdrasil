@@ -60,6 +60,14 @@ namespace Engine {
 		bool SsaoHalfResolution = false;
 		// M26 (W26.2's review): RenderStats::HistoryFrames, the renders since the view's temporal history started afresh.
 		uint32_t HistoryFrames = 0;
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13; ADR 0042's phase-5 ledger: appended in landing order):
+		// RenderStats::SsrHalfResolution, and the SSR trace's area in the completed frame SsrAreaFrame (exact decimal, empty while
+		// unavailable): the trace image's tiles, the tiles traced and the trace pixels that traced, 0 while unavailable.
+		bool SsrHalfResolution = false;
+		std::string SsrAreaFrame{};
+		uint32_t SsrTiles = 0;
+		uint32_t SsrTracedTiles = 0;
+		uint32_t SsrTracedPixels = 0;
 	};
 
 	struct StatsGetResult

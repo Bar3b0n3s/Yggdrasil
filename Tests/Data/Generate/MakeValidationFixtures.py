@@ -78,7 +78,7 @@ COMPONENT_ORDER = [
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
     "Animator", "SkinnedMesh", "ParticleEmitter", "IrradianceVolume", "ReflectionProbe", "Terrain", "TerrainCollider",
-    "ValidatorTarget", "ValidatorFollower",
+    "Fog", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -310,7 +310,7 @@ def default_project(name: str) -> dict[str, Any]:
         "Simulation": {"FixedHz": 60, "MaxStepsPerFrame": 5, "Seed": 0, "MaxEntities": 65536},
         "Physics": {"Gravity": [0, -9.81, 0], "Layers": ["Default"], "Collisions": [["Default", "Default"]]},
         "Input": {"Actions": {}},
-        "Rendering": {"ShadowMapSize": 2048, "SsaoHalfResolution": False},
+        "Rendering": {"ShadowMapSize": 2048, "SsaoHalfResolution": False, "SsrHalfResolution": False},
         "Scripting": {"MemoryLimitMB": 256, "CallbackBudgetMs": 1000, "PauseOnError": True,
                       "BlockPlayOnTypeErrors": False},
         "Export": {"BuildScenes": [], "Exclude": ["Assets/Tests/**"], "Icon": "", "Version": "1.0.0", "Company": "",

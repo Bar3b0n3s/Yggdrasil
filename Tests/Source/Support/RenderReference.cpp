@@ -628,6 +628,71 @@ namespace Engine {
 			return static_cast<uint16_t>(sign | (static_cast<uint32_t>(biased) << 10U) | (static_cast<uint32_t>(significand) - 1024U));
 		}
 
+		namespace {
+
+			// The fog's colour along the unit view ray `ray`.
+			glm::dvec3 GetFogColor(const FogConstants& fog, const glm::dvec3& ray)
+			{
+				const double alignment = std::clamp(glm::dot(ray, glm::dvec3(fog.SunDirection)), 0.0, 1.0);
+				return glm::dvec3(fog.Color) + glm::dvec3(fog.SunColor) * std::pow(alignment, static_cast<double>(fog.SunGlowExponent));
+			}
+
+			// Simpson's rule of `density` over [start, end], 4,096 intervals.
+			template<typename Density>
+			double IntegrateFog(const Density& density, double start, double end)
+			{
+				constexpr int Intervals = 4096;
+				if (!(end > start))
+					return 0.0;
+				const double step = (end - start) / Intervals;
+				double sum = density(start) + density(end);
+				for (int i = 1; i < Intervals; ++i)
+					sum += density(start + step * i) * (i % 2 == 1 ? 4.0 : 2.0);
+				return sum * step / 3.0;
+			}
+
+		}
+
+		glm::dvec4 EvaluateFog(const FogConstants& fog, const glm::dvec3& position)
+		{
+			const glm::dvec3 forward(fog.ViewForward);
+			const double depth = glm::dot(position - glm::dvec3(fog.CameraPosition), forward);
+			const glm::dvec3 eye = fog.Orthographic != 0 ? position - forward * depth : glm::dvec3(fog.CameraPosition);
+			const glm::dvec3 offset = position - eye;
+			const glm::dvec3 ray = fog.Orthographic != 0 || glm::dot(offset, offset) <= 1e-20 ? forward : glm::normalize(offset);
+			const auto density = [&fog, &eye, &offset, depth](double t)
+			{
+				const double height = eye.y + offset.y * t / depth;
+				return static_cast<double>(fog.Density)
+					+ static_cast<double>(fog.HeightDensity) * std::exp(-static_cast<double>(fog.HeightFalloff) * (height - static_cast<double>(fog.BaseHeight)));
+			};
+			const double opticalDepth = depth > 0.0 ? IntegrateFog(density, static_cast<double>(fog.StartDistance), depth) : 0.0;
+			return glm::dvec4(GetFogColor(fog, ray), std::min(1.0 - std::exp(-opticalDepth), static_cast<double>(fog.MaxOpacity)));
+		}
+
+		glm::dvec4 EvaluateSkyFog(const FogConstants& fog, const glm::dvec3& direction, const glm::dvec3& eye)
+		{
+			const glm::dvec3 forward(fog.ViewForward);
+			const glm::dvec3 color = GetFogColor(fog, fog.Orthographic != 0 ? forward : direction);
+			const double maxOpacity = fog.MaxOpacity;
+			if (fog.Density > 0.0f)
+				return glm::dvec4(color, maxOpacity);
+			if (fog.HeightDensity <= 0.0f)
+				return glm::dvec4(color, 0.0);
+			// The height gained per unit of view depth along the ray.
+			const double rise = fog.Orthographic != 0 ? forward.y : direction.y / glm::dot(direction, forward);
+			const double falloff = fog.HeightFalloff;
+			if (!(rise * falloff > 1e-9))
+				return glm::dvec4(color, maxOpacity);
+			const double start = fog.StartDistance;
+			const auto density = [&fog, &eye, rise, falloff](double t)
+			{
+				return static_cast<double>(fog.HeightDensity) * std::exp(-falloff * (eye.y + rise * t - static_cast<double>(fog.BaseHeight)));
+			};
+			const double opticalDepth = IntegrateFog(density, start, start + 60.0 / (rise * falloff));
+			return glm::dvec4(color, std::min(1.0 - std::exp(-opticalDepth), maxOpacity));
+		}
+
 		bool IsPointLightVisible(const glm::dvec3& receiver, const glm::dvec3& light, std::span<const ReferenceTriangle> occluders)
 		{
 			// The segment receiver + t (light - receiver), t in (End, 1 - End), against each triangle (Moller-Trumbore).

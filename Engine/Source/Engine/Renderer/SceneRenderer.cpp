@@ -21,6 +21,7 @@
 #include "Engine/Renderer/DebugRenderer.h"
 #include "Engine/Renderer/EditorOverlay.h"
 #include "Engine/Renderer/ExposurePass.h"
+#include "Engine/Renderer/Fog.h"
 #include "Engine/Renderer/FxaaPass.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Light2DShading.h"
@@ -44,6 +45,7 @@
 #include "Engine/Renderer/TonemapPass.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
@@ -1273,18 +1275,30 @@ namespace Engine {
 		// M26 (W26.2's review): the renders since the view's history started afresh (RenderStats::HistoryFrames).
 		const bool continuesHistory = snapshot.HasCamera && snapshot.Camera.PreviousViewProjection.has_value();
 		state.HistoryFrames = continuesHistory ? state.HistoryFrames + (state.HistoryFrames < std::numeric_limits<uint32_t>::max() ? 1U : 0U) : 0U;
-		RenderStats stats{ .Available = true, .FrameIndex = snapshot.FrameIndex, .Width = state.ViewWidth, .Height = state.ViewHeight, .ShadowMapSize = snapshot.Quality.ShadowMapSize, .SsaoHalfResolution = snapshot.Quality.SsaoHalfResolution, .HistoryFrames = state.HistoryFrames };
+		RenderStats stats{ .Available = true,
+			.FrameIndex = snapshot.FrameIndex,
+			.Width = state.ViewWidth,
+			.Height = state.ViewHeight,
+			.ShadowMapSize = snapshot.Quality.ShadowMapSize,
+			.SsaoHalfResolution = snapshot.Quality.SsaoHalfResolution,
+			.HistoryFrames = state.HistoryFrames,
+			.SsrHalfResolution = snapshot.Quality.SsrHalfResolution };
 		GpuProfiler* profiler = nullptr;
 		const uint32_t slot = state.NextTimingSlot;
 		state.NextTimingSlot = (slot + 1) % static_cast<uint32_t>(state.TimingSubmissions.size());
 		state.PendingTimingSlot.reset();
+		state.PendingSsrArea = {};
 		GpuTimingFrame completedTiming;
+		std::optional<RenderSsrAreaSample> completedSsrArea;
 		if (state.TimingSubmissions[slot] <= state.Device->GetCompletedSubmissionID())
 		{
 			state.Profiler->BeginFrame(slot, snapshot.FrameIndex);
 			completedTiming = state.Profiler->GetLastFrameResult();
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): the SSR area of the slot's completed render, beside its timings.
+			completedSsrArea = state.CollectSsrArea(slot);
 			profiler = state.Profiler.get();
 			state.PendingTimingSlot = slot;
+			state.PendingSsrArea.FrameIndex = snapshot.FrameIndex;
 		}
 		// M18 (the milestone review; decision 39): a render that an exception unwinds (a vk::SystemError thrown out of NVRHI, a
 		// device loss that an upload's first write meets, on its way to the frame boundary or an automation method's handler,
@@ -1378,6 +1392,8 @@ namespace Engine {
 		});
 		state.History.PublishCpu(std::move(stats));
 		state.History.PublishGpu(completedTiming);
+		if (completedSsrArea)
+			state.History.PublishSsrArea(*completedSsrArea);
 		return std::move(frame.FirstError);
 	}
 
@@ -1437,6 +1453,7 @@ namespace Engine {
 		if (frame.OverlayView != ViewConstantsBuffer.Get())
 			commandList.writeBuffer(UnjitteredViewConstantsBuffer, &frame.OverlayConstants, sizeof(frame.OverlayConstants));
 		commandList.writeBuffer(EnvironmentConstantsBuffer, &frame.Environment, sizeof(frame.Environment));
+		commandList.writeBuffer(FogConstantsBuffer, &frame.Fog, sizeof(frame.Fog));
 		commandList.writeBuffer(ShadowConstantsBuffer, &frame.Shadow, sizeof(frame.Shadow));
 		if (!Lights.empty())
 			commandList.writeBuffer(LightBuffer, Lights.data(), Lights.size() * sizeof(ShaderLight));
@@ -1488,6 +1505,7 @@ namespace Engine {
 		frame.HalfAo = snapshot.Quality.SsaoHalfResolution || post.SsaoQuality == RenderSsaoQuality::Low;
 		// M26 (stream X-D, decision 18): SSR in the Lit view's shaded image only.
 		frame.Ssr = hasCamera && frame.IsLit && !frame.Wireframe && post.SsrEnabled;
+		frame.HalfSsr = snapshot.Quality.SsrHalfResolution;
 		const bool shadows = hasCamera && ((frame.IsLit && !frame.Wireframe) || frame.DebugView == RenderDebugView::ShadowCascades);
 		// The Lit view follows Post; the debug views and the 2D colour path (decision 7) fix exposure 1 and no dither.
 		const bool tonemapped = frame.IsLit && !frame.PixelArt;
@@ -1709,6 +1727,8 @@ namespace Engine {
 		});
 		const GpuEnvironment* environment = hasCamera && frame.IsLit && !frame.Wireframe ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
 		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog, in the views that light with the environment.
+		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, frame.Environment, hasCamera && frame.IsLit && !frame.Wireframe);
 		frame.EnvironmentSpecular = environment != nullptr ? environment->Specular : Pipelines->BlackCube;
 		frame.EnvironmentSkybox = environment != nullptr ? environment->Skybox : nvrhi::TextureHandle();
 		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the view's probes, in the views
@@ -2096,7 +2116,7 @@ namespace Engine {
 		// forward passes keep the neutral occlusion and depth then.
 		if (frame.Ssr)
 		{
-			const Status ensured = EnsureSsrTargets();
+			const Status ensured = EnsureSsrTargets(frame.HalfSsr);
 			frame.KeepFirstError(ensured);
 			frame.Ssr = ensured.has_value();
 		}
@@ -2180,6 +2200,7 @@ namespace Engine {
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ShadowConstantsRegister, ShadowConstantsBuffer),
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::EnvironmentConstantsRegister, EnvironmentConstantsBuffer),
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::LightClusterConstantsRegister, LightClusterConstantsBuffer),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::FogConstantsRegister, FogConstantsBuffer),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightsRegister, LightBuffer),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowCascadesRegister, frame.Cascades.Count != 0 ? Targets.Cascades : Pipelines->EmptyCascades),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowAtlasRegister, !frame.Spots.Tiles.empty() ? Targets.SpotAtlas : Pipelines->EmptyAtlas),
@@ -2223,7 +2244,8 @@ namespace Engine {
 				if (frame.IsLit && frame.Camera.ClearToSkybox && frame.EnvironmentSkybox != nullptr && snapshot.Environment.ShowSkybox)
 				{
 					recording.BeginPass("Skybox", &commandList);
-					const Status drawn = Pipelines->Skybox->Record(commandList, SkyboxBindings, { .Framebuffer = Targets.ForwardFramebuffer, .ViewConstants = ViewConstantsBuffer, .EnvironmentConstants = EnvironmentConstantsBuffer, .Skybox = frame.EnvironmentSkybox });
+					const Status drawn = Pipelines->Skybox->Record(commandList, SkyboxBindings,
+						{ .Framebuffer = Targets.ForwardFramebuffer, .ViewConstants = ViewConstantsBuffer, .EnvironmentConstants = EnvironmentConstantsBuffer, .FogConstants = FogConstantsBuffer, .Skybox = frame.EnvironmentSkybox });
 					recording.EndPass({ .DrawCalls = drawn ? 1U : 0U, .Triangles = drawn ? 1U : 0U });
 					frame.KeepFirstError(drawn);
 				}
@@ -2270,23 +2292,60 @@ namespace Engine {
 		}
 	}
 
-	Status SceneRenderer::State::EnsureSsrTargets()
+	Status SceneRenderer::State::EnsureSsrTargets(bool halfResolution)
 	{
 		const uint32_t width = Targets.Width;
 		const uint32_t height = Targets.Height;
+		const glm::uvec2 trace = SsrPass::GetTraceSize(width, height, halfResolution);
 		if (Targets.ViewDepth == nullptr)
 		{
 			ENGINE_TRY_ASSIGN(Targets.ViewDepth, TargetPool->Acquire(DepthPyramidPass::GetTargetDesc(width, height)));
 		}
-		if (Targets.SsrColor == nullptr)
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 11): SsrColor at the trace image's size; a switch of the trace's
+		// resolution takes another target from the pool, which reclaims the old one.
+		if (Targets.SsrColor == nullptr || Targets.SsrColor->getDesc().width != trace.x || Targets.SsrColor->getDesc().height != trace.y)
 		{
-			ENGINE_TRY_ASSIGN(Targets.SsrColor, TargetPool->Acquire(SsrPass::GetTargetDesc(width, height)));
+			ENGINE_TRY_ASSIGN(Targets.SsrColor, TargetPool->Acquire(SsrPass::GetTargetDesc(trace.x, trace.y)));
 		}
 		if (Targets.SsrFramebuffer == nullptr)
 		{
 			ENGINE_TRY_ASSIGN(Targets.SsrFramebuffer, Device->CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(Targets.SceneColor)));
 		}
+		// M32 (decision 10): the tile list and the arguments, view state kept across sizes.
+		const nvrhi::BufferDesc tiles = SsrPass::GetTileBufferDesc(SsrPass::GetTileCount(trace));
+		if (SsrTiles == nullptr || SsrTiles->getDesc().byteSize < tiles.byteSize)
+		{
+			ENGINE_TRY_ASSIGN(SsrTiles, Device->CreateBuffer(tiles));
+		}
+		if (SsrArguments == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(SsrArguments, Device->CreateBuffer(SsrPass::GetArgumentsBufferDesc()));
+		}
 		return {};
+	}
+
+	std::optional<RenderSsrAreaSample> SceneRenderer::State::CollectSsrArea(uint32_t slot)
+	{
+		if (slot >= SsrAreaSlots.size() || !SsrAreaSlots[slot].Submitted)
+			return std::nullopt;
+		Detail::SceneRendererSsrAreaSlot& area = SsrAreaSlots[slot];
+		RenderSsrAreaSample sample{ .Available = false, .FrameIndex = area.FrameIndex };
+		if (area.Recorded && area.Readback != nullptr)
+		{
+			nvrhi::IDevice* device = Device->GetNvrhiDevice();
+			if (const void* mapped = device->mapBuffer(area.Readback, nvrhi::CpuAccessMode::Read); mapped != nullptr)
+			{
+				const SsrArea read = ReadSsrArea(std::span<const std::byte>(static_cast<const std::byte*>(mapped), SsrArgumentsLayout::ByteSize));
+				device->unmapBuffer(area.Readback);
+				sample.Available = true;
+				sample.Tiles = read.Tiles;
+				sample.TracedTiles = read.TracedTiles;
+				sample.TracedPixels = read.TracedPixels;
+			}
+		}
+		area.Submitted = false;
+		area.Recorded = false;
+		return sample;
 	}
 
 	void SceneRenderer::State::RecordSsr(Detail::SceneRendererFrame& frame)
@@ -2297,6 +2356,7 @@ namespace Engine {
 			.ViewConstants = ViewConstantsBuffer,
 			.EnvironmentConstants = EnvironmentConstantsBuffer,
 			.ProbeConstants = ProbeResources.Constants,
+			.FogConstants = FogConstantsBuffer,
 			.SceneDepth = Targets.SceneDepth,
 			.SceneNormals = Targets.SceneNormals,
 			.SceneRoughness = Targets.SceneRoughness,
@@ -2304,15 +2364,39 @@ namespace Engine {
 			.SceneColor = Targets.SceneColor,
 			.Framebuffer = Targets.SsrFramebuffer,
 			.SsrColor = Targets.SsrColor,
+			.Tiles = SsrTiles,
+			.Arguments = SsrArguments,
 			.AmbientOcclusion = frame.Occlusion,
 			.LinearViewDepth = frame.LinearDepth,
 			.EnvironmentSpecular = frame.EnvironmentSpecular,
 			.ReflectionProbeCubes = !frame.Probes.Cubes.empty() ? ProbeResources.Cubes.Get() : Pipelines->EmptyReflectionProbeCubes.Get(),
 			.Post = frame.Snapshot->Post,
+			.HalfResolution = frame.HalfSsr,
 		};
 		recording.BeginPass("SSR", &commandList);
 		RenderPassCounters counters;
 		const Status recorded = Pipelines->Ssr->Record(commandList, SsrBindings, inputs, counters);
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): a render that times this frame copies the classification's
+		// counts into its slot's readback, which the render that next uses the slot reads once this one completed.
+		if (recorded && PendingTimingSlot)
+		{
+			if (SsrAreaSlots.size() < TimingSubmissions.size())
+				SsrAreaSlots.resize(TimingSubmissions.size());
+			Detail::SceneRendererSsrAreaSlot& slot = SsrAreaSlots[*PendingTimingSlot];
+			if (slot.Readback == nullptr)
+			{
+				Result<nvrhi::BufferHandle> readback = Device->CreateBuffer(SsrPass::GetAreaReadbackDesc());
+				if (readback)
+					slot.Readback = std::move(*readback);
+				else
+					frame.KeepFirstError(std::unexpected(std::move(readback).error()));
+			}
+			if (slot.Readback != nullptr)
+			{
+				commandList.copyBuffer(slot.Readback, 0, SsrArguments, 0, SsrArgumentsLayout::ByteSize);
+				PendingSsrArea.Recorded = true;
+			}
+		}
 		recording.EndPass(counters);
 		frame.KeepFirstError(recorded);
 	}
@@ -2659,7 +2743,10 @@ namespace Engine {
 						.Target = lit ? QuadBatchTarget::HdrLit : QuadBatchTarget::Hdr,
 						.Framebuffer = Targets.ForwardFramebuffer,
 						.Transform = viewProjection,
-						.Light = lit ? light : nullptr },
+						.Light = lit ? light : nullptr,
+						// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): sprites and tiles stand in the world, so they meet the
+						// view's fog (enabled or not).
+						.Fog = FogConstantsBuffer },
 					counters);
 				if (!drawn)
 					frame.KeepFirstError(std::unexpected(std::move(drawn).error()));

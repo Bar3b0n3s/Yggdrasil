@@ -324,6 +324,40 @@ namespace Engine {
 			history.PublishGpu({ .Available = true, .FrameIndex = 1, .Samples = { { .Name = "ForwardOpaque", .Milliseconds = 4.0 } } });
 			CHECK(history.GetLatest().GpuFrameIndex == 1);
 		}
+
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): the SSR area belongs to its completed frame, as the GPU timings
+		// do: a later CPU frame keeps it, an older sample cannot replace it, a frame that recorded no SSR makes it unavailable
+		// with its counts 0, and Reset forgets it.
+		TEST_CASE("RenderStats: the SSR area of a completed frame survives later CPU frames and is never replaced by an older one")
+		{
+			RenderStatsHistory history;
+			history.PublishCpu({ .Available = true, .FrameIndex = 20, .SsrHalfResolution = true });
+			CHECK_FALSE(history.GetLatest().SsrAreaAvailable);
+			history.PublishSsrArea({ .Available = true, .FrameIndex = 18, .Tiles = 600, .TracedTiles = 40, .TracedPixels = 2000 });
+			history.PublishCpu({ .Available = true, .FrameIndex = 21 });
+			RenderStats latest = history.GetLatest();
+			CHECK(latest.FrameIndex == 21);
+			CHECK_FALSE(latest.SsrHalfResolution);
+			CHECK(latest.SsrAreaAvailable);
+			CHECK(latest.SsrAreaFrameIndex == 18);
+			CHECK(latest.SsrTiles == 600);
+			CHECK(latest.SsrTracedTiles == 40);
+			CHECK(latest.SsrTracedPixels == 2000);
+			history.PublishSsrArea({ .Available = true, .FrameIndex = 17, .Tiles = 1, .TracedTiles = 1, .TracedPixels = 1 });
+			CHECK(history.GetLatest().SsrAreaFrameIndex == 18);
+			CHECK(history.GetLatest().SsrTracedTiles == 40);
+			history.PublishSsrArea({ .Available = false, .FrameIndex = 19, .Tiles = 600, .TracedTiles = 40, .TracedPixels = 2000 });
+			latest = history.GetLatest();
+			CHECK_FALSE(latest.SsrAreaAvailable);
+			CHECK(latest.SsrAreaFrameIndex == 19);
+			CHECK(latest.SsrTiles == 0);
+			CHECK(latest.SsrTracedTiles == 0);
+			CHECK(latest.SsrTracedPixels == 0);
+			history.Reset();
+			history.PublishSsrArea({ .Available = true, .FrameIndex = 2, .Tiles = 4, .TracedTiles = 1, .TracedPixels = 3 });
+			CHECK(history.GetLatest().SsrAreaFrameIndex == 2);
+			CHECK(history.GetLatest().SsrTracedPixels == 3);
+		}
 	}
 
 	TEST_SUITE("Renderer")

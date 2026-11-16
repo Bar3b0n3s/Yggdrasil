@@ -48,7 +48,12 @@
 //     RGB times its alpha (SrcAlpha / One) and the target's alpha stays (Zero / One), so additive quads draw the same image
 //     in any order (the Particles pass's Additive emitters).
 //   The six pipelines are created at Create (PipelineCount); HdrLit and Normals bind a second texture (QuadBatchInputs::Light
-//   and QuadDraw::NormalMap), so they have a binding layout of their own.
+//   and QuadDraw::NormalMap), so they have binding layouts of their own.
+// Fog (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 5): the Hdr, HdrLit and HdrAdditive targets meet the view's fog
+// (Renderer/Fog.h, Common/Fog.slang) at each fragment's batch-space position, which is then world space, when the record
+// passes the view's fog constants (QuadBatchInputs::Fog) and they are enabled: Hdr and HdrLit blend the colour toward the
+// fog's, HdrAdditive fades it; alpha is unchanged. A record without them draws exactly as before M32 (the batcher binds a
+// neutral buffer of its own); the Ldr, LdrDepth and Normals targets never fog.
 // Colour textures are sampled through their sRGB views, so the shader sees linear values; an 8-bit sRGB texel drawn with a
 // white colour reaches an Ldr target, or an Hdr one through the 2D colour path (RenderOutputSettings::PixelArt), unchanged.
 //
@@ -141,6 +146,9 @@ namespace Engine {
 		// M21 (C21.2): HdrLit's light accumulation (Lights2DLight, the framebuffer's size, in ShaderResource); required for
 		// HdrLit, ignored by the other targets.
 		nvrhi::ITexture* Light = nullptr;
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog constants (Shared/FogConstants.h), for quads whose
+		// batch space is world space; null draws without fog. Read by the Hdr, HdrLit and HdrAdditive targets only.
+		nvrhi::IBuffer* Fog = nullptr;
 	};
 
 	// A frame of a texture for ExpandNineSlice: its texel rectangle and its borders (the SpriteSheet frame's 9-slice borders).
@@ -209,9 +217,9 @@ namespace Engine {
 		QuadBatcher(const QuadBatcher&) = delete;
 		QuadBatcher& operator=(const QuadBatcher&) = delete;
 
-		// Creates the six pipelines (checked against their reflection), the two samplers, the white texture and the index
-		// buffer. `device` is a documented back-reference that outlives the batcher. Errors: those of PipelineFactory and the
-		// GraphicsDevice wrappers (Gpu: an out-of-memory creation, §8.14 item 7).
+		// Creates the six pipelines (checked against their reflection), the two samplers, the white texture, the index buffer
+		// and the neutral fog constants. `device` is a documented back-reference that outlives the batcher. Errors: those of
+		// PipelineFactory and the GraphicsDevice wrappers (Gpu: an out-of-memory creation, §8.14 item 7).
 		[[nodiscard]] static Result<Scope<QuadBatcher>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
 		// The layout descriptions of the six pipelines, in QuadBatchTarget's order, for "Shaders: LayoutsMatchReflection".

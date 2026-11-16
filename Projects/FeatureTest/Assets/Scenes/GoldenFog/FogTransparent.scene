@@ -1,0 +1,271 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "FogTransparent",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 2,
+		"SpriteRenderer": 1,
+		"Fog": 1
+	},
+	"Entities": [
+		{
+			"ID": "8a17a3820f730d60",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000202",
+					"Intensity": 0.8,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Fxaa"
+				}
+			}
+		},
+		{
+			"ID": "5ac47ce4040ec33e",
+			"Name": "Haze",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Fog": {
+					"Color": [0.55, 0.6, 0.66],
+					"AmbientTint": 0.5,
+					"Density": 0.12,
+					"StartDistance": 1.5,
+					"MaxOpacity": 1,
+					"HeightDensity": 0.2,
+					"HeightFalloff": 1,
+					"BaseHeight": 0,
+					"SunGlow": 0,
+					"SunGlowExponent": 8,
+					"FogSkybox": true
+				}
+			}
+		},
+		{
+			"ID": "b877998e8dd89587",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.5, 5],
+					"Rotation": [-0.043619387, 0, 0, 0.99904823],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "097948fbf4a78be5",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.3696438, -0.23911762, -0.09904576, 0.8923991],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "662851deaad905be",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [12, 1, 16]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["ddce4994ae3c1fbe"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "db6026712d4b5f24",
+			"Name": "Wall",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, -12],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [10, 4, 0.5]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["2b1fd6902455e57a"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "aef3c82fadab8d24",
+			"Name": "Pane",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.4, 1.2, -1.5],
+					"Rotation": [0, 0.17364818, 0, 0.9848077],
+					"Scale": [1.6, 2.4, 0.05]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["5ce37f1544f184bf"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "15ee40baf084344b",
+			"Name": "FarPane",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.2, 1.2, -7],
+					"Rotation": [0, -0.13052619, 0, 0.9914449],
+					"Scale": [1.6, 2.4, 0.05]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["5ce37f1544f184bf"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "89b473954ad7318b",
+			"Name": "Ember",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [2.2, 0.5, -3.5],
+					"Rotation": [0, 0.25881904, 0, 0.9659258],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["23e76f86294261ba"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "1315a7da21c38b63",
+			"Name": "Lantern",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0.2, 1.6, -4.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 1.5, 1.5]
+				},
+				"SpriteRenderer": {
+					"Sheet": null,
+					"Frame": 0,
+					"Texture": "000000000000018a",
+					"Color": [1, 0.75, 0.35, 1],
+					"FlipX": false,
+					"FlipY": false,
+					"PixelsPerUnit": 16,
+					"SortingLayer": "Default",
+					"OrderInLayer": 0,
+					"Lit": false,
+					"NormalMap": null
+				}
+			}
+		}
+	]
+}

@@ -11,13 +11,15 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
-from harness import REPOSITORY_ROOT
+from harness import REPOSITORY_ROOT, engine_client
 
 sys.path.insert(0, str(REPOSITORY_ROOT / "Scripts"))
 
 import Perf  # noqa: E402  (Scripts/ is on sys.path above)
 from Lib import perf  # noqa: E402
+from Lib.report import Console  # noqa: E402
 
 
 def capture_document(**changes: object) -> dict[str, object]:
@@ -108,6 +110,53 @@ class PerfTests(unittest.TestCase):
             self.assertIn(str(path), str(raised.exception))
             # A failed write leaves the earlier report in place.
             self.assertEqual(path.read_text(encoding="utf-8"), "not json")
+
+    def test_the_look_costs_sum_the_game_views_passes_against_a_baseline(self) -> None:
+        # M32 (Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5 and 6): the summed GPU time of the passes fog reaches,
+        # from the game view's completed frame only, and each sample with an effect less the median without it.
+        stats = {"views": [{"name": "scene", "gpuAvailable": True, "passes": []},
+                           {"name": "game", "gpuAvailable": True, "passes": [
+                               {"name": "ForwardOpaque", "gpuAvailable": True, "gpuMilliseconds": 1.5},
+                               {"name": "Skybox", "gpuAvailable": True, "gpuMilliseconds": 0.25},
+                               {"name": "Tonemap", "gpuAvailable": True, "gpuMilliseconds": 9.0},
+                               {"name": "SSR", "gpuAvailable": False, "gpuMilliseconds": 4.0}]}]}
+        view = Perf.game_view(stats)
+        self.assertEqual(Perf.summed_gpu_time(view, Perf.FOG_PASSES), 1.75)
+        self.assertIsNone(Perf.summed_gpu_time({"gpuAvailable": False, "passes": []}, Perf.FOG_PASSES))
+        self.assertEqual(Perf.game_view({"views": []}), {})
+        self.assertEqual(Perf.cost_samples([2.0, 2.5, 1.5], [1.0, 1.25, 0.75]), [1.0, 1.5, 0.5])
+        self.assertEqual(len(Perf.ssr_tile_names()), Perf.SSR_COLUMNS * Perf.SSR_ROWS)
+        self.assertEqual(sum(1 for op in Perf.ssr_floor_ops() if op["params"]["name"].startswith("Tile")), 35)
+        self.assertEqual(perf.BUDGETS["fog/FogPillars/gpuCostMs"], 0.5)
+
+    def test_the_fog_cost_measures_with_and_without_the_fog_in_one_opening_of_its_scene(self) -> None:
+        # M32's review: the capture opened FogPillars again after removing its Fog, which the editor refuses for the
+        # active scene, so the metric was never captured. The editor's refusal stands in a fake client here.
+        class FakeEditor:
+            def __init__(self) -> None:
+                self.active = ""
+                self.calls: list[str] = []
+
+            def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+                self.calls.append(method)
+                if method == "scene.open":
+                    if params["path"] == self.active:
+                        raise engine_client.EngineError(method, -32000, "already open as the active scene", {})
+                    self.active = params["path"]
+                return {}
+
+        class FixedSamples(Perf.Capture):
+            def play_samples(self, client: Any, passes: tuple[str, ...]) -> tuple[list[float], dict[str, Any]]:
+                fogged = "entity.update" not in client.calls
+                return ([1.25, 1.5, 1.0] if fogged else [1.0, 1.0, 1.0]), {}
+
+        capture = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        editor = FakeEditor()
+        capture.fog_cost(editor)
+        self.assertEqual(capture.warnings, [])
+        self.assertEqual(editor.calls, ["scene.open", "entity.update"])
+        self.assertEqual([metric.name for metric in capture.metrics], ["fog/FogPillars/gpuCostMs"])
+        self.assertEqual(capture.metrics[0].median, 0.25)
 
     def test_the_capture_reads_scene_names_gpu_passes_and_the_device_line(self) -> None:
         self.assertEqual(Perf.scene_name("Assets/Scenes/Golden/Bloom.scene"), "Golden/Bloom")

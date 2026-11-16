@@ -6,6 +6,7 @@
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
@@ -68,6 +69,7 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::ConstantBuffer(EnvironmentConstantsRegister),
 										nvrhi::BindingLayoutItem::ConstantBuffer(LightClusterConstantsRegister),
 										nvrhi::BindingLayoutItem::ConstantBuffer(ProbeConstantsRegister),
+										nvrhi::BindingLayoutItem::ConstantBuffer(FogConstantsRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(LightsRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ShadowCascadesRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ShadowAtlasRegister),
@@ -150,6 +152,7 @@ namespace Engine {
 					{ .Set = 0, .Register = ShadowConstantsRegister, .ByteSize = sizeof(ShadowConstants) },
 					{ .Set = 0, .Register = LightClusterConstantsRegister, .ByteSize = sizeof(LightClusterConstants) },
 					{ .Set = 0, .Register = ProbeConstantsRegister, .ByteSize = sizeof(ProbeConstants) },
+					{ .Set = 0, .Register = FogConstantsRegister, .ByteSize = sizeof(FogConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
 				},
 			};

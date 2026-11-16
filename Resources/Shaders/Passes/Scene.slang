@@ -16,8 +16,9 @@
 //     units) and image-based lighting: the environment's SH9 irradiance and prefiltered specular cube (split sum), or the
 //     constant ambient AmbientColor treated as a uniform environment without a map (Shared/EnvironmentConstants.h), replaced
 //     inside their boxes by the view's baked irradiance volumes and reflection probes (M26, Common/Probes.slang), with
-//     multi-bounce, specular and horizon occlusion from the material's occlusion; plus emission. Blend materials output the
-//     base colour's alpha for the transparent pass's blending.
+//     multi-bounce, specular and horizon occlusion from the material's occlusion; plus emission; then, in a fogged view, the
+//     fog in front of it (M32, Common/Fog.slang). Blend materials output the base colour's alpha for the transparent pass's
+//     blending.
 // Permutation ALPHA_MASK = 1 is the Mask materials' variant: both entry points drop the fragments below AlphaCutoff by
 // writing a zero SV_Coverage, which keeps the sample's colour and depth unwritten exactly as a discard would. A discard
 // compiles to OpDemoteToHelperInvocation for SPIR-V 1.6, which needs the shaderDemoteToHelperInvocation feature the device
@@ -49,6 +50,7 @@
 
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
@@ -88,6 +90,8 @@ TextureCubeArray<float> PointShadowMaps : register(t12, space0); // M23 (R-PLS):
 ConstantBuffer<ProbeConstants> Probes : register(b4, space0);
 StructuredBuffer<float4> IrradianceProbes : register(t13, space0);
 TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
+// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Common/Fog.slang), read by PSForward's Lit output.
+ConstantBuffer<FogConstants> Fog : register(b5, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -109,6 +113,8 @@ const uint DebugView = 0;
 #include "Common/LightLoop.slang"
 // The probes' indirect term over the declarations above (M26, Docs/Decisions/0037-m26-contract.md decision 16).
 #include "Common/Probes.slang"
+// The fog over the declarations above (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 3).
+#include "Common/Fog.slang"
 
 struct VertexInput
 {
@@ -515,6 +521,10 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 	radiance += irradiance * diffuseColor * saturate(float3(1.0) - multiScatter) * MultiBounceAmbientOcclusion(occlusion, diffuseColor);
 	radiance += prefiltered * multiScatter * (SpecularOcclusion(nDotV, occlusion, alpha) * HorizonOcclusion(reflection, surface.GeometricNormal));
 	radiance += surface.Emissive;
+	// M32: the fog in front of the surface, opaque or transparent (a transparent surface blends its fogged colour over the
+	// fogged surface behind it).
+	if (Fog.Enabled != 0)
+		radiance = ApplyFog(radiance, EvaluateFog(input.WorldPosition));
 
 	const float outputAlpha = Material.AlphaMode == MaterialAlphaModeBlend ? surface.BaseColor.a : 1.0;
 	return float4(radiance, outputAlpha);
