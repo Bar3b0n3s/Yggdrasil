@@ -20,11 +20,11 @@
 // validator reports the scene, entity, component and build codes below. Load diagnostics of scene files are reported under
 // these codes through MapLoadCode (ADR 0006 decision 35). M6 adds the asset codes of Engine/Asset/AssetDiagnostic.h, under
 // the same constants (every one but AssetUploadFailedCode and AssetBakeDeferredCode, which describe this process, not the
-// project; the deferred bake since World Tree brief 14): the registry's scan diagnostics with
-// their fixes (AssetRegistry::PlanFix applied as AssetEditCommand or AssetMoveCommand inside the fix transaction), the
-// asset manager's import diagnostics, ASSET_MISSING and ASSET_TYPE_MISMATCH for asset references in scene components,
-// materials and prefabs, PATH_CASE_MISMATCH, and PREFAB_MISSING_ASSET for an instance whose prefab asset is not registered.
-// M8 adds RENDER_LIGHT_LIMIT_EXCEEDED. M11 adds the physics codes of Engine/Physics/PhysicsDiagnostics.h:
+// project; the deferred bake since World Tree brief 14): the registry's scan diagnostics with their fixes
+// (AssetRegistry::PlanFix applied as AssetEditCommand or AssetMoveCommand inside the fix transaction), the asset manager's
+// import diagnostics, ASSET_MISSING and ASSET_TYPE_MISMATCH for asset references in scene components, materials and
+// prefabs, PATH_CASE_MISMATCH, and PREFAB_MISSING_ASSET for an instance whose prefab asset is not registered. M8 adds
+// RENDER_LIGHT_LIMIT_EXCEEDED. M11 adds the physics codes of Engine/Physics/PhysicsDiagnostics.h:
 // Scene/PhysicsValidation.h's ValidateScenePhysics runs on the open scene and on every scratch scene, with the layer table
 // of the project's PhysicsSettings, each diagnostic keeping its entity, component, field and subject (so its id);
 // PHYSICS_ADJACENT_STATIC_BODIES of the open scene is fixed by adding a Static RigidBody to the two bodies' nearest common

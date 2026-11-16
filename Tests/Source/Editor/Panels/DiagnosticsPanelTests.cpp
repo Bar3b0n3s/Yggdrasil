@@ -310,7 +310,7 @@ namespace Engine {
 			CHECK(request->Finding.empty());
 			CHECK(ResolveGraphEditorTarget(*request, read) == equal);
 
-			// A runtime error of the graph's text, at its line: the graph is finished first, since play refuses asset errors.
+			// A runtime error of the graph's text, at its line, once the graph is finished.
 			REQUIRE(client.Call("graph.removeNodes", Json{ { "graph", std::string(Path) }, { "nodes", Json::array({ equal }) } }));
 			editor.GetAssets().WaitIdle();
 			REQUIRE(editor.GetAssets().Reimport(*graph));

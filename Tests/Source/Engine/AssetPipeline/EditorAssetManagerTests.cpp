@@ -1710,6 +1710,42 @@ namespace Engine {
 			CHECK(manager.FindReferencedAssetErrors(scene({ overGood }), nullptr).empty());
 			CHECK(manager.FindReferencedAssetErrors(Json::object(), nullptr).empty());
 		}
+
+		TEST_CASE("EditorAssetManager: FindReferencedAssetErrors names the source in error of a sub-asset a document references")
+		{
+			// World Tree brief 14 (§12.4): a scene references a glTF's mesh, a sub-asset, while an import failure is recorded on
+			// the glTF, its source; the gate takes each sub-asset to its source.
+			Test::AssetTestFixture fixture;
+			EditorAssetManager& manager = fixture.GetManager();
+			CopyGltfFixtures(fixture, { "Box.glb" });
+			fixture.OpenProject(false);
+			const AssetHandle box = manager.Resolve("Assets/Models/Box.glb").value_or(AssetHandle());
+			REQUIRE(box.IsValid());
+			REQUIRE(manager.Load(box).has_value());
+			const AssetRecord* record = manager.GetRegistry().Find(box);
+			REQUIRE(record != nullptr);
+			const auto mesh = std::ranges::find(record->Metadata.SubAssets, AssetType::Mesh, &SubAssetEntry::Type);
+			REQUIRE(mesh != record->Metadata.SubAssets.end());
+			const AssetHandle meshHandle = mesh->Handle;
+
+			// The glTF's source breaks: its reimport fails, and the sub-asset stays registered with its last good version.
+			fixture.WriteProjectText("Assets/Models/Box.glb", "not a glTF");
+			{
+				const Test::ExpectLog failure(LogLevel::Error, "Assets/Models/Box.glb");
+				REQUIRE(manager.Refresh().has_value());
+			}
+			REQUIRE(CountDiagnostics(manager, AssetImportFailedCode, box) == 1);
+			Json entity = Json::object();
+			entity["ID"] = "00000000000000b1";
+			entity["Name"] = "Box";
+			entity["Components"]["MeshRenderer"]["Mesh"] = meshHandle.ToString();
+			Json document = Json::object();
+			document["Entities"] = Json::array({ entity });
+			const std::vector<AssetDiagnostic> errors = manager.FindReferencedAssetErrors(document, nullptr);
+			REQUIRE(errors.size() == 1);
+			CHECK(errors.front().Asset == box);
+			CHECK(errors.front().Code == AssetImportFailedCode);
+		}
 	}
 
 }

@@ -261,7 +261,8 @@ namespace Engine {
 				.Asset = source,
 				.Path = RelativeText(sourcePath),
 				.Message = std::format("the GPU bake of '{}' is deferred to the next editor with a GPU: this editor has no graphics device (--renderer none "
-									   "or no Vulkan device) and no cooked bake of it exists, so it does not load here",
+									   "or no Vulkan device) and no cooked bake of it exists, so it does not load here unless an earlier bake of it is "
+									   "still in use",
 					RelativeText(sourcePath)),
 				.Hint = error.GetHint(),
 				.Subject = {},
@@ -2307,14 +2308,16 @@ namespace Engine {
 		if (errors.empty())
 			return errors;
 		// Everything the document reaches: its references, each sub-asset's source, and what the dependency graph says each
-		// source references.
+		// source references. A Scene asset is a Scene.Load target (a Script field naming the next level), whose load fails in
+		// the script at run time like any other: it is neither reached nor followed, so the answer never depends on which
+		// scenes this session has imported.
 		std::set<AssetHandle> reached;
 		std::vector<AssetHandle> pending = Utils::CollectDocumentAssetReferences(document, *m_State->Specification.Registry, schemas);
 		while (!pending.empty())
 		{
 			const AssetHandle handle = pending.back();
 			pending.pop_back();
-			if (!reached.insert(handle).second)
+			if (GetAssetType(handle) == AssetType::Scene || !reached.insert(handle).second)
 				continue;
 			if (const std::optional<AssetRegistry::Location> location = m_State->Registry.Locate(handle); location.has_value())
 				pending.push_back(location->Record->Metadata.Handle);
@@ -2539,17 +2542,13 @@ namespace Engine {
 		return jobs.Submit([shared, ticket, queue, alive, serial, state, reload, context = state->GetTicketContext()]() mutable -> Result<AssetImportOutcome>
 		{
 			ImportOutput output = Utils::RunImport(*shared);
-			Result<AssetImportOutcome> outcome = AssetImportOutcome{
-				.Handle = shared->Metadata.Handle,
-				.SubAssets = Utils::MakeSubAssetEntries(output.Import.Import),
-				.Diagnostics = output.Import.Import.Diagnostics,
-				.FromCache = output.FromCache,
-			};
-			// As ApplyImport publishes it: a deferred GPU bake succeeds with its warning (World Tree brief 14).
-			if (output.Failure.has_value() && output.DeferredBake)
-				outcome->Diagnostics = { Utils::MakeDeferredBakeDiagnostic(shared->Metadata.Handle, shared->SourcePath, *output.Failure) };
-			else if (output.Failure.has_value())
-				outcome = std::unexpected(*output.Failure);
+			Result<AssetImportOutcome> outcome = output.Failure.has_value() ? Result<AssetImportOutcome>(std::unexpected(*output.Failure))
+																			: Result<AssetImportOutcome>(AssetImportOutcome{
+																				  .Handle = shared->Metadata.Handle,
+																				  .SubAssets = Utils::MakeSubAssetEntries(output.Import.Import),
+																				  .Diagnostics = output.Import.Import.Diagnostics,
+																				  .FromCache = output.FromCache,
+																			  });
 			queue->Post([output = std::move(output), ticket, alive, serial, state, reload, context = std::move(context)]() mutable
 			{
 				if (alive.expired())

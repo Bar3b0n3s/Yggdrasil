@@ -16,6 +16,7 @@
 #include "Engine/Asset/TilemapData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/AssetPipeline/Graph/GraphNodeLibrary.h"
+#include "Engine/AssetPipeline/Importers/EnvironmentImporter.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
@@ -33,6 +34,7 @@
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
+#include "Engine/Scene/Components/ReflectionProbeComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -1963,6 +1965,39 @@ end
 				CHECK(listed == (code != AssetUploadFailedCode && code != AssetBakeDeferredCode));
 			}
 			CHECK(std::find(codes.begin(), codes.end(), PrefabMissingAssetCode) != codes.end());
+		}
+
+		// World Tree brief 14 (§7.4): an editor without a graphics device (every test editor) defers the bake of a reflection
+		// probe's environment that no cache holds. The probe is baked already, so its PROBE_NOT_BAKED says the bake is deferred
+		// to an editor with a GPU and carries the GPU hint, never the hint to bake the lighting again, which cannot run here.
+		TEST_CASE("ProjectValidator: in an editor without a GPU a reflection probe whose environment bake is deferred names the deferral and the GPU hint")
+		{
+			Test::EditorTestFixture fixture("ValidatorDeferredProbe");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const Result<Buffer> hdr = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Environments/Gradient.hdr"));
+			REQUIRE_MESSAGE(hdr.has_value(), hdr.error().ToString());
+			const Result<VfsPath> path = VfsPath::Create("project", "Assets/Lighting/Scenes/Main/Probe.hdr");
+			REQUIRE(path.has_value());
+			REQUIRE(editor.WriteProjectFile(*path, *hdr).has_value());
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+			const AssetHandle data = editor.GetAssets().Resolve("Assets/Lighting/Scenes/Main/Probe.hdr").value_or(AssetHandle());
+			REQUIRE(data.IsValid());
+			ReflectionProbeComponent probe;
+			probe.Data = TypedAssetHandle<AssetType::Environment>(data);
+			editor.GetScene().CreateEntity("Probe").AddComponent<ReflectionProbeComponent>(std::move(probe));
+
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			const ProjectDiagnostic* deferred = FindDiagnostic(*report, ProbeNotBakedCode);
+			REQUIRE(deferred != nullptr);
+			CHECK(deferred->Severity == DiagnosticSeverity::Warning);
+			CHECK(deferred->Message.contains("deferred"));
+			CHECK(deferred->Hint == EnvironmentImporter::GpuHint);
+			// The deferral is no asset error (ASSET_BAKE_DEFERRED is no project.validate code).
+			CHECK(FindDiagnostic(*report, AssetImportFailedCode) == nullptr);
+			CHECK(FindDiagnostic(*report, AssetBakeDeferredCode) == nullptr);
 		}
 
 		TEST_CASE("ProjectValidator: more lights than the renderer shades per view is RENDER_LIGHT_LIMIT_EXCEEDED, a warning without a fix")

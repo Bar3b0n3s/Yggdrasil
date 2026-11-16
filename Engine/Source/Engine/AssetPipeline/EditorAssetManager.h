@@ -58,9 +58,12 @@
 // does, ASSET_IMPORT_FAILED) and then reports Unsupported with the hint "start the editor with a GPU once to bake this
 // environment". World Tree brief 14: that bake is deferred to the next editor with a GPU, not an asset error. The import
 // succeeds without an artifact, with the ASSET_BAKE_DEFERRED warning (the hint its hint) as its outcome's diagnostic and
-// the manager's; the attempt is remembered like a failure, so Load and GetCookedHash return the Unsupported error without
-// importing again until an input changes (the last good version, if any, stays in use), and GetState is Unloaded. Nothing
-// of it is cached: an editor with a GPU imports the source as usual and bakes it.
+// the manager's; the attempt is remembered like a failure, so, unless an earlier bake of it is still in use (a source or
+// settings change after a cooked bake loaded: Load, GetState and GetCookedHash then answer for that last good version),
+// Load and GetCookedHash return the Unsupported error without importing again until an input changes, and GetState is
+// Unloaded. Nothing of it is cached: an editor with a GPU imports the source as usual and bakes it. An editor that
+// deferred a bake keeps its remembered deferral after another editor with a GPU baked the environment into the shared
+// cache, until an input changes, a reimport or the project is opened again.
 //
 // Duplicated handles keep their original file (AssetRegistry::Scan's keeper rule). The manager passes the scan the
 // locations of the last session, which it keeps in the local, gitignored <CacheRoot>/AssetLocations.json (canonical
@@ -213,9 +216,10 @@ namespace Engine {
 		// reference through AssetRef values, found as the scene and prefab importers find them (a Script component's Fields
 		// typed by `schemas`, the editor's script field schemas; null: those are not followed), each sub-asset's source, and
 		// transitively what the dependency graph says each of them references (§7.5: a prefab's meshes and materials, a
-		// material's textures, a script's required scripts). Only the edges of the imports this editor has run are known, as
-		// are the errors themselves (an import that failed): an asset never imported here reaches nothing further. Built-ins
-		// reach nothing further either. Main thread.
+		// material's textures, a script's required scripts). A Scene asset (a Script field naming the next level, a
+		// Scene.Load target) is neither reached nor followed, so the answer never depends on which scenes this session has
+		// imported. Only the edges of the imports this editor has run are known, as are the errors themselves (an import that
+		// failed): an asset never imported here reaches nothing further. Built-ins reach nothing further either. Main thread.
 		[[nodiscard]] std::vector<AssetDiagnostic> FindReferencedAssetErrors(const Json& document, const IFieldSchemaSource* schemas) const;
 		// M13: latest attempted check, including failed imports; NotFound when no Script attempt is known. Copies owned
 		// ranges/fingerprint/root hash; no pointer into a worker or checker survives. A failed reimport updates this record

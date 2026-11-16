@@ -5,9 +5,9 @@ cooked bake is reused by an editor without a device (under its own handle, and f
 the same cache key) (Docs/Decisions/0013-m8-decisions.md decision 9), and since World Tree brief 14 (ADR 0042 decision
 2) an environment no cache holds imports there with its bake deferred to the next editor with a GPU, a warning with the
 hint to bake it once with a GPU and no asset error, so its scenes still play and test. M23
-(Docs/Decisions/0034-m23-contract.md decisions 14 and 18): an
-OpenEXR .exr imports the same way (EnvironmentImporter version 2), and its Compression import setting, Auto by default,
-stores the baked cubes as BC6H or, with None, as RGBA16F, both showing the same skybox.
+(Docs/Decisions/0034-m23-contract.md decisions 14 and 18): an OpenEXR .exr imports the same way (EnvironmentImporter
+version 2), and its Compression import setting, Auto by default, stores the baked cubes as BC6H or, with None, as
+RGBA16F, both showing the same skybox.
 """
 
 from __future__ import annotations
@@ -291,8 +291,11 @@ class EnvironmentTests(AutomationTestCase):
         info = client.call("asset.info", {"asset": environment["id"]})
         self.assertEqual(info["state"], "Unloaded", info)
         self.assertEqual([diagnostic["code"] for diagnostic in info["diagnostics"]], ["ASSET_BAKE_DEFERRED"], info)
+        # The deferral is no asset error, nor a project.validate code: it describes this editor, not the project.
         report = client.call("project.validate", {"scope": "project"})
-        self.assertNotIn("ASSET_IMPORT_FAILED", [diagnostic["code"] for diagnostic in report["diagnostics"]], report)
+        report_codes = [diagnostic["code"] for diagnostic in report["diagnostics"]]
+        self.assertNotIn("ASSET_IMPORT_FAILED", report_codes, report)
+        self.assertNotIn("ASSET_BAKE_DEFERRED", report_codes, report)
 
         # The scene that uses the environment plays.
         self.set_environment(client, environment["id"])

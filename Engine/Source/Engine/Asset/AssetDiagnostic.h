@@ -67,8 +67,9 @@ namespace Engine {
 	// Warning, editor only (never a project.validate code; World Tree brief 14, Architecture §7.4): an environment needs a
 	// GPU bake that this editor cannot run (no graphics device: --renderer none or no Vulkan device) and no cooked bake of it
 	// exists, so its import is deferred to the next editor with a GPU, which bakes it. It is not an asset error: until then
-	// the environment does not load here (an editor without a device draws nothing anyway), and the hint says to start
-	// the editor with a GPU once. A source that cannot be read or decoded is ASSET_IMPORT_FAILED instead.
+	// the environment does not load here unless an earlier bake of it is still in use (an editor without a device draws
+	// nothing anyway), and the hint says to start the editor with a GPU once. A source that cannot be read or decoded is
+	// ASSET_IMPORT_FAILED instead.
 	inline constexpr std::string_view AssetBakeDeferredCode = "ASSET_BAKE_DEFERRED";
 
 	// One asset diagnostic. Plain value; thread-compatible.

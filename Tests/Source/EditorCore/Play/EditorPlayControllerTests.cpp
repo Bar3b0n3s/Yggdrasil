@@ -8,6 +8,7 @@
 #include "EditorCore/Play/EditorPlayController.h"
 #include "EditorCore/Scripting/EditorScriptService.h"
 #include "EditorCore/Viewport/EditorViewportState.h"
+#include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/EnvironmentData.h"
@@ -45,6 +46,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -56,6 +58,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 // The editor's play mode (Architecture §5.6, §12.4; Docs/Decisions/0012-m7-decisions.md decisions 3 and 11).
 
@@ -156,6 +159,46 @@ namespace Engine {
 		REQUIRE(editor.WriteProjectFile(*editor.GetScenePath(), std::as_bytes(std::span(text->data(), text->size()))).has_value());
 		REQUIRE(editor.MarkSceneSaved(*editor.GetScenePath()).has_value());
 		REQUIRE(editor.GetAssets().Refresh().has_value());
+	}
+
+	// Writes a texture whose source does not import (its failure is the expected Error log) and "Assets/Materials/OverBroken.material"
+	// over it, which imports, so the dependency graph knows the material's texture; returns the material's handle.
+	static AssetHandle WritePlayMaterialOverBrokenTexture(EditorContext& editor)
+	{
+		WritePlayProjectText(editor, "Assets/Textures/Broken.png", "not a png");
+		{
+			const Test::ExpectLog texture(LogLevel::Error, "Assets/Textures/Broken.png");
+			REQUIRE(editor.GetAssets().Refresh().has_value());
+		}
+		const AssetHandle texture = editor.GetAssets().Resolve("Assets/Textures/Broken.png").value_or(AssetHandle());
+		REQUIRE(texture.IsValid());
+		WritePlayProjectText(editor, "Assets/Materials/OverBroken.material",
+			std::format(R"({{"Format": "Material", "Version": 2, "BaseColorMap": "{}"}})", texture.ToString()));
+		REQUIRE(editor.GetAssets().Refresh().has_value());
+		const AssetHandle material = editor.GetAssets().Resolve("Assets/Materials/OverBroken.material").value_or(AssetHandle());
+		REQUIRE(material.IsValid());
+		REQUIRE(editor.GetAssets().GetDependencyGraph().GetDependencies(material) == std::vector<AssetHandle>{ texture });
+		return material;
+	}
+
+	// Writes the Behaviour `source` to project-relative `path` through the script service; returns its handle.
+	static AssetHandle WritePlayScript(EditorContext& editor, std::string_view path, std::string_view source)
+	{
+		const Result<VfsPath> file = VfsPath::Create("project", path);
+		REQUIRE(file.has_value());
+		REQUIRE(editor.GetScriptService() != nullptr);
+		const auto written = editor.GetScriptService()->Write(*file, source);
+		REQUIRE_MESSAGE(written.has_value(), (written ? std::string() : written.error().ToString()));
+		return written->Script;
+	}
+
+	// Adds an entity `name` to the open scene whose one Script slot runs `script` with its asset field `field` set to `asset`.
+	static void AddPlayScriptField(EditorContext& editor, std::string name, AssetHandle script, const std::string& field, AssetHandle asset)
+	{
+		ScriptSlot slot;
+		slot.Script.SetHandle(script);
+		slot.Fields[field] = VariantValue(Json(asset.ToString()));
+		editor.GetScene().CreateEntity(std::move(name)).AddComponent<ScriptComponent>(ScriptComponent{ { std::move(slot) } });
 	}
 
 	// Stores what an editor with a GPU stores in Library/Cache for the environment `source` of `bytes` with the default import
@@ -1091,21 +1134,13 @@ return Script.Define("Host", Host)
 			EditorPlayController& play = editor.GetPlay();
 			// A material whose source does not import, and a texture whose source does not import under a material that does.
 			WritePlayProjectText(editor, "Assets/Materials/Broken.material", "{ \"Format\": \"Material\", ");
-			WritePlayProjectText(editor, "Assets/Textures/Broken.png", "not a png");
 			{
 				const Test::ExpectLog material(LogLevel::Error, "Assets/Materials/Broken.material");
-				const Test::ExpectLog texture(LogLevel::Error, "Assets/Textures/Broken.png");
 				REQUIRE(assets.Refresh().has_value());
 			}
 			const AssetHandle brokenMaterial = assets.Resolve("Assets/Materials/Broken.material").value_or(AssetHandle());
-			const AssetHandle brokenTexture = assets.Resolve("Assets/Textures/Broken.png").value_or(AssetHandle());
 			REQUIRE(brokenMaterial.IsValid());
-			REQUIRE(brokenTexture.IsValid());
-			WritePlayProjectText(editor, "Assets/Materials/OverBroken.material",
-				std::format(R"({{"Format": "Material", "Version": 2, "BaseColorMap": "{}"}})", brokenTexture.ToString()));
-			REQUIRE(assets.Refresh().has_value());
-			const AssetHandle overBroken = assets.Resolve("Assets/Materials/OverBroken.material").value_or(AssetHandle());
-			REQUIRE(overBroken.IsValid());
+			const AssetHandle overBroken = WritePlayMaterialOverBrokenTexture(editor);
 			REQUIRE(assets.HasErrorDiagnostics());
 
 			// A scene that references none of them plays.
@@ -1125,11 +1160,20 @@ return Script.Define("Host", Host)
 			CHECK(refused.error().GetMessageText().find("Assets/Textures/Broken.png") != std::string::npos);
 			CHECK(refused.error().GetMessageText().find("Assets/Scenes/Textured.scene") != std::string::npos);
 			CHECK_FALSE(play.IsPlaying());
-			// So is its recording, the path input.record and input.replay take (ReplaceSession), while the clean scene's file
-			// plays and records with the textured scene open.
+			// So are its recording (input.record's StartRecording) and its replay (input.replay's StartReplay), each of which runs
+			// the gate itself, while the clean scene's file plays and records with the textured scene open.
 			const Status recordingRefused = play.StartRecording(PlayStartOptions{ .Lockstep = true, .LockstepOwner = 7, .ScenePath = "Assets/Scenes/Textured.scene" }, false);
 			REQUIRE_FALSE(recordingRefused.has_value());
 			CHECK(recordingRefused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK_FALSE(play.IsPlaying());
+			ReplayHeader replay;
+			replay.Scene.Handle = assets.Resolve("Assets/Scenes/Textured.scene").value_or(AssetHandle());
+			REQUIRE(replay.Scene.Handle.IsValid());
+			replay.Parameters = VariantValue(Json::object());
+			const Status replayRefused = play.StartReplay(replay, 7);
+			REQUIRE_FALSE(replayRefused.has_value());
+			CHECK(replayRefused.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(replayRefused.error().GetMessageText().find("Assets/Textures/Broken.png") != std::string::npos);
 			CHECK_FALSE(play.IsPlaying());
 			REQUIRE(play.Start(PlayStartOptions{ .ScenePath = "Assets/Scenes/Clean.scene" }).has_value());
 			REQUIRE(play.Stop().has_value());
@@ -1138,22 +1182,87 @@ return Script.Define("Host", Host)
 
 			// A Script field that names the material in error refuses its scene too: the gate reads the fields with the project's
 			// script field schemas.
-			const Result<VfsPath> scriptPath = VfsPath::Create("project", "Assets/Scripts/Painter.luau");
-			REQUIRE(scriptPath.has_value());
-			REQUIRE(editor.GetScriptService() != nullptr);
-			const auto written = editor.GetScriptService()->Write(*scriptPath, "local Painter = {Fields = {Look = Field.Asset(\"Material\")}}\n"
-																			   "return Script.Define(\"Painter\", Painter)\n");
-			REQUIRE_MESSAGE(written.has_value(), (written ? std::string() : written.error().ToString()));
+			const AssetHandle painter = WritePlayScript(editor, "Assets/Scripts/Painter.luau",
+				"local Painter = {Fields = {Look = Field.Asset(\"Material\")}}\nreturn Script.Define(\"Painter\", Painter)\n");
 			fixture.CreateAndOpenScene("Assets/Scenes/Painted.scene");
-			ScriptSlot painter;
-			painter.Script.SetHandle(written->Script);
-			painter.Fields["Look"] = VariantValue(Json(brokenMaterial.ToString()));
-			editor.GetScene().CreateEntity("Painter").AddComponent<ScriptComponent>(ScriptComponent{ { std::move(painter) } });
+			AddPlayScriptField(editor, "Painter", painter, "Look", brokenMaterial);
 			SaveOpenPlayScene(editor);
 			const Status painted = play.Start({});
 			REQUIRE_FALSE(painted.has_value());
 			CHECK(painted.error().GetCode() == ErrorCode::InvalidState);
 			CHECK(painted.error().GetMessageText().find("Assets/Materials/Broken.material") != std::string::npos);
+		}
+
+		// World Tree brief 14 (§12.4): the gate checks what play.start plays, the open scene with its unsaved edits, never its
+		// saved file: an unsaved reference to an asset in error refuses play, and an unsaved edit that removes the saved file's
+		// reference lets it play.
+		TEST_CASE("EditorPlayController: the play gate reads the open scene's unsaved edits, a reference they add and one they remove")
+		{
+			Test::EditorTestFixture fixture("PlayAssetGateUnsaved");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			EditorPlayController& play = editor.GetPlay();
+			const AssetHandle overBroken = WritePlayMaterialOverBrokenTexture(editor);
+
+			// Saved without the reference, then given it without saving: refused.
+			fixture.CreateAndOpenScene("Assets/Scenes/Added.scene");
+			SaveOpenPlayScene(editor);
+			AddPlayBox(editor, { overBroken });
+			const Status added = play.Start({});
+			REQUIRE_FALSE(added.has_value());
+			CHECK(added.error().GetCode() == ErrorCode::InvalidState);
+			CHECK(added.error().GetMessageText().find("Assets/Textures/Broken.png") != std::string::npos);
+			CHECK_FALSE(play.IsPlaying());
+
+			// Saved with the reference, then edited without it and not saved: plays.
+			fixture.CreateAndOpenScene("Assets/Scenes/Removed.scene");
+			AddPlayBox(editor, { overBroken });
+			SaveOpenPlayScene(editor);
+			REQUIRE_FALSE(play.Start({}).has_value());
+			const Entity box = editor.GetScene().FindEntityByPath("/Box");
+			REQUIRE(box.IsValid());
+			box.Patch<MeshRendererComponent>([](MeshRendererComponent& renderer)
+			{
+				renderer.Materials.clear();
+			});
+			REQUIRE(play.Start({}).has_value());
+			REQUIRE(play.Stop().has_value());
+		}
+
+		// World Tree brief 14's review: a Scene asset is a Scene.Load target (a Script field naming the next level), so the gate
+		// neither checks nor follows it. Before the fix, once this editor had imported the next level, the gate followed its
+		// references and refused the first level for the next level's asset in error, so the answer depended on which scenes
+		// the session had loaded.
+		TEST_CASE("EditorPlayController: the play gate does not follow a scene a Script field names, so only the scene that uses the asset in error is refused")
+		{
+			Test::EditorTestFixture fixture("PlayAssetGateNextLevel");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			EditorAssetManager& assets = editor.GetAssets();
+			EditorPlayController& play = editor.GetPlay();
+			const AssetHandle overBroken = WritePlayMaterialOverBrokenTexture(editor);
+
+			// The next level uses the material over the broken texture, and the editor has imported it.
+			fixture.CreateAndOpenScene("Assets/Scenes/Level2.scene");
+			AddPlayBox(editor, { overBroken });
+			SaveOpenPlayScene(editor);
+			const AssetHandle level2 = assets.Resolve("Assets/Scenes/Level2.scene").value_or(AssetHandle());
+			REQUIRE(level2.IsValid());
+			REQUIRE(assets.Load(level2).has_value());
+			const std::vector<AssetHandle> level2References = assets.GetDependencyGraph().GetDependencies(level2);
+			REQUIRE(std::ranges::find(level2References, overBroken) != level2References.end());
+			REQUIRE_FALSE(play.Start({}).has_value());
+
+			// The first level names the next one in a Script field: it plays, opened or as play.start's file.
+			const AssetHandle chain = WritePlayScript(editor, "Assets/Scripts/Chain.luau",
+				"local Chain = {Fields = {NextLevel = Field.Asset(\"Scene\")}}\nreturn Script.Define(\"Chain\", Chain)\n");
+			fixture.CreateAndOpenScene("Assets/Scenes/Level1.scene");
+			AddPlayScriptField(editor, "Game", chain, "NextLevel", level2);
+			SaveOpenPlayScene(editor);
+			REQUIRE(play.Start({}).has_value());
+			REQUIRE(play.Stop().has_value());
+			REQUIRE(play.Start(PlayStartOptions{ .ScenePath = "Assets/Scenes/Level1.scene" }).has_value());
+			REQUIRE(play.Stop().has_value());
 		}
 
 		// World Tree brief 14 (ADR 0042 decision 2): the state hash never depends on whether a bake exists, since an environment
@@ -1206,6 +1315,11 @@ return Script.Define("Host", Host)
 			CHECK(reimported->FromCache);
 			CHECK(reimported->Diagnostics.empty());
 			REQUIRE(assets.GetState(sky) == AssetState::Loaded);
+			// The successful reimport cleared the deferral's warning in this session.
+			CHECK(std::ranges::none_of(assets.GetDiagnostics(), [sky](const AssetDiagnostic& diagnostic)
+			{
+				return diagnostic.Asset == sky && diagnostic.Code == AssetBakeDeferredCode;
+			}));
 			CHECK(play60Ticks() == deferred);
 		}
 

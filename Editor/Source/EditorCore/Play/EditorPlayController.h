@@ -180,9 +180,10 @@ namespace Engine {
 		// one, or ScenePath resolved, read and parsed. Then the asset gate (§12.4; World Tree brief 14): InvalidState when
 		// that scene (the open one with its unsaved edits, or the file) references an asset in error, directly or through
 		// prefabs, materials, required scripts or its Script fields' assets (EditorAssetManager::FindReferencedAssetErrors),
-		// naming the first; an asset in error that it does not reference refuses nothing. While an asset is in error the gate
-		// loads the project's scripts for their field schemas, as the session would; otherwise it reads nothing. Start,
-		// StartRecording and StartReplay all run it, so ReplaceSession checks no asset itself. Nothing changes on error.
+		// naming the first; an asset in error that it does not reference refuses nothing, nor does one that only another scene
+		// it names (a Scene.Load target) references. While an asset is in error the gate loads the project's scripts for their
+		// field schemas, as the session would; otherwise it reads nothing. Start, StartRecording and StartReplay all run it,
+		// so ReplaceSession checks no asset itself. Nothing changes on error.
 		[[nodiscard]] Status ValidatePlayRequest(const PlayStartOptions& options) const;
 		[[nodiscard]] Status CheckPlayScripts(const ProjectSettings& project);
 		[[nodiscard]] Status ReplaceSession(const PlayStartOptions& options, ProjectSettings project);

@@ -39,8 +39,11 @@ namespace Engine {
 
 	// The probe checks over `scene`: every effectively enabled entity's IrradianceVolume, then its ReflectionProbe, in
 	// canonical entity order, whose Data is null or does not load through `assets` (a missing asset, a failed import or
-	// another type) is PROBE_NOT_BAKED. Loads the probes' data (the editor's asset manager imports what it has not); main
-	// thread.
+	// another type) is PROBE_NOT_BAKED, with the hint to bake the scene's lighting. World Tree brief 14 (§7.4): a
+	// ReflectionProbe whose Data load is Unsupported, an environment whose GPU bake an editor without a graphics device
+	// deferred, is baked already, so its issue says the bake is deferred to an editor with a GPU and carries the load's hint
+	// (start the editor with a GPU once) instead. Loads the probes' data (the editor's asset manager imports what it has
+	// not); main thread.
 	[[nodiscard]] std::vector<ProbeSceneIssue> FindProbeSceneIssues(const Scene& scene, AssetManager& assets);
 
 }
