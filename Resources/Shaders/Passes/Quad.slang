@@ -26,9 +26,8 @@
 //
 // M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): PSHdr and PSHdrLit, whose batch space is world space (the Sprites stage's
 // sprites and tilemaps), meet the view's fog (Fog, b1; Common/Fog.slang) at the fragment's batch-space position when the
-// fog is enabled and Quad.FogMode asks: QuadFogModeBlend blends the colour toward the fog's, QuadFogModeFade (the additive
-// pipeline's) fades it, alpha unchanged either way. Both take VSLit's outputs, which carry that position (the Hdr and
-// HdrAdditive pipelines draw with VSLit, whose clip position is VSMain's).
+// fog is enabled and Quad.FogMode asks (QuadFogModeBlend): the colour blends toward the fog's, alpha unchanged. Both take
+// VSLit's outputs, which carry that position (the Hdr pipeline draws with VSLit, whose clip position is VSMain's).
 
 #include "Shared/FogConstants.h"
 #include "Shared/QuadVertex.h"
@@ -101,7 +100,7 @@ float4 ApplyQuadFog(float4 shaded, float3 worldPosition)
 	if (Fog.Enabled == 0 || Quad.FogMode == QuadFogModeNone)
 		return shaded;
 	const float4 fog = EvaluateFog(worldPosition);
-	return float4(Quad.FogMode == QuadFogModeFade ? ApplyFogAdditive(shaded.rgb, fog) : ApplyFog(shaded.rgb, fog), shaded.a);
+	return float4(ApplyFog(shaded.rgb, fog), shaded.a);
 }
 
 [shader("fragment")]

@@ -627,8 +627,9 @@ namespace Engine {
 			GraphicsDevice& device = gpu.GetDevice();
 			Result<Scope<QuadBatcher>> batcher = QuadBatcher::Create(device, gpu.GetPipelines());
 			REQUIRE_MESSAGE(batcher.has_value(), batcher.error().ToString());
-			// M18's Hdr and Ldr, M21's HdrLit and Normals, M22's LdrDepth and M26's HdrAdditive.
-			CHECK((*batcher)->GetPipelineCount() == 6);
+			// M18's Hdr and Ldr, M21's HdrLit and Normals and M22's LdrDepth (M26's HdrAdditive was removed at M33's merge,
+			// Docs/Decisions/0048-m33-particle-look.md decision 10).
+			CHECK((*batcher)->GetPipelineCount() == 5);
 			nvrhi::TextureDesc colorDesc;
 			colorDesc.width = 8;
 			colorDesc.height = 4;
@@ -688,97 +689,12 @@ namespace Engine {
 			device.WaitForIdle();
 		}
 
-		TEST_CASE("QuadBatcher: an HdrAdditive record adds colour times alpha, keeps the target's alpha and is tested against SceneDepth")
-		{
-			// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7, stream P-B): HdrAdditive is Hdr's target, fragment
-			// and depth test (reverse-Z, GreaterOrEqual, no depth writes) with additive blending, the additive particles'
-			// pipeline. Over SceneColor cleared to (0.5, 0.25, 0, 0.75) and SceneDepth cleared to 0.5, the quad at depth 0.25
-			// (farther) is hidden, and the two overlapping quads at 0.75 (nearer) each add their RGB times their alpha in either
-			// order, leaving the target's alpha; an Hdr record of the same quads blends them over each other instead.
-			Test::HeadlessGpuFixture gpu;
-			ENGINE_REQUIRE_GPU(gpu);
-			GraphicsDevice& device = gpu.GetDevice();
-			Result<Scope<QuadBatcher>> batcher = QuadBatcher::Create(device, gpu.GetPipelines());
-			REQUIRE_MESSAGE(batcher.has_value(), batcher.error().ToString());
-			nvrhi::TextureDesc colorDesc;
-			colorDesc.width = 8;
-			colorDesc.height = 4;
-			colorDesc.format = SceneColorFormat;
-			colorDesc.isRenderTarget = true;
-			colorDesc.isShaderResource = true;
-			colorDesc.initialState = nvrhi::ResourceStates::RenderTarget;
-			colorDesc.keepInitialState = true;
-			colorDesc.debugName = "QuadBatcherTests.AdditiveColor";
-			nvrhi::TextureDesc depthDesc = colorDesc;
-			depthDesc.format = SceneDepthFormat;
-			depthDesc.isShaderResource = false;
-			depthDesc.initialState = nvrhi::ResourceStates::DepthWrite;
-			depthDesc.debugName = "QuadBatcherTests.AdditiveDepth";
-			Result<nvrhi::TextureHandle> color = device.CreateTexture(colorDesc);
-			Result<nvrhi::TextureHandle> depth = device.CreateTexture(depthDesc);
-			REQUIRE(color.has_value());
-			REQUIRE(depth.has_value());
-			Result<nvrhi::FramebufferHandle> framebuffer = device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(*color).setDepthAttachment(*depth));
-			REQUIRE(framebuffer.has_value());
-			CHECK(QuadBatcher::GetFramebufferInfo(QuadBatchTarget::HdrAdditive) == QuadBatcher::GetFramebufferInfo(QuadBatchTarget::Hdr));
-			const auto atDepth = [](float minX, float depthValue, glm::vec4 emitted)
-			{
-				QuadDraw draw = MakePixelQuad(glm::vec2(minX, 0.0f), glm::vec2(minX + 4.0f, 4.0f), glm::vec2(0.0f), glm::vec2(1.0f), nullptr);
-				for (glm::vec3& corner : draw.Corners)
-					corner.z = depthValue;
-				draw.Color = emitted;
-				return draw;
-			};
-			PassBindingCache bindings;
-			const auto render = [&device, &batcher, &bindings, &color, &depth, &framebuffer](std::span<const QuadDraw> quads, QuadBatchTarget target)
-			{
-				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
-				REQUIRE(list.has_value());
-				(*list)->open();
-				(*list)->clearTextureFloat(*color, nvrhi::AllSubresources, nvrhi::Color(0.5f, 0.25f, 0.0f, 0.75f));
-				(*list)->clearDepthStencilTexture(*depth, nvrhi::AllSubresources, true, 0.5f, false, 0);
-				RenderPassCounters counters;
-				const Result<uint32_t> recorded = (*batcher)->Record(**list, bindings,
-					{ .Quads = quads, .Target = target, .Framebuffer = *framebuffer, .Transform = MakeQuadPixelTransform(8, 4) }, counters);
-				(*list)->close();
-				device.ExecuteCommandList(**list);
-				REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
-				CHECK(*recorded == quads.size());
-				Readback readback(device);
-				Result<Image> image = readback.ReadTexture(**color);
-				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
-				return std::move(*image);
-			};
-			const auto radiance = [](const Image& image, uint32_t x, uint32_t y)
-			{
-				const std::span<const std::byte> texel = image.GetRow(y).subspan(static_cast<size_t>(x) * 8, 8);
-				std::array<uint16_t, 4> halves{};
-				std::memcpy(halves.data(), texel.data(), sizeof(halves));
-				return glm::vec4(glm::unpackHalf1x16(halves[0]), glm::unpackHalf1x16(halves[1]), glm::unpackHalf1x16(halves[2]), glm::unpackHalf1x16(halves[3]));
-			};
-			const QuadDraw hidden = atDepth(0.0f, 0.25f, glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
-			const QuadDraw bright = atDepth(4.0f, 0.75f, glm::vec4(1.0f, 0.5f, 0.25f, 0.5f));
-			const QuadDraw dim = atDepth(4.0f, 0.75f, glm::vec4(0.5f, 1.0f, 0.5f, 0.25f));
-			const std::array<QuadDraw, 3> forward = { hidden, bright, dim };
-			const std::array<QuadDraw, 3> backward = { dim, bright, hidden };
-			const Image added = render(forward, QuadBatchTarget::HdrAdditive);
-			const glm::vec4 clear(0.5f, 0.25f, 0.0f, 0.75f);
-			CHECK(radiance(added, 1, 1) == clear);
-			// (0.5, 0.25, 0) + (1, 0.5, 0.25) * 0.5 + (0.5, 1, 0.5) * 0.25, alpha 0.75 kept.
-			CHECK(radiance(added, 6, 2) == glm::vec4(1.125f, 0.75f, 0.25f, 0.75f));
-			const Image reordered = render(backward, QuadBatchTarget::HdrAdditive);
-			CHECK(reordered.Pixels == added.Pixels);
-			// Straight alpha (Hdr): the dim quad over the bright one over the clear colour differs.
-			const Image blended = render(forward, QuadBatchTarget::Hdr);
-			CHECK(radiance(blended, 6, 2) != radiance(added, 6, 2));
-			device.WaitForIdle();
-		}
-
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): with the view's fog constants, an Hdr quad's colour blends toward
-		// the fog's colour by the fog's amount at its batch-space (world) position and an HdrAdditive one fades by it, alpha
-		// unchanged; a record without the fog, or with it disabled, draws as before. The fog: distance fog of 2 per metre seen
-		// from (0, 0, 2) down -Z, so a quad at depth 0.75 lies 1.25 m deep and its amount is 1 - e^(-2.5).
-		TEST_CASE("QuadBatcher: Hdr quads blend toward the view's fog and HdrAdditive ones fade, only with the fog enabled")
+		// the fog's colour by the fog's amount at its batch-space (world) position, alpha unchanged; a record without the fog, or
+		// with it disabled, draws as before. The fog: distance fog of 2 per metre seen from (0, 0, 2) down -Z, so a quad at depth
+		// 0.75 lies 1.25 m deep and its amount is 1 - e^(-2.5). (M32's HdrAdditive fade went with that pipeline at M33's merge,
+		// Docs/Decisions/0048-m33-particle-look.md decision 10; the Particles program's additive fade has its own case.)
+		TEST_CASE("QuadBatcher: Hdr quads blend toward the view's fog, only with the fog enabled")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
@@ -870,18 +786,12 @@ namespace Engine {
 			CHECK(near(radiance(blended, 6, 2), glm::vec4(fogged, 1.0f)));
 			CHECK(radiance(blended, 1, 1) == clear);
 
-			const glm::vec4 glowing(1.0f, 0.5f, 0.25f, 0.5f);
-			const std::array<QuadDraw, 1> additive = { atDepth(4.0f, 0.75f, glowing) };
-			const Image faded = render(additive, QuadBatchTarget::HdrAdditive, *fogBuffer, fog);
-			CHECK(near(radiance(faded, 6, 2), glm::vec4(glm::vec3(clear) + glm::vec3(glowing) * (1.0f - amount) * 0.5f, clear.a)));
-
 			// Without the view's fog, or with it disabled, the quads draw as they did before M32.
 			const Image plain = render(opaque, QuadBatchTarget::Hdr, nullptr, fog);
 			CHECK(radiance(plain, 6, 2) == emitted);
 			FogConstants disabled = fog;
 			disabled.Enabled = 0;
 			CHECK(render(opaque, QuadBatchTarget::Hdr, *fogBuffer, disabled).Pixels == plain.Pixels);
-			CHECK(render(additive, QuadBatchTarget::HdrAdditive, nullptr, fog).Pixels == render(additive, QuadBatchTarget::HdrAdditive, *fogBuffer, disabled).Pixels);
 			device.WaitForIdle();
 		}
 	}

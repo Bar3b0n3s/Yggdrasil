@@ -25,17 +25,16 @@ namespace Engine {
 		Float4 Color;
 	};
 
-	// QuadConstants::FogMode values (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 5): how the Hdr, HdrLit and HdrAdditive
-	// entries meet the view's fog (Common/Fog.slang) when its FogConstants::Enabled is set: not at all, blended toward the fog's
-	// colour, or faded by its amount (additive quads, whose fog colour would otherwise be added twice).
+	// QuadConstants::FogMode values (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 5): how the Hdr and HdrLit entries meet
+	// the view's fog (Common/Fog.slang) when its FogConstants::Enabled is set: not at all, or blended toward the fog's colour.
+	// (M32's third mode, a fade for the additive quads, went with M26's HdrAdditive pipeline at M33's merge,
+	// Docs/Decisions/0048-m33-particle-look.md decision 10: the Particles program fades additive particles itself.)
 #if defined(ENGINE_SHADER)
 	static const uint QuadFogModeNone = 0;
 	static const uint QuadFogModeBlend = 1;
-	static const uint QuadFogModeFade = 2;
 #else
 inline constexpr uint32_t QuadFogModeNone = 0;
 inline constexpr uint32_t QuadFogModeBlend = 1;
-inline constexpr uint32_t QuadFogModeFade = 2;
 #endif
 
 	// The push constants of the Quad program: the batch's space to clip space (clip = mul(Transform, float4(Position, 1))) and,
@@ -43,9 +42,9 @@ inline constexpr uint32_t QuadFogModeFade = 2;
 	// normal map: 1 then, 0 for the flat normal; and, since M23's milestone review (Docs/Decisions/0034-m23-contract.md,
 	// "Milestone review" item 1), whether that normal map stores x and y only (1: a BC5 texture, or the decode fallback's
 	// RGBA8 copy of one, whose z the entry reconstructs as Scene.slang does), 0 for an RGB normal map. The other entries
-	// ignore both, and the batcher leaves them 0. M32: FogMode, a QuadFogMode value for the Hdr, HdrLit and HdrAdditive
-	// entries, whose batch space is then world space (the Sprites stage's); the other entries ignore it, and the batcher
-	// leaves it QuadFogModeNone for a record without the view's fog (QuadBatchInputs::Fog).
+	// ignore both, and the batcher leaves them 0. M32: FogMode, a QuadFogMode value for the Hdr and HdrLit entries, whose
+	// batch space is then world space (the Sprites stage's); the other entries ignore it, and the batcher leaves it
+	// QuadFogModeNone for a record without the view's fog (QuadBatchInputs::Fog).
 	struct QuadConstants
 	{
 		Float4x4 Transform;

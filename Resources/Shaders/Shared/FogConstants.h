@@ -13,9 +13,10 @@ namespace Engine {
 	// The view's fog (M32, Docs/Decisions/0047-m32-fog-ssr.md decisions 3 and 5; Renderer/Fog.h, Common/Fog.slang): one
 	// constant buffer per view, written by the scene renderer with the other per-view constants from the snapshot's RenderFog
 	// (MakeFogConstants), and read by the forward passes (b5 of the forward view layout), the terrain, the skybox (b5), the SSR
-	// composite (b5) and the QuadBatcher's Hdr, HdrLit and HdrAdditive pipelines (b1). Self-contained: with a world position,
-	// the camera's position and forward axis here give the point's view depth and view ray, so a pass needs no other constants
-	// to fog. Without fog (no Fog component, a view other than Lit, the wireframe) Enabled is 0 and nothing reads the rest.
+	// composite (b5), the QuadBatcher's Hdr and HdrLit pipelines (b1) and, from M33's merge, the Particles program (b1;
+	// Docs/Decisions/0048-m33-particle-look.md decision 10). Self-contained: with a world position, the camera's position and
+	// forward axis here give the point's view depth and view ray, so a pass needs no other constants to fog. Without fog (no
+	// Fog component, a view other than Lit, the wireframe) Enabled is 0 and nothing reads the rest.
 	struct FogConstants
 	{
 		// The fog's colour before the sun glow: Fog.Color tinted by the environment's ambient light (lerp(1, ambient,

@@ -2689,6 +2689,7 @@ namespace Engine {
 					.ColorFramebuffer = Targets.ParticleColorFramebuffer,
 					.VelocityFramebuffer = frame.Taa ? Targets.ParticleVelocityFramebuffer.Get() : nullptr,
 					.ViewConstants = ViewConstantsBuffer,
+					.Fog = FogConstantsBuffer,
 					.SceneDepth = Targets.SceneDepth,
 					.Sampler = frame.PixelArt ? QuadSampler::Point : QuadSampler::Linear },
 				counters);

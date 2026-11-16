@@ -205,6 +205,10 @@
 					"Stage": "fragment"
 				},
 				{
+					"Name": "PSAdditive",
+					"Stage": "fragment"
+				},
+				{
 					"Name": "PSVelocity",
 					"Stage": "fragment"
 				}

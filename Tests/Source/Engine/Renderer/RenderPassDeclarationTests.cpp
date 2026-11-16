@@ -158,7 +158,7 @@ namespace Engine {
 			// M23: the point shadows draw with the Shadows declaration's caster pipelines.
 			CHECK(GetDeclaredPipelineCountOf("PointShadows") == 0);
 			// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the particles record with their own program's pipelines
-			// (M26's drew with the QuadBatcher's Hdr and HdrAdditive).
+			// (M26's drew with the QuadBatcher's Hdr and HdrAdditive, which M33's merge removed: decision 10).
 			CHECK(GetDeclaredPipelineCountOf("Particles") == ParticlePass::PipelineCount);
 			CHECK(ParticlePass::GetLayoutDescriptions().size() == ParticlePass::PipelineCount);
 			// M26 (decision 22, stream T-C): the terrain pass's prepass and picking prepass, and its forward pass.
@@ -218,9 +218,10 @@ namespace Engine {
 			// 64 on phase 2's merged tree with M21's Lights2D and QuadBatcher pipelines and M22's LdrDepth (60 on M23's branch);
 			// 65 with M26's QuadBatcher HdrAdditive (Docs/Decisions/0037-m26-contract.md decision 7), 67 with its Exposure pass
 			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22); 74 with M32's Ssr classification
-			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and 77 with M33's Particles pass
-			// (Docs/Decisions/0048-m33-particle-look.md decision 4).
-			CHECK(GetDeclaredPipelineCount() == 77);
+			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14), 77 with M33's Particles pass
+			// (Docs/Decisions/0048-m33-particle-look.md decision 4) and 76 without M26's HdrAdditive, which M33's merge removed
+			// (decision 10).
+			CHECK(GetDeclaredPipelineCount() == 76);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -228,8 +229,9 @@ namespace Engine {
 		// with the QuadBatcher's LdrDepth (Docs/Decisions/0033-m22-contract.md decision 57, "Landing"), 64 with M23's
 		// LightClusters and Skinning on phase 2's merged tree, 65 with M26's HdrAdditive for the additive particles
 		// (Docs/Decisions/0037-m26-contract.md decision 7), the QuadBatcher's sixth, 67 with M26's Exposure pass, 68 with its Taa
-		// pass, 70 with its Ssr pass (decision 13) and 73 with its terrain pass (decision 22).
-		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher six")
+		// pass, 70 with its Ssr pass (decision 13) and 73 with its terrain pass (decision 22). M33's merge removed HdrAdditive
+		// (Docs/Decisions/0048-m33-particle-look.md decision 10), so the QuadBatcher declares five again.
+		TEST_CASE("RenderPassDeclarations: the Lights2D pass declares one pipeline of its program and the QuadBatcher five")
 		{
 			const auto lights = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
 			{
@@ -246,10 +248,10 @@ namespace Engine {
 			// It follows Sprites, which follows the QuadBatcher.
 			REQUIRE(lights != ScenePassDeclarations.begin());
 			CHECK((lights - 1)->Name == "Sprites");
-			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 6);
-			CHECK(QuadBatcher::PipelineCount == 6);
-			// 77 since M33's Particles pass (Docs/Decisions/0048-m33-particle-look.md decision 4).
-			CHECK(GetDeclaredPipelineCount() == 77);
+			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
+			CHECK(QuadBatcher::PipelineCount == 5);
+			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10).
+			CHECK(GetDeclaredPipelineCount() == 76);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -279,9 +281,10 @@ namespace Engine {
 			// M23's 2 (the LightClusters and Skinning passes, Docs/Decisions/0034-m23-contract.md decisions 5 and 27) and M26's 9
 			// (the QuadBatcher's HdrAdditive, Docs/Decisions/0037-m26-contract.md decision 7, the Exposure pass's 2, the Taa pass's
 			// 1 and the Ssr pass's 2, decision 13, and the terrain pass's 3, decision 22), M32's 1 (the Ssr classification,
-			// Docs/Decisions/0047-m32-fog-ssr.md decision 10) and M33's 3 (the Particles pass,
-			// Docs/Decisions/0048-m33-particle-look.md decision 4).
-			static_assert(GetDeclaredPipelineCount() == 77);
+			// Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and M33's 3 (the Particles pass,
+			// Docs/Decisions/0048-m33-particle-look.md decision 4), less the QuadBatcher's HdrAdditive, which M33's merge removed
+			// (decision 10).
+			static_assert(GetDeclaredPipelineCount() == 76);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

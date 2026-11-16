@@ -769,6 +769,82 @@ namespace Engine {
 			CHECK(faded.g + 40 >= surface.g);
 		}
 
+		// M33's merge (Docs/Decisions/0048-m33-particle-look.md decision 10; M32's fog, Docs/Decisions/0047-m32-fog-ssr.md
+		// decision 5): with the view's fog, an Alpha particle's colour blends toward the fog's by the fog's amount at its world
+		// position and an Additive one's fades by it, alpha unchanged; without fog, or with it disabled, both draw as before.
+		// The fog: distance fog of 0.1 per metre seen down -Z from z = 10 by the orthographic camera, so a particle at z = 0
+		// lies 10 m deep and its amount is 1 - e^(-1); the cleared far plane is not fogged (no FogSkybox).
+		TEST_CASE("Particles: in fog an alpha particle blends toward the fog's colour and an additive one fades, only with the fog enabled" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
+			const RenderFog fog{ .Enabled = true,
+				.Color = glm::vec3(0.0f, 0.0f, 1.0f),
+				.AmbientTint = 0.0f,
+				.Density = 0.1f,
+				.StartDistance = 0.0f,
+				.MaxOpacity = 1.0f,
+				.HeightDensity = 0.0f,
+				.SunGlow = 0.0f,
+				.FogSkybox = false };
+			uint64_t frame = 0;
+			// The scene colour (linear, 16 x 16 scene pixels) of the fixture's view with `fog`, holding a red Alpha particle 2
+			// units wide at (-2, 0, 0) (scene pixels [2, 6)) and a red Additive one at (2, 0, 0) (scene pixels [10, 14)) when
+			// `particles`.
+			const auto render = [&](const RenderFog& viewFog, bool particles)
+			{
+				RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+				snapshot.FrameIndex += ++frame;
+				snapshot.Fog = viewFog;
+				if (particles)
+				{
+					const std::vector<ParticleItem> blended = { { .Position = glm::vec3(-2.0f, 0.0f, 0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) } };
+					const std::vector<ParticleItem> added = { { .Position = glm::vec3(2.0f, 0.0f, 0.0f), .Size = 2.0f, .Color = glm::vec4(1.0f, 0.0f, 0.0f, 1.0f) } };
+					AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, blended, UUID(86));
+					AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Additive, added, UUID(87));
+				}
+				static_cast<void>(setup.Render(snapshot));
+				nvrhi::ITexture* texture = setup.Renderer().GetSceneColorTexture();
+				REQUIRE(texture != nullptr);
+				Readback readback(gpu.GetDevice());
+				const Result<Image> image = readback.ReadTexture(*texture);
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				std::vector<uint16_t> halves(image->Pixels.size() / sizeof(uint16_t));
+				std::memcpy(halves.data(), image->Pixels.data(), halves.size() * sizeof(uint16_t));
+				std::vector<glm::vec4> texels;
+				for (size_t index = 0; index + 3 < halves.size(); index += 4)
+				{
+					texels.emplace_back(glm::unpackHalf1x16(halves[index]), glm::unpackHalf1x16(halves[index + 1]), glm::unpackHalf1x16(halves[index + 2]),
+						glm::unpackHalf1x16(halves[index + 3]));
+				}
+				REQUIRE(texels.size() == 256);
+				return texels;
+			};
+			const auto near = [](const glm::vec4& actual, const glm::vec4& expected)
+			{
+				return glm::all(glm::lessThanEqual(glm::abs(actual - expected), glm::vec4(4e-3f)));
+			};
+			constexpr size_t AlphaPixel = 8 * 16 + 4;
+			constexpr size_t AdditivePixel = 8 * 16 + 12;
+			const float amount = 1.0f - std::exp(-1.0f);
+			const std::vector<glm::vec4> background = render(fog, false);
+			const std::vector<glm::vec4> fogged = render(fog, true);
+			CAPTURE(fogged[AlphaPixel]);
+			CAPTURE(fogged[AdditivePixel]);
+			CHECK(near(fogged[AlphaPixel], glm::vec4(1.0f - amount, 0.0f, amount, 1.0f)));
+			CHECK(near(fogged[AdditivePixel], background[AdditivePixel] + glm::vec4(1.0f - amount, 0.0f, 0.0f, 0.0f)));
+
+			// Without fog, or with it disabled, the particles draw as they did before M33's merge.
+			const std::vector<glm::vec4> plain = render(RenderFog{}, true);
+			CHECK(near(plain[AlphaPixel], glm::vec4(1.0f, 0.0f, 0.0f, 1.0f)));
+			CHECK(near(plain[AdditivePixel], background[AdditivePixel] + glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)));
+			RenderFog disabled = fog;
+			disabled.Enabled = false;
+			CHECK(render(disabled, true) == plain);
+		}
+
 		// M33 (decision 6): with TAA a particle writes the motion it was drawn with since the view's previous render into
 		// SceneVelocity, where its alpha is at least ParticleVelocityAlpha; one that stood still, or that the view never drew
 		// before, writes the camera's motion (none here), and without TAA particles write no motion at all.

@@ -151,6 +151,11 @@ namespace Engine {
 		// The view's ViewConstants (b0): ViewProjection and PreviousViewProjection (jittered with TAA), the projection kind,
 		// Near and Far for the soft fade, ViewportSize for the motion vectors; never null.
 		nvrhi::IBuffer* ViewConstants = nullptr;
+		// The view's fog constants (b1, Shared/FogConstants.h; M32's fog at M33's merge,
+		// Docs/Decisions/0048-m33-particle-look.md decision 10): with Enabled set, Alpha particles blend toward the fog's
+		// colour and Additive ones fade by its amount at each fragment's world position; never null (Enabled 0 draws without
+		// fog).
+		nvrhi::IBuffer* Fog = nullptr;
 		// SceneDepth, shader-readable, ColorFramebuffer's size; never null. Bound as a texture (t1): the fragments test it.
 		nvrhi::ITexture* SceneDepth = nullptr;
 		QuadSampler Sampler = QuadSampler::Linear;

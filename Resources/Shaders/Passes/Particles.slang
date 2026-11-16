@@ -10,13 +10,19 @@
 //     the vertex colour, its alpha times the soft fade: with Params.y (the inverse soft distance) above 0,
 //     saturate((scene view depth - particle view depth) * Params.y), both linear view depths by §8.3's mappings
 //     (perspective Near / depth, orthographic Far - depth (Far - Near)); 1 without, or over the cleared far plane.
-//   - PSColor writes the shaded colour into SceneColor (the ParticlesAlpha and ParticlesAdditive pipelines blend it).
+//   - PSColor writes the shaded colour into SceneColor (the ParticlesAlpha pipeline blends it), and PSAdditive the same
+//     colour for the ParticlesAdditive pipeline.
+//   - Fog (M32's fog at M33's merge, Docs/Decisions/0048-m33-particle-look.md decision 10; Common/Fog.slang): with the view's
+//     fog enabled (Fog, b1), PSColor blends the shaded colour toward the fog's colour by the fog's amount at the fragment's
+//     world position and PSAdditive fades it by that amount (an additive particle's fog colour would otherwise be added
+//     twice), alpha unchanged either way, as M32's quads were fogged; a view without fog runs none of it.
 //   - PSVelocity writes the fragment's motion (Common/Motion.slang's ComputeMotionVector of its current and previous clip
 //     positions) into SceneVelocity where the particle's alpha is at least ParticleVelocityAlpha, covering nothing elsewhere
-//     (the ParticlesVelocity pipeline, recorded with TAA).
+//     (the ParticlesVelocity pipeline, recorded with TAA). Fog changes no alpha, so it moves no motion.
 // Textures are sampled at their first mip level (no mips), as the QuadBatcher samples them, so a particle without a look
 // shades exactly as M26's quads did.
 
+#include "Shared/FogConstants.h"
 #include "Shared/ParticleVertex.h"
 #include "Shared/ViewConstants.h"
 
@@ -26,6 +32,10 @@ ConstantBuffer<ViewConstants> View : register(b0, space0);
 Texture2D<float4> ParticleTexture : register(t0, space0);
 SamplerState ParticleSampler : register(s0, space0);
 Texture2D<float> ParticleSceneDepth : register(t1, space0);
+// The view's fog (FogConstants, Shared/FogConstants.h): Enabled 0 in a view without fog.
+ConstantBuffer<FogConstants> Fog : register(b1, space0);
+
+#include "Common/Fog.slang"
 
 // ParticleVertex member by member (locations 0 to 4).
 struct VertexInput
@@ -45,6 +55,7 @@ struct VertexOutput
 	float2 Params : TEXCOORD1;
 	float4 CurrentClip : TEXCOORD2;
 	float4 PreviousClip : TEXCOORD3;
+	float3 WorldPosition : TEXCOORD4;
 };
 
 [shader("vertex")]
@@ -57,6 +68,7 @@ VertexOutput VSMain(VertexInput input)
 	output.Params = input.Params;
 	output.CurrentClip = output.Position;
 	output.PreviousClip = mul(View.PreviousViewProjection, float4(input.PreviousPosition, 1.0));
+	output.WorldPosition = input.Position;
 	return output;
 }
 
@@ -95,14 +107,31 @@ struct ColorOutput
 	uint Coverage : SV_Coverage;
 };
 
-[shader("fragment")]
-ColorOutput PSColor(VertexOutput input)
+// The shaded colour behind the view's fog: blended toward the fog's colour, or for an additive particle faded by its amount.
+ColorOutput ShadeParticleColor(VertexOutput input, bool additive)
 {
 	const ParticleShade shade = ShadeParticle(input);
 	ColorOutput output;
 	output.Color = shade.Color;
+	if (Fog.Enabled != 0)
+	{
+		const float4 fog = EvaluateFog(input.WorldPosition);
+		output.Color.rgb = additive ? ApplyFogAdditive(shade.Color.rgb, fog) : ApplyFog(shade.Color.rgb, fog);
+	}
 	output.Coverage = shade.Hidden ? 0u : 0xffffffffu;
 	return output;
+}
+
+[shader("fragment")]
+ColorOutput PSColor(VertexOutput input)
+{
+	return ShadeParticleColor(input, false);
+}
+
+[shader("fragment")]
+ColorOutput PSAdditive(VertexOutput input)
+{
+	return ShadeParticleColor(input, true);
 }
 
 struct VelocityOutput

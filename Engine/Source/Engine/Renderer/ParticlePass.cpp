@@ -8,6 +8,7 @@
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Shared/FogConstants.h"
 #include "Shared/ParticleVertex.h"
 #include "Shared/ViewConstants.h"
 
@@ -50,6 +51,7 @@ namespace Engine {
 		constexpr uint32_t ParticleTextureSlot = 0;
 		constexpr uint32_t ParticleSamplerSlot = 0;
 		constexpr uint32_t ParticleSceneDepthSlot = 1;
+		constexpr uint32_t ParticleFogConstantsSlot = 1; // b1: M32's fog at M33's merge (Docs/Decisions/0048-m33-particle-look.md decision 10)
 		// The slowest a Velocity particle moves across the view and still stretches, in metres per second.
 		constexpr float MinParticleStretchSpeed = 1e-6f;
 
@@ -205,6 +207,7 @@ namespace Engine {
 			layout.registerSpaceIsDescriptorSet = true;
 			layout.bindings = {
 				nvrhi::BindingLayoutItem::ConstantBuffer(ParticleViewConstantsSlot),
+				nvrhi::BindingLayoutItem::ConstantBuffer(ParticleFogConstantsSlot),
 				nvrhi::BindingLayoutItem::Texture_SRV(ParticleTextureSlot),
 				nvrhi::BindingLayoutItem::Texture_SRV(ParticleSceneDepthSlot),
 				nvrhi::BindingLayoutItem::Sampler(ParticleSamplerSlot),
@@ -216,13 +219,14 @@ namespace Engine {
 				.Permutation = {},
 				.BindingLayouts = { layout },
 				.StorageImages = {},
-				.ConstantBuffers = { { .Set = 0, .Register = ParticleViewConstantsSlot, .ByteSize = sizeof(ViewConstants) } },
+				.ConstantBuffers = { { .Set = 0, .Register = ParticleViewConstantsSlot, .ByteSize = sizeof(ViewConstants) },
+					{ .Set = 0, .Register = ParticleFogConstantsSlot, .ByteSize = sizeof(FogConstants) } },
 			};
 		}
 
 		static std::vector<PipelineLayoutDescription> MakeParticleDescriptions()
 		{
-			return { MakeParticleDescription("ParticlesAlpha", "PSColor"), MakeParticleDescription("ParticlesAdditive", "PSColor"),
+			return { MakeParticleDescription("ParticlesAlpha", "PSColor"), MakeParticleDescription("ParticlesAdditive", "PSAdditive"),
 				MakeParticleDescription("ParticlesVelocity", "PSVelocity") };
 		}
 
@@ -244,8 +248,8 @@ namespace Engine {
 
 		// A particle pipeline: double-sided quads without a depth attachment (the fragments test SceneDepth themselves). The
 		// colour pipelines blend as the QuadBatcher's Hdr (straight alpha: colour SrcAlpha / InvSrcAlpha, alpha One /
-		// InvSrcAlpha) and HdrAdditive (colour SrcAlpha / One, the target's alpha kept: Zero / One) did; the velocity one
-		// replaces the motion where it covers.
+		// InvSrcAlpha) and its HdrAdditive, removed at M33's merge (colour SrcAlpha / One, the target's alpha kept: Zero / One),
+		// did; the velocity one replaces the motion where it covers.
 		static GraphicsPipelineSpecification MakeParticleSpecification(PipelineLayoutDescription layout, size_t pipeline,
 			const std::vector<nvrhi::BindingLayoutHandle>& sharedLayouts)
 		{
@@ -513,13 +517,13 @@ namespace Engine {
 		RenderPassCounters& counters)
 	{
 		ENGINE_CORE_ASSERT(inputs.Plan != nullptr && inputs.Resources != nullptr && inputs.ColorFramebuffer != nullptr && inputs.ViewConstants != nullptr
-				&& inputs.SceneDepth != nullptr,
-			"ParticlePass::Record needs a plan, the GpuResourceCache, a colour framebuffer, the view constants and SceneDepth");
+				&& inputs.Fog != nullptr && inputs.SceneDepth != nullptr,
+			"ParticlePass::Record needs a plan, the GpuResourceCache, a colour framebuffer, the view and fog constants and SceneDepth");
 		if (inputs.Plan == nullptr || inputs.Resources == nullptr || inputs.ColorFramebuffer == nullptr || inputs.ViewConstants == nullptr
-			|| inputs.SceneDepth == nullptr)
+			|| inputs.Fog == nullptr || inputs.SceneDepth == nullptr)
 		{
 			return MakeError(ErrorCode::InvalidArgument,
-				"the Particles pass needs a plan, the GpuResourceCache, a colour framebuffer, the view constants and SceneDepth");
+				"the Particles pass needs a plan, the GpuResourceCache, a colour framebuffer, the view and fog constants and SceneDepth");
 		}
 		State& state = *m_State;
 		const ParticlePassPlan& plan = *inputs.Plan;
@@ -594,6 +598,7 @@ namespace Engine {
 				nvrhi::BindingSetDesc desc;
 				desc.bindings = {
 					nvrhi::BindingSetItem::ConstantBuffer(Utils::ParticleViewConstantsSlot, inputs.ViewConstants),
+					nvrhi::BindingSetItem::ConstantBuffer(Utils::ParticleFogConstantsSlot, inputs.Fog),
 					nvrhi::BindingSetItem::Texture_SRV(Utils::ParticleTextureSlot, batch.Texture),
 					nvrhi::BindingSetItem::Texture_SRV(Utils::ParticleSceneDepthSlot, inputs.SceneDepth),
 					nvrhi::BindingSetItem::Sampler(Utils::ParticleSamplerSlot, sampler),

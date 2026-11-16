@@ -140,8 +140,9 @@ namespace Engine {
 
 	}
 
-	// The pass list, in stats order (see the file comment). 77 pipelines at startup (74 with M32's, below, and M33's
-	// Particles 3, Docs/Decisions/0048-m33-particle-look.md decision 4): M17's 54 plus the QuadBatcher's 2 and
+	// The pass list, in stats order (see the file comment). 76 pipelines at startup (74 with M32's, below, M33's Particles 3,
+	// Docs/Decisions/0048-m33-particle-look.md decision 4, less M26's QuadBatcher HdrAdditive 1, which M33's merge removed,
+	// decision 10): M17's 54 plus the QuadBatcher's 2 and
 	// the output stage's 2 (M18), M21's Lights2D 1 and the QuadBatcher's HdrLit and Normals 2 (C21.2; M21's Sprites
 	// records with the QuadBatcher's), the QuadBatcher's LdrDepth 1 (M22, C22.3, Docs/Decisions/0033-m22-contract.md
 	// decision 57; M22's Ui adds none of its own), M23's LightClusters 1 and Skinning 1, M26's QuadBatcher HdrAdditive 1
@@ -195,11 +196,12 @@ namespace Engine {
 		{ .Name = "ForwardTransparent", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::ForwardTransparentRows, .Targets = Detail::SceneColorTargets },
 		// The Overdraw data view's additive pass, for the three cull modes.
 		{ .Name = "Overdraw", .Stage = RenderStage::Forward, .PipelineCount = 3, .Programs = Detail::ScenePrograms, .StatsRows = Detail::OverdrawRows, .Targets = Detail::OverdrawTargets },
-		// QuadBatcher.h: its users record under their own rows (M21's Sprites and Lights2D and M26's Particles in this stage,
-		// M22's Ui in SceneOverlay); Hdr and Ldr, M21's HdrLit and Normals (C21.2, Docs/Decisions/0032-m21-contract.md decision
-		// 22), M22's LdrDepth (C22.3, Docs/Decisions/0033-m22-contract.md decision 57) and M26's HdrAdditive (C26.1,
-		// Docs/Decisions/0037-m26-contract.md decision 7, stream P-B).
-		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 6, .Programs = Detail::QuadPrograms },
+		// QuadBatcher.h: its users record under their own rows (M21's Sprites and Lights2D in this stage, M22's Ui in
+		// SceneOverlay); Hdr and Ldr, M21's HdrLit and Normals (C21.2, Docs/Decisions/0032-m21-contract.md decision 22) and M22's
+		// LdrDepth (C22.3, Docs/Decisions/0033-m22-contract.md decision 57). M26's HdrAdditive (C26.1,
+		// Docs/Decisions/0037-m26-contract.md decision 7, stream P-B), the additive particles' pipeline, was removed at M33's
+		// merge (Docs/Decisions/0048-m33-particle-look.md decision 10).
+		{ .Name = "QuadBatcher", .Stage = RenderStage::Sprites, .PipelineCount = 5, .Programs = Detail::QuadPrograms },
 		// M21 (C21.1, Docs/Decisions/0032-m21-contract.md decision 4): the snapshot's sprites, in its draw order, with the
 		// QuadBatcher's Hdr pipeline into SceneColor, depth-tested against SceneDepth (lit ones with its HdrLit pipeline, C21.2).
 		{ .Name = "Sprites", .Stage = RenderStage::Sprites, .StatsRows = Detail::SpritesRows },
