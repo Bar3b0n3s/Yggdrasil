@@ -198,7 +198,8 @@ namespace Engine {
 					.Count = static_cast<uint32_t>(particles.size()),
 					.Entity = entity });
 				for (const auto& [serial, x] : particles)
-					snapshot.Particles.push_back(ParticleItem{ .Position = glm::vec3(x, 1.0f, 0.0f), .Serial = serial });
+					snapshot.Particles.push_back(
+						ParticleItem{ .Position = glm::vec3(x, 1.0f, 0.0f), .Size = 0.25f, .Rotation = 0.5f, .Velocity = glm::vec3(0.0f, 2.0f, 0.0f), .Serial = serial });
 			};
 			RenderViewHistory history;
 			RenderSnapshot first = MakeSnapshot(0.0f, 0.0f);
@@ -206,7 +207,7 @@ namespace Engine {
 			addEmitter(first, UUID(0xE2), { { 5, 50.0f } });
 			history.Apply(first, 0.016f);
 			for (const ParticleItem& particle : first.Particles)
-				CHECK_FALSE(particle.PreviousPosition.has_value()); // the history's first frame is a reset
+				CHECK_FALSE(particle.Previous.has_value()); // the history's first frame is a reset
 
 			// Serial 4 died and 8 is new; the second emitter's serial 5 is its own.
 			RenderSnapshot second = MakeSnapshot(0.0f, 0.0f);
@@ -214,22 +215,26 @@ namespace Engine {
 			addEmitter(second, UUID(0xE1), { { 5, 2.5f }, { 7, 3.5f }, { 8, 0.0f } });
 			history.Apply(second, 0.016f);
 			REQUIRE(second.Particles.size() == 5);
-			REQUIRE(second.Particles[0].PreviousPosition.has_value());
-			CHECK(*second.Particles[0].PreviousPosition == glm::vec3(50.0f, 1.0f, 0.0f));
-			CHECK_FALSE(second.Particles[1].PreviousPosition.has_value());
-			REQUIRE(second.Particles[2].PreviousPosition.has_value());
-			CHECK(*second.Particles[2].PreviousPosition == glm::vec3(2.0f, 1.0f, 0.0f));
-			REQUIRE(second.Particles[3].PreviousPosition.has_value());
-			CHECK(*second.Particles[3].PreviousPosition == glm::vec3(3.0f, 1.0f, 0.0f));
-			CHECK_FALSE(second.Particles[4].PreviousPosition.has_value());
+			REQUIRE(second.Particles[0].Previous.has_value());
+			CHECK(second.Particles[0].Previous->Position == glm::vec3(50.0f, 1.0f, 0.0f));
+			CHECK_FALSE(second.Particles[1].Previous.has_value());
+			REQUIRE(second.Particles[2].Previous.has_value());
+			CHECK(second.Particles[2].Previous->Position == glm::vec3(2.0f, 1.0f, 0.0f));
+			// The previous draw carries the size, angle and velocity too, from which the previous corners are laid.
+			CHECK(second.Particles[2].Previous->Size == 0.25f);
+			CHECK(second.Particles[2].Previous->Rotation == 0.5f);
+			CHECK(second.Particles[2].Previous->Velocity == glm::vec3(0.0f, 2.0f, 0.0f));
+			REQUIRE(second.Particles[3].Previous.has_value());
+			CHECK(second.Particles[3].Previous->Position == glm::vec3(3.0f, 1.0f, 0.0f));
+			CHECK_FALSE(second.Particles[4].Previous.has_value());
 
 			// The same snapshot again (a capture's warm-up) draws no motion: each particle's previous position is its own.
 			RenderSnapshot again = second;
 			history.Apply(again, 0.0f);
 			for (const ParticleItem& particle : again.Particles)
 			{
-				REQUIRE(particle.PreviousPosition.has_value());
-				CHECK(*particle.PreviousPosition == particle.Position);
+				REQUIRE(particle.Previous.has_value());
+				CHECK(particle.Previous->Position == particle.Position);
 			}
 
 			// A reset forgets every particle, and a position that was not finite is no previous position.
@@ -238,13 +243,44 @@ namespace Engine {
 			history.Apply(broken, 0.016f);
 			RenderSnapshot afterBroken = again;
 			history.Apply(afterBroken, 0.016f);
-			CHECK_FALSE(afterBroken.Particles[0].PreviousPosition.has_value());
-			CHECK(afterBroken.Particles[1].PreviousPosition.has_value());
+			CHECK_FALSE(afterBroken.Particles[0].Previous.has_value());
+			CHECK(afterBroken.Particles[1].Previous.has_value());
 			history.Reset();
 			RenderSnapshot reset = again;
 			history.Apply(reset, 0.016f);
 			for (const ParticleItem& particle : reset.Particles)
-				CHECK_FALSE(particle.PreviousPosition.has_value());
+				CHECK_FALSE(particle.Previous.has_value());
+		}
+
+		// M33 (decision 6, the review's finding 3): an emitter's state made again (a disable and enable, a re-added
+		// ParticleEmitter) numbers its particles from 0 again; its new incarnation keeps them from taking the positions of its
+		// predecessor's particles of the same serials, even across renders that never saw the gap.
+		TEST_CASE("TemporalHistory: a particle state made again never takes its predecessor's positions, its serials restarting")
+		{
+			const auto makeSnapshot = [](uint64_t incarnation, float x)
+			{
+				RenderSnapshot snapshot = MakeSnapshot(0.0f, 0.0f);
+				snapshot.ParticleEmitters.push_back(ParticleEmitterItem{ .First = 0, .Count = 2, .Entity = UUID(0xE3), .Incarnation = incarnation });
+				snapshot.Particles.push_back(ParticleItem{ .Position = glm::vec3(x, 0.0f, 0.0f), .Serial = 0 });
+				snapshot.Particles.push_back(ParticleItem{ .Position = glm::vec3(x, 1.0f, 0.0f), .Serial = 1 });
+				return snapshot;
+			};
+			RenderViewHistory history;
+			RenderSnapshot first = makeSnapshot(1, 5.0f);
+			history.Apply(first, 0.016f);
+			RenderSnapshot same = makeSnapshot(1, 6.0f);
+			history.Apply(same, 0.016f);
+			REQUIRE(same.Particles[0].Previous.has_value());
+			CHECK(same.Particles[0].Previous->Position == glm::vec3(5.0f, 0.0f, 0.0f));
+			// The state was made again between renders: serials 0 and 1 are new particles.
+			RenderSnapshot remade = makeSnapshot(2, -3.0f);
+			history.Apply(remade, 0.016f);
+			CHECK_FALSE(remade.Particles[0].Previous.has_value());
+			CHECK_FALSE(remade.Particles[1].Previous.has_value());
+			RenderSnapshot after = makeSnapshot(2, -2.0f);
+			history.Apply(after, 0.016f);
+			REQUIRE(after.Particles[1].Previous.has_value());
+			CHECK(after.Particles[1].Previous->Position == glm::vec3(-3.0f, 1.0f, 0.0f));
 		}
 	}
 

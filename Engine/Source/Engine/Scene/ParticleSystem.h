@@ -18,7 +18,7 @@
 //   2. anchors a state no phase has stepped yet (LastTick empty: one this phase just created, or one QueueParticleEmit made
 //      since the last phase, at whatever tick) at `tick` - 1, or 0 at tick 0: a state starts at its first phase and never
 //      catches up the ticks before it, so a new emitter steps once at its first phase (none at tick 0), whoever made its
-//      state and whenever;
+//      state and whenever; M33: an anchored state takes the next of the system's incarnations (ParticleStateComponent);
 //   3. steps the state once per tick between its LastTick and `tick` (none when `tick` is not past LastTick), at most
 //      MaxParticleStepsPerPhase times (a longer gap is dropped: the state jumps to `tick`), each step StepParticleEmitter with
 //      the session's FixedDelta, the entity's current world matrix (WorldTransform) and its ParticleLook, or null without one
@@ -68,6 +68,7 @@ namespace Engine {
 	private:
 		float m_FixedDelta = 0.0f;
 		ParticleSystemStats m_Stats{};
+		uint64_t m_Incarnations = 0;    // M33: the last incarnation an anchored state took
 		std::vector<UUID> m_Emitters{}; // the step's emitters in canonical order, kept to reuse its capacity
 	};
 

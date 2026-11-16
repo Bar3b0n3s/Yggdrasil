@@ -19,7 +19,7 @@
 // golden images): the golden scaffold Scaffold/GoldenParticleLook.jsonl (IdSeed 3002) writes
 // Assets/Scenes/GoldenParticleLook/ParticleLook.scene over a lit floor, with bloom: "Flame", a turning, spinning flipbook
 // flame (Flame.png's sixteen frames, blended) whose base meets the floor softly; "Sparks", additive sparks stretched along
-// their velocity; "Ring", flat rings expanding on the ground; and "Ember", embers of intensity 14 blooming. Edit scenes
+// their velocity; "Ring", flat discs expanding on the ground; and "Ember", embers of intensity 14 blooming. Edit scenes
 // simulate no particles, so the test steps the scene's emitters through the Particles phase's system for ParticleTicks ticks
 // of FeatureTest's 64 Hz, as "Golden: Particles" does, before it renders.
 

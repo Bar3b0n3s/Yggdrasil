@@ -29,7 +29,7 @@ inline constexpr float ParticleVelocityAlpha = 0.5f;
 	//   Color:            linear RGB (times the look's Intensity, so above 1 for HDR) and straight alpha, multiplying the
 	//                     texel;
 	//   TexCoords:        xy the frame's texture coordinate at the corner (normalized, top-left origin), zw the next
-	//                     frame's for a blended flipbook (xy again otherwise);
+	//                     frame's, unused while Params.x is 0;
 	//   Params:           x the blend toward the zw texel (0: none), y the inverse of the soft distance in metres (0: a
 	//                     hard cut against the scene's depth).
 	struct ParticleVertex

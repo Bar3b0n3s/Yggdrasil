@@ -159,6 +159,7 @@ namespace Engine {
 			typo.SetActive(false);
 			CHECK(FindSpriteSceneIssues(scene, nullptr, layers).empty());
 		}
+
 		// M33 (decision 9): a flipbook range must start at one of the sheet's frames and end within them, FrameCount 0 running
 		// to its last; the finding is located at FirstFrame when the range starts past the sheet, else at FrameCount.
 		TEST_CASE("SpriteValidation: a ParticleLook whose flipbook range starts or ends past its sheet's frames is PARTICLE_FRAME_OUT_OF_RANGE")

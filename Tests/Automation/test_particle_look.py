@@ -1,7 +1,7 @@
 """The particle look through automation (Docs/Decisions/0048-m33-particle-look.md decisions 1, 7 and 8): a ParticleLook
 beside a ParticleEmitter, with a flipbook sprite sheet cut from an imported texture, created, read and updated through
 entity.create, entity.get and entity.update; its schema through component.schema; its rules refused, located, as the
-inspector refuses them; and its emitter's particles playing with it."""
+inspector refuses them; and its emitter's particles playing with it, counted through script.eval."""
 
 from __future__ import annotations
 
@@ -72,8 +72,11 @@ class ParticleLookTests(AutomationTestCase):
         self.assertEqual(by_name["Spin"]["unit"], "deg/s")
 
         # The emitter plays with its look: the session steps its particles, angles and frames.
-        client.call("play.start", {"lockstep": True, "mode": "simulate"})
+        client.call("play.start", {"lockstep": True})
         client.call("play.step", {"ticks": 10, "render": "none"})
+        count = client.call("script.eval", {"context": "play",
+                                            "code": 'return Scene.FindByName("Flame").ParticleEmitter:GetParticleCount()'})
+        self.assertGreater(count["value"], 0, count)
         client.call("play.stop")
 
     def test_a_reversed_range_and_a_look_without_an_emitter_are_refused(self) -> None:

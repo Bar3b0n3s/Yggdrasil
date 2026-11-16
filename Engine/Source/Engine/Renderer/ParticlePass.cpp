@@ -123,7 +123,8 @@ namespace Engine {
 		};
 
 		// The texture rectangles of frame `phase` of `frames` (decision 5): frame floor(phase n) mod n and the next one, and,
-		// with `blend`, the fraction toward the next.
+		// with `blend`, the fraction toward the next while the next is still to play: the range plays `cycles` times over a
+		// life, so the last frame of its last play is held rather than blended into the first.
 		struct ParticleFrame
 		{
 			glm::vec4 TexCoords = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
@@ -131,7 +132,7 @@ namespace Engine {
 			float Blend = 0.0f;
 		};
 
-		static ParticleFrame GetParticleFrame(std::span<const glm::vec4> frames, float phase, bool blend)
+		static ParticleFrame GetParticleFrame(std::span<const glm::vec4> frames, float phase, bool blend, float cycles)
 		{
 			const auto count = static_cast<uint64_t>(frames.size());
 			// A negative or non-finite phase (no extraction makes one) shows the range's first frame; one past 2^52 frames (data
@@ -141,9 +142,53 @@ namespace Engine {
 																		 : 0.0;
 			const double whole = std::floor(position);
 			const uint64_t frame = static_cast<uint64_t>(whole) % count;
+			const bool nextPlays = std::isfinite(cycles) && whole + 1.0 < static_cast<double>(cycles) * static_cast<double>(count);
 			return ParticleFrame{ .TexCoords = frames[frame],
 				.NextTexCoords = frames[(frame + 1) % count],
-				.Blend = blend ? static_cast<float>(position - whole) : 0.0f };
+				.Blend = blend && nextPlays ? static_cast<float>(position - whole) : 0.0f };
+		}
+
+		// How an emitter lays its particles' quads (the file comment): its alignment, the view's right and up axes, the Flat
+		// plane's (when both are usable) and a Velocity quad's stretch.
+		struct ParticleLayout
+		{
+			RenderParticleAlignment Alignment = RenderParticleAlignment::Camera;
+			glm::vec3 Right = glm::vec3(1.0f, 0.0f, 0.0f);
+			glm::vec3 Up = glm::vec3(0.0f, 1.0f, 0.0f);
+			std::optional<std::pair<glm::vec3, glm::vec3>> Plane{};
+			float Stretch = 0.0f;
+		};
+
+		// The corners of a quad drawn from `draw` (top-left, top-right, bottom-right, bottom-left), laid by `layout`.
+		static std::array<glm::vec3, 4> LayParticleQuad(const ParticleLayout& layout, const ParticleDrawState& draw)
+		{
+			const float half = 0.5f * draw.Size;
+			glm::vec3 across{ 0.0f };
+			glm::vec3 above{ 0.0f };
+			bool laid = false;
+			if (layout.Alignment == RenderParticleAlignment::Velocity && IsFiniteVector(draw.Velocity))
+			{
+				const float alongRight = glm::dot(draw.Velocity, layout.Right);
+				const float alongUp = glm::dot(draw.Velocity, layout.Up);
+				const float speed = std::sqrt(alongRight * alongRight + alongUp * alongUp);
+				if (std::isfinite(speed) && speed > MinParticleStretchSpeed)
+				{
+					const glm::vec3 along = (layout.Right * alongRight + layout.Up * alongUp) / speed;
+					const glm::vec3 side = (layout.Right * alongUp - layout.Up * alongRight) / speed;
+					across = side * half;
+					above = along * (0.5f * (draw.Size + speed * layout.Stretch));
+					laid = true;
+				}
+			}
+			if (!laid)
+			{
+				// A Velocity particle's angle is unused, its fallback square included.
+				const float angle = layout.Alignment == RenderParticleAlignment::Velocity ? 0.0f : draw.Rotation;
+				const auto [right, up] = layout.Plane.has_value() ? TurnAxes(layout.Plane->first, layout.Plane->second, angle) : TurnAxes(layout.Right, layout.Up, angle);
+				across = right * half;
+				above = up * half;
+			}
+			return { draw.Position - across + above, draw.Position + across + above, draw.Position + across - above, draw.Position - across - above };
 		}
 
 		// Whether the pipeline blends additively.
@@ -286,10 +331,15 @@ namespace Engine {
 					continue;
 				flipbook = &flipbooks[emitterIndex];
 			}
-			// The plane of a Flat emitter, or nothing (its particles then face the camera).
+			// The emitter's layout: the plane of a Flat emitter, or nothing (its particles then face the camera).
+			Utils::ParticleLayout layout{ .Alignment = emitter.Alignment,
+				.Right = *rightAxis,
+				.Up = *upAxis,
+				.Stretch = std::isfinite(emitter.VelocityStretch) ? std::max(emitter.VelocityStretch, 0.0f) : 0.0f };
 			const std::optional<glm::vec3> planeRight = Utils::NormalizeAxis(emitter.PlaneRight);
 			const std::optional<glm::vec3> planeUp = Utils::NormalizeAxis(emitter.PlaneUp);
-			const bool flat = emitter.Alignment == RenderParticleAlignment::Flat && planeRight.has_value() && planeUp.has_value();
+			if (emitter.Alignment == RenderParticleAlignment::Flat && planeRight.has_value() && planeUp.has_value())
+				layout.Plane = std::pair(*planeRight, *planeUp);
 			const float inverseSoftDistance = std::isfinite(emitter.SoftDistance) && emitter.SoftDistance > 0.0f ? 1.0f / emitter.SoftDistance : 0.0f;
 
 			keys.clear();
@@ -319,35 +369,9 @@ namespace Engine {
 			for (const Utils::ParticleDepthKey& key : keys)
 			{
 				const ParticleItem& particle = particles[key.Index];
-				const float half = 0.5f * particle.Size;
-				// The quad's axes and half extents by the emitter's alignment (the file comment).
-				glm::vec3 across{ 0.0f };
-				glm::vec3 above{ 0.0f };
-				bool laid = false;
-				if (emitter.Alignment == RenderParticleAlignment::Velocity && Utils::IsFiniteVector(particle.Velocity))
-				{
-					const float alongRight = glm::dot(particle.Velocity, *rightAxis);
-					const float alongUp = glm::dot(particle.Velocity, *upAxis);
-					const float speed = std::sqrt(alongRight * alongRight + alongUp * alongUp);
-					if (std::isfinite(speed) && speed > Utils::MinParticleStretchSpeed)
-					{
-						const glm::vec3 along = (*rightAxis * alongRight + *upAxis * alongUp) / speed;
-						const glm::vec3 side = (*rightAxis * alongUp - *upAxis * alongRight) / speed;
-						const float stretch = std::isfinite(emitter.VelocityStretch) ? std::max(emitter.VelocityStretch, 0.0f) : 0.0f;
-						across = side * half;
-						above = along * (0.5f * (particle.Size + speed * stretch));
-						laid = true;
-					}
-				}
-				if (!laid)
-				{
-					const auto [right, up] = flat ? Utils::TurnAxes(*planeRight, *planeUp, particle.Rotation) : Utils::TurnAxes(*rightAxis, *upAxis, particle.Rotation);
-					across = right * half;
-					above = up * half;
-				}
 				ParticlePassQuad quad{
-					.Corners = { particle.Position - across + above, particle.Position + across + above, particle.Position + across - above,
-						particle.Position - across - above },
+					.Corners = Utils::LayParticleQuad(layout,
+						ParticleDrawState{ .Position = particle.Position, .Size = particle.Size, .Rotation = particle.Rotation, .Velocity = particle.Velocity }),
 					.Color = particle.Color,
 					.InverseSoftDistance = inverseSoftDistance,
 				};
@@ -367,15 +391,20 @@ namespace Engine {
 				}
 				if (flipbook != nullptr)
 				{
-					const Utils::ParticleFrame frame = Utils::GetParticleFrame(flipbook->Frames, particle.FramePhase, emitter.BlendFrames);
+					const Utils::ParticleFrame frame = Utils::GetParticleFrame(flipbook->Frames, particle.FramePhase, emitter.BlendFrames, emitter.FrameCycles);
 					quad.TexCoords = frame.TexCoords;
 					quad.NextTexCoords = frame.NextTexCoords;
 					quad.FrameBlend = frame.Blend;
 				}
-				if (particle.PreviousPosition.has_value() && Utils::IsFiniteVector(*particle.PreviousPosition))
+				// The previous corners, laid from how the view's previous render drew the particle (its position, size, angle and
+				// stretch), so its spin, growth and stretch reach the motion vectors; without a previous draw, the corners stood
+				// still.
+				quad.PreviousCorners = quad.Corners;
+				if (particle.Previous.has_value())
 				{
-					const glm::vec3 offset = *particle.PreviousPosition - particle.Position;
-					quad.PreviousOffset = Utils::IsFiniteVector(offset) ? offset : glm::vec3(0.0f);
+					const std::array<glm::vec3, 4> previous = Utils::LayParticleQuad(layout, *particle.Previous);
+					if (std::ranges::all_of(previous, &Utils::IsFiniteVector))
+						quad.PreviousCorners = previous;
 				}
 				plan.Quads.push_back(quad);
 			}
@@ -536,7 +565,7 @@ namespace Engine {
 				for (size_t corner = 0; corner < quad.Corners.size(); ++corner)
 				{
 					state.Staging.push_back(ParticleVertex{ .Position = quad.Corners[corner],
-						.PreviousPosition = quad.Corners[corner] + quad.PreviousOffset,
+						.PreviousPosition = quad.PreviousCorners[corner],
 						.Color = quad.Color,
 						.TexCoords = glm::vec4(texCoords[corner], nextTexCoords[corner]),
 						.Params = glm::vec2(quad.FrameBlend, quad.InverseSoftDistance) });

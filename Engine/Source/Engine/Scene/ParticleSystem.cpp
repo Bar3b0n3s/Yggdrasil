@@ -105,7 +105,10 @@ namespace Engine {
 			ParticleStateComponent& state = Utils::EnsureState(entity, emitter);
 			// A state no phase has stepped starts here: one step at this phase (none at tick 0), never the ticks before it.
 			if (!state.LastTick.has_value())
+			{
 				state.LastTick = tick > 0 ? tick - 1 : 0;
+				state.Incarnation = ++m_Incarnations;
+			}
 			const uint64_t due = tick > *state.LastTick ? tick - *state.LastTick : 0;
 			const uint64_t steps = std::min(due, MaxParticleStepsPerPhase);
 			if (steps > 0)

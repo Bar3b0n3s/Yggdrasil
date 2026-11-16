@@ -227,9 +227,11 @@ namespace Engine {
 				.First = first,
 				.Count = static_cast<uint32_t>(snapshot.Particles.size()) - first,
 				.Entity = entity,
+				.Incarnation = state.Incarnation,
 			};
 			if (look != nullptr)
 			{
+				item.FrameCycles = look->FrameCycles;
 				item.Sheet = look->SpriteSheet.GetHandle();
 				item.FirstFrame = look->FirstFrame;
 				item.FrameCount = look->FrameCount;

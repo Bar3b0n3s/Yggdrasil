@@ -32,13 +32,15 @@
 //     up axes, the rows of the view matrix, turned counter-clockwise by its Rotation; an angle of exactly 0 takes the axes
 //     as they are, as M26 did), Velocity a quad whose up edge runs along the particle's velocity projected on that plane,
 //     Size wide and Size plus that projected speed times the emitter's VelocityStretch long (the camera-facing square when
-//     the projected speed is not above 1e-6 m/s or not finite), and Flat a square in the emitter's plane (PlaneRight,
-//     PlaneUp) turned by its Rotation (the camera-facing square when an axis is zero). Coloured by its Color, the texture's
+//     the projected speed is not above 1e-6 m/s or not finite, unturned: a Velocity particle's angle is unused), and Flat a
+//     square in the emitter's plane (PlaneRight, PlaneUp) turned by its Rotation (the camera-facing square when an axis is
+//     zero). Coloured by its Color, the texture's
 //     top-left texel at the quad's top-left corner as the camera (or, for Flat, a viewer above the plane) sees it. With a
 //     flipbook (the emitter's Sheet) its texture rectangle is the frame of its phase (decision 5: frame floor(FramePhase n)
-//     mod n of the range's n frames, and with BlendFrames the next one, blended by the phase's fraction), else the whole
-//     texture. Its previous-render offset is PreviousPosition - Position (zero without one) and its inverse soft distance
-//     1 / SoftDistance (0 for a hard cut). Emitters in the snapshot's order; an Alpha emitter's quads back to front in the
+//     mod n of the range's n frames, and with BlendFrames the next one, blended by the phase's fraction until the last frame
+//     of the range's last play of FrameCycles, which is held), else the whole texture. Its previous corners are laid the same
+//     way from its Previous draw (its Corners without one) and its inverse soft distance is 1 / SoftDistance (0 for a hard
+//     cut). Emitters in the snapshot's order; an Alpha emitter's quads back to front in the
 //     view (by view depth, the farthest first; ties in particle order), an Additive emitter's in particle order. Particles
 //     wholly outside the clip volume are culled; those with a non-finite position, colour or angle, or a size that is not
 //     finite and positive, are skipped (data the schemas accept can overflow a simulation: an unbounded Acceleration),
@@ -105,13 +107,14 @@ namespace Engine {
 		std::array<glm::vec3, 4> Corners{};
 		glm::vec4 Color = glm::vec4(1.0f); // linear RGB (above 1 with a look's Intensity), straight alpha; multiplies the texel
 		// M33 (decisions 4 to 6), appended: the frame's texture rectangle (u min, v min, u max, v max: the top-left corner's
-		// coordinates, then the bottom-right one's), the next frame's, the blend toward it, where every corner was in the
-		// view's previous render relative to where it is (PreviousPosition - Position), and the inverse soft distance.
+		// coordinates, then the bottom-right one's), the next frame's, the blend toward it, the inverse soft distance, and the
+		// corners as the view's previous render drew them (laid from the particle's Previous draw; the Corners themselves
+		// without one), from which the motion vectors are drawn.
 		glm::vec4 TexCoords = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
 		glm::vec4 NextTexCoords = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f);
 		float FrameBlend = 0.0f;
-		glm::vec3 PreviousOffset = glm::vec3(0.0f);
 		float InverseSoftDistance = 0.0f;
+		std::array<glm::vec3, 4> PreviousCorners{};
 
 		bool operator==(const ParticlePassQuad&) const = default;
 	};

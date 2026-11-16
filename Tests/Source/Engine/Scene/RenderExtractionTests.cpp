@@ -1035,6 +1035,8 @@ namespace Engine {
 			CHECK(item.Alignment == RenderParticleAlignment::Flat);
 			CHECK(item.VelocityStretch == 0.5f);
 			CHECK(item.SoftDistance == 0.25f);
+			CHECK(item.FrameCycles == 3.0f);
+			CHECK(item.Incarnation == looked.GetComponent<ParticleStateComponent>().Incarnation);
 			CHECK(Test::ApproxEqual(item.PlaneRight, glm::vec3(0.0f, 0.0f, -1.0f), 1e-6f));
 			CHECK(Test::ApproxEqual(item.PlaneUp, glm::vec3(-1.0f, 0.0f, 0.0f), 1e-6f));
 			const ParticleItem& particle = snapshot->Particles[0];
@@ -1042,7 +1044,7 @@ namespace Engine {
 			CHECK(Test::ApproxEqual(particle.Velocity, glm::vec3(-3.0f, 0.0f, 0.0f), 1e-5f));
 			CHECK(particle.FramePhase == 0.25f * 3.0f);
 			CHECK(particle.Serial == 41);
-			CHECK_FALSE(particle.PreviousPosition.has_value());
+			CHECK_FALSE(particle.Previous.has_value());
 			CHECK(particle.Color == glm::vec4(2.0f, 1.0f, 0.5f, 0.75f));
 
 			// Without a look: M26's look, and the particle's own angle, velocity and serial all the same.

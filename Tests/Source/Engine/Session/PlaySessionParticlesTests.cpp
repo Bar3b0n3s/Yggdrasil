@@ -151,6 +151,31 @@ namespace Engine {
 			}
 		}
 
+		// M33 (decision 6, the review's finding 3): the phase gives each state it anchors the next incarnation, so a state made
+		// again after its emitter was disabled is told apart from its predecessor, whose serials it repeats.
+		TEST_CASE("ParticleSystem: a state made again after its emitter was disabled takes a new incarnation")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddGround(scene));
+			static_cast<void>(AddFallingEmitter(scene));
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture, 42, PlayMode::Simulate));
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			Test::RunTicks(**session, 3);
+			Entity sparks = (*session)->GetScene().FindEntityByPath("/Box/Sparks");
+			REQUIRE(sparks.HasComponent<ParticleStateComponent>());
+			const uint64_t first = sparks.GetComponent<ParticleStateComponent>().Incarnation;
+			CHECK(first != 0);
+			sparks.SetActive(false);
+			Test::RunTicks(**session, 1);
+			CHECK_FALSE(sparks.HasComponent<ParticleStateComponent>());
+			sparks.SetActive(true);
+			Test::RunTicks(**session, 1);
+			REQUIRE(sparks.HasComponent<ParticleStateComponent>());
+			CHECK(sparks.GetComponent<ParticleStateComponent>().Incarnation > first);
+			CHECK(sparks.GetComponent<ParticleStateComponent>().State.Particles.front().Serial == 0);
+		}
+
 		// Stream P-A enters the phase: in Play and Simulate, after AudioUpdate (Play only) and right before RenderExtraction,
 		// with the session's ParticleSystem; the streams that enter a phase add it to PlaySessionTests.cpp's phase lists at its
 		// place (ADR 0028's phase-3 ledger).

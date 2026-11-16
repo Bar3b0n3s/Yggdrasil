@@ -554,6 +554,19 @@ namespace Engine {
 		Flat      // a square in the emitter's plane (PlaneRight, PlaneUp), turned by the particle's Rotation
 	};
 
+	// M33 (Docs/Decisions/0048-m33-particle-look.md decision 6): what a particle's quad was drawn from in a view's render: its
+	// position, size, angle and velocity (the stretch of a Velocity particle), from which the Particles pass lays its previous
+	// corners for the motion vectors.
+	struct ParticleDrawState
+	{
+		glm::vec3 Position = glm::vec3(0.0f);
+		float Size = 0.1f;
+		float Rotation = 0.0f;
+		glm::vec3 Velocity = glm::vec3(0.0f);
+
+		bool operator==(const ParticleDrawState&) const = default;
+	};
+
 	// One live particle to draw (decision 7): a quad in world space, by its emitter's alignment (M33).
 	struct ParticleItem
 	{
@@ -566,14 +579,14 @@ namespace Engine {
 		// a Local emitter's through its rendered world matrix), which a Velocity emitter stretches it along; the flipbook's
 		// phase (OverLife: the particle's age over its lifetime as of its last step, below 1, times FrameCycles; Random: its
 		// pick in [0, 1)), which the renderer turns into a frame of its emitter's range; its serial among its emitter's
-		// emissions; and where it was drawn in the view's previous render, matched by emitter and serial
+		// emissions; and how the view's previous render drew it, matched by its emitter's entity and incarnation and its serial
 		// (RenderViewHistory::Apply; empty for a particle that render did not draw, after a reset and in every snapshot no
-		// history filled), from which the Particles pass draws its motion vectors.
+		// history filled), from which the Particles pass lays its previous corners for the motion vectors.
 		float Rotation = 0.0f;
 		glm::vec3 Velocity = glm::vec3(0.0f);
 		float FramePhase = 0.0f;
 		uint64_t Serial = 0;
-		std::optional<glm::vec3> PreviousPosition{};
+		std::optional<ParticleDrawState> Previous{};
 	};
 
 	// One ParticleEmitter's live particles (decision 7), from render extraction: RenderSnapshot::Particles[First, First +
@@ -592,7 +605,10 @@ namespace Engine {
 		// defaults without one, which draw as M26 did): the flipbook's sheet (null: Texture drawn whole), the first frame of
 		// its range and its length (0: to the sheet's last frame), whether a particle cross-fades into the next frame
 		// (OverLife's BlendFrames), the alignment, the stretch of a Velocity particle (seconds), the soft distance (metres; 0:
-		// a hard cut) and, for Flat, the emitter's rendered local +X and -Z axes, normalized: the plane's right and up.
+		// a hard cut) and, for Flat, the emitter's rendered local +X and -Z axes, normalized: the plane's right and up; then how
+		// many times OverLife plays the range over a life (FrameCycles, so the last frame of the last play is held rather than
+		// blended into the first), and the incarnation of the emitter's particle state (ParticleStateComponent::Incarnation),
+		// which the view history matches with the serials, so a state made again never takes its predecessor's positions.
 		AssetHandle Sheet{};
 		uint32_t FirstFrame = 0;
 		uint32_t FrameCount = 0;
@@ -602,6 +618,8 @@ namespace Engine {
 		float SoftDistance = 0.0f;
 		glm::vec3 PlaneRight = glm::vec3(1.0f, 0.0f, 0.0f);
 		glm::vec3 PlaneUp = glm::vec3(0.0f, 0.0f, -1.0f);
+		float FrameCycles = 1.0f;
+		uint64_t Incarnation = 0;
 	};
 
 	// One IrradianceVolume to light with (M26, C26.1, R-GI-PROBE; decision 16), from render extraction: every effectively

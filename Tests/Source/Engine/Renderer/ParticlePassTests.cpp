@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/ParticlePass.h"
 
+#include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/SpriteSheetData.h"
 #include "Engine/Asset/TextureData.h"
@@ -14,6 +15,7 @@
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Support/DeviceLossTest.h"
+#include "Support/ExpectLog.h"
 #include "Support/GlmApprox.h"
 #include "Support/HeadlessGpuFixture.h"
 
@@ -325,12 +327,19 @@ namespace Engine {
 				{},
 			};
 			const std::vector<ParticleItem> particles = {
-				{ .Position = glm::vec3(0.0f), .Size = 1.0f, .FramePhase = 1.4375f, .PreviousPosition = glm::vec3(-0.5f, 0.0f, 0.0f) },
+				{ .Position = glm::vec3(0.0f), .Size = 1.0f, .FramePhase = 1.4375f, .Previous = ParticleDrawState{ .Position = glm::vec3(-0.5f, 0.0f, 0.0f), .Size = 1.0f } },
 				{ .Position = glm::vec3(1.0f, 0.0f, 0.0f), .Size = 1.0f },
 				{ .Position = glm::vec3(0.0f), .Size = 1.0f, .FramePhase = 0.75f },
 			};
 			const std::vector<ParticleEmitterItem> emitters = {
-				{ .Blend = RenderParticleBlend::Additive, .First = 0, .Count = 2, .Entity = UUID(1), .Sheet = UUID(8971), .BlendFrames = true, .SoftDistance = 0.5f },
+				{ .Blend = RenderParticleBlend::Additive,
+					.First = 0,
+					.Count = 2,
+					.Entity = UUID(1),
+					.Sheet = UUID(8971),
+					.BlendFrames = true,
+					.SoftDistance = 0.5f,
+					.FrameCycles = 2.0f },
 				{ .Texture = WhiteParticleTextureHandle, .Blend = RenderParticleBlend::Additive, .First = 2, .Count = 1, .Entity = UUID(2) },
 			};
 			ParticlePassPlan plan;
@@ -346,19 +355,82 @@ namespace Engine {
 			CHECK(blended.NextTexCoords == flipbooks[0].Frames[2]);
 			CHECK(blended.FrameBlend == 0.75f);
 			CHECK(blended.InverseSoftDistance == 2.0f);
-			CHECK(blended.PreviousOffset == glm::vec3(-0.5f, 0.0f, 0.0f));
+			for (size_t corner = 0; corner < 4; ++corner)
+				CHECK(blended.PreviousCorners[corner] == blended.Corners[corner] - glm::vec3(0.5f, 0.0f, 0.0f));
 			// Phase 0: the first frame, the second next, no blend; no previous position, no offset.
 			const ParticlePassQuad& first = plan.Quads[1];
 			CHECK(first.TexCoords == flipbooks[0].Frames[0]);
 			CHECK(first.NextTexCoords == flipbooks[0].Frames[1]);
 			CHECK(first.FrameBlend == 0.0f);
-			CHECK(first.PreviousOffset == glm::vec3(0.0f));
+			CHECK(first.PreviousCorners == first.Corners);
 			// Without a sheet: the whole texture, a hard cut, whatever the phase.
 			const ParticlePassQuad& whole = plan.Quads[2];
 			CHECK(whole.TexCoords == glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
 			CHECK(whole.NextTexCoords == glm::vec4(0.0f, 0.0f, 1.0f, 1.0f));
 			CHECK(whole.FrameBlend == 0.0f);
 			CHECK(whole.InverseSoftDistance == 0.0f);
+		}
+
+		// M33 (decision 5, the review's finding 1): the range plays FrameCycles times over a life, so a blended particle on the
+		// last frame of the last play holds it instead of blending into the first frame, while one between plays blends on.
+		TEST_CASE("ParticlePass: the last frame of a blended range's last play is held, not blended into the first")
+		{
+			const std::vector<ParticleFlipbook> flipbooks = { { .Texture = UUID(8975),
+				.Frames = { glm::vec4(0.0f, 0.0f, 0.5f, 1.0f), glm::vec4(0.5f, 0.0f, 1.0f, 1.0f) } } };
+			// A dying particle of a once-played range (phase just below 1: frame 1, three quarters on), and a particle at the
+			// same place in the first of two plays.
+			const std::vector<ParticleItem> particles = { { .Position = glm::vec3(0.0f), .Size = 1.0f, .FramePhase = 0.875f },
+				{ .Position = glm::vec3(1.0f, 0.0f, 0.0f), .Size = 1.0f, .FramePhase = 0.875f } };
+			std::vector<ParticleEmitterItem> emitters = { { .First = 0, .Count = 1, .Entity = UUID(1), .Sheet = UUID(8976), .BlendFrames = true },
+				{ .First = 1, .Count = 1, .Entity = UUID(2), .Sheet = UUID(8976), .BlendFrames = true, .FrameCycles = 2.0f } };
+			const std::vector<ParticleFlipbook> both = { flipbooks[0], flipbooks[0] };
+			ParticlePassPlan plan;
+			const Status planned = PlanParticlePass(emitters, particles, both, MakeFrontView(), MakeFrontViewProjection(), plan);
+			REQUIRE_MESSAGE(planned.has_value(), planned.error().ToString());
+			REQUIRE(plan.Quads.size() == 2);
+			CHECK(plan.Quads[0].TexCoords == flipbooks[0].Frames[1]);
+			CHECK(plan.Quads[0].FrameBlend == 0.0f);
+			CHECK(plan.Quads[1].TexCoords == flipbooks[0].Frames[1]);
+			CHECK(plan.Quads[1].NextTexCoords == flipbooks[0].Frames[0]);
+			CHECK(plan.Quads[1].FrameBlend == 0.75f);
+		}
+
+		// M33 (decision 6, the review's finding 2): a particle's previous corners are laid from how the view's previous render
+		// drew it, so its spin, its growth and a Velocity quad's stretch reach the motion vectors, not its centre's motion
+		// alone; a Velocity particle not moving across the view faces the camera unturned (the review's finding 10).
+		TEST_CASE("ParticlePass: a seen particle's previous corners are laid from its previous angle, size and stretch")
+		{
+			const std::vector<ParticleItem> particles = {
+				// Now turned a quarter and 2 m wide; drawn unturned and 1 m wide half a metre to the left before.
+				{ .Position = glm::vec3(0.0f), .Size = 2.0f, .Rotation = 1.5707963267948966f, .Previous = ParticleDrawState{ .Position = glm::vec3(-0.5f, 0.0f, 0.0f), .Size = 1.0f } },
+				// A spark now moving right at 3 m/s, before at 1 m/s: its previous length 0.5 + 1 * 0.5.
+				{ .Position = glm::vec3(0.0f), .Size = 0.5f, .Velocity = glm::vec3(3.0f, 0.0f, 0.0f), .Previous = ParticleDrawState{ .Position = glm::vec3(0.0f), .Size = 0.5f, .Velocity = glm::vec3(1.0f, 0.0f, 0.0f) } },
+				// A spark moving straight at the camera with an angle: an unturned square.
+				{ .Position = glm::vec3(0.0f), .Size = 0.5f, .Rotation = 1.0f, .Velocity = glm::vec3(0.0f, 0.0f, 5.0f) },
+			};
+			const std::vector<ParticleEmitterItem> emitters = {
+				{ .Blend = RenderParticleBlend::Additive, .First = 0, .Count = 1, .Entity = UUID(1) },
+				{ .Blend = RenderParticleBlend::Additive, .First = 1, .Count = 2, .Entity = UUID(2), .Alignment = RenderParticleAlignment::Velocity, .VelocityStretch = 0.5f },
+			};
+			ParticlePassPlan plan;
+			const Status planned = PlanParticlePass(emitters, particles, {}, MakeFrontView(), MakeFrontViewProjection(), plan);
+			REQUIRE_MESSAGE(planned.has_value(), planned.error().ToString());
+			REQUIRE(plan.Quads.size() == 3);
+			const auto checkCorners = [](const std::array<glm::vec3, 4>& corners, const std::array<glm::vec3, 4>& expected)
+			{
+				for (size_t corner = 0; corner < 4; ++corner)
+				{
+					CAPTURE(corner);
+					CHECK(Test::ApproxEqual(corners[corner], expected[corner], 1e-6f));
+				}
+			};
+			checkCorners(plan.Quads[0].PreviousCorners,
+				{ glm::vec3(-1.0f, 0.5f, 0.0f), glm::vec3(0.0f, 0.5f, 0.0f), glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(-1.0f, -0.5f, 0.0f) });
+			checkCorners(plan.Quads[1].PreviousCorners,
+				{ glm::vec3(0.5f, 0.25f, 0.0f), glm::vec3(0.5f, -0.25f, 0.0f), glm::vec3(-0.5f, -0.25f, 0.0f), glm::vec3(-0.5f, 0.25f, 0.0f) });
+			checkCorners(plan.Quads[2].Corners,
+				{ glm::vec3(-0.25f, 0.25f, 0.0f), glm::vec3(0.25f, 0.25f, 0.0f), glm::vec3(0.25f, -0.25f, 0.0f), glm::vec3(-0.25f, -0.25f, 0.0f) });
+			CHECK(plan.Quads[2].PreviousCorners == plan.Quads[2].Corners);
 		}
 
 		// M33 (decision 5): a missing or failed sheet, or a range that does not fit it, resolves to no frames, and the emitter's
@@ -629,6 +701,7 @@ namespace Engine {
 			AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Alpha, blended, UUID(82));
 			snapshot.ParticleEmitters.back().Sheet = FlipbookSheetHandle;
 			snapshot.ParticleEmitters.back().BlendFrames = true;
+			snapshot.ParticleEmitters.back().FrameCycles = 2.0f; // the first of two plays: frame 1 blends on into frame 0
 			const Image image = setup.Render(snapshot);
 			CHECK(ParticlePixel(image, 12, 12) == glm::u8vec4(255, 0, 0, 255));
 			CHECK(ParticlePixel(image, 52, 12) == glm::u8vec4(0, 255, 0, 255));
@@ -706,24 +779,29 @@ namespace Engine {
 			Test::SceneRendererIntegrationFixture setup(gpu);
 			setup.Assets().Publish(WhiteParticleTextureHandle, MakeParticleTexture(false));
 			GraphicsDevice& device = gpu.GetDevice();
+			// The fixture's still quad at z = -3 (its prepass writes no motion) behind most of the particles, 0.5 m in front of it.
 			RenderSnapshot snapshot = setup.Snapshot();
-			snapshot.Meshes.clear();
-			snapshot.PickTable.clear();
 			snapshot.Post.AntiAliasing = RenderAntiAliasing::Taa;
-			const glm::vec3 moving(0.5f, 0.0f, -3.0f);
-			const glm::vec3 still(-0.6f, 0.0f, -3.0f);
-			const glm::vec3 unseen(0.0f, 0.6f, -3.0f);
+			const glm::vec3 offset(0.25f, 0.0f, 0.0f);
+			const glm::vec3 moving(0.6f, -0.4f, -2.5f);
+			const glm::vec3 still(-0.6f, -0.4f, -2.5f);
+			const glm::vec3 unseen(0.0f, 0.6f, -2.5f);
+			// The motion draw's two rules (the review's finding 4): a moving particle below ParticleVelocityAlpha, and a moving
+			// particle the quad hides, both leave the motion already there.
+			const glm::vec3 faint(-0.4f, 0.3f, -2.5f);
+			const glm::vec3 hidden(0.5f, 0.4f, -4.0f);
 			const std::vector<ParticleItem> particles = {
-				{ .Position = moving, .Size = 0.4f, .PreviousPosition = moving - glm::vec3(0.25f, 0.0f, 0.0f) },
-				{ .Position = still, .Size = 0.4f, .PreviousPosition = still },
+				{ .Position = moving, .Size = 0.4f, .Previous = ParticleDrawState{ .Position = moving - offset, .Size = 0.4f } },
+				{ .Position = still, .Size = 0.4f, .Previous = ParticleDrawState{ .Position = still, .Size = 0.4f } },
 				{ .Position = unseen, .Size = 0.4f },
+				{ .Position = faint, .Size = 0.4f, .Color = glm::vec4(1.0f, 1.0f, 1.0f, 0.4f), .Previous = ParticleDrawState{ .Position = faint - offset, .Size = 0.4f } },
+				{ .Position = hidden, .Size = 0.4f, .Previous = ParticleDrawState{ .Position = hidden - offset, .Size = 0.4f } },
 			};
 			AddEmitter(snapshot, WhiteParticleTextureHandle, RenderParticleBlend::Additive, particles, UUID(84));
 			setup.Submit(snapshot);
 			const std::vector<glm::vec2> motion = ReadParticleVelocity(device, setup.Renderer());
 			const glm::mat4 viewProjection = snapshot.Camera.Projection * snapshot.Camera.View;
-			const glm::vec2 shift = ProjectParticleToPixel(viewProjection, moving, 64)
-				- ProjectParticleToPixel(viewProjection, moving - glm::vec3(0.25f, 0.0f, 0.0f), 64);
+			const glm::vec2 shift = ProjectParticleToPixel(viewProjection, moving, 64) - ProjectParticleToPixel(viewProjection, moving - offset, 64);
 			REQUIRE(shift.x > 2.0f);
 			const auto at = [&motion](const glm::vec2& pixel)
 			{
@@ -734,6 +812,8 @@ namespace Engine {
 			CHECK(std::abs(at(movingPixel).y) <= 0.05f);
 			CHECK(at(ProjectParticleToPixel(viewProjection, still, 64)) == glm::vec2(0.0f));
 			CHECK(at(ProjectParticleToPixel(viewProjection, unseen, 64)) == glm::vec2(0.0f));
+			CHECK(at(ProjectParticleToPixel(viewProjection, faint, 64)) == glm::vec2(0.0f));
+			CHECK(at(ProjectParticleToPixel(viewProjection, hidden, 64)) == glm::vec2(0.0f));
 			CHECK(motion[0] == glm::vec2(0.0f));
 
 			// Without TAA nothing reads SceneVelocity, and the particles write none.
@@ -742,6 +822,49 @@ namespace Engine {
 			setup.Submit(snapshot);
 			const std::vector<glm::vec2> none = ReadParticleVelocity(device, setup.Renderer());
 			CHECK(none[static_cast<size_t>(movingPixel.y) * 64 + static_cast<size_t>(movingPixel.x)] == glm::vec2(0.0f));
+		}
+
+		// M33 (decision 5, the review's finding 5): the flipbook resolution's fallbacks, as a sprite's: a sheet without a texture
+		// samples opaque white, tinted by the colour; a sheet that is missing draws nothing and is reported; a sheet whose
+		// texture is missing draws the texture's placeholder whole over each quad.
+		TEST_CASE("Particles: a sheet without a texture draws white, a missing sheet nothing, and a missing texture its placeholder" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture setup(gpu);
+			const AssetHandle untextured = UUID(8965);
+			const AssetHandle missingSheet = UUID(8966);
+			const AssetHandle missingTexture = UUID(8967);
+			Ref<SpriteSheetData> white = CreateRef<SpriteSheetData>();
+			white->Frames = { SpriteFrame{ .Rect = { .X = 0, .Y = 0, .Width = 4, .Height = 4 } } };
+			setup.Assets().Publish(untextured, white);
+			Ref<SpriteSheetData> broken = CreateRef<SpriteSheetData>();
+			broken->Texture = TypedAssetHandle<AssetType::Texture>(UUID(8968));
+			broken->Frames = { SpriteFrame{ .Rect = { .X = 0, .Y = 0, .Width = 4, .Height = 4 } } };
+			setup.Assets().Publish(missingTexture, broken);
+			Test::ExpectLog missing(LogLevel::Error, std::string(AssetMissingCode));
+			RenderSnapshot snapshot = MakeParticleSnapshot(setup);
+			const auto addFlipbook = [&snapshot](AssetHandle sheet, const glm::vec3& position, UUID entity)
+			{
+				const std::vector<ParticleItem> particles = { { .Position = position, .Size = 1.0f, .Color = glm::vec4(0.0f, 0.0f, 1.0f, 1.0f) } };
+				AddEmitter(snapshot, AssetHandle(), RenderParticleBlend::Alpha, particles, entity);
+				snapshot.ParticleEmitters.back().Sheet = sheet;
+			};
+			addFlipbook(untextured, glm::vec3(-2.5f, 2.5f, 0.0f), UUID(85));
+			addFlipbook(missingSheet, glm::vec3(2.5f, 2.5f, 0.0f), UUID(86));
+			addFlipbook(missingTexture, glm::vec3(0.0f, -2.5f, 0.0f), UUID(87));
+			const Image image = setup.Render(snapshot);
+			CHECK(ParticlePixel(image, 12, 12) == glm::u8vec4(0, 0, 255, 255));
+			CHECK(ParticlePixel(image, 52, 12) == glm::u8vec4(0, 0, 0, 255));
+			// The placeholder's texels, tinted blue: some of its square is lit.
+			bool drawn = false;
+			for (uint32_t y = 48; y < 56; ++y)
+			{
+				for (uint32_t x = 28; x < 36; ++x)
+					drawn = drawn || ParticlePixel(image, x, y) != glm::u8vec4(0, 0, 0, 255);
+			}
+			CHECK(drawn);
+			CHECK(ParticleTriangles(setup) == 4);
 		}
 
 		// Snapshot data no extraction produces is a partial error (Architecture §8.2): the emitter is skipped, the others drawn.
