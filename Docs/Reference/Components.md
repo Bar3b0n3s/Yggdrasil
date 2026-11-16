@@ -258,6 +258,7 @@ Script members of `Camera`:
 | `Primary` | proxy field | `boolean` | read/write | All | Whether this is the scene's primary camera (exactly one active camera should be). |
 | `Projection` | proxy field | `ProjectionType` | read/write | All | Perspective or orthographic projection. |
 | `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
+| `ScreenToWorldRayFrom` | method | `(self: Camera, x: number, y: number, position: vector, rotation: Quat) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, from the camera pose given (a finite position and a rotation, normalized) instead of the rendered one, so gameplay can aim in the fixed step from a pose it keeps there; the camera's projection and the session's view size as ScreenToWorldRay's, under a PixelPerfectCamera through the given position's snapped reference view. |
 | `VerticalFov` | proxy field | `number` | read/write | All | The vertical field of view of the perspective projection, in degrees. |
 | `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 
@@ -668,10 +669,10 @@ Moves the entity as a walking character that climbs steps and slopes and collide
 | `Radius` | `Float` | `0.3` | >= 0.001 | m |  | The radius of the character's capsule, in metres. |
 | `MaxSlopeAngle` | `Float` | `45` | 0 to 90 | deg |  | The steepest slope the character can walk up, in degrees. |
 | `StepHeight` | `Float` | `0.3` | >= 0 | m |  | The highest step the character climbs without jumping, in metres. |
-| `Mass` | `Float` | `70` | 0.001 to 1e+09 | kg |  | The character's mass in kilograms, used when it pushes bodies. |
+| `Mass` | `Float` | `70` | 0.001 to 1e+09 | kg |  | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
 | `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's gravity for the character. |
 | `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings. |
-| `InheritGroundVelocity` | `Bool` | `false` |  |  |  | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it. |
+| `InheritGroundVelocity` | `Bool` | `false` |  |  |  | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. |
 
 Script members of `CharacterController`:
 
@@ -681,10 +682,10 @@ Script members of `CharacterController`:
 | `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | Velocity after the last update. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for the character. |
 | `Height` | proxy field | `number` | read/write | All | The character's total height, in metres. |
-| `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it. |
+| `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. |
 | `IsGrounded` | method | `(self: CharacterController) -> boolean` |  | All | Whether the last character update found supporting ground. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. |
-| `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies. |
+| `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
 | `MaxSlopeAngle` | proxy field | `number` | read/write | All | The steepest slope the character can walk up, in degrees. |
 | `Move` | method | `(self: CharacterController, velocity: vector) -> ()` |  | All | Supply desired velocity for the next fixed character update. |
 | `Radius` | proxy field | `number` | read/write | All | The radius of the character's capsule, in metres. |

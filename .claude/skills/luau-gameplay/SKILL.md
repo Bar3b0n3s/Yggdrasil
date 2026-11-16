@@ -13,6 +13,7 @@ Reference pages beside this file, each a `docs.get` topic and a file in this ski
 - `skills/luau-gameplay/sprites-2d` ([sprites-2d.md](sprites-2d.md)): sprites, sprite animation, 2D lights, tilemaps and the 2D physics world in scripts: their fields, methods, the `Physics2D` module and the 2D callbacks.
 - `skills/luau-gameplay/animation` ([animation.md](animation.md)): skeletal and morph animation in scripts: the `Animator` and `SkinnedMesh` fields and methods, script-driven blending, root motion, `OnAnimationEvent` and `Test.GetPoseDigest`.
 - `skills/luau-gameplay/world-pause` ([world-pause.md](world-pause.md)): pausing the world while menus run: `Time.PauseWorld`, `ResumeWorld` and `IsWorldPaused`, `RunsWhileWorldPaused`, the world's and the session's clocks, tasks and sounds while paused.
+- `skills/luau-gameplay/characters-and-input` ([characters-and-input.md](characters-and-input.md)): how a character meets Dynamic bodies (the push, light bodies that never move it, tuning it with `Mass`), triggers as buttons, bindings checked when set, and aiming at the cursor in the fixed step with `Camera:ScreenToWorldRayFrom`.
 
 ## Script shape
 

@@ -22,11 +22,6 @@ namespace Engine {
 
 	namespace Utils {
 
-		static bool IsTriggerAxis(GamepadAxis axis)
-		{
-			return axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger;
-		}
-
 		static size_t GetPhaseIndex(InputPhase phase)
 		{
 			switch (phase)
@@ -212,6 +207,24 @@ namespace Engine {
 		return GetView(phase).State.Gamepads[gamepad].Axes[index];
 	}
 
+	bool InputState::IsGamepadTriggerDown(InputPhase phase, uint32_t gamepad, GamepadAxis trigger) const
+	{
+		return gamepad < MaxGamepads && IsGamepadTrigger(trigger)
+			&& GetView(phase).State.Gamepads[gamepad].TriggersDown.test(std::to_underlying(trigger));
+	}
+
+	bool InputState::WasGamepadTriggerPressed(InputPhase phase, uint32_t gamepad, GamepadAxis trigger) const
+	{
+		return gamepad < MaxGamepads && IsGamepadTrigger(trigger)
+			&& GetView(phase).Changes.GamepadTriggersPressed[gamepad].test(std::to_underlying(trigger));
+	}
+
+	bool InputState::WasGamepadTriggerReleased(InputPhase phase, uint32_t gamepad, GamepadAxis trigger) const
+	{
+		return gamepad < MaxGamepads && IsGamepadTrigger(trigger)
+			&& GetView(phase).Changes.GamepadTriggersReleased[gamepad].test(std::to_underlying(trigger));
+	}
+
 	void InputState::InjectKey(const KeyEvent& key)
 	{
 		// Key::None and values between the enumerators have no name and are not keys.
@@ -305,9 +318,12 @@ namespace Engine {
 			}
 			case GamepadEventKind::Disconnected:
 			{
-				// Every button that was down goes up with a Released edge; the axes return to rest.
+				// Every button and trigger that was down goes up with a Released edge; the axes return to rest.
 				for (PhaseChanges& changes : m_Pending)
+				{
 					changes.GamepadButtonsReleased[gamepad.Gamepad] |= state.ButtonsDown;
+					changes.GamepadTriggersReleased[gamepad.Gamepad] |= state.TriggersDown;
+				}
 				state = GamepadState{};
 				return;
 			}
@@ -330,8 +346,21 @@ namespace Engine {
 				const size_t index = std::to_underlying(gamepad.Axis);
 				if (!state.Connected || index >= GamepadAxisCount || std::isnan(gamepad.Value))
 					return;
-				const float minimum = Utils::IsTriggerAxis(gamepad.Axis) ? 0.0f : -1.0f;
-				state.Axes[index] = std::clamp(gamepad.Value, minimum, 1.0f);
+				const bool isTrigger = IsGamepadTrigger(gamepad.Axis);
+				const float value = std::clamp(gamepad.Value, isTrigger ? 0.0f : -1.0f, 1.0f);
+				state.Axes[index] = value;
+				if (!isTrigger)
+					return;
+				// The trigger's button level, with hysteresis (see the class comment).
+				const bool wasDown = state.TriggersDown.test(index);
+				const bool isDown = wasDown ? value >= GamepadTriggerReleaseThreshold : value >= GamepadTriggerPressThreshold;
+				if (!Utils::SetLevel(state.TriggersDown, index, isDown))
+					return;
+				for (PhaseChanges& changes : m_Pending)
+				{
+					auto& edges = isDown ? changes.GamepadTriggersPressed : changes.GamepadTriggersReleased;
+					edges[gamepad.Gamepad].set(index);
+				}
 				return;
 			}
 		}

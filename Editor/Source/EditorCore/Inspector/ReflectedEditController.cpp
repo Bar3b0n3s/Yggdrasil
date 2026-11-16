@@ -768,7 +768,9 @@ namespace Engine {
 			const auto& after = m_State->After.front();
 			if (target.Kind == InspectorTargetKind::ProjectSettings)
 			{
-				ENGINE_TRY_ASSIGN(auto command, ProjectSettingsCommand::CreateFromPatch(editor, CreateMergePatch(m_State->Before.front().Object, after.Object), label));
+				// The user's own settings path: a binding added empty commits, warned, and is filled in by the next edit (M34,
+				// Docs/Decisions/0049-m34-characters-input.md decision 6).
+				ENGINE_TRY_ASSIGN(auto command, ProjectSettingsCommand::CreateFromPatch(editor, CreateMergePatch(m_State->Before.front().Object, after.Object), label, InputActionCheck::Warn));
 				ENGINE_TRY_ASSIGN(index, editor.Execute(std::move(command)));
 			}
 			else

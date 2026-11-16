@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -47,6 +48,12 @@ namespace Engine {
 		Event MakeKeyEvent(Key key, ButtonAction action)
 		{
 			return KeyEvent{ .KeyCode = key, .Action = action, .Modifiers = KeyModifiers::None, .Handled = false };
+		}
+
+		// The first gamepad's right trigger at `value`, as the host's window reports it (QueueDeviceEvent).
+		Event MakeTriggerEvent(float value)
+		{
+			return GamepadEvent{ .Gamepad = 0, .Kind = GamepadEventKind::Axis, .Axis = GamepadAxis::RightTrigger, .Value = value };
 		}
 
 	}
@@ -623,6 +630,61 @@ namespace Engine {
 			CHECK_FALSE(devices.WasKeyPressed(InputPhase::Frame, Key::A));
 			CHECK(devices.WasKeyReleased(InputPhase::Frame, Key::A));
 			CHECK_FALSE(devices.IsKeyDown(InputPhase::Frame, Key::A));
+		}
+
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): project.setSettings and project.validate make this
+		// check of the project's actions, PlayInput::Create's, without a session.
+		TEST_CASE("PlayInput: ValidateInputActions refuses what play.start refuses, below /Input/Actions, and takes a trigger as a button")
+		{
+			InputSettings settings = MakeActions();
+			InputActionSettings attack;
+			attack.Bindings = { "Gamepad.RightTrigger", "Key.J" };
+			settings.Actions.emplace("Attack", attack);
+			CHECK(ValidateInputActions(settings).has_value());
+			CHECK(PlayInput::Create(settings).has_value());
+
+			InputActionSettings look;
+			look.Bindings = { "Gamepad.RightY" };
+			settings.Actions.emplace("Look", look);
+			const Status refused = ValidateInputActions(settings);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(refused.error().GetLocation().JsonPointer == std::optional<std::string>("/Input/Actions"));
+			REQUIRE(refused.error().GetIssues().size() == 1);
+			CHECK(refused.error().GetIssues().front().JsonPointer == "/Input/Actions/Look/Bindings/0");
+			const Result<PlayInput> created = PlayInput::Create(settings);
+			REQUIRE_FALSE(created.has_value());
+			CHECK(created.error().GetIssues().front().JsonPointer == refused.error().GetIssues().front().JsonPointer);
+		}
+
+		// M34 (decision 5): a trigger's button level depends on the history of its values, so the frame view takes the applied
+		// tick's level too, not only its value: here the preview saw the trigger pass 0.5 while the tick, its device events
+		// coalesced, saw only 0.45.
+		TEST_CASE("PlayInput: after a tick the frame view holds the applied trigger level, whatever the preview saw")
+		{
+			InputSettings settings = MakeActions();
+			InputActionSettings attack;
+			attack.Bindings = { "Gamepad.RightTrigger" };
+			settings.Actions.emplace("Attack", attack);
+			Result<PlayInput> created = PlayInput::Create(settings);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlayInput& input = *created;
+			const InputState& devices = input.GetDevices();
+			input.SetFramePreview(true);
+			input.QueueDeviceEvent(GamepadEvent{ .Gamepad = 0, .Kind = GamepadEventKind::Connected });
+			input.ApplyTick(0);
+			input.LatchFrame();
+			input.QueueDeviceEvent(MakeTriggerEvent(0.6f));
+			input.LatchFrame();
+			CHECK(devices.IsGamepadTriggerDown(InputPhase::Frame, 0, GamepadAxis::RightTrigger));
+			input.QueueDeviceEvent(MakeTriggerEvent(0.45f));
+			input.ApplyTick(1);
+			CHECK(devices.GetGamepadAxis(InputPhase::Step, 0, GamepadAxis::RightTrigger) == 0.45f);
+			CHECK_FALSE(devices.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			input.LatchFrame();
+			CHECK(devices.GetGamepadAxis(InputPhase::Frame, 0, GamepadAxis::RightTrigger) == 0.45f);
+			CHECK_FALSE(devices.IsGamepadTriggerDown(InputPhase::Frame, 0, GamepadAxis::RightTrigger));
+			CHECK(input.GetSummary(InputPhase::Frame).Down == input.GetSummary(InputPhase::Step).Down);
 		}
 
 		// Injected input queued for a tick before a device event the frame previewed reaches the frame view through the levels

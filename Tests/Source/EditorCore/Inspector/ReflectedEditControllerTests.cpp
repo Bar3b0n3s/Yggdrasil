@@ -32,6 +32,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -677,6 +678,35 @@ namespace Engine {
 			REQUIRE_FALSE(staleScene);
 			CHECK(staleScene.error().GetCode() == ErrorCode::Conflict);
 			CHECK(editor.GetScene().FindEntityByID(id).GetComponent<TransformComponent>().Translation == glm::vec3(1.0f, 2.0f, 3.0f));
+		}
+
+		// M34 review finding 7 (Docs/Decisions/0049-m34-characters-input.md decision 6): the inspector's settings path is the
+		// user's, so a binding added empty to an input action commits, warned, and the next edit fills it in.
+		TEST_CASE("ReflectedEditController: a binding added empty to an input action commits, and the next edit fills it in")
+		{
+			Test::AutomationFixture fixture("InspectorInputBinding");
+			auto& editor = fixture.GetEditor();
+			REQUIRE(fixture.Call("project.setSettings", Json{ { "patch", Json{ { "Input", Json{ { "Actions", Json{ { "Jump", Json{ { "Type", "Button" }, { "Bindings", Json::array({ "Key.Space" }) } } } } } } } } } }));
+			const auto jumpBindings = [&editor]()
+			{
+				const auto& actions = editor.GetProject().GetSettings().Input.Actions;
+				const auto jump = actions.find("Jump");
+				return jump == actions.end() ? std::vector<std::string>{} : jump->second.Bindings;
+			};
+			ReflectedEditController edits(editor);
+			const InspectorEditTarget bindings{ .Kind = InspectorTargetKind::ProjectSettings, .FieldPath = "Input.Actions[Jump].Bindings" };
+			const size_t history = editor.GetHistory().GetUndoCount();
+			REQUIRE(edits.Begin(bindings));
+			REQUIRE(edits.Preview(Value::FromArray({ Value::FromString("Key.Space"), Value::FromString("") })));
+			const auto added = edits.Commit();
+			REQUIRE_MESSAGE(added.has_value(), added.error().ToString());
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "" });
+			REQUIRE(edits.Begin(bindings));
+			REQUIRE(edits.Preview(Value::FromArray({ Value::FromString("Key.Space"), Value::FromString("Key.J") })));
+			const auto filled = edits.Commit();
+			REQUIRE_MESSAGE(filled.has_value(), filled.error().ToString());
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "Key.J" });
+			CHECK(editor.GetHistory().GetUndoCount() == history + 2);
 		}
 
 		TEST_CASE("ReflectedEditController: an asset replacement rejects the captured version and preserves agent edits")

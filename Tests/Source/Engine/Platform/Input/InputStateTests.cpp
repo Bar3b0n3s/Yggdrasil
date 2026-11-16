@@ -413,6 +413,72 @@ namespace Engine {
 			CHECK(input.GetMouseDelta(InputPhase::Frame) == glm::vec2(0.0f, 2.0f));
 			CHECK(input.GetScrollDelta(InputPhase::Frame) == glm::vec2(0.0f, 1.0f));
 		}
+
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 5; World Tree's brief 10): a trigger is also a button,
+		// down from GamepadTriggerPressThreshold and up again only below GamepadTriggerReleaseThreshold.
+		TEST_CASE("InputState: a trigger is a button, pressed at 0.5 and released only below 0.4")
+		{
+			InputState input;
+			input.Inject(GamepadConnected(0));
+			const auto step = [&input](float value)
+			{
+				input.Inject(GamepadAxisMoved(0, GamepadAxis::RightTrigger, value));
+				input.LatchStep();
+			};
+
+			step(0.45f);
+			CHECK_FALSE(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			CHECK_FALSE(input.WasGamepadTriggerPressed(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			step(GamepadTriggerPressThreshold);
+			CHECK(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			CHECK(input.WasGamepadTriggerPressed(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			// Between the thresholds it holds, without edges: the hysteresis.
+			step(0.45f);
+			CHECK(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			CHECK_FALSE(input.WasGamepadTriggerPressed(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			CHECK_FALSE(input.WasGamepadTriggerReleased(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			step(GamepadTriggerReleaseThreshold);
+			CHECK(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			step(0.39f);
+			CHECK_FALSE(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			CHECK(input.WasGamepadTriggerReleased(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			step(0.45f);
+			CHECK_FALSE(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::RightTrigger));
+			// The other trigger and the sticks are no buttons of this gamepad.
+			CHECK_FALSE(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::LeftTrigger));
+			input.Inject(GamepadAxisMoved(0, GamepadAxis::LeftX, 1.0f));
+			input.LatchStep();
+			CHECK_FALSE(input.IsGamepadTriggerDown(InputPhase::Step, 0, GamepadAxis::LeftX));
+			CHECK_FALSE(input.WasGamepadTriggerPressed(InputPhase::Step, 0, GamepadAxis::LeftX));
+		}
+
+		TEST_CASE("InputState: a trigger's edges are latched per phase like a button's, and a disconnect releases it")
+		{
+			InputState input;
+			input.Inject(GamepadConnected(1));
+			input.LatchStep();
+			input.LatchFrame();
+			// A pull and a release between two steps: both edges on the next step, the trigger up.
+			input.Inject(GamepadAxisMoved(1, GamepadAxis::LeftTrigger, 1.0f));
+			input.Inject(GamepadAxisMoved(1, GamepadAxis::LeftTrigger, 0.0f));
+			input.Inject(GamepadAxisMoved(1, GamepadAxis::LeftTrigger, 0.8f));
+			input.LatchStep();
+			CHECK(input.WasGamepadTriggerPressed(InputPhase::Step, 1, GamepadAxis::LeftTrigger));
+			CHECK(input.WasGamepadTriggerReleased(InputPhase::Step, 1, GamepadAxis::LeftTrigger));
+			CHECK(input.IsGamepadTriggerDown(InputPhase::Step, 1, GamepadAxis::LeftTrigger));
+			// The frame view has its own edges, still pending until it latches.
+			CHECK_FALSE(input.WasGamepadTriggerPressed(InputPhase::Frame, 1, GamepadAxis::LeftTrigger));
+			input.LatchFrame();
+			CHECK(input.WasGamepadTriggerPressed(InputPhase::Frame, 1, GamepadAxis::LeftTrigger));
+			input.LatchStep();
+			CHECK_FALSE(input.WasGamepadTriggerPressed(InputPhase::Step, 1, GamepadAxis::LeftTrigger));
+
+			input.Inject(GamepadEvent{ .Gamepad = 1, .Kind = GamepadEventKind::Disconnected });
+			input.LatchStep();
+			CHECK_FALSE(input.IsGamepadTriggerDown(InputPhase::Step, 1, GamepadAxis::LeftTrigger));
+			CHECK(input.WasGamepadTriggerReleased(InputPhase::Step, 1, GamepadAxis::LeftTrigger));
+			CHECK(input.GetGamepadAxis(InputPhase::Step, 1, GamepadAxis::LeftTrigger) == 0.0f);
+		}
 	}
 
 }

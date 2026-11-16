@@ -2052,6 +2052,14 @@ Ray through a viewport pixel center, origin top-left, using the rendered camera 
 
 All modes; Runtime|Test; pure/read.
 
+### Camera.ScreenToWorldRayFrom
+
+`(self: Camera, x: number, y: number, position: vector, rotation: Quat) -> (vector, vector)`
+
+Ray through a viewport pixel center, origin top-left, from the camera pose given (a finite position and a rotation, normalized) instead of the rendered one, so gameplay can aim in the fixed step from a pose it keeps there; the camera's projection and the session's view size as ScreenToWorldRay's, under a PixelPerfectCamera through the given position's snapped reference view.
+
+All modes; Runtime|Test; pure/read.
+
 ### Camera.VerticalFov
 
 `number`
@@ -2152,7 +2160,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.
+While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2176,7 +2184,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The character's mass in kilograms, used when it pushes bodies.
+The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

@@ -1,0 +1,167 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "24bd4ab104116781",
+		"Path": "Assets/Scenes/InputAim.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.5.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "41449b28c82600f8",
+				"Path": "/Ground",
+				"Hash": "b040bd810927b810",
+				"Components": {
+					"Transform": "94b19441661abe89",
+					"MeshRenderer": "818cf11abdba0624",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "6228836460e0b604",
+				"Path": "/Marker",
+				"Hash": "7c950908b7b9a12e",
+				"Components": {
+					"Transform": "c0bf08c0c218f38b",
+					"MeshRenderer": "65046d1ee03542d7"
+				}
+			},
+			{
+				"Id": "8f67bdb5f64ec924",
+				"Path": "/Camera",
+				"Hash": "d59cd0a7e72b358e",
+				"Components": {
+					"Transform": "29a2d28c9ab4ac29",
+					"Camera": "8509390a2ff98dfc",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "c90078c6c74d261a",
+				"Path": "/Sun",
+				"Hash": "8bc0ed84cd25fb94",
+				"Components": {
+					"Transform": "277ec5c0817bbe09",
+					"DirectionalLight": "6c90c620fea1993b"
+				}
+			},
+			{
+				"Id": "d621b4d20a6e9947",
+				"Path": "/Aimer",
+				"Hash": "f544f63af842d010",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "34c6c9d613a73092"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "00ccaf2a32599084",
+				"Path": "Assets/Scenes/Components/Materials/Glow.material",
+				"Type": "Material",
+				"Hash": "442044ac447b0d97"
+			},
+			{
+				"Handle": "7c0f6961797cd153",
+				"Path": "Assets/Scripts/InputAim/Aimer.luau",
+				"Type": "Script",
+				"Hash": "dbf5e2f660cb2524"
+			},
+			{
+				"Handle": "d31facacf6bb6908",
+				"Path": "Assets/Scenes/Components/Materials/Ground.material",
+				"Type": "Material",
+				"Hash": "6c73020cc30c1dd8"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 8,
+			"Type": "MouseMove",
+			"Position": [640, 360]
+		},
+		{
+			"Tick": 40,
+			"Type": "MouseMove",
+			"Position": [300, 520]
+		},
+		{
+			"Tick": 48,
+			"Type": "GamepadAxis",
+			"Value": 0.8,
+			"Gamepad": 0,
+			"Axis": "RightTrigger"
+		},
+		{
+			"Tick": 56,
+			"Type": "GamepadAxis",
+			"Value": 0.45,
+			"Gamepad": 0,
+			"Axis": "RightTrigger"
+		},
+		{
+			"Tick": 64,
+			"Type": "GamepadAxis",
+			"Value": 0.2,
+			"Gamepad": 0,
+			"Axis": "RightTrigger"
+		},
+		{
+			"Tick": 96,
+			"Type": "MouseMove",
+			"Position": [1000, 420]
+		},
+		{
+			"Tick": 104,
+			"Type": "GamepadAxis",
+			"Value": 1,
+			"Gamepad": 0,
+			"Axis": "RightTrigger"
+		},
+		{
+			"Tick": 120,
+			"Type": "GamepadAxis",
+			"Value": 0,
+			"Gamepad": 0,
+			"Axis": "RightTrigger"
+		},
+		{
+			"Tick": 150,
+			"Type": "MouseMove",
+			"Position": [800, 640]
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 100,
+			"Luau": "local aimer = Scene.FindByName(\"Aimer\"):GetScript(\"Aimer\")\nreturn aimer.Shots == 1 and aimer.Aimed > 0"
+		},
+		{
+			"Tick": 191,
+			"Luau": "local aimer = Scene.FindByName(\"Aimer\"):GetScript(\"Aimer\")\nlocal marker = Scene.FindByName(\"Marker\").Transform.WorldPosition\nreturn aimer.Shots == 2 and vector.magnitude(marker - aimer.Target) < 0.0001 and math.abs(marker.y) < 0.001"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "0415d0de568540c9"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "c7f516b71f5db402"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "7079ea083812e5e8"
+		}
+	],
+	"FinalTick": 192,
+	"FinalStateHash": "98adca5ce5ce12ab"
+}

@@ -1113,7 +1113,7 @@
 					"minimum": 0
 				},
 				"Mass": {
-					"description": "The character's mass in kilograms, used when it pushes bodies.",
+					"description": "The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character.",
 					"type": "number",
 					"minimum": 0.001,
 					"maximum": 1000000000
@@ -1127,7 +1127,7 @@
 					"type": "string"
 				},
 				"InheritGroundVelocity": {
-					"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+					"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.",
 					"type": "boolean"
 				}
 			},

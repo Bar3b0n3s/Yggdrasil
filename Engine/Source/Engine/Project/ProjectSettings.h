@@ -56,9 +56,13 @@ namespace Engine {
 	};
 
 	// Registry struct "InputAction" (§6.1 "Input.Actions" values, §4.3). Bindings are the control names of a Button action
-	// ("Key.Space", "Gamepad.South"); Positive, Negative and Gamepad ("Gamepad.LeftX") form an Axis action; Invert flips
-	// the axis. Control names are validated against Platform's key and gamepad tables when the project is applied (M2's
-	// InputActionMap), and by the project validator (INPUT_UNKNOWN_ACTION is about script names, M13).
+	// ("Key.Space", "Gamepad.South", "Gamepad.RightTrigger"); Positive, Negative and Gamepad ("Gamepad.LeftX") form an Axis
+	// action; Invert flips the axis. The project file's reader does not check control names, so a project holding a bad
+	// one still opens; they are checked against Platform's key and gamepad tables by M2's InputActionMap, through
+	// ValidateInputActions (Session/PlayInput.h; M34, Docs/Decisions/0049-m34-characters-input.md decisions 6 and 7):
+	// when play.start builds a session, when project.setSettings writes Input (an agent's patch is refused, the editor's
+	// own settings panel commits it with warnings) and in project.validate, which reports each problem as
+	// INPUT_INVALID_ACTION (INPUT_UNKNOWN_ACTION is about script names, M13).
 	struct InputActionSettings
 	{
 		// Registry enum "InputActionType". Nested so it cannot collide with Platform's input types (M2).

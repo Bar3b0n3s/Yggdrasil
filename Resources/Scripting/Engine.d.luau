@@ -458,6 +458,8 @@ declare extern type Camera with
 	Projection: ProjectionType
 	-- Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
 	ScreenToWorldRay: (self: Camera, x: number, y: number) -> (vector, vector)
+	-- Ray through a viewport pixel center, origin top-left, from the camera pose given (a finite position and a rotation, normalized) instead of the rendered one, so gameplay can aim in the fixed step from a pose it keeps there; the camera's projection and the session's view size as ScreenToWorldRay's, under a PixelPerfectCamera through the given position's snapped reference view. [All modes; Runtime|Test; pure/read]
+	ScreenToWorldRayFrom: (self: Camera, x: number, y: number, position: vector, rotation: Quat) -> (vector, vector)
 	-- The vertical field of view of the perspective projection, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
 	VerticalFov: number
 	-- Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
@@ -488,13 +490,13 @@ declare extern type CharacterController with
 	GravityFactor: number
 	-- The character's total height, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	Height: number
-	-- While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. [All modes; Runtime|Test; pure/read; setter mutates]
 	InheritGroundVelocity: boolean
 	-- Whether the last character update found supporting ground. [All modes; Runtime|Test; pure/read]
 	IsGrounded: (self: CharacterController) -> boolean
 	-- Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layer: string
-	-- The character's mass in kilograms, used when it pushes bodies. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. [All modes; Runtime|Test; pure/read; setter mutates]
 	Mass: number
 	-- The steepest slope the character can walk up, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
 	MaxSlopeAngle: number

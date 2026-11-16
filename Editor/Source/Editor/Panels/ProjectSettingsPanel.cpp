@@ -8,9 +8,12 @@
 #include "EditorCore/EditorContext.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Session/PlayInput.h"
 
 #include <imgui.h>
 
+#include <format>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
@@ -43,6 +46,48 @@ namespace Engine {
 					patch[value.key()] = nullptr;
 			}
 			return patch;
+		}
+
+		// The drawer path of a ValidateInputActions issue's pointer ("/Input/Actions/<Name>/<Field>[/<i>]", RFC 6901): the
+		// value it names below "ProjectSettings", or the action itself for its name (which is the Map key, not a field).
+		static std::string MakeInputIssuePath(std::string_view pointer)
+		{
+			std::vector<std::string> segments;
+			for (size_t start = 1; start <= pointer.size();)
+			{
+				const size_t slash = pointer.find('/', start);
+				const size_t end = slash == std::string_view::npos ? pointer.size() : slash;
+				std::string segment(pointer.substr(start, end - start));
+				for (size_t found = segment.find("~1"); found != std::string::npos; found = segment.find("~1", found + 1))
+					segment.replace(found, 2, "/");
+				for (size_t found = segment.find("~0"); found != std::string::npos; found = segment.find("~0", found + 1))
+					segment.replace(found, 2, "~");
+				segments.push_back(std::move(segment));
+				start = end + 1;
+			}
+			if (segments.size() < 3)
+				return "ProjectSettings.Input.Actions";
+			std::string path = std::format("ProjectSettings.Input.Actions[{}]", segments[2]);
+			if (segments.size() > 3 && segments[3] != "Name")
+				path += "." + segments[3];
+			if (segments.size() > 4)
+				path += std::format("[{}]", segments[4]);
+			return path;
+		}
+
+		// The problems play.start would refuse in `input`'s actions, each a note under the value it concerns.
+		static std::vector<ReflectedDrawerNote> MakeInputActionNotes(const InputSettings& input)
+		{
+			std::vector<ReflectedDrawerNote> notes;
+			const Status valid = ValidateInputActions(input);
+			if (valid)
+				return notes;
+			for (const ErrorIssue& issue : valid.error().GetIssues())
+			{
+				notes.push_back({ .Path = MakeInputIssuePath(issue.JsonPointer),
+					.Message = issue.Hint.empty() ? issue.Message : std::format("{} ({})", issue.Message, issue.Hint) });
+			}
+			return notes;
 		}
 
 		static Result<ReflectedDrawerResult> DrawSettingsSection(const StructInfo& type, Value& value,
@@ -155,11 +200,13 @@ namespace Engine {
 		ImGui::TextWrapped("%s", context.Editor.IsReadOnly() ? "Read-only project. Settings cannot be changed." : m_Ticket != 0 ? "Saving settings..."
 																																: "Changes save automatically and can be undone.");
 		Utils::EditorSectionHeading(sectionLabel);
+		const std::vector<ReflectedDrawerNote> notes = m_Section == "Input" ? Utils::MakeInputActionNotes(m_Draft.Input) : std::vector<ReflectedDrawerNote>{};
 		const ReflectedDrawerContext drawer{
 			.Types = registry,
 			.Resolve = { .Registry = &registry, .Owner = &m_Draft, .OwnerType = type, .Key = {} },
 			.Path = "ProjectSettings",
-			.ReadOnly = context.Editor.IsReadOnly() || m_Ticket != 0
+			.ReadOnly = context.Editor.IsReadOnly() || m_Ticket != 0,
+			.Notes = notes
 		};
 		ImGui::PushID(std::to_string(m_DraftEpoch).c_str());
 		auto edit = Utils::DrawSettingsSection(*type, m_Value, drawer, m_Section);

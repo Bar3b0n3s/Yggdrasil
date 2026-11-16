@@ -352,11 +352,11 @@ namespace Engine {
 				Lua::RaiseError(call, "camera projection requires a nonzero viewport");
 			return size;
 		}
-		// What a camera's methods project through, as render extraction draws the camera (Scene/RenderExtraction.h): its
-		// rendered pose and its own projection over the view; or, under a PixelPerfectCamera
-		// (Docs/Decisions/0032-m21-contract.md decision 6), the snapped position and the orthographic view of the reference
-		// resolution, which the output stage places in the view by Mapping, so a view point goes through
-		// MapViewPointToScenePoint first.
+		// What a camera's methods project through, as render extraction draws the camera (Scene/RenderExtraction.h): a pose
+		// (the rendered one, or for ScreenToWorldRayFrom the one the script gives, M34) and the camera's own projection over
+		// the view; or, under a PixelPerfectCamera (Docs/Decisions/0032-m21-contract.md decision 6), that pose's snapped
+		// position and the orthographic view of the reference resolution, which the output stage places in the view by
+		// Mapping, so a view point goes through MapViewPointToScenePoint first.
 		struct CameraView
 		{
 			glm::dvec3 Position = glm::dvec3(0.0);
@@ -373,12 +373,12 @@ namespace Engine {
 		{
 			return static_cast<uint32_t>(std::clamp(std::floor(extent), 1.0, static_cast<double>(std::numeric_limits<uint32_t>::max())));
 		}
-		static CameraView GetCameraView(const Entity& entity, const CameraComponent& camera, const glm::dvec2& viewSize)
+		static CameraView GetCameraView(const Entity& entity, const CameraComponent& camera, const glm::dvec2& viewSize, const glm::vec3& position,
+			const glm::quat& rotation)
 		{
 			CameraView view;
-			const glm::vec3 position = TransformSystem::GetRenderPosition(entity);
 			view.Position = glm::dvec3(position);
-			view.Rotation = WidenRotation(TransformSystem::GetRenderRotation(entity));
+			view.Rotation = WidenRotation(rotation);
 			view.Perspective = camera.Projection == ProjectionType::Perspective;
 			view.TanHalfFov = DetMath::Tan(static_cast<double>(camera.VerticalFov) * std::numbers::pi / 360.0);
 			view.HalfHeight = camera.OrthographicSize;
@@ -394,15 +394,15 @@ namespace Engine {
 			}
 			return view;
 		}
-		static int CameraRay(ScriptCall& call)
+		// The ray through the centre of view pixel (x, y) (arguments 2 and 3) of `entity`'s camera, seen from `position` and
+		// `rotation`, pushed as its origin and unit direction.
+		static int PushCameraRay(ScriptCall& call, const Entity& entity, const glm::dvec2& size, const glm::vec3& position, const glm::quat& rotation)
 		{
-			const Entity entity = ComponentReadSelf(call, "Camera");
 			const auto camera = entity.GetComponent<CameraComponent>();
-			const auto size = CameraSize(call);
 			const double x = Lua::Check<double>(call, 2), y = Lua::Check<double>(call, 3);
 			if (x < 0 || y < 0 || x >= size.x || y >= size.y)
 				return Lua::RaiseError(call, "pixel is outside the camera viewport");
-			const CameraView view = GetCameraView(entity, camera, size);
+			const CameraView view = GetCameraView(entity, camera, size, position, rotation);
 			// The pixel's centre in the projected image; a letterbox pixel's lies outside it, and its ray passes beside the
 			// rendered image.
 			glm::dvec2 point(x + 0.5, y + 0.5);
@@ -420,13 +420,30 @@ namespace Engine {
 			Lua::Push(call, glm::vec3(view.Rotation * direction));
 			return 2;
 		}
+		static int CameraRay(ScriptCall& call)
+		{
+			const Entity entity = ComponentReadSelf(call, "Camera");
+			const auto size = CameraSize(call);
+			return PushCameraRay(call, entity, size, TransformSystem::GetRenderPosition(entity), TransformSystem::GetRenderRotation(entity));
+		}
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 8): ScreenToWorldRay from the pose the script gives
+		// (arguments 4 and 5) instead of the rendered one, so gameplay aims in the fixed step from a pose it keeps there.
+		static int CameraRayFrom(ScriptCall& call)
+		{
+			const Entity entity = ComponentReadSelf(call, "Camera");
+			const auto size = CameraSize(call);
+			// Lua::Check refuses a vector with a non-finite component, so the position is finite here.
+			const glm::vec3 position = Lua::Check<glm::vec3>(call, 4);
+			const glm::quat rotation = UnitRotation(call, 5);
+			return PushCameraRay(call, entity, size, position, rotation);
+		}
 		static int CameraScreen(ScriptCall& call)
 		{
 			const Entity entity = ComponentReadSelf(call, "Camera");
 			const auto camera = entity.GetComponent<CameraComponent>();
 			const auto size = CameraSize(call);
 			const glm::dvec3 point(Lua::Check<glm::vec3>(call, 2));
-			const CameraView view = GetCameraView(entity, camera, size);
+			const CameraView view = GetCameraView(entity, camera, size, TransformSystem::GetRenderPosition(entity), TransformSystem::GetRenderRotation(entity));
 			const glm::dvec3 local = glm::inverse(view.Rotation) * (point - view.Position);
 			const double depth = -local.z;
 			double halfHeight = view.HalfHeight;
@@ -498,7 +515,8 @@ namespace Engine {
 				.Method("IsPlaying", Utils::SourcePlaying, "(self: AudioSource) -> boolean", "Whether this source owns an unpaused voice.", read);
 			api.Type("Camera")
 				.Method("ScreenToWorldRay", Utils::CameraRay, "(self: Camera, x: number, y: number) -> (vector, vector)", "Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping.", read)
-				.Method("WorldToScreen", Utils::CameraScreen, "(self: Camera, point: vector) -> vector", "Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping.", read);
+				.Method("WorldToScreen", Utils::CameraScreen, "(self: Camera, point: vector) -> vector", "Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping.", read)
+				.Method("ScreenToWorldRayFrom", Utils::CameraRayFrom, "(self: Camera, x: number, y: number, position: vector, rotation: Quat) -> (vector, vector)", "Ray through a viewport pixel center, origin top-left, from the camera pose given (a finite position and a rotation, normalized) instead of the rendered one, so gameplay can aim in the fixed step from a pose it keeps there; the camera's projection and the session's view size as ScreenToWorldRay's, under a PixelPerfectCamera through the given position's snapped reference view.", read);
 			api.Type("MeshRenderer")
 				.Method("GetMaterial", Utils::MaterialGet, "(self: MeshRenderer, index: number) -> AssetRef?", "Read a 1-based material slot, resolving an absent or null override to the mesh default.", read)
 				.Method("SetMaterial", Utils::MaterialSet, "(self: MeshRenderer, index: number, asset: AssetRef?) -> ()", "Override an existing 1-based mesh or explicit material slot; nil restores the mesh default.", write);

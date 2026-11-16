@@ -33,7 +33,8 @@ namespace Engine {
 			for (uint32_t layer = 0; layer < MaxPhysicsLayers; ++layer)
 			{
 				CAPTURE(layer);
-				for (const PhysicsObjectKind kind : { PhysicsObjectKind::Static, PhysicsObjectKind::Moving, PhysicsObjectKind::Sensor })
+				for (const PhysicsObjectKind kind :
+					{ PhysicsObjectKind::Static, PhysicsObjectKind::Moving, PhysicsObjectKind::Sensor, PhysicsObjectKind::Character })
 				{
 					const PhysicsObjectLayer objectLayer = MakePhysicsObjectLayer(layer, kind);
 					CHECK(objectLayer == ((layer << 2) | std::to_underlying(kind)));
@@ -44,8 +45,10 @@ namespace Engine {
 			CHECK(GetPhysicsBroadPhaseLayer(MakePhysicsObjectLayer(3, PhysicsObjectKind::Static)) == PhysicsBroadPhaseLayer::NonMoving);
 			CHECK(GetPhysicsBroadPhaseLayer(MakePhysicsObjectLayer(3, PhysicsObjectKind::Moving)) == PhysicsBroadPhaseLayer::Moving);
 			CHECK(GetPhysicsBroadPhaseLayer(MakePhysicsObjectLayer(3, PhysicsObjectKind::Sensor)) == PhysicsBroadPhaseLayer::Sensor);
+			// M34: a character's inner body moves, so it lives in the Moving tree, where sensors find it.
+			CHECK(GetPhysicsBroadPhaseLayer(MakePhysicsObjectLayer(3, PhysicsObjectKind::Character)) == PhysicsBroadPhaseLayer::Moving);
 			// The largest object layer fits Jolt's 16-bit ObjectLayer.
-			CHECK(MakePhysicsObjectLayer(MaxPhysicsLayers - 1, PhysicsObjectKind::Sensor) < 0xffffu);
+			CHECK(MakePhysicsObjectLayer(MaxPhysicsLayers - 1, PhysicsObjectKind::Character) < 0xffffu);
 		}
 
 		TEST_CASE("PhysicsLayers: the kind rule excludes Static-Static, Sensor-Static and Sensor-Sensor pairs")
@@ -60,6 +63,38 @@ namespace Engine {
 			CHECK(PhysicsObjectKindsCollide(Moving, Moving));
 			CHECK(PhysicsObjectKindsCollide(Sensor, Moving));
 			CHECK(PhysicsObjectKindsCollide(Moving, Sensor));
+		}
+
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 1): a character's inner body pairs with sensors only, so
+		// the solver never resolves its contact with a Dynamic (Moving) body.
+		TEST_CASE("PhysicsLayers: the kind rule pairs a Character with Sensors only")
+		{
+			using enum PhysicsObjectKind;
+			CHECK(PhysicsObjectKindsCollide(Character, Sensor));
+			CHECK(PhysicsObjectKindsCollide(Sensor, Character));
+			for (const PhysicsObjectKind other : { Static, Moving, Character })
+			{
+				CAPTURE(std::to_underlying(other));
+				CHECK_FALSE(PhysicsObjectKindsCollide(Character, other));
+				CHECK_FALSE(PhysicsObjectKindsCollide(other, Character));
+			}
+
+			Result<PhysicsLayerTable> table = MakeRollingBallTable();
+			REQUIRE_MESSAGE(table.has_value(), table.error().ToString());
+			const uint32_t ball = 1;
+			const uint32_t track = 2;
+			const uint32_t trigger = 3;
+			// A character on the Ball layer: the trigger sees it, the ball's Dynamic bodies and the track do not pair with it.
+			CHECK(table->ShouldCollide(MakePhysicsObjectLayer(trigger, Sensor), MakePhysicsObjectLayer(ball, Character)));
+			CHECK_FALSE(table->ShouldCollide(MakePhysicsObjectLayer(ball, Moving), MakePhysicsObjectLayer(ball, Character)));
+			CHECK_FALSE(table->ShouldCollide(MakePhysicsObjectLayer(track, Static), MakePhysicsObjectLayer(ball, Character)));
+			CHECK_FALSE(table->ShouldCollide(MakePhysicsObjectLayer(ball, Character), MakePhysicsObjectLayer(ball, Character)));
+			// The matrix still applies: a Default trigger does not see a character on the Track layer.
+			CHECK_FALSE(table->ShouldCollide(MakePhysicsObjectLayer(0, Sensor), MakePhysicsObjectLayer(track, Character)));
+			// Object layer against broad-phase layer: only the Sensor tree.
+			CHECK(table->ShouldCollide(MakePhysicsObjectLayer(ball, Character), PhysicsBroadPhaseLayer::Sensor));
+			CHECK_FALSE(table->ShouldCollide(MakePhysicsObjectLayer(ball, Character), PhysicsBroadPhaseLayer::Moving));
+			CHECK_FALSE(table->ShouldCollide(MakePhysicsObjectLayer(ball, Character), PhysicsBroadPhaseLayer::NonMoving));
 		}
 
 		TEST_CASE("PhysicsLayerTable: the default table is the Default layer colliding with itself")

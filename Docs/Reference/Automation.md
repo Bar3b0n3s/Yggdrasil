@@ -2427,7 +2427,7 @@ Example: Save everything unsaved.
 
 ### project.setSettings
 
-Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it.
+Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it. A patch that writes Input is refused, each problem under /patch, when an action is one play.start would refuse.
 
 - Flags: tool `project_set_settings`, mutates, dry run, batch
 - Timeout: 60 s

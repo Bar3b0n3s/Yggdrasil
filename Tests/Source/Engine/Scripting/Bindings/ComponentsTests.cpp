@@ -93,7 +93,8 @@ return true
 		snapshots.push_back(*coverage);
 	}
 
-	// Camera:ScreenToWorldRay and Camera:WorldToScreen in view coordinates (a 100 x 100 view), in both projections.
+	// Camera:ScreenToWorldRay, ScreenToWorldRayFrom (M34) and Camera:WorldToScreen in view coordinates (a 100 x 100 view),
+	// in both projections.
 	static void CameraCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots)
 	{
 		Test::ScriptTestFixture fixture({ .Mode = mode, .TestMode = true });
@@ -112,6 +113,8 @@ origin, direction = camera:ScreenToWorldRay(49.5,49.5)
 assert(origin == vector.create(0,0,-camera.NearClip) and direction == vector.create(0,0,-1))
 screen = camera:WorldToScreen(vector.create(0,0,-5))
 assert(math.abs(screen.z - (camera.FarClip-5)/(camera.FarClip-camera.NearClip)) < 0.00001)
+origin, direction = camera:ScreenToWorldRayFrom(49.5,49.5,vector.create(1,2,3),Quat.Identity())
+assert(origin == vector.create(1,2,3-camera.NearClip) and direction == vector.create(0,0,-1))
 return true
 )");
 		const auto coverage = fixture.GetApi().GetCoverage(mode);
@@ -150,6 +153,39 @@ return true
 			CameraCoverage(RunModes::Editor, snapshots);
 		}
 
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 8; World Tree's brief 10): ScreenToWorldRayFrom projects
+		// as ScreenToWorldRay does, from the pose it is given instead of the rendered one, so gameplay can aim in the fixed
+		// step from a pose it keeps there. The camera entity stays at the origin; the given pose looks down from (0, 10, 10)
+		// at 45 degrees, so the view's centre ray meets the ground y = 0 at (0, 0, 0).
+		TEST_CASE("ComponentBindings: ScreenToWorldRayFrom builds the ray from the pose it is given, not the rendered one")
+		{
+			Test::ScriptTestFixture fixture({ .TestMode = true });
+			fixture.Environment.WindowSize = { 100, 100 };
+			REQUIRE(fixture.Start());
+			CheckComponentScript(fixture, R"(
+local viewer = Scene.CreateEntity("Viewer")
+local camera = viewer:AddComponent("Camera")
+local position = vector.create(0, 10, 10)
+local rotation = Quat.FromEuler(-45, 0, 0)
+local origin, direction = camera:ScreenToWorldRayFrom(49.5, 49.5, position, rotation)
+assert(origin == position)
+assert(vector.magnitude(direction - rotation:Rotate(vector.create(0, 0, -1))) < 0.00001)
+local ground = origin + direction * (origin.y / -direction.y)
+assert(vector.magnitude(ground) < 0.0001)
+-- The rendered pose is the entity's (the origin), so ScreenToWorldRay differs, and equals the call from that pose.
+local renderedOrigin, renderedDirection = camera:ScreenToWorldRay(10, 80)
+local fromOrigin, fromDirection = camera:ScreenToWorldRayFrom(10, 80, viewer.Transform.RenderPosition, viewer.Transform.RenderRotation)
+assert(renderedOrigin == fromOrigin and renderedDirection == fromDirection)
+assert(renderedOrigin ~= camera:ScreenToWorldRayFrom(10, 80, position, rotation))
+-- An unnormalized rotation is normalized; a position that is not finite and a pixel outside the view are errors.
+local _, scaled = camera:ScreenToWorldRayFrom(49.5, 49.5, position, Quat.New(rotation.x * 2, rotation.y * 2, rotation.z * 2, rotation.w * 2))
+assert(vector.magnitude(scaled - direction) < 0.00001)
+assert(not pcall(camera.ScreenToWorldRayFrom, camera, 49.5, 49.5, vector.create(math.huge, 0, 0), rotation))
+assert(not pcall(camera.ScreenToWorldRayFrom, camera, 100, 49.5, position, rotation))
+return true
+)");
+		}
+
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 6, stream C): under a PixelPerfectCamera, Camera:ScreenToWorldRay
 		// and WorldToScreen go through the output mapping, so a view pixel maps to the scene pixel the image shows there. A
 		// 320 x 180 reference at 16 pixels per unit in a 1000 x 540 view is upscaled by 3 and letterboxed by 20 pixels left
@@ -178,6 +214,9 @@ local screen = camera:WorldToScreen(vector.create(-8.65625, 4.40625, 0))
 assert(math.abs(screen.x - 69) < 0.0001 and math.abs(screen.y - 49) < 0.0001)
 local letterbox = camera:ScreenToWorldRay(5, 49)
 assert(math.abs(letterbox.x - (-9.6875 - 14.5 / 48)) < 0.0001)
+-- M34: ScreenToWorldRayFrom snaps the position it is given the same way.
+local from = camera:ScreenToWorldRayFrom(69, 49, vector.create(0.3, -0.2, 10), Quat.Identity())
+assert(vector.magnitude(from - origin) < 0.0001)
 return true
 )");
 		}

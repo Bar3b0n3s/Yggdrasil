@@ -4,7 +4,9 @@
 
 #include "EditorCore/Automation/ProvenanceRecorder.h"
 #include "EditorCore/Automation/RegisterMethods.h"
+#include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/Graph/GraphDocument.h"
@@ -13,6 +15,8 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Project/ProjectSerializer.h"
+#include "Engine/Project/ProjectSettings.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
@@ -217,6 +221,120 @@ namespace Engine {
 			const Result<Json> invalid = setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Simulation":{"FixedHz":0}}})"));
 			REQUIRE_FALSE(invalid.has_value());
 			CHECK(invalid.error().GetCode() == ErrorCode::Validation);
+		}
+
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6; World Tree's brief 10): project.setSettings accepted
+		// any binding name and wrote it, and only play.start refused it.
+		TEST_CASE("ProjectMethods: project.setSettings refuses a patch whose input action play.start would refuse, each problem located under /patch, and writes nothing")
+		{
+			Test::AutomationFixture setup("ProjectSetSettingsBindings");
+			const std::filesystem::path projectFile = setup.GetEditorFixture().GetProjectRoot() / "TestProject.eproj";
+			const std::string before = FileSystem::ReadText(projectFile).value_or("");
+			const Result<Json> refused = setup.Call("project.setSettings",
+				ParseProjectJson(R"({"patch":{"Window":{"Title":"Warden"},"Input":{"Actions":{"Attack":{"Type":"Button","Bindings":["Gamepad.RightTrigger","Gamepad.LeftY","Key.Nope"]}}}}})"));
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			std::vector<std::string> pointers;
+			for (const ErrorIssue& issue : refused.error().GetIssues())
+				pointers.push_back(issue.JsonPointer);
+			CHECK(pointers == std::vector<std::string>{ "/patch/Input/Actions/Attack/Bindings/1", "/patch/Input/Actions/Attack/Bindings/2" });
+			CHECK(refused.error().GetIssues().front().Message.contains("Gamepad.LeftY"));
+			CHECK(FileSystem::ReadText(projectFile).value_or("") == before);
+			CHECK(setup.GetEditor().GetProject().GetSettings().Window.Title == "Game");
+			CHECK_FALSE(setup.GetEditor().GetProject().GetSettings().Input.Actions.contains("Attack"));
+
+			// A dry run refuses it too; the trigger alone, a button binding since M34, is accepted.
+			const Result<Json> dryRun = setup.Call("project.setSettings",
+				ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Attack":{"Type":"Button","Bindings":["Key.Nope"]}}}},"dryRun":true})"));
+			CHECK_FALSE(dryRun.has_value());
+			const Result<Json> accepted = setup.Call("project.setSettings",
+				ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Attack":{"Type":"Button","Bindings":["Gamepad.RightTrigger"]}}}}})"));
+			REQUIRE_MESSAGE(accepted.has_value(), accepted.error().ToString());
+			CHECK((*accepted)["settings"]["Input"]["Actions"]["Attack"]["Bindings"] == Json::array({ "Gamepad.RightTrigger" }));
+		}
+
+		// M34 (decision 6): a patch of other sections never fails on actions the project already holds, which project.validate
+		// reports (INPUT_INVALID_ACTION).
+		TEST_CASE("ProjectMethods: project.setSettings checks the input actions only for a patch that writes Input")
+		{
+			Test::AutomationFixture setup("ProjectSetSettingsHeldBindings");
+			// A project that holds a stick in a Button action, as an editor before M34 let project.setSettings write it.
+			EditorContext& editor = setup.GetEditor();
+			ProjectSettings settings = editor.GetProject().GetSettings();
+			const Result<Json> before = ProjectSerializer::ToJson(settings, editor.GetTypeRegistry());
+			InputActionSettings look;
+			look.Bindings = { "Gamepad.RightX" };
+			settings.Input.Actions["Look"] = look;
+			const Result<Json> after = ProjectSerializer::ToJson(settings, editor.GetTypeRegistry());
+			REQUIRE(before.has_value());
+			REQUIRE(after.has_value());
+			REQUIRE(editor.Execute(CreateScope<ProjectSettingsCommand>("Held bindings", CreateRef<const Json>(*before), CreateRef<const Json>(*after))).has_value());
+
+			const Result<Json> window = setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Window":{"Title":"Warden"}}})"));
+			REQUIRE_MESSAGE(window.has_value(), window.error().ToString());
+			const Result<Json> input = setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Jump":{"Type":"Button","Bindings":["Key.Space"]}}}}})"));
+			REQUIRE_FALSE(input.has_value());
+			REQUIRE(input.error().GetIssues().size() == 1);
+			CHECK(input.error().GetIssues().front().JsonPointer == "/patch/Input/Actions/Look/Bindings/0");
+
+			const Result<Json> validated = setup.Call("project.validate", Json::object());
+			REQUIRE_MESSAGE(validated.has_value(), validated.error().ToString());
+			bool reported = false;
+			for (const Json& diagnostic : (*validated)["diagnostics"])
+			{
+				if (diagnostic["code"] == Json("INPUT_INVALID_ACTION"))
+				{
+					reported = true;
+					CHECK(diagnostic["field"] == Json("Input.Actions.Look.Bindings[0]"));
+					CHECK(diagnostic["severity"] == Json("Error"));
+				}
+			}
+			CHECK(reported);
+		}
+
+		// M34 review finding 7 (decision 6): the Project Settings panel's "Add element" commits an empty binding at once, which
+		// the refusal left the panel no way to add; the panel calls project.setSettings as the user, which commits it warned.
+		TEST_CASE("ProjectMethods: project.setSettings from the editor's panel commits a binding added empty, naming its problem in warnings, and the binding is filled in next")
+		{
+			Test::AutomationFixture setup("ProjectSetSettingsPanelBinding");
+			EditorContext& editor = setup.GetEditor();
+			EditorActions actions(editor, setup.GetClient().GetServer());
+			const auto panelCall = [&actions](const Json& params) -> Result<Json>
+			{
+				ENGINE_TRY_ASSIGN(const uint64_t ticket, actions.Submit("project.setSettings", params));
+				actions.Pump();
+				ENGINE_TRY_ASSIGN(auto completion, actions.TakeResult(ticket));
+				REQUIRE(completion.has_value());
+				return std::move(*completion);
+			};
+			const auto jumpBindings = [&editor]()
+			{
+				const auto& actionsByName = editor.GetProject().GetSettings().Input.Actions;
+				const auto jump = actionsByName.find("Jump");
+				return jump == actionsByName.end() ? std::vector<std::string>{} : jump->second.Bindings;
+			};
+			REQUIRE(setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Jump":{"Type":"Button","Bindings":["Key.Space"]}}}}})")));
+
+			// The agent's call refuses the empty binding; the panel's commits it, warned at its pointer.
+			const Json added = ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Jump":{"Type":"Button","Bindings":["Key.Space",""]}}}}})");
+			const Result<Json> refused = setup.Call("project.setSettings", added);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space" });
+			const size_t history = editor.GetHistory().GetUndoCount();
+			const Result<Json> committed = panelCall(added);
+			REQUIRE_MESSAGE(committed.has_value(), committed.error().ToString());
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "" });
+			REQUIRE((*committed)["warnings"].size() == 1);
+			CHECK(JsonReader((*committed)["warnings"][0]).ReadString().value_or("").starts_with("/patch/Input/Actions/Jump/Bindings/1: "));
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			CHECK(editor.GetHistory().GetEntries(1).front().Origin == CommandOrigin::User);
+
+			// The user fills it in: the next patch commits without a warning.
+			const Result<Json> filled = panelCall(ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Jump":{"Type":"Button","Bindings":["Key.Space","Key.J"]}}}}})"));
+			REQUIRE_MESSAGE(filled.has_value(), filled.error().ToString());
+			CHECK((*filled)["warnings"].empty());
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "Key.J" });
 		}
 
 		// Docs/Decisions/0030-m19-contract.md "Integration of W19.2": a non-strict editor dropped a member the settings do not

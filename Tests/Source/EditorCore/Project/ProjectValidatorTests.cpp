@@ -1374,9 +1374,9 @@ end
 			// RENDER_LIGHT_LIMIT_EXCEEDED, M9's two render warnings, M11's 10 physics codes, M12's 2 audio codes, M13's 7,
 			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
 			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, M23's
-			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, and M26's PROBE_NOT_BAKED and two terrain
-			// codes.
-			CHECK(codes.size() == 55 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
+			// codes, and M34's INPUT_INVALID_ACTION.
+			CHECK(codes.size() == 56 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1418,13 +1418,17 @@ end
 			CHECK(position(AnimationNoAnimatorCode) + 1 == position(AnimationSkeletonMismatchCode));
 			// Phase 3's blocks follow M23's in landing order (ADR 0028's phase-3 ledger): M24's graph codes right after M23's
 			// (Docs/Decisions/0035-m24-contract.md decision 5), then M26's, which lands last (Docs/Decisions/0037-m26-contract.md
-			// decision 9): PROBE_NOT_BAKED, then the terrain codes, which end the list.
+			// decision 9): PROBE_NOT_BAKED, then the terrain codes.
 			CHECK(position(AnimationSkeletonMismatchCode) + 1 == position(GraphInvalidCode));
 			CHECK(position(GraphInvalidCode) + 1 == position(GraphUnreachableNodeCode));
 			CHECK(position(GraphUnreachableNodeCode) + 1 == position(ProbeNotBakedCode));
 			CHECK(position(ProbeNotBakedCode) + 1 == position(TerrainNoHeightfieldCode));
 			CHECK(position(TerrainNoHeightfieldCode) + 1 == position(TerrainSplatNotRawCode));
-			CHECK(codes.back() == TerrainSplatNotRawCode);
+			// Phase 5's codes follow M26's in landing order (ADR 0042's phase 5 ledger): M34's INPUT_INVALID_ACTION
+			// (Docs/Decisions/0049-m34-characters-input.md decision 7) after them, checked by its relative order only, since a
+			// sibling's code that lands first comes between and M30's two follow it.
+			CHECK(position(TerrainSplatNotRawCode) < position("INPUT_INVALID_ACTION"));
+			CHECK(position("INPUT_INVALID_ACTION") < static_cast<std::ptrdiff_t>(codes.size()));
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

@@ -98,6 +98,13 @@ namespace Engine {
 	// Position or Delta, or empty or invalid UTF-8 Text. Pure.
 	[[nodiscard]] Status ValidatePlayInputEvent(const PlayInputEvent& event, const InputActionMap& actions);
 
+	// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): the check PlayInput::Create makes of the project's
+	// Input.Actions (§6.1), without building a session's input: InputActionMap::Create's problems as Validation, located at
+	// "/Input/Actions", with one issue per problem whose pointer is below it ("/Input/Actions/<Name>/<Field>[/<i>]").
+	// project.setSettings and project.validate check a project's actions with it, so they refuse and report exactly what
+	// play.start would.
+	[[nodiscard]] Status ValidateInputActions(const InputSettings& settings);
+
 	// The game input of one play session (see the file comment).
 	//
 	// Queue order: events of one tick are applied in the order they were queued (Tap's Up joins the next tick's events in
@@ -122,7 +129,7 @@ namespace Engine {
 		PlayInput& operator=(const PlayInput&) = delete;
 
 		// Builds the input of a session from the project's Input.Actions (§6.1). Errors: Validation from
-		// InputActionMap::Create, its issues pointing below "/Input/Actions".
+		// InputActionMap::Create, its issues pointing below "/Input/Actions" (ValidateInputActions' error).
 		[[nodiscard]] static Result<PlayInput> Create(const InputSettings& settings);
 
 		// Queues `event` for tick `tick`. Errors: those of ValidatePlayInputEvent, and InvalidArgument when `tick` is before

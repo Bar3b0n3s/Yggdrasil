@@ -17,6 +17,9 @@ namespace Engine {
 	// Reflected ProjectSettings (window/simulation, physics layers and matrix, input action Map/Variant values,
 	// export/scripting). One validated merge patch per completed edit; no duplicate hard-coded settings schema.
 	// Main thread inside ImGui. Retains only UI presentation state, no entity/component/asset pointers across frames.
+	// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): the panel's project.setSettings runs as the user, so a
+	// patch leaving an input action play.start would refuse (a binding just added, still empty) commits; the Input section
+	// shows each problem of the draft's actions (ValidateInputActions) under the value it concerns until it is fixed.
 	class ProjectSettingsPanel
 	{
 	public:

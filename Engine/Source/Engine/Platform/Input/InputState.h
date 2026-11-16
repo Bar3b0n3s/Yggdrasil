@@ -17,6 +17,12 @@ namespace Engine {
 
 	inline constexpr uint32_t MaxGamepads = 4;
 
+	// M34 (Docs/Decisions/0049-m34-characters-input.md decision 5): a trigger (GamepadAxis::LeftTrigger, RightTrigger) is
+	// also a button, with hysteresis: it goes down when its value rises to GamepadTriggerPressThreshold and up again only
+	// when its value falls below GamepadTriggerReleaseThreshold, so a trigger held near one value never chatters.
+	inline constexpr float GamepadTriggerPressThreshold = 0.5f;
+	inline constexpr float GamepadTriggerReleaseThreshold = 0.4f;
+
 	// The latched view a query reads (§4.3). Step: inside fixed steps (script OnFixedUpdate, physics callbacks). Frame:
 	// inside the frame phase (script OnUpdate and OnLateUpdate, editor camera).
 	enum class InputPhase : uint8_t
@@ -62,7 +68,11 @@ namespace Engine {
 	// and zeroes the axes, which is the rest value of every axis (sticks centred, triggers released). Button and Axis
 	// events for a gamepad that is not connected are ignored, so every source injects Connected before a gamepad's first
 	// control (the window always does). Axis values are the last injected value clamped to the axis range (-1 to 1 for
-	// sticks, 0 to 1 for triggers; the dead zone is applied by InputActionMap). Events with a NaN axis value or a
+	// sticks, 0 to 1 for triggers; the dead zone is applied by InputActionMap). Each trigger is also a button (M34): its
+	// level follows its values with the hysteresis of GamepadTriggerPressThreshold and GamepadTriggerReleaseThreshold, so
+	// its Pressed and Released edges are latched like a gamepad button's, and a Disconnected event releases it with a
+	// Released edge. The level is input state like every level here: it depends only on the sequence of axis values
+	// injected, so a replay of the axis events reproduces it. Events with a NaN axis value or a
 	// non-finite cursor position or scroll offset are ignored, and so is a MouseMoveEvent or MouseScrollEvent whose
 	// motion, added to a phase's pending delta, would exceed the float range (about 3.4e38): the views never hold NaN or
 	// infinity, whatever finite values a caller injects.
@@ -114,6 +124,11 @@ namespace Engine {
 		[[nodiscard]] bool WasGamepadButtonReleased(InputPhase phase, uint32_t gamepad, GamepadButton button) const;
 		// The axis value at the phase's last latch, engine convention (up-positive sticks), without dead zone.
 		[[nodiscard]] float GetGamepadAxis(InputPhase phase, uint32_t gamepad, GamepadAxis axis) const;
+		// M34: a trigger as a button (see the class comment): down at the phase's last latch; pressed or released since the
+		// latch before it. False for a stick axis.
+		[[nodiscard]] bool IsGamepadTriggerDown(InputPhase phase, uint32_t gamepad, GamepadAxis trigger) const;
+		[[nodiscard]] bool WasGamepadTriggerPressed(InputPhase phase, uint32_t gamepad, GamepadAxis trigger) const;
+		[[nodiscard]] bool WasGamepadTriggerReleased(InputPhase phase, uint32_t gamepad, GamepadAxis trigger) const;
 	private:
 		static constexpr size_t PhaseCount = 2;
 
@@ -123,6 +138,8 @@ namespace Engine {
 			bool Connected = false;
 			std::bitset<GamepadButtonCount> ButtonsDown{};
 			std::array<float, GamepadAxisCount> Axes{};
+			// M34: the triggers' button levels, by GamepadAxis index (only the two trigger bits are ever set).
+			std::bitset<GamepadAxisCount> TriggersDown{};
 		};
 
 		// The level of every control.
@@ -143,6 +160,8 @@ namespace Engine {
 			std::bitset<MouseButtonCount> MouseButtonsReleased{};
 			std::array<std::bitset<GamepadButtonCount>, MaxGamepads> GamepadButtonsPressed{};
 			std::array<std::bitset<GamepadButtonCount>, MaxGamepads> GamepadButtonsReleased{};
+			std::array<std::bitset<GamepadAxisCount>, MaxGamepads> GamepadTriggersPressed{};
+			std::array<std::bitset<GamepadAxisCount>, MaxGamepads> GamepadTriggersReleased{};
 			glm::vec2 MouseDelta{ 0.0f };
 			glm::vec2 ScrollDelta{ 0.0f };
 		};

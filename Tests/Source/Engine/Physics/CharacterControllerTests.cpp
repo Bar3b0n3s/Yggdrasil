@@ -9,11 +9,13 @@
 #include "Support/ExpectLog.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <format>
 #include <limits>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // The character controller (Architecture §9.6: CharacterVirtual with ExtendedUpdate, a kinematic inner body seen by
 // queries and sensors, a CharacterContactListener recording into the world's buffer).
@@ -91,6 +93,29 @@ namespace Engine {
 			PhysicsPose m_Pose{ .Position = glm::vec3(0.0f, -0.5f, 0.0f) };
 			BodyHandle m_Body{};
 		};
+
+		// A Dynamic box of `halfExtents` and `mass` kg resting on a floor whose top is at y 0, its base at `base`.
+		BodyHandle CreateCrate(PhysicsWorld& world, const glm::vec3& base, const glm::vec3& halfExtents, float mass, float restitution = 0.0f)
+		{
+			Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = halfExtents } } } });
+			REQUIRE(shape.has_value());
+			Result<BodyHandle> body = world.CreateBody({ .Shape = *shape,
+				.MotionType = PhysicsMotionType::Dynamic,
+				.Pose = { .Position = base + glm::vec3(0.0f, halfExtents.y, 0.0f) },
+				.Mass = mass,
+				.Restitution = restitution });
+			REQUIRE_MESSAGE(body.has_value(), body.error().ToString());
+			return *body;
+		}
+
+		// A character of World Tree's Warden (brief 11): 1.8 m tall, 0.35 m in radius, 80 kg, stepping up 0.35 m.
+		Scope<CharacterController> CreateWarden(PhysicsWorld& world, const glm::vec3& base)
+		{
+			Result<Scope<CharacterController>> character =
+				CharacterController::Create(world, { .Height = 1.8f, .Radius = 0.35f, .StepHeight = 0.35f, .Mass = 80.0f, .Pose = { .Position = base } });
+			REQUIRE_MESSAGE(character.has_value(), character.error().ToString());
+			return std::move(*character);
+		}
 
 		// A character created on a MovingPlatform that has not moved yet, standing on it after half a second at rest.
 		Scope<CharacterController> CreateCarriedCharacter(PhysicsWorld& world, bool inheritGroundVelocity)
@@ -539,6 +564,352 @@ namespace Engine {
 			CHECK_FALSE(character->GetGroundState().IsGrounded);
 			CHECK(character->GetVelocity().y > 0.0f);
 			CHECK(std::abs(character->GetVelocity().x) < 1.0e-4f);
+		}
+
+		// M34 (Docs/Decisions/0049-m34-characters-input.md, Roadmap M34's acceptance; World Tree's brief 11): before M34 the
+		// character's kinematic inner body, placed rather than swept, drove the shards it overlapped through the floor at
+		// infinite mass, and the character, standing on a shard its inner body shoved, was launched upwards.
+		TEST_CASE("CharacterController: a character walking at 6.5 m/s through fifteen 0.35 kg Dynamic shards on the floor stays below 0.1 m over 60 ticks, and no shard goes below -0.05 m: the shards are pushed aside along the ground")
+		{
+			// World Tree's shards are convex hulls; FeatureTest's CharacterDebris scene uses boxes turned about Y.
+			for (const bool boxes : { false, true })
+			{
+				CAPTURE(boxes);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				// Fifteen irregular shards about 0.2 m across, as a broken urn leaves them, in three rows of five across the
+				// character's way along +X, their bases on the floor.
+				std::vector<BodyHandle> shards;
+				for (uint32_t index = 0; index < 15; ++index)
+				{
+					const float jitter = 0.01f * static_cast<float>(index % 4);
+					const std::vector<glm::vec3> points = { glm::vec3(-0.1f, -0.06f, -0.08f), glm::vec3(0.11f + jitter, -0.06f, -0.07f),
+						glm::vec3(0.02f, -0.06f, 0.1f), glm::vec3(-0.04f, 0.07f + jitter, 0.0f), glm::vec3(0.06f, 0.05f, 0.03f + jitter),
+						glm::vec3(-0.08f, 0.02f, 0.07f) };
+					const PhysicsShapeGeometry geometry = boxes ? PhysicsShapeGeometry(BoxShapeGeometry{ .HalfExtents = glm::vec3(0.1f + 0.5f * jitter, 0.06f, 0.08f) })
+																: PhysicsShapeGeometry(ConvexHullShapeGeometry{ .Points = points });
+					Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = geometry } } });
+					REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+					const glm::vec3 position(1.0f + 0.3f * static_cast<float>(index / 3), boxes ? 0.06f : 0.07f, -0.3f + 0.3f * static_cast<float>(index % 3));
+					const glm::quat turn = glm::angleAxis(glm::radians(static_cast<float>(17 * index % 90)), glm::vec3(0.0f, 1.0f, 0.0f));
+					Result<BodyHandle> shard = world->CreateBody(
+						{ .Shape = *shape, .MotionType = PhysicsMotionType::Dynamic, .Pose = { .Position = position, .Rotation = turn }, .Mass = 0.35f });
+					REQUIRE_MESSAGE(shard.has_value(), shard.error().ToString());
+					shards.push_back(*shard);
+				}
+				Scope<CharacterController> warden = CreateWarden(*world, glm::vec3(-1.0f, 0.0f, 0.0f));
+				// The shards settle and the character stands.
+				Walk(*world, *warden, glm::vec3(0.0f), 30);
+				REQUIRE(warden->GetGroundState().IsGrounded);
+				std::vector<glm::vec3> rest;
+				for (const BodyHandle shard : shards)
+					rest.push_back(world->GetPose(shard).Position);
+
+				float highest = -std::numeric_limits<float>::infinity();
+				float lowestShard = std::numeric_limits<float>::infinity();
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					Walk(*world, *warden, glm::vec3(6.5f, 0.0f, 0.0f), 1);
+					highest = std::max(highest, warden->GetPose().Position.y);
+					for (const BodyHandle shard : shards)
+						lowestShard = std::min(lowestShard, world->GetPose(shard).Position.y);
+				}
+				CHECK(highest < 0.1f);
+				CHECK(lowestShard > -0.05f);
+				// The character walked on through them (4 m of the 6.5 m it asked for), and they were pushed aside along the
+				// ground.
+				CHECK(warden->GetPose().Position.x > 3.0f);
+				size_t pushed = 0;
+				for (size_t index = 0; index < shards.size(); ++index)
+				{
+					const glm::vec3 moved = world->GetPose(shards[index]).Position - rest[index];
+					if (glm::length(glm::vec2(moved.x, moved.z)) > 0.3f)
+						++pushed;
+				}
+				CHECK(pushed >= 5);
+			}
+		}
+
+		// M34 decision 1: the inner body's object layer has the Character kind, which the solver pairs with sensors only. Before
+		// M34 the kinematic inner body, placed where the character is, pushed a Dynamic body it overlapped out of it with
+		// infinite mass.
+		TEST_CASE("CharacterController: a Dynamic body the inner body overlaps is not pushed by it in the solver")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A light box resting on the floor, then a character placed so that its capsule (radius 0.3 m) overlaps the box by
+			// 0.15 m; the world steps without the character's update, so only its inner body could act on the box.
+			const BodyHandle box = CreateCrate(*world, glm::vec3(0.3f, 0.0f, 0.0f), glm::vec3(0.15f), 0.35f);
+			for (uint32_t step = 0; step < 10; ++step)
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+			const glm::vec3 resting = world->GetPose(box).Position;
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f));
+			static_cast<void>(world->DrainContactEvents());
+			for (uint32_t step = 0; step < 30; ++step)
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+			const BodyHandle inner = character->GetInnerBody();
+			const std::vector<ContactEvent> contacts = world->DrainContactEvents();
+			CHECK(std::none_of(contacts.begin(), contacts.end(), [inner, box](const ContactEvent& event)
+			{
+				return (event.BodyA == inner && event.BodyB == box) || (event.BodyA == box && event.BodyB == inner);
+			}));
+			CHECK(glm::length(world->GetPose(box).Position - resting) < 0.001f);
+		}
+
+		// M34 decision 2: a Dynamic body lighter than the character never moves it. Before M34 a light box sliding into a
+		// standing character pushed it along.
+		TEST_CASE("CharacterController: a light Dynamic body sliding into a standing character never moves it, and meets no inner body in the solver")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 10);
+			const glm::vec3 standing = character->GetPose().Position;
+			// A light box sliding along the floor at 6 m/s straight at the character, 2 m away.
+			const BodyHandle box = CreateCrate(*world, glm::vec3(-2.0f, 0.0f, 0.0f), glm::vec3(0.1f), 0.35f);
+			world->SetLinearVelocity(box, glm::vec3(6.0f, 0.0f, 0.0f));
+			static_cast<void>(world->DrainContactEvents());
+			Walk(*world, *character, glm::vec3(0.0f), 60);
+			const BodyHandle inner = character->GetInnerBody();
+			const std::vector<ContactEvent> contacts = world->DrainContactEvents();
+			CHECK(std::none_of(contacts.begin(), contacts.end(), [inner, box](const ContactEvent& event)
+			{
+				return !event.FromCharacter && ((event.BodyA == inner && event.BodyB == box) || (event.BodyA == box && event.BodyB == inner));
+			}));
+			CHECK(glm::length(character->GetPose().Position - standing) < 0.01f);
+			CHECK(world->GetPose(box).Position.y > 0.0f);
+		}
+
+		// M34 decision 2: a light body is never the character's ground velocity, and carries at most its own weight.
+		TEST_CASE("CharacterController: a character standing on a light Dynamic body is not launched by it")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A bouncy 0.35 kg plate, 0.2 m high and wider than the character, which lands on it.
+			const BodyHandle plate = CreateCrate(*world, glm::vec3(0.0f), glm::vec3(0.5f, 0.1f, 0.5f), 0.35f, 0.8f);
+			Scope<CharacterController> warden = CreateWarden(*world, glm::vec3(0.0f, 0.25f, 0.0f));
+			float highest = -std::numeric_limits<float>::infinity();
+			float fastestUp = -std::numeric_limits<float>::infinity();
+			for (uint32_t tick = 0; tick < 120; ++tick)
+			{
+				Walk(*world, *warden, glm::vec3(0.0f), 1);
+				highest = std::max(highest, warden->GetPose().Position.y);
+				fastestUp = std::max(fastestUp, warden->GetVelocity().y);
+			}
+			CHECK(warden->GetGroundState().IsGrounded);
+			CHECK(highest < 0.3f);
+			CHECK(fastestUp < 0.1f);
+			CHECK(world->GetPose(plate).Position.y > 0.05f);
+			CHECK(glm::length(world->GetLinearVelocity(plate)) < 0.5f);
+		}
+
+		// M34 decision 2: a light body is no stair; a body at least as heavy as the character still is.
+		TEST_CASE("CharacterController: a character pushes a light Dynamic body below StepHeight instead of climbing it, and climbs a heavy one")
+		{
+			for (const float mass : { 0.35f, 500.0f })
+			{
+				CAPTURE(mass);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				// A 0.25 m high box, below the character's 0.35 m step, half a metre ahead.
+				const BodyHandle box = CreateCrate(*world, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.25f, 0.125f, 0.5f), mass);
+				Scope<CharacterController> warden = CreateWarden(*world, glm::vec3(0.0f));
+				Walk(*world, *warden, glm::vec3(0.0f), 10);
+				float highest = -std::numeric_limits<float>::infinity();
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					Walk(*world, *warden, glm::vec3(2.0f, 0.0f, 0.0f), 1);
+					highest = std::max(highest, warden->GetPose().Position.y);
+				}
+				if (mass < 80.0f)
+				{
+					CHECK(highest < 0.05f);
+					CHECK(world->GetPose(box).Position.x > 2.0f);
+				}
+				else
+				{
+					CHECK(highest > 0.2f);
+					CHECK(world->GetPose(box).Position.x < 1.5f);
+				}
+			}
+		}
+
+		// M34 decision 2: Jolt slides a character up a walkable surface it runs into; a light body's never carries it up (its
+		// contact is a vertical wall to the slide), while a heavy body's ramp is walked up as before.
+		TEST_CASE("CharacterController: a character does not walk up a light Dynamic ramp, and walks up a heavy one")
+		{
+			for (const float mass : { 50.0f, 500.0f })
+			{
+				CAPTURE(mass);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				// A wedge 2 m long and 2 m wide rising to 0.3 m, an 8.5 degree slope, its low edge 0.5 m ahead of the character.
+				const std::vector<glm::vec3> points = { glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(2.0f, 0.0f, -1.0f),
+					glm::vec3(2.0f, 0.0f, 1.0f), glm::vec3(2.0f, 0.3f, -1.0f), glm::vec3(2.0f, 0.3f, 1.0f) };
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = ConvexHullShapeGeometry{ .Points = points } } } });
+				REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+				Result<BodyHandle> ramp = world->CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Dynamic, .Pose = { .Position = glm::vec3(0.85f, 0.0f, 0.0f) }, .Mass = mass });
+				REQUIRE_MESSAGE(ramp.has_value(), ramp.error().ToString());
+				Scope<CharacterController> warden = CreateWarden(*world, glm::vec3(0.0f));
+				Walk(*world, *warden, glm::vec3(0.0f), 10);
+				// A second and a half at 1.5 m/s: on the heavy ramp the character is some 1.4 m up the slope by then.
+				float highest = -std::numeric_limits<float>::infinity();
+				for (uint32_t tick = 0; tick < 90; ++tick)
+				{
+					Walk(*world, *warden, glm::vec3(1.5f, 0.0f, 0.0f), 1);
+					highest = std::max(highest, warden->GetPose().Position.y);
+				}
+				if (mass < 80.0f)
+					CHECK(highest < 0.05f);
+				else
+					CHECK(highest > 0.15f);
+			}
+		}
+
+		// M34 decision 2: the slide rule stops a character getting onto a light body, never moving across the one it stands
+		// on. Before the rule exempted the ground body, a character on a tilted light plank met a wall at its own feet.
+		TEST_CASE("CharacterController: a character standing on a tilted light Dynamic plank walks up along it")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A 20 kg plank 4 m long, its low end on the floor against a stop, its high end on a block 0.36 m high: a slope of
+			// about 5.5 degrees.
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.2f, 0.15f, 0.0f), glm::vec3(0.2f, 0.15f, 1.5f)));
+			static_cast<void>(CreateBlock(*world, glm::vec3(4.5f, 0.36f, 0.0f), glm::vec3(0.5f, 0.18f, 1.5f)));
+			Result<Ref<const PhysicsShape>> shape =
+				PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(2.0f, 0.05f, 0.75f) } } } });
+			REQUIRE(shape.has_value());
+			const glm::quat tilt = glm::angleAxis(glm::radians(6.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+			Result<BodyHandle> plank = world->CreateBody({ .Shape = *shape, .Pose = { .Position = glm::vec3(2.4f, 0.3f, 0.0f), .Rotation = tilt }, .Mass = 20.0f });
+			REQUIRE_MESSAGE(plank.has_value(), plank.error().ToString());
+			for (uint32_t step = 0; step < 60; ++step)
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+			Scope<CharacterController> warden = CreateWarden(*world, glm::vec3(1.2f, 0.3f, 0.0f));
+			Walk(*world, *warden, glm::vec3(0.0f), 30);
+			REQUIRE(warden->GetGroundState().IsGrounded);
+			const glm::vec3 start = warden->GetPose().Position;
+			// A second at 1.5 m/s up the plank.
+			Walk(*world, *warden, glm::vec3(1.5f, 0.0f, 0.0f), 60);
+			const glm::vec3 end = warden->GetPose().Position;
+			CHECK(end.x - start.x > 1.2f);
+			CHECK(end.y - start.y > 0.1f);
+			CHECK(warden->GetGroundState().IsGrounded);
+		}
+
+		// M34 decision 2: the slide rule never leaves a velocity into the surface, which Jolt's solver could not resolve.
+		TEST_CASE("CharacterController: a character falling onto a steep face of a light Dynamic body wedged against a wall slides off it")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A wall whose face is at x 1.605, and against it a 40 kg wedge whose face rises at 60 degrees from its toe at x 1.
+			static_cast<void>(CreateBlock(*world, glm::vec3(2.105f, 3.0f, 0.0f), glm::vec3(0.5f, 1.5f, 2.0f)));
+			const std::vector<glm::vec3> points = { glm::vec3(0.0f, 0.0f, -0.75f), glm::vec3(0.0f, 0.0f, 0.75f), glm::vec3(0.6f, 0.0f, -0.75f),
+				glm::vec3(0.6f, 0.0f, 0.75f), glm::vec3(0.6f, 1.04f, -0.75f), glm::vec3(0.6f, 1.04f, 0.75f) };
+			Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = ConvexHullShapeGeometry{ .Points = points } } } });
+			REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+			Result<BodyHandle> wedge = world->CreateBody({ .Shape = *shape, .Pose = { .Position = glm::vec3(1.0f, 0.0f, 0.0f) }, .Mass = 40.0f });
+			REQUIRE_MESSAGE(wedge.has_value(), wedge.error().ToString());
+			for (uint32_t step = 0; step < 30; ++step)
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+			// The character (70 kg, steepest walkable slope 45 degrees) drops onto the face from above it.
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(1.2f, 1.5f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 120);
+			const glm::vec3 position = character->GetPose().Position;
+			CHECK(position.y < 0.05f);
+			CHECK(position.x < 1.0f);
+			CHECK(character->GetGroundState().IsGrounded);
+		}
+
+		// M34 decision 2: a light body that reaches a character within a tick is stopped by the character's push, at most
+		// Mass * 9.81 N, which the body never returns.
+		TEST_CASE("CharacterController: a light Dynamic body thrown at a standing character is stopped by its push")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 10);
+			const glm::vec3 standing = character->GetPose().Position;
+			// A 0.35 kg box thrown at 6 m/s from 2 m away, 0.9 m up: it reaches the character's capsule (radius 0.3 m) at
+			// about half its height.
+			const BodyHandle box = CreateCrate(*world, glm::vec3(-2.0f, 0.8f, 0.0f), glm::vec3(0.1f), 0.35f);
+			world->SetLinearVelocity(box, glm::vec3(6.0f, 0.0f, 0.0f));
+			float furthest = -std::numeric_limits<float>::infinity();
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				Walk(*world, *character, glm::vec3(0.0f), 1);
+				furthest = std::max(furthest, world->GetPose(box).Position.x);
+			}
+			CHECK(furthest < -0.2f);
+			CHECK(glm::length(character->GetPose().Position - standing) < 0.01f);
+		}
+
+		// M34 decision 2: a light body cannot push the character, so a light platform driven up under it rises through it
+		// rather than lifting it.
+		TEST_CASE("CharacterController: a light Dynamic platform rising under a character passes up through it")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A 5 kg plate 0.1 m thick, wider than the character, which stands on it.
+			const BodyHandle plate = CreateCrate(*world, glm::vec3(0.0f), glm::vec3(0.75f, 0.05f, 0.75f), 5.0f);
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.12f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 20);
+			REQUIRE(character->GetGroundState().IsGrounded);
+			// The plate is driven up at 1.5 m/s for two seconds, past the top of the 1.8 m capsule.
+			float highest = -std::numeric_limits<float>::infinity();
+			for (uint32_t tick = 0; tick < 120; ++tick)
+			{
+				world->SetLinearVelocity(plate, glm::vec3(0.0f, 1.5f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 1);
+				highest = std::max(highest, character->GetPose().Position.y);
+			}
+			CHECK(highest < 0.25f);
+			CHECK(world->GetPose(plate).Position.y > 2.0f);
+		}
+
+		// M34 decision 2: the push is CharacterVirtual's, at most Mass * 9.81 N, and the pushed body meets static geometry
+		// as any body does.
+		TEST_CASE("CharacterController: a light body a character walks into is pushed along the ground at about its speed, and not through a wall")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A wall whose face is at x 4.
+			static_cast<void>(CreateBlock(*world, glm::vec3(4.5f, 2.0f, 0.0f), glm::vec3(0.5f, 1.0f, 3.0f)));
+			const BodyHandle box = CreateCrate(*world, glm::vec3(0.8f, 0.0f, 0.0f), glm::vec3(0.15f), 0.35f);
+			Scope<CharacterController> warden = CreateWarden(*world, glm::vec3(0.0f));
+			Walk(*world, *warden, glm::vec3(0.0f), 10);
+			// A second at 3 m/s brings the character to the wall; half of it sees the box ahead, moving along.
+			float pushedSpeed = 0.0f;
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				Walk(*world, *warden, glm::vec3(3.0f, 0.0f, 0.0f), 1);
+				if (tick == 20)
+					pushedSpeed = world->GetLinearVelocity(box).x;
+			}
+			CHECK(pushedSpeed > 2.0f);
+			CHECK(pushedSpeed < 4.5f);
+			const glm::vec3 position = world->GetPose(box).Position;
+			CHECK(position.x < 4.0f);
+			CHECK(position.x > 3.0f);
+			CHECK(position.y > 0.0f);
+			CHECK(warden->GetPose().Position.y < 0.05f);
+		}
+
+		// M34 decision 1: the character's own collision meets another character's inner body as before.
+		TEST_CASE("CharacterController: characters still block each other through their inner bodies")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			Scope<CharacterController> walker = CreateCharacter(*world, glm::vec3(0.0f));
+			Scope<CharacterController> standing = CreateCharacter(*world, glm::vec3(2.0f, 0.0f, 0.0f));
+			for (uint32_t tick = 0; tick < 90; ++tick)
+			{
+				walker->Update(FixedDelta, glm::vec3(2.0f, 0.0f, 0.0f), Gravity);
+				standing->Update(FixedDelta, glm::vec3(0.0f), Gravity);
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+			}
+			// Two capsules of radius 0.3 m stop about 0.6 m apart.
+			CHECK(walker->GetPose().Position.x < 1.45f);
+			CHECK(standing->GetPose().Position.x == doctest::Approx(2.0f).epsilon(1.0e-3));
 		}
 	}
 

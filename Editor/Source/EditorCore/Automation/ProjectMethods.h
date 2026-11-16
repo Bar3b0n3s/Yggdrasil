@@ -111,7 +111,11 @@ namespace Engine {
 	// ("/patch/Window/Titel: unknown field 'Titel' on 'WindowSettings' (did you mean 'Title'?)"), so a mistyped key or reset
 	// is never lost silently; a --strict editor refuses the patch instead (Validation at the member). The warnings also name
 	// a Variant value that does not resolve or match its schema, which is kept as written (see CreateFromPatch in
-	// ProjectSettingsCommand.h). Supports dry runs (the .eproj then goes to the overlay).
+	// ProjectSettingsCommand.h). M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): a patch that writes Input is
+	// refused (Validation, each problem an issue under /patch, such as "/patch/Input/Actions/Attack/Bindings/1") when an
+	// input action of the patched settings is one play.start would refuse; the editor's Project Settings panel, which calls
+	// this method as the user (EditorContext::GetCommandOrigin is User), commits such a patch instead and names each problem
+	// in the warnings (InputActionCheck::Warn). Supports dry runs (the .eproj then goes to the overlay).
 	struct ProjectSetSettingsParams
 	{
 		VariantValue Patch{}; // an object (InvalidArgument otherwise)

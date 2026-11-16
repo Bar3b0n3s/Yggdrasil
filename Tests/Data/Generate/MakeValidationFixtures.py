@@ -988,6 +988,14 @@ return Script.Define("Jumper", Jumper)
     item.entities.append(entity("e000000000000041", "Ground", {
         "Transform": transform(), "Terrain": {"Heightfield": "3a7e000000000013", "SplatMap": "3a7e000000000014"}}))
 
+    # M34 (Docs/Decisions/0049-m34-characters-input.md decision 7): a project holding input actions play.start refuses,
+    # as an editor before M34 let project.setSettings save them: a stick axis and an unknown key among a Button action's
+    # Bindings, and a trigger, a button binding since M34, which reports nothing.
+    item = fixture("INPUT_INVALID_ACTION")
+    item.project["Input"]["Actions"] = {
+        "Attack": {"Type": "Button", "Bindings": ["Gamepad.RightTrigger", "Gamepad.LeftX", "Key.Nope"], "Positive": [],
+                   "Negative": [], "Gamepad": "", "Invert": False}}
+
     return fixtures
 
 

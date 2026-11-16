@@ -17,12 +17,26 @@
 // the world's ContactBuffer (ContactEvent::FromCharacter, BodyA the inner body), so the character's entity and the other
 // body receive collision events with the same sorting and exit rules as bodies (§9.4).
 //
+// Characters and Dynamic bodies (M34, Docs/Decisions/0049-m34-characters-input.md decisions 1 to 3, World Tree's brief
+// 11). The inner body's object layer has the Character kind (PhysicsLayers.h), so the solver never resolves a contact
+// between it and another body but a sensor: placed rather than swept, it would push a Dynamic body with infinite mass. A
+// character pushes Dynamic bodies only through CharacterVirtual's own contacts, with at most Mass * 9.81 N, and a Dynamic
+// body lighter than its Mass never moves it: it cannot push the character or carry it up a surface of its own (but the
+// one the character stands on, which it walks across), gives it none of its velocity as its ground (so standing on one
+// never launches it), is never a stair (the character pushes it along instead of climbing it) and carries at most its own
+// weight from the character. Characters still block each other through their inner bodies. What that leaves (§9.6,
+// Docs/Backlog.md §6): a light body moving into a character is stopped by the character's push, and passes into the
+// capsule only when it outruns the character's look-ahead within one tick or is driven harder than the push; a light
+// platform never lifts or carries a character; a heavy body shoves the character, and overlaps it only when it is pinned
+// or under the body.
+//
 // ECS-agnostic, like PhysicsWorld; Scene/PhysicsSystem owns one per CharacterControllerComponent and drives it from
 // PreStep. Main thread only. Determinism: the same calls in the same order give the same results; the inner body is
 // created as the world's next body at Create, so a caller that creates characters and bodies in canonical order (§5.1)
 // gets the same inner body handle every run (§9.6: the inner body ID comes from the canonical body-ID sequence).
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8).
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8); M34 changes what it documents of Mass,
+// Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1).
 
 namespace Engine {
 
@@ -45,8 +59,10 @@ namespace Engine {
 		float MaxSlopeAngle = 45.0f;
 		// The highest step climbed without jumping (ExtendedUpdate's walk-stairs step up), metres >= 0.
 		float StepHeight = 0.3f;
-		// Kilograms in (0, MaxPhysicsMass]: how hard the character pushes dynamic bodies, and the weight it puts on what it
-		// stands on (capped per update so no body's velocity can overflow, see Update).
+		// Kilograms in (0, MaxPhysicsMass]: how hard the character pushes Dynamic bodies (at most Mass * 9.81 N, M34), which
+		// Dynamic bodies are light for it (a mass below Mass: they never move the character, see the file comment), and the
+		// weight it puts on a Dynamic body it stands on (at most that body's own weight, and capped per update so no body's
+		// velocity can overflow, see Update).
 		float Mass = 70.0f;
 		// The project layer of the character and its inner body (< the world's layer count).
 		uint32_t Layer = 0;
@@ -108,13 +124,16 @@ namespace Engine {
 		// ground's velocity (Jolt's ground velocity, updated first: a kinematic platform's velocity, a rotating body's surface
 		// velocity at the contact); that velocity is clamped to MaxCharacterSpeed.
 		// "Grounded" is Jolt's OnGround while the character does not move away from the ground faster than 0.1 m/s (else
-		// the step after a jump would cancel it). Then ExtendedUpdate with walk-stairs (up to StepHeight) and stick-to-floor
-		// (down to StepHeight) over `deltaTime` seconds, which moves the character and its inner body and records its
-		// contacts; its body filter ignores the inner body and every body of the character's CollisionGroup. The weight the
-		// update puts on the body the character stands on (Mass * |gravity| * deltaTime) is capped at 1e10 N s. An update that
-		// would carry the character beyond MaxPhysicsCoordinate leaves it where it was with no velocity (a warning is logged
-		// once per controller), so the character always stays where the world places bodies. `deltaTime` > 0 and every
-		// vector finite (asserted; Scene/PhysicsSystem validates script input first).
+		// the step after a jump would cancel it); the ground's velocity is none when the ground is a Dynamic body lighter than
+		// the character (M34). Then ExtendedUpdate with stick-to-floor (down to StepHeight) and ExtendedUpdate's walk-stairs
+		// step (up to StepHeight), never onto a Dynamic body lighter than the character, over `deltaTime` seconds, which
+		// moves the character and its inner body and records its contacts; its body filter ignores the inner body and every
+		// body of the character's CollisionGroup. The weight the update puts on a Dynamic body the character stands on
+		// (Mass times the gravity's part along the ground's normal times `deltaTime`, at the contact; at most that body's own
+		// weight when it is lighter than the character) is capped at 1e10 N s. An update that would carry the character
+		// beyond MaxPhysicsCoordinate leaves it where it was with no velocity (a warning is logged once per controller), so
+		// the character always stays where the world places bodies. `deltaTime` > 0 and every vector finite (asserted;
+		// Scene/PhysicsSystem validates script input first).
 		void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity);
 
 		// The character's base position and rotation.
@@ -128,7 +147,8 @@ namespace Engine {
 		void SetVelocity(const glm::vec3& velocity);
 		// The ground state of the last Update.
 		[[nodiscard]] CharacterGroundState GetGroundState() const;
-		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see.
+		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see; its object layer has the Character kind
+		// (M34), so no other body meets it in the solver.
 		[[nodiscard]] BodyHandle GetInnerBody() const;
 		[[nodiscard]] uint64_t GetUserData() const;
 		// Sets CharacterControllerDescription::InheritGroundVelocity in place, for the next Update on: a per-update switch, so

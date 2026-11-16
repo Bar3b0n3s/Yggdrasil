@@ -32,10 +32,10 @@ namespace Engine {
 			return PhysicsObjectKind::Moving;
 		}
 
-		// Whether `kind` is one of the three kinds an object layer encodes (its two low bits may also hold 3).
+		// Whether `kind` is one of the kinds an object layer encodes (since M34 every value of its two low bits is one).
 		[[nodiscard]] static bool IsKnownObjectKind(PhysicsObjectKind kind)
 		{
-			return std::to_underlying(kind) <= std::to_underlying(PhysicsObjectKind::Sensor);
+			return std::to_underlying(kind) <= std::to_underlying(PhysicsObjectKind::Character);
 		}
 
 	}

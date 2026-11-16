@@ -3,9 +3,13 @@
 
 #include "Editor/SupportingPanelTestUi.h"
 #include "Engine/Core/FileSystem.h"
+#include "Engine/Project/ProjectSettings.h"
+#include "Engine/Session/PlayInput.h"
 #include "Support/ExpectLog.h"
 
+#include <format>
 #include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -146,6 +150,48 @@ namespace Engine {
 			CHECK(entries.front().Origin == CommandOrigin::User);
 			REQUIRE(fixture.GetClient().Call("edit.undo", Json::object()));
 			CHECK(fixture.GetEditor().GetProject().GetSettings().Name == before.Name);
+		}
+
+		// M34 review finding 7 (Docs/Decisions/0049-m34-characters-input.md decision 6): "Add element" commits an empty
+		// binding at once; the panel's project.setSettings runs as the user, so it commits, and the panel shows the binding's
+		// problem beside it until it is filled in.
+		TEST_CASE("ProjectSettingsPanel: an input binding added empty commits and shows its problem beside it until it is filled in")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			const Json jump{ { "Type", "Button" }, { "Bindings", Json::array({ "Key.Space" }) } };
+			REQUIRE(fixture.GetClient().Call("project.setSettings", Json{ { "patch", Json{ { "Input", Json{ { "Actions", Json{ { "Jump", jump } } } } } } } }));
+			const auto jumpBindings = [&fixture]()
+			{
+				const auto& actions = fixture.GetEditor().GetProject().GetSettings().Input.Actions;
+				const auto found = actions.find("Jump");
+				return found == actions.end() ? std::vector<std::string>{} : found->second.Bindings;
+			};
+			// The problem play.start would report for the empty binding, which the panel shows as a note: its message and, in
+			// brackets, its hint (an error line would read "hint: " instead).
+			InputSettings added = fixture.GetEditor().GetProject().GetSettings().Input;
+			added.Actions["Jump"].Bindings.push_back("");
+			const Status problems = ValidateInputActions(added);
+			REQUIRE_FALSE(problems.has_value());
+			REQUIRE(problems.error().GetIssues().size() == 1);
+			const ErrorIssue& issue = problems.error().GetIssues().front();
+			const std::string problem = issue.Hint.empty() ? issue.Message : std::format("{} ({})", issue.Message, issue.Hint);
+
+			ProjectSettingsPanel panel;
+			fixture.Draw(panel);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "General");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Input");
+			CHECK_FALSE(fixture.Draw(panel).contains(problem));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add element");
+			fixture.Pump();
+			CHECK(fixture.Draw(panel).contains(problem));
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "" });
+			CHECK(fixture.GetEditor().GetHistory().GetEntries(1).front().Origin == CommandOrigin::User);
+
+			const Json filled{ { "Type", "Button" }, { "Bindings", Json::array({ "Key.Space", "Key.J" }) } };
+			REQUIRE(fixture.GetClient().Call("project.setSettings", Json{ { "patch", Json{ { "Input", Json{ { "Actions", Json{ { "Jump", filled } } } } } } } }));
+			CHECK_FALSE(fixture.Draw(panel).contains(problem));
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "Key.J" });
 		}
 
 		TEST_CASE("ProjectSettingsPanel: an intervening agent edit discards the typed draft with a conflict")
