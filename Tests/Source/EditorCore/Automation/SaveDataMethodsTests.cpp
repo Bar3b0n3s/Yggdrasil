@@ -7,10 +7,12 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/ExpectLog.h"
+#include "Support/PlatformProbes.h"
 
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <format>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -71,6 +73,30 @@ namespace Engine {
 			REQUIRE(refused.contains("error"));
 			CHECK(refused["error"]["data"]["contexts"].dump().contains("Store.corrupt-2.json"));
 			CHECK_FALSE(std::filesystem::exists(directory / "Store.json", error));
+		}
+
+		// Batch 2's merge review (finding 11): a write that fails after the merge's read moved the store file aside says why
+		// the file was moved, as a refused value does. On Windows the durable write's temporary (Store.json.tmp-<pid>) cannot
+		// be created while a directory stands in its place; elsewhere the store is written without the durable path, whose
+		// temporary that does not block.
+		TEST_CASE("SaveDataMethods: savedata.set with merge reports a store file its read moved aside when its write fails")
+		{
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			Test::AutomationFixture setup("SaveDataSetMergeWriteFails", false);
+			const std::filesystem::path directory = setup.GetEditor().GetProject().GetRoot() / "Library" / "SaveData";
+			Test::ExpectLog warning(LogLevel::Warn, "save data");
+			std::error_code error;
+			WriteTruncatedStore(directory);
+			const std::filesystem::path temporary = directory / std::format("Store.json.tmp-{}", Test::GetCurrentProcessIdentifier());
+			REQUIRE(std::filesystem::create_directories(temporary / "Blocker", error));
+			Json failed = setup.Request("savedata.set", Json{ { "values", Json{ { "Realm", 2 } } }, { "merge", true } });
+			REQUIRE(failed.contains("error"));
+			CHECK(failed["error"]["data"]["contexts"].dump().contains("Store.corrupt-1.json"));
+			CHECK(std::filesystem::exists(directory / "Store.corrupt-1.json", error));
+			CHECK_FALSE(std::filesystem::exists(directory / "Store.json", error));
+#else
+			MESSAGE("the durable write has a Windows backend only (Docs/Decisions/0028-backlog-program.md decision 10)");
+#endif
 		}
 	}
 

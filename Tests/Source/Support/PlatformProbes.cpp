@@ -209,6 +209,11 @@ namespace Engine {
 			}
 		}
 
+		uint32_t GetCurrentProcessIdentifier()
+		{
+			return static_cast<uint32_t>(GetCurrentProcessId());
+		}
+
 		Result<uint32_t> GetThreadStackGuarantee()
 		{
 			ULONG size = 0; // 0 asks for the current value
@@ -422,6 +427,11 @@ namespace Engine {
 		SystemLibraryProbe GetSystemLibraryProbe()
 		{
 			return {};
+		}
+
+		uint32_t GetCurrentProcessIdentifier()
+		{
+			return static_cast<uint32_t>(getpid());
 		}
 
 		Status StartProcessInheritingOutput(const std::filesystem::path& executable, std::span<const std::string> arguments)

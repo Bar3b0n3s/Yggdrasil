@@ -13,6 +13,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <string_view>
 
 // M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the Save Data panel over editor play's store.
@@ -75,6 +76,30 @@ namespace Engine {
 			panel.ApplyChange(fixture.GetContext(), "Volume", "0.5");
 			CHECK(ReadPlayStore(fixture) == Json{ { "Volume", 0.5 } });
 			CHECK(fixture.Draw(panel).contains("Store.corrupt-1.json"));
+		}
+
+		// Batch 2's merge review (finding 10): the panel lists a store that becomes unreadable, and a Set the store refuses (an
+		// empty key) finds it so. Nothing is written, but the read moved the file aside: the panel shows why and the store as it
+		// is now, empty, beside the refusal.
+		TEST_CASE("SaveDataPanel: a refused Set that finds the store unreadable shows why and the store as it is now")
+		{
+			Test::UtilityPanelFixture fixture;
+			fixture.OpenProject();
+			REQUIRE(fixture.GetEditor().GetPlay().WritePlaySaveData(Json{ { "Realm", 2.0 } }).has_value());
+			SaveDataPanel panel;
+			CHECK(fixture.Draw(panel).contains("Realm"));
+			const std::filesystem::path file = fixture.GetEditor().GetProject().GetRoot() / "Library" / "SaveData" / "Store.json";
+			REQUIRE(FileSystem::WriteFileAtomic(file, AsBytes("{\"Format\": \"SaveData\""), { .KeepBackup = false }).has_value());
+
+			Test::ExpectLog warning(LogLevel::Warn, "save data");
+			panel.ApplyChange(fixture.GetContext(), "", "1");
+			const std::string shown = fixture.Draw(panel);
+			CHECK(shown.contains("Store.corrupt-1.json"));
+			const Status refused = SaveDataStore::ValidateKey("");
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(shown.contains(refused.error().GetMessageText()));
+			CHECK_FALSE(shown.contains("Realm"));
+			CHECK(ReadPlayStore(fixture) == Json::object());
 		}
 	}
 

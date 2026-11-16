@@ -27,8 +27,10 @@ namespace Engine {
 	// (Docs/Decisions/0033-m22-contract.md decision 8) and ui.createWidget (decision 32), M23's animation.preview
 	// (Docs/Decisions/0034-m23-contract.md decision 32), M24's ten graph edit and read methods (Docs/Decisions/0035-m24-contract.md
 	// decision 12) and graph.liveValues (decision 14), M26's lighting.bake, terrain.edit and terrain.importHeightmap
-	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), and M30's navigation.bake
-	// (Docs/Decisions/0045-m30-navigation.md decision 8), test hooks excluded.
+	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), M35's play.setWorldPaused
+	// (Docs/Decisions/0050-m35-pause-entity-state.md decision 5), M28's savedata.get, savedata.set and savedata.clear
+	// (Docs/Decisions/0043-m28-game-services.md decision 8), and M30's navigation.bake (Docs/Decisions/0045-m30-navigation.md
+	// decision 8), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",

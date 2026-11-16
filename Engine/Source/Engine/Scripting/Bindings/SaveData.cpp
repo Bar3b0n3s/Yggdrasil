@@ -134,8 +134,9 @@ namespace Engine {
 					"the reason (a headless Runtime reads its store and never writes it; a failed write). Test runs, replays, recordings "
 					"and lockstep sessions keep their store in memory: Commit returns true and writes nothing.")
 				.Function("GetLoadError", &Utils::SaveDataLoadError, "() -> string?",
-					"Returns why the store the session started with could not be read (it was moved aside as Store.corrupt-<n>.json and "
-					"the game started with no save data), or nil.",
+					"Returns why the store the session started with could not be read, or nil: the game started with no save data, and "
+					"the file was moved aside as Store.corrupt-<n>.json, or left in place by a headless Runtime (the next windowed run "
+					"moves it aside) or when it could not be moved.",
 					read);
 			return {};
 		}

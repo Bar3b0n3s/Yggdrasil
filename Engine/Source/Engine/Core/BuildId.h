@@ -57,7 +57,7 @@ namespace Engine {
 	[[nodiscard]] const BuildId& GetBuildId();
 
 	// The build id as one string, semantic-versioning build metadata: "<Version>" without a commit, "<Version>+<Commit>"
-	// for a clean tree, "<Version>+<Commit>.dirty" for a dirty one ("0.5.0+3f2a9c1d4e5b.dirty"). Asserts a valid id (a
+	// for a clean tree, "<Version>+<Commit>.dirty" for a dirty one ("0.6.0+3f2a9c1d4e5b.dirty"). Asserts a valid id (a
 	// Version of three decimal numbers without leading zeros, a Commit of 12 lowercase hex digits or empty, Dirty only with
 	// a Commit).
 	[[nodiscard]] std::string FormatBuildId(const BuildId& id);

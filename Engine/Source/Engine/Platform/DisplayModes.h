@@ -83,11 +83,17 @@ namespace Engine {
 		DisplaySettings Last{};          // what was resolved while the window was last not minimized
 	};
 
-	// The settings in force (M28, the W28.1 review's finding 4 and the W28.2 review's finding 10):the observation's mode and VSync; while the window is
-	// minimized (an Exclusive window is, at every focus loss, when its monitor goes back to the desktop's mode) the last
-	// size and refresh rate it had; otherwise its size and, in the two full-screen modes, its monitor's current refresh rate
-	// (Windowed has none: 0). Pure.
+	// The settings in force (M28, the W28.1 review's finding 4 and the W28.2 review's finding 10): the observation's mode and
+	// VSync; while the window is minimized (an Exclusive window is, at every focus loss, when its monitor goes back to the
+	// desktop's mode) the last size and refresh rate it had; otherwise its size and, in the two full-screen modes, its
+	// monitor's current refresh rate (Windowed has none: 0). Pure.
 	[[nodiscard]] DisplaySettings ResolveDisplaySettings(const DisplayObservation& observation);
+
+	// What a frame boundary records of a window that is not minimized (M28; batch 2's merge review, finding 1): `last` with
+	// the mode and VSync in force and the window's size, its refresh rate kept (0 Windowed), so the frame loop never queries
+	// the monitor. The refresh rate is the last one known: the startup settings', an applied request's, or that of the last
+	// GetDisplaySettings that queried the monitor. Pure.
+	[[nodiscard]] DisplaySettings RecordFrameDisplay(const DisplaySettings& last, DisplayWindowMode mode, bool vsync, uint32_t width, uint32_t height);
 
 	// The ranges every display request and user://Display.json take (ValidateDisplaySettings).
 	inline constexpr uint32_t MaxDisplayExtent = 16384;

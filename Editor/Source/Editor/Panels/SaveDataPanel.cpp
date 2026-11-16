@@ -88,6 +88,10 @@ namespace Engine {
 			changed = store.Set(key, value);
 		if (!changed)
 		{
+			// Nothing is written, but the read above moved a store it could not read aside (batch 2's merge review, finding
+			// 10): show the store as it is now and why, beside the refusal.
+			m_Values = load->Values;
+			m_LoadError = load->Error.value_or(std::string());
 			m_Problem = changed.error().ToString();
 			return;
 		}

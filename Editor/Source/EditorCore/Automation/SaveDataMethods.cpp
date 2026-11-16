@@ -65,7 +65,8 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidArgument, "values must be an object of save-data values by key");
 			SaveDataStore store;
 			// A merge reads the play store first, and that read moves a store file it cannot read aside, so no later read finds
-			// it again: why travels with this result, or with the error of a value the merge refuses.
+			// it again: why travels with this result, or with the error of a value the merge refuses or of a write that fails
+			// (batch 2's merge review, finding 11).
 			std::string loadError;
 			if (params.Merge)
 			{
@@ -82,9 +83,15 @@ namespace Engine {
 					return std::unexpected(std::move(set).error().WithContext(std::format("the play store's file was read first: {}", loadError)));
 				}
 			}
-			ENGINE_TRY_ASSIGN(SaveDataWriteResult result, Utils::WritePlayStore(context, store));
-			result.LoadError = std::move(loadError);
-			return result;
+			Result<SaveDataWriteResult> written = Utils::WritePlayStore(context, store);
+			if (!written)
+			{
+				if (loadError.empty())
+					return std::unexpected(std::move(written).error());
+				return std::unexpected(std::move(written).error().WithContext(std::format("the play store's file was read first: {}", loadError)));
+			}
+			written->LoadError = std::move(loadError);
+			return written;
 		}
 
 		Result<SaveDataWriteResult> SaveDataClear(EditorMethodContext& context, const NoParams& /*params*/)

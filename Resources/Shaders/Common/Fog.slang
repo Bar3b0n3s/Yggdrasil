@@ -1,6 +1,7 @@
 // The fog of a view (M32, Docs/Decisions/0047-m32-fog-ssr.md decisions 3 and 5; Renderer/Fog.h; Architecture §8.6). The
 // passes that fog include it after declaring the view's fog constants, which it reads by name: Fog
-// (ConstantBuffer<FogConstants>, Shared/FogConstants.h; b5 of the forward, skybox and SSR-composite layouts, b1 of the quads').
+// (ConstantBuffer<FogConstants>, Shared/FogConstants.h; b5 of the forward, skybox and SSR-composite layouts, b1 of the quads'
+// and, from M33's merge, of the Particles program's).
 // Every caller tests Fog.Enabled first, so a view without fog runs none of it.
 //
 // A point is fogged along its view ray from its eye point (the camera for a perspective view; the point moved back along the

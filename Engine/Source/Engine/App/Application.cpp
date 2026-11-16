@@ -482,7 +482,7 @@ namespace Engine {
 		return QueryDisplayVideoModes(*m_Context->GetWindow());
 	}
 
-	DisplayObservation Application::ObserveDisplay() const
+	DisplayObservation Application::ObserveDisplay()
 	{
 		DisplayObservation observation{ .Mode = m_DisplayMode, .VSync = m_VSync, .Last = m_LastDisplay };
 		const Window* window = m_Context != nullptr ? m_Context->GetWindow() : nullptr;
@@ -498,15 +498,27 @@ namespace Engine {
 		// is not minimized; a minimized Exclusive window's monitor is back at the desktop's mode, so its last rate stands in.
 		if (observation.Mode != DisplayWindowMode::Windowed && !headless && observation.Width > 0 && observation.Height > 0)
 		{
+			++m_DisplayMonitorQueries;
 			if (const Result<DisplayVideoMode> current = QueryCurrentVideoMode(*window); current.has_value())
 				observation.MonitorRefreshRate = current->RefreshRate;
 		}
 		return observation;
 	}
 
-	DisplaySettings Application::GetDisplaySettings() const
+	DisplaySettings Application::GetDisplaySettings()
 	{
-		return ResolveDisplaySettings(ObserveDisplay());
+		const DisplayObservation observation = ObserveDisplay();
+		const DisplaySettings settings = ResolveDisplaySettings(observation);
+		// What a visible window showed, the monitor's refresh rate included, is the last known, which stands in while it is
+		// minimized (batch 2's merge review, finding 1: the frame boundary no longer queries the monitor).
+		if (observation.Width > 0 && observation.Height > 0)
+			m_LastDisplay = settings;
+		return settings;
+	}
+
+	uint64_t Application::GetDisplayMonitorQueryCount() const
+	{
+		return m_DisplayMonitorQueries;
 	}
 
 	Status Application::RequestDisplaySettings(const DisplaySettings& settings)
@@ -542,6 +554,7 @@ namespace Engine {
 			applied.RefreshRate = 0;
 		else if (settings.WindowMode == DisplayWindowMode::Borderless)
 		{
+			++m_DisplayMonitorQueries;
 			if (const Result<DisplayVideoMode> current = QueryCurrentVideoMode(*m_Context->GetWindow()); current.has_value())
 			{
 				applied.Width = current->Width;
@@ -740,14 +753,15 @@ namespace Engine {
 	void Application::OnFrameSafePoint()
 	{
 		// M28 (decision 3): the mode in force when the monitor let an exclusive window go, and the settings of a window that is
-		// not minimized (its size and refresh rate, which stand in while it is); then a display-settings request applies at the
-		// frame boundary, before the subclass's safe point.
+		// not minimized (its size, mode and VSync, with the last refresh rate known, which stand in while it is: no monitor
+		// query, batch 2's merge review's finding 1); then a display-settings request applies at the frame boundary, before
+		// the subclass's safe point.
 		if (const Window* window = m_Context != nullptr ? m_Context->GetWindow() : nullptr)
 		{
 			if (m_DisplayMode == DisplayWindowMode::Exclusive && m_Specification.Window != WindowMode::Headless && !window->IsFullScreen())
 				m_DisplayMode = DisplayWindowMode::Windowed;
 			if (window->GetWidth() > 0 && window->GetHeight() > 0)
-				m_LastDisplay = GetDisplaySettings();
+				m_LastDisplay = RecordFrameDisplay(m_LastDisplay, m_DisplayMode, m_VSync, window->GetWidth(), window->GetHeight());
 		}
 		ApplyPendingDisplaySettings();
 		OnSafePoint();

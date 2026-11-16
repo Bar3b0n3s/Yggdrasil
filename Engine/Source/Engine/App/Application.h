@@ -268,9 +268,14 @@ namespace Engine {
 		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayVideoModes() const;
 		// The settings in force: the window's mode (the specification's at the start, Exclusive for WindowSettings.Fullscreen,
 		// then each applied request's; Windowed once the monitor let an Exclusive window go), its size in screen units, its
-		// monitor's current refresh rate in the full-screen modes (0 windowed) and the VSync in force; while it is minimized, its
-		// last size and refresh rate (ResolveDisplaySettings).
-		[[nodiscard]] DisplaySettings GetDisplaySettings() const;
+		// monitor's current refresh rate in the full-screen modes (0 windowed), queried now, and the VSync in force; while it is
+		// minimized, its last size and refresh rate (ResolveDisplaySettings), the refresh rate the last one known (the startup
+		// settings', an applied request's or the last call's). Not const: a visible window's answer becomes the last known.
+		[[nodiscard]] DisplaySettings GetDisplaySettings();
+		// The monitor queries (QueryCurrentVideoMode) this application made for its display settings since it was created: one
+		// per GetDisplaySettings of a visible full-screen window and one per applied Borderless request, none per frame (batch
+		// 2's merge review, finding 1). A diagnostic, which the tests read.
+		[[nodiscard]] uint64_t GetDisplayMonitorQueryCount() const;
 		// Checks `settings` now and applies them at the next frame boundary (the frame's safe point, before OnSafePoint and
 		// the fixed steps; the last request before it wins): the window's mode (ApplyDisplaySettings) and the swapchain's
 		// VSync, which the application keeps for every swapchain it creates, a device loss's included; then
@@ -379,8 +384,8 @@ namespace Engine {
 		void ApplyPendingDisplaySettings();
 		// M28 (decision 3): what the window shows of its display settings now (ResolveDisplaySettings' input): the mode in
 		// force (Windowed once the monitor let an Exclusive window go), the window's size and its monitor's current refresh
-		// rate in the full-screen modes while it is not minimized.
-		[[nodiscard]] DisplayObservation ObserveDisplay() const;
+		// rate in the full-screen modes while it is not minimized (a monitor query, counted).
+		[[nodiscard]] DisplayObservation ObserveDisplay();
 		// Step 3's teardown of what InitializeRendering built, after GraphicsDevice::WaitForIdle.
 		void ShutdownRendering();
 		// Logs an initialization failure at Error level, and shows it in an error dialog when `process` has
@@ -407,11 +412,14 @@ namespace Engine {
 		DisplayWindowMode m_DisplayMode = DisplayWindowMode::Windowed;
 		bool m_VSync = true;
 		// The settings resolved while the window was last not minimized (0 x 0), whose size and refresh rate GetDisplaySettings
-		// reports while it is (ResolveDisplaySettings): recorded at each frame boundary and each applied request.
+		// reports while it is (ResolveDisplaySettings): the startup settings, then each applied request and each
+		// GetDisplaySettings of a visible window, and each frame boundary's size, mode and VSync (RecordFrameDisplay, which
+		// keeps the refresh rate and queries nothing).
 		DisplaySettings m_LastDisplay{};
-		Scope<EngineContext> m_Context;    // between the start of initialization and the end of OnShutdown
-		Scope<FrameLoop> m_FrameLoop;      // while the frame loop runs
-		Scope<FrameRendering> m_Rendering; // with a device, from InitializeRendering to ShutdownRendering
+		uint64_t m_DisplayMonitorQueries = 0; // GetDisplayMonitorQueryCount
+		Scope<EngineContext> m_Context;       // between the start of initialization and the end of OnShutdown
+		Scope<FrameLoop> m_FrameLoop;         // while the frame loop runs
+		Scope<FrameRendering> m_Rendering;    // with a device, from InitializeRendering to ShutdownRendering
 #if !defined(ENGINE_DIST)
 		Scope<ImGuiLayer> m_ImGuiLayer; // with EnableImGui, from InitializeRendering to ShutdownRendering
 #endif

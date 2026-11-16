@@ -211,10 +211,10 @@ namespace Engine {
 			return MakeError(ErrorCode::Unsupported, "this host has no display: display settings apply in a windowed Runtime");
 		}
 		// M28 (decision 8): the SaveData module and Test.SetSaveData over a play session's store (Session/SaveDataStore.h).
-		// GetSaveValue returns the key's value, or null when the key is absent; SetSaveValue deletes it with null; ReplaceSaveData replaces every value;
-		// CommitSaveData writes the store where its host keeps it; GetSaveDataLoadError is why the store the session started
-		// with could not be read. Every other host keeps the defaults, Unsupported, which the module raises, but for
-		// CommitSaveData, which SaveData.Commit returns as false and the reason.
+		// GetSaveValue returns the key's value, or null when the key is absent; SetSaveValue deletes it with null;
+		// ReplaceSaveData replaces every value; CommitSaveData writes the store where its host keeps it; GetSaveDataLoadError
+		// is why the store the session started with could not be read. Every other host keeps the defaults, Unsupported,
+		// which the module raises, but for CommitSaveData, which SaveData.Commit returns as false and the reason.
 		// Defined in ScriptHost.cpp, where Json is complete.
 		[[nodiscard]] virtual Result<Json> GetSaveValue(std::string_view key) const;
 		[[nodiscard]] virtual Status SetSaveValue(std::string_view /*key*/, const Json& /*value*/) { return MakeError(ErrorCode::Unsupported, "{}", NoSaveDataReason); }

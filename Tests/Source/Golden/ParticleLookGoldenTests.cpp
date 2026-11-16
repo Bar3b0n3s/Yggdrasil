@@ -14,7 +14,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string_view>
+#include <utility>
 
 // The ParticleLook golden (M33, Docs/Decisions/0048-m33-particle-look.md decision 8; Roadmap M33's and World Tree brief 6's
 // golden images): the golden scaffold Scaffold/GoldenParticleLook.jsonl (IdSeed 3002) writes
@@ -27,9 +29,10 @@
 // The ParticlesInFog golden (M33's merge after M32, Docs/Decisions/0048-m33-particle-look.md decision 10; Roadmap M33's
 // acceptance "particles in fog"): the same scaffold's Assets/Scenes/GoldenParticleLook/ParticlesInFog.scene, a row of
 // alpha smoke columns and a row of additive embers at 4, 11 and 20 m from the camera, receding into distance fog ("Haze")
-// over a long floor: the far ones take the fog's colour (smoke) or fade into it (embers). The test also renders it with
-// and without the fog and the particles, checks that the particles change fewer pixels in fog than in clear air, and
-// renders it twice.
+// over a long floor: the far ones take the fog's colour (smoke) or fade into it (embers). The test also renders the 20 m
+// row alone, with and without the fog, each over the same view without particles: unfogged, the far smoke and embers would
+// stand out of the grey field as they do from the dark clear air, so their share of the fogged image must be a small
+// fraction of their share of the clear one (batch 2's merge review, finding 2); and it renders the scene twice.
 
 namespace Engine {
 
@@ -48,23 +51,48 @@ namespace Engine {
 			return {};
 		}
 
-		// How many pixels of `a` and `b` differ by more than `tolerance` levels in a colour channel.
-		[[nodiscard]] size_t CountChangedParticlePixels(const Image& a, const Image& b, int tolerance)
+		// The z below which ParticlesInFog's 20 m row lies (its emitters stand at z = -14, the camera at z = 6; the 11 m row's at
+		// z = -5): its particles rise and spread less than a metre in z over their lives.
+		constexpr float FarParticleRowZ = -10.0f;
+
+		// Keeps the snapshot's emitters whose particles all lie beyond FarParticleRowZ, with their particles.
+		void KeepFarParticles(RenderSnapshot& snapshot)
+		{
+			decltype(snapshot.ParticleEmitters) emitters(snapshot.ParticleEmitters.get_allocator());
+			decltype(snapshot.Particles) particles(snapshot.Particles.get_allocator());
+			for (const ParticleEmitterItem& emitter : snapshot.ParticleEmitters)
+			{
+				REQUIRE(static_cast<size_t>(emitter.First) + emitter.Count <= snapshot.Particles.size());
+				const std::span<const ParticleItem> range(snapshot.Particles.data() + emitter.First, emitter.Count);
+				if (range.empty() || !std::ranges::all_of(range, [](const ParticleItem& particle)
+				{
+					return particle.Position.z < FarParticleRowZ;
+				}))
+					continue;
+				ParticleEmitterItem kept = emitter;
+				kept.First = static_cast<uint32_t>(particles.size());
+				particles.insert(particles.end(), range.begin(), range.end());
+				emitters.push_back(kept);
+			}
+			snapshot.ParticleEmitters = std::move(emitters);
+			snapshot.Particles = std::move(particles);
+		}
+
+		// The summed absolute difference of `a` and `b` over every pixel's colour channels, in levels.
+		[[nodiscard]] uint64_t SumParticleDifference(const Image& a, const Image& b)
 		{
 			REQUIRE(a.Pixels.size() == b.Pixels.size());
-			size_t changed = 0;
+			uint64_t sum = 0;
 			for (size_t pixel = 0; pixel < a.Pixels.size() / 4; ++pixel)
 			{
-				int delta = 0;
 				for (size_t channel = 0; channel < 3; ++channel)
 				{
 					const int left = std::to_integer<int>(a.Pixels[pixel * 4 + channel]);
 					const int right = std::to_integer<int>(b.Pixels[pixel * 4 + channel]);
-					delta = std::max(delta, left > right ? left - right : right - left);
+					sum += static_cast<uint64_t>(left > right ? left - right : right - left);
 				}
-				changed += delta > tolerance ? 1U : 0U;
 			}
-			return changed;
+			return sum;
 		}
 
 	}
@@ -114,35 +142,46 @@ namespace Engine {
 			ENGINE_CHECK_GOLDEN(ParticleLookGoldenScene, look, gpu.GetDevice().GetInfo().DeviceClass);
 		}
 
-		// Smoke and embers draw in fog, both blends among them, and the fog hides the far particles.
+		// Smoke and embers draw in fog, both blends among them, and the fog hides the far particles: the 20 m row's share of the
+		// fogged image is under a tenth of its share of the image in clear air (about a twentieth on nvidia-62x; with the
+		// particles left unfogged, about a quarter).
 		TEST_CASE("Golden: ParticlesInFog")
 		{
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
-			const auto capture = [&gpu](bool fog, bool particles)
+			enum class ParticleRows : uint8_t
+			{
+				None,
+				FarRow,
+				All
+			};
+			const auto capture = [&gpu](bool fog, ParticleRows particles)
 			{
 				Test::GoldenSceneOptions options{ .PrepareScene = &RunParticles };
 				options.EditSnapshot = [fog, particles](RenderSnapshot& snapshot)
 				{
 					snapshot.Fog.Enabled = snapshot.Fog.Enabled && fog;
-					if (!particles)
+					if (particles == ParticleRows::None)
 					{
 						snapshot.ParticleEmitters.clear();
 						snapshot.Particles.clear();
 					}
+					else if (particles == ParticleRows::FarRow)
+						KeepFarParticles(snapshot);
 				};
 				options.InspectSnapshot = [fog, particles](const RenderSnapshot& snapshot)
 				{
 					CHECK(snapshot.Fog.Enabled == fog);
-					if (!particles)
+					if (particles == ParticleRows::None)
 						return;
-					REQUIRE(snapshot.ParticleEmitters.size() == 6);
+					// Every row has a smoke column (Alpha) and an ember stream (Additive).
+					REQUIRE(snapshot.ParticleEmitters.size() == (particles == ParticleRows::All ? 6U : 2U));
 					for (const RenderParticleBlend blend : { RenderParticleBlend::Alpha, RenderParticleBlend::Additive })
 					{
 						CHECK(std::ranges::count_if(snapshot.ParticleEmitters, [blend](const ParticleEmitterItem& emitter)
 						{
 							return emitter.Blend == blend && emitter.Count > 0;
-						}) == 3);
+						}) == (particles == ParticleRows::All ? 3 : 1));
 					}
 				};
 				const Result<Image> image = Test::RenderGoldenScene(gpu, ParticlesInFogGoldenScene, options);
@@ -152,16 +191,14 @@ namespace Engine {
 				CHECK(image->Height == 360);
 				return *image;
 			};
-			// The particles' share of the image: the pixels they change over the same view without them. Fog hides the far
-			// ones, so they change fewer pixels in fog than in clear air (unfogged particles would stand out of the fog).
-			const Image fogged = capture(true, true);
-			const size_t inFog = CountChangedParticlePixels(fogged, capture(true, false), 8);
-			const size_t inClearAir = CountChangedParticlePixels(capture(false, true), capture(false, false), 8);
+			const uint64_t inFog = SumParticleDifference(capture(true, ParticleRows::FarRow), capture(true, ParticleRows::None));
+			const uint64_t inClearAir = SumParticleDifference(capture(false, ParticleRows::FarRow), capture(false, ParticleRows::None));
 			CAPTURE(inFog);
 			CAPTURE(inClearAir);
-			CHECK(inFog > 1000);
-			CHECK(inFog < inClearAir);
-			CHECK(capture(true, true).Pixels == fogged.Pixels);
+			CHECK(inClearAir > 100000);
+			CHECK(inFog * 10 < inClearAir);
+			const Image fogged = capture(true, ParticleRows::All);
+			CHECK(capture(true, ParticleRows::All).Pixels == fogged.Pixels);
 			ENGINE_CHECK_GOLDEN(ParticlesInFogGoldenScene, fogged, gpu.GetDevice().GetInfo().DeviceClass);
 		}
 	}

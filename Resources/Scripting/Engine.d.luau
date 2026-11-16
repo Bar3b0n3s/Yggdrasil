@@ -1978,7 +1978,7 @@ declare SaveData: {
 	Get: (key: string) -> any,
 	-- Returns the keys of the saved values, sorted by their bytes. [All modes; Runtime|Test; pure/read]
 	GetKeys: () -> {string},
-	-- Returns why the store the session started with could not be read (it was moved aside as Store.corrupt-<n>.json and the game started with no save data), or nil. [All modes; Runtime|Test; pure/read]
+	-- Returns why the store the session started with could not be read, or nil: the game started with no save data, and the file was moved aside as Store.corrupt-<n>.json, or left in place by a headless Runtime (the next windowed run moves it aside) or when it could not be moved. [All modes; Runtime|Test; pure/read]
 	GetLoadError: () -> string?,
 	-- Saves value under key; nil deletes it. A value is what converts to JSON: nil, booleans, finite numbers, strings, arrays and tables of string keys (no functions, cycles or mixed keys), nesting at most 64 arrays and tables. The store is part of the session's state hash and lasts across Scene.Load and Scene.Reload; it outlives the run only once SaveData.Commit writes it. The whole store is at most 1048576 bytes of compact JSON; a Set past it raises, naming the size. [All modes; Runtime|Test; mutates]
 	Set: (key: string, value: any) -> (),

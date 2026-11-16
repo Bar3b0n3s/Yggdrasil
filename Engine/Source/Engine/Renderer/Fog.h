@@ -11,7 +11,8 @@
 // extracted into RenderSnapshot::Fog, drawn by every pass that shades the world in a Lit view: the forward passes' opaque and
 // transparent shading (Passes/Scene.slang) and the terrains' (Passes/Terrain.slang), the skybox with FogSkybox
 // (Passes/Skybox.slang), the SSR composite, whose addition is weighed by the point's remaining transparency (Passes/Ssr.slang),
-// and the Sprites stage's world-space quads (Passes/Quad.slang: blended quads fogged, additive ones faded). The model is
+// the Sprites stage's world-space quads (Passes/Quad.slang: blended quads fogged) and, from M33's merge, the particles
+// (Passes/Particles.slang: alpha particles blended toward the fog's colour, additive ones faded). The model is
 // Common/Fog.slang's: distance is view depth, so an orthographic camera fogs as evenly as a perspective one. A view without
 // fog (no Fog component, a view other than Lit, the wireframe, no camera) has FogConstants::Enabled 0, and every pass then
 // renders exactly as before M32. Particles are fogged by M33's particle program; World-space UI and world text are not

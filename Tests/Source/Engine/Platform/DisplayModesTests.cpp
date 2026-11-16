@@ -57,9 +57,9 @@ namespace Engine {
 			CHECK(ComputeDisplayWindowRect(large, 100, 200, desktop, std::nullopt) == DisplayWindowRect{ .X = 100, .Y = 200, .Width = 4000, .Height = 3000 });
 		}
 
-		// The W28.1 review's finding 4 and the W28.2 review's finding 10: an Exclusive window is minimized at every focus loss, and its monitor goes back to
-		// the desktop's mode then, so the settings in force keep the window's last size and refresh rate, and a VSync toggle
-		// made then requests the mode the game had, not the desktop's rate.
+		// The W28.1 review's finding 4 and the W28.2 review's finding 10: an Exclusive window is minimized at every focus loss,
+		// and its monitor goes back to the desktop's mode then, so the settings in force keep the window's last size and
+		// refresh rate, and a VSync toggle made then requests the mode the game had, not the desktop's rate.
 		TEST_CASE("DisplayModes: a minimized window's settings keep its last size and refresh rate")
 		{
 			const DisplaySettings exclusive{ .WindowMode = DisplayWindowMode::Exclusive, .Width = 1920, .Height = 1080, .RefreshRate = 60, .VSync = true };
@@ -78,6 +78,26 @@ namespace Engine {
 			CHECK(ResolveDisplaySettings(DisplayObservation{ .Mode = DisplayWindowMode::Windowed, .MonitorRefreshRate = 144, .Last = windowed }) == windowed);
 			CHECK(ResolveDisplaySettings(DisplayObservation{ .Mode = DisplayWindowMode::Windowed, .Width = 640, .Height = 480, .MonitorRefreshRate = 144 })
 				== DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 640, .Height = 480 });
+		}
+
+		// Batch 2's merge review (finding 1): a frame boundary records a visible window's size, mode and VSync without asking
+		// its monitor, keeping the last refresh rate known for the full-screen modes and none for Windowed, which a minimized
+		// window then reports.
+		TEST_CASE("DisplayModes: a frame boundary records the window's size, mode and VSync and keeps the last refresh rate")
+		{
+			const DisplaySettings exclusive{ .WindowMode = DisplayWindowMode::Exclusive, .Width = 1920, .Height = 1080, .RefreshRate = 60, .VSync = true };
+			CHECK(RecordFrameDisplay(exclusive, DisplayWindowMode::Exclusive, false, 1920, 1080)
+				== DisplaySettings{ .WindowMode = DisplayWindowMode::Exclusive, .Width = 1920, .Height = 1080, .RefreshRate = 60, .VSync = false });
+			// A Borderless window resized by its monitor's mode keeps the rate its last query or request found.
+			const DisplaySettings borderless{ .WindowMode = DisplayWindowMode::Borderless, .Width = 2560, .Height = 1440, .RefreshRate = 144, .VSync = true };
+			CHECK(RecordFrameDisplay(borderless, DisplayWindowMode::Borderless, true, 1920, 1080).RefreshRate == 144);
+			// The monitor let an Exclusive window go: Windowed, with no refresh rate.
+			CHECK(RecordFrameDisplay(exclusive, DisplayWindowMode::Windowed, true, 1280, 720)
+				== DisplaySettings{ .WindowMode = DisplayWindowMode::Windowed, .Width = 1280, .Height = 720, .RefreshRate = 0, .VSync = true });
+			// What a minimized window reports afterwards is the record.
+			const DisplaySettings recorded = RecordFrameDisplay(exclusive, DisplayWindowMode::Exclusive, true, 1920, 1080);
+			CHECK(ResolveDisplaySettings(DisplayObservation{ .Mode = DisplayWindowMode::Exclusive, .VSync = true, .MonitorRefreshRate = 144, .Last = recorded })
+				== recorded);
 		}
 	}
 

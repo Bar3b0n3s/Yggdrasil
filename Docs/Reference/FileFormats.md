@@ -536,7 +536,7 @@ Header: `"Format": "Replay", "Version": 4`. Schema: [Schemas/Replay.schema.json]
 	},
 	"Seed": 7,
 	"FixedHz": 60,
-	"EngineVersion": "0.5.0",
+	"EngineVersion": "0.6.0",
 	"Config": "Editor",
 	"SaveData": {
 		"BestWave": 12,

@@ -332,9 +332,13 @@ namespace Engine {
 						CHECK(reaches(desktop->Width, desktop->Height));
 						Current = Step::AwaitBorderlessFrame;
 						m_FramesInStep = 0;
+						m_MonitorQueries = GetDisplayMonitorQueryCount();
 						break;
 					}
 					case Step::AwaitBorderlessFrame:
+						// Batch 2's merge review (finding 1): the frame boundaries since the last read queried no monitor, a
+						// Borderless window's included.
+						CHECK(GetDisplayMonitorQueryCount() == m_MonitorQueries);
 						if (m_FramesInStep == 0)
 							break;
 						CHECK(m_LastFrameWidth == window.GetFramebufferWidth());
@@ -383,6 +387,7 @@ namespace Engine {
 			uint32_t m_FramesInStep = 0;
 			uint32_t m_LastFrameWidth = 0;
 			uint32_t m_LastFrameHeight = 0;
+			uint64_t m_MonitorQueries = 0; // GetDisplayMonitorQueryCount after the Cover step's reads
 		};
 
 		// M28 (decision 3): minimizes its window in the first update, reads the settings in force while minimized and asks for
@@ -1399,8 +1404,9 @@ namespace Engine {
 		// 3): the display requests of a game's options menu on a windowed application (DisplayApplication's steps). A request
 		// applies at the next frame boundary, the frame's last one wins and a refused one queues nothing; the applied settings
 		// are a Windowed window's size at refresh rate 0 and a Borderless window's monitor mode; the chosen VSync survives a
-		// device loss. Windowed and Borderless only, Borderless for one presented frame (the lead's limits for the shared
-		// machine: Exclusive changes the desktop's video mode).
+		// device loss; and a Borderless window's frame boundaries query no monitor (batch 2's merge review, finding 1:
+		// GetDisplayMonitorQueryCount). Windowed and Borderless only, Borderless for one presented frame (the lead's limits for
+		// the shared machine: Exclusive changes the desktop's video mode).
 		TEST_CASE("Application: a display request applies at the next frame boundary and its VSync survives a device loss"
 			* doctest::test_suite(Test::ChildTargetSuite) * doctest::skip(true))
 		{

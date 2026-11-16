@@ -42,6 +42,9 @@ namespace Engine {
 		};
 		[[nodiscard]] SystemLibraryProbe GetSystemLibraryProbe();
 
+		// The current process's identifier (GetCurrentProcessId; getpid on Linux and macOS).
+		[[nodiscard]] uint32_t GetCurrentProcessIdentifier();
+
 #if defined(ENGINE_PLATFORM_WINDOWS)
 		// Takes the lock of the process heap (HeapLock(GetProcessHeap())) and keeps it: every other thread that allocates
 		// from the process heap blocks, as after an access violation inside HeapAlloc on a corrupt heap. The calling thread

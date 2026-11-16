@@ -54,6 +54,15 @@ namespace Engine {
 		return settings;
 	}
 
+	DisplaySettings RecordFrameDisplay(const DisplaySettings& last, DisplayWindowMode mode, bool vsync, uint32_t width, uint32_t height)
+	{
+		return DisplaySettings{ .WindowMode = mode,
+			.Width = width,
+			.Height = height,
+			.RefreshRate = mode == DisplayWindowMode::Windowed ? 0 : last.RefreshRate,
+			.VSync = vsync };
+	}
+
 	DisplayWindowRect ComputeDisplayWindowRect(const DisplaySettings& settings, int32_t monitorX, int32_t monitorY, const DisplayVideoMode& desktop,
 		const std::optional<std::pair<int32_t, int32_t>>& windowedPosition)
 	{

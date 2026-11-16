@@ -50,8 +50,9 @@
 //   and QuadDraw::NormalMap), so they have binding layouts of their own.
 // Fog (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 5): the Hdr and HdrLit targets meet the view's fog (Renderer/Fog.h,
 // Common/Fog.slang) at each fragment's batch-space position, which is then world space, when the record passes the view's
-// fog constants (QuadBatchInputs::Fog) and they are enabled: they blend the colour toward the fog's; alpha is unchanged. A record without them draws exactly as before M32 (the batcher binds a
-// neutral buffer of its own); the Ldr, LdrDepth and Normals targets never fog.
+// fog constants (QuadBatchInputs::Fog) and they are enabled: they blend the colour toward the fog's; alpha is unchanged. A
+// record without them draws exactly as before M32 (the batcher binds a neutral buffer of its own); the Ldr, LdrDepth and
+// Normals targets never fog.
 // Colour textures are sampled through their sRGB views, so the shader sees linear values; an 8-bit sRGB texel drawn with a
 // white colour reaches an Ldr target, or an Hdr one through the 2D colour path (RenderOutputSettings::PixelArt), unchanged.
 //
@@ -213,12 +214,12 @@ namespace Engine {
 		QuadBatcher(const QuadBatcher&) = delete;
 		QuadBatcher& operator=(const QuadBatcher&) = delete;
 
-		// Creates the six pipelines (checked against their reflection), the two samplers, the white texture, the index buffer
+		// Creates the five pipelines (checked against their reflection), the two samplers, the white texture, the index buffer
 		// and the neutral fog constants. `device` is a documented back-reference that outlives the batcher. Errors: those of
 		// PipelineFactory and the GraphicsDevice wrappers (Gpu: an out-of-memory creation, §8.14 item 7).
 		[[nodiscard]] static Result<Scope<QuadBatcher>> Create(GraphicsDevice& device, PipelineFactory& pipelines);
 
-		// The layout descriptions of the six pipelines, in QuadBatchTarget's order, for "Shaders: LayoutsMatchReflection".
+		// The layout descriptions of the five pipelines, in QuadBatchTarget's order, for "Shaders: LayoutsMatchReflection".
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		// The framebuffer a batch of `target` records into (see the file comment).
 		[[nodiscard]] static nvrhi::FramebufferInfo GetFramebufferInfo(QuadBatchTarget target);
