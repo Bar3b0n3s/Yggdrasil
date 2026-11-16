@@ -67,6 +67,7 @@
 #include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
+#include "Engine/Session/PlayInput.h"
 
 #include <nlohmann/json.hpp>
 
@@ -103,6 +104,8 @@ namespace Engine {
 		constexpr std::string_view UiImageFrameOutOfRangeCode = "UI_IMAGE_FRAME_OUT_OF_RANGE";
 		// M22 (Docs/Decisions/0033-m22-contract.md decision 35): CheckUi's widget parts.
 		constexpr std::string_view UiWidgetPartInvalidCode = "UI_WIDGET_PART_INVALID";
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 7): CheckInputActions.
+		constexpr std::string_view InputInvalidActionCode = "INPUT_INVALID_ACTION";
 
 		constexpr std::array ValidatorCodes = {
 			SceneNoPrimaryCameraCode,
@@ -190,6 +193,9 @@ namespace Engine {
 			// M24's (ADR 0028's phase-3 ledger).
 			TerrainNoHeightfieldCode,
 			TerrainSplatNotRawCode,
+			// M34 (Docs/Decisions/0049-m34-characters-input.md decision 7), appended in landing order after main's (ADR 0042's
+			// phase 5 ledger: before M30's two).
+			InputInvalidActionCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -416,6 +422,13 @@ namespace Engine {
 				"A Terrain's SplatMap is not imported as a data texture (Usage Linear and Compression None): its weights are decoded as sRGB "
 				"colour or blurred by block compression, and terrain.edit cannot paint it.",
 				"Set the splat map's Usage to Linear and its Compression to None with asset.setImportSettings." },
+			ValidationCodeInfo{ InputInvalidActionCode, "Error", false,
+				"An input action of Input.Actions that play.start refuses: an unknown binding name, a stick axis among a button list "
+				"(Bindings, Positive, Negative), a Gamepad that is not a gamepad axis, or a field its type does not have. The project "
+				"does not play until it is fixed.",
+				"Correct the binding at the reported field with project.setSettings, which refuses a patch of Input that leaves an "
+				"action invalid; a trigger (Gamepad.LeftTrigger, Gamepad.RightTrigger) is a button binding, a stick belongs in an "
+				"Axis action's Gamepad." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1634,6 +1647,56 @@ namespace Engine {
 			}
 		}
 
+		// The field of a diagnostic about the problem at `pointer`, an issue pointer of ValidateInputActions
+		// ("/Input/Actions/<Name>/<Field>[/<i>]"): "Input.Actions.<Name>.<Field>[<i>]", the settings' own field form.
+		static std::string MakeInputActionField(std::string_view pointer)
+		{
+			std::vector<std::string> segments;
+			size_t start = 1;
+			while (start <= pointer.size())
+			{
+				const size_t slash = pointer.find('/', start);
+				const size_t end = slash == std::string_view::npos ? pointer.size() : slash;
+				std::string segment(pointer.substr(start, end - start));
+				for (size_t found = segment.find("~1"); found != std::string::npos; found = segment.find("~1", found + 1))
+					segment.replace(found, 2, "/");
+				for (size_t found = segment.find("~0"); found != std::string::npos; found = segment.find("~0", found + 1))
+					segment.replace(found, 2, "~");
+				segments.push_back(std::move(segment));
+				start = end + 1;
+			}
+			std::string field;
+			for (size_t index = 0; index < segments.size(); ++index)
+			{
+				const bool isIndex = index == 4 && !segments[index].empty() && std::ranges::all_of(segments[index], [](char character)
+				{
+					return character >= '0' && character <= '9';
+				});
+				field += isIndex ? std::format("[{}]", segments[index]) : std::format("{}{}", index == 0 ? "" : ".", segments[index]);
+			}
+			return field;
+		}
+
+		// INPUT_INVALID_ACTION (M34, Docs/Decisions/0049-m34-characters-input.md decision 7): one Error per problem that
+		// play.start's check of Input.Actions finds (Session/PlayInput.h ValidateInputActions), in its order, on the project
+		// file at the problem's field.
+		static void CheckInputActions(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			const Status valid = ValidateInputActions(editor.GetProject().GetSettings().Input);
+			if (valid)
+				return;
+			DiagnosticSite site;
+			site.File = GetProjectFileName(editor);
+			for (const ErrorIssue& issue : valid.error().GetIssues())
+			{
+				site.Field = MakeInputActionField(issue.JsonPointer);
+				site.Subject = issue.JsonPointer;
+				std::string hint = issue.Hint.empty() ? std::string("correct the action with project.setSettings") : issue.Hint;
+				diagnostics.push_back(MakeDiagnostic(InputInvalidActionCode, DiagnosticSeverity::Error,
+					std::format("{}: {}", site.Field, issue.Message), site, std::move(hint), false));
+			}
+		}
+
 		static void CheckSettings(const EditorContext& editor, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const ProjectSettings& settings = editor.GetProject().GetSettings();
@@ -1662,6 +1725,7 @@ namespace Engine {
 					"fix it to remove the entry, or create the scene with scene.new", true));
 			}
 			CheckTestSuiteSettings(editor, diagnostics);
+			CheckInputActions(editor, diagnostics);
 		}
 
 		// Every .scene file under project://Assets, sorted. Errors: the VFS errors other than a missing Assets/ directory.

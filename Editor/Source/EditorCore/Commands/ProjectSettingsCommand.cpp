@@ -12,6 +12,7 @@
 #include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Session/PlayInput.h"
 
 #include <nlohmann/json.hpp>
 
@@ -89,6 +90,12 @@ namespace Engine {
 		std::vector<ValidationIssue> warnings;
 		const ReadContext read{ .Schemas = nullptr, .Strict = context.GetSpecification().StrictUnknowns, .Diagnostics = &warnings };
 		ENGINE_TRY(info->ApplyMergePatch(&patched, JsonReader(exposed, reader.GetPointer()), read));
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): a patch that writes the input settings leaves
+		// every action as play.start accepts it, so a bad binding is refused here, each problem located, not at the next
+		// play; a patch of other sections never fails on actions the project already holds (project.validate reports
+		// those, INPUT_INVALID_ACTION).
+		if (patch.contains("Input"))
+			ENGINE_TRY(ValidateInputActions(patched.Input));
 		ENGINE_TRY_ASSIGN(Json after, ProjectSerializer::ToJson(patched, registry));
 		// The document the command will apply must load as a project file (header and every rule of ProjectSerializer).
 		ProjectLoadReport report;

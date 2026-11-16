@@ -49,8 +49,8 @@ namespace Engine {
 	{
 		std::string Name{};
 		InputActionType Type = InputActionType::Button;
-		std::vector<std::string> Bindings{}; // Button: keys, mouse buttons or gamepad buttons
-		std::vector<std::string> Positive{}; // Axis: keys, mouse buttons or gamepad buttons that give +1
+		std::vector<std::string> Bindings{}; // Button: keys, mouse buttons, gamepad buttons or triggers (M34)
+		std::vector<std::string> Positive{}; // Axis: keys, mouse buttons, gamepad buttons or triggers that give +1
 		std::vector<std::string> Negative{}; // Axis: ... that give -1
 		std::string Gamepad{};               // Axis: an optional gamepad axis ("Gamepad.LeftY"); empty for none
 		bool Invert = false;                 // Axis: flips the gamepad axis (not the Positive/Negative bindings)
@@ -63,14 +63,16 @@ namespace Engine {
 	// Every query works for both action types:
 	//   - Button action: IsDown while any binding is down. WasPressed / WasReleased when any binding reported that edge in
 	//     the view (the union of the bindings' edges, so pressing a second binding while the first is held reports a
-	//     second press). GetAxis is 1 while down, else 0.
+	//     second press). GetAxis is 1 while down, else 0. M34 (Docs/Decisions/0049-m34-characters-input.md decision 5): a
+	//     trigger ("Gamepad.LeftTrigger", "Gamepad.RightTrigger") is a button binding, down by InputState's hysteresis
+	//     (pressed at GamepadTriggerPressThreshold, released below GamepadTriggerReleaseThreshold); a stick axis is not.
 	//   - Axis action: GetAxis combines two values and returns the one with the larger magnitude (the key value on a tie):
 	//       keys:    (any Positive binding down ? 1 : 0) - (any Negative binding down ? 1 : 0);
 	//       gamepad: the bound axis of every connected gamepad, negated when Invert is set, through ApplyDeadZone; of these
 	//                the value with the largest magnitude (the lowest gamepad index on a tie), 0 with no gamepad.
 	//     IsDown, WasPressed and WasReleased treat its Positive and Negative bindings as the bindings of a Button action
 	//     (the gamepad axis is ignored).
-	// Gamepad button bindings likewise read every connected gamepad.
+	// Gamepad button and trigger bindings likewise read every connected gamepad.
 	class InputActionMap
 	{
 	public:
@@ -82,9 +84,9 @@ namespace Engine {
 
 		// Validates `definitions` and builds the map. Actions are indexed in byte-wise name order, whatever the order of
 		// `definitions`. Errors: Validation carrying one ErrorIssue per problem, with the pointer "/<Name>/<Field>[/<i>]":
-		// an empty or duplicated name; an unknown binding name; a gamepad axis among Bindings, Positive or Negative; a
-		// Gamepad that is not a gamepad axis; Bindings on an Axis action; Positive, Negative, Gamepad or Invert on a
-		// Button action.
+		// an empty or duplicated name; an unknown binding name; a stick axis among Bindings, Positive or Negative (a trigger
+		// is a button there, M34); a Gamepad that is not a gamepad axis; Bindings on an Axis action; Positive, Negative,
+		// Gamepad or Invert on a Button action.
 		[[nodiscard]] static Result<InputActionMap> Create(std::span<const InputActionDefinition> definitions);
 
 		// The index of the action named `name` (exact, case-sensitive); nullopt when there is none. Scripts report an

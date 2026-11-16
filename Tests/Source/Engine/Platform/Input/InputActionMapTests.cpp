@@ -172,7 +172,7 @@ namespace Engine {
 			const std::vector<InputActionDefinition> definitions = {
 				{ .Name = "Jump", .Type = InputActionType::Button, .Bindings = { "Key.Spacebar" } },
 				{ .Name = "Jump", .Type = InputActionType::Button, .Bindings = { "Key.Space" } },
-				{ .Name = "Fire", .Type = InputActionType::Button, .Bindings = { "Gamepad.LeftX" } },
+				{ .Name = "Fire", .Type = InputActionType::Button, .Bindings = { "Gamepad.LeftX", "Gamepad.RightTrigger" } },
 				{ .Name = "Move", .Type = InputActionType::Axis, .Gamepad = "Gamepad.South" },
 				{ .Name = "Look", .Type = InputActionType::Axis, .Bindings = { "Key.L" } },
 				{ .Name = "Use", .Type = InputActionType::Button, .Bindings = { "Key.E" }, .Invert = true },
@@ -191,6 +191,8 @@ namespace Engine {
 			};
 			CHECK(contains("/Jump/Bindings/0"));
 			CHECK(contains("/Fire/Bindings/0"));
+			// M34: a trigger is a button binding; only the stick axis is refused.
+			CHECK_FALSE(contains("/Fire/Bindings/1"));
 			CHECK(contains("/Move/Gamepad"));
 			CHECK(contains("/Look/Bindings"));
 			CHECK(contains("/Use/Invert"));
@@ -277,6 +279,57 @@ namespace Engine {
 			CHECK(actions->GetAxis(input, InputPhase::Frame, *moveX) == 1.0f);
 			CHECK_FALSE(actions->IsDown(input, InputPhase::Frame, *moveX));
 			CHECK_FALSE(actions->WasPressed(input, InputPhase::Frame, *moveX));
+		}
+
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 5; World Tree's brief 10): attack and cast on the triggers.
+		TEST_CASE("InputActionMap: a Button action bound to a trigger fires past 0.5 and releases only below 0.4")
+		{
+			const std::vector<InputActionDefinition> definitions = {
+				{ .Name = "Attack", .Type = InputActionType::Button, .Bindings = { "Gamepad.RightTrigger", "Key.J" } },
+				{ .Name = "Turn", .Type = InputActionType::Axis, .Positive = { "Gamepad.RightTrigger" }, .Negative = { "Gamepad.LeftTrigger" } },
+			};
+			const Result<InputActionMap> actions = InputActionMap::Create(definitions);
+			REQUIRE_MESSAGE(actions.has_value(), actions.error().ToString());
+			const uint32_t attack = actions->FindAction("Attack").value_or(99);
+			const uint32_t turn = actions->FindAction("Turn").value_or(99);
+			InputState input;
+			// The second gamepad: every connected gamepad counts, as for buttons.
+			const auto pull = [&input](float value)
+			{
+				MoveStick(input, 1, GamepadAxis::RightTrigger, value);
+				input.LatchStep();
+			};
+
+			pull(0.3f);
+			CHECK_FALSE(actions->IsDown(input, InputPhase::Step, attack));
+			pull(0.6f);
+			CHECK(actions->IsDown(input, InputPhase::Step, attack));
+			CHECK(actions->WasPressed(input, InputPhase::Step, attack));
+			CHECK(actions->GetAxis(input, InputPhase::Step, attack) == 1.0f);
+			CHECK(actions->GetAxis(input, InputPhase::Step, turn) == 1.0f);
+			pull(0.45f);
+			CHECK(actions->IsDown(input, InputPhase::Step, attack));
+			CHECK_FALSE(actions->WasPressed(input, InputPhase::Step, attack));
+			CHECK_FALSE(actions->WasReleased(input, InputPhase::Step, attack));
+			pull(0.35f);
+			CHECK_FALSE(actions->IsDown(input, InputPhase::Step, attack));
+			CHECK(actions->WasReleased(input, InputPhase::Step, attack));
+			CHECK(actions->GetAxis(input, InputPhase::Step, turn) == 0.0f);
+		}
+
+		TEST_CASE("InputActionMap: a stick axis in a button list is refused, naming it")
+		{
+			const std::vector<InputActionDefinition> definitions = {
+				{ .Name = "Attack", .Type = InputActionType::Button, .Bindings = { "Gamepad.RightTrigger", "Gamepad.RightY" } },
+				{ .Name = "Turn", .Type = InputActionType::Axis, .Positive = { "Gamepad.LeftX" } },
+			};
+			const Result<InputActionMap> actions = InputActionMap::Create(definitions);
+			REQUIRE_FALSE(actions.has_value());
+			const std::vector<ErrorIssue>& issues = actions.error().GetIssues();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].JsonPointer == "/Attack/Bindings/1");
+			CHECK(issues[0].Message.find("Gamepad.RightY") != std::string::npos);
+			CHECK(issues[1].JsonPointer == "/Turn/Positive/0");
 		}
 
 		TEST_CASE("InputActionMap: an action index out of range asserts")

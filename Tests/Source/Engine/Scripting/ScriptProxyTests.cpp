@@ -243,6 +243,8 @@ return true
 				{ "Transform.TransformDirection", "assert(child.Transform:TransformDirection(vector.create(0, 0, 1)) == vector.create(0, 0, 1))" },
 				{ "Camera.ScreenToWorldRay", "local origin = d.Camera:ScreenToWorldRay(49.5, 49.5); assert(origin == vector.create(1, 2, 0))" },
 				{ "Camera.WorldToScreen", "assert(d.Camera:WorldToScreen(vector.create(1, 2, -5)).z > 0)" },
+				// M34 (Docs/Decisions/0049-m34-characters-input.md decision 8): from a given pose, a read of the pending camera.
+				{ "Camera.ScreenToWorldRayFrom", "local origin = d.Camera:ScreenToWorldRayFrom(49.5, 49.5, vector.create(4, 5, 6), Quat.Identity()); assert(origin == vector.create(4, 5, 6))" },
 				{ "MeshRenderer.GetMaterial", "assert(d.MeshRenderer:GetMaterial(1) ~= nil)" },
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the pose of the last AnimationSystem phase (none here).
 				{ "Animator.GetJointTransform", "assert(holders.Animator.Animator:GetJointTransform(\"Hips\") == nil)" },

@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["INPUT_INVALID_ACTION"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

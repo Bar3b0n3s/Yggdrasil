@@ -69,11 +69,6 @@ namespace Engine {
 			return std::isfinite(value.x) && std::isfinite(value.y);
 		}
 
-		static bool IsTrigger(GamepadAxis axis)
-		{
-			return axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger;
-		}
-
 		// True for a button use, whose State is read: an action without a value, a key, a mouse button or a gamepad button.
 		static bool ReadsState(const PlayInputEvent& event)
 		{
@@ -127,6 +122,23 @@ namespace Engine {
 				definitions.push_back(std::move(definition));
 			}
 			return definitions;
+		}
+
+		// The project's actions as a map, or InputActionMap::Create's error with its pointers below the project's
+		// Input.Actions (the map's are "/<Name>/<Field>"), located there.
+		static Result<InputActionMap> MakeActionMap(const InputSettings& settings)
+		{
+			const std::vector<InputActionDefinition> definitions = MakeActionDefinitions(settings);
+			Result<InputActionMap> actions = InputActionMap::Create(definitions);
+			if (actions)
+				return actions;
+			std::vector<ErrorIssue> issues = actions.error().GetIssues();
+			for (ErrorIssue& issue : issues)
+				issue.JsonPointer = "/Input/Actions" + issue.JsonPointer;
+			Error error(actions.error().GetCode(), actions.error().GetMessageText());
+			ErrorLocation location;
+			location.JsonPointer = "/Input/Actions";
+			return std::unexpected(std::move(error).WithHint(actions.error().GetHint()).WithLocation(std::move(location)).WithIssues(std::move(issues)));
 		}
 
 		// The code points of `text`, which must be valid UTF-8 (asserted; ValidatePlayInputEvent checks events first).
@@ -488,19 +500,37 @@ namespace Engine {
 						.Handled = false });
 				}
 			}
+			const auto injectAxis = [this, gamepad](GamepadAxis axis, float value)
+			{
+				Input.Inject(GamepadEvent{ .Gamepad = gamepad,
+					.Kind = GamepadEventKind::Axis,
+					.Button = GamepadButton::South,
+					.Pressed = false,
+					.Axis = axis,
+					.Value = value,
+					.Handled = false });
+			};
 			for (size_t code = 0; code < GamepadAxisCount; ++code)
 			{
 				const auto axis = static_cast<GamepadAxis>(code);
 				const float value = target.GetGamepadAxis(InputPhase::Step, gamepad, axis);
-				if ((wasConnected ? Input.GetGamepadAxis(InputPhase::Step, gamepad, axis) : 0.0f) != value)
+				// M34: a trigger's button level depends on the history of its values (InputState's hysteresis), so one whose
+				// level differs goes through the far end of its range first: a value that ends down is at least the release
+				// threshold and one that ends up is below the press threshold, so the target's value then keeps the level.
+				// (The step view read here is the one latched above, before any of these events.)
+				const bool down = target.IsGamepadTriggerDown(InputPhase::Step, gamepad, axis);
+				const bool wasDown = wasConnected && Input.IsGamepadTriggerDown(InputPhase::Step, gamepad, axis);
+				const float current = wasConnected ? Input.GetGamepadAxis(InputPhase::Step, gamepad, axis) : 0.0f;
+				if (wasDown != down)
 				{
-					Input.Inject(GamepadEvent{ .Gamepad = gamepad,
-						.Kind = GamepadEventKind::Axis,
-						.Button = GamepadButton::South,
-						.Pressed = false,
-						.Axis = axis,
-						.Value = value,
-						.Handled = false });
+					const float farEnd = down ? 1.0f : 0.0f;
+					injectAxis(axis, farEnd);
+					if (farEnd != value)
+						injectAxis(axis, value);
+				}
+				else if (current != value)
+				{
+					injectAxis(axis, value);
 				}
 			}
 		}
@@ -593,6 +623,12 @@ namespace Engine {
 		}
 	}
 
+	Status ValidateInputActions(const InputSettings& settings)
+	{
+		ENGINE_TRY(Utils::MakeActionMap(settings));
+		return {};
+	}
+
 	Status ValidatePlayInputEvent(const PlayInputEvent& event, const InputActionMap& actions)
 	{
 		switch (event.Type)
@@ -654,12 +690,12 @@ namespace Engine {
 					return Utils::MakeMemberError("gamepad", std::format("gamepad {} does not exist: gamepads are 0 to {}", event.Gamepad, MaxGamepads - 1));
 				if (GamepadAxisToString(event.Axis).empty())
 					return Utils::MakeMemberError("axis", std::format("{} is not a gamepad axis", std::to_underlying(event.Axis)));
-				const float minimum = Utils::IsTrigger(event.Axis) ? 0.0f : -1.0f;
+				const float minimum = IsGamepadTrigger(event.Axis) ? 0.0f : -1.0f;
 				if (!std::isfinite(event.Value) || event.Value < minimum || event.Value > 1.0f)
 				{
 					return Utils::MakeMemberError("value",
 						std::format("the value of gamepad axis {} must be in [{}, 1] (got {})", GamepadAxisToString(event.Axis), minimum, event.Value),
-						Utils::IsTrigger(event.Axis) ? "triggers go from 0 (released) to 1 (fully pressed)" : "sticks go from -1 to 1, up and right positive");
+						IsGamepadTrigger(event.Axis) ? "triggers go from 0 (released) to 1 (fully pressed)" : "sticks go from -1 to 1, up and right positive");
 				}
 				return {};
 			}
@@ -684,19 +720,9 @@ namespace Engine {
 
 	Result<PlayInput> PlayInput::Create(const InputSettings& settings)
 	{
-		const std::vector<InputActionDefinition> definitions = Utils::MakeActionDefinitions(settings);
-		Result<InputActionMap> actions = InputActionMap::Create(definitions);
+		Result<InputActionMap> actions = Utils::MakeActionMap(settings);
 		if (!actions)
-		{
-			// The map's pointers are "/<Name>/<Field>": they sit below the project's Input.Actions.
-			std::vector<ErrorIssue> issues = actions.error().GetIssues();
-			for (ErrorIssue& issue : issues)
-				issue.JsonPointer = "/Input/Actions" + issue.JsonPointer;
-			Error error(actions.error().GetCode(), actions.error().GetMessageText());
-			ErrorLocation location;
-			location.JsonPointer = "/Input/Actions";
-			return std::unexpected(std::move(error).WithHint(actions.error().GetHint()).WithLocation(std::move(location)).WithIssues(std::move(issues)));
-		}
+			return std::unexpected(std::move(actions).error());
 
 		PlayInput input;
 		input.m_State->Actions = std::move(*actions);

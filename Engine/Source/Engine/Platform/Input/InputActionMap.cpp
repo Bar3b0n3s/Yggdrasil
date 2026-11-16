@@ -64,6 +64,31 @@ namespace Engine {
 			return false;
 		}
 
+		static bool QueryGamepadTriggerOf(const InputState& input, InputPhase phase, uint32_t gamepad, GamepadAxis trigger,
+			ButtonQuery query)
+		{
+			switch (query)
+			{
+				case ButtonQuery::Down:     return input.IsGamepadTriggerDown(phase, gamepad, trigger);
+				case ButtonQuery::Pressed:  return input.WasGamepadTriggerPressed(phase, gamepad, trigger);
+				case ButtonQuery::Released: return input.WasGamepadTriggerReleased(phase, gamepad, trigger);
+			}
+
+			ENGINE_CORE_ASSERT(false, "Unknown ButtonQuery {}", std::to_underlying(query));
+			return false;
+		}
+
+		// A trigger as a button (M34), over every gamepad as QueryGamepadButton reads buttons.
+		static bool QueryGamepadTrigger(const InputState& input, InputPhase phase, GamepadAxis trigger, ButtonQuery query)
+		{
+			for (uint32_t gamepad = 0; gamepad < MaxGamepads; ++gamepad)
+			{
+				if (QueryGamepadTriggerOf(input, phase, gamepad, trigger, query))
+					return true;
+			}
+			return false;
+		}
+
 		static bool QueryGamepadButton(const InputState& input, InputPhase phase, GamepadButton button, ButtonQuery query)
 		{
 			// Every gamepad counts (v1 has one player). A gamepad that is not connected has no button down, and the
@@ -110,7 +135,9 @@ namespace Engine {
 				return QueryMouseButton(input, phase, *mouseButton, query);
 			if (const GamepadButton* gamepadButton = std::get_if<GamepadButton>(&control))
 				return QueryGamepadButton(input, phase, *gamepadButton, query);
-			// Create keeps gamepad axes out of the button lists.
+			// Create keeps the stick axes out of the button lists, so a gamepad axis there is a trigger (M34).
+			if (const GamepadAxis* trigger = std::get_if<GamepadAxis>(&control))
+				return QueryGamepadTrigger(input, phase, *trigger, query);
 			return false;
 		}
 
@@ -154,7 +181,7 @@ namespace Engine {
 		}
 
 		// Parses the button bindings `names`, the field `field` of `action`, into `controls`, with an issue for every
-		// unknown name and every gamepad axis.
+		// unknown name and every stick axis (a trigger is a button, M34).
 		static void ResolveButtonBindings(std::string_view action, std::string_view field, std::span<const std::string> names,
 			std::vector<InputBinding::Control>& controls, std::vector<ErrorIssue>& issues)
 		{
@@ -167,11 +194,12 @@ namespace Engine {
 					issues.push_back(MakeIssue(JsonReader::AppendPointer(fieldPointer, index), binding.error().GetMessageText(),
 						binding.error().GetHint()));
 				}
-				else if (std::holds_alternative<GamepadAxis>(binding->Target))
+				else if (const GamepadAxis* axis = std::get_if<GamepadAxis>(&binding->Target); axis != nullptr && !IsGamepadTrigger(*axis))
 				{
 					issues.push_back(MakeIssue(JsonReader::AppendPointer(fieldPointer, index),
-						std::format("'{}' is a gamepad axis, not a button", names[index]),
-						"bind keys, mouse buttons and gamepad buttons here; a gamepad axis belongs in an Axis action's Gamepad"));
+						std::format("'{}' is a stick axis, not a button", names[index]),
+						"bind keys, mouse buttons, gamepad buttons and triggers (Gamepad.LeftTrigger, Gamepad.RightTrigger) here; a "
+						"stick axis belongs in an Axis action's Gamepad"));
 				}
 				else
 				{

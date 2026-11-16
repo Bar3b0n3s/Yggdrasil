@@ -245,4 +245,11 @@ namespace Engine {
 	// ASCII case-insensitive inverse of GamepadAxisToString; nullopt for an unknown name.
 	[[nodiscard]] std::optional<GamepadAxis> GamepadAxisFromString(std::string_view name);
 
+	// Whether `axis` is a trigger (LeftTrigger or RightTrigger): engine range 0 to 1, and since M34 also a button
+	// (InputState.h, Docs/Decisions/0049-m34-characters-input.md decision 5); the other axes are sticks.
+	[[nodiscard]] constexpr bool IsGamepadTrigger(GamepadAxis axis)
+	{
+		return axis == GamepadAxis::LeftTrigger || axis == GamepadAxis::RightTrigger;
+	}
+
 }

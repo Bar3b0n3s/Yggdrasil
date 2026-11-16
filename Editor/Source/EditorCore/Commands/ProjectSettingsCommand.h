@@ -35,7 +35,9 @@ namespace Engine {
 		// (EditorContextSpecification::StrictUnknowns), is refused as an error, as the strict reader refuses it in the .eproj.
 		// Errors: InvalidState without an open project; Validation (located, with issues relative to the settings root, such
 		// as "/Simulation/FixedHz" or "/Window/Titel") for a patch that is not an object, yields invalid settings or, in a
-		// --strict editor, has a member the settings do not have.
+		// --strict editor, has a member the settings do not have; M34 (Docs/Decisions/0049-m34-characters-input.md
+		// decision 6): Validation from ValidateInputActions (Session/PlayInput.h), one issue per problem below
+		// "/Input/Actions", for a patch with an "Input" member whose result holds an input action play.start would refuse.
 		[[nodiscard]] static Result<Scope<ProjectSettingsCommand>> CreateFromPatch(const EditorContext& context, const Json& patch,
 			std::string label);
 

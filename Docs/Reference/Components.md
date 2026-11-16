@@ -256,6 +256,7 @@ Script members of `Camera`:
 | `Primary` | proxy field | `boolean` | read/write | All | Whether this is the scene's primary camera (exactly one active camera should be). |
 | `Projection` | proxy field | `ProjectionType` | read/write | All | Perspective or orthographic projection. |
 | `ScreenToWorldRay` | method | `(self: Camera, x: number, y: number) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
+| `ScreenToWorldRayFrom` | method | `(self: Camera, x: number, y: number, position: vector, rotation: Quat) -> (vector, vector)` |  | All | Ray through a viewport pixel center, origin top-left, from the camera pose given (a finite position and a rotation, normalized) instead of the rendered one, so gameplay can aim in the fixed step from a pose it keeps there; the camera's projection and the session's view size as ScreenToWorldRay's, under a PixelPerfectCamera through the given position's snapped reference view. |
 | `VerticalFov` | proxy field | `number` | read/write | All | The vertical field of view of the perspective projection, in degrees. |
 | `WorldToScreen` | method | `(self: Camera, point: vector) -> vector` |  | All | Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. |
 

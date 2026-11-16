@@ -2010,6 +2010,14 @@ Ray through a viewport pixel center, origin top-left, using the rendered camera 
 
 All modes; Runtime|Test; pure/read.
 
+### Camera.ScreenToWorldRayFrom
+
+`(self: Camera, x: number, y: number, position: vector, rotation: Quat) -> (vector, vector)`
+
+Ray through a viewport pixel center, origin top-left, from the camera pose given (a finite position and a rotation, normalized) instead of the rendered one, so gameplay can aim in the fixed step from a pose it keeps there; the camera's projection and the session's view size as ScreenToWorldRay's, under a PixelPerfectCamera through the given position's snapped reference view.
+
+All modes; Runtime|Test; pure/read.
+
 ### Camera.VerticalFov
 
 `number`

@@ -455,6 +455,8 @@ declare extern type Camera with
 	Projection: ProjectionType
 	-- Ray through a viewport pixel center, origin top-left, using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
 	ScreenToWorldRay: (self: Camera, x: number, y: number) -> (vector, vector)
+	-- Ray through a viewport pixel center, origin top-left, from the camera pose given (a finite position and a rotation, normalized) instead of the rendered one, so gameplay can aim in the fixed step from a pose it keeps there; the camera's projection and the session's view size as ScreenToWorldRay's, under a PixelPerfectCamera through the given position's snapped reference view. [All modes; Runtime|Test; pure/read]
+	ScreenToWorldRayFrom: (self: Camera, x: number, y: number, position: vector, rotation: Quat) -> (vector, vector)
 	-- The vertical field of view of the perspective projection, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
 	VerticalFov: number
 	-- Project to top-left pixel coordinates and reverse-Z depth using the rendered camera pose; under a PixelPerfectCamera through its snapped reference view and the output mapping. [All modes; Runtime|Test; pure/read]
