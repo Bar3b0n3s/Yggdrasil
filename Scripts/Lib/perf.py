@@ -41,9 +41,9 @@ PERF_FORMAT = "PerfCapture"
 PERF_VERSION = 1
 PERF_REPORT_NAME = "Perf.json"
 # Tracked budgets, in the metric's unit (§5.6: "1,000 entities copy in under 30 ms (Release)"; ADR 0012 handed it to
-# this capture; M32's fog "under 0.5 ms at 1920 x 1080", Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5; M30's navigation
-# case, about half of FeatureTest's 15.6 ms fixed step at 64 Hz, World Tree's brief 1's "fit comfortably in a 60 Hz fixed
-# step", Docs/Decisions/0045-m30-navigation.md decision 13). Exceeding one is a warning.
+# this capture; M32's fog "under 0.5 ms at 1920 x 1080", Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5; M30's
+# navigation case, about half of FeatureTest's 15.6 ms fixed step at 64 Hz, World Tree's brief 1's "fit comfortably in a
+# 60 Hz fixed step", Docs/Decisions/0045-m30-navigation.md decision 13). Exceeding one is a warning.
 BUDGETS = {"playCopy/1000Entities": 30.0, "fog/Fog/gpuCostMs": 0.5, "navigation/150Agents/tickMs": 8.0}
 
 _CAPTURE_MEMBERS = {"format": str, "version": int, "commit": str, "config": str, "host": dict, "metrics": list,

@@ -61,6 +61,8 @@ Every component of the type registry, in canonical component order: the order of
 | `TerrainCollider` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn. |
 | `MaterialParameters` | MaterialParameters | Serializable, ScriptVisible, EditorVisible, Removable | Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes. |
 | `Fog` | Fog | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene). |
+| `Navigation` | Navigation | Serializable, EditorVisible, Removable, UniquePerScene | The scene's navigation mesh (one per scene): its agent types and bake settings, and the mesh navigation.bake builds from the scene's static colliders for the Navigation script namespace's queries. |
+| `NavModifier` | Navigation | Serializable, EditorVisible, Removable | A box around the entity that marks the navigation mesh at the next bake: not walkable, or walkable at a cost that paths avoid. |
 
 ## ID
 
@@ -1805,6 +1807,41 @@ Script members of `Fog`:
 | `SunGlow` | proxy field | `number` | read/write | All | How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. |
 | `SunGlowExponent` | proxy field | `number` | read/write | All | How tightly the sun glow gathers around the light's direction: higher is tighter. |
 
+## Navigation
+
+The scene's navigation mesh (one per scene): its agent types and bake settings, and the mesh navigation.bake builds from the scene's static colliders for the Navigation script namespace's queries.
+
+- Category: Navigation
+- Version: 1
+- Flags: Serializable, EditorVisible, Removable, UniquePerScene
+- Requires: none
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `NavMesh` | `AssetRef(NavMesh)` | `null` |  |  |  | The baked navigation mesh, which navigation.bake writes and assigns; null finds no path. |
+| `AgentTypes` | `Array<NavAgentType>` | `[{"Name":"Default","Radius":0.4,"Height":1.8,"MaxSlope":45,"MaxStep":0.4}]` |  |  |  | One to four agent types, each baked into a mesh of its own. |
+| `Layers` | `Array<String>` | `[]` |  |  |  | The physics layers whose static colliders the bake reads, by name from project settings; empty reads every layer. |
+| `CellSize` | `Float` | `0.2` | 0.01 to 10 | m |  | The width of the bake's voxels, in metres: smaller follows walls more closely and bakes more slowly. |
+| `CellHeight` | `Float` | `0.1` | 0.01 to 10 | m |  | The height of the bake's voxels, in metres: the precision of steps and slopes. |
+| `MinRegionArea` | `Float` | `1` | 0 to 10000 | m2 |  | Walkable islands smaller than this many square metres are left out of the mesh (a table top, a narrow ledge). |
+
+## NavModifier
+
+A box around the entity that marks the navigation mesh at the next bake: not walkable, or walkable at a cost that paths avoid.
+
+- Category: Navigation
+- Version: 1
+- Flags: Serializable, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Kind` | `NavModifierKind` | `"NotWalkable"` |  |  |  | Whether the box is not walkable or walkable at Cost. |
+| `Cost` | `Float` | `4` | 1 to 10000 |  |  | How many times the distance a path inside the box costs (Kind Cost). |
+| `HalfExtents` | `Vec3` | `[0.5,0.5,0.5]` | 0.01 to 10000 | m |  | Half the box's size along the entity's axes, in metres; the entity's scale applies and its rotation's yaw turns it. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -1999,6 +2036,15 @@ How a moving body is checked for collisions between steps.
 |---|---|
 | `Discrete` | Collisions are checked at the end of each step (fast bodies can tunnel through thin ones). |
 | `LinearCast` | Continuous collision detection along the step's motion; prevents tunnelling. |
+
+### NavModifierKind
+
+What a NavModifier does to the navigation mesh inside its box.
+
+| Value | Description |
+|---|---|
+| `NotWalkable` | No agent walks there: the box cuts a hole in the navigation mesh. |
+| `Cost` | Walkable at Cost times the distance, so paths avoid it unless no cheaper way exists. |
 
 ### ParticleAlignment
 

@@ -19,12 +19,12 @@ then a --renderer none editor measures:
     8 calls of 30 ticks with render "None", after a warm-up. The metric is captured only when every one of the 150
     found a path that reaches the Warden;
   - replay/Determinism/tickMs: Assets/Tests/Replays/Determinism.replay replayed 3 times;
-and (M32, Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5 and 6) a --headless-game-view editor whose game view renders at
-1920 x 1080 measures, over LOOK_SAMPLES single rendered ticks each, the GPU time fog adds to the passes it reaches in
-Assets/Scenes/Fog.scene, whose Fog sets every field (distance and height fog, the ambient tint and the sun glow, the
-skybox unfogged; fog/Fog/gpuCostMs: each sample with the Fog less the median without it; budget 0.5 ms), and the
-SSR row of a generated isometric floor of 35 tiles with 0, 8 and 35 of them glossy, and with 8 at half resolution
-(ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also give the tiles the trace covered.
+and (M32, Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5 and 6; the "look" part) a --headless-game-view editor whose
+game view renders at 1920 x 1080 measures, over LOOK_SAMPLES single rendered ticks each, the GPU time fog adds to the
+passes it reaches in Assets/Scenes/Fog.scene, whose Fog sets every field (distance and height fog, the ambient tint and
+the sun glow, the skybox unfogged; fog/Fog/gpuCostMs: each sample with the Fog less the median without it; budget
+0.5 ms), and the SSR row of a generated isometric floor of 35 tiles with 0, 8 and 35 of them glossy, and with 8 at half
+resolution (ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also give the tiles the trace covered.
 --only selects some of the parts (playCopy, scenes, navigation, replay, look), a development aid for one measurement.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device

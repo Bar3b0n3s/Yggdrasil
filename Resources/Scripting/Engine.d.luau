@@ -116,6 +116,9 @@ export type MouseButton = "Left" | "Right" | "Middle" | "Button4" | "Button5" | 
 -- What a type of a game's native module is.
 export type NativeTypeRole = "Component" | "Resource"
 
+-- What a NavModifier does to the navigation mesh inside its box.
+export type NavModifierKind = "NotWalkable" | "Cost"
+
 -- How a particle's quad is laid in the world.
 export type ParticleAlignment = "Camera" | "Velocity" | "Flat"
 
@@ -281,8 +284,11 @@ export type DisplaySettingsRequest = {WindowMode: ("Windowed" | "Borderless" | "
 -- Editor metadata and numeric validation bounds for a field.
 export type FieldOptions = {Min: number?, Max: number?, Step: number?, Tooltip: string?}
 
+-- A walk along the navigation surface: Clear when nothing blocks it, Point where it ends on the surface, the blocking edge's horizontal Normal (pointing back along the walk; zero when Clear) and the Fraction of the way it got in XZ.
+export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
+
 -- The performance readout of Application.GetStats: frame-paced observations, never simulation state.
-export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number}
+export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number}
 
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
@@ -1700,7 +1706,7 @@ declare Application: {
 	GetDisplaySettings: () -> DisplaySettings,
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
 	GetPlatform: () -> string,
-	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most the per-view cap, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
+	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
 	GetStats: () -> PerformanceStats,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,

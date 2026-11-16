@@ -1,0 +1,479 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "ParticlesInFog",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 2,
+		"ParticleEmitter": 1,
+		"ParticleLook": 1,
+		"Fog": 1
+	},
+	"Entities": [
+		{
+			"ID": "3d568ea332639ad8",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": null,
+					"Intensity": 1,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.05, 0.055, 0.065]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Fxaa"
+				}
+			}
+		},
+		{
+			"ID": "86436c35df471ff3",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.6, 6],
+					"Rotation": [-0.043619387, 0, 0, 0.99904823],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.02, 0.025, 0.03]
+				}
+			}
+		},
+		{
+			"ID": "6c919123e3b6d66e",
+			"Name": "Haze",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Fog": {
+					"Color": [0.5, 0.56, 0.64],
+					"AmbientTint": 0,
+					"Density": 0.09,
+					"StartDistance": 1,
+					"MaxOpacity": 1,
+					"HeightDensity": 0,
+					"HeightFalloff": 0.5,
+					"BaseHeight": 0,
+					"SunGlow": 0,
+					"SunGlowExponent": 8,
+					"FogSkybox": true
+				}
+			}
+		},
+		{
+			"ID": "2110680cf0d17b9b",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4082179, 0.23456971, 0.10938165, 0.8754261],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 0.6,
+					"CastShadows": false,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "f5a5f6eb11fb1a29",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, -8],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [16, 1, 32]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "481c313b7ebe9e53",
+			"Name": "SmokeNear",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.4, 0, 2],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 30,
+					"Burst": 0,
+					"MaxParticles": 96,
+					"Seed": 51,
+					"Lifetime": [1.6, 2.2],
+					"Speed": [1.2, 1.8],
+					"Size": [0.6, 0.9],
+					"Shape": "Cone",
+					"ShapeRadius": 0.3,
+					"ConeAngle": 14,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0.1,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Alpha",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [0.95, 0.55, 0.2, 0.95]
+						},
+						{
+							"Time": 1,
+							"Color": [0.55, 0.25, 0.1, 0]
+						}
+					],
+					"SizeOverLife": []
+				}
+			}
+		},
+		{
+			"ID": "3148706d7cb95f23",
+			"Name": "SmokeMiddle",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.4, 0, -5],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 30,
+					"Burst": 0,
+					"MaxParticles": 96,
+					"Seed": 52,
+					"Lifetime": [1.6, 2.2],
+					"Speed": [1.2, 1.8],
+					"Size": [0.6, 0.9],
+					"Shape": "Cone",
+					"ShapeRadius": 0.3,
+					"ConeAngle": 14,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0.1,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Alpha",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [0.95, 0.55, 0.2, 0.95]
+						},
+						{
+							"Time": 1,
+							"Color": [0.55, 0.25, 0.1, 0]
+						}
+					],
+					"SizeOverLife": []
+				}
+			}
+		},
+		{
+			"ID": "fd55ba24a98cf080",
+			"Name": "SmokeFar",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.4, 0, -14],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 30,
+					"Burst": 0,
+					"MaxParticles": 96,
+					"Seed": 53,
+					"Lifetime": [1.6, 2.2],
+					"Speed": [1.2, 1.8],
+					"Size": [0.6, 0.9],
+					"Shape": "Cone",
+					"ShapeRadius": 0.3,
+					"ConeAngle": 14,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0.1,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Alpha",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [0.95, 0.55, 0.2, 0.95]
+						},
+						{
+							"Time": 1,
+							"Color": [0.55, 0.25, 0.1, 0]
+						}
+					],
+					"SizeOverLife": []
+				}
+			}
+		},
+		{
+			"ID": "70ee51bd9f482379",
+			"Name": "EmbersNear",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.4, 0.2, 2],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 40,
+					"Burst": 0,
+					"MaxParticles": 128,
+					"Seed": 54,
+					"Lifetime": [1.2, 1.6],
+					"Speed": [1.4, 2.2],
+					"Size": [0.18, 0.26],
+					"Shape": "Cone",
+					"ShapeRadius": 0.25,
+					"ConeAngle": 20,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [1, 0.8, 0.35, 1]
+						},
+						{
+							"Time": 1,
+							"Color": [1, 0.3, 0.05, 0.4]
+						}
+					],
+					"SizeOverLife": []
+				},
+				"ParticleLook": {
+					"SpriteSheet": null,
+					"FirstFrame": 0,
+					"FrameCount": 0,
+					"FrameMode": "OverLife",
+					"FrameCycles": 1,
+					"BlendFrames": false,
+					"StartRotation": [0, 0],
+					"Spin": [0, 0],
+					"Alignment": "Camera",
+					"VelocityStretch": 0.1,
+					"SoftDistance": 0,
+					"Intensity": 3
+				}
+			}
+		},
+		{
+			"ID": "67b95c75115dcaf5",
+			"Name": "EmbersMiddle",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.4, 0.2, -5],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 40,
+					"Burst": 0,
+					"MaxParticles": 128,
+					"Seed": 55,
+					"Lifetime": [1.2, 1.6],
+					"Speed": [1.4, 2.2],
+					"Size": [0.18, 0.26],
+					"Shape": "Cone",
+					"ShapeRadius": 0.25,
+					"ConeAngle": 20,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [1, 0.8, 0.35, 1]
+						},
+						{
+							"Time": 1,
+							"Color": [1, 0.3, 0.05, 0.4]
+						}
+					],
+					"SizeOverLife": []
+				},
+				"ParticleLook": {
+					"SpriteSheet": null,
+					"FirstFrame": 0,
+					"FrameCount": 0,
+					"FrameMode": "OverLife",
+					"FrameCycles": 1,
+					"BlendFrames": false,
+					"StartRotation": [0, 0],
+					"Spin": [0, 0],
+					"Alignment": "Camera",
+					"VelocityStretch": 0.1,
+					"SoftDistance": 0,
+					"Intensity": 3
+				}
+			}
+		},
+		{
+			"ID": "3d3a31259dac8ea7",
+			"Name": "EmbersFar",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.4, 0.2, -14],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1, 1, 1]
+				},
+				"ParticleEmitter": {
+					"Playing": true,
+					"Loop": true,
+					"Duration": 5,
+					"Rate": 40,
+					"Burst": 0,
+					"MaxParticles": 128,
+					"Seed": 56,
+					"Lifetime": [1.2, 1.6],
+					"Speed": [1.4, 2.2],
+					"Size": [0.18, 0.26],
+					"Shape": "Cone",
+					"ShapeRadius": 0.25,
+					"ConeAngle": 20,
+					"BoxHalfExtents": [0.5, 0.5, 0.5],
+					"Acceleration": [0, 0, 0],
+					"Drag": 0,
+					"SimulationSpace": "World",
+					"Texture": null,
+					"Blend": "Additive",
+					"ColorOverLife": [
+						{
+							"Time": 0,
+							"Color": [1, 0.8, 0.35, 1]
+						},
+						{
+							"Time": 1,
+							"Color": [1, 0.3, 0.05, 0.4]
+						}
+					],
+					"SizeOverLife": []
+				},
+				"ParticleLook": {
+					"SpriteSheet": null,
+					"FirstFrame": 0,
+					"FrameCount": 0,
+					"FrameMode": "OverLife",
+					"FrameCycles": 1,
+					"BlendFrames": false,
+					"StartRotation": [0, 0],
+					"Spin": [0, 0],
+					"Alignment": "Camera",
+					"VelocityStretch": 0.1,
+					"SoftDistance": 0,
+					"Intensity": 3
+				}
+			}
+		}
+	]
+}

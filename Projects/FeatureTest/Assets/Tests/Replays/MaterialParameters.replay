@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 3,
+	"Version": 4,
 	"Scene": {
 		"Handle": "c9cc5fe2dd9f915f",
 		"Path": "Assets/Scenes/MaterialParameters.scene"
@@ -8,8 +8,9 @@
 	"Parameters": {},
 	"Seed": 1414,
 	"FixedHz": 64,
-	"EngineVersion": "0.5.0",
+	"EngineVersion": "0.6.0",
 	"Config": "Editor",
+	"SaveData": {},
 	"Fingerprint": {
 		"Entities": [
 			{

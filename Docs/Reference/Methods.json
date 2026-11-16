@@ -3594,6 +3594,12 @@
 							},
 							"Fog": {
 								"$ref": "#/$defs/Fog"
+							},
+							"Navigation": {
+								"$ref": "#/$defs/Navigation"
+							},
+							"NavModifier": {
+								"$ref": "#/$defs/NavModifier"
 							}
 						},
 						"additionalProperties": false
@@ -6743,6 +6749,91 @@
 						},
 						"additionalProperties": false
 					},
+					"Navigation": {
+						"description": "The scene's navigation mesh (one per scene): its agent types and bake settings, and the mesh navigation.bake builds from the scene's static colliders for the Navigation script namespace's queries.",
+						"type": "object",
+						"properties": {
+							"NavMesh": {
+								"description": "The baked navigation mesh, which navigation.bake writes and assigns; null finds no path.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "NavMesh"
+							},
+							"AgentTypes": {
+								"description": "One to four agent types, each baked into a mesh of its own.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/NavAgentType"
+								}
+							},
+							"Layers": {
+								"description": "The physics layers whose static colliders the bake reads, by name from project settings; empty reads every layer.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"CellSize": {
+								"description": "The width of the bake's voxels, in metres: smaller follows walls more closely and bakes more slowly.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 10
+							},
+							"CellHeight": {
+								"description": "The height of the bake's voxels, in metres: the precision of steps and slopes.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 10
+							},
+							"MinRegionArea": {
+								"description": "Walkable islands smaller than this many square metres are left out of the mesh (a table top, a narrow ledge).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10000
+							}
+						},
+						"additionalProperties": false
+					},
+					"NavModifier": {
+						"description": "A box around the entity that marks the navigation mesh at the next bake: not walkable, or walkable at a cost that paths avoid.",
+						"type": "object",
+						"properties": {
+							"Kind": {
+								"description": "Whether the box is not walkable or walkable at Cost.",
+								"enum": ["NotWalkable", "Cost"]
+							},
+							"Cost": {
+								"description": "How many times the distance a path inside the box costs (Kind Cost).",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 10000
+							},
+							"HalfExtents": {
+								"description": "Half the box's size along the entity's axes, in metres; the entity's scale applies and its rotation's yaw turns it.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -7896,6 +7987,12 @@
 							},
 							"Fog": {
 								"$ref": "#/$defs/Fog"
+							},
+							"Navigation": {
+								"$ref": "#/$defs/Navigation"
+							},
+							"NavModifier": {
+								"$ref": "#/$defs/NavModifier"
 							}
 						},
 						"additionalProperties": false
@@ -11048,6 +11145,91 @@
 							"FogSkybox": {
 								"description": "Whether the skybox is fogged too, as if it lay infinitely far away.",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Navigation": {
+						"description": "The scene's navigation mesh (one per scene): its agent types and bake settings, and the mesh navigation.bake builds from the scene's static colliders for the Navigation script namespace's queries.",
+						"type": "object",
+						"properties": {
+							"NavMesh": {
+								"description": "The baked navigation mesh, which navigation.bake writes and assigns; null finds no path.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "NavMesh"
+							},
+							"AgentTypes": {
+								"description": "One to four agent types, each baked into a mesh of its own.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/NavAgentType"
+								}
+							},
+							"Layers": {
+								"description": "The physics layers whose static colliders the bake reads, by name from project settings; empty reads every layer.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"CellSize": {
+								"description": "The width of the bake's voxels, in metres: smaller follows walls more closely and bakes more slowly.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 10
+							},
+							"CellHeight": {
+								"description": "The height of the bake's voxels, in metres: the precision of steps and slopes.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 10
+							},
+							"MinRegionArea": {
+								"description": "Walkable islands smaller than this many square metres are left out of the mesh (a table top, a narrow ledge).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10000
+							}
+						},
+						"additionalProperties": false
+					},
+					"NavModifier": {
+						"description": "A box around the entity that marks the navigation mesh at the next bake: not walkable, or walkable at a cost that paths avoid.",
+						"type": "object",
+						"properties": {
+							"Kind": {
+								"description": "Whether the box is not walkable or walkable at Cost.",
+								"enum": ["NotWalkable", "Cost"]
+							},
+							"Cost": {
+								"description": "How many times the distance a path inside the box costs (Kind Cost).",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 10000
+							},
+							"HalfExtents": {
+								"description": "Half the box's size along the entity's axes, in metres; the entity's scale applies and its rotation's yaw turns it.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
 							}
 						},
 						"additionalProperties": false
@@ -18321,6 +18503,12 @@
 							},
 							"Fog": {
 								"$ref": "#/$defs/Fog"
+							},
+							"Navigation": {
+								"$ref": "#/$defs/Navigation"
+							},
+							"NavModifier": {
+								"$ref": "#/$defs/NavModifier"
 							}
 						},
 						"additionalProperties": false
@@ -21462,6 +21650,91 @@
 							"FogSkybox": {
 								"description": "Whether the skybox is fogged too, as if it lay infinitely far away.",
 								"type": "boolean"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Navigation": {
+						"description": "The scene's navigation mesh (one per scene): its agent types and bake settings, and the mesh navigation.bake builds from the scene's static colliders for the Navigation script namespace's queries.",
+						"type": "object",
+						"properties": {
+							"NavMesh": {
+								"description": "The baked navigation mesh, which navigation.bake writes and assigns; null finds no path.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{16}|Assets/.+|engine://.+)$",
+								"x-assetType": "NavMesh"
+							},
+							"AgentTypes": {
+								"description": "One to four agent types, each baked into a mesh of its own.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/NavAgentType"
+								}
+							},
+							"Layers": {
+								"description": "The physics layers whose static colliders the bake reads, by name from project settings; empty reads every layer.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"CellSize": {
+								"description": "The width of the bake's voxels, in metres: smaller follows walls more closely and bakes more slowly.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 10
+							},
+							"CellHeight": {
+								"description": "The height of the bake's voxels, in metres: the precision of steps and slopes.",
+								"type": "number",
+								"minimum": 0.01,
+								"maximum": 10
+							},
+							"MinRegionArea": {
+								"description": "Walkable islands smaller than this many square metres are left out of the mesh (a table top, a narrow ledge).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 10000
+							}
+						},
+						"additionalProperties": false
+					},
+					"NavModifier": {
+						"description": "A box around the entity that marks the navigation mesh at the next bake: not walkable, or walkable at a cost that paths avoid.",
+						"type": "object",
+						"properties": {
+							"Kind": {
+								"description": "Whether the box is not walkable or walkable at Cost.",
+								"enum": ["NotWalkable", "Cost"]
+							},
+							"Cost": {
+								"description": "How many times the distance a path inside the box costs (Kind Cost).",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 10000
+							},
+							"HalfExtents": {
+								"description": "Half the box's size along the entity's axes, in metres; the entity's scale applies and its rotation's yaw turns it.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									},
+									{
+										"type": "number",
+										"minimum": 0.01,
+										"maximum": 10000
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
 							}
 						},
 						"additionalProperties": false
@@ -28315,6 +28588,24 @@
 							},
 							"ssrTracedPixels": {
 								"description": "The trace pixels that traced a reflection in the covered tiles (at half resolution each stands for four scene pixels); 0 when unavailable.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"lights": {
+								"description": "Lights the frame shaded after culling, at most maxShadedLights.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"droppedLights": {
+								"description": "Visible lights beyond maxShadedLights, left unshaded (RENDER_LIGHT_LIMIT_EXCEEDED's).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"skinnedMeshes": {
+								"description": "Meshes with a skin the frame deformed (morph-only meshes are not counted).",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
