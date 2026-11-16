@@ -477,6 +477,8 @@ namespace Engine {
 				"The most lights one view shades: 256, 512, 1024 or 2048. More visible lights drop the least important ones "
 				"(RENDER_LIGHT_LIMIT_EXCEEDED).",
 				{ .Min = Utils::MinMaxShadedLights, .Max = Utils::MaxMaxShadedLights, .Unit = "lights" })
+			.Field("SsrHalfResolution", &RenderingSettings::SsrHalfResolution,
+				"Traces screen-space reflections at half resolution, upsampled with the depth-aware filter: a quarter of the rays, softer reflections.")
 			.Validate(&Utils::ValidateRendering)
 			.Generate(&Utils::GenerateRendering);
 

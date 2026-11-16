@@ -33,6 +33,13 @@ namespace Engine {
 			stats.MaxShadedLights = 1024;
 			stats.CachedPointShadows = 3;
 			stats.CachedSpotShadows = 5;
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): the SSR trace's half resolution and the area of its frame.
+			stats.SsrHalfResolution = true;
+			stats.SsrAreaAvailable = true;
+			stats.SsrAreaFrameIndex = stats.FrameIndex - 3;
+			stats.SsrTiles = 1200;
+			stats.SsrTracedTiles = 90;
+			stats.SsrTracedPixels = 4321;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -45,14 +52,21 @@ namespace Engine {
 			CHECK(summary.MaxShadedLights == 1024); // M29 (Docs/Decisions/0044-m29-light-limits.md decisions 4 and 5)
 			CHECK(summary.CachedPointShadows == 3);
 			CHECK(summary.CachedSpotShadows == 5);
+			CHECK(summary.SsrHalfResolution);
+			CHECK(summary.SsrAreaFrame == "18446744073709551612");
+			CHECK(summary.SsrTiles == 1200);
+			CHECK(summary.SsrTracedTiles == 90);
+			CHECK(summary.SsrTracedPixels == 4321);
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);
 			CHECK(summary.Passes[1].GpuMilliseconds == 3.0f);
 			CHECK(summary.Passes[1].DrawCalls == 9);
 			stats.GpuAvailable = false;
+			stats.SsrAreaAvailable = false;
 			const auto cpuOnly = MakeStatsViewSummary("game", stats);
 			CHECK(cpuOnly.GpuFrame.empty());
+			CHECK(cpuOnly.SsrAreaFrame.empty());
 			CHECK_FALSE(cpuOnly.Passes[1].GpuAvailable);
 			CHECK(cpuOnly.Passes[1].GpuMilliseconds == 0.0f);
 			stats.Available = false;
@@ -68,6 +82,8 @@ namespace Engine {
 			CHECK(unavailable.MaxShadedLights == 0);
 			CHECK(unavailable.CachedPointShadows == 0);
 			CHECK(unavailable.CachedSpotShadows == 0);
+			CHECK_FALSE(unavailable.SsrHalfResolution);
+			CHECK(unavailable.SsrTiles == 0);
 		}
 
 		TEST_CASE("StatsGet: play reports the live script heap and limits without advancing time")

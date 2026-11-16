@@ -59,6 +59,7 @@ Every component of the type registry, in canonical component order: the order of
 | `Terrain` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit. |
 | `TerrainCollider` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn. |
 | `MaterialParameters` | MaterialParameters | Serializable, ScriptVisible, EditorVisible, Removable | Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes. |
+| `Fog` | Fog | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene). |
 
 ## ID
 
@@ -1717,6 +1718,46 @@ Script members of `MaterialParameters`:
 | `Tint` | proxy field | `Color` | read/write | All | The linear colour that multiplies the base colour of every material. |
 | `UVOffset` | proxy field | `vector` | read/write | All | Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture. |
 | `UVScroll` | proxy field | `vector` | read/write | All | How fast the texture coordinates move, in texture units per second of the world's clock, added to UVOffset; it advances in play only, and holds while the world is paused. |
+
+## Fog
+
+The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene).
+
+- Category: Fog
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene
+- Requires: none
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Color` | `Color3` | `[0.5,0.55,0.6]` | 0 to 1 |  |  | The fog's linear colour. |
+| `AmbientTint` | `Float` | `0` | 0 to 1 |  |  | How much the environment's ambient light tints Color: 0 keeps Color, 1 multiplies it by the ambient light. |
+| `Density` | `Float` | `0.02` | 0 to 10 | 1/m |  | The distance fog's density: the share of light it absorbs per metre of view depth, as an exponent. |
+| `StartDistance` | `Float` | `0` | 0 to 1e+05 | m |  | The view depth, in metres, where fog begins. |
+| `MaxOpacity` | `Float` | `1` | 0 to 1 |  |  | The most fog any point receives, from none (0) to fully fogged (1). |
+| `HeightDensity` | `Float` | `0` | 0 to 10 | 1/m |  | The height fog's density per metre at BaseHeight; 0 has no height fog. |
+| `HeightFalloff` | `Float` | `0.5` | 0.001 to 100 | 1/m |  | How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent. |
+| `BaseHeight` | `Float` | `0` |  | m |  | The world height, in metres, where the height fog has HeightDensity. |
+| `SunGlow` | `Float` | `0` | 0 to 100 |  |  | How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. |
+| `SunGlowExponent` | `Float` | `8` | 1 to 1000 |  |  | How tightly the sun glow gathers around the light's direction: higher is tighter. |
+| `FogSkybox` | `Bool` | `true` |  |  |  | Whether the skybox is fogged too, as if it lay infinitely far away. |
+
+Script members of `Fog`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `AmbientTint` | proxy field | `number` | read/write | All | How much the environment's ambient light tints Color: 0 keeps Color, 1 multiplies it by the ambient light. |
+| `BaseHeight` | proxy field | `number` | read/write | All | The world height, in metres, where the height fog has HeightDensity. |
+| `Color` | proxy field | `Color` | read/write | All | The fog's linear colour. |
+| `Density` | proxy field | `number` | read/write | All | The distance fog's density: the share of light it absorbs per metre of view depth, as an exponent. |
+| `FogSkybox` | proxy field | `boolean` | read/write | All | Whether the skybox is fogged too, as if it lay infinitely far away. |
+| `HeightDensity` | proxy field | `number` | read/write | All | The height fog's density per metre at BaseHeight; 0 has no height fog. |
+| `HeightFalloff` | proxy field | `number` | read/write | All | How fast the height fog thins above BaseHeight and thickens below it, per metre, as an exponent. |
+| `MaxOpacity` | proxy field | `number` | read/write | All | The most fog any point receives, from none (0) to fully fogged (1). |
+| `StartDistance` | proxy field | `number` | read/write | All | The view depth, in metres, where fog begins. |
+| `SunGlow` | proxy field | `number` | read/write | All | How strongly the fog glows toward the first directional light, as a multiple of that light's colour times its intensity; 0 has no glow. |
+| `SunGlowExponent` | proxy field | `number` | read/write | All | How tightly the sun glow gathers around the light's direction: higher is tighter. |
 
 ## Structs
 

@@ -8,6 +8,7 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/FogComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
@@ -228,6 +229,60 @@ namespace Engine {
 			CHECK(snapshot->Environment.FallbackColor == glm::vec3(0.1f, 0.2f, 0.3f));
 			CHECK(snapshot->Post.ExposureEV == -1.0f);
 			CHECK(snapshot->Post.Tonemap == RenderTonemapper::Linear);
+		}
+
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 4): the first effectively enabled Fog in canonical order is the
+		// snapshot's, every field as it is; without one (or with only a disabled one) the fog is disabled, at its defaults.
+		TEST_CASE("RenderExtraction: the first enabled Fog is the snapshot's fog, and a scene without one has none")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity disabled = scene.CreateEntity("DisabledFog");
+			disabled.AddComponent<FogComponent>(FogComponent{ .Density = 5.0f });
+			disabled.SetActive(false);
+			TransformSystem::Update(scene);
+			Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			CHECK_FALSE(snapshot->Fog.Enabled);
+			CHECK(snapshot->Fog.Density == RenderFog{}.Density);
+
+			Entity haze = scene.CreateEntity("Haze");
+			haze.AddComponent<FogComponent>(FogComponent{ .Color = glm::vec3(0.25f, 0.5f, 0.75f),
+				.AmbientTint = 0.5f,
+				.Density = 0.1f,
+				.StartDistance = 4.0f,
+				.MaxOpacity = 0.8f,
+				.HeightDensity = 0.3f,
+				.HeightFalloff = 2.0f,
+				.BaseHeight = -1.5f,
+				.SunGlow = 3.0f,
+				.SunGlowExponent = 16.0f,
+				.FogSkybox = false });
+			Entity second = scene.CreateEntity("SecondFog");
+			second.AddComponent<FogComponent>(FogComponent{ .Density = 9.0f });
+			TransformSystem::Update(scene);
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			const RenderFog& fog = snapshot->Fog;
+			CHECK(fog.Enabled);
+			CHECK(fog.Color == glm::vec3(0.25f, 0.5f, 0.75f));
+			CHECK(fog.AmbientTint == 0.5f);
+			CHECK(fog.Density == 0.1f);
+			CHECK(fog.StartDistance == 4.0f);
+			CHECK(fog.MaxOpacity == 0.8f);
+			CHECK(fog.HeightDensity == 0.3f);
+			CHECK(fog.HeightFalloff == 2.0f);
+			CHECK(fog.BaseHeight == -1.5f);
+			CHECK(fog.SunGlow == 3.0f);
+			CHECK(fog.SunGlowExponent == 16.0f);
+			CHECK_FALSE(fog.FogSkybox);
+
+			haze.SetActive(false);
+			TransformSystem::Update(scene);
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			CHECK(snapshot->Fog.Enabled);
+			CHECK(snapshot->Fog.Density == 9.0f);
 		}
 
 		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decision 12, stream X-A): every member of PostProcess version 2

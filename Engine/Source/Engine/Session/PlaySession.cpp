@@ -1231,7 +1231,8 @@ namespace Engine {
 			.SimulationTime = GetRenderTime(alpha),
 			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize,
 				.SsaoHalfResolution = Project.Rendering.SsaoHalfResolution,
-				.MaxShadedLights = Project.Rendering.MaxShadedLights },
+				.MaxShadedLights = Project.Rendering.MaxShadedLights,
+				.SsrHalfResolution = Project.Rendering.SsrHalfResolution },
 			.SortingLayers = Project.SortingLayers.Layers,
 			// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state.
 			.UiInteraction = &Ui.GetInteraction() };

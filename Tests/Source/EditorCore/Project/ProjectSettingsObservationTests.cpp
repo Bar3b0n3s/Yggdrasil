@@ -353,6 +353,8 @@ namespace Engine {
 			observe("/Rendering/ShadowMapSize", session->GetLastExtraction().Quality.ShadowMapSize == settings.Rendering.ShadowMapSize);
 			observe("/Rendering/SsaoHalfResolution", session->GetLastExtraction().Quality.SsaoHalfResolution == settings.Rendering.SsaoHalfResolution);
 			observe("/Rendering/MaxShadedLights", session->GetLastExtraction().Quality.MaxShadedLights == settings.Rendering.MaxShadedLights);
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 12): the SSR trace's resolution reaches the extraction too.
+			observe("/Rendering/SsrHalfResolution", session->GetLastExtraction().Quality.SsrHalfResolution == settings.Rendering.SsrHalfResolution);
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): Main.scene's Front sprite comes first in canonical order with
 			// the lower OrderInLayer, so only the declared layers draw Back (Background) before it (Foreground).
 			const auto& sprites = session->GetLastExtraction().Sprites;

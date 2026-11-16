@@ -9,7 +9,13 @@ On a temporary copy of Projects/FeatureTest, a headless editor of --config (--re
   - per scene below Assets/Scenes/: in a lockstep session, the play.step time per tick of 8 calls of 30 ticks with
     render "Every" (frameMs) and with render "None" (simulationMs), stats.get's GPU pass times, and the editor
     process's memory (Lib/process.py);
-then a --renderer none editor replays Assets/Tests/Replays/Determinism.replay 3 times (replay/Determinism/tickMs).
+then a --renderer none editor replays Assets/Tests/Replays/Determinism.replay 3 times (replay/Determinism/tickMs); and
+(M32, Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5 and 6) a --headless-game-view editor whose game view renders at
+1920 x 1080 measures, over LOOK_SAMPLES single rendered ticks each, the GPU time fog adds to the passes it reaches in
+Assets/Scenes/Fog.scene, whose Fog sets every field (distance and height fog, the ambient tint and the sun glow, the
+skybox unfogged; fog/Fog/gpuCostMs: each sample with the Fog less the median without it; budget 0.5 ms), and the
+SSR row of a generated isometric floor of 35 tiles with 0, 8 and 35 of them glossy, and with 8 at half resolution
+(ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also give the tiles the trace covered.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
 (--gpu-optional: no frame or GPU times) makes the step a warning. Only a capture that cannot run fails it: a missing
@@ -53,6 +59,19 @@ SCENE_CHUNKS = 8
 SCENE_CHUNK_TICKS = 30
 WARM_UP_TICKS = 8
 REPLAY_RUNS = 3
+# M32: the look costs' game view, samples and scenes (module docstring).
+LOOK_WIDTH = 1920
+LOOK_HEIGHT = 1080
+LOOK_WARM_UP_TICKS = 8
+LOOK_SAMPLES = 16
+FOG_SCENE = "Assets/Scenes/Fog.scene"
+FOG_ENTITY = "/Haze"
+# The passes fog reaches (Renderer/Fog.h): their GPU times summed.
+FOG_PASSES = ("ForwardOpaque", "TerrainForward", "Skybox", "SSR", "ForwardTransparent", "Sprites")
+SSR_SCENE = "Assets/Perf/SsrFloor.scene"
+SSR_COLUMNS = 7
+SSR_ROWS = 5
+SSR_GLOSSY_COUNTS = (0, 8, 35)
 DEVICE_PROBE_TIMEOUT_SECONDS = 120.0
 CALL_TIMEOUT_SECONDS = 120.0
 STEP_TIMEOUT_SECONDS = 600.0
@@ -247,6 +266,98 @@ class Capture:
         shown = f"frame {frame.median:.3f} ms, " if frame is not None else ""
         self.console.print(f"  {name}: {shown}simulation {simulation.median:.3f} ms per tick")
 
+    def look_samples(self, client: Any, passes: tuple[str, ...]) -> tuple[list[float], dict[str, Any]]:
+        """LOOK_SAMPLES rendered single ticks of the playing session: the game view's summed GPU time of `passes` after
+        each (a sample only when the view has a completed GPU frame), and the last stats' game view."""
+        samples: list[float] = []
+        view: dict[str, Any] = {}
+        for _ in range(LOOK_SAMPLES):
+            self.call(client, "play.step", {"ticks": 1, "render": "Every"}, timeout=STEP_TIMEOUT_SECONDS)
+            stats = self.call(client, "stats.get", {})
+            view = game_view(stats)
+            total = summed_gpu_time(view, passes)
+            if total is not None:
+                samples.append(total)
+        return samples, view
+
+    def play_samples(self, client: Any, passes: tuple[str, ...]) -> tuple[list[float], dict[str, Any]]:
+        """look_samples of a lockstep session of the open scene after LOOK_WARM_UP_TICKS rendered ticks."""
+        self.call(client, "play.start", {"lockstep": True})
+        try:
+            self.call(client, "play.step", {"ticks": LOOK_WARM_UP_TICKS, "render": "Every"},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            return self.look_samples(client, passes)
+        finally:
+            self.call(client, "play.stop", {})
+
+    def fog_cost(self, client: Any) -> None:
+        """fog/Fog/gpuCostMs (module docstring); an engine error or a view without GPU times makes it a
+        warning."""
+        try:
+            self.call(client, "scene.open", {"path": FOG_SCENE, "discardChanges": True}, timeout=STEP_TIMEOUT_SECONDS)
+            fogged, _ = self.play_samples(client, FOG_PASSES)
+            # The scene stays open without its Fog, unsaved: the editor refuses to open the active scene again, and
+            # the SSR floor's scene.new discards the change.
+            self.call(client, "entity.update", {"entity": FOG_ENTITY, "removeComponents": ["Fog"]})
+            clear, _ = self.play_samples(client, FOG_PASSES)
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"fog/Fog/gpuCostMs: {detail}; not captured")
+            return
+        if not fogged or not clear:
+            self.warnings.append("fog/Fog/gpuCostMs: the game view reported no GPU times; not captured")
+            return
+        metric = perf.summarize("fog/Fog/gpuCostMs", "ms", cost_samples(fogged, clear))
+        self.metrics.append(metric)
+        self.console.print(f"  fog/Fog/gpuCostMs: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
+
+    def ssr_cost(self, client: Any) -> None:
+        """ssr/Floor<n>of35/gpuMs and ssr/Floor8of35Half/gpuMs (module docstring); an engine error or a view without GPU
+        times makes it a warning."""
+        try:
+            self.call(client, "asset.create", {"type": "Material", "path": "Assets/Perf/Glossy.material",
+                                               "values": {"BaseColor": [0.3, 0.32, 0.35, 1], "Roughness": 0.25}})
+            self.call(client, "asset.create", {"type": "Material", "path": "Assets/Perf/Rough.material",
+                                               "values": {"BaseColor": [0.35, 0.3, 0.28, 1], "Roughness": 0.9}})
+            self.call(client, "scene.new", {"path": SSR_SCENE, "template": "Empty", "discardChanges": True})
+            self.call(client, "edit.batch", {"label": "Perf: SSR floor", "ops": ssr_floor_ops()},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            for glossy in SSR_GLOSSY_COUNTS:
+                self.set_glossy_tiles(client, glossy)
+                self.ssr_metric(client, f"ssr/Floor{glossy}of35/gpuMs")
+            self.set_glossy_tiles(client, 8)
+            self.call(client, "project.setSettings", {"patch": {"Rendering": {"SsrHalfResolution": True}}})
+            self.ssr_metric(client, "ssr/Floor8of35Half/gpuMs")
+            self.call(client, "project.setSettings", {"patch": {"Rendering": {"SsrHalfResolution": False}}})
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"ssr/Floor: {detail}; not captured")
+
+    def set_glossy_tiles(self, client: Any, glossy: int) -> None:
+        """Gives the floor's first `glossy` tiles (in ssr_tile_names' order) the glossy material and the rest the
+        rough."""
+        ops = [{"method": "entity.update",
+                "params": {"entity": f"/{name}",
+                           "components": {"MeshRenderer": {"Materials": [
+                               "Assets/Perf/Glossy.material" if index < glossy else "Assets/Perf/Rough.material"]}}}}
+               for index, name in enumerate(ssr_tile_names())]
+        self.call(client, "edit.batch", {"label": f"Perf: {glossy} glossy tiles", "ops": ops},
+                  timeout=STEP_TIMEOUT_SECONDS)
+
+    def ssr_metric(self, client: Any, name: str) -> None:
+        """The SSR row's GPU time of the open floor scene as the metric `name`, with the traced tiles printed."""
+        samples, view = self.play_samples(client, ("SSR",))
+        if not samples:
+            self.warnings.append(f"{name}: the game view reported no SSR GPU time; not captured")
+            return
+        metric = perf.summarize(name, "ms", samples)
+        self.metrics.append(metric)
+        self.console.print(f"  {name}: median {metric.median:.3f} ms, {view.get('ssrTracedTiles', 0)} of "
+                           f"{view.get('ssrTiles', 0)} tiles traced at {LOOK_WIDTH} x {LOOK_HEIGHT}")
+
     @staticmethod
     def gpu_pass_times(stats: dict[str, Any]) -> dict[str, float]:
         """The completed GPU pass times of the game view (the scene view's when the game view has none), by pass."""
@@ -280,14 +391,67 @@ class Capture:
         self.console.print(f"  replay/Determinism/tickMs: median {metric.median:.3f} ms per tick")
 
 
-def run_editor(capture: Capture, editor: Path, project_file: Path, renderer: str, user_data: Path, work: Any) -> None:
-    """Starts a headless editor with `renderer` on `project_file`, runs `work(client, pid)` and shuts the editor down;
-    the process is always stopped."""
+def game_view(stats: dict[str, Any]) -> dict[str, Any]:
+    """The game view of a stats.get result, or an empty dict without one."""
+    return next((view for view in stats.get("views", []) if isinstance(view, dict) and view.get("name") == "game"), {})
+
+
+def summed_gpu_time(view: dict[str, Any], passes: tuple[str, ...]) -> float | None:
+    """The summed GPU time of `passes` in `view` (a pass it did not record counts 0), or None without a completed GPU
+    frame."""
+    if not view.get("gpuAvailable"):
+        return None
+    return sum(float(entry.get("gpuMilliseconds", 0.0)) for entry in view.get("passes", [])
+               if isinstance(entry, dict) and entry.get("name") in passes and entry.get("gpuAvailable"))
+
+
+def cost_samples(with_effect: list[float], without: list[float]) -> list[float]:
+    """Each sample with an effect less the median of the samples without it: the effect's cost, sample by sample."""
+    baseline = perf.summarize("baseline", "ms", without).median
+    return [sample - baseline for sample in with_effect]
+
+
+def ssr_tile_names() -> list[str]:
+    """The SSR floor's tiles in row-major order, the glossy ones first by set_glossy_tiles."""
+    return [f"Tile{row}{column}" for row in range(SSR_ROWS) for column in range(SSR_COLUMNS)]
+
+
+def ssr_floor_ops() -> list[dict[str, Any]]:
+    """edit.batch ops of the SSR floor: 7 x 5 tiles of 2 m under an isometric orthographic camera, rough columns to
+    reflect (so only the floor's glossy tiles trace), a sun, the Studio environment and SSR on (SsrMaxRoughness 0.75, as
+    World Tree's Arena 1)."""
+    ops: list[dict[str, Any]] = [
+        {"method": "entity.create", "params": {"name": "Rendering", "components": {
+            "Environment": {"Environment": "engine://Environments/Studio", "Intensity": 0.6},
+            "PostProcess": {"SsrEnabled": True, "SsrMaxRoughness": 0.75, "SsaoEnabled": False}}}},
+        {"method": "entity.create", "params": {"name": "Camera", "components": {
+            "Transform": {"Translation": [10, 10, 10], "EulerAngles": [-35.264, 45, 0]},
+            "Camera": {"Primary": True, "Projection": "Orthographic", "OrthographicSize": 6, "FarClip": 60}}}},
+        {"method": "entity.create", "params": {"name": "Sun", "components": {
+            "Transform": {"EulerAngles": [-50, 30, 0]}, "DirectionalLight": {"Intensity": 2, "CastShadows": False}}}},
+    ]
+    for index, name in enumerate(ssr_tile_names()):
+        row, column = divmod(index, SSR_COLUMNS)
+        ops.append({"method": "entity.create", "params": {"name": name, "components": {
+            "Transform": {"Translation": [(column - SSR_COLUMNS // 2) * 2.0, 0, (row - SSR_ROWS // 2) * 2.0]},
+            "MeshRenderer": {"Mesh": "engine://Meshes/Plane", "Materials": ["Assets/Perf/Rough.material"]}}}})
+    for index in range(4):
+        ops.append({"method": "entity.create", "params": {"name": f"Column{index}", "components": {
+            "Transform": {"Translation": [-4.0 + index * 2.5, 1.5, -3.0], "Scale": [0.6, 3, 0.6]},
+            "MeshRenderer": {"Mesh": BUILTIN_CUBE_MESH, "Materials": ["Assets/Perf/Rough.material"]}}}})
+    return ops
+
+
+def run_editor(capture: Capture, editor: Path, project_file: Path, renderer: str, user_data: Path, work: Any,
+               extra_arguments: tuple[str, ...] = ()) -> None:
+    """Starts a headless editor with `renderer` (and `extra_arguments`) on `project_file`, runs `work(client, pid)`
+    and shuts the editor down; the process is always stopped."""
     engine_client = capture.engine_client
     try:
         editor_process = engine_client.launch_editor(
-            editor, ["--headless", "--renderer", renderer, "--audio-device", "none", "--automation", "--project",
-                     str(project_file)], user_data, paths.workspace_name(), environment=child_environment())
+            editor, ["--headless", *extra_arguments, "--renderer", renderer, "--audio-device", "none", "--automation",
+                     "--project", str(project_file)], user_data, paths.workspace_name(),
+            environment=child_environment())
     except (RuntimeError, TimeoutError, OSError) as error:
         raise CaptureError(f"{editor.name} could not be started: {error}") from error
     try:
@@ -347,6 +511,15 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
             run_editor(capture, editor, project_file, renderer, root / "UserData", measure)
             run_editor(capture, editor, project_file, "none", root / "ReplayUserData",
                        lambda client, _pid: capture.replay(client))
+            if renderer == "vulkan":
+                def look(client: Any, _pid: int) -> None:
+                    capture.call(client, "project.setSettings",
+                                 {"patch": {"Window": {"Width": LOOK_WIDTH, "Height": LOOK_HEIGHT}}})
+                    capture.fog_cost(client)
+                    capture.ssr_cost(client)
+
+                run_editor(capture, editor, project_file, renderer, root / "LookUserData", look,
+                           ("--headless-game-view",))
     except CaptureError as error:
         return Step(name, Status.FAILED, f"the capture could not run: {error}", time.perf_counter() - started,
                     data=data)

@@ -293,7 +293,7 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 			editor.GetScene().CreateEntity("Camera").AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
 			Test::AutomationTestClient client(editor);
 			REQUIRE(client.Call("project.setSettings",
-							  Json{ { "patch", Json{ { "Rendering", Json{ { "ShadowMapSize", 512 }, { "SsaoHalfResolution", true }, { "MaxShadedLights", 1024 } } } } } })
+							  Json{ { "patch", Json{ { "Rendering", Json{ { "ShadowMapSize", 512 }, { "SsaoHalfResolution", true }, { "MaxShadedLights", 1024 }, { "SsrHalfResolution", true } } } } } })
 					.has_value());
 			GizmoController gizmos(editor);
 			EditorHostViewports host(editor, gizmos);
@@ -309,6 +309,7 @@ return vector.magnitude(direction - vector.create(0, 0, -1)) < 0.001)")
 					CHECK(snapshot->Quality.ShadowMapSize == 512);
 					CHECK(snapshot->Quality.SsaoHalfResolution);
 					CHECK(snapshot->Quality.MaxShadedLights == 1024); // M29 (Docs/Decisions/0044-m29-light-limits.md decision 1)
+					CHECK(snapshot->Quality.SsrHalfResolution);
 				}
 			}
 			REQUIRE(client.Call("play.stop", Json::object()).has_value());

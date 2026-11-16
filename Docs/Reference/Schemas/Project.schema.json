@@ -218,6 +218,10 @@
 					"type": "integer",
 					"minimum": 256,
 					"maximum": 2048
+				},
+				"SsrHalfResolution": {
+					"description": "Traces screen-space reflections at half resolution, upsampled with the depth-aware filter: a quarter of the rays, softer reflections.",
+					"type": "boolean"
 				}
 			},
 			"additionalProperties": false

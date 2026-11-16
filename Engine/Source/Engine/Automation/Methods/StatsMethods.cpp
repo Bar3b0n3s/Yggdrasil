@@ -94,6 +94,11 @@ namespace Engine {
 		result.MaxShadedLights = stats.MaxShadedLights;
 		result.CachedPointShadows = stats.CachedPointShadows;
 		result.CachedSpotShadows = stats.CachedSpotShadows;
+		result.SsrHalfResolution = stats.SsrHalfResolution;
+		result.SsrAreaFrame = stats.SsrAreaAvailable ? std::to_string(stats.SsrAreaFrameIndex) : std::string();
+		result.SsrTiles = stats.SsrTiles;
+		result.SsrTracedTiles = stats.SsrTracedTiles;
+		result.SsrTracedPixels = stats.SsrTracedPixels;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -150,7 +155,18 @@ namespace Engine {
 			.Field("cachedPointShadows", &StatsViewSummary::CachedPointShadows,
 				"Shadowed point lights whose shadow maps the frame reused unchanged, drawing no caster (the static shadow cache).")
 			.Field("cachedSpotShadows", &StatsViewSummary::CachedSpotShadows,
-				"Shadowed spot lights whose atlas tiles the frame reused unchanged (the atlas is reused whole or redrawn whole).");
+				"Shadowed spot lights whose atlas tiles the frame reused unchanged (the atlas is reused whole or redrawn whole).")
+			.Field("ssrHalfResolution", &StatsViewSummary::SsrHalfResolution, "Whether the frame rendered with the project's Rendering.SsrHalfResolution set.")
+			.Field("ssrAreaFrame", &StatsViewSummary::SsrAreaFrame,
+				"Exact decimal source frame of the SSR area below, a completed GPU frame; empty while no completed frame recorded SSR.")
+			.Field("ssrTiles", &StatsViewSummary::SsrTiles,
+				"The SSR trace image's 8 x 8 tiles in the frame of ssrAreaFrame: the scene image's, or a quarter of them at half resolution; 0 when "
+				"unavailable.")
+			.Field("ssrTracedTiles", &StatsViewSummary::SsrTracedTiles,
+				"The tiles the SSR trace covered, those holding a glossy pixel (roughness at most SsrMaxRoughness, the sky excluded); 0 when unavailable.")
+			.Field("ssrTracedPixels", &StatsViewSummary::SsrTracedPixels,
+				"The trace pixels that traced a reflection in the covered tiles (at half resolution each stands for four scene pixels); 0 when "
+				"unavailable.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

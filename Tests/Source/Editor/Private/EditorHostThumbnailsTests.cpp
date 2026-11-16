@@ -387,6 +387,7 @@ namespace Engine {
 			REQUIRE(document.has_value());
 			(*document)["Rendering"]["ShadowMapSize"] = 256;
 			(*document)["Rendering"]["SsaoHalfResolution"] = true;
+			(*document)["Rendering"]["SsrHalfResolution"] = true;
 			const auto written = JsonWriter::Write(*document);
 			REQUIRE(written.has_value());
 			REQUIRE(FileSystem::WriteFileAtomic(projectFile, AsBytes(*written)).has_value());
@@ -408,6 +409,7 @@ namespace Engine {
 			REQUIRE(quality.has_value());
 			CHECK(quality->ShadowMapSize == 256);
 			CHECK(quality->SsaoHalfResolution);
+			CHECK(quality->SsrHalfResolution);
 			thumbnails.Reset();
 		}
 	}

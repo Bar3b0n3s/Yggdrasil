@@ -23,7 +23,14 @@
 //     coordinates, taken before any branch: +X along the increasing u, +Y against the increasing v (texture space runs
 //     down), +Z the unit normal of the quad's plane facing the viewer, so a quad mirrored by its flips or a negative scale
 //     mirrors its normals' X or Y and keeps them facing the lights above the plane.
+//
+// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): PSHdr and PSHdrLit, whose batch space is world space (the Sprites stage's
+// sprites and tilemaps), meet the view's fog (Fog, b1; Common/Fog.slang) at the fragment's batch-space position when the
+// fog is enabled and Quad.FogMode asks: QuadFogModeBlend blends the colour toward the fog's, QuadFogModeFade (the additive
+// pipeline's) fades it, alpha unchanged either way. Both take VSLit's outputs, which carry that position (the Hdr and
+// HdrAdditive pipelines draw with VSLit, whose clip position is VSMain's).
 
+#include "Shared/FogConstants.h"
 #include "Shared/QuadVertex.h"
 
 import Common.Color;
@@ -33,6 +40,10 @@ Texture2D<float4> QuadTexture : register(t0, space0);
 SamplerState QuadSampler : register(s0, space0);
 // The lit entries' second texture: PSHdrLit's light accumulation, PSNormals' normal map (a white texel without one).
 Texture2D<float4> QuadLitTexture : register(t1, space0);
+// M32: the view's fog (b1: the push constants hold slot 0).
+ConstantBuffer<FogConstants> Fog : register(b1, space0);
+
+#include "Common/Fog.slang"
 
 // QuadVertex member by member (locations 0, 1, 2).
 struct VertexInput
@@ -84,10 +95,19 @@ float4 ShadeQuad(float2 texCoord, float4 color)
 	return QuadTexture.SampleLevel(QuadSampler, texCoord, 0.0) * color;
 }
 
-[shader("fragment")]
-float4 PSHdr(VertexOutput input) : SV_Target0
+// `shaded` at the world point `worldPosition` behind the view's fog, per Quad.FogMode.
+float4 ApplyQuadFog(float4 shaded, float3 worldPosition)
 {
-	return ShadeQuad(input.TexCoord, input.Color);
+	if (Fog.Enabled == 0 || Quad.FogMode == QuadFogModeNone)
+		return shaded;
+	const float4 fog = EvaluateFog(worldPosition);
+	return float4(Quad.FogMode == QuadFogModeFade ? ApplyFogAdditive(shaded.rgb, fog) : ApplyFog(shaded.rgb, fog), shaded.a);
+}
+
+[shader("fragment")]
+float4 PSHdr(LitVertexOutput input) : SV_Target0
+{
+	return ApplyQuadFog(ShadeQuad(input.TexCoord, input.Color), input.BatchPosition);
 }
 
 [shader("fragment")]
@@ -102,7 +122,7 @@ float4 PSHdrLit(LitVertexOutput input) : SV_Target0
 {
 	const float4 shaded = ShadeQuad(input.TexCoord, input.Color);
 	const float3 light = QuadLitTexture.Load(int3(int2(input.Position.xy), 0)).rgb;
-	return float4(shaded.rgb * light, shaded.a);
+	return ApplyQuadFog(float4(shaded.rgb * light, shaded.a), input.BatchPosition);
 }
 
 struct NormalsOutput

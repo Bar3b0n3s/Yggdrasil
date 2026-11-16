@@ -48,6 +48,7 @@ namespace Engine {
 		constexpr AssetHandle FloorMaterialHandle{ 0x9c01 };
 		constexpr AssetHandle WallMaterialHandle{ 0x9c02 };
 		constexpr AssetHandle ProbeEnvironmentHandle{ 0x9c03 };
+		constexpr AssetHandle GlossyWallMaterialHandle{ 0x9c04 };
 		constexpr uint32_t ViewSize = 64;
 		// The wall: the fixture's quad facing +Z, 3 m wide and 2 m high, standing on the floor (y = 0) at z = -1.
 		constexpr float WallHalfWidth = 1.5f;
@@ -190,11 +191,74 @@ namespace Engine {
 			return Test::SceneRendererIntegrationFixture::FindPass(renderer.GetRenderStats(), name) != nullptr;
 		}
 
+		// Renders `snapshot` again, with `frameIndex` rising, until a render collects a completed frame of it (from its
+		// FrameIndex on) that recorded SSR, and returns that render's stats, which carry the frame's SSR area.
+		std::optional<RenderStats> RenderUntilAreaReported(Test::HeadlessGpuFixture& gpu, Test::SceneRendererIntegrationFixture& fixture, RenderSnapshot snapshot,
+			uint64_t& frameIndex)
+		{
+			const uint64_t first = snapshot.FrameIndex;
+			for (uint32_t frame = 0; frame < 3 * gpu.GetDevice().GetFramesInFlight() + 2; ++frame)
+			{
+				snapshot.FrameIndex = ++frameIndex;
+				fixture.Submit(snapshot);
+				gpu.GetDevice().WaitForIdle();
+				const RenderStats stats = fixture.Renderer().GetRenderStats();
+				if (stats.SsrAreaAvailable && stats.SsrAreaFrameIndex >= first)
+					return stats;
+			}
+			return std::nullopt;
+		}
+
+		// The mirror image's pixels against their classification (ClassifyMirrorPixel), sampling every `step`-th pixel along x
+		// and y from step / 2: the wall one colour, a floor pixel reflecting the wall that colour (within 2), one reflecting the
+		// probe the probe's radiance (within 2). Mismatched also counts a view in which no sample saw the wall.
+		struct MirrorCheck
+		{
+			uint32_t Hits = 0;
+			uint32_t Misses = 0;
+			uint32_t Mismatched = 0;
+		};
+
+		MirrorCheck CheckMirrorImage(const RenderSnapshot& snapshot, const Image& image, uint32_t step)
+		{
+			const glm::ivec3 probe(ToSrgb8(ProbeRadiance.x), ToSrgb8(ProbeRadiance.y), ToSrgb8(ProbeRadiance.z));
+			const CameraData& camera = snapshot.Camera;
+			MirrorCheck check;
+			std::optional<glm::ivec3> wall;
+			for (uint32_t y = step / 2; y < camera.ViewportHeight; y += step)
+			{
+				for (uint32_t x = step / 2; x < camera.ViewportWidth; x += step)
+				{
+					if (ClassifyMirrorPixel(camera, x, y) != MirrorPixel::Wall)
+						continue;
+					if (!wall)
+						wall = GetPixel(image, x, y);
+					check.Mismatched += IsNear(GetPixel(image, x, y), *wall, 2) ? 0U : 1U;
+				}
+			}
+			if (!wall)
+				return { .Mismatched = 1 };
+			for (uint32_t y = step / 2; y < camera.ViewportHeight; y += step)
+			{
+				for (uint32_t x = step / 2; x < camera.ViewportWidth; x += step)
+				{
+					const MirrorPixel kind = ClassifyMirrorPixel(camera, x, y);
+					if (kind != MirrorPixel::ReflectsWall && kind != MirrorPixel::ReflectsProbe)
+						continue;
+					const bool hit = kind == MirrorPixel::ReflectsWall;
+					check.Mismatched += IsNear(GetPixel(image, x, y), hit ? *wall : probe, 2) ? 0U : 1U;
+					check.Hits += hit ? 1U : 0U;
+					check.Misses += hit ? 0U : 1U;
+				}
+			}
+			return check;
+		}
+
 	}
 
 	TEST_SUITE("Renderer")
 	{
-		TEST_CASE("SsrPass: its declaration holds its two pipelines of the program Ssr, and SsrColor its traced reflections")
+		TEST_CASE("SsrPass: its declaration holds its three pipelines of the program Ssr, and SsrColor its traced reflections")
 		{
 			const auto ssr = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
 			{
@@ -203,25 +267,78 @@ namespace Engine {
 			REQUIRE(ssr != ScenePassDeclarations.end());
 			CHECK(ssr->Stage == RenderStage::Forward);
 			CHECK(ssr->PipelineCount == SsrPass::PipelineCount);
-			CHECK(SsrPass::PipelineCount == 2);
+			CHECK(SsrPass::PipelineCount == 3);
 			REQUIRE(ssr->Programs.size() == 1);
 			CHECK(ssr->Programs[0] == "Ssr");
 			REQUIRE(ssr->StatsRows.size() == 1);
 			CHECK(ssr->StatsRows[0] == "SSR");
 			const std::vector<PipelineLayoutDescription> layouts = SsrPass::GetLayoutDescriptions();
 			REQUIRE(layouts.size() == SsrPass::PipelineCount);
-			CHECK(layouts[0].Entries == std::vector<std::string>{ "CSTrace" });
-			CHECK(layouts[1].Entries == std::vector<std::string>{ "VSComposite", "PSComposite" });
+			CHECK(layouts[0].Entries == std::vector<std::string>{ "CSClassify" });
+			CHECK(layouts[1].Entries == std::vector<std::string>{ "CSTrace" });
+			CHECK(layouts[2].Entries == std::vector<std::string>{ "VSComposite", "PSComposite" });
 			const nvrhi::TextureDesc target = SsrPass::GetTargetDesc(40, 20);
 			CHECK(target.width == 40);
 			CHECK(target.height == 20);
 			CHECK(target.format == SsrColorFormat);
 			CHECK(target.isUAV);
 			CHECK(target.isShaderResource);
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 11): the trace image is the scene image or its half rounded
+			// up, cut into 8 x 8 tiles; the tile list holds one word a tile, the arguments their layout.
+			CHECK(SsrPass::GetTraceSize(40, 21, false) == glm::uvec2(40, 21));
+			CHECK(SsrPass::GetTraceSize(40, 21, true) == glm::uvec2(20, 11));
+			CHECK(SsrPass::GetTileCount(glm::uvec2(40, 21)) == 5 * 3);
+			CHECK(SsrPass::GetTileCount(glm::uvec2(20, 11)) == 3 * 2);
+			const nvrhi::BufferDesc tiles = SsrPass::GetTileBufferDesc(15);
+			CHECK(tiles.byteSize == (1 + 15) * sizeof(uint32_t));
+			CHECK(tiles.structStride == sizeof(uint32_t));
+			CHECK(tiles.canHaveUAVs);
+			CHECK(SsrPass::GetTileBufferDesc(0).byteSize == 2 * sizeof(uint32_t));
+			const nvrhi::BufferDesc arguments = SsrPass::GetArgumentsBufferDesc();
+			CHECK(arguments.byteSize == SsrArgumentsLayout::ByteSize);
+			CHECK(arguments.isDrawIndirectArgs);
+			CHECK(arguments.canHaveRawViews);
+			CHECK(SsrPass::GetAreaReadbackDesc().cpuAccess == nvrhi::CpuAccessMode::Read);
 			const nvrhi::FramebufferInfo composite = SsrPass::GetCompositeFramebufferInfo();
 			REQUIRE(composite.colorFormats.size() == 1);
 			CHECK(composite.colorFormats[0] == SceneColorFormat);
 			CHECK(composite.depthFormat == nvrhi::Format::UNKNOWN);
+		}
+
+		// M32 (decision 13): the traced area is read from the arguments buffer's words: the tile count, the listed tiles (the
+		// composite's instance count), the traced pixels and the trace's groups along x and y.
+		TEST_CASE("SsrPass: the traced area is read from the arguments' tile count, listed tiles and traced pixels")
+		{
+			std::array<uint32_t, SsrArgumentsLayout::ByteSize / sizeof(uint32_t)> words = { 65535, 2, 1, 6, 70000, 0, 0, 300, 90000 };
+			const SsrArea area = ReadSsrArea(std::as_bytes(std::span(words)));
+			CHECK(area == SsrArea{ .Tiles = 90000, .TracedTiles = 70000, .TracedPixels = 300, .TraceGroups = 65535, .TraceRows = 2 });
+			CHECK(SsrArgumentsLayout::CompositeInstancesOffset == SsrArgumentsLayout::CompositeDrawOffset + sizeof(uint32_t));
+			CHECK(SsrArgumentsLayout::TraceRowsOffset == SsrArgumentsLayout::TraceGroupsOffset + sizeof(uint32_t));
+		}
+
+		// M32's milestone review: the trace runs in rows of at most SsrTraceRowGroups groups, so neither dimension of its
+		// dispatch passes Vulkan's guaranteed 65,535 however many tiles are listed (a 3840 x 2160 view has 129,600, an 8192²
+		// one 1,048,576), and the rows hold every listed tile.
+		TEST_CASE("SsrPass: the trace's dispatch keeps each dimension within Vulkan's guaranteed 65,535 groups")
+		{
+			CHECK(SsrTraceRowGroups <= 65535U);
+			CHECK(SsrPass::GetTraceGroups(0) == glm::uvec2(0, 0));
+			CHECK(SsrPass::GetTraceGroups(1) == glm::uvec2(1, 1));
+			CHECK(SsrPass::GetTraceGroups(32400) == glm::uvec2(32400, 1));
+			CHECK(SsrPass::GetTraceGroups(65535) == glm::uvec2(65535, 1));
+			CHECK(SsrPass::GetTraceGroups(65536) == glm::uvec2(65535, 2));
+			CHECK(SsrPass::GetTraceGroups(129600) == glm::uvec2(65535, 2));
+			CHECK(SsrPass::GetTraceGroups(1048576) == glm::uvec2(65535, 17));
+			for (const uint32_t listed : { 1U, 65535U, 65536U, 131070U, 131071U, 1048576U })
+			{
+				CAPTURE(listed);
+				const glm::uvec2 groups = SsrPass::GetTraceGroups(listed);
+				CHECK(groups.x <= 65535U);
+				CHECK(groups.y <= 65535U);
+				// The rows hold every listed tile, and the last row is not empty.
+				CHECK(static_cast<uint64_t>(groups.x) * groups.y >= listed);
+				CHECK(static_cast<uint64_t>(groups.y - 1) * SsrTraceRowGroups < listed);
+			}
 		}
 
 		// The push constants carry the image's size, the pyramid's mips and PostProcess's settings made usable.
@@ -240,6 +357,8 @@ namespace Engine {
 			CHECK(plain.MaxRoughness == 0.4f);
 			CHECK(plain.Intensity == 0.75f);
 			CHECK(plain.PyramidLevels == 5);
+			CHECK(plain.HalfResolution == 0);
+			CHECK(MakeSsrConstants(post, 40, 20, 5, true).HalfResolution == 1);
 
 			// Values past the registered ranges are clamped to them, and a pyramid of no mips counts one.
 			post.SsrIntensity = 2.0f;
@@ -309,6 +428,8 @@ namespace Engine {
 				Result<nvrhi::TextureHandle> viewDepth = device.CreateTexture(DepthPyramidPass::GetTargetDesc(8, 8));
 				Result<nvrhi::TextureHandle> ssrColor = device.CreateTexture(SsrPass::GetTargetDesc(8, 8));
 				Result<nvrhi::TextureHandle> smallSsrColor = device.CreateTexture(SsrPass::GetTargetDesc(4, 8));
+				Result<nvrhi::BufferHandle> tiles = device.CreateBuffer(SsrPass::GetTileBufferDesc(1));
+				Result<nvrhi::BufferHandle> arguments = device.CreateBuffer(SsrPass::GetArgumentsBufferDesc());
 				Result<nvrhi::FramebufferHandle> framebuffer = device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(sceneColor));
 				Result<nvrhi::FramebufferHandle> withDepth =
 					device.CreateFramebuffer(nvrhi::FramebufferDesc().addColorAttachment(sceneColor).setDepthAttachment(sceneDepth));
@@ -317,6 +438,7 @@ namespace Engine {
 				REQUIRE(viewDepth.has_value());
 				REQUIRE(ssrColor.has_value());
 				REQUIRE(smallSsrColor.has_value());
+				REQUIRE((tiles.has_value() && arguments.has_value()));
 				REQUIRE(framebuffer.has_value());
 				REQUIRE(withDepth.has_value());
 				REQUIRE(otherColor.has_value());
@@ -325,6 +447,7 @@ namespace Engine {
 					.ViewConstants = constants,
 					.EnvironmentConstants = constants,
 					.ProbeConstants = constants,
+					.FogConstants = constants,
 					.SceneDepth = sceneDepth,
 					.SceneNormals = sceneNormals,
 					.SceneRoughness = sceneRoughness,
@@ -332,17 +455,23 @@ namespace Engine {
 					.SceneColor = sceneColor,
 					.Framebuffer = *framebuffer,
 					.SsrColor = *ssrColor,
+					.Tiles = *tiles,
+					.Arguments = *arguments,
 					.AmbientOcclusion = sceneNormals,
 					.LinearViewDepth = sceneNormals,
 					.EnvironmentSpecular = sceneNormals,
 					.ReflectionProbeCubes = sceneNormals,
 				};
-				std::vector<SsrPassInputs> refused(5, valid);
+				std::vector<SsrPassInputs> refused(9, valid);
 				refused[0] = SsrPassInputs{};
 				refused[1].SceneRoughness = nullptr; // the prepass target X-C adds (decision 14)
 				refused[2].SsrColor = *smallSsrColor;
 				refused[3].Framebuffer = *withDepth;
 				refused[4].Framebuffer = *otherColor;
+				refused[5].FogConstants = nullptr; // M32's fog (Docs/Decisions/0047-m32-fog-ssr.md decision 6)
+				refused[6].Arguments = nullptr;    // M32's classification (decision 10)
+				refused[7].HalfResolution = true;  // SsrColor of the scene's size, not the half trace image's (decision 11)
+				refused[8].Arguments = buffer(16); // smaller than the arguments' layout
 				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
 				REQUIRE(list.has_value());
 				(*list)->open();
@@ -439,7 +568,7 @@ namespace Engine {
 				const RenderStats stats = fixture.Renderer().GetRenderStats();
 				const RenderPassStats* ssr = Test::SceneRendererIntegrationFixture::FindPass(stats, "SSR");
 				REQUIRE(ssr != nullptr);
-				CHECK(ssr->Dispatches == 1);
+				CHECK(ssr->Dispatches == 2);
 				CHECK(ssr->DrawCalls == 1);
 
 				// The wall is one colour (its emission and the probe's faint reflection at roughness 1, which SSR leaves alone).
@@ -481,6 +610,246 @@ namespace Engine {
 			}
 		}
 
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 6): in a fogged view the composite's addition passes through the fog in
+		// front of the floor, so the floor and its reflection fog as one surface. A fog dense enough that every pixel of the
+		// view has its MaxOpacity m: with SSR off a floor pixel is P (1 - m) + F m (P the probe's radiance), the wall W (1 - m)
+		// + F m, and with SSR on a floor pixel that reflects the wall adds what it traced, the fogged wall, less P, times 1 - m;
+		// with m = 1 the reflection adds nothing at all.
+		TEST_CASE("SsrPass: in a fogged view the reflection is fogged with the surface it lies on" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, ViewSize, ViewSize);
+			PublishMirrorAssets(fixture);
+			const auto readSceneColor = [&gpu, &fixture]()
+			{
+				Readback readback(gpu.GetDevice());
+				Result<Image> image = readback.ReadTexture(*fixture.Renderer().GetSceneColorTexture());
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				return std::move(*image);
+			};
+			const auto radiance = [](const Image& image, uint32_t x, uint32_t y)
+			{
+				std::array<uint16_t, 4> halves{};
+				std::memcpy(halves.data(), image.GetRow(y).data() + static_cast<size_t>(x) * sizeof(halves), sizeof(halves));
+				return glm::dvec3(Test::HalfToDouble(halves[0]), Test::HalfToDouble(halves[1]), Test::HalfToDouble(halves[2]));
+			};
+			RenderSnapshot snapshot = MakeMirrorSnapshot(fixture, RenderProjection::Perspective);
+			snapshot.Post.SsrEnabled = false;
+			fixture.Submit(snapshot);
+			const Image clear = readSceneColor();
+			constexpr double Opacity = 0.6;
+			const glm::dvec3 fogColor(0.4, 0.4, 0.5);
+			snapshot.Fog = RenderFog{ .Enabled = true, .Color = glm::vec3(fogColor), .Density = 5.0f, .MaxOpacity = static_cast<float>(Opacity), .SunGlow = 0.0f };
+			fixture.Submit(snapshot);
+			const Image fogged = readSceneColor();
+			snapshot.Post.SsrEnabled = true;
+			fixture.Submit(snapshot);
+			const Image reflected = readSceneColor();
+
+			uint32_t compared = 0;
+			for (uint32_t y = 0; y < ViewSize; ++y)
+			{
+				for (uint32_t x = 0; x < ViewSize; ++x)
+				{
+					const MirrorPixel kind = ClassifyMirrorPixel(snapshot.Camera, x, y);
+					CAPTURE(x);
+					CAPTURE(y);
+					if (kind == MirrorPixel::Wall)
+					{
+						const glm::dvec3 expected = radiance(clear, x, y) * (1.0 - Opacity) + fogColor * Opacity;
+						CHECK(glm::length(radiance(fogged, x, y) - expected) < 5e-3);
+					}
+					if (kind != MirrorPixel::ReflectsWall)
+						continue;
+					// The fogged wall the trace reads: the wall's own radiance at a pixel of the clear render's wall.
+					const glm::dvec3 probe = radiance(clear, x, y);
+					CHECK(glm::length(probe - ProbeRadiance) < 5e-3);
+					const glm::dvec3 floorOff = probe * (1.0 - Opacity) + fogColor * Opacity;
+					CHECK(glm::length(radiance(fogged, x, y) - floorOff) < 5e-3);
+					++compared;
+				}
+			}
+			CHECK(compared > 100);
+			// The reflection's addition: what the floor gains with SSR on is (the fogged wall - P) (1 - m), so the floor's two
+			// fogged images differ by 1 - m times what the trace reads less the probe.
+			std::optional<glm::dvec3> wall;
+			for (uint32_t y = 0; y < ViewSize && !wall; ++y)
+			{
+				for (uint32_t x = 0; x < ViewSize && !wall; ++x)
+				{
+					if (ClassifyMirrorPixel(snapshot.Camera, x, y) == MirrorPixel::Wall)
+						wall = radiance(fogged, x, y);
+				}
+			}
+			REQUIRE(wall.has_value());
+			uint32_t near = 0;
+			for (uint32_t y = 0; y < ViewSize; ++y)
+			{
+				for (uint32_t x = 0; x < ViewSize; ++x)
+				{
+					if (ClassifyMirrorPixel(snapshot.Camera, x, y) != MirrorPixel::ReflectsWall)
+						continue;
+					const glm::dvec3 gained = radiance(reflected, x, y) - radiance(fogged, x, y);
+					const glm::dvec3 expected = (*wall - ProbeRadiance) * (1.0 - Opacity);
+					near += glm::length(gained - expected) < 2e-2 ? 1U : 0U;
+				}
+			}
+			CHECK(near > 100);
+
+			// A fog that hides everything leaves nothing for the reflection to add.
+			snapshot.Fog.MaxOpacity = 1.0f;
+			snapshot.Post.SsrEnabled = false;
+			fixture.Submit(snapshot);
+			const Image hiddenOff = readSceneColor();
+			snapshot.Post.SsrEnabled = true;
+			fixture.Submit(snapshot);
+			CHECK(HasPass(fixture.Renderer(), "SSR"));
+			CHECK(readSceneColor().Pixels == hiddenOff.Pixels);
+		}
+
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 13): the classification lists exactly the tiles that hold a
+		// tracing pixel, and the renderer reports them for a completed frame. The mirror snapshot's floor traces (its roughness is
+		// below SsrMaxRoughness), its rough wall and the sky do not; SceneRoughness read back gives each pixel's test, so the
+		// expected tiles and pixels follow from it, at full and at half resolution (where a trace pixel tests the scene pixel at
+		// its footprint's centre), and the stats of a render after the frame completed report them exactly.
+		TEST_CASE("SsrPass: the trace covers only the tiles that hold a tracing pixel, which the stats report" * doctest::test_suite(Test::GpuSuite))
+		{
+			// At 64 x 64 every tile is whole at both resolutions; at 61 x 37 (31 x 19 at half) the last column and row of tiles
+			// are cut by the image's edge (M32's milestone review).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			for (const glm::uvec2 size : { glm::uvec2(ViewSize, ViewSize), glm::uvec2(61, 37) })
+			{
+				CAPTURE(size.x);
+				CAPTURE(size.y);
+				Test::SceneRendererIntegrationFixture fixture(gpu, size.x, size.y);
+				PublishMirrorAssets(fixture);
+				// The frame indices keep rising across both renders' frames, so the history never takes the second for an older one.
+				uint64_t frameIndex = 100;
+				for (const bool half : { false, true })
+				{
+					CAPTURE(half);
+					RenderSnapshot snapshot = MakeMirrorSnapshot(fixture, RenderProjection::Perspective);
+					snapshot.Quality.SsrHalfResolution = half;
+					snapshot.FrameIndex = ++frameIndex;
+					fixture.Submit(snapshot);
+					Readback readback(gpu.GetDevice());
+					const Result<Image> roughness = readback.ReadTexture(*fixture.Renderer().GetSceneRoughnessTexture());
+					REQUIRE_MESSAGE(roughness.has_value(), roughness.error().ToString());
+					const glm::uvec2 traceSize = SsrPass::GetTraceSize(size.x, size.y, half);
+					const auto traces = [&roughness, &snapshot, half, size, traceSize](uint32_t x, uint32_t y)
+					{
+						const uint32_t sceneX = half ? std::min((2 * x + 1) * size.x / (2 * traceSize.x), size.x - 1) : x;
+						const uint32_t sceneY = half ? std::min((2 * y + 1) * size.y / (2 * traceSize.y), size.y - 1) : y;
+						uint32_t word = 0;
+						std::memcpy(&word, roughness->GetRow(sceneY).data() + static_cast<size_t>(sceneX) * 8, sizeof(word));
+						const float value = static_cast<float>(word >> 24) / 255.0f;
+						return (word & 0x00FFFFFFu) != 0 && !(value > snapshot.Post.SsrMaxRoughness);
+					};
+					uint32_t expectedTiles = 0;
+					uint32_t expectedPixels = 0;
+					for (uint32_t tileY = 0; tileY < traceSize.y; tileY += SsrPass::TileSize)
+					{
+						for (uint32_t tileX = 0; tileX < traceSize.x; tileX += SsrPass::TileSize)
+						{
+							uint32_t traced = 0;
+							for (uint32_t y = tileY; y < std::min(tileY + SsrPass::TileSize, traceSize.y); ++y)
+							{
+								for (uint32_t x = tileX; x < std::min(tileX + SsrPass::TileSize, traceSize.x); ++x)
+									traced += traces(x, y) ? 1U : 0U;
+							}
+							expectedTiles += traced > 0 ? 1U : 0U;
+							expectedPixels += traced;
+						}
+					}
+					CHECK(expectedTiles > 0);
+					// At 64 x 64 the floor leaves tiles without a glossy pixel, which the trace skips; the 61 x 37 view is
+					// small enough that its half-resolution tiles may all hold one.
+					if (size == glm::uvec2(ViewSize, ViewSize))
+						CHECK(expectedTiles < SsrPass::GetTileCount(traceSize));
+					const std::optional<RenderStats> reported = RenderUntilAreaReported(gpu, fixture, snapshot, frameIndex);
+					REQUIRE(reported.has_value());
+					CHECK(reported->SsrHalfResolution == half);
+					CHECK(reported->SsrTiles == SsrPass::GetTileCount(traceSize));
+					CHECK(reported->SsrTracedTiles == expectedTiles);
+					CHECK(reported->SsrTracedPixels == expectedPixels);
+				}
+			}
+		}
+
+		// M32's milestone review: the tile list is view state that grows with the trace image. A view that rendered SSR at
+		// 64 x 64 and is resized to 128 x 96 lists the larger image's tiles and reflects as before.
+		TEST_CASE("SsrPass: a view resized to a larger image grows its tile list and reflects as before" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, ViewSize, ViewSize);
+			PublishMirrorAssets(fixture);
+			uint64_t frameIndex = 100;
+			RenderSnapshot small = MakeMirrorSnapshot(fixture, RenderProjection::Orthographic);
+			small.FrameIndex = ++frameIndex;
+			fixture.Submit(small);
+			const std::optional<RenderStats> before = RenderUntilAreaReported(gpu, fixture, small, frameIndex);
+			REQUIRE(before.has_value());
+			CHECK(before->SsrTiles == SsrPass::GetTileCount(glm::uvec2(ViewSize)));
+
+			REQUIRE(fixture.Renderer().Resize(128, 96).has_value());
+			RenderSnapshot large = MakeMirrorSnapshot(fixture, RenderProjection::Orthographic);
+			REQUIRE(large.Camera.ViewportWidth == 128);
+			large.FrameIndex = ++frameIndex;
+			const Image image = fixture.Render(large);
+			const MirrorCheck check = CheckMirrorImage(large, image, 1);
+			CHECK(check.Mismatched == 0);
+			CHECK(check.Hits > 100);
+			CHECK(check.Misses > 100);
+			const std::optional<RenderStats> after = RenderUntilAreaReported(gpu, fixture, large, frameIndex);
+			REQUIRE(after.has_value());
+			CHECK(after->SsrTiles == SsrPass::GetTileCount(glm::uvec2(128, 96)));
+			CHECK(after->SsrTracedTiles > before->SsrTracedTiles);
+		}
+
+		// M32's milestone review: a view of more glossy tiles than one row of trace groups holds. At 2,100 x 2,100 (69,169
+		// tiles) a floor, a wall and a backdrop all glossy list every tile, so the trace runs two rows (GetTraceGroups:
+		// 65,535 and 3,634 groups) and the composite draws 69,169 instances; the floor must still show the wall where its
+		// reflection hits it and the probe where it misses, one sample per tile. What it guards is the rows' arithmetic: the
+		// classification's arguments and CSTrace's tile index y * SsrTraceRowGroups + x, which a broken row would leave untraced
+		// in its tiles. It cannot show a dispatch over the limit itself: this machine's NVIDIA driver allows 2^31 - 1 groups
+		// per dimension, where Vulkan guarantees only 65,535 (the CPU case "the trace's dispatch keeps each dimension within
+		// Vulkan's guaranteed 65,535 groups" checks the arithmetic, and the read-back arguments are checked here).
+		TEST_CASE("SsrPass: a view of more glossy tiles than one row of trace groups traces and composites every tile" * doctest::test_suite(Test::GpuSuite))
+		{
+			constexpr uint32_t LargeSize = 2100;
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, LargeSize, LargeSize);
+			PublishMirrorAssets(fixture);
+			fixture.Assets().Publish(GlossyWallMaterialHandle, MakeMaterial(glm::vec3(1.0f), 1.0f, 0.0f, glm::vec3(0.6f, 0.2f, 0.05f)));
+			RenderSnapshot snapshot = MakeMirrorSnapshot(fixture, RenderProjection::Orthographic);
+			// The wall glossy (its reflections reach the floor, whose radiance is the probe's, so they add nothing), and a glossy
+			// backdrop behind the floor's far edge filling the rest of the view (its radiance the probe's too).
+			snapshot.Meshes[1].Materials = { GlossyWallMaterialHandle };
+			MeshDrawItem backdrop = snapshot.Meshes[0];
+			backdrop.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -FloorHalfExtent - 0.4f)) * glm::scale(glm::mat4(1.0f), glm::vec3(30.0f, 30.0f, 1.0f));
+			backdrop.Entity = UUID(42);
+			backdrop.PickId = 0;
+			snapshot.Meshes.push_back(backdrop);
+			uint64_t frameIndex = 100;
+			snapshot.FrameIndex = ++frameIndex;
+			const Image image = fixture.Render(snapshot);
+			const MirrorCheck check = CheckMirrorImage(snapshot, image, SsrPass::TileSize);
+			CHECK(check.Mismatched == 0);
+			CHECK(check.Hits > 1000);
+			CHECK(check.Misses > 1000);
+			const std::optional<RenderStats> reported = RenderUntilAreaReported(gpu, fixture, snapshot, frameIndex);
+			REQUIRE(reported.has_value());
+			const uint32_t tiles = SsrPass::GetTileCount(glm::uvec2(LargeSize));
+			CHECK(tiles == 69169);
+			CHECK(reported->SsrTiles == tiles);
+			CHECK(reported->SsrTracedTiles == tiles);
+			CHECK(glm::uvec2(reported->SsrTraceGroups, reported->SsrTraceRows) == SsrPass::GetTraceGroups(tiles));
+		}
+
 		// The probe fallback is exact where nothing is traced: a floor rougher than SsrMaxRoughness traces no ray, and an
 		// SsrIntensity of 0 replaces nothing, so either image equals the render with SSR off, while the pass still records.
 		TEST_CASE("SsrPass: a surface rougher than SsrMaxRoughness, or an SsrIntensity of 0, keeps the probes' reflection exactly"
@@ -498,6 +867,22 @@ namespace Engine {
 			const Image rough = fixture.Render(snapshot);
 			CHECK(HasPass(fixture.Renderer(), "SSR"));
 			CHECK(rough.Pixels == off.Pixels);
+			// M32 (decision 10): no tile is listed, so the trace and the composite draw nothing; the stats of a later render report
+			// the completed frame's empty area.
+			const uint64_t first = snapshot.FrameIndex;
+			std::optional<RenderStats> reported;
+			for (uint32_t frame = 0; frame < 3 * gpu.GetDevice().GetFramesInFlight() + 2 && !reported; ++frame)
+			{
+				snapshot.FrameIndex += 1;
+				CHECK(fixture.Render(snapshot).Pixels == off.Pixels);
+				const RenderStats stats = fixture.Renderer().GetRenderStats();
+				if (stats.SsrAreaAvailable && stats.SsrAreaFrameIndex >= first)
+					reported = stats;
+			}
+			REQUIRE(reported.has_value());
+			CHECK(reported->SsrTiles > 0);
+			CHECK(reported->SsrTracedTiles == 0);
+			CHECK(reported->SsrTracedPixels == 0);
 			snapshot.Post.SsrMaxRoughness = PostProcessSettings{}.SsrMaxRoughness;
 			snapshot.Post.SsrIntensity = 0.0f;
 			const Image faded = fixture.Render(snapshot);
@@ -506,6 +891,44 @@ namespace Engine {
 			// With the intensity back, the floor reflects the wall.
 			snapshot.Post.SsrIntensity = 1.0f;
 			CHECK(fixture.Render(snapshot).Pixels != off.Pixels);
+		}
+
+		// M32 (decision 11): the half-resolution trace reflects what the full one does: on the mirror floor nine pixels in ten
+		// within six levels of the full-resolution image, the rest along the reflection's edges, where the upsample's taps mix
+		// the wall and the probe; it differs from the full-resolution image, and two renders of it are equal.
+		TEST_CASE("SsrPass: a half-resolution trace reflects what the full one does" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, ViewSize, ViewSize);
+			PublishMirrorAssets(fixture);
+			for (const RenderProjection projection : { RenderProjection::Orthographic, RenderProjection::Perspective })
+			{
+				CAPTURE(static_cast<int>(projection));
+				RenderSnapshot snapshot = MakeMirrorSnapshot(fixture, projection);
+				const Image full = fixture.Render(snapshot);
+				snapshot.Quality.SsrHalfResolution = true;
+				const Image half = fixture.Render(snapshot);
+				CHECK(half.Pixels != full.Pixels);
+				CHECK(fixture.Render(snapshot).Pixels == half.Pixels);
+				uint32_t compared = 0;
+				uint32_t near = 0;
+				for (uint32_t y = 0; y < ViewSize; ++y)
+				{
+					for (uint32_t x = 0; x < ViewSize; ++x)
+					{
+						const MirrorPixel kind = ClassifyMirrorPixel(snapshot.Camera, x, y);
+						if (kind != MirrorPixel::ReflectsWall && kind != MirrorPixel::ReflectsProbe)
+							continue;
+						++compared;
+						near += IsNear(GetPixel(half, x, y), GetPixel(full, x, y), 6) ? 1U : 0U;
+					}
+				}
+				CAPTURE(compared);
+				CAPTURE(near);
+				CHECK(compared > 200);
+				CHECK(near * 10 >= compared * 9);
+			}
 		}
 
 		TEST_CASE("SsrPass: a renderer with SSR recovers from a device loss with the same image" * doctest::test_suite(Test::GpuSuite))

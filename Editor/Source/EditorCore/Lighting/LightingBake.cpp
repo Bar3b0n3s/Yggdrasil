@@ -74,7 +74,8 @@ namespace Engine {
 			request.Height = IrradianceProbeFaceSize;
 			request.Quality = { .ShadowMapSize = settings.Rendering.ShadowMapSize,
 				.SsaoHalfResolution = settings.Rendering.SsaoHalfResolution,
-				.MaxShadedLights = settings.Rendering.MaxShadedLights };
+				.MaxShadedLights = settings.Rendering.MaxShadedLights,
+				.SsrHalfResolution = settings.Rendering.SsrHalfResolution };
 			request.SortingLayers = settings.SortingLayers.Layers;
 			ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(scene, request));
 			snapshot.Camera.ClearColor = glm::vec3(0.0f);

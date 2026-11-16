@@ -26,7 +26,9 @@
 //     which in a 90-degree face traces only that face's image and fades at its edges, so it would seam the cube, add a
 //     second specular bounce the views add again, and make a bake depend on a view toggle. GTAO (SsaoEnabled) is kept as
 //     the scene sets it: its occlusion only darkens the ambient light in the creases a face sees, the geometry's own
-//     occlusion the scene's views show too, so a bake keeps the look the scene is lit with.
+//     occlusion the scene's views show too, so a bake keeps the look the scene is lit with. M32
+//     (Docs/Decisions/0047-m32-fog-ssr.md decision 4): the scene's fog is off too (RenderSnapshot::Fog), so a probe bakes
+//     the light alone and the views fog it where they shade it, never twice.
 //   - Deterministic for a device class, as the environment bake is (no temporal noise, no atomics deciding a sum or an
 //     order): two captures of one snapshot give equal texels, and the CPU steps below are pure with IEEE-exact operations,
 //     sqrt and DetMath only, so two bakes of one scene write byte-identical files (the acceptance "two probe bakes are

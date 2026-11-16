@@ -13,6 +13,7 @@
 #include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/FogComponent.h"
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
@@ -99,7 +100,10 @@ namespace Engine {
 		// MaterialParameters (Registration/MaterialParametersRegistration.cpp; M31, Docs/Decisions/0046-m31-material-parameters.md
 		// decision 1). ADR 0042's phase-5 ledger: phase 5's categories (M30's Navigation, M31's MaterialParameters, M32's Fog)
 		// are appended after Terrain in landing order.
-		MaterialParametersComponent>;
+		MaterialParametersComponent,
+		// Fog (Registration/FogRegistration.cpp; M32, Docs/Decisions/0047-m32-fog-ssr.md decision 2). ADR 0042's phase-5 ledger:
+		// M30's Navigation, M31's MaterialParameters and M32's Fog categories go after Terrain, in landing order.
+		FogComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -123,6 +127,8 @@ namespace Engine {
 	// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 1), after Terrain, in ADR 0042's phase-5 ledger's landing
 	// order.
 	void RegisterMaterialParametersComponents(TypeRegistry& registry);
+	// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 2), after Terrain, in ADR 0042's phase-5 ledger's landing order.
+	void RegisterFogComponents(TypeRegistry& registry);
 
 	// Registers every built-in component (the thirteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order

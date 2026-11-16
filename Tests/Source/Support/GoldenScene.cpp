@@ -242,7 +242,7 @@ namespace Engine {
 				const RenderExtractionRequest request{
 					.Width = options.Width,
 					.Height = options.Height,
-					.Quality = { .ShadowMapSize = settings.Rendering.ShadowMapSize, .SsaoHalfResolution = settings.Rendering.SsaoHalfResolution },
+					.Quality = { .ShadowMapSize = settings.Rendering.ShadowMapSize, .SsaoHalfResolution = settings.Rendering.SsaoHalfResolution, .SsrHalfResolution = settings.Rendering.SsrHalfResolution },
 					.SortingLayers = settings.SortingLayers.Layers,
 				};
 				ENGINE_TRY_ASSIGN(RenderSnapshot snapshot, ExtractRenderSnapshot(*loaded, request));

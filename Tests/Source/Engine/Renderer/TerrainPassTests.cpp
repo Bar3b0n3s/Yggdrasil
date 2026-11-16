@@ -8,16 +8,19 @@
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Graphics/RenderTargetPool.h"
+#include "Engine/Renderer/Fog.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TerrainLod.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
+#include "Shared/EnvironmentConstants.h"
 #include "Support/BufferCreationFails.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/RenderReference.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -25,6 +28,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -283,6 +287,56 @@ namespace Engine {
 			const Image unsplatted = fixture.Render(snapshot);
 			CHECK(GetPixel(unsplatted, 56, 32) == left);
 			CHECK(GetPixel(unsplatted, 8, 32) == left);
+		}
+
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 6): the terrain's forward pass fogs its radiance as the meshes' does.
+		// A flat terrain seen straight down by an orthographic camera 20 m above it: each pixel's fogged radiance is its clear
+		// radiance blended toward the fog's colour by the oracle's amount at the point the pixel's ray meets the ground.
+		TEST_CASE("SceneRenderer: a terrain is fogged as a mesh is" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 64, 64);
+			fixture.Assets().Publish(HeightfieldHandle, CreateRef<HeightfieldData>(MakeFlatHeightfield(33)));
+			RenderSnapshot snapshot = MakeTerrainSnapshot(fixture, RenderProjection::Orthographic, glm::vec3(16.0f, 20.0f, 16.0f),
+				glm::vec3(16.0f, 0.0f, 16.0f), 60.0f, 16.0f, 32.0f, 4.0f);
+			const auto readSceneColor = [&gpu, &fixture]()
+			{
+				Readback readback(gpu.GetDevice());
+				Result<Image> image = readback.ReadTexture(*fixture.Renderer().GetSceneColorTexture());
+				REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+				return std::move(*image);
+			};
+			const auto radiance = [](const Image& image, uint32_t x, uint32_t y)
+			{
+				std::array<uint16_t, 4> halves{};
+				std::memcpy(halves.data(), image.GetRow(y).data() + static_cast<size_t>(x) * sizeof(halves), sizeof(halves));
+				return glm::dvec3(Test::HalfToDouble(halves[0]), Test::HalfToDouble(halves[1]), Test::HalfToDouble(halves[2]));
+			};
+			fixture.Submit(snapshot);
+			const Image clear = readSceneColor();
+			snapshot.Fog = RenderFog{ .Enabled = true, .Color = glm::vec3(0.6f, 0.65f, 0.7f), .Density = 0.02f, .StartDistance = 2.0f, .MaxOpacity = 0.95f, .HeightDensity = 0.08f, .HeightFalloff = 0.3f, .BaseHeight = 1.0f };
+			snapshot.FrameIndex += 1;
+			fixture.Submit(snapshot);
+			const Image fogged = readSceneColor();
+			const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+			uint32_t mismatched = 0;
+			for (uint32_t y = 4; y < 60; ++y)
+			{
+				for (uint32_t x = 4; x < 60; ++x)
+				{
+					const Result<RenderRay> ray = ComputeViewPixelRay(snapshot.Camera, x, y);
+					REQUIRE(ray.has_value());
+					const glm::dvec3 origin(ray->Origin);
+					const glm::dvec3 direction(ray->Direction);
+					const glm::dvec4 reference = Test::EvaluateFog(fog, origin + direction * (-origin.y / direction.y));
+					CHECK(reference.a > 0.3);
+					const glm::dvec3 expected = radiance(clear, x, y) * (1.0 - reference.a) + glm::dvec3(reference) * reference.a;
+					const glm::dvec3 actual = radiance(fogged, x, y);
+					mismatched += glm::length(actual - expected) < 5e-3 + glm::length(expected) * 4e-3 ? 0U : 1U;
+				}
+			}
+			CHECK(mismatched == 0);
 		}
 
 		// The picking prepass writes the terrain's pick id, and the stats count both terrain rows; a terrain whose heightfield is

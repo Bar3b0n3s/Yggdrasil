@@ -39,7 +39,7 @@
 //   - overdraw set 0 (the Overdraw data view's pipelines, M26: the prepass's before M26): b0 ViewConstants, t10 Instances,
 //     s2 AnisoWrap and the push constants;
 //   - forward set 0: b0 ViewConstants, b1 ShadowConstants, b2 EnvironmentConstants, b3 LightClusterConstants, b4
-//     ProbeConstants (M26), t0 Lights, t1 ShadowCascades, t2 ShadowAtlas, t3 EnvSpecular, t5 BRDFLut, t6 AmbientOcclusion,
+//     ProbeConstants (M26), b5 FogConstants (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 5), t0 Lights, t1 ShadowCascades, t2 ShadowAtlas, t3 EnvSpecular, t5 BRDFLut, t6 AmbientOcclusion,
 //     t8 ViewDepth, t9 SceneNormals, t10 Instances, t11 the light cluster masks (M23, Renderer/LightClusterPass.h), t12
 //     PointShadowMaps, t13 the irradiance volumes' coefficients and t14 the reflection probes' cubes (M26), t15
 //     PointShadowMapsHalf (M29), t16 the dissolve noise (M31), s0 LinearClamp, s1 ShadowCompare, s2 AnisoWrap and the push
@@ -55,8 +55,9 @@ namespace Engine {
 		// with a constant buffer of the layout; Vulkan ignores the slot. b0 to b4 of set 0 are the per-view constants of
 		// §8.4, so the draw's push constants take the first slot after them: b3 until M23 (ADR 0012 decision 22), b4 since
 		// M23's LightClusterConstants took b3 (Docs/Decisions/0034-m23-contract.md decision 5), b5 since M26's ProbeConstants
-		// took b4 (Docs/Decisions/0037-m26-contract.md decision 16).
-		inline constexpr uint32_t DrawConstantsSlot = 5;
+		// took b4 (Docs/Decisions/0037-m26-contract.md decision 16), b6 since M32's FogConstants took b5
+		// (Docs/Decisions/0047-m32-fog-ssr.md decision 5).
+		inline constexpr uint32_t DrawConstantsSlot = 6;
 
 		// The registers of set 0 (§8.4) and set 1.
 		inline constexpr uint32_t ViewConstantsRegister = 0;
@@ -64,6 +65,7 @@ namespace Engine {
 		inline constexpr uint32_t EnvironmentConstantsRegister = 2;
 		inline constexpr uint32_t LightClusterConstantsRegister = 3; // M23 (stream C): the cluster grid
 		inline constexpr uint32_t ProbeConstantsRegister = 4;        // M26 (stream Q-B): the view's probes
+		inline constexpr uint32_t FogConstantsRegister = 5;          // M32: the view's fog (Renderer/Fog.h)
 		inline constexpr uint32_t LightsRegister = 0;
 		inline constexpr uint32_t ShadowCascadesRegister = 1;
 		inline constexpr uint32_t ShadowAtlasRegister = 2;

@@ -5,6 +5,7 @@
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/ViewConstants.h"
 
 #include <string>
@@ -18,6 +19,7 @@ namespace Engine {
 		// The set-0 registers of §8.4 the skybox binds.
 		constexpr uint32_t SkyboxViewConstantsSlot = 0;
 		constexpr uint32_t SkyboxEnvironmentConstantsSlot = 2;
+		constexpr uint32_t SkyboxFogConstantsSlot = 5; // M32: the forward view layout's register (Private/ForwardPipelines.h)
 		constexpr uint32_t SkyboxCubeSlot = 4;
 		constexpr uint32_t SkyboxSamplerSlot = 0;
 
@@ -30,6 +32,7 @@ namespace Engine {
 			layout.bindings = {
 				nvrhi::BindingLayoutItem::ConstantBuffer(SkyboxViewConstantsSlot),
 				nvrhi::BindingLayoutItem::ConstantBuffer(SkyboxEnvironmentConstantsSlot),
+				nvrhi::BindingLayoutItem::ConstantBuffer(SkyboxFogConstantsSlot),
 				nvrhi::BindingLayoutItem::Texture_SRV(SkyboxCubeSlot),
 				nvrhi::BindingLayoutItem::Sampler(SkyboxSamplerSlot),
 			};
@@ -43,6 +46,7 @@ namespace Engine {
 				.ConstantBuffers = {
 					{ .Set = 0, .Register = SkyboxViewConstantsSlot, .ByteSize = sizeof(ViewConstants) },
 					{ .Set = 0, .Register = SkyboxEnvironmentConstantsSlot, .ByteSize = sizeof(EnvironmentConstants) },
+					{ .Set = 0, .Register = SkyboxFogConstantsSlot, .ByteSize = sizeof(FogConstants) },
 				},
 			};
 		}
@@ -101,8 +105,9 @@ namespace Engine {
 
 	Status SkyboxPass::Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const SkyboxPassInputs& inputs)
 	{
-		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr && inputs.ViewConstants != nullptr && inputs.EnvironmentConstants != nullptr && inputs.Skybox != nullptr,
-			"SkyboxPass::Record needs the framebuffer, both constant buffers and the skybox cube");
+		ENGINE_CORE_ASSERT(inputs.Framebuffer != nullptr && inputs.ViewConstants != nullptr && inputs.EnvironmentConstants != nullptr
+				&& inputs.FogConstants != nullptr && inputs.Skybox != nullptr,
+			"SkyboxPass::Record needs the framebuffer, the three constant buffers and the skybox cube");
 		ENGINE_CORE_ASSERT(inputs.Skybox->getDesc().dimension == nvrhi::TextureDimension::TextureCube, "SkyboxPass::Record needs a cube texture");
 		State& state = *m_State;
 
@@ -110,6 +115,7 @@ namespace Engine {
 		desc.bindings = {
 			nvrhi::BindingSetItem::ConstantBuffer(Utils::SkyboxViewConstantsSlot, inputs.ViewConstants),
 			nvrhi::BindingSetItem::ConstantBuffer(Utils::SkyboxEnvironmentConstantsSlot, inputs.EnvironmentConstants),
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::SkyboxFogConstantsSlot, inputs.FogConstants),
 			nvrhi::BindingSetItem::Texture_SRV(Utils::SkyboxCubeSlot, inputs.Skybox),
 			nvrhi::BindingSetItem::Sampler(Utils::SkyboxSamplerSlot, state.LinearClamp),
 		};

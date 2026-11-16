@@ -37,6 +37,7 @@
 #include "Engine/Renderer/TonemapPass.h"
 #include "Engine/Renderer/UpscalePass.h"
 #include "Shared/EnvironmentConstants.h"
+#include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/ShaderLight.h"
@@ -226,6 +227,17 @@ namespace Engine {
 			nvrhi::FramebufferHandle SsrFramebuffer{};
 		};
 
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 13): one timing slot's SSR area readback: the copy of the arguments
+		// buffer (SsrPass::GetAreaReadbackDesc) a render that recorded SSR in the slot made, created on its first use, and what the
+		// slot's last submitted render recorded (OnSubmitted sets it from SceneRenderer::State's PendingSsrArea).
+		struct SceneRendererSsrAreaSlot
+		{
+			nvrhi::BufferHandle Readback{};
+			uint64_t FrameIndex = 0;
+			bool Submitted = false; // a render used the slot since its last collection
+			bool Recorded = false;  // that render copied its arguments into Readback
+		};
+
 		// M18 (C18.1, Docs/Decisions/0029-m18-contract.md decision 6): the output stage's per-view objects at the renderer's
 		// (view) size, owned by stream F (SceneRendererOutput.cpp) and created only while the output mapping is not the
 		// identity; at the identity the editor overlays draw into the scene's LDR target with SceneDepth, as before.
@@ -298,8 +310,16 @@ namespace Engine {
 			// with a camera outside the wireframe), so the Ambient stage records the depth pyramid it traces over even without
 			// GTAO; cleared when its targets or the pyramid fail (their error kept), so the Forward stage records no SSR pass.
 			bool Ssr = false;
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 11): the trace at half resolution
+			// (RenderQualitySettings::SsrHalfResolution).
+			bool HalfSsr = false;
+			// M32's milestone review: the skybox draws over the cleared pixels (a Lit view clearing to a skybox it has and shows).
+			bool DrawsSkybox = false;
 			ViewConstants View{};
 			EnvironmentConstants Environment{};
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Renderer/Fog.h), Enabled only in a Lit view
+			// with a camera outside the wireframe whose snapshot holds fog.
+			FogConstants Fog{};
 			ShadowConstants Shadow{};
 			ShadowCascadeSet Cascades{};
 			SpotShadowAtlas Spots{};
@@ -477,8 +497,8 @@ namespace Engine {
 		// M26 (C26.1, R-AEX; decision 15, stream X-A): the Exposure pass's two sets (its view's SceneColor, bloom chain and
 		// exposure buffers).
 		PassBindingCache ExposureBindings{};
-		// M26 (C26.1, R-SSR; decision 18, stream X-D): the SSR pass's two sets (its view's prepass targets, pyramid, SsrColor and
-		// SceneColor).
+		// M26 (C26.1, R-SSR; decision 18, stream X-D): the SSR pass's sets (its view's prepass targets, pyramid, SsrColor and
+		// SceneColor; M32: three, with the classification's tile list and arguments).
 		PassBindingCache SsrBindings{};
 		Scope<RenderTargetPool> TargetPool{};
 		Scope<AsyncPicker> Picker{};
@@ -522,6 +542,9 @@ namespace Engine {
 		uint64_t PipelineGeneration = 0;
 		nvrhi::BufferHandle ViewConstantsBuffer{};
 		nvrhi::BufferHandle EnvironmentConstantsBuffer{};
+		// M32 (decision 5): the view's FogConstants (b5 of the forward, skybox and SSR-composite sets, b1 of the Sprites stage's
+		// quads), written with the other per-view constants.
+		nvrhi::BufferHandle FogConstantsBuffer{};
 		nvrhi::BufferHandle LightBuffer{};
 		// M23 (C23.1, Docs/Decisions/0034-m23-contract.md decisions 2 and 5): the mesh path's per-view buffers (the placement
 		// rule's place 2), null until their streams create them: the Instances structured buffer of InstanceRecord (stream
@@ -552,6 +575,14 @@ namespace Engine {
 		// M26 (W26.2's review): RenderStats::HistoryFrames of the last render, which the next continues; 0 in the new state a
 		// device loss's release makes.
 		uint32_t HistoryFrames = 0;
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 13): the SSR pass's tile list (grown to the trace image's
+		// tiles, never shrunk) and arguments buffer, created by the first render with SSR (EnsureSsrTargets); one readback slot
+		// per timing slot (resized with TimingSubmissions); and what the render awaiting OnSubmitted recorded in its timing slot
+		// (Recorded with the frame's index), which OnSubmitted moves into the slot. A device loss's release drops them all.
+		nvrhi::BufferHandle SsrTiles{};
+		nvrhi::BufferHandle SsrArguments{};
+		std::vector<Detail::SceneRendererSsrAreaSlot> SsrAreaSlots{};
+		Detail::SceneRendererSsrAreaSlot PendingSsrArea{};
 		// M18 (C18.3, decision 26): the renderer's registration with its device's recreation registry (Create); kept by
 		// ReleaseGpuObjects like the back-references.
 		GpuRecreationRegistration Recreation{};
@@ -732,9 +763,15 @@ namespace Engine {
 		// A record error is the render's, and SceneColor keeps the forward passes' image.
 		void RecordSsr(Detail::SceneRendererFrame& frame);
 		// M26 (stream X-D): SsrColor and SsrFramebuffer at the scene resolution (Targets), and the depth pyramid's ViewDepth when
-		// GTAO did not create it, each created when missing. Errors: those of the pool and the framebuffer creation (Gpu,
+		// GTAO did not create it, each created when missing. M32: SsrColor at the trace image's size (SsrPass::GetTraceSize with
+		// `halfResolution`), replaced when it has another size; the tile list when missing or too small for the trace image's
+		// tiles; the arguments buffer when missing. Errors: those of the pool, the framebuffer and the buffer creations (Gpu,
 		// OutOfMemory after its trim and retry).
-		[[nodiscard]] Status EnsureSsrTargets();
+		[[nodiscard]] Status EnsureSsrTargets(bool halfResolution);
+		// M32 (decision 13): the SSR area of the render the timing slot `slot` last held, which has completed: its readback's
+		// counts when that render recorded SSR, unavailable when it did not (or the map failed); nullopt when no render used
+		// the slot since its last collection. Clears the slot's flags.
+		[[nodiscard]] std::optional<RenderSsrAreaSample> CollectSsrArea(uint32_t slot);
 		// M21's Sprites pass (Docs/Decisions/0032-m21-contract.md decision 4): in a Lit view with a camera (not the wireframe),
 		// the snapshot's sprites in its draw order, one QuadBatcher quad each in world space (Asset/SpriteGeometry.h's quad of
 		// the frame or texture this stage resolves through the GpuResourceCache, the camera's view-projection, the Point

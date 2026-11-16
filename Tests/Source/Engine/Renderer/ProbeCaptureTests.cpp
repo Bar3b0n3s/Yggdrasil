@@ -379,6 +379,28 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
+		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 4): a probe bakes the scene's light, which the views fog where they
+		// shade it, so a capture leaves the scene's fog out: a dense fog over the skybox and the wall changes no texel.
+		TEST_CASE("ProbeCapture: a capture leaves the scene's fog out, so a Fog changes no texel" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				ProbeCaptureSetup setup(gpu);
+				RenderSnapshot snapshot = MakeProbeSnapshot(glm::vec3(0.2f, 0.05f, 0.1f));
+				const glm::mat4 wall = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, -3.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f, 2.0f, 1.0f));
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = wall, .Mesh = UUID(QuadMeshHandle), .Materials = { UUID(FirstMarkerMaterialHandle) }, .Entity = UUID(2) });
+				const glm::vec3 position(0.0f, 1.0f, 0.0f);
+				const Result<ProbeCubeCapture> clear = setup.GetCapture().Capture(snapshot, position, 16);
+				REQUIRE_MESSAGE(clear.has_value(), clear.error().ToString());
+				snapshot.Fog = RenderFog{ .Enabled = true, .Color = glm::vec3(0.9f, 0.9f, 0.9f), .Density = 2.0f, .MaxOpacity = 1.0f, .FogSkybox = true };
+				const Result<ProbeCubeCapture> fogged = setup.GetCapture().Capture(snapshot, position, 16);
+				REQUIRE_MESSAGE(fogged.has_value(), fogged.error().ToString());
+				CHECK(ToBytes(*fogged) == ToBytes(*clear));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
 		// M18's recreation protocol (decision 29): the capture registers itself for its command list and staging, its renderer
 		// is place 2, and a capture after the recovery gives the texels it gave before.
 		TEST_CASE("ProbeCapture: a capture after a device loss gives the texels it gave before" * doctest::test_suite(Test::GpuSuite))

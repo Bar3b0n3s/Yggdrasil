@@ -9,6 +9,7 @@
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/FogComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
@@ -667,12 +668,13 @@ namespace Engine {
 
 		std::optional<RenderEnvironment> environment;
 		std::optional<PostProcessSettings> post;
+		std::optional<RenderFog> fog;
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 24): the sprites' places in the one 2D draw order and the
 		// tilemaps' canonical positions, from which the tilemaps are placed among the sprites below.
 		std::vector<Utils::SpriteDrawKey> spriteKeys;
 		std::vector<uint32_t> tilemapPositions;
 		uint32_t canonicalPosition = 0;
-		scene.ForEachCanonical([&snapshot, &environment, &post, &request, &spriteKeys, &tilemapPositions, &canonicalPosition](ConstEntity entity)
+		scene.ForEachCanonical([&snapshot, &environment, &post, &fog, &request, &spriteKeys, &tilemapPositions, &canonicalPosition](ConstEntity entity)
 		{
 			if (!Utils::IsEffectivelyEnabled(entity))
 				return;
@@ -781,6 +783,24 @@ namespace Engine {
 			}
 			if (const PostProcessComponent* component = entity.TryGetComponent<PostProcessComponent>(); component != nullptr && !post.has_value())
 				post = Utils::MakePostProcessSettings(*component);
+			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 4): the first effectively enabled Fog, as Environment and PostProcess.
+			if (const FogComponent* component = entity.TryGetComponent<FogComponent>(); component != nullptr && !fog.has_value())
+			{
+				fog = RenderFog{
+					.Enabled = true,
+					.Color = component->Color,
+					.AmbientTint = component->AmbientTint,
+					.Density = component->Density,
+					.StartDistance = component->StartDistance,
+					.MaxOpacity = component->MaxOpacity,
+					.HeightDensity = component->HeightDensity,
+					.HeightFalloff = component->HeightFalloff,
+					.BaseHeight = component->BaseHeight,
+					.SunGlow = component->SunGlow,
+					.SunGlowExponent = component->SunGlowExponent,
+					.FogSkybox = component->FogSkybox,
+				};
+			}
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): listed in canonical order, sorted into draw order below.
 			if (const SpriteRendererComponent* sprite = entity.TryGetComponent<SpriteRendererComponent>())
 			{
@@ -831,6 +851,7 @@ namespace Engine {
 		Utils::AssignTerrainPickIds(snapshot);
 		snapshot.Environment = environment.value_or(RenderEnvironment{});
 		snapshot.Post = post.value_or(PostProcessSettings{});
+		snapshot.Fog = fog.value_or(RenderFog{});
 		Utils::SortSpritesForDrawing(snapshot.Sprites);
 		Utils::PlaceTilemapsForDrawing(snapshot.Tilemaps, tilemapPositions, std::move(spriteKeys));
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 7): the view's UI, laid out at the scene resolution of the

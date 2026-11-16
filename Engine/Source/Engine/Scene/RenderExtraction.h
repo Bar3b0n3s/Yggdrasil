@@ -156,6 +156,9 @@ namespace Engine {
 	//     from the matrix's translation, direction its normalized -Z axis), with the component's fields.
 	//   - Environment and Post: the first effectively enabled EnvironmentComponent and PostProcessComponent in canonical
 	//     order (both are unique per scene, §5.3), or their defaults when there is none.
+	//   - Fog (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 4): the first effectively enabled FogComponent in canonical
+	//     order (unique per scene), its fields as they are with Enabled set; the defaults (Enabled false) without one, in
+	//     every view and every scene, edit scenes included.
 	//   - Alpha: request.Alpha.
 	//   - Texts (M8): every effectively enabled entity with a TextComponent whose Text is not empty, with its fields mapped to
 	//     TextItem (Space, Alignment and the font handle as they are; World = the rendered world matrix, used by World

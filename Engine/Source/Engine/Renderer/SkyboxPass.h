@@ -18,7 +18,13 @@
 // cube's mip chain), times Intensity, all from EnvironmentConstants (Shared/EnvironmentConstants.h). Linear radiance out:
 // exposure and tonemapping follow in TonemapPass.
 //
-// Binding layout (set 0, the registers of §8.4): b0 ViewConstants, b2 EnvironmentConstants, t4 EnvSkybox, s0 LinearClamp.
+// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): in a fogged view whose fog has FogSkybox, each pixel is fogged as the
+// sky at infinite depth along its view ray (Common/Fog.slang's EvaluateSkyFog, Renderer/Fog.h); without fog it is unchanged.
+// M32's milestone review: with FogConstants::SkyIsClearColor the pass draws the fog's ClearColor in the cube's place (the
+// renderer records it so in a fogged view with FogSkybox whose cleared pixels no skybox draws over, binding a black cube).
+//
+// Binding layout (set 0, the registers of §8.4): b0 ViewConstants, b2 EnvironmentConstants, b5 FogConstants (M32), t4
+// EnvSkybox, s0 LinearClamp.
 // The pipeline is created for GetSceneColorFramebufferInfo() (SceneTargetFormats.h). Created once per device at startup and
 // owned by SceneRendererPipelines; the pass keeps no binding sets: each Record takes them from the view's PassBindingCache.
 // Main thread only; not copyable or movable. Frozen by the M8 contract (Docs/Decisions/0013-m8-decisions.md decision 9).
@@ -33,6 +39,7 @@ namespace Engine {
 		nvrhi::IFramebuffer* Framebuffer = nullptr;
 		nvrhi::IBuffer* ViewConstants = nullptr;        // b0; never null
 		nvrhi::IBuffer* EnvironmentConstants = nullptr; // b2; never null
+		nvrhi::IBuffer* FogConstants = nullptr;         // b5 (M32: Shared/FogConstants.h); never null
 		nvrhi::ITexture* Skybox = nullptr;              // the environment's skybox cube (GpuEnvironment::Skybox); never null
 	};
 
