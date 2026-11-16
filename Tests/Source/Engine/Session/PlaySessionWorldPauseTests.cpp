@@ -520,6 +520,75 @@ return Script.Define("Level", L)
 			CHECK(session.GetScriptErrors().GetErrors().empty());
 		}
 
+		// The batch-2 landing (ADR 0042's merge notes: M28 and M35 both change the audio lines of PlaySession's scene
+		// replacement): a Scene.Load and a Scene.Reload while the world is paused keep both the session's audio mix (M28,
+		// Docs/Decisions/0043-m28-game-services.md decision 9) and the world pause on the new scene's voices (M35, decision 3),
+		// and the session's end restores the mix recorded before it.
+		TEST_CASE("PlaySession: a Scene.Load while the world is paused keeps the session's audio mix and holds the new scene's world voices")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle menu(0x35000d), next(0x35000e);
+			REQUIRE(fixture.AddScript(menu, "Assets/Scripts/Menu.luau", R"(
+local M = { RunsWhileWorldPaused = true }
+function M:OnFixedUpdate()
+	local tick = Time.GetSessionTick()
+	if tick == 3 then
+		Audio.SetGroupVolume("Sfx", 0.25)
+		Audio.SetGroupVolume("Ui", 0.5)
+	end
+	if tick == 5 then Time.PauseWorld() end
+	if tick == 8 then Scene.Load(Assets.Load("Assets/Scenes/Next.scene")) end
+end
+return Script.Define("Menu", M)
+)"));
+			// The loaded scene: a listener and two looping sources, one of the world (Sfx), one of the UI.
+			Scene& scene = fixture.GetScene();
+			scene.CreateEntity("Listener").AddComponent<AudioListenerComponent>();
+			AddLoopingSource(scene, "Music", AudioGroup::Sfx);
+			AddLoopingSource(scene, "Click", AudioGroup::Ui);
+			Result<Json> document = SceneSerializer::ToJson(scene);
+			REQUIRE(document.has_value());
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(std::move(*document));
+			fixture.GetAssetManager().Publish(next, data, "Assets/Scenes/Next.scene");
+			for (const std::string_view name : { "/Listener", "/Music", "/Click" })
+				scene.DestroyEntity(scene.FindEntityByPath(name));
+			AttachScript(scene.CreateEntity("Menu"), menu);
+
+			VirtualFileSystem vfs;
+			Result<Scope<AudioEngine>> createdAudio = AudioEngine::Create(AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic }, vfs);
+			REQUIRE_MESSAGE(createdAudio.has_value(), createdAudio.error().ToString());
+			AudioEngine& audio = **createdAudio;
+			REQUIRE(audio.SetGroupVolume(AudioGroup::Sfx, 0.75f));
+			PlaySessionSpecification specification = MakeScriptSpecification(fixture);
+			specification.Audio = &audio;
+			Result<Scope<PlaySession>> started = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			Scope<PlaySession> session = std::move(*started);
+			session->SetExtractionEnabled(false);
+			Test::RunTicks(*session, 12);
+			REQUIRE(session->GetSceneGeneration() == 2);
+			const auto checkKept = [&session, &audio]()
+			{
+				CHECK(audio.GetGroupVolume(AudioGroup::Sfx) == 0.25f);
+				CHECK(audio.GetGroupVolume(AudioGroup::Ui) == 0.5f);
+				CHECK(session->IsWorldPaused());
+				REQUIRE(session->GetAudioSystem() != nullptr);
+				CHECK(session->GetAudioSystem()->IsWorldPaused());
+				CHECK(GetSourceVoice(*session, audio, "/Music").Paused);
+				CHECK_FALSE(GetSourceVoice(*session, audio, "/Click").Paused);
+			};
+			checkKept();
+			REQUIRE(session->GetScripts()->Evaluate("Scene.Reload()", {}));
+			Test::RunTicks(*session, 3);
+			REQUIRE(session->GetSceneGeneration() == 3);
+			checkKept();
+			CHECK(session->GetScriptErrors().GetErrors().empty());
+			session.reset();
+			CHECK(audio.GetGroupVolume(AudioGroup::Sfx) == 0.75f);
+			CHECK(audio.GetGroupVolume(AudioGroup::Ui) == 1.0f);
+		}
+
 		// Decision 2 (the review of W35.1, its finding 5): a menu creates and destroys entities while the world is paused. A
 		// scripted body it creates starts (OnStart, in the paused tick's start flush) with its body, which does not move, and
 		// its OnFixedUpdate holds; destroyed, it gets its OnDestroy and loses its body in the paused tick's destroy flush.

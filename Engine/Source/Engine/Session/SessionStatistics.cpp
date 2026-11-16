@@ -39,6 +39,15 @@ namespace Engine {
 		stats.DroppedLights = view.DroppedLights;
 		stats.ShadowedLights = view.ShadowedSpotLights + view.ShadowedPointLights;
 		stats.SkinnedMeshes = view.SkinnedMeshes;
+		stats.MaxShadedLights = view.MaxShadedLights;
+		stats.CachedPointShadows = view.CachedPointShadows;
+		stats.CachedSpotShadows = view.CachedSpotShadows;
+		if (view.SsrAreaAvailable)
+		{
+			stats.SsrTiles = view.SsrTiles;
+			stats.SsrTracedTiles = view.SsrTracedTiles;
+			stats.SsrTracedPixels = view.SsrTracedPixels;
+		}
 		for (const RenderPassStats& pass : view.Passes)
 		{
 			stats.DrawCalls += pass.DrawCalls;

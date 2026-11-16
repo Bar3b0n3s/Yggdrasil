@@ -30,6 +30,18 @@ namespace Engine {
 		uint32_t ActiveBodies = 0;
 		uint32_t Entities = 0;
 		uint64_t ScriptHeapBytes = 0;
+		// M29's light rows (Docs/Decisions/0044-m29-light-limits.md decisions 4 and 5; ADR 0042's phase-5 ledger, carried by M28
+		// at its later landing): the shaded-light cap the frame rendered with, and the shadowed point and spot lights whose maps
+		// it reused from the static shadow cache.
+		uint32_t MaxShadedLights = 0;
+		uint32_t CachedPointShadows = 0;
+		uint32_t CachedSpotShadows = 0;
+		// M32's SSR row (Docs/Decisions/0047-m32-fog-ssr.md decision 13, carried the same way): the area the SSR trace covered
+		// in the last completed GPU frame that recorded it: the trace image's 8 x 8 tiles, those it traced and the trace
+		// pixels that traced; 0 while unavailable (no completed frame with SSR).
+		uint32_t SsrTiles = 0;
+		uint32_t SsrTracedTiles = 0;
+		uint32_t SsrTracedPixels = 0;
 	};
 
 }

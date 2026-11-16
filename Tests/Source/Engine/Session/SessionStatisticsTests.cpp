@@ -93,6 +93,38 @@ namespace Engine {
 			CHECK(stats.Triangles == 420);
 			// Only the passes with a GPU sample add to the GPU time.
 			CHECK(stats.GpuMilliseconds == doctest::Approx(2.25));
+			// M29's light rows and M32's SSR row (ADR 0042's phase-5 ledger, carried at M28's landing): the cap and the cached
+			// shadows always, the SSR area only while a completed frame recorded it.
+			CHECK(stats.MaxShadedLights == 0);
+			CHECK(stats.SsrTiles == 0);
+		}
+
+		TEST_CASE("SessionStatistics: AddRenderStatistics copies M29's light rows and M32's SSR area while it is available")
+		{
+			RenderStats view;
+			view.Available = true;
+			view.MaxShadedLights = 1024;
+			view.CachedPointShadows = 3;
+			view.CachedSpotShadows = 2;
+			view.SsrTiles = 120;
+			view.SsrTracedTiles = 30;
+			view.SsrTracedPixels = 1500;
+			ScriptPerformanceStats stale;
+			AddRenderStatistics(stale, view);
+			CHECK(stale.MaxShadedLights == 1024);
+			CHECK(stale.CachedPointShadows == 3);
+			CHECK(stale.CachedSpotShadows == 2);
+			// No completed frame recorded the SSR area: its counts stay 0.
+			CHECK(stale.SsrTiles == 0);
+			CHECK(stale.SsrTracedTiles == 0);
+			CHECK(stale.SsrTracedPixels == 0);
+
+			view.SsrAreaAvailable = true;
+			ScriptPerformanceStats stats;
+			AddRenderStatistics(stats, view);
+			CHECK(stats.SsrTiles == 120);
+			CHECK(stats.SsrTracedTiles == 30);
+			CHECK(stats.SsrTracedPixels == 1500);
 		}
 
 		TEST_CASE("PlaySession: Application.GetStats reads the host's frame statistics and the session's counters outside the fixed step only")
@@ -131,6 +163,13 @@ return Script.Define("Readout", Readout)
 			host.View.VisibleLights = 7;
 			host.View.DroppedLights = 2;
 			host.View.Passes.push_back({ .Name = "Forward", .CpuMilliseconds = 1.0, .GpuMilliseconds = 1.0, .GpuAvailable = false, .DrawCalls = 9, .Dispatches = 0, .Triangles = 600 });
+			host.View.MaxShadedLights = 512;
+			host.View.CachedPointShadows = 4;
+			host.View.CachedSpotShadows = 6;
+			host.View.SsrAreaAvailable = true;
+			host.View.SsrTiles = 80;
+			host.View.SsrTracedTiles = 12;
+			host.View.SsrTracedPixels = 700;
 			PlaySessionSpecification specification{};
 			specification.Registry = &fixture.GetTypes();
 			specification.Assets = &fixture.GetAssetManager();
@@ -154,6 +193,12 @@ return Script.Define("Readout", Readout)
 			const auto evaluated = session->GetScripts()->Evaluate("return Application.GetStats().Entities", {});
 			REQUIRE(evaluated);
 			CHECK(evaluated->Value.Get() == Json(4));
+			// M29's light rows and M32's SSR area reach the readout (ADR 0042's phase-5 ledger, carried at M28's landing).
+			const auto rows = session->GetScripts()->Evaluate(
+				"local s = Application.GetStats() return {s.MaxShadedLights, s.CachedPointShadows, s.CachedSpotShadows, s.SsrTiles, s.SsrTracedTiles, s.SsrTracedPixels}",
+				{});
+			REQUIRE(rows);
+			CHECK(rows->Value.Get() == Json::array({ 512, 4, 6, 80, 12, 700 }));
 		}
 
 		TEST_CASE("PlaySession: the performance readout without a host reports the session's counters with no render")

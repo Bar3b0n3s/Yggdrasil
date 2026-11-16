@@ -81,7 +81,7 @@ namespace Engine {
 			if (!read)
 				return Lua::RaiseError(call, read.error());
 			const ScriptPerformanceStats& stats = *read;
-			lua_createtable(call.State, 0, 16);
+			lua_createtable(call.State, 0, 22);
 			const auto field = [&call](const char* name, const auto& value)
 			{
 				Lua::Push(call, value);
@@ -103,6 +103,12 @@ namespace Engine {
 			field("ActiveBodies", stats.ActiveBodies);
 			field("Entities", stats.Entities);
 			field("ScriptHeapBytes", static_cast<double>(stats.ScriptHeapBytes));
+			field("MaxShadedLights", stats.MaxShadedLights);
+			field("CachedPointShadows", stats.CachedPointShadows);
+			field("CachedSpotShadows", stats.CachedSpotShadows);
+			field("SsrTiles", stats.SsrTiles);
+			field("SsrTracedTiles", stats.SsrTracedTiles);
+			field("SsrTracedPixels", stats.SsrTracedPixels);
 			return 1;
 		}
 
@@ -253,7 +259,8 @@ namespace Engine {
 			ENGINE_TRY(api.RegisterAlias("PerformanceStats",
 				"{RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, "
 				"DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, "
-				"Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number}",
+				"Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, "
+				"CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number}",
 				"The performance readout of Application.GetStats: frame-paced observations, never simulation state."));
 			ENGINE_TRY(api.RegisterAlias("DisplayMode", "{Width: number, Height: number, RefreshRate: number}", "One video mode of the monitor: its size in pixels and refresh rate in Hz."));
 			ENGINE_TRY(api.RegisterAlias("DisplaySettings", "{WindowMode: \"Windowed\" | \"Borderless\" | \"Exclusive\", Width: number, Height: number, RefreshRate: number, VSync: boolean}",
@@ -278,10 +285,12 @@ namespace Engine {
 				.Function("GetStats", &Utils::ApplicationStats, "() -> PerformanceStats",
 					"Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in "
 					"milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU "
-					"sample, GpuAvailable; the lights it shaded, VisibleLights at most the per-view cap, DroppedLights beyond it, "
-					"ShadowedLights the shadowed spot and point lights; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin "
-					"it deformed), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both "
-					"worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step "
+					"sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, "
+					"DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows "
+					"those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and "
+					"the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and "
+					"SsrTracedPixels), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies "
+					"(both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step "
 					"gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, "
 					"OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.",
 					read)
