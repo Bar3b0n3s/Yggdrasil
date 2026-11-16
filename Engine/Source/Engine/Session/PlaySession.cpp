@@ -1014,6 +1014,9 @@ namespace Engine {
 		Physics2D->SetEventListener(nullptr);
 		Animation->SetEventListener(nullptr);
 		Scripts.reset();
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 9): the mix belongs to the session, so the replaced scene's
+		// system hands it over instead of restoring the volumes recorded before the session.
+		const std::optional<std::array<float, AudioGroupCount>> sessionMix = SceneAudio != nullptr ? SceneAudio->TakeMix() : std::nullopt;
 		SceneAudio.reset();
 		Animation.reset();
 		SpriteAnimation.reset();
@@ -1045,7 +1048,10 @@ namespace Engine {
 		if (Audio != nullptr)
 		{
 			SceneAudio = CreateScope<AudioSystem>(*RuntimeScene, AudioSystemSpecification{ .Audio = Audio, .Assets = Assets });
-			SceneAudio->InitializeMix();
+			if (sessionMix.has_value())
+				SceneAudio->AdoptMix(*sessionMix);
+			else
+				SceneAudio->InitializeMix();
 			AudioHeld = true;
 			ApplyAudioRunState();
 		}

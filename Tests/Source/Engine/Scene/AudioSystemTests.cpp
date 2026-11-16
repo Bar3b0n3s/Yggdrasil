@@ -21,6 +21,7 @@
 #include "Support/SceneTestFixture.h"
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <map>
 #include <optional>
@@ -384,6 +385,38 @@ namespace Engine {
 				CHECK(system.GetGroupVolume(AudioGroup::Music) == 0.25f);
 			}
 			CHECK(engine.GetGroupVolume(AudioGroup::Music) == 0.75f);
+		}
+
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 9): a scene replacement hands the session's mix from the replaced
+		// scene's system to the new one, so the volumes stay as the session set them and come back once, at the session's end.
+		TEST_CASE("AudioSystem: a mix handed over is restored by the system that adopts it, not by the one that gave it")
+		{
+			AudioSceneFixture fixture;
+			AudioEngine& engine = fixture.GetEngine();
+			REQUIRE(engine.SetGroupVolume(AudioGroup::Music, 0.75f));
+			std::optional<std::array<float, AudioGroupCount>> handed;
+			{
+				AudioSystem replaced(fixture.GetScene(), fixture.GetSpecification());
+				replaced.InitializeMix();
+				REQUIRE(replaced.SetGroupVolume(AudioGroup::Music, 0.25f));
+				handed = replaced.TakeMix();
+				REQUIRE(handed.has_value());
+				CHECK((*handed)[static_cast<size_t>(AudioGroup::Music)] == 0.75f);
+				CHECK_FALSE(replaced.TakeMix().has_value());
+			}
+			CHECK(engine.GetGroupVolume(AudioGroup::Music) == 0.25f);
+			{
+				AudioSystem adopting(fixture.GetScene(), fixture.GetSpecification());
+				adopting.AdoptMix(*handed);
+				CHECK(adopting.GetGroupVolume(AudioGroup::Music) == 0.25f);
+				// The adopted mix counts as initialized: InitializeMix keeps the session's volume.
+				adopting.InitializeMix();
+				CHECK(adopting.GetGroupVolume(AudioGroup::Music) == 0.25f);
+			}
+			CHECK(engine.GetGroupVolume(AudioGroup::Music) == 0.75f);
+			// A system that never initialized the mix hands nothing over.
+			AudioSystem idle(fixture.GetScene(), fixture.GetSpecification());
+			CHECK_FALSE(idle.TakeMix().has_value());
 		}
 
 		TEST_CASE("AudioSystem: spatial sources without a listener or a camera raise AUDIO_NO_LISTENER")

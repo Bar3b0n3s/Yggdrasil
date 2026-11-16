@@ -588,6 +588,22 @@ namespace Engine {
 		state.MixInitialized = true;
 	}
 
+	std::optional<std::array<float, AudioGroupCount>> AudioSystem::TakeMix()
+	{
+		State& state = *m_State;
+		if (!state.MixInitialized)
+			return std::nullopt;
+		state.MixInitialized = false;
+		return state.RecordedGroupVolumes;
+	}
+
+	void AudioSystem::AdoptMix(const std::array<float, AudioGroupCount>& recorded)
+	{
+		State& state = *m_State;
+		state.RecordedGroupVolumes = recorded;
+		state.MixInitialized = true;
+	}
+
 	void AudioSystem::Start()
 	{
 		State& state = *m_State;
