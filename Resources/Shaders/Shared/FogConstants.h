@@ -44,14 +44,20 @@ namespace Engine {
 		uint32_t Padding0 = 0;
 		uint32_t Padding1 = 0;
 		uint32_t Padding2 = 0;
+		// M32's milestone review: the camera's clear colour (linear, CameraData::ClearColor), and whether it is the view's
+		// sky (1: no skybox draws over the cleared pixels, set by the renderer). With FogSkybox the skybox pass then fogs the
+		// cleared pixels as the sky, so a void below a bridge and the world's edge fade into the fog as a skybox does.
+		Float3 ClearColor;
+		uint32_t SkyIsClearColor = 0;
 	};
 
 #if !defined(ENGINE_SHADER)
-	static_assert(sizeof(FogConstants) == 112, "FogConstants must match its 112-byte constant-buffer layout");
+	static_assert(sizeof(FogConstants) == 128, "FogConstants must match its 128-byte constant-buffer layout");
 	static_assert(offsetof(FogConstants, Density) == 12 && offsetof(FogConstants, CameraPosition) == 16 && offsetof(FogConstants, StartDistance) == 28
 			&& offsetof(FogConstants, ViewForward) == 32 && offsetof(FogConstants, MaxOpacity) == 44 && offsetof(FogConstants, SunDirection) == 48
 			&& offsetof(FogConstants, SunGlowExponent) == 60 && offsetof(FogConstants, SunColor) == 64 && offsetof(FogConstants, HeightDensity) == 76
-			&& offsetof(FogConstants, HeightFalloff) == 80 && offsetof(FogConstants, Enabled) == 88 && offsetof(FogConstants, Orthographic) == 96,
+			&& offsetof(FogConstants, HeightFalloff) == 80 && offsetof(FogConstants, Enabled) == 88 && offsetof(FogConstants, Orthographic) == 96
+			&& offsetof(FogConstants, ClearColor) == 112 && offsetof(FogConstants, SkyIsClearColor) == 124,
 		"FogConstants members must sit where the constant-buffer layout puts them");
 
 }

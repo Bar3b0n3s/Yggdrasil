@@ -177,7 +177,7 @@ namespace Engine {
 				for (uint32_t column = 0; column < 16; ++column)
 					total += Test::CubeTexelSolidAngle(column, row, 16);
 			}
-			CHECK(total * 6.0 == doctest::Approx(4.0 * glm::pi<double>()).epsilon(1e-6));
+			CHECK(total * 6.0 == doctest::Approx(4.0 * glm::pi<double>()).epsilon(1e-9));
 			// A centre texel subtends more than a corner texel.
 			CHECK(Test::CubeTexelSolidAngle(7, 7, 16) > Test::CubeTexelSolidAngle(0, 0, 16));
 		}

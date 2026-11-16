@@ -81,7 +81,7 @@
 					"BaseHeight": -1.6,
 					"SunGlow": 0,
 					"SunGlowExponent": 8,
-					"FogSkybox": false
+					"FogSkybox": true
 				}
 			}
 		},

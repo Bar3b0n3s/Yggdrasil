@@ -8,8 +8,8 @@
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
-#include "Support/ExpectLog.h"
 #include "Shared/FogConstants.h"
+#include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <glm/glm.hpp>

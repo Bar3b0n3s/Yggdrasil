@@ -455,6 +455,69 @@ namespace Engine {
 			CHECK(IsNear(glm::dvec3(texels[5 * 64 + 7]), SkyRadiance, 2e-3));
 		}
 
+		// M32's milestone review: a view that clears to a colour (or to a skybox it has none of) has that colour for its sky,
+		// and with FogSkybox its cleared pixels are fogged as the sky, so a void below a bridge or the world's edge fades into
+		// the fog; without FogSkybox, or without fog, they keep the clear colour exactly. The mesh is untouched by the mode.
+		TEST_CASE("Fog: a view clearing to a colour fogs its cleared pixels as the sky only with FogSkybox" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu);
+			PublishFogAssets(fixture);
+			const glm::vec3 clearColor(0.2f, 0.05f, 0.4f);
+			for (const bool clearToSkybox : { false, true })
+			{
+				CAPTURE(clearToSkybox);
+				RenderSnapshot snapshot = MakeFogSnapshot(fixture, RenderProjection::Perspective, MakeTestFog());
+				snapshot.Camera.ClearColor = clearColor;
+				// A skybox clear without an environment map clears to the colour too.
+				snapshot.Camera.ClearToSkybox = clearToSkybox;
+				snapshot.Fog.Density = 0.0f;
+				snapshot.Fog.BaseHeight = 0.0f;
+				snapshot.Fog.HeightFalloff = 0.8f;
+				snapshot.Fog.HeightDensity = 0.3f;
+				fixture.Submit(snapshot);
+				const std::vector<glm::dvec4> fogged = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
+				const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+				size_t compared = 0;
+				size_t mismatched = 0;
+				for (uint32_t y = 0; y < snapshot.Camera.ViewportHeight; ++y)
+				{
+					for (uint32_t x = 0; x < snapshot.Camera.ViewportWidth; ++x)
+					{
+						// The cleared pixels: those whose ray misses the quad (with a margin at its edge).
+						if (HitSquare(snapshot.Camera, x, y, -3.0, 1.1, 0.0))
+							continue;
+						const Result<RenderRay> ray = ComputeViewPixelRay(snapshot.Camera, x, y);
+						REQUIRE(ray.has_value());
+						const glm::dvec4 reference = Test::EvaluateSkyFog(fog, glm::dvec3(ray->Direction), glm::dvec3(snapshot.Camera.Position));
+						const glm::dvec3 expected = glm::dvec3(clearColor) * (1.0 - reference.a) + glm::dvec3(reference) * reference.a;
+						const double tolerance = std::abs(static_cast<double>(ray->Direction.y)) < 0.05 ? 3e-2 : 5e-3;
+						++compared;
+						mismatched += IsNear(glm::dvec3(fogged[static_cast<size_t>(y) * snapshot.Camera.ViewportWidth + x]), expected, tolerance) ? 0U : 1U;
+					}
+				}
+				CHECK(compared > 1000);
+				CHECK(mismatched == 0);
+				// The lower sky is deep in the height fog: there the cleared pixel is all but the fog's colour.
+				const glm::dvec3 lowest = fogged[static_cast<size_t>(snapshot.Camera.ViewportHeight - 1) * snapshot.Camera.ViewportWidth];
+				CHECK_FALSE(IsNear(lowest, glm::dvec3(clearColor), 5e-2));
+
+				// Without FogSkybox, and without fog, the cleared pixels keep the clear colour.
+				for (const bool withFog : { true, false })
+				{
+					CAPTURE(withFog);
+					RenderSnapshot plain = snapshot;
+					plain.Fog.FogSkybox = false;
+					plain.Fog.Enabled = withFog;
+					fixture.Submit(plain);
+					const std::vector<glm::dvec4> texels = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
+					CHECK(IsNear(glm::dvec3(texels.front()), glm::dvec3(clearColor), 1e-3));
+					CHECK(texels.back() == texels.front());
+				}
+			}
+		}
+
 		TEST_CASE("Fog: the debug views and the wireframe are never fogged" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;

@@ -10,6 +10,16 @@ namespace Engine {
 
 #endif
 
+	// M32's milestone review (Docs/Decisions/0047-m32-fog-ssr.md decision 10): the trace is dispatched in rows of at most
+	// SsrTraceRowGroups thread groups (one per listed tile) along x, and as many rows along y as the listed tiles need: group
+	// (x, y) traces listed tile y * SsrTraceRowGroups + x, so a list of any length stays within Vulkan's guaranteed 65,535
+	// groups per dimension (VkDispatchIndirectCommand; a 3840 x 2160 view has 129,600 tiles).
+#if defined(ENGINE_SHADER)
+	static const uint SsrTraceRowGroups = 65535;
+#else
+inline constexpr uint32_t SsrTraceRowGroups = 65535;
+#endif
+
 	// The SSR pass's push constants (M26, C26.1, R-SSR-IN, R-SSR; Docs/Decisions/0037-m26-contract.md decisions 14 and 18;
 	// Renderer/SsrPass.h, Passes/Ssr.slang), shared by its trace and its composite: the scene resolution SceneColor, SceneDepth
 	// and the prepass targets have (ImageSize, and its inverse), the depth pyramid's mip count (PyramidLevels, ViewDepth's: 1 to

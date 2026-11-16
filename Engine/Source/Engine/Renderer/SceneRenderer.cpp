@@ -1731,6 +1731,10 @@ namespace Engine {
 		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, frame.Environment, hasCamera && frame.IsLit && !frame.Wireframe);
 		frame.EnvironmentSpecular = environment != nullptr ? environment->Specular : Pipelines->BlackCube;
 		frame.EnvironmentSkybox = environment != nullptr ? environment->Skybox : nvrhi::TextureHandle();
+		// M32's milestone review: a view whose cleared pixels no skybox draws over has its clear colour for a sky, which the
+		// skybox pass fogs as the sky when the fog has FogSkybox.
+		frame.DrawsSkybox = frame.IsLit && frame.Camera.ClearToSkybox && frame.EnvironmentSkybox != nullptr && snapshot.Environment.ShowSkybox;
+		frame.Fog.SkyIsClearColor = frame.DrawsSkybox ? 0U : 1U;
 		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the view's probes, in the views
 		// that light with the environment, never in a bake's captures (RenderQualitySettings::Probes false: one bounce).
 		frame.Probes = Utils::PrepareProbeShading(*Cache, snapshot, camera, hasCamera && frame.IsLit && !frame.Wireframe && snapshot.Quality.Probes);
@@ -2183,7 +2187,6 @@ namespace Engine {
 
 	void SceneRenderer::State::RecordForwardStage(Detail::SceneRendererFrame& frame)
 	{
-		const RenderSnapshot& snapshot = *frame.Snapshot;
 		nvrhi::ICommandList& commandList = *frame.CommandList;
 		RenderRecordingContext& recording = *frame.Recording;
 		// M23 (stream C): the forward set binds the cluster grid and masks (RecordLightClusters); without them (their creation
@@ -2241,11 +2244,18 @@ namespace Engine {
 					Pipelines->Terrain->RecordForward(commandList, TerrainResources, *Targets.ForwardFramebuffer, **forwardSet, counters);
 					recording.EndPass(counters);
 				}
-				if (frame.IsLit && frame.Camera.ClearToSkybox && frame.EnvironmentSkybox != nullptr && snapshot.Environment.ShowSkybox)
+				// The skybox, or (M32's milestone review) in a view fogged with FogSkybox whose sky is its clear colour, the same pass
+				// drawing that colour fogged as the sky (the black cube bound in the skybox's place, unread).
+				const bool fogsClearSky = !frame.DrawsSkybox && frame.Fog.Enabled != 0 && frame.Fog.FogSkybox != 0;
+				if (frame.DrawsSkybox || fogsClearSky)
 				{
 					recording.BeginPass("Skybox", &commandList);
 					const Status drawn = Pipelines->Skybox->Record(commandList, SkyboxBindings,
-						{ .Framebuffer = Targets.ForwardFramebuffer, .ViewConstants = ViewConstantsBuffer, .EnvironmentConstants = EnvironmentConstantsBuffer, .FogConstants = FogConstantsBuffer, .Skybox = frame.EnvironmentSkybox });
+						{ .Framebuffer = Targets.ForwardFramebuffer,
+							.ViewConstants = ViewConstantsBuffer,
+							.EnvironmentConstants = EnvironmentConstantsBuffer,
+							.FogConstants = FogConstantsBuffer,
+							.Skybox = frame.DrawsSkybox ? frame.EnvironmentSkybox.Get() : Pipelines->BlackCube.Get() });
 					recording.EndPass({ .DrawCalls = drawn ? 1U : 0U, .Triangles = drawn ? 1U : 0U });
 					frame.KeepFirstError(drawn);
 				}
@@ -2341,6 +2351,8 @@ namespace Engine {
 				sample.Tiles = read.Tiles;
 				sample.TracedTiles = read.TracedTiles;
 				sample.TracedPixels = read.TracedPixels;
+				sample.TraceGroups = read.TraceGroups;
+				sample.TraceRows = read.TraceRows;
 			}
 		}
 		area.Submitted = false;

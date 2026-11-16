@@ -617,6 +617,26 @@ namespace Engine {
 			CHECK(cache.Request(MakeContentThumbnailRequest(editor, cache, texture))->Cached);
 			CHECK(rendered.size() == 3);
 
+			// M32's milestone review: SSR's trace resolution is part of the quality, and of the captured images' key.
+			const auto setSsrHalf = [&fixture](bool halfResolution)
+			{
+				REQUIRE(fixture.Call("project.setSettings", Json{ { "patch", Json{ { "Rendering", Json{ { "SsrHalfResolution", halfResolution } } } } } }));
+			};
+			setSsrHalf(!original.SsrHalfResolution);
+			CHECK(cache.GetRenderQuality().SsrHalfResolution == !original.SsrHalfResolution);
+			const auto ssrStale = cache.Find(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(ssrStale);
+			REQUIRE(ssrStale->has_value());
+			CHECK((*ssrStale)->Stale);
+			const auto ssrImage = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
+			REQUIRE(ssrImage);
+			CHECK_FALSE(ssrImage->Cached);
+			CHECK(ssrImage->Path != second->Path);
+			// Back at the earlier quality, the image is rendered again into that quality's entry.
+			setSsrHalf(original.SsrHalfResolution);
+			CHECK(cache.Request(MakeContentThumbnailRequest(editor, cache, material))->Path == second->Path);
+			CHECK(rendered.size() == 5);
+
 			// A later binding (another session) reuses the image of the current quality, never the earlier one's.
 			cache.Reset();
 			REQUIRE(cache.BindProject(2));
@@ -631,7 +651,7 @@ namespace Engine {
 			const auto restored = cache.Request(MakeContentThumbnailRequest(editor, cache, material));
 			REQUIRE(restored);
 			CHECK_FALSE(restored->Cached);
-			CHECK(rendered.size() == 4);
+			CHECK(rendered.size() == 6);
 		}
 
 		TEST_CASE("ThumbnailCache: a sorting-layer change marks captured images stale and keys their disk entries")

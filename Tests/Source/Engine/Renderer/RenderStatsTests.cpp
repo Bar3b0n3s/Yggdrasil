@@ -333,7 +333,7 @@ namespace Engine {
 			RenderStatsHistory history;
 			history.PublishCpu({ .Available = true, .FrameIndex = 20, .SsrHalfResolution = true });
 			CHECK_FALSE(history.GetLatest().SsrAreaAvailable);
-			history.PublishSsrArea({ .Available = true, .FrameIndex = 18, .Tiles = 600, .TracedTiles = 40, .TracedPixels = 2000 });
+			history.PublishSsrArea({ .Available = true, .FrameIndex = 18, .Tiles = 600, .TracedTiles = 40, .TracedPixels = 2000, .TraceGroups = 40, .TraceRows = 1 });
 			history.PublishCpu({ .Available = true, .FrameIndex = 21 });
 			RenderStats latest = history.GetLatest();
 			CHECK(latest.FrameIndex == 21);
@@ -343,6 +343,8 @@ namespace Engine {
 			CHECK(latest.SsrTiles == 600);
 			CHECK(latest.SsrTracedTiles == 40);
 			CHECK(latest.SsrTracedPixels == 2000);
+			CHECK(latest.SsrTraceGroups == 40);
+			CHECK(latest.SsrTraceRows == 1);
 			history.PublishSsrArea({ .Available = true, .FrameIndex = 17, .Tiles = 1, .TracedTiles = 1, .TracedPixels = 1 });
 			CHECK(history.GetLatest().SsrAreaFrameIndex == 18);
 			CHECK(history.GetLatest().SsrTracedTiles == 40);
@@ -353,6 +355,7 @@ namespace Engine {
 			CHECK(latest.SsrTiles == 0);
 			CHECK(latest.SsrTracedTiles == 0);
 			CHECK(latest.SsrTracedPixels == 0);
+			CHECK(latest.SsrTraceRows == 0);
 			history.Reset();
 			history.PublishSsrArea({ .Available = true, .FrameIndex = 2, .Tiles = 4, .TracedTiles = 1, .TracedPixels = 3 });
 			CHECK(history.GetLatest().SsrAreaFrameIndex == 2);

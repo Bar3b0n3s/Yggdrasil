@@ -87,6 +87,8 @@ namespace Engine {
 		stats.SsrTiles = m_Latest.SsrTiles;
 		stats.SsrTracedTiles = m_Latest.SsrTracedTiles;
 		stats.SsrTracedPixels = m_Latest.SsrTracedPixels;
+		stats.SsrTraceGroups = m_Latest.SsrTraceGroups;
+		stats.SsrTraceRows = m_Latest.SsrTraceRows;
 		for (RenderPassStats& pass : stats.Passes)
 		{
 			pass.GpuAvailable = false;
@@ -149,6 +151,8 @@ namespace Engine {
 		m_Latest.SsrTiles = sample.Available ? sample.Tiles : 0;
 		m_Latest.SsrTracedTiles = sample.Available ? sample.TracedTiles : 0;
 		m_Latest.SsrTracedPixels = sample.Available ? sample.TracedPixels : 0;
+		m_Latest.SsrTraceGroups = sample.Available ? sample.TraceGroups : 0;
+		m_Latest.SsrTraceRows = sample.Available ? sample.TraceRows : 0;
 		m_LastSsrAreaFrameIndex = sample.FrameIndex;
 		m_HasSsrArea = true;
 	}

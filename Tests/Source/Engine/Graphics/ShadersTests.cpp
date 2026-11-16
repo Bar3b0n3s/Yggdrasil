@@ -530,6 +530,8 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(FogConstants, Padding0),
 					ENGINE_TEST_SHARED_FIELD(FogConstants, Padding1),
 					ENGINE_TEST_SHARED_FIELD(FogConstants, Padding2),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, ClearColor),
+					ENGINE_TEST_SHARED_FIELD(FogConstants, SkyIsClearColor),
 				},
 				.Program = "Scene",
 				.Entry = "PSForward",

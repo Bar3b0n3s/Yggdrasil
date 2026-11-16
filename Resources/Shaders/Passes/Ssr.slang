@@ -5,11 +5,15 @@
 // (ceil(width / 2) x ceil(height / 2)), whose pixel p traces the scene pixel GtaoFullPixel maps it to; it is cut into 8 x 8
 // tiles:
 //   - CSClassify, one group per tile: a tile any of whose trace pixels traces (IsTracedPixel, CSTrace's own test) appends
-//     itself to Tiles (u1, x | y << 16) and its tracing pixels' count to Arguments (u2: the trace's dispatch arguments (tiles,
-//     1, 1) at byte 0, the composite's draw arguments (6, tiles, 0, 0) at byte 12, the traced pixels at byte 28), which the
-//     pass resets before it; the tiles' order follows the atomics, and each tile writes only its own pixels, so the image
-//     does not depend on it.
-//   - CSTrace, dispatched indirectly, one group per listed tile, writes SsrColor (u0) once per pixel of its tile. A pixel
+//     itself to Tiles (u1: the listed count n in element 0, then each tile as x | y << 16) and its tracing pixels' count to
+//     Arguments (u2: the trace's dispatch arguments at byte 0, the composite's draw arguments (6, n, 0, 0) at byte 12, the
+//     traced pixels at byte 28), which the pass resets before it. The trace runs in rows of at most SsrTraceRowGroups groups
+//     (Shared/SsrConstants.h), so its arguments are (min(n, SsrTraceRowGroups), ceil(n / SsrTraceRowGroups), 1): each listing
+//     group raises x to min(its slot + 1, SsrTraceRowGroups) and y to its slot's row + 1 (atomic maxima, so the order the
+//     groups run in does not matter). The tiles' order follows the atomics, and each tile writes only its own pixels, so the
+//     image does not depend on it.
+//   - CSTrace, dispatched indirectly, group (x, y) for listed tile y * SsrTraceRowGroups + x (a group past n returns),
+//     writes SsrColor (u0) once per pixel of its tile. A pixel
 //     traces when its surface reflects (SceneRoughness word 0's multiplier is not 0: the sky and surfaces without specular are
 //     0) and its roughness (word 0's a) is at most MaxRoughness: the view ray's reflection about the pixel's normal
 //     (SceneNormals), from the pixel's view-space position (SceneDepth) moved one pixel's footprint along the normal (so the
@@ -93,9 +97,10 @@ static const float SsrRoughnessFade = 0.5;
 static const float SsrSkyDepth = 3.0e38;
 // The trace image's tiles are 8 x 8 trace pixels (CSClassify's and CSTrace's groups).
 static const uint SsrTileSize = 8;
-// Arguments' byte offsets (Renderer/SsrPass.h's SsrArgumentsLayout): the trace's group count, the composite's instance
-// count and the traced pixels.
+// Arguments' byte offsets (Renderer/SsrPass.h's SsrArgumentsLayout): the trace's groups along x and y, the composite's
+// instance count and the traced pixels.
 static const uint SsrTraceGroupsOffset = 0;
+static const uint SsrTraceRowsOffset = 4;
 static const uint SsrCompositeInstancesOffset = 16;
 static const uint SsrTracedPixelsOffset = 28;
 // The pyramid's R16_FLOAT depths are rounded to the nearest: a coarse cell is skipped only when the ray is in front of its
@@ -215,10 +220,12 @@ void CSClassify(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint i
 	if (index != 0 || TileTracedPixels == 0)
 		return;
 	uint slot;
-	Arguments.InterlockedAdd(SsrTraceGroupsOffset, 1u, slot);
+	InterlockedAdd(TileList[0], 1u, slot);
+	Arguments.InterlockedMax(SsrTraceGroupsOffset, min(slot + 1u, SsrTraceRowGroups));
+	Arguments.InterlockedMax(SsrTraceRowsOffset, slot / SsrTraceRowGroups + 1u);
 	Arguments.InterlockedAdd(SsrCompositeInstancesOffset, 1u);
 	Arguments.InterlockedAdd(SsrTracedPixelsOffset, TileTracedPixels);
-	TileList[slot] = group.x | (group.y << 16);
+	TileList[1u + slot] = group.x | (group.y << 16);
 }
 
 // The traced reflection of `pixel` (CSTrace above): rgb the radiance, a the confidence.
@@ -316,7 +323,11 @@ uint2 GetTileOrigin(uint tile)
 [numthreads(8, 8, 1)]
 void CSTrace(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID)
 {
-	const uint2 tracePixel = GetTileOrigin(Tiles[group.x]) + thread.xy;
+	// The last row's groups past the listed count trace nothing.
+	const uint listed = group.y * SsrTraceRowGroups + group.x;
+	if (listed >= Tiles[0])
+		return;
+	const uint2 tracePixel = GetTileOrigin(Tiles[1u + listed]) + thread.xy;
 	if (any(tracePixel >= GetTraceSize()))
 		return;
 	TracedColor[tracePixel] = Trace(GetTracedScenePixel(tracePixel));
@@ -334,7 +345,7 @@ CompositeVaryings VSComposite(uint vertexID : SV_VulkanVertexID, uint instance :
 {
 	const float2 corner = float2(vertexID == 1 || vertexID == 2 || vertexID == 4 ? 1.0 : 0.0, vertexID == 2 || vertexID == 4 || vertexID == 5 ? 1.0 : 0.0);
 	const float scale = Settings.HalfResolution != 0 ? 2.0 : 1.0;
-	const float2 pixel = (float2(GetTileOrigin(Tiles[instance])) + corner * float(SsrTileSize)) * scale;
+	const float2 pixel = (float2(GetTileOrigin(Tiles[1u + instance])) + corner * float(SsrTileSize)) * scale;
 	CompositeVaryings output;
 	output.Position = float4(GetNdc(pixel), 0.0, 1.0);
 	return output;

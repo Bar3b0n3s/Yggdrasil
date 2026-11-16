@@ -308,6 +308,8 @@ namespace Engine {
 			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 11): the trace at half resolution
 			// (RenderQualitySettings::SsrHalfResolution).
 			bool HalfSsr = false;
+			// M32's milestone review: the skybox draws over the cleared pixels (a Lit view clearing to a skybox it has and shows).
+			bool DrawsSkybox = false;
 			ViewConstants View{};
 			EnvironmentConstants Environment{};
 			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Renderer/Fog.h), Enabled only in a Lit view

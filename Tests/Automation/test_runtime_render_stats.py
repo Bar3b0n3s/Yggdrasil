@@ -17,7 +17,7 @@ from tiny_game import (TINY_GAME_NAME, WINDOW_HEIGHT, WINDOW_WIDTH, build_tiny_g
 
 # Non-default ProjectSettings.Rendering, exported into Game.pak; the Runtime's stats.get reports what its game view
 # rendered with.
-EXPORTED_RENDERING = {"ShadowMapSize": 512, "SsaoHalfResolution": True}
+EXPORTED_RENDERING = {"ShadowMapSize": 512, "SsaoHalfResolution": True, "SsrHalfResolution": True}
 
 
 class RuntimeRenderStatsTests(AutomationTestCase):
@@ -87,6 +87,7 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         self.assertEqual(view["passes"], [])
         self.assertEqual(view["shadowMapSize"], 0)
         self.assertFalse(view["ssaoHalfResolution"])
+        self.assertFalse(view["ssrHalfResolution"])
         self.assertEqual((view["shadowedPointLights"], view["droppedPointShadows"]), (0, 0))
         after = client.call("play.state")
         self.assertEqual(after["tick"], before["tick"])
@@ -137,9 +138,10 @@ class RuntimeRenderStatsTests(AutomationTestCase):
         view = stats["views"][0]
         self.assertEqual((view["width"], view["height"]), (WINDOW_WIDTH, WINDOW_HEIGHT))
         # The game view renders with the exported project's quality settings, not the defaults (2048, full-resolution
-        # AO).
+        # AO and SSR).
         self.assertEqual(view["shadowMapSize"], EXPORTED_RENDERING["ShadowMapSize"])
         self.assertEqual(view["ssaoHalfResolution"], EXPORTED_RENDERING["SsaoHalfResolution"])
+        self.assertEqual(view["ssrHalfResolution"], EXPORTED_RENDERING["SsrHalfResolution"])
         # The tiny game holds no point light (M23's point-shadow counts, Docs/Decisions/0034-m23-contract.md
         # decision 18).
         self.assertEqual((view["shadowedPointLights"], view["droppedPointShadows"]), (0, 0))

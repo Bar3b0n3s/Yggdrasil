@@ -15,12 +15,12 @@
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Engine/Renderer/TerrainLod.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
+#include "Shared/EnvironmentConstants.h"
 #include "Support/BufferCreationFails.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/RenderReference.h"
-#include "Shared/EnvironmentConstants.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>

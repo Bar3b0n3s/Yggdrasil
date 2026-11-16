@@ -12,10 +12,10 @@ On a temporary copy of Projects/FeatureTest, a headless editor of --config (--re
 then a --renderer none editor replays Assets/Tests/Replays/Determinism.replay 3 times (replay/Determinism/tickMs); and
 (M32, Docs/Decisions/0047-m32-fog-ssr.md Acceptance 5 and 6) a --headless-game-view editor whose game view renders at
 1920 x 1080 measures, over LOOK_SAMPLES single rendered ticks each, the GPU time fog adds to the passes it reaches in
-Assets/Scenes/GoldenFog/FogPillars.scene (fog/FogPillars/gpuCostMs: each sample with the Fog less the median without it;
-budget 0.5 ms), and the SSR row of a generated isometric floor of 35 tiles with 0, 8 and 35 of them glossy, and with 8
-at half resolution (ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also give the tiles the trace
-covered.
+Assets/Scenes/Fog.scene, whose Fog sets every field (distance and height fog, the ambient tint and the sun glow, the
+skybox unfogged; fog/Fog/gpuCostMs: each sample with the Fog less the median without it; budget 0.5 ms), and the
+SSR row of a generated isometric floor of 35 tiles with 0, 8 and 35 of them glossy, and with 8 at half resolution
+(ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also give the tiles the trace covered.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
 (--gpu-optional: no frame or GPU times) makes the step a warning. Only a capture that cannot run fails it: a missing
@@ -64,7 +64,7 @@ LOOK_WIDTH = 1920
 LOOK_HEIGHT = 1080
 LOOK_WARM_UP_TICKS = 8
 LOOK_SAMPLES = 16
-FOG_SCENE = "Assets/Scenes/GoldenFog/FogPillars.scene"
+FOG_SCENE = "Assets/Scenes/Fog.scene"
 FOG_ENTITY = "/Haze"
 # The passes fog reaches (Renderer/Fog.h): their GPU times summed.
 FOG_PASSES = ("ForwardOpaque", "TerrainForward", "Skybox", "SSR", "ForwardTransparent", "Sprites")
@@ -291,7 +291,7 @@ class Capture:
             self.call(client, "play.stop", {})
 
     def fog_cost(self, client: Any) -> None:
-        """fog/FogPillars/gpuCostMs (module docstring); an engine error or a view without GPU times makes it a
+        """fog/Fog/gpuCostMs (module docstring); an engine error or a view without GPU times makes it a
         warning."""
         try:
             self.call(client, "scene.open", {"path": FOG_SCENE, "discardChanges": True}, timeout=STEP_TIMEOUT_SECONDS)
@@ -303,14 +303,14 @@ class Capture:
         except (self.engine_client.EngineError, ValueError) as error:
             detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
                       else str(error))
-            self.warnings.append(f"fog/FogPillars/gpuCostMs: {detail}; not captured")
+            self.warnings.append(f"fog/Fog/gpuCostMs: {detail}; not captured")
             return
         if not fogged or not clear:
-            self.warnings.append("fog/FogPillars/gpuCostMs: the game view reported no GPU times; not captured")
+            self.warnings.append("fog/Fog/gpuCostMs: the game view reported no GPU times; not captured")
             return
-        metric = perf.summarize("fog/FogPillars/gpuCostMs", "ms", cost_samples(fogged, clear))
+        metric = perf.summarize("fog/Fog/gpuCostMs", "ms", cost_samples(fogged, clear))
         self.metrics.append(metric)
-        self.console.print(f"  fog/FogPillars/gpuCostMs: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
+        self.console.print(f"  fog/Fog/gpuCostMs: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
 
     def ssr_cost(self, client: Any) -> None:
         """ssr/Floor<n>of35/gpuMs and ssr/Floor8of35Half/gpuMs (module docstring); an engine error or a view without GPU

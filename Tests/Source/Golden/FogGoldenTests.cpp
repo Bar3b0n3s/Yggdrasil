@@ -15,7 +15,8 @@
 // The fog goldens of M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 8; Roadmap M32's acceptance), the scenes of the golden
 // scaffold Scaffold/GoldenFog.jsonl (IdSeed 2902), rendered through Test::RenderGoldenScene:
 //   - FogPillars: two rows of pillars receding into distance fog, which also hides the far ground and the fogged sky;
-//   - FogHollow: an isometric (orthographic) view of a hollow whose floor lies under height fog, the rim in clear air;
+//   - FogHollow: an isometric (orthographic) view of a hollow whose floor lies under height fog, the rim in clear air, its
+//     camera clearing to a colour that the fog (with FogSkybox) fogs as the sky, so the void around the block fades into it;
 //   - FogSunGlow: looking toward a low sun through haze that glows around its direction, silhouettes against it;
 //   - FogTransparent: a transparent pane, an emitting block and a sprite disc standing in fog before a wall.
 // Each case also renders its scene with the fog off and checks that the fog changed the image, and renders it twice.

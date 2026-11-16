@@ -2,7 +2,9 @@
 // against SceneDepth and writes off, so it covers exactly the pixels the scene left at the cleared (far) depth. Each pixel
 // samples the skybox cube along its view ray, rotated by the environment's Rotation, at SkyboxLod, times Intensity: linear
 // radiance into SceneColor (exposure and tonemapping follow). M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): in a
-// fogged view whose fog has FogSkybox, the sky's fog along the pixel's view ray at infinite depth (Common/Fog.slang).
+// fogged view whose fog has FogSkybox, the sky's fog along the pixel's view ray at infinite depth (Common/Fog.slang); and,
+// M32's milestone review, in such a view whose sky is its clear colour (Fog.SkyIsClearColor: no skybox draws), the pass
+// draws that colour in the cube's place, so the cleared pixels are fogged as the sky too.
 
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/FogConstants.h"
@@ -54,7 +56,8 @@ float4 PSMain(SkyboxVaryings input) : SV_Target0
 	else
 		ray = Unproject(input.Ndc, 0.5) - Unproject(input.Ndc, 1.0);
 	const float3 lookup = RotateEnvironmentDirection(normalize(ray), SkyEnvironment.RotationSin, SkyEnvironment.RotationCos);
-	float3 radiance = EnvSkybox.SampleLevel(LinearClamp, lookup, SkyEnvironment.SkyboxLod).rgb * SkyEnvironment.Intensity;
+	float3 radiance = Fog.SkyIsClearColor != 0 ? Fog.ClearColor
+											  : EnvSkybox.SampleLevel(LinearClamp, lookup, SkyEnvironment.SkyboxLod).rgb * SkyEnvironment.Intensity;
 	if (Fog.Enabled != 0 && Fog.FogSkybox != 0)
 	{
 		// The eye point: the camera, or for an orthographic view the pixel's point on the camera's plane (its point on the near

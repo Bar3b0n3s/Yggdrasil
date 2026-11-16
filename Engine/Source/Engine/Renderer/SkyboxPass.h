@@ -20,6 +20,8 @@
 //
 // M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): in a fogged view whose fog has FogSkybox, each pixel is fogged as the
 // sky at infinite depth along its view ray (Common/Fog.slang's EvaluateSkyFog, Renderer/Fog.h); without fog it is unchanged.
+// M32's milestone review: with FogConstants::SkyIsClearColor the pass draws the fog's ClearColor in the cube's place (the
+// renderer records it so in a fogged view with FogSkybox whose cleared pixels no skybox draws over, binding a black cube).
 //
 // Binding layout (set 0, the registers of §8.4): b0 ViewConstants, b2 EnvironmentConstants, b5 FogConstants (M32), t4
 // EnvSkybox, s0 LinearClamp.

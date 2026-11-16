@@ -191,8 +191,10 @@ namespace Engine {
 			return {};
 		return {
 			.Tiles = Utils::ReadWord(arguments, SsrArgumentsLayout::TilesOffset),
-			.TracedTiles = Utils::ReadWord(arguments, SsrArgumentsLayout::TraceGroupsOffset),
+			.TracedTiles = Utils::ReadWord(arguments, SsrArgumentsLayout::CompositeInstancesOffset),
 			.TracedPixels = Utils::ReadWord(arguments, SsrArgumentsLayout::TracedPixelsOffset),
+			.TraceGroups = Utils::ReadWord(arguments, SsrArgumentsLayout::TraceGroupsOffset),
+			.TraceRows = Utils::ReadWord(arguments, SsrArgumentsLayout::TraceRowsOffset),
 		};
 	}
 
@@ -261,6 +263,11 @@ namespace Engine {
 		return ((traceSize.x + TileSize - 1) / TileSize) * ((traceSize.y + TileSize - 1) / TileSize);
 	}
 
+	glm::uvec2 SsrPass::GetTraceGroups(uint32_t listedTiles)
+	{
+		return { std::min(listedTiles, SsrTraceRowGroups), listedTiles / SsrTraceRowGroups + (listedTiles % SsrTraceRowGroups != 0 ? 1U : 0U) };
+	}
+
 	nvrhi::TextureDesc SsrPass::GetTargetDesc(uint32_t width, uint32_t height)
 	{
 		ENGINE_CORE_ASSERT(width > 0 && height > 0, "SsrColor's dimensions must be positive");
@@ -280,7 +287,8 @@ namespace Engine {
 	nvrhi::BufferDesc SsrPass::GetTileBufferDesc(uint32_t tileCount)
 	{
 		nvrhi::BufferDesc desc;
-		desc.byteSize = static_cast<uint64_t>(std::max(tileCount, 1U)) * sizeof(uint32_t);
+		// The listed count, then the tiles.
+		desc.byteSize = (static_cast<uint64_t>(std::max(tileCount, 1U)) + 1) * sizeof(uint32_t);
 		desc.structStride = sizeof(uint32_t);
 		desc.canHaveUAVs = true;
 		desc.initialState = nvrhi::ResourceStates::ShaderResource;
@@ -340,7 +348,7 @@ namespace Engine {
 		const uint32_t tileCount = GetTileCount(trace);
 		if (!Utils::HasSize(*inputs.SceneDepth, image.width, image.height) || !Utils::HasSize(*inputs.SceneNormals, image.width, image.height)
 			|| !Utils::HasSize(*inputs.SceneRoughness, image.width, image.height) || !Utils::HasSize(*inputs.ViewDepth, image.width, image.height)
-			|| !Utils::HasSize(*inputs.SsrColor, trace.x, trace.y) || inputs.Tiles->getDesc().byteSize < static_cast<uint64_t>(tileCount) * sizeof(uint32_t)
+			|| !Utils::HasSize(*inputs.SsrColor, trace.x, trace.y) || inputs.Tiles->getDesc().byteSize < (static_cast<uint64_t>(tileCount) + 1) * sizeof(uint32_t)
 			|| inputs.Arguments->getDesc().byteSize < SsrArgumentsLayout::ByteSize || framebuffer.colorAttachments.size() != 1
 			|| framebuffer.colorAttachments[0].texture != inputs.SceneColor || framebuffer.depthAttachment.valid())
 			return MakeError(ErrorCode::InvalidArgument, "the SSR pass's targets must be of SceneColor's size, SsrColor of the trace image's, its tile list and "
@@ -392,10 +400,13 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * compositeSet, bindings.GetOrCreate(*state.Device, compositeDesc, *state.Composite.BindingLayouts[0]));
 
 		commandList.beginMarker("SSR");
-		// The counts start at 0 and the indirect arguments at their constant words: (0, 1, 1) for the trace, (6, 0, 0, 0) for the
-		// composite; then the traced pixels and the tile count.
-		const std::array<uint32_t, SsrArgumentsLayout::ByteSize / sizeof(uint32_t)> initial = { 0, 1, 1, Utils::SsrCompositeVerticesPerTile, 0, 0, 0, 0, tileCount };
+		// The counts start at 0 and the indirect arguments at their constant words: (0, 0, 1) for the trace (CSClassify raises x
+		// and y to its rows), (6, 0, 0, 0) for the composite; then the traced pixels and the tile count. The tile list's count
+		// starts at 0.
+		const std::array<uint32_t, SsrArgumentsLayout::ByteSize / sizeof(uint32_t)> initial = { 0, 0, 1, Utils::SsrCompositeVerticesPerTile, 0, 0, 0, 0, tileCount };
 		commandList.writeBuffer(inputs.Arguments, initial.data(), sizeof(initial));
+		constexpr uint32_t NoTiles = 0;
+		commandList.writeBuffer(inputs.Tiles, &NoTiles, sizeof(NoTiles));
 		// At half resolution the upsample reads the trace image across tile edges, so the unlisted tiles hold 0 (no reflection).
 		if (inputs.HalfResolution)
 			commandList.clearTextureFloat(inputs.SsrColor, nvrhi::AllSubresources, nvrhi::Color(0.0f));

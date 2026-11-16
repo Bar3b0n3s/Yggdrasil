@@ -6,7 +6,7 @@
 
 // The Fog category (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 2; ADR 0042's phase-5 ledger: after Terrain, in
 // landing order): the Fog component, the scene's distance and height fog, which every Lit view's forward shading, terrain,
-// skybox, SSR composite and 3D sprites apply (Renderer/FogConstants.h).
+// skybox, SSR composite and 3D sprites apply (Renderer/Fog.h, Shared/FogConstants.h).
 
 namespace Engine {
 

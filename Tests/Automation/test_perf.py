@@ -127,11 +127,11 @@ class PerfTests(unittest.TestCase):
         self.assertEqual(Perf.cost_samples([2.0, 2.5, 1.5], [1.0, 1.25, 0.75]), [1.0, 1.5, 0.5])
         self.assertEqual(len(Perf.ssr_tile_names()), Perf.SSR_COLUMNS * Perf.SSR_ROWS)
         self.assertEqual(sum(1 for op in Perf.ssr_floor_ops() if op["params"]["name"].startswith("Tile")), 35)
-        self.assertEqual(perf.BUDGETS["fog/FogPillars/gpuCostMs"], 0.5)
+        self.assertEqual(perf.BUDGETS["fog/Fog/gpuCostMs"], 0.5)
 
     def test_the_fog_cost_measures_with_and_without_the_fog_in_one_opening_of_its_scene(self) -> None:
-        # M32's review: the capture opened FogPillars again after removing its Fog, which the editor refuses for the
-        # active scene, so the metric was never captured. The editor's refusal stands in a fake client here.
+        # M32's review: the capture opened the fog's scene again after removing its Fog, which the editor refuses for
+        # the active scene, so the metric was never captured. The editor's refusal stands in a fake client here.
         class FakeEditor:
             def __init__(self) -> None:
                 self.active = ""
@@ -155,7 +155,7 @@ class PerfTests(unittest.TestCase):
         capture.fog_cost(editor)
         self.assertEqual(capture.warnings, [])
         self.assertEqual(editor.calls, ["scene.open", "entity.update"])
-        self.assertEqual([metric.name for metric in capture.metrics], ["fog/FogPillars/gpuCostMs"])
+        self.assertEqual([metric.name for metric in capture.metrics], ["fog/Fog/gpuCostMs"])
         self.assertEqual(capture.metrics[0].median, 0.25)
 
     def test_the_capture_reads_scene_names_gpu_passes_and_the_device_line(self) -> None:

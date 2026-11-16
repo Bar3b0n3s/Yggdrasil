@@ -88,6 +88,7 @@ namespace Engine {
 		constants.Enabled = fogged && fog.Enabled ? 1U : 0U;
 		constants.FogSkybox = fog.FogSkybox ? 1U : 0U;
 		constants.Orthographic = camera.ProjectionKind == RenderProjection::Orthographic ? 1U : 0U;
+		constants.ClearColor = Utils::MakeColorUsable(camera.ClearColor);
 		return constants;
 	}
 

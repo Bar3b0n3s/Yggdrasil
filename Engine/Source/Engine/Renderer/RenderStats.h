@@ -60,15 +60,18 @@ namespace Engine {
 		// rows in landing order): the snapshot's RenderQualitySettings::SsrHalfResolution this frame rendered with; and the SSR
 		// trace's area in the completed GPU frame SsrAreaFrameIndex (read back, as the GPU timings are, once that frame's
 		// submission completed): the trace image's 8 x 8 tiles (SsrTiles), those the trace covered (SsrTracedTiles) and the
-		// trace pixels that traced in them (SsrTracedPixels; at half resolution each stands for four scene pixels).
-		// SsrAreaAvailable is false, and the counts 0, while no completed frame recorded SSR, or the last completed frame
-		// recorded none.
+		// trace pixels that traced in them (SsrTracedPixels; at half resolution each stands for four scene pixels), and the
+		// trace's dispatch, its groups along x and its rows (SsrTraceGroups and SsrTraceRows, SsrPass::GetTraceGroups of
+		// SsrTracedTiles; M32's milestone review). SsrAreaAvailable is false, and the counts 0, while no completed frame
+		// recorded SSR, or the last completed frame recorded none.
 		bool SsrHalfResolution = false;
 		bool SsrAreaAvailable = false;
 		uint64_t SsrAreaFrameIndex = 0;
 		uint32_t SsrTiles = 0;
 		uint32_t SsrTracedTiles = 0;
 		uint32_t SsrTracedPixels = 0;
+		uint32_t SsrTraceGroups = 0;
+		uint32_t SsrTraceRows = 0;
 	};
 
 	// M32 (decision 13): the SSR area of one completed frame, which RenderStatsHistory::PublishSsrArea merges into the
@@ -80,6 +83,8 @@ namespace Engine {
 		uint32_t Tiles = 0;
 		uint32_t TracedTiles = 0;
 		uint32_t TracedPixels = 0;
+		uint32_t TraceGroups = 0;
+		uint32_t TraceRows = 0;
 	};
 
 	struct RenderPassCounters

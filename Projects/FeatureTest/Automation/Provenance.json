@@ -2964,7 +2964,7 @@
 		},
 		{
 			"Path": "Assets/Scenes/GoldenFog/FogHollow.scene",
-			"XXH64": "8b3a6de5594c18b3",
+			"XXH64": "dd0e03e56361e2e9",
 			"Method": "scene.save",
 			"RequestId": 11,
 			"Client": "batch",

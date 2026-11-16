@@ -32,7 +32,9 @@ namespace Engine {
 	//   - the densities, distances, opacity, falloff and exponent made usable: a non-finite value takes RenderFog's default and
 	//     each is clamped to its Fog component range (Density and HeightDensity [0, 10] per metre, StartDistance [0, 100000] m,
 	//     MaxOpacity and AmbientTint [0, 1], HeightFalloff [0.001, 100] per metre, SunGlow [0, 100], SunGlowExponent [1, 1000]),
-	//     BaseHeight any finite value, and each colour channel finite and at least 0.
+	//     BaseHeight any finite value, and each colour channel finite and at least 0;
+	//   - ClearColor: camera.ClearColor made usable the same way; SkyIsClearColor 0, which the renderer sets to 1 for a view
+	//     whose cleared pixels no skybox draws over (M32's milestone review).
 	// Pure, thread-safe.
 	[[nodiscard]] FogConstants MakeFogConstants(const RenderFog& fog, const CameraData& camera, std::span<const LightData> lights,
 		const EnvironmentConstants& environment, bool fogged);

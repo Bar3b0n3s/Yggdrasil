@@ -636,8 +636,8 @@ namespace Engine {
 	// M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 3 and 4): the scene's FogComponent, from render extraction: the first
 	// effectively enabled one in canonical order (it is unique per scene), with Enabled set; Enabled false (the defaults) when
 	// the scene has none, which renders exactly as a renderer without fog did. The renderer fogs a Lit view with a camera
-	// (Renderer/FogConstants.h: the model, the passes it reaches); lighting.bake's probe captures turn it off
-	// (Renderer/ProbeCapture.h). The members are the component's (Scene/Components/FogComponent.h); colours are linear.
+	// (Renderer/Fog.h: the model, the passes it reaches; Shared/FogConstants.h: the constants); lighting.bake's probe
+	// captures turn it off (Renderer/ProbeCapture.h). The members are the component's (Scene/Components/FogComponent.h); colours are linear.
 	struct RenderFog
 	{
 		bool Enabled = false;

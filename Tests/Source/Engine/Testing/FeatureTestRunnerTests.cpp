@@ -2002,6 +2002,7 @@ return Script.Define("Driver",Driver))");
 			RunnerHost host;
 			host.Settings.Rendering.ShadowMapSize = 512;
 			host.Settings.Rendering.SsaoHalfResolution = true;
+			host.Settings.Rendering.SsrHalfResolution = true;
 			ReplayHeader header;
 			header.Scene.Handle = UUID(401);
 			header.Seed = host.Settings.Simulation.Seed;
@@ -2013,10 +2014,12 @@ return Script.Define("Driver",Driver))");
 			CHECK(request.Height == 180);
 			CHECK(request.Quality.ShadowMapSize == 512);
 			CHECK(request.Quality.SsaoHalfResolution);
+			CHECK(request.Quality.SsrHalfResolution);
 			const auto snapshot = (*session)->ExtractView(request);
 			REQUIRE(snapshot);
 			CHECK(snapshot->Quality.ShadowMapSize == 512);
 			CHECK(snapshot->Quality.SsaoHalfResolution);
+			CHECK(snapshot->Quality.SsrHalfResolution);
 		}
 
 		TEST_CASE("TestRunner: a suite that must not quit fails on Application.Quit(-1)")
