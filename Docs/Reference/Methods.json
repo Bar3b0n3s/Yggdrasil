@@ -3845,7 +3845,7 @@
 								"minimum": 0.001
 							},
 							"CastShadows": {
-								"description": "Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).",
+								"description": "Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full resolution; the shadow budget applies).",
 								"type": "boolean"
 							},
 							"SourceRadius": {
@@ -7779,7 +7779,7 @@
 								"minimum": 0.001
 							},
 							"CastShadows": {
-								"description": "Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).",
+								"description": "Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full resolution; the shadow budget applies).",
 								"type": "boolean"
 							},
 							"SourceRadius": {
@@ -17377,7 +17377,7 @@
 								"minimum": 0.001
 							},
 							"CastShadows": {
-								"description": "Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).",
+								"description": "Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full resolution; the shadow budget applies).",
 								"type": "boolean"
 							},
 							"SourceRadius": {
@@ -21316,6 +21316,12 @@
 							"SsaoHalfResolution": {
 								"description": "Computes ambient occlusion at half resolution.",
 								"type": "boolean"
+							},
+							"MaxShadedLights": {
+								"description": "The most lights one view shades: 256, 512, 1024 or 2048. More visible lights drop the least important ones (RENDER_LIGHT_LIMIT_EXCEEDED).",
+								"type": "integer",
+								"minimum": 256,
+								"maximum": 2048
 							}
 						},
 						"additionalProperties": false
@@ -22366,6 +22372,12 @@
 							"SsaoHalfResolution": {
 								"description": "Computes ambient occlusion at half resolution.",
 								"type": "boolean"
+							},
+							"MaxShadedLights": {
+								"description": "The most lights one view shades: 256, 512, 1024 or 2048. More visible lights drop the least important ones (RENDER_LIGHT_LIMIT_EXCEEDED).",
+								"type": "integer",
+								"minimum": 256,
+								"maximum": 2048
 							}
 						},
 						"additionalProperties": false
@@ -26213,6 +26225,24 @@
 							},
 							"historyFrames": {
 								"description": "Renders since the view's temporal history (motion vectors, TAA's jitter and history, auto-exposure's adaptation) last started afresh: 0 at its first render, after a scene change, play starting or stopping, or a camera cut; one more each render after.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"maxShadedLights": {
+								"description": "The most lights the frame shaded (the project's Rendering.MaxShadedLights: 256, 512, 1024 or 2048); 0 when unavailable.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"cachedPointShadows": {
+								"description": "Shadowed point lights whose shadow maps the frame reused unchanged, drawing no caster (the static shadow cache).",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"cachedSpotShadows": {
+								"description": "Shadowed spot lights whose atlas tiles the frame reused unchanged (the atlas is reused whole or redrawn whole).",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295

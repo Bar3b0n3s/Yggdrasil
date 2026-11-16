@@ -1,5 +1,5 @@
 // LightClusters: the cluster masks of the clustered light loop (M23, R-CLC; Docs/Decisions/0034-m23-contract.md decision 5;
-// Renderer/LightClusterPass.h). One thread per cluster and mask word: x runs over every tile's LightClusterWordCount words of
+// Renderer/LightClusterPass.h). One thread per cluster and mask word: x runs over every tile's Grid.w words of
 // one slice, y over the slices. Each thread tests the 32 lights of its word against its cluster's view-space bounds and
 // writes its word alone, so no atomic decides a bit. The test is conservative, so every light that lights a point of the
 // cluster in the forward pass (its windowed falloff is 0 at and beyond Range, its cone factor 0 outside the outer cone) is

@@ -447,7 +447,7 @@ namespace Engine {
 		{
 			CaptureLog log;
 			ScreenshotSetup setup("ViewportAnnotationsCapture", log);
-			REQUIRE(setup.Call("project.setSettings", ParseJson(R"({"patch":{"Rendering":{"ShadowMapSize":512,"SsaoHalfResolution":true}}})")));
+			REQUIRE(setup.Call("project.setSettings", ParseJson(R"({"patch":{"Rendering":{"ShadowMapSize":512,"SsaoHalfResolution":true,"MaxShadedLights":2048}}})")));
 			const auto created = setup.Call("entity.create", ParseJson(R"({"name":"Annotated","components":{"MeshRenderer":{"Mesh":"engine://Meshes/Cube"},"BoxCollider":{}}})"));
 			REQUIRE(created);
 			const UUID id = JsonReader((*created)["entity"]["id"]).ReadUUID().value();
@@ -461,6 +461,7 @@ namespace Engine {
 			CHECK(snapshot.SceneRevision == revision);
 			CHECK(snapshot.Quality.ShadowMapSize == 512);
 			CHECK(snapshot.Quality.SsaoHalfResolution);
+			CHECK(snapshot.Quality.MaxShadedLights == 2048); // M29 (Docs/Decisions/0044-m29-light-limits.md decision 1)
 			CHECK(snapshot.Flags == RenderViewFlags::Colliders);
 			CHECK(snapshot.SelectedEntities == std::vector<UUID>{ id });
 			CHECK(snapshot.Annotations.Labels == RenderAnnotationLabels::Selected);

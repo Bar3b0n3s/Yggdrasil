@@ -82,11 +82,14 @@ namespace Engine {
 		std::map<std::string, InputActionSettings> Actions;
 	};
 
-	// Registry struct "RenderingSettings" (§6.1 "Rendering"). ShadowMapSize is a power of two in [256, 8192].
+	// Registry struct "RenderingSettings" (§6.1 "Rendering"). ShadowMapSize is a power of two in [256, 8192]. M29
+	// (Docs/Decisions/0044-m29-light-limits.md decision 1): MaxShadedLights, the most lights one view shades, is 256, 512,
+	// 1024 or 2048 (Renderer/RenderSnapshot.h's IsValidMaxShadedLights; more visible lights drop the least important).
 	struct RenderingSettings
 	{
 		uint32_t ShadowMapSize = 2048;
 		bool SsaoHalfResolution = false;
+		uint32_t MaxShadedLights = 256;
 	};
 
 	// Registry struct "ScriptingSettings" (§6.1 "Scripting", §11.1). MemoryLimitMB >= 1 (soft limit, plus 16 MB headroom);

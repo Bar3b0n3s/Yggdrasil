@@ -582,7 +582,7 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(ShaderLight, SourceRadius),
 					ENGINE_TEST_SHARED_FIELD(ShaderLight, SpotCosOuter),
 					ENGINE_TEST_SHARED_FIELD(ShaderLight, SpotCosInner),
-					ENGINE_TEST_SHARED_FIELD(ShaderLight, Padding0),
+					ENGINE_TEST_SHARED_FIELD(ShaderLight, ShadowSlot),
 					ENGINE_TEST_SHARED_FIELD(ShaderLight, Padding1),
 				},
 				.Program = "Scene",

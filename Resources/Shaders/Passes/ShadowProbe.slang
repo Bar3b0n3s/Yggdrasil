@@ -28,8 +28,10 @@ void CSMain(uint3 thread : SV_DispatchThreadID)
 		float visibility;
 		if (Probe.Options.x == 3)
 			visibility = SampleDirectionalShadow(Cascades, Comparison, Shadows, float3(xy, Probe.Parameters.z), float3(0, 0, 1), float3(0, 0, 1), Probe.Parameters.y, thread.xy);
+		else if (Probe.Options.y < Shadows.Counts.y) // M29: Options.y is the spot's ShadowSlot, its entry in Shadows.Spots
+			visibility = SampleSpotShadow(Atlas, Comparison, Shadows.Spots[Probe.Options.y], float3(xy * Probe.Parameters.z, -Probe.Parameters.z), float3(0, 0, 1), float3(0, 0, 1), thread.xy);
 		else
-			visibility = SampleSpotShadow(Atlas, Comparison, Shadows, Probe.Options.y, float3(xy * Probe.Parameters.z, -Probe.Parameters.z), float3(0, 0, 1), float3(0, 0, 1), thread.xy);
+			visibility = 1.0;
 		result = float4(visibility, visibility, visibility, 1);
 	}
 	Output[thread.xy] = result;

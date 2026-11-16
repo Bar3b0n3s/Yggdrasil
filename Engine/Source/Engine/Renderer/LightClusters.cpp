@@ -33,10 +33,12 @@ namespace Engine {
 
 	}
 
-	LightClusterGrid ComputeLightClusterGrid(const CameraData& camera, uint32_t width, uint32_t height)
+	LightClusterGrid ComputeLightClusterGrid(const CameraData& camera, uint32_t width, uint32_t height, uint32_t maxShadedLights)
 	{
 		ENGINE_CORE_ASSERT(width > 0 && height > 0, "ComputeLightClusterGrid needs a view of at least 1x1, got {}x{}", width, height);
+		ENGINE_CORE_ASSERT(IsValidMaxShadedLights(maxShadedLights), "{} is not a shaded-light cap", maxShadedLights);
 		LightClusterGrid grid;
+		grid.WordCount = maxShadedLights / 32;
 		grid.TilesX = Utils::GetTileCount(std::max(width, 1U));
 		grid.TilesY = Utils::GetTileCount(std::max(height, 1U));
 		grid.Slices = LightClusterDepthSlices;

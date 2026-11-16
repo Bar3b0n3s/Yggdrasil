@@ -25,6 +25,9 @@ namespace Engine {
 		static constexpr std::string_view DefaultLayer = "Default";
 		static constexpr double MinShadowMapSize = 256.0;
 		static constexpr double MaxShadowMapSize = 8192.0;
+		// M29: Rendering.MaxShadedLights' range; ValidateRendering takes its four values (Renderer/RenderSnapshot.h's rule).
+		static constexpr double MinMaxShadedLights = 256.0;
+		static constexpr double MaxMaxShadedLights = 2048.0;
 		static constexpr uint32_t MinCallbackBudgetMs = 10;
 		static constexpr size_t VersionPartCount = 3;
 
@@ -135,12 +138,16 @@ namespace Engine {
 		{
 			if (!std::has_single_bit(rendering.ShadowMapSize))
 				context.Error("ShadowMapSize", std::format("must be a power of two (got {})", rendering.ShadowMapSize));
+			const uint32_t lights = rendering.MaxShadedLights;
+			if (lights != 256 && lights != 512 && lights != 1024 && lights != 2048)
+				context.Error("MaxShadedLights", std::format("must be 256, 512, 1024 or 2048 (got {})", lights));
 		}
 
 		static void GenerateRendering(RenderingSettings& rendering, Random& random)
 		{
 			// 2^8 = 256 to 2^13 = 8192, the range the field metadata allows.
 			rendering.ShadowMapSize = 1u << static_cast<uint32_t>(random.RangeInt(8, 13));
+			rendering.MaxShadedLights = 256u << static_cast<uint32_t>(random.RangeInt(0, 3));
 		}
 
 		static void ValidateExport(const ExportSettings& settings, ValidationContext& context)
@@ -466,6 +473,10 @@ namespace Engine {
 			.Field("ShadowMapSize", &RenderingSettings::ShadowMapSize, "Shadow map resolution in texels: a power of two from 256 to 8192.",
 				{ .Min = Utils::MinShadowMapSize, .Max = Utils::MaxShadowMapSize, .Unit = "px" })
 			.Field("SsaoHalfResolution", &RenderingSettings::SsaoHalfResolution, "Computes ambient occlusion at half resolution.")
+			.Field("MaxShadedLights", &RenderingSettings::MaxShadedLights,
+				"The most lights one view shades: 256, 512, 1024 or 2048. More visible lights drop the least important ones "
+				"(RENDER_LIGHT_LIMIT_EXCEEDED).",
+				{ .Min = Utils::MinMaxShadedLights, .Max = Utils::MaxMaxShadedLights, .Unit = "lights" })
 			.Validate(&Utils::ValidateRendering)
 			.Generate(&Utils::GenerateRendering);
 

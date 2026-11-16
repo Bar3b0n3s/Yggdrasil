@@ -891,7 +891,7 @@ end
 
 -- A light shining in every direction from the entity.
 declare extern type PointLight with
-	-- Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full resolution; the shadow budget applies). [All modes; Runtime|Test; pure/read; setter mutates]
 	CastShadows: boolean
 	-- The linear light colour. [All modes; Runtime|Test; pure/read; setter mutates]
 	Color: Color

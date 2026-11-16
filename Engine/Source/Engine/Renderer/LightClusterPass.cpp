@@ -23,7 +23,7 @@ namespace Engine {
 	LightClusterConstants MakeLightClusterConstants(const LightClusterGrid& grid, uint32_t mode)
 	{
 		LightClusterConstants constants{};
-		constants.Grid = UInt4(grid.TilesX, grid.TilesY, grid.Slices, LightClusterWordCount);
+		constants.Grid = UInt4(grid.TilesX, grid.TilesY, grid.Slices, grid.WordCount);
 		constants.Slicing = Float4(grid.Near, grid.Far, grid.SliceScale, grid.SliceBias);
 		constants.Mode = UInt4(mode, 0, 0, 0);
 		return constants;
@@ -80,10 +80,10 @@ namespace Engine {
 		return desc;
 	}
 
-	nvrhi::BufferDesc LightClusterPass::GetMaskBufferDesc(uint32_t clusterCount)
+	nvrhi::BufferDesc LightClusterPass::GetMaskBufferDesc(uint32_t clusterCount, uint32_t wordCount)
 	{
 		nvrhi::BufferDesc desc;
-		desc.byteSize = static_cast<uint64_t>(std::max(clusterCount, 1U)) * LightClusterWordCount * sizeof(uint32_t);
+		desc.byteSize = static_cast<uint64_t>(std::max(clusterCount, 1U)) * std::max(wordCount, 1U) * sizeof(uint32_t);
 		desc.structStride = sizeof(uint32_t);
 		desc.canHaveUAVs = true;
 		desc.initialState = nvrhi::ResourceStates::ShaderResource;
@@ -97,10 +97,12 @@ namespace Engine {
 	{
 		const uint32_t clusterCount = GetLightClusterCount(inputs.Grid);
 		if (inputs.ViewConstants == nullptr || inputs.ClusterConstants == nullptr || inputs.Lights == nullptr || inputs.Masks == nullptr
-			|| clusterCount == 0 || inputs.Masks->getDesc().byteSize < GetMaskBufferDesc(clusterCount).byteSize)
+			|| clusterCount == 0 || inputs.Grid.WordCount == 0 || inputs.Grid.WordCount > MaxLightClusterWordCount
+			|| inputs.Masks->getDesc().byteSize < GetMaskBufferDesc(clusterCount, inputs.Grid.WordCount).byteSize)
 		{
-			return MakeError(ErrorCode::InvalidArgument, "the LightClusters pass needs its buffers and a mask buffer for the {} clusters of its grid",
-				clusterCount);
+			return MakeError(ErrorCode::InvalidArgument,
+				"the LightClusters pass needs its buffers, a grid of 1 to {} mask words per cluster and a mask buffer for the {} clusters of its grid",
+				MaxLightClusterWordCount, clusterCount);
 		}
 		State& state = *m_State;
 		nvrhi::BindingSetDesc desc;
@@ -120,7 +122,7 @@ namespace Engine {
 		compute.bindings = { set };
 		commandList.setComputeState(compute);
 		// x: every tile's words of one slice (Passes/LightClusters.slang), y: the slices.
-		const uint32_t threads = inputs.Grid.TilesX * inputs.Grid.TilesY * LightClusterWordCount;
+		const uint32_t threads = inputs.Grid.TilesX * inputs.Grid.TilesY * inputs.Grid.WordCount;
 		commandList.dispatch((threads + ThreadGroupSize - 1) / ThreadGroupSize, inputs.Grid.Slices);
 		recording.EndPass({ .Dispatches = 1 });
 		return {};

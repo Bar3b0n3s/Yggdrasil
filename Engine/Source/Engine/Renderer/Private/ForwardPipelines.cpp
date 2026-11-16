@@ -81,6 +81,7 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::Texture_SRV(PointShadowMapsRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(IrradianceProbesRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(ReflectionProbeCubesRegister),
+										nvrhi::BindingLayoutItem::Texture_SRV(PointShadowMapsHalfRegister),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(ShadowCompareRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),

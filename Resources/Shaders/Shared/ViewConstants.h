@@ -45,7 +45,7 @@ inline constexpr uint32_t ProjectionKindOrthographic = 1;
 		float Exposure = 1.0f;      // 2^ExposureEV (§8.9); 1 when unused
 		uint32_t Padding0 = 0;
 		// M8 (Docs/Decisions/0013-m8-decisions.md decision 7: appended, the members above are frozen): the number of valid
-		// entries of the Lights structured buffer (t0, Shared/ShaderLight.h), at most MaxVisibleLights; 0 for passes that
+		// entries of the Lights structured buffer (t0, Shared/ShaderLight.h), at most RenderQualitySettings::MaxShadedLights; 0 for passes that
 		// bind no light list.
 		uint32_t LightCount = 0;
 		uint32_t Padding1 = 0;

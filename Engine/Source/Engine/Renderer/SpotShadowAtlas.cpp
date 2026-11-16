@@ -1,12 +1,14 @@
 #include "EnginePCH.h"
 #include "Engine/Renderer/SpotShadowAtlas.h"
 
+#include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/ShadowCascades.h"
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <optional>
@@ -90,7 +92,7 @@ namespace Engine {
 	}
 
 	Result<SpotShadowAtlas> AllocateSpotShadowAtlas(std::span<const LightData> lights, std::span<const uint32_t> visibleLightIndices,
-		const CameraData& camera)
+		const CameraData& camera, const SpotShadowAtlas* previous)
 	{
 		if (!Utils::IsFiniteSpotVector(camera.Position) || camera.ViewportWidth == 0 || camera.ViewportHeight == 0
 			|| (camera.ProjectionKind != RenderProjection::Perspective && camera.ProjectionKind != RenderProjection::Orthographic))
@@ -113,21 +115,63 @@ namespace Engine {
 			else
 				++result.Rejected;
 		}
-		std::ranges::sort(ranked, [](const RankedShadowSpot& left, const RankedShadowSpot& right)
+		const auto byImportance = [](const RankedShadowSpot& left, const RankedShadowSpot& right)
 		{
 			if (left.Importance != right.Importance)
 				return left.Importance > right.Importance;
 			return std::tie(left.Entity, left.Index) < std::tie(right.Entity, right.Index);
-		});
-		const size_t count = std::min(ranked.size(), static_cast<size_t>(MaxSpotShadowLights));
-		result.Dropped = static_cast<uint32_t>(ranked.size() - count);
-		for (size_t index = 0; index < count; ++index)
+		};
+		// M29 (decision 3): the previous atlas's tile of a spot, if it had one.
+		const auto previousTile = [previous](const RankedShadowSpot& spot) -> const SpotShadowTile*
+		{
+			if (previous == nullptr || !spot.Entity.IsValid())
+				return nullptr;
+			const auto held = std::ranges::find(previous->Tiles, spot.Entity, &SpotShadowTile::Entity);
+			return held != previous->Tiles.end() ? &*held : nullptr;
+		};
+		if (ranked.size() > MaxSpotShadowLights)
+		{
+			std::ranges::sort(ranked, [&previousTile](const RankedShadowSpot& left, const RankedShadowSpot& right)
+			{
+				const float leftRank = previousTile(left) != nullptr ? left.Importance * LightHysteresis : left.Importance;
+				const float rightRank = previousTile(right) != nullptr ? right.Importance * LightHysteresis : right.Importance;
+				if (leftRank != rightRank)
+					return leftRank > rightRank;
+				// Ties as CullLights breaks them (ADR 0044 decision 3): entity UUID, then snapshot index.
+				return std::tie(left.Entity, left.Index) < std::tie(right.Entity, right.Index);
+			});
+			result.Dropped = static_cast<uint32_t>(ranked.size() - MaxSpotShadowLights);
+			ranked.resize(MaxSpotShadowLights);
+		}
+		std::ranges::sort(ranked, byImportance);
+		// The slots: a spot keeps its previous one, the others take the lowest free ones in importance order.
+		std::array<bool, MaxSpotShadowLights> taken{};
+		std::vector<uint32_t> slots(ranked.size(), MaxSpotShadowLights);
+		for (size_t index = 0; index < ranked.size(); ++index)
+		{
+			const SpotShadowTile* held = previousTile(ranked[index]);
+			if (held != nullptr && held->Slot < MaxSpotShadowLights && !taken[held->Slot])
+			{
+				slots[index] = held->Slot;
+				taken[held->Slot] = true;
+			}
+		}
+		for (uint32_t& slot : slots)
+		{
+			if (slot != MaxSpotShadowLights)
+				continue;
+			slot = static_cast<uint32_t>(std::ranges::find(taken, false) - taken.begin());
+			taken[slot] = true;
+		}
+		for (size_t index = 0; index < ranked.size(); ++index)
 		{
 			const RankedShadowSpot& spot = ranked[index];
 			SpotShadowTile tile;
 			tile.LightIndex = spot.Index;
-			tile.X = static_cast<uint32_t>(index % (SpotShadowAtlasSize / SpotShadowTileSize)) * SpotShadowTileSize;
-			tile.Y = static_cast<uint32_t>(index / (SpotShadowAtlasSize / SpotShadowTileSize)) * SpotShadowTileSize;
+			tile.Entity = spot.Entity;
+			tile.Slot = slots[index];
+			tile.X = tile.Slot % (SpotShadowAtlasSize / SpotShadowTileSize) * SpotShadowTileSize;
+			tile.Y = tile.Slot / (SpotShadowAtlasSize / SpotShadowTileSize) * SpotShadowTileSize;
 			tile.UvScaleBias = glm::vec4(SpotShadowTileSize - 2 * SpotShadowGuardTexels, SpotShadowTileSize - 2 * SpotShadowGuardTexels,
 								   tile.X + SpotShadowGuardTexels, tile.Y + SpotShadowGuardTexels)
 				/ static_cast<float>(SpotShadowAtlasSize);

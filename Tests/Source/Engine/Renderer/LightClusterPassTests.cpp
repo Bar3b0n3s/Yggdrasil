@@ -44,24 +44,47 @@ namespace Engine {
 			const LightClusterGrid grid = ComputeLightClusterGrid(MakeCamera(1920, 1080), 1920, 1080);
 			CHECK(GetLightClusterCount(grid) == 30 * 17 * 24);
 			const LightClusterConstants clustered = MakeLightClusterConstants(grid, LightClusterModeClustered);
-			CHECK(clustered.Grid == glm::uvec4(30, 17, 24, LightClusterWordCount));
+			CHECK(grid.WordCount == 8);
+			CHECK(clustered.Grid == glm::uvec4(30, 17, 24, 8));
 			CHECK(clustered.Slicing == glm::vec4(grid.Near, grid.Far, grid.SliceScale, grid.SliceBias));
 			CHECK(clustered.Mode == glm::uvec4(LightClusterModeClustered, 0, 0, 0));
 			CHECK(MakeLightClusterConstants(grid, LightClusterModeBruteForce).Mode.x == LightClusterModeBruteForce);
-			const nvrhi::BufferDesc masks = LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid));
-			CHECK(masks.byteSize == uint64_t{ 30 } * 17 * 24 * LightClusterWordCount * sizeof(uint32_t));
+			const nvrhi::BufferDesc masks = LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid), grid.WordCount);
+			CHECK(masks.byteSize == uint64_t{ 30 } * 17 * 24 * 8 * sizeof(uint32_t));
 			CHECK(masks.structStride == sizeof(uint32_t));
 			CHECK(masks.canHaveUAVs);
-			CHECK(LightClusterPass::GetMaskBufferDesc(0).byteSize == LightClusterWordCount * sizeof(uint32_t));
+			CHECK(LightClusterPass::GetMaskBufferDesc(0, grid.WordCount).byteSize == 8 * sizeof(uint32_t));
 			CHECK(LightClusterPass::GetConstantsDesc().byteSize == sizeof(LightClusterConstants));
 			CHECK(LightClusterPass::GetConstantsDesc().isConstantBuffer);
+		}
+
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): a cluster holds a bit per light of the cap, so its mask words,
+		// the constants' Grid.w and the buffer follow the cap; nothing else of the grid does.
+		TEST_CASE("LightClusterPass: the grid's word count follows the shaded-light cap")
+		{
+			const CameraData camera = MakeCamera(1920, 1080);
+			const LightClusterGrid base = ComputeLightClusterGrid(camera, 1920, 1080);
+			CHECK(base.WordCount == DefaultMaxShadedLights / 32);
+			for (const uint32_t cap : { 256U, 512U, 1024U, 2048U })
+			{
+				CAPTURE(cap);
+				const LightClusterGrid grid = ComputeLightClusterGrid(camera, 1920, 1080, cap);
+				CHECK(grid.WordCount == cap / 32);
+				LightClusterGrid sameElse = grid;
+				sameElse.WordCount = base.WordCount;
+				CHECK(sameElse == base);
+				CHECK(MakeLightClusterConstants(grid, LightClusterModeClustered).Grid.w == cap / 32);
+				CHECK(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid), grid.WordCount).byteSize
+					== uint64_t{ 30 } * 17 * 24 * (cap / 32) * sizeof(uint32_t));
+			}
+			CHECK(ComputeLightClusterGrid(camera, 1920, 1080, MaxShadedLightsCeiling).WordCount == MaxLightClusterWordCount);
 		}
 	}
 
 	TEST_SUITE(Test::GpuSuite)
 	{
 		// Record checks its inputs before it records anything: every buffer, a grid of at least one cluster and a mask
-		// buffer that holds the grid's clusters.
+		// buffer that holds the grid's clusters (M29: and a word count of 1 to MaxLightClusterWordCount).
 		TEST_CASE("LightClusterPass: Record refuses missing buffers and a mask buffer smaller than its grid's")
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -84,7 +107,7 @@ namespace Engine {
 				Result<nvrhi::BufferHandle> view = device.CreateBuffer(viewDesc);
 				Result<nvrhi::BufferHandle> constants = device.CreateBuffer(LightClusterPass::GetConstantsDesc());
 				Result<nvrhi::BufferHandle> lights = device.CreateBuffer(lightsDesc);
-				Result<nvrhi::BufferHandle> masks = device.CreateBuffer(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid) - 1));
+				Result<nvrhi::BufferHandle> masks = device.CreateBuffer(LightClusterPass::GetMaskBufferDesc(GetLightClusterCount(grid) - 1, grid.WordCount));
 				REQUIRE(view.has_value());
 				REQUIRE(constants.has_value());
 				REQUIRE(lights.has_value());
@@ -94,6 +117,11 @@ namespace Engine {
 				withoutLights.Lights = nullptr;
 				LightClusterPassInputs emptyGrid = complete;
 				emptyGrid.Grid = {};
+				// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): a word count of 0, or beyond the 2,048-light ceiling's.
+				LightClusterPassInputs noWords = complete;
+				noWords.Grid.WordCount = 0;
+				LightClusterPassInputs tooManyWords = complete;
+				tooManyWords.Grid.WordCount = MaxLightClusterWordCount + 1;
 				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
 				REQUIRE(list.has_value());
 				PassBindingCache bindings;
@@ -104,7 +132,7 @@ namespace Engine {
 				});
 				(*list)->open();
 				// `complete`'s mask buffer holds one cluster fewer than the grid has.
-				for (const LightClusterPassInputs& inputs : { complete, withoutLights, emptyGrid })
+				for (const LightClusterPassInputs& inputs : { complete, withoutLights, emptyGrid, noWords, tooManyWords })
 				{
 					const Status refused = (*pass)->Record(**list, recording, bindings, inputs);
 					REQUIRE_FALSE(refused.has_value());

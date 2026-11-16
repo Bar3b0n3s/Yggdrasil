@@ -123,11 +123,26 @@ namespace Engine {
 		UUID Entity{};
 	};
 
+	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): the lights one view shades by default
+	// (RenderQualitySettings::MaxShadedLights, ProjectSettings.Rendering.MaxShadedLights), and the largest cap a project may
+	// set. More visible lights than the cap drop the least important (RenderPrepare.h's CullLights, RENDER_LIGHT_LIMIT_EXCEEDED).
+	inline constexpr uint32_t DefaultMaxShadedLights = 256;
+	inline constexpr uint32_t MaxShadedLightsCeiling = 2048;
+
+	// Whether `value` is a shaded-light cap a view takes: 256, 512, 1024 or 2048 (the cluster masks hold a whole number of
+	// 32-bit words per cluster, Shared/LightClusterConstants.h).
+	[[nodiscard]] constexpr bool IsValidMaxShadedLights(uint32_t value)
+	{
+		return value == 256 || value == 512 || value == 1024 || value == 2048;
+	}
+
 	// Copied from ProjectSettings.Rendering by the host; no Project dependency in Renderer.
 	struct RenderQualitySettings
 	{
 		uint32_t ShadowMapSize = 2048; // power of two, [256, 8192]
 		bool SsaoHalfResolution = false;
+		// M29 (decision 1): the most lights one view shades, IsValidMaxShadedLights (ExtractRenderSnapshot refuses others).
+		uint32_t MaxShadedLights = DefaultMaxShadedLights;
 		// M23 (C23.1, decisions 2 and 5): the reference paths the renderer's tests compare its fast paths with, on in every
 		// host (no project setting copies them). Instancing false draws every mesh item's submesh with its own draw, which an
 		// instanced render equals byte for byte (R-INST); ClusteredLights false shades every pixel with every light of the
@@ -298,7 +313,7 @@ namespace Engine {
 	};
 
 	// One light (§8.2: directional, point, spot). The renderer culls them on the CPU and lights with at most
-	// MaxVisibleLights of them (RenderPrepare.h, RENDER_LIGHT_LIMIT_EXCEEDED); the walking skeleton used the first
+	// RenderQualitySettings::MaxShadedLights of them (RenderPrepare.h, RENDER_LIGHT_LIMIT_EXCEEDED); the walking skeleton used the first
 	// directional light only. M23 (C23.1): the forward passes shade them through the view's cluster grid
 	// (LightClusters.h), and point lights cast shadows (PointShadowMaps.h).
 	struct LightData

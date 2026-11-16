@@ -28,6 +28,9 @@ namespace Engine {
 		// SliceScale = Slices / log2(Far / Near), SliceBias = -log2(Near) * SliceScale.
 		float SliceScale = 0.0f;
 		float SliceBias = 0.0f;
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 1): the 32-bit mask words of each cluster, the view's shaded-light
+		// cap over 32 (8 at the default 256, MaxLightClusterWordCount at 2048), LightClusterConstants::Grid.w.
+		uint32_t WordCount = DefaultMaxShadedLights / 32;
 
 		bool operator==(const LightClusterGrid&) const = default;
 	};
@@ -36,8 +39,9 @@ namespace Engine {
 	// view, partial at the right and bottom edges, and its slices the camera's [NearClip, FarClip] range of view depth,
 	// exponentially (LightClusterConstants' comment), for both projections. A camera whose clip range is not finite and
 	// positive with Near < Far gives one slice spanning everything (SliceScale 0, so every depth is slice 0 after the
-	// clamp). Pure.
-	[[nodiscard]] LightClusterGrid ComputeLightClusterGrid(const CameraData& camera, uint32_t width, uint32_t height);
+	// clamp). M29: its WordCount holds `maxShadedLights` (IsValidMaxShadedLights, asserted) lights' bits. Pure.
+	[[nodiscard]] LightClusterGrid ComputeLightClusterGrid(const CameraData& camera, uint32_t width, uint32_t height,
+		uint32_t maxShadedLights = DefaultMaxShadedLights);
 
 	// The cluster of scene pixel (x, y) at view depth `viewDepth` (positive in front of the camera): the index
 	// (z * TilesY + y / LightClusterTileSize) * TilesX + x / LightClusterTileSize, z the depth's slice clamped to

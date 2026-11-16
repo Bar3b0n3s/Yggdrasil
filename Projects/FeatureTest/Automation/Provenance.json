@@ -1699,6 +1699,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Materials/GoldenManyLights/Block.material",
+			"XXH64": "1a8db528b3f50f40",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenManyLights/Block.material.meta",
+			"XXH64": "c93dac91b3cb22fb",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenManyLights/Floor.material",
+			"XXH64": "04f047b68ff78afe",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenManyLights/Floor.material.meta",
+			"XXH64": "365c66aac97b001a",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Materials/GoldenPointShadows/Floor.material",
 			"XXH64": "a755c8cf4216b86e",
 			"Method": "asset.create",
@@ -2847,6 +2879,22 @@
 			"XXH64": "823d587e6b9fc383",
 			"Method": "edit.batch",
 			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenManyLights/ManyLights.scene",
+			"XXH64": "826cbf0b5da65e80",
+			"Method": "scene.save",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenManyLights/ManyLights.scene.meta",
+			"XXH64": "a7b9c3fcd07d14e2",
+			"Method": "edit.batch",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6596,7 +6644,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "4b5f36050a5af65a",
+			"XXH64": "16d660a4f396f5d1",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

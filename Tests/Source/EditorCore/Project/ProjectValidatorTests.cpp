@@ -2010,7 +2010,7 @@ end
 			Scene& scene = editor.GetScene();
 			{
 				SceneEdit edit(editor, "Lights");
-				for (uint32_t index = 0; index < MaxVisibleLights; ++index)
+				for (uint32_t index = 0; index < DefaultMaxShadedLights; ++index)
 					REQUIRE(ComponentAccess::AddComponent(scene.CreateEntity("Light"), "PointLight", nullptr).has_value());
 				REQUIRE(edit.Commit().has_value());
 			}
@@ -2048,6 +2048,51 @@ end
 			report = ProjectValidator::Validate(editor, ValidationScope::Scene);
 			REQUIRE(report.has_value());
 			CHECK(FindDiagnostic(*report, RenderLightLimitExceededCode) == nullptr);
+		}
+
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 6): the scene's lights are counted against the project's
+		// Rendering.MaxShadedLights, whatever it is set to.
+		TEST_CASE("ProjectValidator: the light limit follows the project's MaxShadedLights")
+		{
+			Test::EditorTestFixture fixture("ValidatorLightCap");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			Scene& scene = editor.GetScene();
+			{
+				SceneEdit edit(editor, "Lights");
+				for (uint32_t index = 0; index < 600; ++index)
+					REQUIRE(ComponentAccess::AddComponent(scene.CreateEntity("Light"), "PointLight", nullptr).has_value());
+				REQUIRE(edit.Commit().has_value());
+			}
+			const auto setCap = [&editor](uint32_t cap)
+			{
+				auto command = ProjectSettingsCommand::CreateFromPatch(editor, Json{ { "Rendering", Json{ { "MaxShadedLights", cap } } } }, "Light cap");
+				REQUIRE(command.has_value());
+				REQUIRE(editor.Execute(std::move(*command)).has_value());
+				REQUIRE(editor.GetProject().GetSettings().Rendering.MaxShadedLights == cap);
+			};
+			for (const uint32_t cap : { 256U, 512U })
+			{
+				CAPTURE(cap);
+				setCap(cap);
+				const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+				REQUIRE(report.has_value());
+				const ProjectDiagnostic* limit = FindDiagnostic(*report, RenderLightLimitExceededCode);
+				REQUIRE(limit != nullptr);
+				CHECK(limit->Message.contains("600"));
+				CHECK(limit->Message.contains(std::to_string(cap)));
+			}
+			for (const uint32_t cap : { 1024U, 2048U })
+			{
+				CAPTURE(cap);
+				setCap(cap);
+				const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+				REQUIRE(report.has_value());
+				CHECK(FindDiagnostic(*report, RenderLightLimitExceededCode) == nullptr);
+			}
+			// A value outside the four is refused before it reaches the project.
+			CHECK_FALSE(ProjectSettingsCommand::CreateFromPatch(editor, Json{ { "Rendering", Json{ { "MaxShadedLights", 300 } } } }, "Bad cap").has_value());
 		}
 
 		TEST_CASE("ProjectValidator: render warnings have stable IDs and no automatic fixes")
@@ -2100,9 +2145,9 @@ end
 		}
 
 		// M23 (R-PLS; Docs/Decisions/0034-m23-contract.md decision 18): a scene whose enabled shadow-casting point lights
-		// outnumber what one view shadows (MaxPointShadowLights) is warned once, without a fix; a point light without
+		// outnumber what one view shadows (MaxPointShadowLights: 16 since M29) is warned once, without a fix; a point light without
 		// CastShadows or on an inactive entity does not count.
-		TEST_CASE("ProjectValidator: more than four shadow-casting point lights is RENDER_POINT_SHADOW_BUDGET, a warning without a fix")
+		TEST_CASE("ProjectValidator: more shadow-casting point lights than a view shadows is RENDER_POINT_SHADOW_BUDGET, a warning without a fix")
 		{
 			Test::EditorTestFixture fixture("ValidatorPointShadowBudget");
 			fixture.CreateAndOpenProject();

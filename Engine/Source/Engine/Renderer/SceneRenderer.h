@@ -20,7 +20,7 @@
 //      textures, the environment; placeholders for missing assets, §7.2), submeshes culled against the view frustum by their
 //      bounds, opaque draws (AlphaMode Opaque and Mask) sorted by pipeline, then material, then mesh, then submesh (M23),
 //      transparent draws (AlphaMode Blend) back to front with ties by entity UUID; the lights culled and packed, at most
-//      MaxVisibleLights, logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants
+//      the snapshot's Quality.MaxShadedLights (M29), logging RENDER_LIGHT_LIMIT_EXCEEDED once per renderer when more are visible; the per-view constants
 //      written (ViewConstants b0, EnvironmentConstants b2, the Lights structured buffer t0, and from M23 the Instances
 //      structured buffer t10: one instance record per submesh draw of the view, every mesh pass drawing maximal runs of
 //      adjacent equal draws as one instanced draw, which renders exactly what one draw per submesh draw renders).
@@ -28,7 +28,7 @@
 //      deformed vertices bound as vertex binding 0 by every later pass instead of the mesh's, its previous positions kept.
 //   2. Directional cascades and 3. spot shadow atlas: shared shadow pipelines, per-view depth targets and constants (b1).
 //      Then M23's point-light shadow cubes (PointShadowMaps.h, the PointShadows row after SpotShadows): six faces for each of
-//      at most four shadow-casting point lights, drawn with the shadow casters' pipelines.
+//      at most 16 shadow-casting point lights in two tiers (M29), drawn with the shadow casters' pipelines.
 //   4. Depth/normal prepass: SceneDepth (reverse-Z) and SceneNormals (octahedral view-space normals, normal-mapped); Mask
 //      materials discard below AlphaCutoff here and in the forward pass. Picking adds the same visible surfaces to EntityId.
 //      M26 (Docs/Decisions/0037-m26-contract.md decisions 11 and 14): also SceneVelocity, the motion vectors (from the
@@ -160,11 +160,11 @@ namespace Engine {
 	{
 		uint32_t MeshDraws = 0;       // submesh draws recorded by the forward passes (opaque and transparent)
 		uint32_t CulledSubmeshes = 0; // submeshes outside the frustum
-		uint32_t Lights = 0;          // lights used after culling (at most MaxVisibleLights, RenderPrepare.h)
+		uint32_t Lights = 0;          // lights used after culling (at most Quality.MaxShadedLights, RenderPrepare.h)
 		// M8 additions.
 		uint32_t TransparentDraws = 0;  // of MeshDraws, the Blend draws of pass 9
 		uint32_t CulledLights = 0;      // LightCullResult::Culled: outside the view, or zero or non-finite radiance or range
-		uint32_t DroppedLights = 0;     // visible lights beyond MaxVisibleLights (RENDER_LIGHT_LIMIT_EXCEEDED)
+		uint32_t DroppedLights = 0;     // visible lights beyond Quality.MaxShadedLights (RENDER_LIGHT_LIMIT_EXCEEDED)
 		uint32_t TextDraws = 0;         // text items and debug labels drawn
 		uint32_t DebugLineVertices = 0; // vertices of the debug lines drawn
 		// M21's milestone review: the visible tiles (of chunks that meet the view) past SceneRenderer::MaxTileQuadsPerView,
@@ -365,7 +365,8 @@ namespace Engine {
 		// Errors returned before recording (nothing recorded, no OnSubmitted needed): InvalidState while the previous Render
 		// awaits its OnSubmitted (also asserted), or between the pipeline set's ReleaseGpuObjects and its CreatePipelines (a
 		// programmer error, also asserted); InvalidArgument for a debug view outside RenderDebugView or a
-		// Quality.ShadowMapSize that is not a power of two in [256, 8192]; a debug view's pipeline error other than Gpu (an
+		// Quality.ShadowMapSize that is not a power of two in [256, 8192] or (M29) a Quality.MaxShadedLights other than 256, 512,
+		// 1024 or 2048 (IsValidMaxShadedLights); a debug view's pipeline error other than Gpu (an
 		// invalid shader), or its Gpu error on a lost device; Gpu when a lazily created target of the Prepare stage or (M23)
 		// the view's instance buffer cannot be created. Partial errors (the view is still recorded, the first error is
 		// returned): InvalidArgument for a non-finite camera matrix (the view clears as without a camera) or world matrix

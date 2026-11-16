@@ -27,8 +27,9 @@ namespace Engine {
 	class GraphicsDevice;
 
 	// The caster-constant slots of one record: one per cascade (slots [0, 4)), then one per spot tile (from slot 4), then one per
-	// point-shadow face (M23: from slot 12, light i's faces at 12 + 6 i in PointShadowFaceCount order). A slot is 256 bytes,
-	// the largest minUniformBufferOffsetAlignment Vulkan allows, so every slot offset is a valid binding offset.
+	// point-shadow face (M23; M29's 16 spots and 16 point lights: from slot 20, the plan's light i's faces at 20 + 6 i in
+	// PointShadowFaceCount order), 116 in all. A slot is 256 bytes, the largest minUniformBufferOffsetAlignment Vulkan allows,
+	// so every slot offset is a valid binding offset.
 	inline constexpr uint32_t ShadowCasterFirstPointSlot = MaxShadowCascades + MaxSpotShadowLights;
 	inline constexpr uint32_t ShadowCasterSlotCount = ShadowCasterFirstPointSlot + MaxPointShadowLights * PointShadowFaceCount;
 	inline constexpr uint32_t ShadowCasterSlotStride = 256;
@@ -53,6 +54,10 @@ namespace Engine {
 		nvrhi::BufferHandle MaterialConstants{};
 		nvrhi::TextureHandle BaseColorMap{};
 		uint32_t Instance = 0; // its instance record's index in the view's Instances buffer
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): XXH64 of everything the draw puts into a depth map: its
+		// world matrix, mesh handle and GpuMesh::Version, submesh range, variants, a Mask caster's material handle and
+		// GpuMaterial::Generation, and a deformed caster's entity, joint palette and morph weights (PrepareCasters).
+		uint64_t Signature = 0;
 	};
 
 	// The view's shadow casters (ShadowPass::PrepareCasters).
@@ -63,6 +68,41 @@ namespace Engine {
 		// (RenderQualitySettings::Instancing false). Each face records, of every batch, the maximal runs of the draws its
 		// frustum does not cull, each run one instanced draw of adjacent instance records.
 		std::vector<MeshInstanceBatch> Batches{};
+	};
+
+	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4; the review): a world-space box of the shadow pass's culling,
+	// which ShadowPass::Record tests before any view's frustum: for each shadowed light (a point light's cube of Range, a spot
+	// tile's frustum's box), the caster draws whose box overlaps the light's are the only ones its views cull further.
+	struct ShadowBox
+	{
+		glm::vec3 Centre = glm::vec3(0.0f);
+		glm::vec3 HalfExtent = glm::vec3(0.0f);
+	};
+
+	// The box of a caster draw's local `bounds` moved by its `world` matrix: the box of the moved corners, so it holds every
+	// moved point of the bounds whatever the matrix's rotation, scale or shear. Empty bounds, which no shadow view culls,
+	// give an infinite box at the world matrix's origin.
+	[[nodiscard]] ShadowBox ComputeShadowCasterBox(const Aabb& bounds, const glm::mat4& world);
+	// Whether a caster's box may reach a light's: overlapping on every axis, with a margin against rounding of a thousandth of
+	// the half extents, a hundred-thousandth of the centres' coordinates and a tenth of a millimetre, so a caster it rejects
+	// lies wholly outside and no view inside the light's box records it.
+	[[nodiscard]] bool ShadowBoxesOverlap(const ShadowBox& caster, const ShadowBox& light);
+
+	// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): the static shadow cache, per-view renderer state that
+	// ShadowPass::Record reads and writes: the signature of what each point-shadow layer group of either tier and the spot atlas
+	// hold (0: nothing reusable). A point light's signature hashes its tier, layer group, face size, clip planes and each face's
+	// view-projection with the signatures of the caster draws that face records; the atlas's hashes every tile's slot,
+	// view-projection and clip planes with its draws. Record skips a point light whose layer group holds its own signature, and
+	// the whole atlas when it holds its own, counting them as cached, and stores a map's signature once it is drawn. The owner
+	// clears it (Clear) whenever the maps may no longer hold what the signatures say: a render that does not continue its
+	// view's temporal history, a new or re-acquired shadow target, a shader reload and a device loss.
+	struct ShadowMapCache
+	{
+		std::array<uint64_t, MaxFullPointShadowLights> Full{};
+		std::array<uint64_t, MaxHalfPointShadowLights> Half{};
+		uint64_t Atlas = 0;
+
+		void Clear() { *this = {}; }
 	};
 
 	struct ShadowRenderInputs
@@ -87,14 +127,23 @@ namespace Engine {
 		// pipelines of the reflected winding (every face projection is a reflection, PointShadowMaps.h) and the spot shadows'
 		// bias defaults. Null or empty Lights means no point shadows.
 		const PointShadowSet* Points = nullptr;                        // borrowed for Record only
-		nvrhi::ITexture* PointTarget = nullptr;                        // GetPointTargetDesc, 6 x MaxPointShadowLights layers
+		nvrhi::ITexture* PointTarget = nullptr;                        // GetPointTargetDesc(Full), the Full tier's cubes
 		std::span<const nvrhi::FramebufferHandle> PointFramebuffers{}; // CreateFramebuffers(PointTarget), one per layer
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): the Half tier's cubes (GetPointTargetDesc(Half)); may be
+		// non-null while no planned light is Half, and is read only for Half lights (then required).
+		nvrhi::ITexture* PointHalfTarget = nullptr;
+		std::span<const nvrhi::FramebufferHandle> PointHalfFramebuffers{}; // CreateFramebuffers(PointHalfTarget), one per layer
+		// M29 (decision 4): the view's static shadow cache, read and written by Record; null draws every map.
+		ShadowMapCache* Cache = nullptr;
 	};
 
 	struct ShadowRenderResult
 	{
 		uint32_t DrawCalls = 0;
 		uint32_t Triangles = 0;
+		// M29 (decision 4): the planned point lights and spot lights whose maps Record reused from the cache instead of drawing.
+		uint32_t CachedPointLights = 0;
+		uint32_t CachedSpotLights = 0;
 	};
 
 	// Shared immutable pipelines; per-view targets, framebuffers, caster constants, instance buffer and binding cache supplied
@@ -124,9 +173,10 @@ namespace Engine {
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		[[nodiscard]] static nvrhi::TextureDesc GetCascadeTargetDesc(uint32_t shadowMapSize);
 		[[nodiscard]] static nvrhi::TextureDesc GetAtlasTargetDesc();
-		// M23: the PointShadowMaps cube array, PointShadowFaceCount x MaxPointShadowLights layers of `faceSize` (a
-		// GetPointShadowFaceSize) texels in the shadows' depth format.
-		[[nodiscard]] static nvrhi::TextureDesc GetPointTargetDesc(uint32_t faceSize);
+		// M23: the PointShadowMaps cube array, PointShadowFaceCount x MaxFullPointShadowLights layers of `faceSize` (a
+		// GetPointShadowFaceSize) texels in the shadows' depth format; M29: for PointShadowTier::Half, the PointShadowMapsHalf
+		// cube array, PointShadowFaceCount x MaxHalfPointShadowLights layers of `faceSize` (a GetPointShadowHalfFaceSize).
+		[[nodiscard]] static nvrhi::TextureDesc GetPointTargetDesc(uint32_t faceSize, PointShadowTier tier = PointShadowTier::Full);
 		// The per-view caster-constant buffer ShadowRenderInputs::CasterConstants takes.
 		[[nodiscard]] static nvrhi::BufferDesc GetCasterConstantsDesc();
 		// One depth-only framebuffer per array slice of `target` (a cascade, atlas or point-shadow target). Gpu errors propagate.

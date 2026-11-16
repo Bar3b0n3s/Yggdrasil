@@ -49,7 +49,7 @@
 			}
 		},
 		{
-			"ID": "e000000000000020",
+			"ID": "e000000000000200",
 			"Name": "Bulb0",
 			"Parent": null,
 			"Active": true,
@@ -66,7 +66,7 @@
 			}
 		},
 		{
-			"ID": "e000000000000021",
+			"ID": "e000000000000201",
 			"Name": "Bulb1",
 			"Parent": null,
 			"Active": true,
@@ -83,7 +83,7 @@
 			}
 		},
 		{
-			"ID": "e000000000000022",
+			"ID": "e000000000000202",
 			"Name": "Bulb2",
 			"Parent": null,
 			"Active": true,
@@ -100,7 +100,7 @@
 			}
 		},
 		{
-			"ID": "e000000000000023",
+			"ID": "e000000000000203",
 			"Name": "Bulb3",
 			"Parent": null,
 			"Active": true,
@@ -117,7 +117,7 @@
 			}
 		},
 		{
-			"ID": "e000000000000024",
+			"ID": "e000000000000204",
 			"Name": "Bulb4",
 			"Parent": null,
 			"Active": true,
@@ -125,6 +125,210 @@
 			"Components": {
 				"Transform": {
 					"Translation": [8, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000205",
+			"Name": "Bulb5",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [10, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000206",
+			"Name": "Bulb6",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [12, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000207",
+			"Name": "Bulb7",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [14, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000208",
+			"Name": "Bulb8",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [16, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000209",
+			"Name": "Bulb9",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [18, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e00000000000020a",
+			"Name": "Bulb10",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [20, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e00000000000020b",
+			"Name": "Bulb11",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [22, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e00000000000020c",
+			"Name": "Bulb12",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [24, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e00000000000020d",
+			"Name": "Bulb13",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [26, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e00000000000020e",
+			"Name": "Bulb14",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [28, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e00000000000020f",
+			"Name": "Bulb15",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [30, 3, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"PointLight": {
+					"CastShadows": true
+				}
+			}
+		},
+		{
+			"ID": "e000000000000210",
+			"Name": "Bulb16",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [32, 3, 0],
 					"Rotation": [0, 0, 0, 1],
 					"Scale": [1, 1, 1]
 				},

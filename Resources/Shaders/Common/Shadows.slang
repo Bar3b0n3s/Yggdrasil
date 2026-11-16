@@ -153,69 +153,62 @@ float SampleDirectionalShadow(Texture2DArray<float> maps, SamplerComparisonState
 	return visibility;
 }
 
-// Finds the atlas allocation by uploaded Lights index. Unallocated/point lights return full visibility.
-float SampleSpotShadow(Texture2D<float> atlas, SamplerComparisonState comparison, ShadowConstants shadows,
-	uint lightIndex, float3 worldPosition, float3 normal, float3 toLight, uint2 pixel)
+// The visibility of a spot light's atlas tile `spot` (its ShaderLight::ShadowSlot's entry, M29).
+float SampleSpotShadow(Texture2D<float> atlas, SamplerComparisonState comparison, SpotShadowConstants spot,
+	float3 worldPosition, float3 normal, float3 toLight, uint2 pixel)
 {
 	uint width, height;
 	atlas.GetDimensions(width, height);
-	for (uint index = 0; index < shadows.Counts.y; ++index)
+	float4 clip = mul(spot.ViewProjection, float4(worldPosition, 1.0));
+	if (clip.w <= 0.0)
+		return 1.0;
+	float distance = ShadowLinearDepth(saturate(clip.z / clip.w), spot.DepthSoftness.x, spot.DepthSoftness.y, true);
+	float offset = spot.Bias.y * spot.Bias.z * distance * (1.0 - saturate(dot(normal, toLight)));
+	clip = mul(spot.ViewProjection, float4(worldPosition + normal * offset, 1.0));
+	if (clip.w <= 0.0)
+		return 1.0;
+	float2 localUv = ShadowUv(clip);
+	float receiverDepth = clip.z / clip.w;
+	if (any(localUv < 0.0) || any(localUv > 1.0) || receiverDepth < 0.0 || receiverDepth > 1.0)
+		return 1.0;
+	float receiverDistance = ShadowLinearDepth(receiverDepth, spot.DepthSoftness.x, spot.DepthSoftness.y, true);
+	float2 texel = 1.0 / float2(width, height);
+	float2 uv = localUv * spot.UvScaleBias.xy + spot.UvScaleBias.zw;
+	float2 gradient = ShadowReceiverGradient(spot.ViewProjection, clip, normal) / spot.UvScaleBias.xy;
+	// Clamp to interior texel centres, so bilinear comparison never consumes guard or neighbouring tile texels.
+	float2 lower = spot.UvScaleBias.zw + 0.5 * texel;
+	float2 upper = spot.UvScaleBias.zw + spot.UvScaleBias.xy - 0.5 * texel;
+	float projectionScale = length(float3(spot.ViewProjection[0][0], spot.ViewProjection[0][1], spot.ViewProjection[0][2]));
+	float sizeUv = spot.DepthSoftness.z * projectionScale * 0.5 * spot.UvScaleBias.x;
+	float maximumRadius = max(1.5 * texel.x, spot.DepthSoftness.w);
+	float searchRadius = clamp(sizeUv * (receiverDistance - spot.DepthSoftness.x) / (receiverDistance * spot.DepthSoftness.x), 1.5 * texel.x, maximumRadius);
+	float rotation = ShadowRotation(pixel);
+	float blockerSum = 0.0;
+	uint blockers = 0;
+	for (uint tap = 0; tap < ShadowBlockerTaps; ++tap)
 	{
-		SpotShadowConstants spot = shadows.Spots[index];
-		if (spot.Indices.x != lightIndex)
-			continue;
-		float4 clip = mul(spot.ViewProjection, float4(worldPosition, 1.0));
-		if (clip.w <= 0.0)
-			return 1.0;
-		float distance = ShadowLinearDepth(saturate(clip.z / clip.w), spot.DepthSoftness.x, spot.DepthSoftness.y, true);
-		float offset = spot.Bias.y * spot.Bias.z * distance * (1.0 - saturate(dot(normal, toLight)));
-		clip = mul(spot.ViewProjection, float4(worldPosition + normal * offset, 1.0));
-		if (clip.w <= 0.0)
-			return 1.0;
-		float2 localUv = ShadowUv(clip);
-		float receiverDepth = clip.z / clip.w;
-		if (any(localUv < 0.0) || any(localUv > 1.0) || receiverDepth < 0.0 || receiverDepth > 1.0)
-			return 1.0;
-		float receiverDistance = ShadowLinearDepth(receiverDepth, spot.DepthSoftness.x, spot.DepthSoftness.y, true);
-		float2 texel = 1.0 / float2(width, height);
-		float2 uv = localUv * spot.UvScaleBias.xy + spot.UvScaleBias.zw;
-		float2 gradient = ShadowReceiverGradient(spot.ViewProjection, clip, normal) / spot.UvScaleBias.xy;
-		// Clamp to interior texel centres, so bilinear comparison never consumes guard or neighbouring tile texels.
-		float2 lower = spot.UvScaleBias.zw + 0.5 * texel;
-		float2 upper = spot.UvScaleBias.zw + spot.UvScaleBias.xy - 0.5 * texel;
-		float projectionScale = length(float3(spot.ViewProjection[0][0], spot.ViewProjection[0][1], spot.ViewProjection[0][2]));
-		float sizeUv = spot.DepthSoftness.z * projectionScale * 0.5 * spot.UvScaleBias.x;
-		float maximumRadius = max(1.5 * texel.x, spot.DepthSoftness.w);
-		float searchRadius = clamp(sizeUv * (receiverDistance - spot.DepthSoftness.x) / (receiverDistance * spot.DepthSoftness.x), 1.5 * texel.x, maximumRadius);
-		float rotation = ShadowRotation(pixel);
-		float blockerSum = 0.0;
-		uint blockers = 0;
-		for (uint tap = 0; tap < ShadowBlockerTaps; ++tap)
+		float2 sampleUv = clamp(uv + ShadowDisk(tap, ShadowBlockerTaps, rotation) * searchRadius, lower, upper);
+		int2 coordinate = int2(sampleUv * float2(width, height));
+		float2 centre = (float2(coordinate) + 0.5) / float2(width, height);
+		float depth = atlas.Load(int3(coordinate, 0));
+		if (depth > 0.0 && depth > ShadowReceiverDepth(receiverDepth, gradient, centre - uv))
 		{
-			float2 sampleUv = clamp(uv + ShadowDisk(tap, ShadowBlockerTaps, rotation) * searchRadius, lower, upper);
-			int2 coordinate = int2(sampleUv * float2(width, height));
-			float2 centre = (float2(coordinate) + 0.5) / float2(width, height);
-			float depth = atlas.Load(int3(coordinate, 0));
-			if (depth > 0.0 && depth > ShadowReceiverDepth(receiverDepth, gradient, centre - uv))
-			{
-				blockerSum += ShadowLinearDepth(depth, spot.DepthSoftness.x, spot.DepthSoftness.y, true);
-				++blockers;
-			}
+			blockerSum += ShadowLinearDepth(depth, spot.DepthSoftness.x, spot.DepthSoftness.y, true);
+			++blockers;
 		}
-		if (blockers == 0)
-			return 1.0;
-		float blockerDistance = blockerSum / float(blockers);
-		float radius = clamp(sizeUv * (receiverDistance - blockerDistance) / (receiverDistance * blockerDistance), 1.5 * texel.x, maximumRadius);
-		float visibility = 0.0;
-		for (uint tap = 0; tap < ShadowFilterTaps; ++tap)
-		{
-			float2 sampleUv = clamp(uv + ShadowDisk(tap, ShadowFilterTaps, rotation) * radius, lower, upper);
-			float reference = ShadowFilterDepth(receiverDepth, gradient, uv, sampleUv, float2(width, height));
-			visibility += 1.0 - atlas.SampleCmpLevelZero(comparison, sampleUv, reference);
-		}
-		return visibility / float(ShadowFilterTaps);
 	}
-	return 1.0;
+	if (blockers == 0)
+		return 1.0;
+	float blockerDistance = blockerSum / float(blockers);
+	float radius = clamp(sizeUv * (receiverDistance - blockerDistance) / (receiverDistance * blockerDistance), 1.5 * texel.x, maximumRadius);
+	float visibility = 0.0;
+	for (uint tap = 0; tap < ShadowFilterTaps; ++tap)
+	{
+		float2 sampleUv = clamp(uv + ShadowDisk(tap, ShadowFilterTaps, rotation) * radius, lower, upper);
+		float reference = ShadowFilterDepth(receiverDepth, gradient, uv, sampleUv, float2(width, height));
+		visibility += 1.0 - atlas.SampleCmpLevelZero(comparison, sampleUv, reference);
+	}
+	return visibility / float(ShadowFilterTaps);
 }
 
 // The point shadows' kernel: a fixed Vogel disk, the same taps for every pixel and frame (plan §7 item 9).
@@ -242,78 +235,79 @@ uint PointShadowFace(float3 direction)
 	return direction.z >= 0.0 ? 4 : 5;
 }
 
-// Finds the point light's cube by uploaded Lights index; an unplanned light returns full visibility. The receiver,
-// offset along its normal, selects the face its direction from the light's major axis gives, and its reference depth is
+// The visibility of a point light's cube `shadow` (its ShaderLight::ShadowSlot's entry, M29) in `maps`, its tier's cube
+// array. The receiver, offset along its normal, selects the face its direction from the light's major axis gives, and its reference depth is
 // that face's reverse-Z depth (1 at the near plane, 0 at Range). Over a plane that depth is affine in the face's UV, so
 // the receiver plane gives each tap's reference exactly (the nearest over the tap's bilinear footprint, as the spots'
 // ShadowFilterDepth does). The taps stay inside the receiver's face (clamped half a texel from its edges), so a bilinear
 // footprint never crosses into a face of another projection. The kernel's radius is half SourceRadius over the
 // receiver's distance in face UV (a penumbra about as wide as the source), at least 1.5 texels and at most
 // DepthSoftness.w.
-float SamplePointShadow(TextureCubeArray<float> maps, SamplerComparisonState comparison, ShadowConstants shadows,
-	uint lightIndex, float3 worldPosition, float3 normal, float3 toLight)
+float SamplePointShadow(TextureCubeArray<float> maps, SamplerComparisonState comparison, PointShadowConstants shadow,
+	float3 worldPosition, float3 normal, float3 toLight)
 {
 	uint width, height, elements;
 	maps.GetDimensions(width, height, elements);
-	for (uint index = 0; index < shadows.Counts.w; ++index)
+	float3 light = shadow.PositionRange.xyz;
+	float nearPlane = shadow.DepthSoftness.x;
+	float farPlane = shadow.DepthSoftness.y;
+	float3 fromLight = worldPosition - light;
+	float receiverAxisDistance = max(abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));
+	float offset = shadow.Bias.y * shadow.Bias.z * receiverAxisDistance * max(1.0 - saturate(dot(normal, toLight)), PointShadowMinimumNormalOffset);
+	float3 direction = fromLight + normal * offset;
+	uint face = PointShadowFace(direction);
+	float3 major = PointShadowMajorAxes[face];
+	float3 scAxis = PointShadowScAxes[face];
+	float3 tcAxis = PointShadowTcAxes[face];
+	float axisDistance = dot(direction, major);
+	if (!(axisDistance > nearPlane) || axisDistance >= farPlane)
+		return 1.0;
+	float2 uv = float2(dot(direction, scAxis), dot(direction, tcAxis)) / axisDistance * 0.5 + 0.5;
+	// depth = K / d - near / (far - near) with K = near far / (far - near), d the distance along the face's axis; along the
+	// direction major + a sc + b tc, 1 / d = dot(major + a sc + b tc, normal) / dot(direction, normal), affine in a = 2u - 1
+	// and b = 2v - 1.
+	float depthScale = nearPlane * farPlane / (farPlane - nearPlane);
+	float receiverDepth = depthScale / axisDistance - nearPlane / (farPlane - nearPlane);
+	float2 gradient = 2.0 * depthScale * float2(dot(scAxis, normal), dot(tcAxis, normal)) / dot(direction, normal);
+	if (!all(isfinite(gradient)))
+		gradient = 0.0;
+	float texel = 1.0 / float(width);
+	float radius = clamp(0.5 * shadow.DepthSoftness.z / axisDistance, 1.5 * texel, max(1.5 * texel, shadow.DepthSoftness.w));
+	float visibility = 0.0;
+	for (uint tap = 0; tap < PointShadowFilterTaps; ++tap)
 	{
-		PointShadowConstants shadow = shadows.Points[index];
-		if (shadow.Indices.x != lightIndex)
-			continue;
-		float3 light = shadow.PositionRange.xyz;
-		float nearPlane = shadow.DepthSoftness.x;
-		float farPlane = shadow.DepthSoftness.y;
-		float3 fromLight = worldPosition - light;
-		float receiverAxisDistance = max(abs(fromLight.x), max(abs(fromLight.y), abs(fromLight.z)));
-		float offset = shadow.Bias.y * shadow.Bias.z * receiverAxisDistance * max(1.0 - saturate(dot(normal, toLight)), PointShadowMinimumNormalOffset);
-		float3 direction = fromLight + normal * offset;
-		uint face = PointShadowFace(direction);
-		float3 major = PointShadowMajorAxes[face];
-		float3 scAxis = PointShadowScAxes[face];
-		float3 tcAxis = PointShadowTcAxes[face];
-		float axisDistance = dot(direction, major);
-		if (!(axisDistance > nearPlane) || axisDistance >= farPlane)
-			return 1.0;
-		float2 uv = float2(dot(direction, scAxis), dot(direction, tcAxis)) / axisDistance * 0.5 + 0.5;
-		// depth = K / d - near / (far - near) with K = near far / (far - near), d the distance along the face's axis; along the
-		// direction major + a sc + b tc, 1 / d = dot(major + a sc + b tc, normal) / dot(direction, normal), affine in a = 2u - 1
-		// and b = 2v - 1.
-		float depthScale = nearPlane * farPlane / (farPlane - nearPlane);
-		float receiverDepth = depthScale / axisDistance - nearPlane / (farPlane - nearPlane);
-		float2 gradient = 2.0 * depthScale * float2(dot(scAxis, normal), dot(tcAxis, normal)) / dot(direction, normal);
-		if (!all(isfinite(gradient)))
-			gradient = 0.0;
-		float texel = 1.0 / float(width);
-		float radius = clamp(0.5 * shadow.DepthSoftness.z / axisDistance, 1.5 * texel, max(1.5 * texel, shadow.DepthSoftness.w));
-		float visibility = 0.0;
-		for (uint tap = 0; tap < PointShadowFilterTaps; ++tap)
-		{
-			float2 sampleUv = clamp(uv + ShadowDisk(tap, PointShadowFilterTaps, 0.0) * radius, 0.5 * texel, 1.0 - 0.5 * texel);
-			float reference = ShadowFilterDepth(receiverDepth, gradient, uv, sampleUv, float2(width, height));
-			float2 planar = sampleUv * 2.0 - 1.0;
-			float3 sampleDirection = major + planar.x * scAxis + planar.y * tcAxis;
-			visibility += 1.0 - maps.SampleCmpLevelZero(comparison, float4(sampleDirection, float(shadow.Indices.y)), reference);
-		}
-		return visibility / float(PointShadowFilterTaps);
+		float2 sampleUv = clamp(uv + ShadowDisk(tap, PointShadowFilterTaps, 0.0) * radius, 0.5 * texel, 1.0 - 0.5 * texel);
+		float reference = ShadowFilterDepth(receiverDepth, gradient, uv, sampleUv, float2(width, height));
+		float2 planar = sampleUv * 2.0 - 1.0;
+		float3 sampleDirection = major + planar.x * scAxis + planar.y * tcAxis;
+		visibility += 1.0 - maps.SampleCmpLevelZero(comparison, float4(sampleDirection, float(shadow.Indices.y)), reference);
 	}
-	return 1.0;
+	return visibility / float(PointShadowFilterTaps);
 }
 
 // The shadow visibility of the uploaded light `lightIndex` at a receiver, 1 where it casts none: the directional
 // cascades for Counts.z, a spot's atlas tile, a point light's cube (M23; Docs/Decisions/0034-m23-contract.md decision 4:
-// the forward light loop multiplies each light's radiance by it). `normal` is the receiver's geometric (triangle-plane)
-// normal on the viewer's side, `viewDistance` its distance along the camera's forward axis.
+// the forward light loop multiplies each light's radiance by it). M29 (Docs/Decisions/0044-m29-light-limits.md decision 2):
+// a spot or point light finds its entry through its ShadowSlot, without a search (a slot beyond the planned count, as
+// ShaderLightNoShadowSlot is, casts none), and a point light samples its tier's cube array: `points` (PointShadowMaps) or
+// `halfPoints` (PointShadowMapsHalf). `normal` is the receiver's geometric (triangle-plane) normal on the viewer's side,
+// `viewDistance` its distance along the camera's forward axis.
 float GetLightVisibility(Texture2DArray<float> cascades, Texture2D<float> atlas, TextureCubeArray<float> points,
-	SamplerComparisonState comparison, ShadowConstants shadows, ShaderLight light, uint lightIndex, float3 worldPosition,
-	float3 normal, float viewDistance, uint2 pixel)
+	TextureCubeArray<float> halfPoints, SamplerComparisonState comparison, ShadowConstants shadows, ShaderLight light, uint lightIndex,
+	float3 worldPosition, float3 normal, float viewDistance, uint2 pixel)
 {
 	if (light.Type == ShaderLightTypeDirectional && shadows.Counts.x != 0 && lightIndex == shadows.Counts.z)
 		return SampleDirectionalShadow(cascades, comparison, shadows, worldPosition, normal, -light.Direction, viewDistance, pixel);
 	float3 toLight = light.Position - worldPosition;
 	toLight *= rsqrt(max(dot(toLight, toLight), 1e-20));
-	if (light.Type == ShaderLightTypeSpot && shadows.Counts.y != 0)
-		return SampleSpotShadow(atlas, comparison, shadows, lightIndex, worldPosition, normal, toLight, pixel);
-	if (light.Type == ShaderLightTypePoint && shadows.Counts.w != 0)
-		return SamplePointShadow(points, comparison, shadows, lightIndex, worldPosition, normal, toLight);
+	if (light.Type == ShaderLightTypeSpot && light.ShadowSlot < shadows.Counts.y)
+		return SampleSpotShadow(atlas, comparison, shadows.Spots[light.ShadowSlot], worldPosition, normal, toLight, pixel);
+	if (light.Type == ShaderLightTypePoint && light.ShadowSlot < shadows.Counts.w)
+	{
+		const PointShadowConstants shadow = shadows.Points[light.ShadowSlot];
+		if (shadow.Indices.z == PointShadowTierFull)
+			return SamplePointShadow(points, comparison, shadow, worldPosition, normal, toLight);
+		return SamplePointShadow(halfPoints, comparison, shadow, worldPosition, normal, toLight);
+	}
 	return 1.0;
 }

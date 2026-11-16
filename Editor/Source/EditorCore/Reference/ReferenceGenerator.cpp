@@ -88,7 +88,7 @@ namespace Engine {
 "Physics": {"Gravity": [0, -9.81, 0], "Layers": ["Default", "Ball", "Track"], "Collisions": [["Default", "Default"], ["Ball", "Track"], ["Ball", "Default"]]},
 "Input": {"Actions": {"Jump": {"Type": "Button", "Bindings": ["Key.Space", "Gamepad.South"]},
 "MoveX": {"Type": "Axis", "Positive": ["Key.D"], "Negative": ["Key.A"], "Gamepad": "Gamepad.LeftX", "Invert": false}}},
-"Rendering": {"ShadowMapSize": 2048, "SsaoHalfResolution": false},
+"Rendering": {"ShadowMapSize": 2048, "SsaoHalfResolution": false, "MaxShadedLights": 256},
 "Scripting": {"MemoryLimitMB": 256, "CallbackBudgetMs": 1000, "PauseOnError": true, "BlockPlayOnTypeErrors": false},
 "Export": {"BuildScenes": ["Assets/Scenes/Level1.scene"], "Exclude": ["Assets/Tests/**"], "Icon": "", "Version": "1.0.0", "Company": "", "PruneUnreferenced": false},
 "Testing": {"Suites": [{"Script": "Assets/Tests/Level1.test.luau", "Scene": "Assets/Scenes/Level1.scene"}], "Replays": ["Assets/Tests/Replays/*.replay"],

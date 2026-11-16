@@ -120,7 +120,7 @@ namespace Engine {
 				}
 			}
 			Random random(0x434C555354455253ULL);
-			for (uint32_t index = 0; index < MaxVisibleLights; ++index)
+			for (uint32_t index = 0; index < DefaultMaxShadedLights; ++index)
 			{
 				const bool spot = index % 4 == 0;
 				const glm::vec3 position(random.NextFloat() * 14.0f - 7.0f, random.NextFloat() * 10.0f - 5.0f, -2.0f - random.NextFloat() * 10.0f);

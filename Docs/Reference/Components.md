@@ -310,14 +310,14 @@ A light shining in every direction from the entity.
 | `Color` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The linear light colour. |
 | `Intensity` | `Float` | `10` | >= 0 |  |  | The unitless brightness multiplied with Color. |
 | `Range` | `Float` | `10` | >= 0.001 | m |  | The distance at which the light's falloff reaches zero, in metres. |
-| `CastShadows` | `Bool` | `false` |  |  |  | Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies). |
+| `CastShadows` | `Bool` | `false` |  |  |  | Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full resolution; the shadow budget applies). |
 | `SourceRadius` | `Float` | `0.05` | >= 0 | m |  | The radius of the emitting sphere, in metres; widens highlights and shadow penumbrae. |
 
 Script members of `PointLight`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `CastShadows` | proxy field | `boolean` | read/write | All | Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies). |
+| `CastShadows` | proxy field | `boolean` | read/write | All | Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full resolution; the shadow budget applies). |
 | `Color` | proxy field | `Color` | read/write | All | The linear light colour. |
 | `Intensity` | proxy field | `number` | read/write | All | The unitless brightness multiplied with Color. |
 | `Range` | proxy field | `number` | read/write | All | The distance at which the light's falloff reaches zero, in metres. |

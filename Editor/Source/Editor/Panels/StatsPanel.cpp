@@ -162,11 +162,13 @@ namespace Engine {
 				Utils::DrawSupportingMetric("CPU preparation", std::format("{:.2f} ms", view.CpuMilliseconds));
 				Utils::DrawSupportingMetric("CPU frame", view.Frame);
 				Utils::DrawSupportingMetric("GPU frame", view.GpuAvailable ? view.GpuFrame : "Unavailable");
+				Utils::DrawSupportingMetric("Shaded light cap", std::to_string(view.MaxShadedLights));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));
 				Utils::DrawSupportingMetric("Shadowed point lights", std::to_string(view.ShadowedPointLights));
 				Utils::DrawSupportingMetric("Dropped point shadows", std::to_string(view.DroppedPointShadows));
+				Utils::DrawSupportingMetric("Cached shadows", std::format("{} point, {} spot", view.CachedPointShadows, view.CachedSpotShadows));
 				ImGui::EndTable();
 			}
 			for (const StatsPassSummary& pass : view.Passes)

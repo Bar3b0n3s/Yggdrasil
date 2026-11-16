@@ -352,6 +352,7 @@ namespace Engine {
 			session->Tick();
 			observe("/Rendering/ShadowMapSize", session->GetLastExtraction().Quality.ShadowMapSize == settings.Rendering.ShadowMapSize);
 			observe("/Rendering/SsaoHalfResolution", session->GetLastExtraction().Quality.SsaoHalfResolution == settings.Rendering.SsaoHalfResolution);
+			observe("/Rendering/MaxShadedLights", session->GetLastExtraction().Quality.MaxShadedLights == settings.Rendering.MaxShadedLights);
 			// M21 (Docs/Decisions/0032-m21-contract.md decision 4): Main.scene's Front sprite comes first in canonical order with
 			// the lower OrderInLayer, so only the declared layers draw Back (Background) before it (Foreground).
 			const auto& sprites = session->GetLastExtraction().Sprites;

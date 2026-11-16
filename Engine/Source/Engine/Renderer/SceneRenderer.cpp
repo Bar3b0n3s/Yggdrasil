@@ -153,6 +153,16 @@ namespace Engine {
 		// DepthSoftness.w; Common/Shadows.slang's SamplePointShadow), about 4.6 degrees from the light.
 		constexpr float PointShadowMaxFilterRadius = 0.04f;
 
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): whether the plan holds a Half-tier light, whose faces need
+		// PointShadowMapsHalf.
+		[[nodiscard]] static bool HasHalfTierPointShadow(const PointShadowSet& points)
+		{
+			return std::ranges::any_of(points.Lights, [](const PointShadowLight& light)
+			{
+				return light.Tier == PointShadowTier::Half;
+			});
+		}
+
 		static bool IsFinite(const glm::mat4& matrix)
 		{
 			for (glm::length_t column = 0; column < 4; ++column)
@@ -686,7 +696,7 @@ namespace Engine {
 	}
 
 	Status SceneRenderer::State::EnsureFrameTargets(bool picking, bool ao, bool halfAo, uint32_t shadowSize, bool spots, uint32_t pointShadowFaceSize,
-		bool selection, bool overdraw)
+		uint32_t pointShadowHalfFaceSize, bool selection, bool overdraw)
 	{
 		const uint32_t width = Targets.Width;
 		const uint32_t height = Targets.Height;
@@ -724,6 +734,7 @@ namespace Engine {
 		}
 		if (spots && Targets.SpotAtlas == nullptr)
 		{
+			ShadowCache.Atlas = 0; // M29: a new or re-acquired atlas holds nothing the cache knows
 			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle atlas, TargetPool->Acquire(ShadowPass::GetAtlasTargetDesc()));
 			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *atlas));
 			Targets.SpotAtlas = std::move(atlas);
@@ -731,11 +742,22 @@ namespace Engine {
 		}
 		if (pointShadowFaceSize != 0 && (Targets.PointShadowMaps == nullptr || Targets.PointShadowMaps->getDesc().width != pointShadowFaceSize))
 		{
+			ShadowCache.Full = {};
 			ClearTargetBindings();
 			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle maps, TargetPool->Acquire(ShadowPass::GetPointTargetDesc(pointShadowFaceSize)));
 			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *maps));
 			Targets.PointShadowMaps = std::move(maps);
 			Targets.PointShadowFramebuffers = std::move(framebuffers);
+		}
+		if (pointShadowHalfFaceSize != 0
+			&& (Targets.PointShadowMapsHalf == nullptr || Targets.PointShadowMapsHalf->getDesc().width != pointShadowHalfFaceSize))
+		{
+			ShadowCache.Half = {};
+			ClearTargetBindings();
+			ENGINE_TRY_ASSIGN(nvrhi::TextureHandle maps, TargetPool->Acquire(ShadowPass::GetPointTargetDesc(pointShadowHalfFaceSize, PointShadowTier::Half)));
+			ENGINE_TRY_ASSIGN(std::vector<nvrhi::FramebufferHandle> framebuffers, ShadowPass::CreateFramebuffers(*Device, *maps));
+			Targets.PointShadowMapsHalf = std::move(maps);
+			Targets.PointShadowHalfFramebuffers = std::move(framebuffers);
 		}
 		if (selection && Targets.SelectionMask == nullptr)
 		{
@@ -1243,10 +1265,13 @@ namespace Engine {
 		if (snapshot.Quality.ShadowMapSize < 256 || snapshot.Quality.ShadowMapSize > 8192
 			|| (snapshot.Quality.ShadowMapSize & (snapshot.Quality.ShadowMapSize - 1)) != 0)
 			return MakeError(ErrorCode::InvalidArgument, "shadow map size must be a power of two in [256,8192]");
+		if (!IsValidMaxShadedLights(snapshot.Quality.MaxShadedLights))
+			return MakeError(ErrorCode::InvalidArgument, "the shaded-light cap must be 256, 512, 1024 or 2048, got {}", snapshot.Quality.MaxShadedLights);
 		// CreatePipelines replaced the binding layouts every binding set of this renderer was made for (decision 2).
 		if (state.PipelineGeneration != state.Pipelines->Generation)
 		{
 			state.ClearBindings();
+			state.ShadowCache.Clear(); // M29: maps drawn by the replaced pipelines are not reused
 			state.PipelineGeneration = state.Pipelines->Generation;
 		}
 		state.Stats = {};
@@ -1359,6 +1384,9 @@ namespace Engine {
 		stats.DroppedSpotShadows = frame.Spots.Dropped;
 		stats.ShadowedPointLights = static_cast<uint32_t>(frame.Points.Lights.size());
 		stats.DroppedPointShadows = frame.Points.Dropped;
+		stats.MaxShadedLights = snapshot.Quality.MaxShadedLights;
+		stats.CachedPointShadows = frame.CachedPointShadows;
+		stats.CachedSpotShadows = frame.CachedSpotShadows;
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1527,9 +1555,20 @@ namespace Engine {
 		}
 		LightCullResult culled;
 		Lights.clear();
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 3): the hysteresis reads the view's previous choices only when
+		// this render continues the view's history; any other render ranks afresh, as a capture's first render does.
+		const bool continuesHistory = hasCamera && camera.PreviousViewProjection.has_value();
+		if (!continuesHistory)
+		{
+			ShadedLightHistory.clear();
+			SpotShadowHistory = {};
+			PointShadowHistory = {};
+			ShadowCache.Clear();
+		}
 		if (hasCamera)
 		{
-			culled = CullLights(snapshot.Lights, camera);
+			culled = CullLights(snapshot.Lights, camera, snapshot.Quality.MaxShadedLights, ShadedLightHistory);
+			ShadedLightHistory = culled.Shaded;
 			for (const uint32_t index : culled.Visible)
 				Lights.push_back(Utils::MakeShaderLight(snapshot.Lights[index]));
 			Stats.Lights = static_cast<uint32_t>(culled.Visible.size());
@@ -1538,7 +1577,8 @@ namespace Engine {
 			if (culled.Dropped > 0 && !LightLimitLogged)
 			{
 				LightLimitLogged = true;
-				ENGINE_CORE_WARN("{}: {} lights exceed the view's budget of {} (logged once per view)", RenderLightLimitExceededCode, culled.Dropped, MaxVisibleLights);
+				ENGINE_CORE_WARN("{}: {} lights exceed the view's budget of {} (Rendering.MaxShadedLights; logged once per view)", RenderLightLimitExceededCode,
+					culled.Dropped, snapshot.Quality.MaxShadedLights);
 			}
 		}
 		frame.View.LightCount = static_cast<uint32_t>(Lights.size());
@@ -1552,8 +1592,11 @@ namespace Engine {
 			for (uint32_t index = 0; index < snapshot.Lights.size(); ++index)
 			{
 				const LightData& light = snapshot.Lights[index];
+				// M29 (the review): the type first, so a view of thousands of point lights searches its list for none of them.
+				if (light.Type != RenderLightType::Directional || !light.CastShadows)
+					continue;
 				const auto visible = std::find(culled.Visible.begin(), culled.Visible.end(), index);
-				if (light.Type != RenderLightType::Directional || !light.CastShadows || visible == culled.Visible.end())
+				if (visible == culled.Visible.end())
 					continue;
 				auto planned = BuildShadowCascades(camera, light, index, snapshot.Quality.ShadowMapSize);
 				if (!planned)
@@ -1579,8 +1622,9 @@ namespace Engine {
 				}
 				break;
 			}
-			// Spots are validated one at a time: one that cannot be shadowed is rejected alone (SpotShadowAtlas.h).
-			auto allocated = AllocateSpotShadowAtlas(snapshot.Lights, culled.Visible, camera);
+			// Spots are validated one at a time: one that cannot be shadowed is rejected alone (SpotShadowAtlas.h). M29 (decision
+			// 3): both planners keep the previous render's lights and slots under their hysteresis.
+			auto allocated = AllocateSpotShadowAtlas(snapshot.Lights, culled.Visible, camera, &SpotShadowHistory);
 			if (!allocated)
 				frame.KeepFirstError(std::unexpected(std::move(allocated).error()));
 			else
@@ -1591,7 +1635,7 @@ namespace Engine {
 				rejectedLights += frame.Spots.Rejected;
 			}
 			// M23 (R-PLS): the point lights the same way, in CullLights' importance order (PointShadowMaps.h).
-			auto points = AllocatePointShadows(snapshot.Lights, culled.Visible);
+			auto points = AllocatePointShadows(snapshot.Lights, culled.Visible, culled.Importance, &PointShadowHistory);
 			if (!points)
 				frame.KeepFirstError(std::unexpected(std::move(points).error()));
 			else
@@ -1618,26 +1662,33 @@ namespace Engine {
 				constants.DepthSoftness = glm::vec4(tile.NearClip, tile.FarClip, light.SourceRadius, 0.05f * tile.UvScaleBias.x);
 				const float projectionScale = glm::length(glm::vec3(tile.ViewProjection[0][0], tile.ViewProjection[1][0], tile.ViewProjection[2][0]));
 				constants.Bias = glm::vec4(light.DepthBias, light.NormalBias, 2.0f / (projectionScale * static_cast<float>(SpotShadowTileSize - 2 * SpotShadowGuardTexels)), 0.0f);
-				constants.Indices.x = static_cast<uint32_t>(std::find(culled.Visible.begin(), culled.Visible.end(), tile.LightIndex) - culled.Visible.begin());
+				const uint32_t uploaded = static_cast<uint32_t>(std::find(culled.Visible.begin(), culled.Visible.end(), tile.LightIndex) - culled.Visible.begin());
+				constants.Indices.x = uploaded;
+				// M29 (decision 2): the light finds its entry through its slot, without a search.
+				Lights[uploaded].ShadowSlot = static_cast<uint32_t>(index);
 			}
 			if (frame.Spots.Dropped > 0 && !SpotLimitLogged)
 			{
 				SpotLimitLogged = true;
 				ENGINE_CORE_WARN("{}: {} visible spot shadows exceed the budget of {} (logged once per view)", RenderSpotShadowBudgetCode, frame.Spots.Dropped, MaxSpotShadowLights);
 			}
-			// The point entries (Shared/ShadowConstants.h): Bias.z is a face texel's width in face-plane units at unit distance.
+			// The point entries (Shared/ShadowConstants.h): Bias.z is a face texel's width in face-plane units at unit distance,
+			// of the light's tier's faces (M29).
 			const uint32_t faceSize = GetPointShadowFaceSize(snapshot.Quality.ShadowMapSize);
+			const uint32_t halfFaceSize = GetPointShadowHalfFaceSize(snapshot.Quality.ShadowMapSize);
 			frame.Shadow.Counts.w = static_cast<uint32_t>(frame.Points.Lights.size());
 			for (size_t index = 0; index < frame.Points.Lights.size(); ++index)
 			{
 				const PointShadowLight& planned = frame.Points.Lights[index];
 				const LightData& light = snapshot.Lights[planned.LightIndex];
 				PointShadowConstants& constants = frame.Shadow.Points[index];
+				const uint32_t tierFaceSize = planned.Tier == PointShadowTier::Full ? faceSize : halfFaceSize;
 				constants.PositionRange = glm::vec4(light.Position, light.Range);
 				constants.DepthSoftness = glm::vec4(planned.NearClip, planned.FarClip, light.SourceRadius, Utils::PointShadowMaxFilterRadius);
-				constants.Bias = glm::vec4(light.DepthBias, light.NormalBias, 2.0f / static_cast<float>(faceSize), 0.0f);
-				constants.Indices = glm::uvec4(static_cast<uint32_t>(std::find(culled.Visible.begin(), culled.Visible.end(), planned.LightIndex) - culled.Visible.begin()),
-					planned.Layer, 0, 0);
+				constants.Bias = glm::vec4(light.DepthBias, light.NormalBias, 2.0f / static_cast<float>(tierFaceSize), 0.0f);
+				const uint32_t uploaded = static_cast<uint32_t>(std::find(culled.Visible.begin(), culled.Visible.end(), planned.LightIndex) - culled.Visible.begin());
+				constants.Indices = glm::uvec4(uploaded, planned.Layer, std::to_underlying(planned.Tier), 0);
+				Lights[uploaded].ShadowSlot = static_cast<uint32_t>(index);
 			}
 			if (frame.Points.Dropped > 0 && !PointShadowLimitLogged)
 			{
@@ -1646,6 +1697,8 @@ namespace Engine {
 					MaxPointShadowLights);
 			}
 		}
+		SpotShadowHistory = frame.Spots;
+		PointShadowHistory = frame.Points;
 		OpaqueDraws.clear();
 		TransparentDraws.clear();
 		Instances.clear();
@@ -1736,8 +1789,10 @@ namespace Engine {
 		}
 		recording.EndPass({});
 		ENGINE_TRY(EnsureInstanceBuffer());
+		const bool halfPoints = Utils::HasHalfTierPointShadow(frame.Points);
 		return EnsureFrameTargets(frame.Picking, frame.Ao, frame.HalfAo, frame.Cascades.Count != 0 ? snapshot.Quality.ShadowMapSize : 0, !frame.Spots.Tiles.empty(),
-			!frame.Points.Lights.empty() ? GetPointShadowFaceSize(snapshot.Quality.ShadowMapSize) : 0, frame.Selection, frame.IsOverdraw);
+			!frame.Points.Lights.empty() ? GetPointShadowFaceSize(snapshot.Quality.ShadowMapSize) : 0,
+			halfPoints ? GetPointShadowHalfFaceSize(snapshot.Quality.ShadowMapSize) : 0, frame.Selection, frame.IsOverdraw);
 	}
 
 	Status SceneRenderer::State::ResolveItemDeform(const RenderSnapshot& snapshot, size_t index)
@@ -1995,10 +2050,18 @@ namespace Engine {
 			.Points = !points.Lights.empty() ? &points : nullptr,
 			.PointTarget = !points.Lights.empty() ? Targets.PointShadowMaps.Get() : nullptr,
 			.PointFramebuffers = Targets.PointShadowFramebuffers,
+			.PointHalfTarget = Targets.PointShadowMapsHalf.Get(),
+			.PointHalfFramebuffers = Targets.PointShadowHalfFramebuffers,
+			.Cache = &ShadowCache,
 		};
 		auto result = Pipelines->Shadows->Record(*frame.CommandList, *frame.Recording, ShadowBindings, inputs);
 		if (!result)
+		{
 			frame.KeepFirstError(std::unexpected(std::move(result).error()));
+			return;
+		}
+		frame.CachedPointShadows = result->CachedPointLights;
+		frame.CachedSpotShadows = result->CachedSpotLights;
 	}
 
 	void SceneRenderer::State::RecordDepthNormalStage(Detail::SceneRendererFrame& frame)
@@ -2122,13 +2185,13 @@ namespace Engine {
 		RecordLightClusters(frame);
 	}
 
-	Status SceneRenderer::State::EnsureLightClusterBuffers(uint32_t clusterCount)
+	Status SceneRenderer::State::EnsureLightClusterBuffers(uint32_t clusterCount, uint32_t wordCount)
 	{
 		if (LightClusterConstantsBuffer == nullptr)
 		{
 			ENGINE_TRY_ASSIGN(LightClusterConstantsBuffer, Device->CreateBuffer(LightClusterPass::GetConstantsDesc()));
 		}
-		const nvrhi::BufferDesc masks = LightClusterPass::GetMaskBufferDesc(clusterCount);
+		const nvrhi::BufferDesc masks = LightClusterPass::GetMaskBufferDesc(clusterCount, wordCount);
 		if (LightClusterBuffer == nullptr || LightClusterBuffer->getDesc().byteSize < masks.byteSize)
 		{
 			ENGINE_TRY_ASSIGN(LightClusterBuffer, Device->CreateBuffer(masks));
@@ -2138,8 +2201,8 @@ namespace Engine {
 
 	void SceneRenderer::State::RecordLightClusters(Detail::SceneRendererFrame& frame)
 	{
-		frame.Clusters = ComputeLightClusterGrid(frame.Camera, Targets.Width, Targets.Height);
-		const Status ensured = EnsureLightClusterBuffers(GetLightClusterCount(frame.Clusters));
+		frame.Clusters = ComputeLightClusterGrid(frame.Camera, Targets.Width, Targets.Height, frame.Snapshot->Quality.MaxShadedLights);
+		const Status ensured = EnsureLightClusterBuffers(GetLightClusterCount(frame.Clusters), frame.Clusters.WordCount);
 		frame.KeepFirstError(ensured);
 		if (LightClusterConstantsBuffer == nullptr || LightClusterBuffer == nullptr)
 			return;
@@ -2191,6 +2254,8 @@ namespace Engine {
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightClusterMasksRegister, LightClusterBuffer),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::PointShadowMapsRegister, !frame.Points.Lights.empty() ? Targets.PointShadowMaps : Pipelines->EmptyPointShadows),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::PointShadowMapsHalfRegister,
+					Utils::HasHalfTierPointShadow(frame.Points) ? Targets.PointShadowMapsHalf : Pipelines->EmptyPointShadows),
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ProbeConstantsRegister, ProbeResources.Constants),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::IrradianceProbesRegister, hasVolumes ? ProbeResources.Coefficients : Pipelines->EmptyIrradianceProbes),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::ReflectionProbeCubesRegister, hasReflections ? ProbeResources.Cubes : Pipelines->EmptyReflectionProbeCubes),

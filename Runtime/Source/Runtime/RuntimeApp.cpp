@@ -1502,7 +1502,7 @@ namespace Engine {
 		request.Width = width;
 		request.Height = height;
 		const RenderingSettings& quality = state.Session->GetProjectSettings().Rendering;
-		request.Quality = { .ShadowMapSize = quality.ShadowMapSize, .SsaoHalfResolution = quality.SsaoHalfResolution };
+		request.Quality = { .ShadowMapSize = quality.ShadowMapSize, .SsaoHalfResolution = quality.SsaoHalfResolution, .MaxShadedLights = quality.MaxShadedLights };
 		request.SortingLayers = state.Session->GetProjectSettings().SortingLayers.Layers;
 		Result<RenderSnapshot> snapshot = state.Session->ExtractView(request);
 		Result<Image> image = snapshot.has_value() ? state.Capture->Capture({ .Width = width, .Height = height, .MaxDimension = 0 }, *snapshot)

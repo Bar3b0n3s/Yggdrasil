@@ -83,6 +83,9 @@ namespace Engine {
 		// array), which Common/Probes.slang reads with ProbeConstantsRegister's constants.
 		inline constexpr uint32_t IrradianceProbesRegister = 13;
 		inline constexpr uint32_t ReflectionProbeCubesRegister = 14;
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): the PointShadowMapsHalf cube array, the Half tier's point
+		// lights' faces, sampled like PointShadowMapsRegister's.
+		inline constexpr uint32_t PointShadowMapsHalfRegister = 15;
 		inline constexpr uint32_t LinearClampRegister = 0;
 		inline constexpr uint32_t ShadowCompareRegister = 1;
 		inline constexpr uint32_t AnisoWrapRegister = 2;

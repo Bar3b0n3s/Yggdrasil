@@ -60,6 +60,11 @@ namespace Engine {
 		bool SsaoHalfResolution = false;
 		// M26 (W26.2's review): RenderStats::HistoryFrames, the renders since the view's temporal history started afresh.
 		uint32_t HistoryFrames = 0;
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 5): RenderStats::MaxShadedLights, the shaded-light cap in force.
+		uint32_t MaxShadedLights = 0;
+		// M29 (decision 4): RenderStats::CachedPointShadows and CachedSpotShadows.
+		uint32_t CachedPointShadows = 0;
+		uint32_t CachedSpotShadows = 0;
 	};
 
 	struct StatsGetResult

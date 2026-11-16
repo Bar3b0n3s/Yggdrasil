@@ -187,7 +187,8 @@ namespace Engine {
 	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no
 	// CameraComponent (both name the id); InvalidArgument for an Explicit camera whose Target equals its Position.
-	// Also rejects unknown flag bits, invalid annotation enums and invalid ShadowMapSize before copying
+	// Also rejects unknown flag bits, invalid annotation enums, invalid ShadowMapSize and (M29) a Quality.MaxShadedLights that
+	// is not IsValidMaxShadedLights before copying
 	// options. Explicit label IDs are copied, sorted/deduplicated and unknown IDs filtered; other label modes require
 	// an empty LabelEntities vector. Returned values own selection and label storage.
 	// M18 (R-ARENA; Docs/Decisions/0029-m18-contract.md decision 9): the snapshot is built over `resource` (not null,

@@ -412,7 +412,7 @@
 					"minimum": 0.001
 				},
 				"CastShadows": {
-					"description": "Whether the light casts soft shadows (at most four point lights per view; the shadow budget applies).",
+					"description": "Whether the light casts soft shadows (a view shadows its 16 most important point lights, the four most important at full resolution; the shadow budget applies).",
 					"type": "boolean"
 				},
 				"SourceRadius": {

@@ -83,6 +83,8 @@ Texture2D<float2> SceneNormals : register(t9, space0);
 StructuredBuffer<InstanceRecord> Instances : register(t10, space0);
 StructuredBuffer<uint> LightClusterMasks : register(t11, space0); // M23: the cluster masks (Renderer/LightClusterPass.h)
 TextureCubeArray<float> PointShadowMaps : register(t12, space0); // M23 (R-PLS): ShadowConstants::Points' cubes
+// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): the half tier's cubes, faces of half PointShadowMaps' size.
+TextureCubeArray<float> PointShadowMapsHalf : register(t15, space0);
 // M26 (R-GI-PROBE): the view's probes (Common/Probes.slang): their constants, the volumes' SH9 coefficients and the
 // reflection probes' prefiltered specular cubes.
 ConstantBuffer<ProbeConstants> Probes : register(b4, space0);

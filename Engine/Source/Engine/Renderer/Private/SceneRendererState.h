@@ -191,6 +191,11 @@ namespace Engine {
 			// while a point light is planned, and one framebuffer per face layer.
 			nvrhi::TextureHandle PointShadowMaps{};
 			std::vector<nvrhi::FramebufferHandle> PointShadowFramebuffers{};
+			// M29 (Docs/Decisions/0044-m29-light-limits.md decision 2): the PointShadowMapsHalf cube array (6 x
+			// MaxHalfPointShadowLights layers of GetPointShadowHalfFaceSize texels), created while a Half-tier light is planned,
+			// and one framebuffer per face layer.
+			nvrhi::TextureHandle PointShadowMapsHalf{};
+			std::vector<nvrhi::FramebufferHandle> PointShadowHalfFramebuffers{};
 			nvrhi::TextureHandle SelectionMask{};
 			nvrhi::TextureHandle SelectionScratch{};
 			nvrhi::TextureHandle Overdraw{};
@@ -302,6 +307,10 @@ namespace Engine {
 			// grid the LightClusters pass and the forward passes read (LightClusterConstants b3).
 			PointShadowSet Points{};
 			LightClusterGrid Clusters{};
+			// M29 (decision 4): set by the Shadows stage: the planned point and spot lights whose maps the static shadow cache
+			// gave (RenderStats::CachedPointShadows and CachedSpotShadows).
+			uint32_t CachedPointShadows = 0;
+			uint32_t CachedSpotShadows = 0;
 			// M23 (C23.3, decision 27; stream C): set by the Prepare stage: the indices into SceneRenderer::State::DeformedMeshes
 			// of the items the Deform stage deforms this render (every deformed item one of whose draws survived culling, the
 			// shadow casters' included), in snapshot order.
@@ -572,6 +581,18 @@ namespace Engine {
 		std::vector<QuadDraw> ParticleQuads{};
 		std::vector<ShaderLight> Lights{};
 		bool LightLimitLogged = false; // RENDER_LIGHT_LIMIT_EXCEEDED is logged once per renderer
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 3): the previous render's shaded point and spot lights
+		// (LightCullResult::Shaded), which CullLights' hysteresis reads in a render that continues the view's history
+		// (CameraData::PreviousViewProjection); any other render clears it first, and a device loss's release drops it.
+		std::vector<LightKey> ShadedLightHistory{};
+		// M29 (decision 3): the previous render's spot and point shadow plans, which AllocateSpotShadowAtlas' and
+		// AllocatePointShadows' hysteresis and stable slots read under the same rule (empty after any other render).
+		SpotShadowAtlas SpotShadowHistory{};
+		PointShadowSet PointShadowHistory{};
+		// M29 (decision 4): the static shadow cache (ShadowPass.h's ShadowMapCache), cleared by a render that does not continue
+		// the view's history, by EnsureFrameTargets when it creates or re-acquires a spot or point shadow target, by a shader
+		// reload (Render's pipeline-generation check) and, with the state, by a device loss's release.
+		ShadowMapCache ShadowCache{};
 		// M23 (C23.1): the view's instance records, reused by every Render (stream A: the opaque draws', then the transparent
 		// draws', the shadow casters' and the selection's, written into InstanceBuffer by RecordViewSetup), and
 		// RENDER_POINT_SHADOW_BUDGET logged once per renderer (stream B).
@@ -609,9 +630,10 @@ namespace Engine {
 
 		// The targets of `width` x `height` with their framebuffers.
 		[[nodiscard]] Result<Detail::SceneRendererTargets> CreateTargets(uint32_t width, uint32_t height) const;
-		// `pointShadowFaceSize`: the PointShadowMaps' face size while a point light is planned (GetPointShadowFaceSize), else 0.
+		// `pointShadowFaceSize`: the PointShadowMaps' face size while a point light is planned (GetPointShadowFaceSize), else 0;
+		// M29: `pointShadowHalfFaceSize` the PointShadowMapsHalf's while a Half-tier light is (GetPointShadowHalfFaceSize), else 0.
 		[[nodiscard]] Status EnsureFrameTargets(bool picking, bool ao, bool halfAo, uint32_t shadowSize, bool spots, uint32_t pointShadowFaceSize,
-			bool selection, bool overdraw);
+			uint32_t pointShadowHalfFaceSize, bool selection, bool overdraw);
 		// Clears every binding-set cache that references the targets.
 		void ClearTargetBindings();
 		// Clears every binding-set cache and the material sets: Render calls it before its first recording with a new
@@ -694,9 +716,9 @@ namespace Engine {
 		// writes nothing, and the forward passes and the data views' composite, which bind them, are skipped.
 		void RecordLightClusters(Detail::SceneRendererFrame& frame);
 		// LightClusterConstantsBuffer when it is null, and LightClusterBuffer when it is null or holds fewer than
-		// `clusterCount` clusters (LightClusterPass's descs), each replacing the member only when its creation succeeded.
-		// Errors: those of GraphicsDevice::CreateBuffer (Gpu).
-		[[nodiscard]] Status EnsureLightClusterBuffers(uint32_t clusterCount);
+		// `clusterCount` clusters of `wordCount` words (LightClusterPass's descs; M29: the grid's WordCount), each replacing
+		// the member only when its creation succeeded. Errors: those of GraphicsDevice::CreateBuffer (Gpu).
+		[[nodiscard]] Status EnsureLightClusterBuffers(uint32_t clusterCount, uint32_t wordCount);
 		void RecordForwardStage(Detail::SceneRendererFrame& frame);
 		// M26 (C26.1, R-SSR; Docs/Decisions/0037-m26-contract.md decision 18, stream X-D): the SSR row, after the skybox and before
 		// the transparent pass, with frame.Ssr: SsrPass::Record of the view's SceneDepth, SceneNormals, SceneRoughness, depth

@@ -331,10 +331,10 @@ namespace Engine {
 				"A scene has non-emissive meshes but no light or ambient illumination, so they render black.",
 				"Add a light, or raise the environment's effective illumination." },
 			ValidationCodeInfo{ RenderLightLimitExceededCode, "Warning", false,
-				"A scene has more than 256 enabled lights, more than one view shades.",
-				"Disable or remove lights, or keep fewer of them in view at once." },
+				"A scene has more enabled lights than one view shades (the project's Rendering.MaxShadedLights: 256, 512, 1024 or 2048).",
+				"Raise Rendering.MaxShadedLights, disable or remove lights, or keep fewer of them in view at once." },
 			ValidationCodeInfo{ RenderSpotShadowBudgetCode, "Warning", false,
-				"A scene has more than 8 shadow-casting spot lights, more than one view shadows.",
+				"A scene has more than 16 shadow-casting spot lights, more than one view shadows.",
 				"Turn off shadows on less important spot lights, or keep fewer of them in view at once." },
 			ValidationCodeInfo{ BuildStartSceneMissingCode, "Error", false,
 				"StartScene names no scene file.",
@@ -387,7 +387,8 @@ namespace Engine {
 				"names an entity that is not a UI element below the widget in its canvas, so the widget ignores it.",
 				"Name an element below the widget, or clear the reference." },
 			ValidationCodeInfo{ RenderPointShadowBudgetCode, "Warning", false,
-				"More than four shadow-casting point lights are enabled in the scene; the least important ones are lit without shadows.",
+				"More than 16 shadow-casting point lights are enabled in the scene; each view shadows the 16 most important (the four most "
+				"important at full resolution, the rest at half) and lights the others without shadows.",
 				"Turn off CastShadows on less important point lights, or keep fewer of them in view at once." },
 			ValidationCodeInfo{ AnimationNoAnimatorCode, "Warning", false,
 				"A SkinnedMesh's mesh has a skin, but no Animator is on its entity or an ancestor; it draws its bind pose.",
@@ -768,9 +769,10 @@ namespace Engine {
 		}
 
 		// RENDER_LIGHT_LIMIT_EXCEEDED (M8, §13.7; ProjectValidator.h): the validator cannot know every view, so it counts the
-		// scene's effectively enabled lights against what one view shades.
-		static void CheckLightLimit(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		// scene's effectively enabled lights against what one view shades, the project's Rendering.MaxShadedLights (M29).
+		static void CheckLightLimit(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
+			const uint32_t maxShadedLights = editor.GetProject().GetSettings().Rendering.MaxShadedLights;
 			const Scene& scene = *checked.Target;
 			size_t lights = 0;
 			scene.ForEachCanonical([&lights](ConstEntity entity)
@@ -780,14 +782,15 @@ namespace Engine {
 				lights += static_cast<size_t>(entity.HasComponent<DirectionalLightComponent>()) + static_cast<size_t>(entity.HasComponent<PointLightComponent>())
 					+ static_cast<size_t>(entity.HasComponent<SpotLightComponent>());
 			});
-			if (lights <= MaxVisibleLights)
+			if (lights <= maxShadedLights)
 				return;
 			DiagnosticSite site;
 			site.File = checked.File;
 			diagnostics.push_back(MakeDiagnostic(RenderLightLimitExceededCode, DiagnosticSeverity::Warning,
-				std::format("the scene has {} enabled lights; a view shades at most {}, and leaves out the least important lights it sees beyond that",
-					lights, MaxVisibleLights),
-				site, "disable or remove lights, or keep fewer of them in view at once", false));
+				std::format("the scene has {} enabled lights; a view shades at most {} (Rendering.MaxShadedLights), and leaves out the least important "
+							"lights it sees beyond that",
+					lights, maxShadedLights),
+				site, "raise Rendering.MaxShadedLights, disable or remove lights, or keep fewer of them in view at once", false));
 		}
 
 		// The audio checks of §13.7 (FindAudioSceneIssues): AUDIO_MULTIPLE_PRIMARY_LISTENERS on each extra primary listener
@@ -1531,7 +1534,7 @@ namespace Engine {
 			CheckPhysics(editor, checked, diagnostics);
 			CheckAnimation(editor, checked, diagnostics);
 			CheckProbes(editor, checked, diagnostics);
-			CheckLightLimit(checked, diagnostics);
+			CheckLightLimit(editor, checked, diagnostics);
 			CheckSprites(editor, checked, diagnostics);
 			CheckUi(editor, checked, diagnostics);
 			CheckTerrain(editor, checked, diagnostics);

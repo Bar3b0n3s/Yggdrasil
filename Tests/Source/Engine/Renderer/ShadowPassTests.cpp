@@ -264,6 +264,40 @@ namespace Engine {
 
 	}
 
+	TEST_SUITE("Renderer")
+	{
+		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4; the review): the per-light pre-filter keeps every caster that
+		// reaches a light's box, a sheared one included, and only those. A unit cube sheared by x += y / 2 has a corner at
+		// (0.75, 0.5, 0.5), 1.03 m from its centre: beyond the sphere of its half diagonal scaled by its longest axis (0.97 m),
+		// so a box just inside that corner is reached only through the moved corners' box.
+		TEST_CASE("ShadowPass: a caster's box holds its moved bounds, and the pre-filter keeps exactly the casters that may reach a light")
+		{
+			const Aabb cube{ .Min = glm::vec3(-0.5f), .Max = glm::vec3(0.5f) };
+			glm::mat4 shear(1.0f);
+			shear[1][0] = 0.5f; // x += y / 2
+			const ShadowBox sheared = ComputeShadowCasterBox(cube, shear);
+			CHECK(sheared.Centre == glm::vec3(0.0f));
+			CHECK(sheared.HalfExtent == glm::vec3(0.75f, 0.5f, 0.5f));
+			const ShadowBox nearCorner{ .Centre = glm::vec3(0.74f, 0.49f, 0.49f), .HalfExtent = glm::vec3(0.01f) };
+			CHECK(ShadowBoxesOverlap(sheared, nearCorner));
+			CHECK_FALSE(ShadowBoxesOverlap(sheared, ShadowBox{ .Centre = glm::vec3(0.8f, 0.49f, 0.49f), .HalfExtent = glm::vec3(0.01f) }));
+
+			// Rotated, scaled and moved: a quarter turn about Z maps the local X extent to world Y.
+			const glm::mat4 world = glm::translate(glm::mat4(1.0f), glm::vec3(10.0f, 0.0f, 0.0f))
+				* glm::rotate(glm::mat4(1.0f), std::numbers::pi_v<float> / 2.0f, glm::vec3(0.0f, 0.0f, 1.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(4.0f, 1.0f, 1.0f));
+			const ShadowBox turned = ComputeShadowCasterBox(cube, world);
+			CHECK(glm::all(glm::lessThan(glm::abs(turned.Centre - glm::vec3(10.0f, 0.0f, 0.0f)), glm::vec3(1e-5f))));
+			CHECK(glm::all(glm::lessThan(glm::abs(turned.HalfExtent - glm::vec3(0.5f, 2.0f, 0.5f)), glm::vec3(1e-5f))));
+			const ShadowBox light{ .Centre = glm::vec3(10.0f, 4.0f, 0.0f), .HalfExtent = glm::vec3(2.0f) };
+			CHECK(ShadowBoxesOverlap(turned, light)); // the long axis reaches y = 2, the light's box starts there
+			CHECK_FALSE(ShadowBoxesOverlap(turned, ShadowBox{ .Centre = glm::vec3(13.0f, 0.0f, 0.0f), .HalfExtent = glm::vec3(2.0f) }));
+
+			// Empty bounds, which no view culls, reach every light.
+			const ShadowBox empty = ComputeShadowCasterBox(Aabb{}, glm::translate(glm::mat4(1.0f), glm::vec3(-100.0f)));
+			CHECK(ShadowBoxesOverlap(empty, light));
+		}
+	}
+
 	TEST_SUITE(Test::GpuSuite)
 	{
 		TEST_CASE("Shadows: a 0.37 texel camera move stays below the shimmer threshold")

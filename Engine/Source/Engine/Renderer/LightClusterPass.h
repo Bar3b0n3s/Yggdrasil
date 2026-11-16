@@ -78,14 +78,14 @@ namespace Engine {
 		[[nodiscard]] static std::vector<PipelineLayoutDescription> GetLayoutDescriptions();
 		// The grid's constants: a constant buffer of LightClusterConstants kept in ConstantBuffer between command lists.
 		[[nodiscard]] static nvrhi::BufferDesc GetConstantsDesc();
-		// The masks of `clusterCount` clusters (at least one): a structured buffer of LightClusterWordCount uint words per
+		// The masks of `clusterCount` clusters (at least one): a structured buffer of `wordCount` (LightClusterGrid::WordCount) uint words per
 		// cluster, with UAVs, kept in ShaderResource between command lists.
-		[[nodiscard]] static nvrhi::BufferDesc GetMaskBufferDesc(uint32_t clusterCount);
+		[[nodiscard]] static nvrhi::BufferDesc GetMaskBufferDesc(uint32_t clusterCount, uint32_t wordCount);
 
 		// Records the LightClusters row: writes MakeLightClusterConstants(inputs.Grid, LightClusterModeClustered) into
 		// inputs.ClusterConstants, then dispatches the masks of every cluster of the grid into inputs.Masks, after the view's
 		// ViewConstants and light list are written. Errors, with nothing recorded: InvalidArgument for a missing buffer, an
-		// empty grid or a mask buffer smaller than the grid's; those of the binding set's creation (Gpu). Main thread; the
+		// empty grid, a grid's WordCount of 0 or above MaxLightClusterWordCount or a mask buffer smaller than the grid's; those of the binding set's creation (Gpu). Main thread; the
 		// command list is open.
 		[[nodiscard]] Status Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,
 			const LightClusterPassInputs& inputs);

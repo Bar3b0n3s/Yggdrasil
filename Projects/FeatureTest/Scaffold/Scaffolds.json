@@ -409,6 +409,20 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "LightLimits.jsonl",
+			"IdSeed": 2601,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenManyLights.jsonl",
+			"IdSeed": 2602,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenManyLights",
+				"Assets/Scenes/GoldenManyLights"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"
