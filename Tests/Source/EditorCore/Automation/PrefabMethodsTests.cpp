@@ -5,6 +5,7 @@
 #include "EditorCore/EditorContext.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
+#include "Engine/Core/Buffer.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
@@ -22,6 +23,8 @@
 #include <format>
 #include <optional>
 #include <string>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 namespace Engine {
@@ -1212,6 +1215,157 @@ return Script.Define("GameFlow", GameFlow)
 			CHECK(stale == 1);
 			CHECK(anchors("/Options/Panel") == std::make_pair(corner, corner));
 			CHECK(anchors("/Second/Panel") == std::make_pair(low, low));
+		}
+
+		// M35 (decision 10; the review of W35.2, its finding 6): prefab.revert, asset.reimport and asset.import {replace} each
+		// rebuild the instance, and each reports what its rebuild drops. The anchors are written so that every step leaves one
+		// override that the next version of the prefab, or the selective revert, makes invalid.
+		TEST_CASE("PrefabMethods: prefab.revert, asset.reimport and asset.import with replace report the overrides their rebuilds drop")
+		{
+			Test::AutomationFixture setup("PrefabRebuildReports");
+			EditorContext& editor = setup.GetEditor();
+			const Json centred = Json::array({ 0.5, 0.5 });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Options" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Panel" }, { "parent", "/Options" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", centred }, { "AnchorMax", centred } } } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Options" }, { "path", "Assets/Prefabs/Options.prefab" }, { "replaceWithInstance", true } });
+			const Json options = CaptureEntity(editor, "/Options")["ID"];
+			const auto anchors = [&setup]()
+			{
+				const Json rect = CallOrFail(setup, "entity.get", Json{ { "entity", "/Options/Panel" } })["entity"]["components"]["UiRect"];
+				return std::make_pair(rect["AnchorMin"], rect["AnchorMax"]);
+			};
+			const auto checkDropped = [&options](const Json& result)
+			{
+				REQUIRE(result["rebuildDiagnostics"].size() == 1);
+				const Json& dropped = result["rebuildDiagnostics"][0];
+				CHECK(dropped["code"] == Json("PREFAB_STALE_OVERRIDE"));
+				CHECK(dropped["entity"] == options);
+				CHECK(dropped["scene"] == Json("Assets/Scenes/Main.scene"));
+				CHECK(JsonReader(dropped["pointer"]).ReadString().value_or(std::string()).starts_with("/Components/Prefab/Overrides/"));
+			};
+
+			// A selective revert of AnchorMin leaves AnchorMax [0, 0] alone, below the prefab's AnchorMin: dropped.
+			const Json corner = Json::array({ 0, 0 });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Options/Panel" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", corner }, { "AnchorMax", corner } } } } } });
+			const std::string panel = editor.GetScene().FindEntityByPath("/Options/Panel").GetComponent<PrefabLinkComponent>().PrefabEntityID.ToString();
+			const Json reverted = CallOrFail(setup, "prefab.revert",
+				Json{ { "instance", "/Options" }, { "overrides", Json::array({ Json{ { "path", Json::array({ panel }) }, { "component", "UiRect" }, { "field", "AnchorMin" } } }) } });
+			checkDropped(reverted);
+			CHECK(anchors() == std::make_pair(centred, centred));
+
+			// Another program moves the prefab's anchors to [0.25, 0.25], below the instance's AnchorMin; asset.reimport drops it.
+			const Json high = Json::array({ 0.375, 0.375 });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Options/Panel" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", high } } } } } });
+			const std::filesystem::path prefabFile = setup.GetEditorFixture().GetProjectRoot() / "Assets/Prefabs/Options.prefab";
+			const auto withAnchors = [&prefabFile](const Json& anchor)
+			{
+				const Result<std::string> text = FileSystem::ReadText(prefabFile);
+				REQUIRE(text.has_value());
+				Json document = ParsePrefabMethodJson(*text);
+				for (Json& entity : document["Entities"])
+				{
+					if (entity["Name"] == Json("Panel"))
+					{
+						entity["Components"]["UiRect"]["AnchorMin"] = anchor;
+						entity["Components"]["UiRect"]["AnchorMax"] = anchor;
+					}
+				}
+				return document.dump(2);
+			};
+			const Json low = Json::array({ 0.25, 0.25 });
+			const std::string lowered = withAnchors(low);
+			REQUIRE(FileSystem::WriteFileAtomic(prefabFile, AsBytes(lowered), {}).has_value());
+			checkDropped(CallOrFail(setup, "asset.reimport", Json{ { "asset", "Assets/Prefabs/Options.prefab" } }));
+			CHECK(anchors() == std::make_pair(low, low));
+
+			// A new version imported over the prefab moves its anchors back to [0.5, 0.5], above the instance's AnchorMax (written
+			// with the AnchorMin it has, the prefab's, which records no override).
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Options/Panel" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", low }, { "AnchorMax", high } } } } } });
+			const std::filesystem::path incoming = setup.GetEditorFixture().GetDirectory().GetPath() / "Incoming";
+			std::error_code created;
+			std::filesystem::create_directories(incoming, created);
+			REQUIRE_FALSE(created);
+			const std::string raised = withAnchors(centred);
+			REQUIRE(FileSystem::WriteFileAtomic(incoming / "Options.prefab", AsBytes(raised), {}).has_value());
+			const Json replaced = CallOrFail(setup, "asset.import",
+				Json{ { "source", (incoming / "Options.prefab").generic_string() }, { "destDir", "Assets/Prefabs" }, { "replace", true } });
+			checkDropped(replaced);
+			CHECK(anchors() == std::make_pair(centred, centred));
+		}
+
+		// M35 (decision 10; the lead's addition to the review of W35.2): undoing or redoing a prefab write makes the other open
+		// scenes' instances follow it (EditorContext::PropagatePrefabUpdate), and edit.undo and edit.redo report what those
+		// rebuilds drop. Level's instance gets an override the version the step restores makes invalid, before each.
+		TEST_CASE("PrefabMethods: edit.undo and edit.redo of a prefab write report the overrides the other open scenes' rebuilds drop")
+		{
+			Test::AutomationFixture setup("PrefabUndoReports");
+			const Json centred = Json::array({ 0.5, 0.5 });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Options" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Panel" }, { "parent", "/Options" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", centred }, { "AnchorMax", centred } } } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Options" }, { "path", "Assets/Prefabs/Options.prefab" }, { "replaceWithInstance", true } });
+			CallOrFail(setup, "scene.new", Json{ { "path", "Assets/Scenes/Level.scene" }, { "keepOpen", true } });
+			const Json hud = CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Options.prefab" }, { "name", "Hud" } })["entity"]["id"];
+			CallOrFail(setup, "scene.activate", Json{ { "scene", "Assets/Scenes/Main.scene" } });
+			const auto updateHud = [&setup](const Json& rect)
+			{
+				CallOrFail(setup, "entity.update", Json{ { "scene", "Assets/Scenes/Level.scene" }, { "entity", "/Hud/Panel" }, { "components", Json{ { "UiRect", rect } } } });
+			};
+			const auto checkDropped = [&hud](const Json& result)
+			{
+				REQUIRE(result["rebuildDiagnostics"].size() == 1);
+				const Json& dropped = result["rebuildDiagnostics"][0];
+				CHECK(dropped["code"] == Json("PREFAB_STALE_OVERRIDE"));
+				CHECK(dropped["entity"] == hud);
+				CHECK(dropped["scene"] == Json("Assets/Scenes/Level.scene"));
+			};
+
+			// The prefab's anchors become [0, 0] through Main's instance; Level's Hud follows, dropping nothing.
+			const Json corner = Json::array({ 0, 0 });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Options/Panel" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", corner }, { "AnchorMax", corner } } } } } });
+			const Json applied = CallOrFail(setup, "prefab.apply", Json{ { "instance", "/Options" } });
+			CHECK(applied["rebuildDiagnostics"].empty());
+
+			// The undo restores [0.5, 0.5], above Hud's AnchorMax [0.25, 0.25] (written with the AnchorMin it has, the prefab's);
+			// the redo [0, 0], below its AnchorMin [0.375, 0.375].
+			updateHud(Json{ { "AnchorMin", corner }, { "AnchorMax", Json::array({ 0.25, 0.25 }) } });
+			const Json undone = CallOrFail(setup, "edit.undo", Json::object());
+			CHECK(undone["undone"] == Json(1));
+			checkDropped(undone);
+			updateHud(Json{ { "AnchorMin", Json::array({ 0.375, 0.375 }) } });
+			const Json redone = CallOrFail(setup, "edit.redo", Json::object());
+			CHECK(redone["redone"] == Json(1));
+			checkDropped(redone);
+			// An undo that rebuilds nothing reports nothing.
+			CHECK(CallOrFail(setup, "edit.undo", Json{ { "scene", "Assets/Scenes/Level.scene" } })["rebuildDiagnostics"].empty());
+		}
+
+		// M35 (decision 11; the review of W35.2, its finding 7): a patch whose reference the instance's overrides cannot record
+		// (the prefab-local ID of Menus, which also names the source scene's Menus, outside the instance) refuses the call, at
+		// /components, and creates nothing.
+		TEST_CASE("PrefabMethods: prefab.instantiate refuses a patch whose reference the instance's overrides cannot record, creating nothing")
+		{
+			Test::AutomationFixture setup("PrefabUnrecordablePatch");
+			EditorContext& editor = setup.GetEditor();
+			CallOrFail(setup, "script.write", Json{ { "path", "Assets/Scripts/GameFlow.luau" }, { "source", R"(
+local GameFlow = { Fields = { Menus = Field.Entity(), Warden = Field.Entity() } }
+return Script.Define("GameFlow", GameFlow)
+)" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Game" } });
+			const Json menus = CallOrFail(setup, "entity.create", Json{ { "name", "Menus" }, { "parent", "/Game" } })["entity"]["id"];
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Game" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Script", "Assets/Scripts/GameFlow.luau" }, { "Fields", Json{ { "Menus", menus } } } }) } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Game" }, { "path", "Assets/Prefabs/GameUi.prefab" } });
+			const size_t steps = editor.GetHistory().GetUndoCount();
+			const size_t entities = editor.GetScene().GetEntityCount();
+
+			const Json refused = setup.Request("prefab.instantiate",
+				Json{ { "prefab", "Assets/Prefabs/GameUi.prefab" }, { "name", "Hub" },
+					{ "components", Json{ { "Script", ScriptSlots(Json{ { "Fields", Json{ { "Warden", menus } } } }) } } } });
+			REQUIRE_MESSAGE(refused.contains("error"), refused.dump());
+			CHECK(refused["error"]["data"]["errorCode"] == Json("InvalidState"));
+			CHECK(refused["error"]["data"]["location"]["pointer"] == Json("/components"));
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+			CHECK(editor.GetScene().GetEntityCount() == entities);
+			CHECK_FALSE(editor.GetScene().FindEntityByPath("/Hub").IsValid());
 		}
 
 		TEST_CASE("PrefabMethods: errors name the problem")

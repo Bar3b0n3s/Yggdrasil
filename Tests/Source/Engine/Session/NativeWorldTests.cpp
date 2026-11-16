@@ -121,6 +121,19 @@ namespace Engine {
 			registrar.AddSystem({ .Name = "Break", .Description = "Writes a speed below its minimum.", .Run = &BreakSpeed });
 		}
 
+		// BreakSpeed at the world's tick 2 only (INativeStepContext::GetTick, the world's clock).
+		void BreakSpeedAtWorldTickTwo(INativeStepContext& context)
+		{
+			if (context.GetTick() == 2)
+				BreakSpeed(context);
+		}
+
+		void RegisterLateBreakingModule(INativeRegistrar& registrar)
+		{
+			RegisterTestTypes(registrar);
+			registrar.AddSystem({ .Name = "BreakLater", .Description = "Writes a speed below its minimum at the world's tick 2.", .Run = &BreakSpeedAtWorldTickTwo });
+		}
+
 		// On tick 0: spawns "Spawned" with a TestMover of speed 4, removes every TestSpinner, destroys "/Doomed", turns a
 		// rotation that is not unit length away and counts the active TestMovers in TestCounter.Ticks.
 		void Build(INativeStepContext& context)
@@ -397,6 +410,32 @@ namespace Engine {
 			REQUIRE(written.Registered.size() == 1);
 			CHECK(written.Registered[0].second.Get() == ParseJson(R"({"Speed": 6, "Follow": null})"));
 			CHECK(session->ComputeStateHash() != 0);
+		}
+
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2; the review of W35.1, its finding 2): the systems step
+		// on the world's clock, which holds while the world is paused, but a fault's error carries the session's tick, as
+		// every error does; before the fix it carried the world's.
+		TEST_CASE("NativeWorld: a fault after a world pause carries the session's tick, while its systems read the world's")
+		{
+			Test::SceneTestFixture fixture;
+			const Ref<const NativeModuleTypes> types = RequireTestTypes({ .ApiVersion = NativeApiVersion, .Register = &RegisterLateBreakingModule });
+			UUID mover{};
+			UUID spinner{};
+			PopulateNativeScene(fixture.GetScene(), *types, mover, spinner);
+			const Scope<PlaySession> session = RequireSession(MakeNativeSpecification(fixture, types), fixture.GetScene());
+			session->Tick();
+			// The session's ticks 1 to 3 hold the world at its tick 1; tick 4 steps the world's tick 1, tick 5 its tick 2.
+			REQUIRE(session->RequestWorldPause(true));
+			for (int tick = 0; tick < 3; ++tick)
+				session->Tick();
+			REQUIRE(session->RequestWorldPause(false));
+			session->Tick();
+			REQUIRE_FALSE(session->GetFatalError().has_value());
+			session->Tick();
+			REQUIRE(session->GetFatalError().has_value());
+			CHECK(session->GetFatalError()->Script == "native:BreakLater");
+			CHECK(session->GetFatalError()->Tick == 5);
+			CHECK(ScriptErrorToJson(*session->GetFatalError())["tick"] == Json(5));
 		}
 
 		// Decision 28 (N-B): only the starting scene is canonicalized, so the step reads what it finds; a value its type rejects

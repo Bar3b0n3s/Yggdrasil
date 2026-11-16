@@ -130,7 +130,7 @@ namespace Engine {
 			.Field("collider", &PhysicsContactSummary::Collider, "This body's collider entity of the first sub-shape pair that touched.")
 			.Field("otherCollider", &PhysicsContactSummary::OtherCollider, "The partner's collider entity of that sub-shape pair.")
 			.Field("isTrigger", &PhysicsContactSummary::IsTrigger, "A sensor pair (trigger events), not a collision.")
-			.Field("sinceTick", &PhysicsContactSummary::SinceTick, "The tick whose physics step reported the pair's enter.");
+			.Field("sinceTick", &PhysicsContactSummary::SinceTick, "The world's tick whose physics step reported the pair's enter (play.state's worldTick, which holds while the world is paused, so after a world pause it is behind play.state's tick).");
 
 		registry.Struct<PhysicsBodyInfoResult>("PhysicsBodyInfoResult", "The physics body of an entity of the play scene.")
 			.Field("entity", &PhysicsBodyInfoResult::Entity, "The entity asked about.")

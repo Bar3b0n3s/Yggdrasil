@@ -470,21 +470,20 @@ namespace Engine {
 			// Per-instance values are ordinary writes to the new root, which the commit records as its overrides (§5.5); a
 			// script-field patch first takes the instance's mapped values for the fields it does not change (M35, decision 11).
 			std::map<std::string, VariantValue> components = params.Components;
-			if (const auto script = components.find("Script"); script != components.end() && script->second.Get().is_object())
-			{
-				LoadReport prefabReport;
-				ENGINE_TRY_ASSIGN(const Prefab prefab, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), schemas.get(), prefabReport));
-				Json patched = script->second.Get();
-				MapScriptPatchToInstance(prefab, root, patched);
-				script->second = VariantValue(std::move(patched));
-			}
-			ENGINE_TRY(Utils::WriteComponents(editor, root, components));
-			// The instance's overrides must be storable: a reference they cannot record (one naming an entity outside the
-			// instance by a prefab-local ID) refuses the call, which creates nothing, instead of leaving it behind a warning.
 			if (!components.empty())
 			{
+				// The prefab, loaded once for the script patch and the check of the overrides.
 				LoadReport prefabReport;
 				ENGINE_TRY_ASSIGN(const Prefab prefab, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), schemas.get(), prefabReport));
+				if (const auto script = components.find("Script"); script != components.end() && script->second.Get().is_object())
+				{
+					Json patched = script->second.Get();
+					MapScriptPatchToInstance(prefab, root, patched);
+					script->second = VariantValue(std::move(patched));
+				}
+				ENGINE_TRY(Utils::WriteComponents(editor, root, components));
+				// The instance's overrides must be storable: a reference they cannot record (one naming an entity outside the
+				// instance by a prefab-local ID) refuses the call, which creates nothing, instead of leaving it behind a warning.
 				if (const Result<std::vector<PrefabOverride>> overrides = PrefabInstantiator::ComputeOverrides(root, prefab, prefabOptions); !overrides)
 					return std::unexpected(Utils::LocateAtParam(overrides.error(), "/components"));
 			}

@@ -2783,6 +2783,13 @@
 						"description": "What a further edit.redo would redo.",
 						"type": "string"
 					},
+					"rebuildDiagnostics": {
+						"description": "The diagnostics of the rebuilds of the other open scenes' prefab instances that a redone prefab write made follow it, each override they dropped among them (also logged); empty when none.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PrefabRebuildDiagnostic"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -2793,7 +2800,39 @@
 					}
 				},
 				"additionalProperties": false,
-				"$defs": {}
+				"$defs": {
+					"PrefabRebuildDiagnostic": {
+						"description": "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.",
+						"type": "object",
+						"properties": {
+							"scene": {
+								"description": "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).",
+								"type": "string"
+							},
+							"severity": {
+								"description": "How serious it is.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What happened: which override was dropped and why.",
+								"type": "string"
+							},
+							"pointer": {
+								"description": "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The instance root (16 hex digits).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
 			},
 			"examples": [
 				{
@@ -2962,6 +3001,13 @@
 						"description": "What edit.redo would redo.",
 						"type": "string"
 					},
+					"rebuildDiagnostics": {
+						"description": "The diagnostics of the rebuilds of the other open scenes' prefab instances that an undone prefab write made follow it, each override they dropped among them (also logged); empty when none.",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PrefabRebuildDiagnostic"
+						}
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -2972,7 +3018,39 @@
 					}
 				},
 				"additionalProperties": false,
-				"$defs": {}
+				"$defs": {
+					"PrefabRebuildDiagnostic": {
+						"description": "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.",
+						"type": "object",
+						"properties": {
+							"scene": {
+								"description": "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).",
+								"type": "string"
+							},
+							"severity": {
+								"description": "How serious it is.",
+								"enum": ["Warning", "Error"]
+							},
+							"code": {
+								"description": "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.",
+								"type": "string"
+							},
+							"message": {
+								"description": "What happened: which override was dropped and why.",
+								"type": "string"
+							},
+							"pointer": {
+								"description": "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.",
+								"type": "string"
+							},
+							"entity": {
+								"description": "The instance root (16 hex digits).",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
 			},
 			"examples": [
 				{
@@ -14876,7 +14954,7 @@
 								"type": "boolean"
 							},
 							"sinceTick": {
-								"description": "The tick whose physics step reported the pair's enter.",
+								"description": "The world's tick whose physics step reported the pair's enter (play.state's worldTick, which holds while the world is paused, so after a world pause it is behind play.state's tick).",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -15096,7 +15174,7 @@
 								"type": "boolean"
 							},
 							"sinceTick": {
-								"description": "The tick whose physics step reported the pair's enter.",
+								"description": "The world's tick whose physics step reported the pair's enter (play.state's worldTick, which holds while the world is paused, so after a world pause it is behind play.state's tick).",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
@@ -25320,7 +25398,7 @@
 		{
 			"name": "script.errors",
 			"domain": "script",
-			"description": "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's. An error's tick is the tick its callback ran in, as Time.GetTick() reads it there (0 in the first fixed step; in the frame phase the ticks completed). Whatever pauseOnError says, the faulting behaviour instance is disabled at its first error and runs no further callback (its tasks cancelled) until a hot reload of its script, so its error's count does not grow; other instances and the entity's other slots run on, and pauseOnError only decides whether the editor also pauses play.",
+			"description": "Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's. An error's tick is the session's tick its callback ran in, as Time.GetSessionTick() reads it there (Time.GetTick() too in a session whose world never paused; 0 in the first fixed step; in the frame phase the ticks completed). Whatever pauseOnError says, the faulting behaviour instance is disabled at its first error and runs no further callback (its tasks cancelled) until a hot reload of its script, so its error's count does not grow; other instances and the entity's other slots run on, and pauseOnError only decides whether the editor also pauses play.",
 			"exposeAsTool": true,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -25441,7 +25519,7 @@
 								"maximum": 4294967295
 							},
 							"tick": {
-								"description": "The simulation tick the latest occurrence's callback ran in, as Time.GetTick() reads it there: in the fixed step the zero-based index of the tick being run (the ticks completed before it, so 0 in the first OnFixedUpdate), in the frame phase (OnUpdate, OnLateUpdate) the ticks completed.",
+								"description": "The session's tick the latest occurrence's callback ran in, as Time.GetSessionTick() reads it there (Time.GetTick() too in a session whose world never paused): in the fixed step the zero-based index of the tick being run (the ticks completed before it, so 0 in the first OnFixedUpdate), in the frame phase (OnUpdate, OnLateUpdate) the ticks completed.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295

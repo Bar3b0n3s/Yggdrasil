@@ -239,7 +239,9 @@ namespace Engine {
 	public:
 		virtual ~INativeStepContext() = default;
 
-		// The tick being stepped and the fixed delta in seconds (1 / Simulation.FixedHz).
+		// The world's tick being stepped and the fixed delta in seconds (1 / Simulation.FixedHz). The world's clock holds
+		// while the world is paused (Time.PauseWorld; no system runs then), so after a pause it is behind the session's tick
+		// (play.state's tick, an error's tick); in a session whose world never paused they agree.
 		[[nodiscard]] virtual uint64_t GetTick() const = 0;
 		[[nodiscard]] virtual double GetFixedDelta() const = 0;
 

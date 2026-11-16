@@ -572,7 +572,7 @@ namespace Engine {
 			ENGINE_TRY(api.RegisterAlias("AnimationEvent", "{Name: string, Layer: number, Clip: AssetRef, Time: number}",
 				"An animation clip's named event that an Animator layer's time passed: its name, the 1-based layer, the layer's clip and the event's time in it."));
 			api.Module("Script", "Behaviour class registration.").Function("Define", Utils::Define, "<T>(name: string, class: T) -> T", "Authenticate a behaviour class and return the exact same table. The class may set RunsWhileWorldPaused = true (a boolean, "
-																																		"read when an instance is created): its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks then run while the world is paused "
+																																		"read by Script.Define, so set it on the class before the call): its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks then run while the world is paused "
 																																		"(Time.PauseWorld), as a pause menu's must, and its tasks count the session's ticks; every other behaviour holds then.",
 				pure);
 			api.Module("Field", "Persistent behaviour field schemas.")

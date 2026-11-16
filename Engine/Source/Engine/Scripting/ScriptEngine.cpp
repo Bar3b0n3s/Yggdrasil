@@ -34,6 +34,23 @@ namespace Engine {
 
 	namespace {
 
+		// Counts one level of a nested call for its scope: increments `depth` and decrements it at the scope's end (the
+		// creation depth of NotifyCreated, the synchronization depth of SynchronizeInstances). The counter outlives it.
+		class DepthScope
+		{
+		public:
+			explicit DepthScope(uint32_t& depth)
+				: m_Depth(depth)
+			{
+				++m_Depth;
+			}
+			~DepthScope() { --m_Depth; }
+			DepthScope(const DepthScope&) = delete;
+			DepthScope& operator=(const DepthScope&) = delete;
+		private:
+			uint32_t& m_Depth; // documented back-reference
+		};
+
 		// One list of ReadInstanceValues' result, kept to the MaxScriptInstanceValues byte-wise smallest keys while it is
 		// filled, so a huge table costs at most twice that many entries of host memory, and none of the VM's.
 		struct InstanceValueList
@@ -255,16 +272,7 @@ namespace Engine {
 		m_State->AssertOwner();
 		if (!m_State->Initialized || IsStopped())
 			return MakeError(ErrorCode::InvalidState, "Script instances are not running");
-		struct DepthScope
-		{
-			uint32_t& Depth;
-			explicit DepthScope(uint32_t& depth)
-				: Depth(depth)
-			{
-				++Depth;
-			}
-			~DepthScope() { --Depth; }
-		} depth(m_State->SynchronizationDepth);
+		const DepthScope depth(m_State->SynchronizationDepth);
 		const bool outermost = m_State->SynchronizationDepth == 1;
 		Scene& scene = GetHost().GetScene();
 		m_State->RefreshLifecycleOrder();
@@ -473,16 +481,7 @@ namespace Engine {
 		}
 		if (m_State->CreationDepth >= 16)
 			return MakeError(ErrorCode::Script, "Nested script creation exceeds the maximum depth of 16");
-		struct DepthScope
-		{
-			uint32_t& Depth;
-			explicit DepthScope(uint32_t& depth)
-				: Depth(depth)
-			{
-				++Depth;
-			}
-			~DepthScope() { --Depth; }
-		} depth(m_State->CreationDepth);
+		const DepthScope depth(m_State->CreationDepth);
 		return m_State->CreateInstances(m_State->MissingInstances(entities));
 	}
 

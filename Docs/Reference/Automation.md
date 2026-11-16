@@ -621,6 +621,7 @@ Redoes the oldest undone commands of the open scene's history.
 | `undoIndex` | `UInt32` | The newest applied command's undo index. |
 | `undoLabel` | `String` | What edit.undo would undo. |
 | `redoLabel` | `String` | What a further edit.redo would redo. |
+| `rebuildDiagnostics` | `Array<PrefabRebuildDiagnostic>` | The diagnostics of the rebuilds of the other open scenes' prefab instances that a redone prefab write made follow it, each override they dropped among them (also logged); empty when none. |
 
 Example: Redo the last undone command.
 
@@ -667,6 +668,7 @@ Undoes the newest commands of the open scene's history.
 | `undoIndex` | `UInt32` | The newest applied command's undo index; 0 when none. |
 | `undoLabel` | `String` | What a further edit.undo would undo. |
 | `redoLabel` | `String` | What edit.redo would redo. |
+| `rebuildDiagnostics` | `Array<PrefabRebuildDiagnostic>` | The diagnostics of the rebuilds of the other open scenes' prefab instances that an undone prefab write made follow it, each override they dropped among them (also logged); empty when none. |
 
 Example: Undo the last command.
 
@@ -2858,7 +2860,7 @@ Example: Create a behaviour.
 
 ### script.errors
 
-Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's. An error's tick is the tick its callback ran in, as Time.GetTick() reads it there (0 in the first fixed step; in the frame phase the ticks completed). Whatever pauseOnError says, the faulting behaviour instance is disabled at its first error and runs no further callback (its tasks cancelled) until a hot reload of its script, so its error's count does not grow; other instances and the entity's other slots run on, and pauseOnError only decides whether the editor also pauses play.
+Reads the game's retained script errors without clearing them, including updated repeat counts, never a failed script.eval's: in the editor the current play session's (a new play session forgets the earlier sessions' errors and keeps the cursor), in the Runtime its process's. An error's tick is the session's tick its callback ran in, as Time.GetSessionTick() reads it there (Time.GetTick() too in a session whose world never paused; 0 in the first fixed step; in the frame phase the ticks completed). Whatever pauseOnError says, the faulting behaviour instance is disabled at its first error and runs no further callback (its tasks cancelled) until a hot reload of its script, so its error's count does not grow; other instances and the entity's other slots run on, and pauseOnError only decides whether the editor also pauses play.
 
 - Flags: tool `script_errors`, runtime, batch, scene target
 - Timeout: 60 s

@@ -1322,7 +1322,9 @@ namespace Engine {
 			// decision 9): each whose own target is gone is dropped alone; the others' values are written into the component
 			// in their order and the combined component is validated once. Valid, every one of them applies; invalid, the
 			// overrides whose fields the error locates are dropped and the rest written again, until the write is valid or none
-			// is left; an error that locates none of them drops all of them, the entity keeping the prefab's component.
+			// is left; an error that locates none of them (a rule of the component that blames a field no override writes)
+			// sends the rest one at a time, in their order, over the component as written so far (ApplyEach), so only those
+			// invalid there are dropped.
 			void ApplyFields(std::span<const PrefabOverride> overrides, std::vector<PrefabOverride>& applied)
 			{
 				std::vector<std::vector<size_t>> groups;
@@ -1384,10 +1386,13 @@ namespace Engine {
 							if (IsBlamed(overrides[index], canonical.error()))
 								blamed.push_back(index);
 						}
-						// An error that locates none of them is the write's as a whole: every one of them is dropped, so the
-						// entity keeps the prefab's component.
+						// An error that locates none of them names no override to drop: each is tried alone instead, so a
+						// valid one never goes with an invalid sibling (the review of W35.2).
 						if (blamed.empty())
-							blamed = written;
+						{
+							ApplyEach(*info, *target, written, overrides, applied);
+							break;
+						}
 						const std::string problem = written.size() == 1 ? canonical.error().ToString()
 																		: std::format("with the instance's other overrides of '{}': {}", info->GetName(), canonical.error().ToString());
 						for (const size_t index : blamed)
@@ -1399,6 +1404,33 @@ namespace Engine {
 						remaining = std::move(written);
 					}
 				}
+			}
+
+			// Writes the overrides `indices` of one component one at a time, in their order, each over the component as the ones
+			// before it left it, validating after each: an override invalid there is dropped with its error and the next is
+			// written over the component without it. The component holds what applied.
+			void ApplyEach(const ComponentInfo& info, MemberTarget& target, std::span<const size_t> indices, std::span<const PrefabOverride> overrides,
+				std::vector<PrefabOverride>& applied)
+			{
+				Json component = GetMember(target.Object[ComponentsKey], info.GetName());
+				for (const size_t index : indices)
+				{
+					Json candidate = component;
+					if (std::string problem = WriteField(info, overrides[index], candidate); !problem.empty())
+					{
+						ReportDropped(index, overrides[index], problem);
+						continue;
+					}
+					Result<Json> canonical = Canonicalize(info, candidate, m_Options.Schemas);
+					if (!canonical)
+					{
+						ReportDropped(index, overrides[index], canonical.error().ToString());
+						continue;
+					}
+					component = std::move(*canonical);
+					applied.push_back(overrides[index]);
+				}
+				target.Object[ComponentsKey][info.GetName()] = std::move(component);
 			}
 
 			// Whether `error`, the component's validation of a combined write, locates the field that `prefabOverride` writes:
@@ -1453,9 +1485,6 @@ namespace Engine {
 				return {};
 			}
 
-			// Writes one Field override's value into `candidate`, the component's JSON, without validating the component
-			// (ApplyFields validates the combined write once); the reason it is stale on its own when its field or script slot
-			// is gone.
 			// "of '<target>' " for an override of a component, a field or an entity key; empty for a RemoveEntity, whose
 			// target is the entity itself.
 			[[nodiscard]] static std::string DescribeTarget(const PrefabOverride& prefabOverride)
@@ -1570,6 +1599,9 @@ namespace Engine {
 				return {};
 			}
 
+			// Writes one Field override's value into `candidate`, the component's JSON, without validating the component
+			// (ApplyFields validates the combined write once); the reason it is stale on its own when its field or script slot
+			// is gone.
 			[[nodiscard]] std::string WriteField(const ComponentInfo& info, const PrefabOverride& prefabOverride, Json& candidate) const
 			{
 				if (const std::optional<ScriptSlotTarget> slot = FindScriptSlotTarget(m_Registry, info, prefabOverride.Field))

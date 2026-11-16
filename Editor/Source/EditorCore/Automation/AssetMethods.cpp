@@ -1982,14 +1982,6 @@ namespace Engine {
 				"A .heightfield heightfield for a Terrain: a flat square of 129 x 129 samples at height 0; takes no values (terrain.importHeightmap converts "
 				"a heightmap, terrain.edit sculpts it).");
 
-		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10).
-		registry.Struct<PrefabRebuildDiagnostic>("PrefabRebuildDiagnostic", "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.")
-			.Field("scene", &PrefabRebuildDiagnostic::Scene, "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).")
-			.Field("severity", &PrefabRebuildDiagnostic::Severity, "How serious it is.")
-			.Field("code", &PrefabRebuildDiagnostic::Code, "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.")
-			.Field("message", &PrefabRebuildDiagnostic::Message, "What happened: which override was dropped and why.")
-			.Field("pointer", &PrefabRebuildDiagnostic::Pointer, "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.")
-			.Field("entity", &PrefabRebuildDiagnostic::Entity, "The instance root (16 hex digits).");
 		registry.Struct<AssetDiagnosticInfo>("AssetDiagnosticInfo", "A diagnostic of an asset.")
 			.Field("severity", &AssetDiagnosticInfo::Severity, "How serious it is.")
 			.Field("code", &AssetDiagnosticInfo::Code, "The diagnostic code, such as ASSET_IMPORT_FAILED.")

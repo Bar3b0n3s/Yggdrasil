@@ -1,8 +1,16 @@
 #include "TestsPCH.h"
 #include "Engine/Session/PlaySession.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/DocumentData.h"
+#include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Physics/PhysicsTypes.h"
+#include "Engine/Scene/AudioSystem.h"
+#include "Engine/Scene/Components/AudioListenerComponent.h"
+#include "Engine/Scene/Components/AudioSourceComponent.h"
+#include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
@@ -10,6 +18,7 @@
 #include "Engine/Scene/ParticleSystem.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SceneSerializer.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Support/ExpectLog.h"
 #include "Support/PhysicsTestScene.h"
@@ -111,6 +120,36 @@ namespace Engine {
 			const Result<double> value = JsonReader(evaluated->Value.Get()).ReadDouble();
 			REQUIRE_MESSAGE(value.has_value(), value.error().ToString());
 			return *value;
+		}
+
+		// A looping AudioSource of the built-in silent clip that plays on start, in `group`.
+		void AddLoopingSource(Scene& scene, std::string_view name, AudioGroup group)
+		{
+			AudioSourceComponent source;
+			source.Clip.SetHandle(BuiltinAssetHandles::SilentClip);
+			source.Loop = true;
+			source.PlayOnStart = true;
+			source.Group = group;
+			scene.CreateEntity(name).AddComponent<AudioSourceComponent>(source);
+		}
+
+		// The engine's voice of the AudioSource entity at `path` of the session's scene; fails the test case without one.
+		AudioVoiceInfo GetSourceVoice(PlaySession& session, const AudioEngine& audio, std::string_view path)
+		{
+			const UUID owner = Test::GetEntityId(session.GetScene(), path);
+			for (const AudioVoiceInfo& voice : audio.GetVoices())
+			{
+				if (voice.Owner == owner.GetValue())
+					return voice;
+			}
+			FAIL("the source has no voice");
+			return AudioVoiceInfo{};
+		}
+
+		// Whether the entity at `path` of the session's scene has a 3D physics body.
+		bool HasBody(PlaySession& session, std::string_view path)
+		{
+			return session.GetPhysics().GetLinearVelocity(Test::GetEntityId(session.GetScene(), path)).has_value();
 		}
 
 		// A behaviour that counts its updates and its task's runs and records the clocks it saw; with `runsWhilePaused`, its
@@ -395,6 +434,232 @@ return Script.Define("Menu", M)
 			}
 			CHECK(hashes[1] == hashes[0]);
 			CHECK(hashes[2] == hashes[0]);
+		}
+
+		// Decision 1 (the review of W35.1, its finding 5): the pause is session state, so a pause menu that loads a scene, or
+		// a reload, without resuming first starts the new scene with its world held: its behaviours start but do not update,
+		// its world's voices start held, and the world's clock keeps its value; after a resume everything runs.
+		TEST_CASE("PlaySession: a world pause lasts across Scene.Load and Scene.Reload, the new scene starting with its world held and its voices paused")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle menu(0x350006), level(0x350007), next(0x350008);
+			REQUIRE(fixture.AddScript(menu, "Assets/Scripts/Menu.luau", R"(
+local M = { RunsWhileWorldPaused = true }
+function M:OnFixedUpdate()
+	local tick = Time.GetSessionTick()
+	if tick == 5 then Time.PauseWorld() end
+	if tick == 8 then Scene.Load(Assets.Load("Assets/Scenes/Next.scene")) end
+end
+return Script.Define("Menu", M)
+)"));
+			REQUIRE(fixture.AddScript(level, "Assets/Scripts/Level.luau", R"(
+local L = {}
+function L:OnCreate()
+	self.Started = 0
+	self.Fixed = 0
+end
+function L:OnStart() self.Started += 1 end
+function L:OnFixedUpdate() self.Fixed += 1 end
+return Script.Define("Level", L)
+)"));
+			// The loaded scene: a world behaviour, a listener and two looping sources, one of the world (Sfx), one of the UI.
+			Scene& scene = fixture.GetScene();
+			AttachScript(scene.CreateEntity("Level"), level);
+			scene.CreateEntity("Listener").AddComponent<AudioListenerComponent>();
+			AddLoopingSource(scene, "Music", AudioGroup::Sfx);
+			AddLoopingSource(scene, "Click", AudioGroup::Ui);
+			Result<Json> document = SceneSerializer::ToJson(scene);
+			REQUIRE(document.has_value());
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(std::move(*document));
+			fixture.GetAssetManager().Publish(next, data, "Assets/Scenes/Next.scene");
+			for (const std::string_view name : { "/Level", "/Listener", "/Music", "/Click" })
+				scene.DestroyEntity(scene.FindEntityByPath(name));
+			AttachScript(scene.CreateEntity("Menu"), menu);
+
+			VirtualFileSystem vfs;
+			Result<Scope<AudioEngine>> createdAudio = AudioEngine::Create(AudioEngineSpecification{ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic }, vfs);
+			REQUIRE_MESSAGE(createdAudio.has_value(), createdAudio.error().ToString());
+			AudioEngine& audio = **createdAudio;
+			PlaySessionSpecification specification = MakeScriptSpecification(fixture);
+			specification.Audio = &audio;
+			Result<Scope<PlaySession>> started = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			PlaySession& session = **started;
+			session.SetExtractionEnabled(false);
+			// The menu pauses at tick 5 (the world ran ticks 0 to 5) and loads the next scene at tick 8, without resuming.
+			Test::RunTicks(session, 12);
+			REQUIRE(session.GetSceneGeneration() == 2);
+			const auto checkHeld = [&session, &audio]()
+			{
+				CHECK(session.IsWorldPaused());
+				CHECK(session.GetWorldTick() == 6);
+				CHECK(EvaluateNumber(session, "return self.Started", "/Level") == 1.0);
+				CHECK(EvaluateNumber(session, "return self.Fixed", "/Level") == 0.0);
+				REQUIRE(session.GetAudioSystem() != nullptr);
+				CHECK(session.GetAudioSystem()->IsWorldPaused());
+				CHECK(GetSourceVoice(session, audio, "/Music").Paused);
+				CHECK_FALSE(GetSourceVoice(session, audio, "/Click").Paused);
+			};
+			checkHeld();
+
+			// A reload while the world is still paused: the reloaded scene starts held too.
+			REQUIRE(session.GetScripts()->Evaluate("Scene.Reload()", {}));
+			Test::RunTicks(session, 3);
+			REQUIRE(session.GetSceneGeneration() == 3);
+			checkHeld();
+
+			// After a resume the new scene's world runs: its behaviour updates, its world clock counts, its voice plays.
+			REQUIRE(session.GetScripts()->Evaluate("Time.ResumeWorld()", {}));
+			Test::RunTicks(session, 4);
+			CHECK_FALSE(session.IsWorldPaused());
+			CHECK(session.GetWorldTick() == 10);
+			CHECK(EvaluateNumber(session, "return self.Fixed", "/Level") == 4.0);
+			CHECK_FALSE(session.GetAudioSystem()->IsWorldPaused());
+			CHECK_FALSE(GetSourceVoice(session, audio, "/Music").Paused);
+			CHECK(session.GetScriptErrors().GetErrors().empty());
+		}
+
+		// Decision 2 (the review of W35.1, its finding 5): a menu creates and destroys entities while the world is paused. A
+		// scripted body it creates starts (OnStart, in the paused tick's start flush) with its body, which does not move, and
+		// its OnFixedUpdate holds; destroyed, it gets its OnDestroy and loses its body in the paused tick's destroy flush.
+		TEST_CASE("PlaySession: a menu creates and destroys a scripted body while the world is paused, which starts with a body that holds and is torn down")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle menu(0x350009), faller(0x35000a);
+			REQUIRE(fixture.AddScript(menu, "Assets/Scripts/Menu.luau", R"(
+local M = { RunsWhileWorldPaused = true }
+function M:OnFixedUpdate()
+	local tick = Time.GetSessionTick()
+	if tick == 2 then Time.PauseWorld() end
+	if tick == 4 then
+		local body = Scene.CreateEntity("Body")
+		body:GetComponent("Transform").Translation = vector.create(0, 5, 0)
+		body:AddComponent("RigidBody", {})
+		body:AddComponent("SphereCollider", {Radius = 0.5})
+		body:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Faller.luau"), Fields = {}, ExecutionOrder = 0}}})
+		self.Body = body
+	end
+	if tick == 9 then self.Body:Destroy() end
+end
+return Script.Define("Menu", M)
+)"));
+			REQUIRE(fixture.AddScript(faller, "Assets/Scripts/Faller.luau", R"(
+local F = {}
+function F:OnCreate()
+	self.Started = 0
+	self.Fixed = 0
+end
+function F:OnStart() self.Started += 1 end
+function F:OnFixedUpdate() self.Fixed += 1 end
+function F:OnDestroy() Scene.CreateEntity("FallerDestroyed") end
+return Script.Define("Faller", F)
+)"));
+			AttachScript(fixture.GetScene().CreateEntity("Menu"), menu);
+			Result<Scope<PlaySession>> started = PlaySession::CreateFromScene(MakeScriptSpecification(fixture), fixture.GetScene());
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			PlaySession& session = **started;
+			session.SetExtractionEnabled(false);
+			// Created at tick 4, started at tick 5's start flush, both in the pause that began at tick 3.
+			Test::RunTicks(session, 8);
+			REQUIRE(session.IsWorldPaused());
+			CHECK(EvaluateNumber(session, "return self.Started", "/Body") == 1.0);
+			CHECK(EvaluateNumber(session, "return self.Fixed", "/Body") == 0.0);
+			CHECK(HasBody(session, "/Body"));
+			CHECK(Test::GetWorldPosition(session, "/Body") == glm::vec3(0.0f, 5.0f, 0.0f));
+
+			// Destroyed at tick 9, while still paused.
+			Test::RunTicks(session, 2);
+			CHECK(session.IsWorldPaused());
+			CHECK_FALSE(session.GetScene().FindEntityByPath("/Body").IsValid());
+			CHECK(session.GetScene().FindEntityByPath("/FallerDestroyed").IsValid());
+			CHECK(session.GetWorldTick() == 3);
+			CHECK(session.GetScriptErrors().GetErrors().empty());
+		}
+
+		// Decision 2 (the review of W35.1, its finding 4): no world phase runs while the world is paused, so no new contact or
+		// animation event arises, but the destroy flush still closes the pairs of the entities destroyed or disabled meanwhile
+		// and the start flush still delivers the events held for an instance starting then. Both reach every behaviour, one
+		// that holds while the world is paused too, since gating them would leave an exit without its enter.
+		TEST_CASE("PlaySession: while the world is paused the destroy flush's exits and the start flush's held events reach every behaviour")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle menu(0x35000b), watch(0x35000c);
+			REQUIRE(fixture.AddScript(menu, "Assets/Scripts/Menu.luau", R"(
+local M = { RunsWhileWorldPaused = true }
+function M:OnFixedUpdate()
+	local tick = Time.GetSessionTick()
+	if tick == 3 then
+		Scene.FindByName("Visitor"):GetComponent("Transform"):Teleport(vector.create(20, 0.5, 0))
+		Scene.FindByName("Late"):AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Watch.luau"), Fields = {}, ExecutionOrder = 0}}})
+		Time.PauseWorld()
+	end
+	if tick == 8 then
+		Scene.FindByName("Doomed"):Destroy()
+		Scene.FindByName("Hidden"):SetActive(false)
+	end
+end
+return Script.Define("Menu", M)
+)"));
+			REQUIRE(fixture.AddScript(watch, "Assets/Scripts/Watch.luau", R"(
+local W = {}
+function W:OnCreate()
+	self.Fixed = 0
+	self.Enters = 0
+	self.Exits = 0
+	self.PausedEnters = 0
+	self.PausedExits = 0
+end
+function W:OnFixedUpdate() self.Fixed += 1 end
+function W:OnTriggerEnter(other)
+	self.Enters += 1
+	if Time.IsWorldPaused() then self.PausedEnters += 1 end
+end
+function W:OnTriggerExit(other)
+	self.Exits += 1
+	if Time.IsWorldPaused() then self.PausedExits += 1 end
+end
+return Script.Define("Watch", W)
+)"));
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddGround(scene));
+			// The watched zone, with two balls resting in it from the first tick.
+			Entity zone = Test::AddBoxBody(scene, "Zone", glm::vec3(0.0f), glm::vec3(5.0f), BodyType::Static);
+			zone.Patch<BoxColliderComponent>([](BoxColliderComponent& collider)
+			{
+				collider.IsTrigger = true;
+			});
+			AttachScript(zone, watch);
+			static_cast<void>(Test::AddSphereBody(scene, "Doomed", glm::vec3(-2.0f, 0.5f, 0.0f), 0.5f, BodyType::Dynamic));
+			static_cast<void>(Test::AddSphereBody(scene, "Hidden", glm::vec3(2.0f, 0.5f, 0.0f), 0.5f, BodyType::Dynamic));
+			// A zone that gains its behaviour at tick 3, the tick the visitor is moved into it: its enter is held until the
+			// behaviour starts, at tick 4's start flush, the first tick of the pause.
+			Entity late = Test::AddBoxBody(scene, "Late", glm::vec3(20.0f, 0.0f, 0.0f), glm::vec3(1.0f), BodyType::Static);
+			late.Patch<BoxColliderComponent>([](BoxColliderComponent& collider)
+			{
+				collider.IsTrigger = true;
+			});
+			static_cast<void>(Test::AddSphereBody(scene, "Visitor", glm::vec3(20.0f, 0.5f, 30.0f), 0.5f, BodyType::Dynamic));
+			AttachScript(scene.CreateEntity("Menu"), menu);
+			Result<Scope<PlaySession>> started = PlaySession::CreateFromScene(MakeScriptSpecification(fixture), scene);
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			PlaySession& session = **started;
+			session.SetExtractionEnabled(false);
+			Test::RunTicks(session, 12);
+
+			REQUIRE(session.IsWorldPaused());
+			CHECK(session.GetWorldTick() == 4);
+			// The zone's behaviour held from tick 4 on, yet got both exits of tick 8's destroy flush.
+			CHECK(EvaluateNumber(session, "return self.Fixed", "/Zone") == 4.0);
+			CHECK(EvaluateNumber(session, "return self.Enters", "/Zone") == 2.0);
+			CHECK(EvaluateNumber(session, "return self.PausedEnters", "/Zone") == 0.0);
+			CHECK(EvaluateNumber(session, "return self.Exits", "/Zone") == 2.0);
+			CHECK(EvaluateNumber(session, "return self.PausedExits", "/Zone") == 2.0);
+			// The late zone's behaviour never updated, yet got its held enter when it started.
+			CHECK(EvaluateNumber(session, "return self.Fixed", "/Late") == 0.0);
+			CHECK(EvaluateNumber(session, "return self.Enters", "/Late") == 1.0);
+			CHECK(EvaluateNumber(session, "return self.PausedEnters", "/Late") == 1.0);
+			CHECK(session.GetScriptErrors().GetErrors().empty());
 		}
 
 		TEST_CASE("PlaySession: Time.PauseWorld refuses an unknown sounds choice, a host without a world and a read-only evaluation, and Script.Define a RunsWhileWorldPaused that is not a boolean")

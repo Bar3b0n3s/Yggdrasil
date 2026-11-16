@@ -137,7 +137,8 @@ namespace Engine {
 	// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): registry struct "PrefabRebuildDiagnostic", a diagnostic
 	// of a rebuild of an open scene's prefab instances that a method caused (EditorContext's PrefabRebuildCollector), every
 	// override the rebuild dropped (PREFAB_STALE_OVERRIDE) among them; asset.import, asset.reimport, asset.setImportSettings,
-	// prefab.apply and prefab.revert report them as rebuildDiagnostics, also logged.
+	// prefab.apply, prefab.revert, edit.undo and edit.redo report them as rebuildDiagnostics, also logged. Registered by
+	// RegisterEditMethodTypes, the first of those domains to register its types.
 	struct PrefabRebuildDiagnostic
 	{
 		std::string Scene{}; // the open scene's project path; empty for a scene never saved

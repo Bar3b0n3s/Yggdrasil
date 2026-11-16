@@ -582,7 +582,9 @@ namespace Engine {
 		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 9; World Tree's brief 13, its second item): an entity's
 		// overrides of one component are one write. The pair below is valid only together (AnchorMax [0, 0] alone is below the
 		// prefab's AnchorMin [0.5, 0.5]); before M35 the rebuild applied them one at a time, so AnchorMax, sorted first, was
-		// dropped as stale and AnchorMin applied, and the panel stretched.
+		// dropped as stale and AnchorMin applied, and the panel stretched. UiRect's rule blames AnchorMin, which an override
+		// need not write: such an error names no override, and then the overrides are tried one at a time, so a valid
+		// sibling of the invalid one stays (the review of W35.2, its finding 1).
 		TEST_CASE("PrefabInstantiator: an entity's overrides of one component apply together, and a write's error drops only the overrides it locates")
 		{
 			constexpr std::string_view OptionsPrefab = R"({
@@ -645,6 +647,21 @@ namespace Engine {
 			CHECK(prefabs.AnchorMin == glm::vec2(0.5f));
 			CHECK(prefabs.AnchorMax == glm::vec2(0.5f));
 			CHECK(third.GetComponent<PrefabInstanceComponent>().Overrides.empty());
+
+			// An error that names no override (the rule blames AnchorMin, which no override writes): the overrides are tried one
+			// at a time, so AnchorMax, invalid below the prefab's AnchorMin, is dropped and Size, valid, is kept.
+			LoadReport unnamed;
+			const auto [fourth, sized] = rebuild(UUID(0x3504),
+				{ MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "AnchorMax", Json::array({ 0.2, 0.2 })),
+					MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "Size", Json::array({ 300, 50 })) },
+				unnamed);
+			REQUIRE(CountDiagnostics(unnamed, PrefabStaleOverrideCode) == 1);
+			CHECK(unnamed.Diagnostics.front().JsonPointer == "/Components/Prefab/Overrides/0");
+			CHECK(sized.AnchorMax == glm::vec2(0.5f));
+			CHECK(sized.Size == glm::vec2(300.0f, 50.0f));
+			const std::vector<PrefabOverride>& sizeKept = fourth.GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(sizeKept.size() == 1);
+			CHECK(sizeKept[0].Field == "Size");
 		}
 
 		TEST_CASE("PrefabInstantiator: members whose prefab entity is gone disappear and their user children move up")

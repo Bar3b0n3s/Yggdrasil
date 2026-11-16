@@ -693,8 +693,9 @@ namespace Engine {
 
 		// Stops the session fatally (PlaySession::GetFatalError) through its script host, which publishes the error to the
 		// session's error stream (the host reports it, as a fatal script error), pauses the session and invalidates a
-		// recording. A Play session always has its script VM while it steps.
-		static void StopSession(PlaySession& session, const SimStep& step, const NativeFault& fault)
+		// recording. A Play session always has its script VM while it steps. The error's tick is the session's, as every
+		// error's is (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 2), not the world's the systems step on.
+		static void StopSession(PlaySession& session, const NativeFault& fault)
 		{
 			ScriptError error{};
 			error.Kind = ScriptErrorKind::Runtime;
@@ -703,7 +704,7 @@ namespace Engine {
 			error.Callback = "NativeStep";
 			error.Entity = fault.Entity;
 			error.EntityName = fault.EntityName;
-			error.Tick = step.Tick;
+			error.Tick = session.GetTick();
 			ScriptEngine* scripts = session.GetScripts();
 			ENGINE_CORE_VERIFY(scripts != nullptr, "a Play session that runs a native module has its script VM");
 			scripts->GetHost().OnScriptError(error, true);
@@ -766,11 +767,11 @@ namespace Engine {
 		Utils::WriteBack(world, session.GetScene());
 		if (world.DroppedLogLines != 0)
 		{
-			ENGINE_CORE_WARN("{} log lines of the native module's systems were dropped at tick {}: more than {} in one step", world.DroppedLogLines, step.Tick,
-				Utils::MaxNativeLogLinesPerStep);
+			ENGINE_CORE_WARN("{} log lines of the native module's systems were dropped at tick {}: more than {} in one step", world.DroppedLogLines,
+				session.GetTick(), Utils::MaxNativeLogLinesPerStep);
 		}
 		if (fault.has_value())
-			Utils::StopSession(session, step, *fault);
+			Utils::StopSession(session, *fault);
 	}
 
 	void NativeWorld::AppendStateHash(XXH64Hasher& hasher) const

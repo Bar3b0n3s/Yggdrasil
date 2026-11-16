@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/Automation/AssetMethods.h"
 #include "EditorCore/Automation/AutomationTypes.h"
 #include "EditorCore/Commands/Command.h"
 #include "Engine/Core/Base.h"
@@ -75,6 +76,10 @@ namespace Engine {
 		uint32_t UndoIndex = 0;  // the newest applied command afterwards (0: none)
 		std::string UndoLabel{}; // what a further edit.undo would undo
 		std::string RedoLabel{};
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): the diagnostics of the rebuilds of the other open
+		// scenes' prefab instances that an undone prefab write made follow it (EditorContext::PropagatePrefabUpdate), every
+		// override they dropped among them (also logged).
+		std::vector<PrefabRebuildDiagnostic> RebuildDiagnostics{};
 	};
 
 	// edit.redo {steps?}.
@@ -89,6 +94,7 @@ namespace Engine {
 		uint32_t UndoIndex = 0;
 		std::string UndoLabel{};
 		std::string RedoLabel{};
+		std::vector<PrefabRebuildDiagnostic> RebuildDiagnostics{}; // M35: as EditUndoResult's, for a redone prefab write
 	};
 
 	// edit.history {limit?}.

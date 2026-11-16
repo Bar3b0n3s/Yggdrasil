@@ -1014,7 +1014,7 @@ Behaviour class registration.
 
 `<T>(name: string, class: T) -> T`
 
-Authenticate a behaviour class and return the exact same table. The class may set RunsWhileWorldPaused = true (a boolean, read when an instance is created): its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks then run while the world is paused (Time.PauseWorld), as a pause menu's must, and its tasks count the session's ticks; every other behaviour holds then.
+Authenticate a behaviour class and return the exact same table. The class may set RunsWhileWorldPaused = true (a boolean, read by Script.Define, so set it on the class before the call): its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks then run while the world is paused (Time.PauseWorld), as a pause menu's must, and its tasks count the session's ticks; every other behaviour holds then.
 
 All modes; LoadTime|Runtime|Test; pure/read.
 
@@ -1394,7 +1394,7 @@ All modes; Runtime|Test; pure/read.
 
 `(sounds: WorldPauseSounds?) -> ()`
 
-Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices outside the Ui group, Finish lets them play on. Not the host's session pause (play.pause), which stops every tick. The pause is the session's, like the time scale: it lasts across Scene.Load and Scene.Reload, so call Time.ResumeWorld before loading or restarting a scene, or the new scene starts with its world paused. Refused during read-only evaluation.
+Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices outside the Ui group, Finish lets them play on. Not the host's session pause (play.pause), which stops every tick. It is session state, like the time scale: it lasts across Scene.Load and Scene.Reload, so call Time.ResumeWorld before loading or restarting a scene (a level's restart), or the new scene starts with its world paused. Refused during read-only evaluation.
 
 All modes; Runtime|Test; mutates.
 
@@ -1412,7 +1412,7 @@ All modes; Runtime|Test; mutates.
 
 `(scale: number) -> ()`
 
-Sets the session time scale in [0, 100]; refused during read-only evaluation. At 0 frames run without a fixed step, so an entity created meanwhile (in OnUpdate, OnLateUpdate or by an evaluation) gets no OnStart or OnUpdate until the first tick after the scale returns: spawn what must run while paused before setting the scale to 0, or pause with a flag.
+Sets the session time scale in [0, 100]; refused during read-only evaluation. At 0 frames run without a fixed step, so an entity created meanwhile (in OnUpdate, OnLateUpdate or by an evaluation) gets no OnStart or OnUpdate until the first tick after the scale returns: spawn what must run while paused before setting the scale to 0. To pause a game while its menus run, pause its world instead (Time.PauseWorld), which keeps the ticks and the UI going.
 
 All modes; Runtime|Test; mutates.
 

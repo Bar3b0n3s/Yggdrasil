@@ -148,7 +148,8 @@ namespace Engine {
 		// new prefab entities appear; Field, component and EntityKey overrides are applied, validated against the registry
 		// as ComponentAccess validates a write (relations, uniqueness, field metadata, type-level rules): an entity's Field
 		// overrides of one component as one write (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 9: the write's
-		// error drops the overrides it locates and the rest are written again; one that locates none drops them all), the
+		// error drops the overrides it locates and the rest are written again; after one that locates none, the rest are
+		// written one at a time over the component so far and only those invalid there are dropped), the
 		// others each on its own,
 		// with script field overrides resolved against the member's own script slot and, as in a file read, unresolvable
 		// Variant values kept; overrides that no longer match a field, component or entity key, or whose value is no longer
