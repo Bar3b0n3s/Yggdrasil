@@ -54,9 +54,11 @@
 // SelectMeshAlphaMode), test a material's alpha only when it is a Mask material, and clip a dissolving instance's
 // fragments whose noise (DissolveNoise, t15, at the first texture coordinates times DissolveNoiseScale) lies below its
 // DissolveAmount and a fading instance's fragments by a 4 x 4 ordered dither of its Opacity (screen-door transparency,
-// the pattern moved by TAA's jitter so that successive frames resolve it); the prepass and the forward passes evaluate
-// the same clip, so the forward pass's depth test keeps exactly the prepass's surface. A Blend material's instance
-// multiplies its alpha by Opacity and drops it to 0 where it dissolves. An instance without the flag reads none of it.
+// its thresholds moved by a whole eighth at each frame of TAA's 8-frame jitter cycle, so that over the cycle every pixel
+// is covered in Opacity of the frames and TAA resolves a uniform fade); the prepass and the forward passes evaluate the
+// same clip (the noise sampled at level 0, outside every per-pixel branch), so the forward pass's depth test keeps
+// exactly the prepass's surface. A Blend material's instance multiplies its alpha by Opacity and drops it to 0 where it
+// dissolves. An instance without the flag reads none of it.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
@@ -278,10 +280,12 @@ float2 GetSurfaceTexCoord(VertexOutput input, uint uv1Flag)
 	return texCoord;
 }
 
-// M31: the dissolve noise of the instance's fragment, at its first texture coordinates times its DissolveNoiseScale.
+// M31: the dissolve noise of the instance's fragment, at its first texture coordinates times its DissolveNoiseScale. The
+// noise has one level, so it is sampled at level 0: no implicit derivative takes part, and the prepass, the forward
+// passes and the shadow casters read the same value wherever in their control flow they sample it.
 float SampleDissolveNoise(VertexOutput input, InstanceRecord record)
 {
-	return DissolveNoise.Sample(AnisoWrap, input.TexCoord * record.DissolveNoiseScale);
+	return DissolveNoise.SampleLevel(AnisoWrap, input.TexCoord * record.DissolveNoiseScale, 0.0);
 }
 
 // M31: whether a dissolve of `record` removes a fragment of noise `noise`: below DissolveAmount, and everywhere at 1.
@@ -290,16 +294,21 @@ bool IsDissolved(InstanceRecord record, float noise)
 	return record.DissolveAmount >= 1.0 || noise < record.DissolveAmount;
 }
 
-// M31: the 4 x 4 ordered-dither threshold of `pixel` in (0, 1), the Bayer matrix's index plus one half over 16: its 2 x 2
-// level from the coordinates' low bits, then the next level from their second bits. The pattern moves with TAA's jitter
-// (zero without TAA), so successive frames dither different pixels and TAA resolves the fade.
+// M31: the 4 x 4 ordered-dither threshold of `pixel` in (0, 1) for this frame. The Bayer matrix's index plus one half over
+// 16 (its 2 x 2 level from the coordinates' low bits, then the next level from their second bits), moved by the frame's
+// phase in TAA's 8-frame jitter cycle, in whole eighths and wrapped into (0, 1). The phase is the frame's index in the
+// cycle as the jitter's x gives it: Halton (2, 3)'s base-2 coordinate puts each of the cycle's 8 frames in a different
+// eighth, floor((Jitter.x + 0.5) * 8). Over the cycle a pixel's threshold visits 8 evenly spaced values, so it is covered
+// in floor or ceil of Opacity x 8 of the frames and TAA resolves a uniform fade; without TAA the jitter is 0 (phase 4),
+// a fixed dither.
 float GetFadeThreshold(uint2 pixel)
 {
-	const uint2 offset = uint2(clamp(floor((View.Jitter + 0.5) * 4.0), 0.0, 3.0));
-	const uint2 p = (pixel + offset) & 3u;
+	const uint2 p = pixel & 3u;
 	const uint low = (((p.x ^ p.y) & 1u) << 1) | (p.y & 1u);
 	const uint high = ((((p.x ^ p.y) >> 1) & 1u) << 1) | ((p.y >> 1) & 1u);
-	return (float((low << 2) | high) + 0.5) / 16.0;
+	const float threshold = (float((low << 2) | high) + 0.5) / 16.0;
+	const float phase = clamp(floor((View.Jitter.x + 0.5) * 8.0), 0.0, 7.0);
+	return frac(threshold + phase / 8.0);
 }
 
 // Samples the material's maps, each with its UV set, and builds the normal-mapped shading frame. The vertex colour
@@ -459,21 +468,21 @@ OverdrawVertexOutput VSOverdraw(OverdrawVertexInput input, uint instance : SV_Vu
 
 // The coverage of a fragment: all of it, or (ALPHA_MASK) none for a Mask material's point below the cutoff and (M31) for
 // a point its instance's dissolve or fade removes. An Opaque material draws with the Mask variants only for its
-// instance's parameters, so only a Mask material tests its alpha.
+// instance's parameters, so only a Mask material tests its alpha. The parameters' clip is evaluated first, under
+// conditions that hold for the whole primitive, and the coverage is returned once at the end.
 uint GetCoverage(VertexOutput input, Surface surface)
 {
 #if ALPHA_MASK
-	if (Material.AlphaMode == MaterialAlphaModeMask && surface.BaseColor.a < Material.AlphaCutoff)
-		return 0u;
+	bool clipped = false;
 	if (HasMaterialParameters(input))
 	{
 		const InstanceRecord record = Instances[input.Instance];
-		if (record.DissolveAmount > 0.0 && IsDissolved(record, SampleDissolveNoise(input, record)))
-			return 0u;
-		if (record.Opacity < GetFadeThreshold(uint2(input.Position.xy)))
-			return 0u;
+		if (record.DissolveAmount > 0.0)
+			clipped = IsDissolved(record, SampleDissolveNoise(input, record));
+		clipped = clipped || record.Opacity < GetFadeThreshold(uint2(input.Position.xy));
 	}
-	return 0xFFFFFFFFu;
+	clipped = clipped || (Material.AlphaMode == MaterialAlphaModeMask && surface.BaseColor.a < Material.AlphaCutoff);
+	return clipped ? 0u : 0xFFFFFFFFu;
 #else
 	return 0xFFFFFFFFu;
 #endif

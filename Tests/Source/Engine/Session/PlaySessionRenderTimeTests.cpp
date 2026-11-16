@@ -3,6 +3,7 @@
 #include "Engine/Session/PlaySession.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
@@ -83,6 +84,62 @@ namespace Engine {
 			for (int tick = 0; tick < 512; ++tick)
 				session.Tick();
 			CHECK(std::abs(scrolling.GetScroll() - 0.0625f) < 1e-6f);
+		}
+
+		// The review of W31.1 (finding 6): a paused session runs no frame and its views take alpha 1, so they render the scroll
+		// at its last tick, the same value every time.
+		TEST_CASE("PlaySession: a paused session's views render a scroll at its last tick, every time")
+		{
+			ScrollingSession scrolling;
+			PlaySession& session = *scrolling.Session;
+			for (int tick = 0; tick < 32; ++tick)
+				session.Tick();
+			session.FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 128.0, .UnscaledDeltaTime = 1.0 / 128.0, .Alpha = 0.5, .FrameIndex = 0 });
+			REQUIRE(scrolling.GetScroll() == static_cast<float>(31.5 / 64.0 * 0.125));
+			session.SetPaused(true);
+			const auto viewScroll = [&session]()
+			{
+				const Result<RenderSnapshot> view = session.ExtractView(RenderExtractionRequest{ .Camera = RenderCameraSource::Explicit });
+				REQUIRE_MESSAGE(view.has_value(), view.error().ToString());
+				REQUIRE(view->Meshes.size() == 1);
+				return view->Meshes[0].Parameters.UVOffset.x;
+			};
+			const float paused = viewScroll();
+			CHECK(paused == 0.0625f);
+			CHECK(viewScroll() == paused);
+			CHECK(viewScroll() == paused);
+		}
+
+		// The review of W31.1 (finding 6): at a time scale of 0 a live host runs frames but no tick and holds the alpha, so every
+		// frame renders the scroll where it stood. The frames are driven as a live host drives them, through a
+		// FixedStepScheduler advanced at the session's time scale.
+		TEST_CASE("PlaySession: at a time scale of 0 its frames render a scroll standing still")
+		{
+			ScrollingSession scrolling;
+			PlaySession& session = *scrolling.Session;
+			FixedStepScheduler scheduler(FrameLoopConfig{ .FixedHz = 64 });
+			uint64_t frameIndex = 0;
+			const auto frame = [&session, &scheduler, &frameIndex]()
+			{
+				constexpr double Delta = 1.0 / 100.0;
+				const FrameSteps steps = scheduler.Advance(Delta, session.GetTimeScale());
+				for (uint32_t step = 0; step < steps.StepCount; ++step)
+					session.FixedStep();
+				session.FrameUpdate(FrameTime{ .DeltaTime = Delta * session.GetTimeScale(), .UnscaledDeltaTime = Delta, .Alpha = steps.Alpha, .FrameIndex = frameIndex++ });
+			};
+			for (int count = 0; count < 20; ++count)
+				frame();
+			REQUIRE(session.GetTick() > 0);
+			REQUIRE(session.SetTimeScale(0.0).has_value());
+			frame();
+			const uint64_t tick = session.GetTick();
+			const float held = scrolling.GetScroll();
+			for (int count = 0; count < 10; ++count)
+			{
+				frame();
+				CHECK(scrolling.GetScroll() == held);
+			}
+			CHECK(session.GetTick() == tick);
 		}
 
 		TEST_CASE("PlaySession: its first view renders a scroll at time 0")

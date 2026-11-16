@@ -5,18 +5,21 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/ShadowPass.h"
+#include "Engine/Renderer/TemporalHistory.h"
 #include "Shared/DrawConstants.h"
 #include "Support/HeadlessGpuFixture.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -50,6 +53,65 @@ namespace Engine {
 		LightData MakePointLight(const glm::vec3& position, float intensity, uint64_t entity)
 		{
 			return LightData{ .Type = RenderLightType::Point, .Intensity = intensity, .Position = position, .Range = 2.0f, .Entity = UUID(entity) };
+		}
+
+		// M31: the picking prepass's entity id at pixel (x, y) of `ids` (an R32_UINT readback of SceneRenderer::GetEntityIdTexture).
+		uint32_t EntityIdAt(const Image& ids, uint32_t x, uint32_t y)
+		{
+			uint32_t id = 0;
+			std::memcpy(&id, ids.GetRow(y).data() + static_cast<size_t>(x) * sizeof(id), sizeof(id));
+			return id;
+		}
+
+		// M31: renders `snapshot` (its Flags with Picking) and reads back its entity ids.
+		Image RenderEntityIds(Test::HeadlessGpuFixture& gpu, Test::SceneRendererIntegrationFixture& setup, const RenderSnapshot& snapshot)
+		{
+			setup.Submit(snapshot);
+			Readback readback(gpu.GetDevice());
+			Result<Image> ids = readback.ReadTexture(*setup.Renderer().GetEntityIdTexture());
+			REQUIRE_MESSAGE(ids.has_value(), ids.error().ToString());
+			return std::move(*ids);
+		}
+
+		// M31: a one-row RGBA8 texture of white texels with the alphas `alphas`, left to right, one level.
+		Ref<TextureData> MakeAlphaRow(std::span<const uint8_t> alphas)
+		{
+			auto texture = CreateRef<TextureData>();
+			texture->Format = TextureFormat::RGBA8Unorm;
+			texture->Width = static_cast<uint32_t>(alphas.size());
+			texture->Height = 1;
+			for (const uint8_t alpha : alphas)
+			{
+				for (int channel = 0; channel < 3; ++channel)
+					texture->Pixels.push_back(std::byte{ 255 });
+				texture->Pixels.push_back(static_cast<std::byte>(alpha));
+			}
+			texture->Mips = { { .Width = texture->Width, .Height = 1, .Offset = 0, .Size = texture->Pixels.size() } };
+			return texture;
+		}
+
+		// M31: the shadow scene of the material-parameter cases: a wall 6 m away and a caster 4 m away left of the centre,
+		// under a sun shining down -Z and to the right, so the caster's shadow falls on the wall right of the centre, beside
+		// the caster, not behind it. In row 32, pixel 25 sees the caster, and pixels 34, 37 and 39 see the wall in its shadow,
+		// pixel 34 in its left half's and pixel 39 in its right half's.
+		RenderSnapshot MakeCasterSnapshot(const Test::SceneRendererIntegrationFixture& setup, AssetHandle casterMaterial)
+		{
+			RenderSnapshot snapshot = setup.Snapshot();
+			const MeshDrawItem quad = snapshot.Meshes.front();
+			MeshDrawItem wall = quad;
+			wall.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(4.0f));
+			MeshDrawItem caster = quad;
+			caster.World = glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, 0.0f, -4.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f));
+			caster.Materials = { casterMaterial };
+			caster.Entity = UUID(40);
+			caster.PickId = 2;
+			snapshot.Meshes = { wall, caster };
+			snapshot.Lights.push_back({ .Type = RenderLightType::Directional,
+				.Intensity = 3.0f,
+				.Direction = glm::normalize(glm::vec3(0.5f, 0.0f, -1.0f)),
+				.CastShadows = true,
+				.ShadowDistance = 20.0f });
+			return snapshot;
 		}
 
 	}
@@ -641,27 +703,12 @@ namespace Engine {
 			ENGINE_REQUIRE_GPU(gpu);
 			{
 				Test::SceneRendererIntegrationFixture setup(gpu);
-				RenderSnapshot snapshot = setup.Snapshot();
-				// A wall 6 m away and a caster 4 m away left of the centre; the sun shines down -Z and to the right, so the caster's
-				// shadow falls on the wall right of the centre, beside the caster, not behind it.
-				const MeshDrawItem quad = snapshot.Meshes.front();
-				MeshDrawItem wall = quad;
-				wall.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(4.0f));
 				// A dark caster, so the camera tells it from the lit wall behind it.
 				auto dark = CreateRef<MaterialData>();
 				dark->BaseColor = glm::vec4(0.02f, 0.02f, 0.02f, 1.0f);
 				setup.Assets().Publish(UUID(8917), dark);
-				MeshDrawItem caster = quad;
-				caster.World = glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, 0.0f, -4.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f));
-				caster.Materials = { UUID(8917) };
-				caster.Entity = UUID(40);
-				caster.PickId = 2;
-				snapshot.Meshes = { wall, caster };
-				snapshot.Lights.push_back({ .Type = RenderLightType::Directional,
-					.Intensity = 3.0f,
-					.Direction = glm::normalize(glm::vec3(0.5f, 0.0f, -1.0f)),
-					.CastShadows = true,
-					.ShadowDistance = 20.0f });
+				RenderSnapshot snapshot = MakeCasterSnapshot(setup, UUID(8917));
+				const MeshDrawItem wall = snapshot.Meshes[0];
 				const auto render = [&setup, &snapshot](const MeshMaterialParameters& parameters)
 				{
 					snapshot.Meshes[1].Parameters = parameters;
@@ -775,6 +822,201 @@ namespace Engine {
 				CHECK(at(red, 0) == at(plain, 0));
 				CHECK(at(red, 1) < at(plain, 1) / 2);
 				CHECK(at(gone, 1) == 0);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// The review of W31.1 (finding 1): TAA's eight jitters move the fade's dither by whole eighths of its thresholds, so over
+		// the cycle every pixel of a faded item is covered in Opacity x 8 of the frames, rounded down or up, and TAA resolves a
+		// uniform fade rather than a fixed pattern. Each frame's coverage is the picking prepass's entity ids, which TAA does
+		// not touch.
+		TEST_CASE("SceneRenderer: over TAA's jitter cycle every pixel of a faded item is covered in Opacity of the frames")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				snapshot.Flags = RenderViewFlags::Picking;
+				snapshot.Post.AntiAliasing = RenderAntiAliasing::Taa;
+				// The quad 1.5 m away fills the view.
+				snapshot.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.5f));
+				for (const float opacity : { 0.25f, 0.5f, 0.75f })
+				{
+					CAPTURE(opacity);
+					snapshot.Meshes[0].Parameters = { .Opacity = opacity };
+					std::vector<uint32_t> covered(64 * 64, 0);
+					for (uint32_t frame = 0; frame < 8; ++frame)
+					{
+						snapshot.Camera.Jitter = GetTaaJitter(frame);
+						++snapshot.FrameIndex;
+						const Image ids = RenderEntityIds(gpu, setup, snapshot);
+						for (uint32_t y = 8; y < 56; ++y)
+							for (uint32_t x = 8; x < 56; ++x)
+								covered[y * 64 + x] += EntityIdAt(ids, x, y) == 1 ? 1U : 0U;
+					}
+					const auto low = static_cast<uint32_t>(opacity * 8.0f);
+					const uint32_t high = low + (static_cast<float>(low) == opacity * 8.0f ? 0U : 1U);
+					uint32_t uneven = 0;
+					for (uint32_t y = 8; y < 56; ++y)
+						for (uint32_t x = 8; x < 56; ++x)
+							uneven += covered[y * 64 + x] < low || covered[y * 64 + x] > high ? 1U : 0U;
+					CAPTURE(covered[32 * 64 + 32]);
+					CAPTURE(covered[32 * 64 + 33]);
+					CHECK(uneven == 0);
+				}
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// The review of W31.1 (finding 2): a Mask caster's alpha test samples its base colour at the instance's UVOffset, as the
+		// camera's passes do, so a scrolling cut-out's shadow holes move with it. The caster's material is clear on the left half
+		// of its texture and opaque on the right; half a texture's offset swaps the halves, in the shadow too.
+		TEST_CASE("SceneRenderer: a Mask caster's shadow follows its UVOffset")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				const std::array<uint8_t, 4> alphas = { 0, 0, 255, 255 };
+				setup.Assets().Publish(UUID(8918), MakeAlphaRow(alphas));
+				auto grate = CreateRef<MaterialData>();
+				grate->AlphaMode = AlphaMode::Mask;
+				grate->BaseColorMap = TypedAssetHandle<AssetType::Texture>(UUID(8918));
+				setup.Assets().Publish(UUID(8919), grate);
+				RenderSnapshot snapshot = MakeCasterSnapshot(setup, UUID(8919));
+				const auto green = [](const Image& image, uint32_t x)
+				{
+					return Test::SceneRendererIntegrationFixture::Channel(image, x, 32, 1);
+				};
+				// Pixel 34 lies in the shadow of the caster's left half (the hole), pixel 39 in its right half's.
+				const Image still = setup.Render(snapshot);
+				REQUIRE(green(still, 34) > green(still, 39) + 24);
+				snapshot.Meshes[1].Parameters.UVOffset = glm::vec2(0.5f, 0.0f);
+				++snapshot.FrameIndex;
+				const Image moved = setup.Render(snapshot);
+				CHECK(green(moved, 39) > green(moved, 34) + 24);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// The review of W31.1 (finding 3): a dissolving Mask material's prepass and forward pass clip the same fragments, its
+		// alpha test and its noise evaluated alike in both (the noise sampled at level 0, outside every per-pixel branch), so no
+		// fragment the depth says is there shows the background. The material's alpha rises across the quad, so its cut-off
+		// edge crosses the dissolve's holes.
+		TEST_CASE("SceneRenderer: a dissolving Mask material clips the same fragments in the prepass and the forward pass")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				const std::array<uint8_t, 8> alphas = { 0, 36, 73, 109, 146, 182, 219, 255 };
+				setup.Assets().Publish(UUID(8921), MakeAlphaRow(alphas));
+				auto ramp = CreateRef<MaterialData>();
+				ramp->AlphaMode = AlphaMode::Mask;
+				ramp->BaseColorMap = TypedAssetHandle<AssetType::Texture>(UUID(8921));
+				setup.Assets().Publish(UUID(8922), ramp);
+				RenderSnapshot snapshot = setup.Snapshot();
+				snapshot.Flags = RenderViewFlags::Picking;
+				snapshot.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.5f));
+				snapshot.Meshes[0].Materials = { UUID(8922) };
+				snapshot.Meshes[0].Parameters = { .DissolveAmount = 0.5f, .DissolveNoiseScale = 4.0f };
+				const Image ids = RenderEntityIds(gpu, setup, snapshot);
+				const Image colour = setup.Read();
+				uint32_t covered = 0;
+				uint32_t mismatched = 0;
+				for (uint32_t y = 0; y < 64; ++y)
+				{
+					for (uint32_t x = 0; x < 64; ++x)
+					{
+						const bool picked = EntityIdAt(ids, x, y) == 1;
+						const bool shown = Test::SceneRendererIntegrationFixture::Channel(colour, x, y, 1) > 2;
+						covered += picked ? 1U : 0U;
+						mismatched += picked != shown ? 1U : 0U;
+					}
+				}
+				CAPTURE(covered);
+				CHECK(covered > 64 * 64 / 8);
+				CHECK(covered < 64 * 64 * 7 / 8);
+				CHECK(mismatched == 0);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// The review of W31.1 (finding 5): an Opaque material drawn with the Mask variants for its dissolve or fade does not test
+		// its alpha, so an Opaque material whose alpha is 0 (an imported texture's unused alpha) keeps the pixels and the shadow
+		// its parameters leave, rather than vanishing whole the moment it starts to dissolve or fade.
+		TEST_CASE("SceneRenderer: an Opaque material whose alpha is 0 keeps what its dissolve and fade leave, its shadow too")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				auto clear = CreateRef<MaterialData>();
+				clear->BaseColor = glm::vec4(1.0f, 1.0f, 1.0f, 0.0f);
+				setup.Assets().Publish(UUID(8920), clear);
+
+				RenderSnapshot near = setup.Snapshot();
+				near.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.5f));
+				near.Meshes[0].Materials = { UUID(8920) };
+				const auto shownShare = [&setup, &near](const MeshMaterialParameters& parameters)
+				{
+					near.Meshes[0].Parameters = parameters;
+					++near.FrameIndex;
+					const Image image = setup.Render(near);
+					size_t shown = 0;
+					for (uint32_t y = 20; y < 44; ++y)
+						for (uint32_t x = 20; x < 44; ++x)
+							shown += Test::SceneRendererIntegrationFixture::Channel(image, x, y, 1) > 2 ? 1U : 0U;
+					return static_cast<double>(shown) / (24.0 * 24.0);
+				};
+				CHECK(shownShare({ .DissolveAmount = 0.01f }) > 0.95);
+				CHECK(shownShare({ .Opacity = 0.99f }) == 1.0);
+
+				RenderSnapshot shadow = MakeCasterSnapshot(setup, UUID(8920));
+				const auto green = [](const Image& image, uint32_t x)
+				{
+					return Test::SceneRendererIntegrationFixture::Channel(image, x, 32, 1);
+				};
+				const Image whole = setup.Render(shadow);
+				shadow.Meshes[1].Parameters.DissolveAmount = 0.01f;
+				++shadow.FrameIndex;
+				const Image dissolving = setup.Render(shadow);
+				CHECK(std::abs(green(dissolving, 37) - green(whole, 37)) <= 2);
+				shadow.Meshes = { shadow.Meshes[0] };
+				++shadow.FrameIndex;
+				const Image bare = setup.Render(shadow);
+				CHECK(green(dissolving, 37) + 24 < green(bare, 37));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// The review of W31.1 (finding 6): the picking prepass clips with the parameters, as the prepass does, so a pick behind a
+		// fully dissolved or faded entity selects what lies behind it, and at amount 0 the entity itself.
+		TEST_CASE("SceneRenderer: the picking prepass picks through a dissolved or faded item")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				snapshot.Flags = RenderViewFlags::Picking;
+				MeshDrawItem back = snapshot.Meshes[0];
+				back.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -4.0f));
+				MeshDrawItem front = back;
+				front.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -2.0f));
+				front.Entity = UUID(40);
+				front.PickId = 2;
+				snapshot.Meshes = { back, front };
+				const auto centreId = [&gpu, &setup, &snapshot](const MeshMaterialParameters& parameters)
+				{
+					snapshot.Meshes[1].Parameters = parameters;
+					++snapshot.FrameIndex;
+					return EntityIdAt(RenderEntityIds(gpu, setup, snapshot), 32, 32);
+				};
+				CHECK(centreId({}) == 2);
+				CHECK(centreId({ .DissolveAmount = 1.0f }) == 1);
+				CHECK(centreId({ .Opacity = 0.0f }) == 1);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

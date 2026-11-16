@@ -68,7 +68,7 @@ return Test.Suite("Api.MaterialParameters", function()
 		Test.ExpectEqual(ghost.DissolveAmount, Support.F32(0.4), "a refused write changes nothing")
 	end)
 
-	Test.Case("the scroll moves the surface, never the field, and a press dissolves the Enemy", function()
+	Test.Case("the scroll leaves the field as authored, and a press dissolves the Enemy", function()
 		local lava = parameters("Lava")
 		Test.WaitTicks(32)
 		Test.ExpectNear(lava.UVOffset, vector.create(0.25, 0, 0), 1e-6, "the scroll is presentation: the field stays as authored")

@@ -4804,7 +4804,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Api/MaterialParameters.test.luau",
-			"XXH64": "0101ce39e66ef769",
+			"XXH64": "e4bb347dbe20f380",
 			"Method": "script.write",
 			"RequestId": 6,
 			"Client": "batch",

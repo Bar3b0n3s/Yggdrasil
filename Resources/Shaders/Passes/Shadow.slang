@@ -9,8 +9,9 @@
 // M31 (Docs/Decisions/0046-m31-material-parameters.md decision 5): the Mask variants, which an Opaque material takes while
 // its instance dissolves (Renderer/RenderPrepare.h's SelectMeshAlphaMode), test a material's alpha only when it is a Mask
 // material, and clip a dissolving instance's fragments as Scene.slang does: where the dissolve noise (t15, at the first
-// texture coordinates times DissolveNoiseScale) lies below its DissolveAmount. The vertex shader hands them the record's
-// index (flat). A fading instance keeps its whole shadow.
+// texture coordinates times DissolveNoiseScale, sampled at level 0) lies below its DissolveAmount. A Mask material's alpha
+// is sampled at the instance's UVOffset too, so a scrolling cut-out's shadow holes move with it. The vertex shader hands
+// them the record's index (flat). A fading instance keeps its whole shadow.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"
@@ -89,14 +90,17 @@ ShadowPixel PSMain(VertexOutput input)
 	ShadowPixel output;
 	output.Coverage = 1;
 #if ALPHA_MASK
+	const InstanceRecord record = Instances[input.Instance];
+	const bool parameters = (record.Flags & DrawFlagMaterialParameters) != 0;
 	float2 uv = ((Material.Flags & MaterialFlagBaseColorUV1) != 0 ? input.TexCoord1 : input.TexCoord) * Material.UVScale + Material.UVOffset;
+	if (parameters)
+		uv += record.UVOffset; // M31: as Scene.slang's GetSurfaceTexCoord
 	float alpha = BaseColorMap.Sample(AnisoWrap, uv).a * Material.BaseColor.a * input.Color.a;
 	// Match Scene.slang's coverage mask without requiring shader-demote support.
 	output.Coverage = Material.AlphaMode == MaterialAlphaModeMask && alpha < Material.AlphaCutoff ? 0 : 1;
-	const InstanceRecord record = Instances[input.Instance];
-	if ((record.Flags & DrawFlagMaterialParameters) != 0 && record.DissolveAmount > 0.0)
+	if (parameters && record.DissolveAmount > 0.0)
 	{
-		const float noise = DissolveNoise.Sample(AnisoWrap, input.TexCoord * record.DissolveNoiseScale);
+		const float noise = DissolveNoise.SampleLevel(AnisoWrap, input.TexCoord * record.DissolveNoiseScale, 0.0);
 		if (record.DissolveAmount >= 1.0 || noise < record.DissolveAmount)
 			output.Coverage = 0;
 	}
