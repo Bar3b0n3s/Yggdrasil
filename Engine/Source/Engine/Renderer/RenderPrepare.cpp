@@ -277,10 +277,31 @@ namespace Engine {
 	InstanceRecord MakeMeshInstanceRecord(const MeshDrawItem& item, uint32_t flags)
 	{
 		const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0.0f;
-		return InstanceRecord{ .World = item.World,
+		InstanceRecord record{ .World = item.World,
 			.PreviousWorld = item.PreviousWorld.value_or(item.World),
 			.EntityId = item.PickId,
 			.Flags = (mirrored ? DrawFlagMirrored : 0U) | flags };
+		const MeshMaterialParameters& parameters = item.Parameters;
+		if (parameters.IsNeutral())
+			return record;
+		record.Flags |= DrawFlagMaterialParameters;
+		record.Opacity = parameters.Opacity;
+		record.DissolveAmount = parameters.DissolveAmount;
+		record.Tint = parameters.Tint;
+		record.DissolveEdgeWidth = parameters.DissolveEdgeWidth;
+		record.Emissive = parameters.Emissive;
+		record.DissolveNoiseScale = parameters.DissolveNoiseScale;
+		record.DissolveEdge = parameters.DissolveEdge;
+		record.UVOffset = parameters.UVOffset;
+		return record;
+	}
+
+	AlphaMode SelectMeshAlphaMode(AlphaMode material, const MeshMaterialParameters& parameters, bool shadowCaster)
+	{
+		if (material != AlphaMode::Opaque)
+			return material;
+		const bool clips = parameters.DissolveAmount > 0.0f || (!shadowCaster && parameters.Opacity < 1.0f);
+		return clips ? AlphaMode::Mask : AlphaMode::Opaque;
 	}
 
 }

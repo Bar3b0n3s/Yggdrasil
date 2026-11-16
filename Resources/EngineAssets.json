@@ -203,6 +203,16 @@
 			"Generator": ""
 		},
 		{
+			"Handle": "000000000000018c",
+			"Path": "engine://Textures/DissolveNoise",
+			"Type": "Texture",
+			"Source": "Procedural",
+			"File": "",
+			"Importer": "",
+			"Settings": {},
+			"Generator": ""
+		},
+		{
 			"Handle": "00000000000001c1",
 			"Path": "engine://Fonts/Default",
 			"Type": "Font",

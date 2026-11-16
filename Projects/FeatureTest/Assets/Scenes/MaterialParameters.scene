@@ -1,0 +1,265 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "MaterialParameters",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Script": 2,
+		"MaterialParameters": 1
+	},
+	"Entities": [
+		{
+			"ID": "8c59a1029edcc42a",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 3, 9],
+					"Rotation": [-0.13052619, 0, 0, 0.9914449],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 50,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.03, 0.035, 0.05]
+				}
+			}
+		},
+		{
+			"ID": "745a601dfe9fedf8",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.4082179, 0.23456971, 0.10938165, 0.8754261],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "2aad9f9f889b0adf",
+			"Name": "Floor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [14, 1, 8]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "9b7bd47f51b11071",
+			"Name": "Tinted",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-4, 0.5, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"MaterialParameters": {
+					"Tint": [0.9, 0.35, 0.2],
+					"Emissive": [1, 0.6, 0.2],
+					"EmissiveStrength": 1.5,
+					"UVOffset": [0, 0],
+					"UVScroll": [0, 0],
+					"DissolveAmount": 0,
+					"DissolveEdgeColor": [1, 0.5, 0.1],
+					"DissolveEdgeStrength": 2,
+					"DissolveEdgeWidth": 0.05,
+					"DissolveNoiseScale": 1,
+					"Opacity": 1
+				}
+			}
+		},
+		{
+			"ID": "e11296e598f3148c",
+			"Name": "Lava",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.5, 0.02, 2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2, 1, 2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["a9942d50c4ae54c0"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"MaterialParameters": {
+					"Tint": [1, 1, 1],
+					"Emissive": [1, 0.35, 0.05],
+					"EmissiveStrength": 0.8,
+					"UVOffset": [0.25, 0],
+					"UVScroll": [0.1, 0.05],
+					"DissolveAmount": 0,
+					"DissolveEdgeColor": [1, 0.5, 0.1],
+					"DissolveEdgeStrength": 2,
+					"DissolveEdgeWidth": 0.05,
+					"DissolveNoiseScale": 1,
+					"Opacity": 1
+				}
+			}
+		},
+		{
+			"ID": "997d5d57f32a7345",
+			"Name": "Ghost",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1, 0.75, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"MaterialParameters": {
+					"Tint": [1, 1, 1],
+					"Emissive": [1, 1, 1],
+					"EmissiveStrength": 0,
+					"UVOffset": [0, 0],
+					"UVScroll": [0, 0],
+					"DissolveAmount": 0.4,
+					"DissolveEdgeColor": [0.2, 0.6, 1],
+					"DissolveEdgeStrength": 3,
+					"DissolveEdgeWidth": 0.1,
+					"DissolveNoiseScale": 2,
+					"Opacity": 1
+				}
+			}
+		},
+		{
+			"ID": "87dc00d1d53a3c54",
+			"Name": "Wall",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.5, 1, 1.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1.5, 2, 0.3]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"MaterialParameters": {
+					"Tint": [1, 1, 1],
+					"Emissive": [1, 1, 1],
+					"EmissiveStrength": 0,
+					"UVOffset": [0, 0],
+					"UVScroll": [0, 0],
+					"DissolveAmount": 0,
+					"DissolveEdgeColor": [1, 0.5, 0.1],
+					"DissolveEdgeStrength": 2,
+					"DissolveEdgeWidth": 0.05,
+					"DissolveNoiseScale": 1,
+					"Opacity": 0.5
+				}
+			}
+		},
+		{
+			"ID": "db7a8c57e937dcff",
+			"Name": "Enemy",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3.5, 0.5, -1.5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000106",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "3d695a696760eeb0",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"MaterialParameters": {
+					"Tint": [1, 1, 1],
+					"Emissive": [1, 1, 1],
+					"EmissiveStrength": 0,
+					"UVOffset": [0, 0],
+					"UVScroll": [0, 0],
+					"DissolveAmount": 0,
+					"DissolveEdgeColor": [1, 0.5, 0.1],
+					"DissolveEdgeStrength": 2,
+					"DissolveEdgeWidth": 0.05,
+					"DissolveNoiseScale": 1,
+					"Opacity": 1
+				}
+			}
+		}
+	]
+}

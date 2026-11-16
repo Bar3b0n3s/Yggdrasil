@@ -65,6 +65,7 @@ TextureCubeArray<float> PointShadowMapsHalf : register(t15, space0); // M29: the
 ConstantBuffer<ProbeConstants> Probes : register(b4, space0);
 StructuredBuffer<float4> IrradianceProbes : register(t13, space0);
 TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
+Texture2D<float> DissolveNoise : register(t16, space0); // M31: the mesh draws' dissolve noise, which the terrain does not read
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);

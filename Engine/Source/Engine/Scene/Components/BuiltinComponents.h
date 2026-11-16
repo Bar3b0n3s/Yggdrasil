@@ -16,6 +16,7 @@
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
+#include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/NameComponent.h"
@@ -94,7 +95,11 @@ namespace Engine {
 		// Particles (Registration/ParticlesRegistration.cpp), Probes (Registration/ProbesRegistration.cpp) and Terrain
 		// (Registration/TerrainRegistration.cpp; M26, Docs/Decisions/0037-m26-contract.md decision 4). ADR 0028's phase-3
 		// ledger: M26's components go in categories of their own after Animation, in that order; M24 adds none.
-		ParticleEmitterComponent, IrradianceVolumeComponent, ReflectionProbeComponent, TerrainComponent, TerrainColliderComponent>;
+		ParticleEmitterComponent, IrradianceVolumeComponent, ReflectionProbeComponent, TerrainComponent, TerrainColliderComponent,
+		// MaterialParameters (Registration/MaterialParametersRegistration.cpp; M31, Docs/Decisions/0046-m31-material-parameters.md
+		// decision 1). ADR 0042's phase-5 ledger: phase 5's categories (M30's Navigation, M31's MaterialParameters, M32's Fog)
+		// are appended after Terrain in landing order.
+		MaterialParametersComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -115,8 +120,11 @@ namespace Engine {
 	void RegisterParticlesComponents(TypeRegistry& registry);
 	void RegisterProbesComponents(TypeRegistry& registry);
 	void RegisterTerrainComponents(TypeRegistry& registry);
+	// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 1), after Terrain, in ADR 0042's phase-5 ledger's landing
+	// order.
+	void RegisterMaterialParametersComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the twelve functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the thirteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

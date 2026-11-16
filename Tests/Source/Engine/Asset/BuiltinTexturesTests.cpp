@@ -30,6 +30,72 @@ namespace Engine {
 			CHECK(BuiltinTextureToString(BuiltinTexture::SpriteCircle) == "SpriteCircle");
 			// M26 (Docs/Decisions/0037-m26-contract.md decision 7): engine://Textures/Particle.
 			CHECK(BuiltinTextureToString(BuiltinTexture::Particle) == "Particle");
+			// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6): engine://Textures/DissolveNoise.
+			CHECK(BuiltinTextureToString(BuiltinTexture::DissolveNoise) == "DissolveNoise");
+		}
+
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6): the noise a MaterialParameters dissolve clips by. Its
+		// values are equalized, so a dissolve's amount is the share of the surface it removes; they stay inside (0, 255), so a
+		// linear sampler's blend of them never reaches 0 (an amount of 0 removes nothing) or 1 (an amount of 1 removes all);
+		// it is smooth, so a dissolve's holes are blobs rather than salt and pepper; and it tiles, so a repeating surface
+		// shows no seam.
+		TEST_CASE("BuiltinTextures: the dissolve noise is a 128x128 single-channel smooth noise that tiles, its values 1 to 254 in equal shares")
+		{
+			const TextureData texture = GenerateBuiltinDissolveNoiseTexture();
+			REQUIRE(ValidateTextureData(texture).has_value());
+			CHECK(texture.Format == TextureFormat::R8Unorm);
+			CHECK(texture.Width == 128);
+			CHECK(texture.Height == 128);
+			REQUIRE(texture.Mips.size() == 1);
+			CHECK(std::ranges::equal(texture.Pixels, GenerateBuiltinDissolveNoiseTexture().Pixels));
+			CHECK(std::ranges::equal(texture.Pixels, GenerateBuiltinTexture(BuiltinTexture::DissolveNoise).Pixels));
+			const std::span<const std::byte> pixels = GetMipPixels(texture, 0);
+			REQUIRE(pixels.size() == 128 * 128);
+			const auto value = [&pixels](uint32_t x, uint32_t y)
+			{
+				return std::to_integer<int>(pixels[static_cast<size_t>(y % 128) * 128 + x % 128]);
+			};
+
+			// Every value from 1 to 254 holds 64 or 65 of the 16384 texels, and 0 and 255 none.
+			std::array<int, 256> counts{};
+			for (const std::byte texel : pixels)
+				++counts[std::to_integer<size_t>(texel)];
+			CHECK(counts[0] == 0);
+			CHECK(counts[255] == 0);
+			for (size_t level = 1; level <= 254; ++level)
+			{
+				CAPTURE(level);
+				CHECK(counts[level] >= 64);
+				CHECK(counts[level] <= 65);
+			}
+
+			// Smooth and seamless: neighbours differ by a small step, across the texture's wrapping edges as inside it (the
+			// largest step, measured once, is far below the 253 a random texture would reach).
+			int largestStep = 0;
+			int wrapStep = 0;
+			for (uint32_t y = 0; y < 128; ++y)
+			{
+				for (uint32_t x = 0; x < 128; ++x)
+				{
+					const int right = std::abs(value(x, y) - value(x + 1, y));
+					const int down = std::abs(value(x, y) - value(x, y + 1));
+					largestStep = std::max({ largestStep, right, down });
+					if (x == 127)
+						wrapStep = std::max(wrapStep, right);
+					if (y == 127)
+						wrapStep = std::max(wrapStep, down);
+				}
+			}
+			CAPTURE(largestStep);
+			CAPTURE(wrapStep);
+			CHECK(largestStep <= 48);
+			CHECK(wrapStep <= 48);
+			// The noise has structure at every octave: not one smooth gradient but many values in any 32 x 32 tile.
+			std::array<bool, 256> seen{};
+			for (uint32_t y = 0; y < 32; ++y)
+				for (uint32_t x = 0; x < 32; ++x)
+					seen[static_cast<size_t>(value(x, y))] = true;
+			CHECK(std::ranges::count(seen, true) > 64);
 		}
 
 		// Docs/Decisions/0032-m21-contract.md decision 7 (stream B): the procedural sprite textures, white shapes a sprite tints.

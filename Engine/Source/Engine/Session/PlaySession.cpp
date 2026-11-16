@@ -601,6 +601,13 @@ namespace Engine {
 		void RunFramePhase(PlaySession& session, const FrameTime& frame);
 		// The RenderExtraction phase's work: the game view through the primary camera at `alpha`.
 		void ExtractGameView(float alpha);
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 3): the simulation time a view at `alpha` renders at,
+		// RenderExtractionRequest::SimulationTime: (Tick - 1 + alpha) fixed steps, between the last two simulated states that
+		// alpha interpolates (Tick fixed steps at alpha 1, Time.GetTime's value in the frame phase), 0 before the first tick.
+		[[nodiscard]] double GetRenderTime(float alpha) const
+		{
+			return Tick == 0 ? 0.0 : (static_cast<double>(Tick - 1) + static_cast<double>(alpha)) * FixedDelta;
+		}
 		// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 24): how the UiInput phase maps the pointer's view
 		// coordinates to the scene pixels the layout is in. Since M22's landing ("Landing", decisions 3 and 24): the game
 		// view's output mapping (ComputeGameViewOutputMapping, Scene/RenderExtraction.h), the session's view through its
@@ -1214,6 +1221,7 @@ namespace Engine {
 			.Width = ViewWidth,
 			.Height = ViewHeight,
 			.Alpha = alpha,
+			.SimulationTime = GetRenderTime(alpha),
 			.Quality = { .ShadowMapSize = Project.Rendering.ShadowMapSize,
 				.SsaoHalfResolution = Project.Rendering.SsaoHalfResolution,
 				.MaxShadedLights = Project.Rendering.MaxShadedLights },
@@ -2212,6 +2220,7 @@ namespace Engine {
 		m_State->RefreshViewState();
 		RenderExtractionRequest view = request;
 		view.Alpha = GetViewAlpha();
+		view.SimulationTime = m_State->GetRenderTime(view.Alpha);
 		// M22 (C22.2, decision 25): the widgets' tints follow the session's interaction state, as in its game view.
 		view.UiInteraction = &m_State->Ui.GetInteraction();
 		ENGINE_TRY_ASSIGN(auto snapshot, ExtractRenderSnapshot(*m_State->RuntimeScene, view));

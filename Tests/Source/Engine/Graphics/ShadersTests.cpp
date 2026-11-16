@@ -471,7 +471,8 @@ namespace Engine {
 			},
 			{
 				// M23 (R-INST): the element of the Instances structured buffer (std430), which every mesh program's vertex
-				// shader reads.
+				// shader reads; M31 (Docs/Decisions/0046-m31-material-parameters.md decision 4): with the material parameters
+				// its fragment shaders read.
 				.Name = "InstanceRecord",
 				.Size = sizeof(InstanceRecord),
 				.Fields = {
@@ -479,8 +480,17 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, PreviousWorld),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, EntityId),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Flags),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Opacity),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveAmount),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Tint),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveEdgeWidth),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Emissive),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveNoiseScale),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveEdge),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding0),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, UVOffset),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding1),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding2),
 				},
 				.Program = "Scene",
 				.Entry = "VSMain",

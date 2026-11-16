@@ -37,7 +37,7 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			static_assert(BuiltinComponents::Size == 52);
+			static_assert(BuiltinComponents::Size == 53);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -558,6 +558,24 @@ namespace Engine {
 			CHECK(collider.Restitution == 0.0f);
 		}
 
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 1): the defaults are neutral, so they draw as no
+		// component (RenderExtraction's ResolveMaterialParameters).
+		TEST_CASE("BuiltinComponents: material parameter defaults follow the component table")
+		{
+			const MaterialParametersComponent parameters;
+			CHECK(parameters.Tint == glm::vec3(1.0f));
+			CHECK(parameters.Emissive == glm::vec3(1.0f));
+			CHECK(parameters.EmissiveStrength == 0.0f);
+			CHECK(parameters.UVOffset == glm::vec2(0.0f));
+			CHECK(parameters.UVScroll == glm::vec2(0.0f));
+			CHECK(parameters.DissolveAmount == 0.0f);
+			CHECK(parameters.DissolveEdgeColor == glm::vec3(1.0f, 0.5f, 0.1f));
+			CHECK(parameters.DissolveEdgeStrength == 2.0f);
+			CHECK(parameters.DissolveEdgeWidth == 0.05f);
+			CHECK(parameters.DissolveNoiseScale == 1.0f);
+			CHECK(parameters.Opacity == 1.0f);
+		}
+
 		TEST_CASE("BuiltinComponents: every listed type is registered in list order")
 		{
 			TypeRegistry registry;
@@ -659,6 +677,9 @@ namespace Engine {
 				"ReflectionProbe",
 				"Terrain",
 				"TerrainCollider",
+				// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 1): ADR 0042's phase-5 ledger's categories after
+				// Terrain, in landing order.
+				"MaterialParameters",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -670,7 +691,7 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,

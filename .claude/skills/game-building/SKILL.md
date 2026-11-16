@@ -26,7 +26,7 @@ The Architecture sections cited below (§13.12: demo acceptance) and the definit
 Reference pages beside this file, each a `docs.get` topic and a file in this skill's directory:
 - `skills/game-building/editor-sessions` ([editor-sessions.md](editor-sessions.md)): attaching to an editor the user has open, recovering after a crash, and a stale tool list after the catalogue changed.
 - `skills/game-building/prefabs-and-levels` ([prefabs-and-levels.md](prefabs-and-levels.md)): prefabs, their per-instance values and nesting; replacing imported art and what survives it; a level's static compound body; pieces that report their own collisions.
-- `skills/game-building/look` ([look.md](look.md)): the look: lights and shadows (point and spot lights included), repeated meshes, glow, background, screen text, GTAO and framing.
+- `skills/game-building/look` ([look.md](look.md)): the look: lights and shadows (point and spot lights included), repeated meshes, per-entity material parameters (tint, glow, scroll, dissolve, fade), glow, background, screen text, GTAO and framing.
 - `skills/game-building/replays` ([replays.md](replays.md)): recording and verifying replays, the input check, recording suites and re-recording.
 - `skills/game-building/exports` ([exports.md](exports.md)): testing, pruned and command-line exports.
 - `skills/game-building/sprites-2d` ([sprites-2d.md](sprites-2d.md)): 2D games: sprites, sprite sheets and clips, sorting layers, the pixel-perfect camera, 2D lights and normal maps, tilemaps and `tilemap_paint`, 2D physics and the editor's 2D mode.

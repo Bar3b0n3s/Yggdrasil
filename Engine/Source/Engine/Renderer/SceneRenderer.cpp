@@ -930,6 +930,8 @@ namespace Engine {
 				const Detail::SceneRendererMaterial& material = found->second;
 				if (material.Set == nullptr)
 					continue; // its GPU objects are missing (reported)
+				// M31 (decision 5): an Opaque material's draw of a dissolving or fading item takes the Mask variants.
+				const AlphaMode mode = SelectMeshAlphaMode(material.Mode, item.Parameters, false);
 				// M23 (C23.3): a deformed item's draws bind its entry's deformed vertices and key its VertexStream; M26 (stream X-C):
 				// and its previous positions, which the prepass's motion vectors read.
 				nvrhi::IBuffer* drawVertices = vertexBuffer;
@@ -959,13 +961,13 @@ namespace Engine {
 				draw.IndexOffset = submesh.IndexOffset;
 				draw.IndexCount = submesh.IndexCount;
 				draw.Material = material.Set;
-				draw.ForwardVariant = Utils::GetForwardVariant(material.Mode, cullMode);
+				draw.ForwardVariant = Utils::GetForwardVariant(mode, cullMode);
 				draw.MaterialHandle = materialHandle;
 				draw.Mesh = item.Mesh;
 				draw.Entity = item.Entity;
 				draw.Submesh = submeshIndex;
 				draw.SnapshotIndex = index;
-				if (material.Mode == AlphaMode::Blend)
+				if (mode == AlphaMode::Blend)
 				{
 					const glm::vec3 centre = bounds.IsEmpty() ? glm::vec3(0.0f) : (bounds.Min + bounds.Max) * 0.5f;
 					draw.ViewDepth = -(worldView * glm::vec4(centre, 1.0f)).z;
@@ -973,7 +975,7 @@ namespace Engine {
 				}
 				else
 				{
-					draw.PrepassVariant = Utils::GetPrepassVariant(material.Mode, cullMode);
+					draw.PrepassVariant = Utils::GetPrepassVariant(mode, cullMode);
 					OpaqueDraws.push_back(draw);
 				}
 			}
@@ -1787,6 +1789,19 @@ namespace Engine {
 			if (!noise.IsPlaceholder)
 				frame.BlueNoise = noise.Texture;
 		}
+		// M31 (decision 6): the dissolve noise, a procedural built-in every asset manager serves, looked up only while an item
+		// dissolves, so a snapshot without a dissolve never asks for it.
+		frame.DissolveNoise = Pipelines->WhiteAo;
+		const bool dissolves = std::ranges::any_of(snapshot.Meshes, [](const MeshDrawItem& item)
+		{
+			return item.Parameters.DissolveAmount > 0.0f;
+		});
+		if (dissolves)
+		{
+			const GpuTexture& noise = Cache->GetTexture(BuiltinAssetHandles::DissolveNoiseTexture);
+			if (!noise.IsPlaceholder && noise.Texture != nullptr)
+				frame.DissolveNoise = noise.Texture;
+		}
 		recording.EndPass({});
 		ENGINE_TRY(EnsureInstanceBuffer());
 		const bool halfPoints = Utils::HasHalfTierPointShadow(frame.Points);
@@ -2053,6 +2068,7 @@ namespace Engine {
 			.PointHalfTarget = Targets.PointShadowMapsHalf.Get(),
 			.PointHalfFramebuffers = Targets.PointShadowHalfFramebuffers,
 			.Cache = &ShadowCache,
+			.DissolveNoise = frame.DissolveNoise,
 		};
 		auto result = Pipelines->Shadows->Record(*frame.CommandList, *frame.Recording, ShadowBindings, inputs);
 		if (!result)
@@ -2076,6 +2092,7 @@ namespace Engine {
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, ViewConstantsBuffer),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
@@ -2259,6 +2276,7 @@ namespace Engine {
 				nvrhi::BindingSetItem::ConstantBuffer(Utils::ProbeConstantsRegister, ProbeResources.Constants),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::IrradianceProbesRegister, hasVolumes ? ProbeResources.Coefficients : Pipelines->EmptyIrradianceProbes),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::ReflectionProbeCubesRegister, hasReflections ? ProbeResources.Cubes : Pipelines->EmptyReflectionProbeCubes),
+				nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::ShadowCompareRegister, Pipelines->ShadowCompare),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),

@@ -2518,7 +2518,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2625,6 +2625,14 @@ All modes; Runtime|Test; pure/read.
 `Light2D?`
 
 The entity's Light2D component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.MaterialParameters
+
+`MaterialParameters?`
+
+The entity's MaterialParameters component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3097,6 +3105,98 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `Light2DType`
 
 Whether the light is a point light around the entity or a global light of the whole view.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## MaterialParameters
+
+Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes.
+
+### MaterialParameters.DissolveAmount
+
+`number`
+
+How much of the surface has dissolved, from 0 (none) to 1 (all), by a built-in noise over the first texture coordinates; shadows dissolve too.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.DissolveEdgeColor
+
+`Color`
+
+The linear colour of the glow along the dissolve's edge, scaled by DissolveEdgeStrength.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.DissolveEdgeStrength
+
+`number`
+
+How bright the dissolve's edge glows: DissolveEdgeColor times this, in the units of a material's emission.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.DissolveEdgeWidth
+
+`number`
+
+How wide the glowing edge is, as the share of the noise just above DissolveAmount that glows; 0 draws no edge.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.DissolveNoiseScale
+
+`number`
+
+How many times the dissolve noise repeats per unit of the mesh's first texture coordinates.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.Emissive
+
+`Color`
+
+The linear colour of the glow added to every material's emission, scaled by EmissiveStrength.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.EmissiveStrength
+
+`number`
+
+How bright the added glow is: Emissive times this, in the units of a material's emission; 0 adds none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.Opacity
+
+`number`
+
+The fade, from 1 (solid) to 0 (gone): a dithered see-through pattern on Opaque and Mask materials, which keep their depth, sorting and shadow, and a factor of a Blend material's alpha.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.Tint
+
+`Color`
+
+The linear colour that multiplies the base colour of every material.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.UVOffset
+
+`vector`
+
+Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### MaterialParameters.UVScroll
+
+`vector`
+
+How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

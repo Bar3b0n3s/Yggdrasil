@@ -2779,6 +2779,154 @@
 			},
 			"additionalProperties": false
 		},
+		"MaterialParameters": {
+			"description": "Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes.",
+			"type": "object",
+			"properties": {
+				"Tint": {
+					"description": "The linear colour that multiplies the base colour of every material.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Emissive": {
+					"description": "The linear colour of the glow added to every material's emission, scaled by EmissiveStrength.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"EmissiveStrength": {
+					"description": "How bright the added glow is: Emissive times this, in the units of a material's emission; 0 adds none.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"UVOffset": {
+					"description": "Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000,
+							"maximum": 1000
+						},
+						{
+							"type": "number",
+							"minimum": -1000,
+							"maximum": 1000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"UVScroll": {
+					"description": "How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000,
+							"maximum": 1000
+						},
+						{
+							"type": "number",
+							"minimum": -1000,
+							"maximum": 1000
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				},
+				"DissolveAmount": {
+					"description": "How much of the surface has dissolved, from 0 (none) to 1 (all), by a built-in noise over the first texture coordinates; shadows dissolve too.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"DissolveEdgeColor": {
+					"description": "The linear colour of the glow along the dissolve's edge, scaled by DissolveEdgeStrength.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"DissolveEdgeStrength": {
+					"description": "How bright the dissolve's edge glows: DissolveEdgeColor times this, in the units of a material's emission.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"DissolveEdgeWidth": {
+					"description": "How wide the glowing edge is, as the share of the noise just above DissolveAmount that glows; 0 draws no edge.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"DissolveNoiseScale": {
+					"description": "How many times the dissolve noise repeats per unit of the mesh's first texture coordinates.",
+					"type": "number",
+					"minimum": 0.01,
+					"maximum": 100
+				},
+				"Opacity": {
+					"description": "The fade, from 1 (solid) to 0 (gone): a dithered see-through pattern on Opaque and Mask materials, which keep their depth, sorting and shadow, and a factor of a Blend material's alpha.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -3342,6 +3490,9 @@
 						},
 						"TerrainCollider": {
 							"$ref": "#/$defs/TerrainCollider"
+						},
+						"MaterialParameters": {
+							"$ref": "#/$defs/MaterialParameters"
 						}
 					},
 					"additionalProperties": true

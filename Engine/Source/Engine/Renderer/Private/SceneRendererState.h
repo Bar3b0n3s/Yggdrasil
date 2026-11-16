@@ -318,6 +318,11 @@ namespace Engine {
 			nvrhi::TextureHandle EnvironmentSpecular{};
 			nvrhi::TextureHandle EnvironmentSkybox{};
 			nvrhi::TextureHandle BlueNoise{};
+			// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6): set by the Prepare stage: the dissolve noise the
+			// prepass, forward and shadow sets bind at Utils::DissolveNoiseRegister: the built-in DissolveNoise texture's mirror
+			// while an item of the snapshot dissolves, else (and when the mirror is a placeholder or missing) the neutral white
+			// texture: unread without a dissolve; with a dissolve and a placeholder mirror, only an amount of 1 dissolves.
+			nvrhi::TextureHandle DissolveNoise{};
 			// Set by the DepthNormal stage: the view's prepass set (null without a camera or when it cannot be created), and
 			// (M26: the overdraw pipelines' own set 0, Private/ForwardPipelines.h) the set the Overdraw data view draws with
 			// (null outside it).

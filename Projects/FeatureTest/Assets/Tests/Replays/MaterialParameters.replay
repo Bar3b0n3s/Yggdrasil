@@ -1,0 +1,141 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "c9cc5fe2dd9f915f",
+		"Path": "Assets/Scenes/MaterialParameters.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.5.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "2aad9f9f889b0adf",
+				"Path": "/Floor",
+				"Hash": "aeada5995d72d263",
+				"Components": {
+					"Transform": "db0c42b3702fc196",
+					"MeshRenderer": "42e6798e4cd87203"
+				}
+			},
+			{
+				"Id": "745a601dfe9fedf8",
+				"Path": "/Sun",
+				"Hash": "1ced3c75868d16eb",
+				"Components": {
+					"Transform": "b12cf37696743467",
+					"DirectionalLight": "ea7e628a7f0f8fc7"
+				}
+			},
+			{
+				"Id": "87dc00d1d53a3c54",
+				"Path": "/Wall",
+				"Hash": "6e50824be5dc5a0e",
+				"Components": {
+					"Transform": "3e1dc4d1f680e1a1",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"MaterialParameters": "e25304b2ea27c930"
+				}
+			},
+			{
+				"Id": "8c59a1029edcc42a",
+				"Path": "/Camera",
+				"Hash": "2fee3d88c243bbbc",
+				"Components": {
+					"Transform": "791816df2958d412",
+					"Camera": "a5787511e5cd0729"
+				}
+			},
+			{
+				"Id": "997d5d57f32a7345",
+				"Path": "/Ghost",
+				"Hash": "0354f512c5393d94",
+				"Components": {
+					"Transform": "826b1e7dfea1b618",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"MaterialParameters": "3e32497cf7da5dd1"
+				}
+			},
+			{
+				"Id": "9b7bd47f51b11071",
+				"Path": "/Tinted",
+				"Hash": "57ea9e7da78d88c7",
+				"Components": {
+					"Transform": "4b8751e4630e92f4",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"MaterialParameters": "3c8c7502aabfe7be"
+				}
+			},
+			{
+				"Id": "db7a8c57e937dcff",
+				"Path": "/Enemy",
+				"Hash": "4cc59c1072870b31",
+				"Components": {
+					"Transform": "879610621bee0740",
+					"MeshRenderer": "68e2f227aeb86fce",
+					"Script": "35cf287d78636644",
+					"MaterialParameters": "e18c14803a142c6d"
+				}
+			},
+			{
+				"Id": "e11296e598f3148c",
+				"Path": "/Lava",
+				"Hash": "f325c3e800cfc48f",
+				"Components": {
+					"Transform": "82c36592079de0c2",
+					"MeshRenderer": "78687b9c4ae0c5a5",
+					"MaterialParameters": "d45f3d3683aaf100"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "3d695a696760eeb0",
+				"Path": "Assets/Scripts/MaterialParameters/Dissolver.luau",
+				"Type": "Script",
+				"Hash": "e58c02dfd3a38556"
+			},
+			{
+				"Handle": "a9942d50c4ae54c0",
+				"Path": "Assets/Materials/MaterialParameters/Lava.material",
+				"Type": "Material",
+				"Hash": "b86c1f513045908f"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 64,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 65,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 159,
+			"Luau": "local enemy = Scene.FindByName(\"Enemy\").MaterialParameters\nlocal lava = Scene.FindByName(\"Lava\").MaterialParameters\nreturn enemy.DissolveAmount == 1 and enemy.EmissiveStrength == 0 and lava.UVScroll.x > 0"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "306978067ee15e3a"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "18df1d0b8b35e0db"
+		}
+	],
+	"FinalTick": 160,
+	"FinalStateHash": "024dbc7bb8619817"
+}

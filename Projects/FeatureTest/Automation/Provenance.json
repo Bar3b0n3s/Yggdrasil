@@ -1731,6 +1731,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Materials/GoldenMaterialParameters/Checker.material",
+			"XXH64": "2c65a807442ff3d2",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenMaterialParameters/Checker.material.meta",
+			"XXH64": "54dff9b530d0cdd0",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Materials/GoldenPointShadows/Floor.material",
 			"XXH64": "a755c8cf4216b86e",
 			"Method": "asset.create",
@@ -2079,6 +2095,22 @@
 			"XXH64": "b752a9835968a9e5",
 			"Method": "asset.create",
 			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/MaterialParameters/Lava.material",
+			"XXH64": "55c287204791c084",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/MaterialParameters/Lava.material.meta",
+			"XXH64": "51f65f13f8095f63",
+			"Method": "asset.create",
+			"RequestId": 1,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -2899,6 +2931,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/GoldenMaterialParameters/MaterialParameters.scene",
+			"XXH64": "3b02f556d493e1dd",
+			"Method": "scene.save",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenMaterialParameters/MaterialParameters.scene.meta",
+			"XXH64": "e17e17fe2f2516da",
+			"Method": "edit.batch",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/GoldenParticles/Particles.scene",
 			"XXH64": "f28ee38218650c84",
 			"Method": "scene.save",
@@ -3327,6 +3375,22 @@
 			"XXH64": "c4eb3b6dee20c88f",
 			"Method": "edit.batch",
 			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/MaterialParameters.scene",
+			"XXH64": "f8325da8bfacef4a",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/MaterialParameters.scene.meta",
+			"XXH64": "0fda2628e57e1bfd",
+			"Method": "edit.batch",
+			"RequestId": 4,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -3919,6 +3983,22 @@
 			"XXH64": "0aa491baf6753b31",
 			"Method": "script.write",
 			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/MaterialParameters/Dissolver.luau",
+			"XXH64": "d80ed1e11c212673",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/MaterialParameters/Dissolver.luau.meta",
+			"XXH64": "693caf1f13885dfe",
+			"Method": "script.write",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4815,6 +4895,22 @@
 			"XXH64": "352a405c4c74fb57",
 			"Method": "script.write",
 			"RequestId": 20,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/MaterialParameters.test.luau",
+			"XXH64": "e4bb347dbe20f380",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/MaterialParameters.test.luau.meta",
+			"XXH64": "5d44ebe94b5a8e8c",
+			"Method": "script.write",
+			"RequestId": 6,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5949,6 +6045,22 @@
 		{
 			"Path": "Assets/Tests/Replays/Input.replay.meta",
 			"XXH64": "344d7fcf749183d9",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/MaterialParameters.replay",
+			"XXH64": "95a6e9e251b22603",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/MaterialParameters.replay.meta",
+			"XXH64": "727fc6f923a3ac42",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
