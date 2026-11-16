@@ -2,6 +2,8 @@
 #include "Engine/Scene/NavigationBakeInput.h"
 
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/HeightfieldData.h"
+#include "Engine/Asset/TerrainGeometry.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
@@ -9,16 +11,22 @@
 #include "Engine/Scene/Components/MeshColliderComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
+#include "Engine/Scene/Components/TerrainColliderComponent.h"
+#include "Engine/Scene/Components/TerrainComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Support/AssetTestFixture.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/NavigationTestScene.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -237,6 +245,157 @@ namespace Engine {
 			}
 		}
 
+		// The height field's cells, two triangles each, split along the diagonal and facing up as the terrain's surface is
+		// (Asset/TerrainGeometry.h): every triangle lies in the surface's plane at its centroid, its normal the surface's.
+		TEST_CASE("NavigationBakeInput: a terrain collider is its height field's cells, split and facing as the terrain's surface")
+		{
+			constexpr AssetHandle Bowl{ 0x4e41u };
+			constexpr uint32_t Samples = 5;
+			Test::InMemoryAssetManager assets;
+			// Bowed along both axes, so a cell's two triangles are different planes and a wrong split would leave the surface.
+			auto heightfield = CreateRef<HeightfieldData>(MakeFlatHeightfield(Samples));
+			for (uint32_t z = 0; z < Samples; ++z)
+			{
+				for (uint32_t x = 0; x < Samples; ++x)
+					heightfield->Heights[x + Samples * z] = static_cast<uint16_t>(x * x * 2000 + z * z * 1500);
+			}
+			assets.Publish(Bowl, heightfield, "Assets/Terrain/Bowl.heightfield");
+			const TerrainExtent extent{ .Size = glm::vec2(8.0f, 6.0f), .HeightScale = 4.0f };
+			const glm::vec3 origin(1.0f, 2.0f, 3.0f);
+
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			AddNavigation(scene);
+			Entity terrain = scene.CreateEntity("Terrain");
+			terrain.Patch<TransformComponent>([&origin](TransformComponent& transform)
+			{
+				transform.Translation = origin;
+			});
+			terrain.AddComponent<TerrainComponent>(TerrainComponent{
+				.Heightfield = TypedAssetHandle<AssetType::Heightfield>(Bowl), .Size = extent.Size, .HeightScale = extent.HeightScale });
+			terrain.AddComponent<TerrainColliderComponent>();
+			const Result<NavigationBakeInput> input = CollectNavigationBakeInput(scene, MakeLayers(), assets);
+			REQUIRE_MESSAGE(input.has_value(), input.error().ToString());
+			CHECK(input->SkippedBodies.empty());
+			CHECK(input->Vertices.size() == Samples * Samples);
+			REQUIRE(input->Indices.size() == 3 * 2 * (Samples - 1) * (Samples - 1));
+			for (size_t triangle = 0; triangle < input->Indices.size() / 3; ++triangle)
+			{
+				CAPTURE(triangle);
+				const glm::vec3 centroid = (input->Vertices[input->Indices[triangle * 3]] + input->Vertices[input->Indices[triangle * 3 + 1]]
+											   + input->Vertices[input->Indices[triangle * 3 + 2]])
+					/ 3.0f;
+				const glm::vec2 local(centroid.x - origin.x, centroid.z - origin.z);
+				const std::optional<float> height = SampleTerrainHeight(*heightfield, extent, local);
+				const std::optional<glm::vec3> normal = SampleTerrainNormal(*heightfield, extent, local);
+				REQUIRE(height.has_value());
+				REQUIRE(normal.has_value());
+				CHECK(centroid.y - origin.y == doctest::Approx(*height).epsilon(1e-4));
+				const glm::vec3 facing = TriangleNormal(*input, triangle);
+				CHECK(facing.y > 0.0f);
+				CHECK(glm::dot(facing, *normal) == doctest::Approx(1.0f).epsilon(1e-4));
+			}
+		}
+
+		TEST_CASE("NavigationBakeInput: a body whose shape cannot be described adds no triangle and is listed as skipped")
+		{
+			Test::AssetTestFixture assets;
+			assets.OpenProject();
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			AddNavigation(scene);
+			static_cast<void>(Test::AddBoxBody(scene, "Wall", glm::vec3(0.0f), glm::vec3(1.0f), std::nullopt));
+			// A MeshCollider without a mesh, on an entity without a MeshRenderer: its shape cannot be described.
+			Entity rock = scene.CreateEntity("Rock");
+			rock.AddComponent<MeshColliderComponent>();
+			const Result<NavigationBakeInput> input = CollectNavigationBakeInput(scene, MakeLayers(), assets.GetManager());
+			REQUIRE_MESSAGE(input.has_value(), input.error().ToString());
+			CHECK(input->Indices.size() == 36);
+			REQUIRE(input->SkippedBodies.size() == 1);
+			CHECK(input->SkippedBodies[0] == rock.GetUUID());
+		}
+
+		TEST_CASE("NavigationBakeInput: a collider under a scaled and rotated parent is placed by its world transform, and a disabled one is not read")
+		{
+			Test::AssetTestFixture assets;
+			assets.OpenProject();
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			AddNavigation(scene);
+			Entity parent = scene.CreateEntity("Parent");
+			parent.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.0f, 1.0f, -2.0f);
+				transform.Rotation = glm::angleAxis(glm::radians(30.0f), glm::normalize(glm::vec3(0.0f, 1.0f, 1.0f)));
+				transform.Scale = glm::vec3(2.0f, 2.0f, 2.0f);
+			});
+			Entity child = Test::AddBoxBody(scene, "Child", glm::vec3(1.0f, 0.0f, 0.5f), glm::vec3(0.5f, 0.25f, 1.0f), std::nullopt, parent);
+			child.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Rotation = glm::angleAxis(glm::radians(45.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+			});
+			const Result<NavigationBakeInput> input = CollectNavigationBakeInput(scene, MakeLayers(), assets.GetManager());
+			REQUIRE_MESSAGE(input.has_value(), input.error().ToString());
+			REQUIRE(input->Vertices.size() == 8);
+			// Every corner of the box, placed by the child's world matrix, is a vertex of the input.
+			const glm::mat4 world = TransformSystem::ComputeWorldMatrix(child);
+			for (uint32_t corner = 0; corner < 8; ++corner)
+			{
+				CAPTURE(corner);
+				const glm::vec3 local((corner & 1U) != 0 ? 0.5f : -0.5f, (corner & 2U) != 0 ? 0.25f : -0.25f, (corner & 4U) != 0 ? 1.0f : -1.0f);
+				const glm::vec3 expected(world * glm::vec4(local, 1.0f));
+				CHECK(std::any_of(input->Vertices.begin(), input->Vertices.end(), [&expected](const glm::vec3& vertex)
+				{
+					return glm::length(vertex - expected) < 1.0e-4f;
+				}));
+			}
+			CHECK(FacesOutward(*input, glm::vec3(world[3])));
+
+			// Disabling the child, or its parent, leaves it out.
+			child.SetActive(false);
+			const Result<NavigationBakeInput> disabled = CollectNavigationBakeInput(scene, MakeLayers(), assets.GetManager());
+			REQUIRE(disabled.has_value());
+			CHECK(disabled->Vertices.empty());
+			child.SetActive(true);
+			parent.SetActive(false);
+			const Result<NavigationBakeInput> hidden = CollectNavigationBakeInput(scene, MakeLayers(), assets.GetManager());
+			REQUIRE(hidden.has_value());
+			CHECK(hidden->Vertices.empty());
+		}
+
+		// A world pose that overflows (valid content: two far translations add up past float's range) would hand Recast
+		// infinite coordinates; the input refuses it, naming the entity.
+		TEST_CASE("NavigationBakeInput: a body or a NavModifier whose world placement is not finite is refused, naming its entity")
+		{
+			Test::AssetTestFixture assets;
+			assets.OpenProject();
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			AddNavigation(scene);
+			Entity far = scene.CreateEntity("Far");
+			far.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.0e38f, 0.0f, 0.0f);
+			});
+			Entity wall = Test::AddBoxBody(scene, "Wall", glm::vec3(3.0e38f, 0.0f, 0.0f), glm::vec3(1.0f), std::nullopt, far);
+			const Result<NavigationBakeInput> body = CollectNavigationBakeInput(scene, MakeLayers(), assets.GetManager());
+			REQUIRE_FALSE(body.has_value());
+			CHECK(body.error().GetCode() == ErrorCode::Validation);
+			CHECK(body.error().GetMessageText().find(wall.GetUUID().ToString()) != std::string::npos);
+			scene.DestroyEntity(wall);
+
+			Entity hole = scene.CreateEntity("Hole", far);
+			hole.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(3.0e38f, 0.0f, 0.0f);
+			});
+			hole.AddComponent<NavModifierComponent>();
+			const Result<NavigationBakeInput> modifier = CollectNavigationBakeInput(scene, MakeLayers(), assets.GetManager());
+			REQUIRE_FALSE(modifier.has_value());
+			CHECK(modifier.error().GetCode() == ErrorCode::Validation);
+			CHECK(modifier.error().GetMessageText().find(hole.GetUUID().ToString()) != std::string::npos);
+		}
+
 		TEST_CASE("NavigationBakeInput: a mirrored collider keeps its triangles facing outward")
 		{
 			Test::AssetTestFixture assets;
@@ -321,6 +480,12 @@ namespace Engine {
 			});
 			static_cast<void>(Test::AddBoxBody(scene, "Crate", glm::vec3(1.0f, 3.0f, 1.0f), glm::vec3(0.5f), BodyType::Dynamic));
 			static_cast<void>(scene.CreateEntity("Marker"));
+			CHECK(hash() == baked);
+			// Nor does a NotWalkable box's Cost, which the bake never reads.
+			scene.FindEntityByPath("/Lava").Patch<NavModifierComponent>([](NavModifierComponent& modifier)
+			{
+				modifier.Cost = 7.0f;
+			});
 			CHECK(hash() == baked);
 
 			// Moving a wall, changing a modifier or a setting each changes it.

@@ -55,8 +55,9 @@ namespace Engine {
 	// for a scene never saved (the hint names scene.save); NotFound for an unknown open scene and for a scene without a
 	// Navigation component (CollectNavigationBakeInput's); Validation for the project's physics layers, the component's
 	// settings and layer names and the builder's limits (CollectNavigationBakeInput's and BuildNavMesh's), before anything is
-	// written; OutOfMemory from the builder; those of the write (Io) and the import (ImportFailed), after which the written
-	// file stays and no component changes.
+	// written; OutOfMemory from the builder; those of the write (Io, or AlreadyExists naming a file where the bake's directory
+	// goes), after which nothing is written and no component changes; those of the import (ImportFailed), after which the
+	// written file stays and no component changes.
 	[[nodiscard]] Result<NavigationBakeResult> BakeNavigation(EditorContext& editor, OpenSceneId scene);
 
 }

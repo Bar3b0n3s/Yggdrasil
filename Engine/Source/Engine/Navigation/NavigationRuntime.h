@@ -8,8 +8,9 @@
 // allocator and assert hooks, which the ProcessContext's Navigation step sets once, before any navigation mesh exists,
 // and puts back at its teardown.
 //   - Allocator: dtAlloc and dtFree go to the C runtime's heap, as Detour's defaults do, through a counting hook, so the
-//     step's teardown verifies that no Detour allocation outlived every navigation mesh and query (a leak check the
-//     program's unhardened gates keep without AddressSanitizer, ADR 0042's answer 9).
+//     step's teardown asserts that no Detour allocation outlived every navigation mesh and query (a leak check the
+//     program's unhardened gates keep without AddressSanitizer, ADR 0042's answer 9, in the Debug and Release builds they
+//     run).
 //   - Assert: a failed dtAssert is a programmer error (the payload Detour reads is validated first-party, NavMeshData.h),
 //     reported to the engine's assert handler like ENGINE_CORE_ASSERT, naming Detour's file and line. Dist builds with
 //     NDEBUG, where dtAssert compiles to nothing and Detour has no assert hook to set.
@@ -22,9 +23,9 @@ namespace Engine {
 	// (asserted). Main thread, before any Detour object exists.
 	void InitializeNavigationRuntime();
 
-	// Puts Detour's default hooks back. Verifies (ENGINE_CORE_VERIFY, active in Dist) that no Detour allocation is still live:
-	// a navigation mesh or query that outlived its owner would later free its memory through a hook that no longer counts it.
-	// Does nothing when not initialized. Main thread.
+	// Puts Detour's default hooks back. Asserts (ENGINE_CORE_ASSERT: a leak corrupts nothing, since a later dtFree goes to
+	// the same heap through Detour's default, so a shipped game never ends on one) that no Detour allocation is still live:
+	// a navigation mesh or query that outlived its owner is a leak. Does nothing when not initialized. Main thread.
 	void ShutdownNavigationRuntime();
 
 	// Whether InitializeNavigationRuntime ran without a ShutdownNavigationRuntime since.

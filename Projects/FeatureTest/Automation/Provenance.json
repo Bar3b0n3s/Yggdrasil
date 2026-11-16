@@ -2244,7 +2244,7 @@
 		},
 		{
 			"Path": "Assets/Navigation/Scenes/Navigation.navmesh",
-			"XXH64": "9525bf704e338eb2",
+			"XXH64": "e1a001d715d4d346",
 			"Method": "navigation.bake",
 			"RequestId": 4,
 			"Client": "batch",
@@ -3372,10 +3372,10 @@
 		},
 		{
 			"Path": "Assets/Scenes/Navigation.scene.meta",
-			"XXH64": "e2cfe50a54e798ce",
-			"Method": "ui",
-			"RequestId": null,
-			"Client": "ui",
+			"XXH64": "d614fbfbe9b359fe",
+			"Method": "project.refreshAssets",
+			"RequestId": 7,
+			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{

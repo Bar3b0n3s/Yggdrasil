@@ -95,6 +95,44 @@ namespace Engine {
 			return !status.has_value() && status.error().GetCode() == ErrorCode::Validation;
 		}
 
+		// A mesh of one agent: `polygons` copies of the triangle of vertices 0, 1 and 2, without neighbours, each with a
+		// detail mesh of the same `detailVertices` vertices (the triangle's, then extra ones at its first vertex) and
+		// `detailTriangles` triangles.
+		NavMeshData MakeRepeatedMesh(size_t polygons, uint32_t detailVertices, uint32_t detailTriangles)
+		{
+			NavMeshData mesh;
+			NavMeshAgent& agent = mesh.Agents.emplace_back(MakeAgent("Small"));
+			agent.VerticesPerPolygon = 3;
+			agent.Vertices = { 0, 0, 0, 10, 0, 0, 10, 0, 10 };
+			agent.Polygons.clear();
+			agent.Areas.assign(polygons, NavMeshWalkableArea);
+			agent.DetailMeshes.clear();
+			for (size_t polygon = 0; polygon < polygons; ++polygon)
+			{
+				agent.Polygons.insert(agent.Polygons.end(), { 0, 1, 2, Null, Null, Null });
+				agent.DetailMeshes.insert(agent.DetailMeshes.end(), { 0, detailVertices, 0, detailTriangles });
+			}
+			agent.DetailVertices.clear();
+			for (uint32_t vertex = 0; vertex < detailVertices; ++vertex)
+			{
+				const glm::vec3 position = GetNavMeshVertexPosition(agent, vertex < 3 ? vertex : 0);
+				agent.DetailVertices.insert(agent.DetailVertices.end(), { position.x, position.y, position.z });
+			}
+			agent.DetailTriangles.clear();
+			for (uint32_t triangle = 0; triangle < detailTriangles; ++triangle)
+				agent.DetailTriangles.insert(agent.DetailTriangles.end(), { 0, 1, 2, 0 });
+			return mesh;
+		}
+
+		// Whether ValidateNavMeshData accepts `mesh`.
+		bool IsValid(const NavMeshData& mesh)
+		{
+			const Status status = ValidateNavMeshData(mesh);
+			if (!status.has_value())
+				MESSAGE(status.error().ToString());
+			return status.has_value();
+		}
+
 	}
 
 	ENGINE_DEATH_TEST("Asset/NavMeshVertexPastItsCount")
@@ -336,6 +374,38 @@ namespace Engine {
 			{
 				mesh.Agents[0].DetailVertices[4] = std::numeric_limits<float>::quiet_NaN();
 			}));
+		}
+
+		// Detour stores a neighbour as its index + 1 and reads DT_EXT_LINK (0x8000) as a link to another tile, so a polygon
+		// index of 0x7fff or more would silently lose its links: a mesh holds at most 0x7fff polygons, every neighbour index
+		// below 0x7fff.
+		TEST_CASE("NavMeshData: a mesh holds at most 0x7fff polygons, so no neighbour index reaches Detour's external-link bit")
+		{
+			CHECK(MaxNavMeshPolygons == 0x7fff);
+			NavMeshData most = MakeRepeatedMesh(MaxNavMeshPolygons, 3, 1);
+			CHECK(IsValid(most));
+			// The last polygon is a valid neighbour; one past it is not.
+			most.Agents[0].Polygons[3] = static_cast<uint16_t>(MaxNavMeshPolygons - 1);
+			CHECK(IsValid(most));
+			most.Agents[0].Polygons[3] = static_cast<uint16_t>(MaxNavMeshPolygons);
+			CHECK_FALSE(IsValid(most));
+			CHECK_FALSE(IsValid(MakeRepeatedMesh(MaxNavMeshPolygons + 1, 3, 1)));
+		}
+
+		// The caps that keep Detour's narrowing safe, each reached with arrays large enough that no range check refuses first:
+		// a polygon's extra detail vertices and its detail triangles (a byte each in dtPolyDetail), and every polygon's extra
+		// detail vertices together (a uint16 range in dtCreateNavMeshData).
+		TEST_CASE("NavMeshData: the detail mesh's per-polygon and total caps refuse what the range checks pass")
+		{
+			CHECK(IsValid(MakeRepeatedMesh(1, 3 + MaxNavMeshDetailVerticesPerPolygon, 1)));
+			CHECK_FALSE(IsValid(MakeRepeatedMesh(1, 3 + MaxNavMeshDetailVerticesPerPolygon + 1, 1)));
+			CHECK(IsValid(MakeRepeatedMesh(1, 3, MaxNavMeshDetailTrianglesPerPolygon)));
+			CHECK_FALSE(IsValid(MakeRepeatedMesh(1, 3, MaxNavMeshDetailTrianglesPerPolygon + 1)));
+			// 257 polygons of 255 extra detail vertices each make 65,535, the most; 258 make more.
+			constexpr size_t Polygons = MaxNavMeshExtraDetailVertices / MaxNavMeshDetailVerticesPerPolygon;
+			static_assert(Polygons * MaxNavMeshDetailVerticesPerPolygon == MaxNavMeshExtraDetailVertices);
+			CHECK(IsValid(MakeRepeatedMesh(Polygons, 3 + MaxNavMeshDetailVerticesPerPolygon, 1)));
+			CHECK_FALSE(IsValid(MakeRepeatedMesh(Polygons + 1, 3 + MaxNavMeshDetailVerticesPerPolygon, 1)));
 		}
 
 		// The readers' own refusals: a count above its limit, refused before anything is allocated however large; a payload

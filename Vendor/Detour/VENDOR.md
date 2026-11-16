@@ -50,12 +50,15 @@ The run-time navigation mesh and its queries (M30, `Docs/Decisions/0045-m30-navi
 (`Engine/Source/Engine/Navigation/`) builds Detour's mesh from a NavMesh asset's validated first-party payload
 (`Asset/NavMeshData.h`) with `dtCreateNavMeshData`, never from bytes it trusts, and answers the `Navigation` script
 namespace's path, closest-point and surface-ray queries in the fixed step. Only the Navigation module's private files
-include its headers (`Scripts/ModuleRules.json`); every executable links it, the Runtime included.
+include its headers in the engine (`Scripts/ModuleRules.json`), and the Tests' cases of its hooks
+(`Tests/Source/Engine/Navigation/NavigationRuntimeTests.cpp`); every executable links it, the Runtime included.
 
 ### Audit of the C runtime's mathematical functions (ADR 0042 decision 3)
 
 Detour's sources call `sqrtf`, `floorf`, `ceilf` and `fabsf` (`DetourMath.h`'s `dtMathSqrtf`, `dtMathFloorf`,
-`dtMathCeilf`, `dtMathFabsf`), which IEEE 754 rounds exactly in every configuration. `DetourMath.h` also defines
+`dtMathCeilf`, `dtMathFabsf`), which IEEE 754 rounds exactly in every configuration, `isfinite` (`dtMathIsfinite`, exact),
+and `roundf` (`DetourNavMesh.cpp`'s links between tiles, exactly rounded, which the engine's one tile per agent type never
+reaches). `DetourMath.h` also defines
 `dtMathCosf`, `dtMathSinf` and `dtMathAtan2f`, which no file of `Detour/` calls (DetourCrowd, not vendored, does). The only
 randomness is the `frand` callback of `dtNavMeshQuery::findRandomPoint` and `findRandomPointAroundCircle`, a function
 pointer without user data that a seeded generator could reach only through a global: the engine never calls either, and

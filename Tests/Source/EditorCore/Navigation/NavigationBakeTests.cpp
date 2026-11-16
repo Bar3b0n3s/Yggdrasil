@@ -4,6 +4,7 @@
 
 #include "EditorCore/Commands/CommandHistory.h"
 #include "EditorCore/EditorContext.h"
+#include "Engine/Asset/AssetMetadata.h"
 #include "Engine/Asset/NavMeshData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Core/FileSystem.h"
@@ -13,18 +14,22 @@
 #include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
 #include "Support/EditorTestFixture.h"
+#include "Support/ExpectLog.h"
 #include "Support/NavigationTestScene.h"
 
 #include <nlohmann/json.hpp>
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 
 // navigation.bake's work (EditorCore/Navigation/NavigationBake.h; Docs/Decisions/0045-m30-navigation.md decision 8): its
 // refusals, the acceptance "two bakes give identical bytes" (the first bake writes, imports and assigns the mesh in one undo
-// step; the second writes nothing and records no step), a changed scene rewriting the file, and the bake's independence from
-// a renderer. The method's round trip is Automation/NavigationMethodsTests.cpp.
+// step; the second writes nothing and records no step), a changed scene rewriting the file, its write and import failures,
+// and the bake's independence from a renderer. The method's round trip is Automation/NavigationMethodsTests.cpp.
 
 namespace Engine {
 
@@ -141,9 +146,68 @@ namespace Engine {
 			CHECK(moved->InputHash != first->InputHash);
 			CHECK(ReadProjectBytes(fixture, first->Path) != bytes);
 
-			// Undoing the bake's step takes the assignment back.
+			// Undoing the bake's step takes the assignment back, and redoing it assigns the mesh again.
 			REQUIRE(editor.GetHistory().Undo(editor).has_value());
 			CHECK_FALSE(GetBakedHandle(editor).IsValid());
+			REQUIRE(editor.GetHistory().Redo(editor).has_value());
+			CHECK(GetBakedHandle(editor) == first->Asset);
+			CHECK(editor.GetHistory().GetUndoCount() == steps + 1);
+		}
+
+		// A write that fails (a file where the bake's directory goes: AlreadyExists, naming it) leaves everything as it was: no
+		// file, no .meta, the component's NavMesh and the history unchanged.
+		TEST_CASE("NavigationBake: a write that fails writes nothing and changes no component or history")
+		{
+			Test::EditorTestFixture fixture("NavigationBakeWriteFails");
+			EditorContext& editor = fixture.GetEditor();
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Arena.scene");
+			static_cast<void>(Test::AddNavigationArena(editor.GetScene()));
+			const std::span<const std::byte> text = AsBytes(std::string_view("not a directory"));
+			const Buffer blocker(text.begin(), text.end());
+			REQUIRE(FileSystem::WriteFileAtomic(fixture.GetProjectRoot() / "Assets" / "Navigation", blocker).has_value());
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			const Result<NavigationBakeResult> failed = BakeNavigation(editor, editor.GetActiveSceneId());
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().GetCode() == ErrorCode::AlreadyExists);
+			CHECK(ReadProjectBytes(fixture, "Assets/Navigation") == std::optional<Buffer>(blocker));
+			CHECK_FALSE(GetBakedHandle(editor).IsValid());
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
+		}
+
+		// An import that fails (the .meta names an importer this build does not have) returns its error after the write: the
+		// written file stays, and the component and the history are unchanged.
+		TEST_CASE("NavigationBake: an import that fails returns its error, keeping the written file and changing no component or history")
+		{
+			Test::EditorTestFixture fixture("NavigationBakeImportFails");
+			EditorContext& editor = fixture.GetEditor();
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene("Assets/Scenes/Arena.scene");
+			static_cast<void>(Test::AddNavigationArena(editor.GetScene()));
+			// A source the registry knows, whose .meta names a missing importer.
+			AssetMetadata metadata;
+			metadata.Handle = AssetHandle(0x4e415601u);
+			metadata.Type = AssetType::NavMesh;
+			metadata.Importer = "Missing";
+			metadata.ImporterVersion = 1;
+			const std::filesystem::path directory = fixture.GetProjectRoot() / "Assets" / "Navigation" / "Scenes";
+			REQUIRE(FileSystem::CreateDirectories(directory).has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Arena.navmesh", AsBytes(std::string_view("stale"))).has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(directory / "Arena.navmesh.meta", AsBytes(SerializeAssetMetadata(metadata))).has_value());
+			const Test::ExpectLog importFailure(LogLevel::Error, "ASSET_IMPORT_FAILED Assets/Navigation/Scenes/Arena.navmesh");
+			Test::AutomationTestClient client(editor, Test::MakeTestServerSpecification());
+			REQUIRE(client.Call("project.refreshAssets", Json::object()).has_value());
+			const size_t steps = editor.GetHistory().GetUndoCount();
+
+			const Result<NavigationBakeResult> failed = BakeNavigation(editor, editor.GetActiveSceneId());
+			REQUIRE_FALSE(failed.has_value());
+			CHECK(failed.error().GetCode() == ErrorCode::ImportFailed);
+			const std::optional<Buffer> written = ReadProjectBytes(fixture, "Assets/Navigation/Scenes/Arena.navmesh");
+			REQUIRE(written.has_value());
+			CHECK(ReadNavMeshSource(*written).has_value());
+			CHECK_FALSE(GetBakedHandle(editor).IsValid());
+			CHECK(editor.GetHistory().GetUndoCount() == steps);
 		}
 	}
 

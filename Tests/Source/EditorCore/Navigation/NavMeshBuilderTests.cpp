@@ -4,6 +4,7 @@
 #include "Engine/App/ProcessContext.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
+#include "Engine/Scene/Components/NavModifierComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/NavigationBakeInput.h"
 #include "Engine/Scene/Scene.h"
@@ -21,7 +22,11 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
+#include <limits>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -59,6 +64,109 @@ namespace Engine {
 				vertices.push_back(GetNavMeshVertexPosition(agent, index));
 			return vertices;
 		}
+
+		// The area of the polygon of `agent` whose XZ footprint holds the XZ point `point`, or nullopt where no polygon does.
+		std::optional<uint8_t> FindAreaAt(const NavMeshAgent& agent, const glm::vec2& point)
+		{
+			const size_t slots = agent.VerticesPerPolygon;
+			for (size_t polygon = 0; polygon < agent.GetPolygonCount(); ++polygon)
+			{
+				const uint32_t count = GetNavMeshPolygonVertexCount(agent, polygon);
+				bool left = false;
+				bool right = false;
+				for (uint32_t corner = 0; corner < count; ++corner)
+				{
+					const glm::vec3 a = GetNavMeshVertexPosition(agent, agent.Polygons[polygon * 2 * slots + corner]);
+					const glm::vec3 b = GetNavMeshVertexPosition(agent, agent.Polygons[polygon * 2 * slots + (corner + 1) % count]);
+					const float side = (b.x - a.x) * (point.y - a.z) - (b.z - a.z) * (point.x - a.x);
+					left = left || side > 0.0f;
+					right = right || side < 0.0f;
+				}
+				if (!(left && right))
+					return agent.Areas[polygon];
+			}
+			return std::nullopt;
+		}
+
+		// A 20 x 20 m floor whose top is at y = 0 and a Navigation component of one agent type, `agent`.
+		void AddFloor(Scene& scene, const NavAgentType& agent = {})
+		{
+			static_cast<void>(Test::AddBoxBody(scene, "Floor", glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(10.0f, 0.5f, 10.0f), std::nullopt));
+			Entity navigation = scene.CreateEntity("Navigation");
+			NavigationComponent settings;
+			settings.AgentTypes = { agent };
+			navigation.AddComponent<NavigationComponent>(settings);
+		}
+
+		// A NavModifier `name` 1 m tall at the XZ point `center`.
+		void AddModifier(Scene& scene, std::string_view name, const glm::vec2& center, const glm::vec2& halfExtents, NavModifierKind kind, float cost)
+		{
+			Entity entity = scene.CreateEntity(name);
+			entity.Patch<TransformComponent>([&center](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(center.x, 0.0f, center.y);
+			});
+			entity.AddComponent<NavModifierComponent>(
+				NavModifierComponent{ .Kind = kind, .Cost = cost, .HalfExtents = glm::vec3(halfExtents.x, 0.5f, halfExtents.y) });
+		}
+
+		// Recast's allocations while a FailingRecastAllocator is in place: the live count, and which allocation of at least
+		// LargeRecastAllocation bytes fails.
+		constexpr size_t LargeRecastAllocation = 4096;
+		struct FailingRecastAllocations
+		{
+			std::atomic<size_t> Live{ 0 };
+			std::atomic<size_t> LargeSeen{ 0 };
+			size_t FailingLarge = 0; // 1 for the first large allocation
+		};
+
+		FailingRecastAllocations& GetFailingRecastAllocations()
+		{
+			static FailingRecastAllocations s_Allocations;
+			return s_Allocations;
+		}
+
+		void* AllocateFailing(size_t size, rcAllocHint /*hint*/)
+		{
+			FailingRecastAllocations& allocations = GetFailingRecastAllocations();
+			if (size >= LargeRecastAllocation && allocations.LargeSeen.fetch_add(1) + 1 == allocations.FailingLarge)
+				return nullptr;
+			void* memory = std::malloc(size);
+			if (memory != nullptr)
+				allocations.Live.fetch_add(1);
+			return memory;
+		}
+
+		void FreeFailing(void* memory)
+		{
+			if (memory == nullptr)
+				return;
+			GetFailingRecastAllocations().Live.fetch_sub(1);
+			std::free(memory);
+		}
+
+		// Recast's allocator for its lifetime: the C runtime's heap, counted, failing the `failingLarge`-th allocation of at
+		// least LargeRecastAllocation bytes; the process's hooks come back at its end.
+		class FailingRecastAllocator
+		{
+		public:
+			explicit FailingRecastAllocator(size_t failingLarge)
+			{
+				RemoveNavMeshBuildHooks();
+				FailingRecastAllocations& allocations = GetFailingRecastAllocations();
+				allocations.Live.store(0);
+				allocations.LargeSeen.store(0);
+				allocations.FailingLarge = failingLarge;
+				rcAllocSetCustom(&AllocateFailing, &FreeFailing);
+			}
+			~FailingRecastAllocator()
+			{
+				rcAllocSetCustom(nullptr, nullptr);
+				InstallNavMeshBuildHooks();
+			}
+			FailingRecastAllocator(const FailingRecastAllocator&) = delete;
+			FailingRecastAllocator& operator=(const FailingRecastAllocator&) = delete;
+		};
 
 	}
 
@@ -226,6 +334,144 @@ namespace Engine {
 			REQUIRE_FALSE(large.has_value());
 			CHECK(large.error().GetCode() == ErrorCode::Validation);
 			CHECK(GetLiveNavMeshBuildAllocationCount() == 0);
+		}
+
+		// A grid size or a cell index past int's range is undefined behaviour in Recast, which once let a far collider wrap the
+		// grid's size and bake an empty mesh without an error: the builder measures the input in double and refuses it first.
+		TEST_CASE("NavMeshBuilder: geometry or a modifier beyond the grid's reach, and a coordinate that is not finite, are refused before Recast reads them")
+		{
+			Test::AssetTestFixture assets;
+			assets.OpenProject();
+			{
+				// A static collider a million kilometres away along X and Z.
+				Test::SceneTestFixture fixture;
+				AddFloor(fixture.GetScene());
+				static_cast<void>(Test::AddBoxBody(fixture.GetScene(), "Far", glm::vec3(1.0e9f, 0.0f, 1.0e9f), glm::vec3(0.5f), std::nullopt));
+				const Result<NavMeshData> far = BuildNavMesh(CollectInput(fixture.GetScene(), assets.GetManager()));
+				REQUIRE_FALSE(far.has_value());
+				CHECK(far.error().GetCode() == ErrorCode::Validation);
+			}
+			{
+				// A tower taller than MaxNavBakeHeightCells cells of 0.1 m above the floor.
+				Test::SceneTestFixture fixture;
+				AddFloor(fixture.GetScene());
+				static_cast<void>(Test::AddBoxBody(fixture.GetScene(), "Tower", glm::vec3(0.0f, 500.0f, 0.0f), glm::vec3(0.5f, 500.0f, 0.5f), std::nullopt));
+				const Result<NavMeshData> tall = BuildNavMesh(CollectInput(fixture.GetScene(), assets.GetManager()));
+				REQUIRE_FALSE(tall.has_value());
+				CHECK(tall.error().GetCode() == ErrorCode::Validation);
+			}
+			{
+				// A NavModifier a million kilometres away.
+				Test::SceneTestFixture fixture;
+				AddFloor(fixture.GetScene());
+				AddModifier(fixture.GetScene(), "Far", glm::vec2(1.0e9f, 0.0f), glm::vec2(1.0f), NavModifierKind::Cost, 2.0f);
+				const Result<NavMeshData> far = BuildNavMesh(CollectInput(fixture.GetScene(), assets.GetManager()));
+				REQUIRE_FALSE(far.has_value());
+				CHECK(far.error().GetCode() == ErrorCode::Validation);
+			}
+			// An input built by hand: a vertex or a modifier's extent that is not finite.
+			NavigationBakeInput input;
+			input.Vertices = { glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.0f, 0.0f) };
+			input.Indices = { 0, 1, 2 };
+			REQUIRE(BuildNavMesh(input).has_value());
+			for (const float bad : { std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN() })
+			{
+				NavigationBakeInput vertex = input;
+				vertex.Vertices[1].x = bad;
+				const Result<NavMeshData> refused = BuildNavMesh(vertex);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+				NavigationBakeInput modifier = input;
+				modifier.Modifiers.push_back(NavBakeModifier{ .Kind = NavModifierKind::Cost, .Cost = 2.0f, .MinY = -1.0f, .MaxY = bad });
+				const Result<NavMeshData> unmarked = BuildNavMesh(modifier);
+				REQUIRE_FALSE(unmarked.has_value());
+				CHECK(unmarked.error().GetCode() == ErrorCode::Validation);
+			}
+			CHECK(GetLiveNavMeshBuildAllocationCount() == 0);
+		}
+
+		// The walkable test is "the slope is at most MaxSlope", so an agent type meant for flat ground still walks it.
+		TEST_CASE("NavMeshBuilder: an agent type whose MaxSlope is 0 walks a flat floor")
+		{
+			Test::AssetTestFixture assets;
+			assets.OpenProject();
+			Test::SceneTestFixture fixture;
+			AddFloor(fixture.GetScene(), NavAgentType{ .Name = "Flat", .MaxSlope = 0.0f });
+			const Result<NavMeshData> built = BuildNavMesh(CollectInput(fixture.GetScene(), assets.GetManager()));
+			REQUIRE_MESSAGE(built.has_value(), built.error().ToString());
+			CHECK(FindAgent(*built, "Flat").GetPolygonCount() > 0);
+		}
+
+		// Where boxes overlap, a NotWalkable box's hole stays a hole under any cost, and the highest cost wins whatever the
+		// boxes' order in the scene.
+		TEST_CASE("NavMeshBuilder: where modifiers overlap, NotWalkable wins, then the highest cost")
+		{
+			Test::AssetTestFixture assets;
+			assets.OpenProject();
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			AddFloor(scene);
+			// The costlier box first in the scene's order, so marking in that order would let the cheaper one win the overlap.
+			AddModifier(scene, "High", glm::vec2(0.0f), glm::vec2(2.0f), NavModifierKind::Cost, 8.0f);
+			AddModifier(scene, "Low", glm::vec2(2.0f, 0.0f), glm::vec2(2.0f), NavModifierKind::Cost, 2.0f);
+			AddModifier(scene, "Around", glm::vec2(-6.0f, 0.0f), glm::vec2(3.0f), NavModifierKind::Cost, 4.0f);
+			AddModifier(scene, "Hole", glm::vec2(-6.0f, 0.0f), glm::vec2(1.0f), NavModifierKind::NotWalkable, 1.0f);
+			const Result<NavMeshData> built = BuildNavMesh(CollectInput(scene, assets.GetManager()));
+			REQUIRE_MESSAGE(built.has_value(), built.error().ToString());
+			// The distinct costs sorted: area 1 costs 2, area 2 costs 4, area 3 costs 8.
+			REQUIRE(built->AreaCosts == std::vector<float>{ 2.0f, 4.0f, 8.0f });
+			const NavMeshAgent& agent = built->Agents[0];
+			CHECK(FindAreaAt(agent, glm::vec2(1.0f, 0.0f)) == std::optional<uint8_t>(3));
+			CHECK(FindAreaAt(agent, glm::vec2(-1.0f, 0.0f)) == std::optional<uint8_t>(3));
+			CHECK(FindAreaAt(agent, glm::vec2(3.0f, 0.0f)) == std::optional<uint8_t>(1));
+			CHECK(FindAreaAt(agent, glm::vec2(-6.0f, 2.3f)) == std::optional<uint8_t>(2));
+			CHECK(FindAreaAt(agent, glm::vec2(-6.0f, 0.0f)) == std::nullopt);
+			CHECK(FindAreaAt(agent, glm::vec2(7.0f, 7.0f)) == std::optional<uint8_t>(NavMeshWalkableArea));
+		}
+
+		TEST_CASE("NavMeshBuilder: modifiers of more distinct costs than a mesh holds are refused")
+		{
+			NavigationBakeInput input;
+			for (uint32_t cost = 1; cost <= MaxNavMeshAreaCosts; ++cost)
+				input.Modifiers.push_back(NavBakeModifier{ .Kind = NavModifierKind::Cost, .Cost = static_cast<float>(cost) });
+			const Result<NavMeshData> most = BuildNavMesh(input);
+			REQUIRE_MESSAGE(most.has_value(), most.error().ToString());
+			CHECK(most->AreaCosts.size() == MaxNavMeshAreaCosts);
+			// A repeated cost adds no area; one more distinct cost is refused.
+			input.Modifiers.push_back(NavBakeModifier{ .Kind = NavModifierKind::Cost, .Cost = 1.0f });
+			CHECK(BuildNavMesh(input).has_value());
+			input.Modifiers.push_back(NavBakeModifier{ .Kind = NavModifierKind::Cost, .Cost = 100.0f });
+			const Result<NavMeshData> refused = BuildNavMesh(input);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+		}
+
+		// Recast's allocation failures are OutOfMemory, as BuildNavMesh documents, never a Validation error that sends an
+		// agent to change the settings: the heightfield's column array (whose failure Recast reports without a reason) and
+		// the rasterizer's first span pool (which Recast logs as out of memory). Recast's working data is freed either way.
+		TEST_CASE("NavMeshBuilder: Recast's allocation failures are OutOfMemory and free its working data")
+		{
+			Test::AssetTestFixture assets;
+			assets.OpenProject();
+			Test::SceneTestFixture fixture;
+			AddFloor(fixture.GetScene());
+			const NavigationBakeInput input = CollectInput(fixture.GetScene(), assets.GetManager());
+			for (const size_t failing : { size_t{ 1 }, size_t{ 2 } })
+			{
+				CAPTURE(failing);
+				std::optional<Result<NavMeshData>> built;
+				{
+					const FailingRecastAllocator allocator(failing);
+					built.emplace(BuildNavMesh(input));
+					CHECK(GetFailingRecastAllocations().Live.load() == 0);
+					CHECK(GetFailingRecastAllocations().LargeSeen.load() >= failing);
+				}
+				REQUIRE(built.has_value());
+				REQUIRE_FALSE(built->has_value());
+				CHECK(built->error().GetCode() == ErrorCode::OutOfMemory);
+			}
+			CHECK(AreNavMeshBuildHooksInstalled());
+			CHECK(BuildNavMesh(input).has_value());
 		}
 	}
 

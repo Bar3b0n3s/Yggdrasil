@@ -61,13 +61,15 @@ namespace Engine {
 	inline constexpr float MaxNavAreaCost = 10000.0f;
 	inline constexpr uint32_t MaxNavMeshAreaCosts = 62;
 	inline constexpr uint8_t NavMeshWalkableArea = 63;
-	// Detour's polygons: 3 to 6 vertices (DT_VERTS_PER_POLYGON), indices and counts below 0xffff, which marks an unused slot
-	// or a border edge.
+	// Detour's polygons: 3 to 6 vertices (DT_VERTS_PER_POLYGON), vertex indices and counts below 0xffff, which marks an
+	// unused slot or a border edge. Detour stores a polygon's neighbour as its index + 1 and reads DT_EXT_LINK (0x8000) as a
+	// link to another tile (dtCreateNavMeshData, connectIntLinks), so a mesh holds at most 0x7fff polygons and every
+	// neighbour index is below 0x7fff (static_asserted beside Detour, Navigation/NavigationRuntime.cpp).
 	inline constexpr uint32_t NavMeshMinVerticesPerPolygon = 3;
 	inline constexpr uint32_t NavMeshMaxVerticesPerPolygon = 6;
 	inline constexpr uint16_t NavMeshNullIndex = 0xffff;
 	inline constexpr uint32_t MaxNavMeshVertices = 0xfffe;
-	inline constexpr uint32_t MaxNavMeshPolygons = 0xfffe;
+	inline constexpr uint32_t MaxNavMeshPolygons = 0x7fff;
 	// The detail mesh: Detour stores a polygon's extra detail vertices and its triangle count in a byte each, and every
 	// polygon's extra detail vertices together in a uint16 range.
 	inline constexpr uint32_t MaxNavMeshDetailVerticesPerPolygon = 255; // beyond the polygon's own

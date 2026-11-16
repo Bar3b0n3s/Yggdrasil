@@ -222,6 +222,20 @@ namespace Engine {
 			return std::isfinite(value) && value >= minimum && value <= maximum;
 		}
 
+		[[nodiscard]] static bool IsFinite(const glm::vec3& value)
+		{
+			return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+		}
+
+		// Whether every corner and the vertical extent of `modifier` are finite.
+		[[nodiscard]] static bool IsFinite(const NavBakeModifier& modifier)
+		{
+			bool finite = std::isfinite(modifier.MinY) && std::isfinite(modifier.MaxY);
+			for (const glm::vec2& corner : modifier.Corners)
+				finite = finite && std::isfinite(corner.x) && std::isfinite(corner.y);
+			return finite;
+		}
+
 		// The component's settings against its ranges (the registry's, which a file or a patch may have bypassed).
 		[[nodiscard]] static Status CheckSettings(const NavigationComponent& navigation)
 		{
@@ -340,17 +354,38 @@ namespace Engine {
 			const ConstEntity owner = scene.FindEntityByID(plan.Owner);
 			const glm::vec3 position(TransformSystem::ComputeWorldMatrix(owner)[3]);
 			const glm::quat rotation = TransformSystem::GetWorldRotation(owner);
+			const size_t first = input.Vertices.size();
 			for (const ColliderShapeDescription& shape : description->Colliders)
 				Utils::AppendPlaced(input, Utils::TriangulateCollider(scene, plan, shape, assets), shape, position, rotation);
+			for (size_t vertex = first; vertex < input.Vertices.size(); ++vertex)
+			{
+				if (!Utils::IsFinite(input.Vertices[vertex]))
+				{
+					return std::unexpected(Error(ErrorCode::Validation,
+						std::format("the static body of {} is placed where a coordinate is not finite: its world transform overflows", plan.Owner.ToString()))
+							.WithHint("keep the entity's and its parents' translations and scales within float's range"));
+				}
+			}
 		}
 
-		scene.ForEachCanonical([&input](ConstEntity entity)
+		std::optional<UUID> unplaced;
+		scene.ForEachCanonical([&input, &unplaced](ConstEntity entity)
 		{
-			if (!entity.IsActive())
+			if (unplaced.has_value() || !entity.IsActive())
 				return;
 			if (const NavModifierComponent* modifier = entity.TryGetComponent<NavModifierComponent>())
+			{
 				input.Modifiers.push_back(Utils::MakeModifier(entity, *modifier));
+				if (!Utils::IsFinite(input.Modifiers.back()))
+					unplaced = entity.GetUUID();
+			}
 		});
+		if (unplaced.has_value())
+		{
+			return std::unexpected(Error(ErrorCode::Validation,
+				std::format("the NavModifier of {} is placed where a coordinate is not finite: its world transform overflows", unplaced->ToString()))
+					.WithHint("keep the entity's and its parents' translations and scales within float's range"));
+		}
 		return input;
 	}
 
@@ -384,7 +419,9 @@ namespace Engine {
 		for (const NavBakeModifier& modifier : input.Modifiers)
 		{
 			writer.WriteU8(static_cast<uint8_t>(modifier.Kind));
-			writer.WriteF32(modifier.Cost);
+			// A NotWalkable box's Cost is never read by the bake, so it never makes a mesh stale.
+			if (modifier.Kind == NavModifierKind::Cost)
+				writer.WriteF32(modifier.Cost);
 			for (const glm::vec2& corner : modifier.Corners)
 			{
 				writer.WriteF32(corner.x);

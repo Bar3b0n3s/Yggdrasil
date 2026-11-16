@@ -9,6 +9,8 @@
 #include <RecastAlloc.h>
 #include <RecastAssert.h>
 
+static_assert(Engine::MaxNavBakeHeightCells == RC_SPAN_MAX_HEIGHT, "a bake's height in cells is Recast's span height limit");
+
 #include <glm/gtc/constants.hpp>
 
 #include <algorithm>
@@ -112,10 +114,13 @@ namespace Engine {
 			std::map<float, uint8_t> CostAreas{}; // a cost's area id (1 + its index among the sorted distinct costs)
 		};
 
+		// A failed Recast step: OutOfMemory when Recast logged running out of memory (every step logs each of its failed
+		// allocations as "Out of memory"), Validation otherwise (the input's, such as too many vertices).
 		[[nodiscard]] static Error MakeStepError(std::string_view step, std::string_view agent, const NavMeshBuildContext& context)
 		{
 			const std::string reason = context.GetErrors().empty() ? std::string("Recast gave no reason") : context.GetErrors();
-			return Error(ErrorCode::Validation, std::format("baking the agent type '{}': Recast's {} failed: {}", agent, step, reason));
+			const ErrorCode code = reason.find("Out of memory") != std::string::npos ? ErrorCode::OutOfMemory : ErrorCode::Validation;
+			return Error(code, std::format("baking the agent type '{}': Recast's {} failed: {}", agent, step, reason));
 		}
 
 		[[nodiscard]] static Error MakeAllocationError(std::string_view what, std::string_view agent)
@@ -161,13 +166,14 @@ namespace Engine {
 			int height = 0;
 			rcCalcGridSize(geometry.BoundsMin, geometry.BoundsMax, cellSize, &width, &height);
 
-			// 1. The walkable triangles: cos(MaxSlope) through DetMath, never Recast's cosf.
+			// 1. The walkable triangles: cos(MaxSlope) through DetMath, never Recast's cosf; a slope of exactly MaxSlope is walkable,
+			// so a MaxSlope of 0 walks flat ground.
 			const float walkableThreshold = DetMath::Cos(type.MaxSlope / 180.0f * glm::pi<float>());
 			const size_t triangleCount = geometry.Triangles.size() / 3;
 			std::vector<unsigned char> areas(triangleCount, RC_NULL_AREA);
 			for (size_t triangle = 0; triangle < triangleCount; ++triangle)
 			{
-				if (geometry.Normals[triangle].y > walkableThreshold)
+				if (geometry.Normals[triangle].y >= walkableThreshold)
 					areas[triangle] = RC_WALKABLE_AREA;
 			}
 
@@ -176,8 +182,9 @@ namespace Engine {
 			const std::unique_ptr<rcHeightfield, HeightfieldDeleter> solid(rcAllocHeightfield());
 			if (solid == nullptr)
 				return std::unexpected(MakeAllocationError("heightfield", type.Name));
+			// rcCreateHeightfield fails only when it cannot allocate the columns.
 			if (!rcCreateHeightfield(&context, *solid, width, height, geometry.BoundsMin, geometry.BoundsMax, cellSize, cellHeight))
-				return std::unexpected(MakeStepError("rcCreateHeightfield", type.Name, context));
+				return std::unexpected(MakeAllocationError("heightfield's columns", type.Name));
 			if (!rcRasterizeTriangles(&context, geometry.Vertices.data(), static_cast<int>(geometry.Vertices.size() / 3), geometry.Triangles.data(),
 					areas.data(), static_cast<int>(triangleCount), *solid, walkableClimb))
 			{
@@ -251,6 +258,85 @@ namespace Engine {
 			return agent;
 		}
 
+		// Every coordinate Recast reads is finite: the bake input refuses a placement that is not, naming its entity, and an
+		// input built otherwise is refused here.
+		[[nodiscard]] static Status CheckFinite(const NavigationBakeInput& input)
+		{
+			for (size_t vertex = 0; vertex < input.Vertices.size(); ++vertex)
+			{
+				const glm::vec3& position = input.Vertices[vertex];
+				if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+					return MakeError(ErrorCode::Validation, "the bake input's vertex {} is not finite ({}, {}, {})", vertex, position.x, position.y, position.z);
+			}
+			for (const NavBakeModifier& modifier : input.Modifiers)
+			{
+				// A NotWalkable box's Cost is never read.
+				bool finite = (modifier.Kind != NavModifierKind::Cost || std::isfinite(modifier.Cost)) && std::isfinite(modifier.MinY) && std::isfinite(modifier.MaxY);
+				for (const glm::vec2& corner : modifier.Corners)
+					finite = finite && std::isfinite(corner.x) && std::isfinite(corner.y);
+				if (!finite)
+					return MakeError(ErrorCode::Validation, "the NavModifier of {} has a box or a cost that is not finite", modifier.Entity.ToString());
+			}
+			return {};
+		}
+
+		// The grid over the geometry's bounds, measured in double first: Recast computes the grid's size and every span's
+		// height by converting floats to int without a range check (rcCalcGridSize, the rasterizer), so a far or tall input
+		// is refused before it reaches them; within that range, Recast's own size is checked too.
+		[[nodiscard]] static Status CheckGrid(const BuildGeometry& geometry, const NavigationComponent& settings)
+		{
+			int width = 0;
+			int depth = 0;
+			const double columns = (static_cast<double>(geometry.BoundsMax[0]) - geometry.BoundsMin[0]) / settings.CellSize + 0.5;
+			const double rows = (static_cast<double>(geometry.BoundsMax[2]) - geometry.BoundsMin[2]) / settings.CellSize + 0.5;
+			if (columns < MaxNavBakeGridCells + 1.0 && rows < MaxNavBakeGridCells + 1.0)
+				rcCalcGridSize(geometry.BoundsMin, geometry.BoundsMax, settings.CellSize, &width, &depth);
+			if (!(columns < MaxNavBakeGridCells + 1.0 && rows < MaxNavBakeGridCells + 1.0) || width > MaxNavBakeGridCells || depth > MaxNavBakeGridCells)
+			{
+				return std::unexpected(Error(ErrorCode::Validation,
+					std::format("the scene's static colliders span {:.0f} x {:.0f} cells of {} metres; a bake voxelizes at most {} along X and Z", std::floor(columns),
+						std::floor(rows), settings.CellSize, MaxNavBakeGridCells))
+						.WithHint("raise the Navigation component's CellSize, or leave far geometry out of its Layers"));
+			}
+			const double layers = (static_cast<double>(geometry.BoundsMax[1]) - geometry.BoundsMin[1]) / settings.CellHeight;
+			if (layers > MaxNavBakeHeightCells)
+			{
+				return std::unexpected(Error(ErrorCode::Validation,
+					std::format("the scene's static colliders span {:.0f} cells of {} metres from bottom to top; a bake voxelizes at most {}", std::ceil(layers),
+						settings.CellHeight, MaxNavBakeHeightCells))
+						.WithHint("raise the Navigation component's CellHeight, or leave high or deep geometry out of its Layers"));
+			}
+			return {};
+		}
+
+		// Recast marks a modifier's box (rcMarkConvexPolyArea) by converting its corners and its vertical extent to int cells
+		// from the grid's minimum without a range check: a modifier more than MaxNavBakeModifierReachCells cells from it is
+		// refused, naming its entity.
+		[[nodiscard]] static Status CheckModifierReach(const NavigationBakeInput& input, const BuildGeometry& geometry)
+		{
+			const auto inReach = [](double value, float origin, float cell)
+			{
+				return std::abs((value - origin) / cell) <= MaxNavBakeModifierReachCells;
+			};
+			const NavigationComponent& settings = input.Settings;
+			for (const NavBakeModifier& modifier : input.Modifiers)
+			{
+				bool reached = inReach(modifier.MinY, geometry.BoundsMin[1], settings.CellHeight) && inReach(modifier.MaxY, geometry.BoundsMin[1], settings.CellHeight);
+				for (const glm::vec2& corner : modifier.Corners)
+				{
+					reached = reached && inReach(corner.x, geometry.BoundsMin[0], settings.CellSize) && inReach(corner.y, geometry.BoundsMin[2], settings.CellSize);
+				}
+				if (!reached)
+				{
+					return std::unexpected(Error(ErrorCode::Validation,
+						std::format("the NavModifier of {} reaches more than {} cells from the scene's static colliders, beyond the bake's grid", modifier.Entity.ToString(),
+							MaxNavBakeModifierReachCells))
+							.WithHint("move the NavModifier to the walkable geometry it changes, or shrink it"));
+				}
+			}
+			return {};
+		}
+
 		// rcAssertFailFunc: a failed Recast assert is a programmer error, reported to the engine's assert handler (which ends
 		// the process) with Recast's file and line.
 		static void OnRecastAssertFailed(const char* expression, const char* file, int line)
@@ -270,6 +356,7 @@ namespace Engine {
 				input.Vertices.size(), MaxNavBakeTriangles);
 		}
 
+		ENGINE_TRY(Utils::CheckFinite(input));
 		Utils::BuildGeometry geometry;
 		geometry.Vertices.reserve(input.Vertices.size() * 3);
 		for (const glm::vec3& vertex : input.Vertices)
@@ -312,16 +399,8 @@ namespace Engine {
 
 		if (!geometry.Triangles.empty())
 		{
-			int width = 0;
-			int height = 0;
-			rcCalcGridSize(geometry.BoundsMin, geometry.BoundsMax, input.Settings.CellSize, &width, &height);
-			if (width > MaxNavBakeGridCells || height > MaxNavBakeGridCells)
-			{
-				return std::unexpected(Error(ErrorCode::Validation,
-					std::format("the scene's static colliders span {} x {} cells of {} metres; a bake voxelizes at most {} along X and Z", width, height,
-						input.Settings.CellSize, MaxNavBakeGridCells))
-						.WithHint("raise the Navigation component's CellSize, or leave far geometry out of its Layers"));
-			}
+			ENGINE_TRY(Utils::CheckGrid(geometry, input.Settings));
+			ENGINE_TRY(Utils::CheckModifierReach(input, geometry));
 		}
 
 		for (const NavAgentType& type : input.Settings.AgentTypes)
@@ -352,7 +431,7 @@ namespace Engine {
 		if (!s_AreNavMeshBuildHooksInstalled.load())
 			return;
 		const size_t live = s_LiveNavMeshBuildAllocations.load();
-		ENGINE_CORE_VERIFY(live == 0, "RemoveNavMeshBuildHooks with {} live Recast allocation(s): a navigation bake leaked its working data", live);
+		ENGINE_CORE_ASSERT(live == 0, "RemoveNavMeshBuildHooks with {} live Recast allocation(s): a navigation bake leaked its working data", live);
 		rcAssertFailSetCustom(nullptr);
 		// Null restores Recast's default allocator (RecastAlloc.cpp).
 		rcAllocSetCustom(nullptr, nullptr);

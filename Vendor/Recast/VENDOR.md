@@ -46,9 +46,10 @@ Local modifications: **none**.
 The editor's navigation bake (M30, `Docs/Decisions/0045-m30-navigation.md`): `navigation.bake` and the editor's Bake
 Navigation action voxelize a scene's static collision geometry (the bake input, `Scene/NavigationBakeInput.h`) and build
 each agent type's polygon and detail meshes, which the NavMesh asset stores as a first-party payload
-(`Asset/NavMeshData.h`). Only one first-party translation unit includes its headers:
-`Editor/Source/EditorCore/Navigation/NavMeshBuilder.cpp` (`Scripts/ModuleRules.json`). EditorCore exists only in the
-editor and the Tests, so no exported game links Recast.
+(`Asset/NavMeshData.h`). Only one translation unit of the editor includes its headers:
+`Editor/Source/EditorCore/Navigation/NavMeshBuilder.cpp` (`Scripts/ModuleRules.json`), and the Tests' cases of its hooks
+(`Tests/Source/EditorCore/Navigation/NavMeshBuilderTests.cpp`). EditorCore exists only in the editor and the Tests, so no
+exported game links Recast.
 
 The builder calls Recast's steps one by one (`rcCreateHeightfield`, `rcRasterizeTriangles`, the span filters,
 `rcBuildCompactHeightfield`, `rcErodeWalkableArea`, `rcMarkConvexPolyArea`, `rcBuildDistanceField`, `rcBuildRegions`,

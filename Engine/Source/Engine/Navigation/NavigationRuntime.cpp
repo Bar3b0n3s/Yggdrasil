@@ -1,10 +1,12 @@
 #include "EnginePCH.h"
 #include "Engine/Navigation/NavigationRuntime.h"
 
+#include "Engine/Asset/NavMeshData.h"
 #include "Engine/Core/Assert.h"
 
 #include <DetourAlloc.h>
 #include <DetourAssert.h>
+#include <DetourNavMesh.h>
 
 #include <atomic>
 #include <cstdlib>
@@ -13,6 +15,10 @@
 #include <string_view>
 
 // Detour's process-level hooks (NavigationRuntime.h; Docs/Decisions/0045-m30-navigation.md decision 2).
+
+// Detour stores a polygon's neighbour as its index + 1 and reads DT_EXT_LINK as a link to another tile, so a mesh's
+// polygon indices stay below it (NavMeshData.h).
+static_assert(Engine::MaxNavMeshPolygons < DT_EXT_LINK, "a navigation mesh's neighbour index + 1 stays below Detour's external-link bit");
 
 namespace Engine {
 
@@ -69,7 +75,7 @@ namespace Engine {
 		if (!s_IsNavigationRuntimeInitialized.load())
 			return;
 		const size_t live = s_LiveNavigationAllocations.load();
-		ENGINE_CORE_VERIFY(live == 0,
+		ENGINE_CORE_ASSERT(live == 0,
 			"ShutdownNavigationRuntime with {} live Detour allocation(s): destroy every navigation mesh and query before the process context", live);
 #if !defined(ENGINE_DIST)
 		dtAssertFailSetCustom(nullptr);

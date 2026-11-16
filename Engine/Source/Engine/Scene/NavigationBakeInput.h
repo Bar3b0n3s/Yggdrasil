@@ -79,13 +79,14 @@ namespace Engine {
 	// and heightfields loaded through `assets`. Errors: NotFound when no effectively enabled entity holds a Navigation
 	// component (the hint names the component); Validation naming the Navigation entity for settings outside the component's
 	// ranges (an agent type count, name or size, a cell size, MinRegionArea) and for a layer name the project does not
-	// define.
+	// define, and naming the body's owner or the NavModifier's entity for a placement that is not finite (a world transform
+	// that overflows float's range, which Recast cannot voxelize).
 	[[nodiscard]] Result<NavigationBakeInput> CollectNavigationBakeInput(const Scene& scene, const PhysicsLayerTable& layers, AssetManager& assets);
 
 	// The bytes the hash covers, little-endian, floats as their bits: NavigationBakeInputVersion; the settings (each agent
 	// type's name, radius, height, maximum slope and step; the layer names; CellSize, CellHeight and MinRegionArea); the
-	// vertices and the indices; the modifiers (kind, cost, corners, vertical extent). Not the Navigation entity, the skipped
-	// bodies or NavMesh. Pure.
+	// vertices and the indices; the modifiers (kind, a Cost box's cost, corners, vertical extent). Not the Navigation entity,
+	// the skipped bodies, NavMesh or a NotWalkable box's Cost, which the bake never reads. Pure.
 	[[nodiscard]] Buffer SerializeNavigationBakeInput(const NavigationBakeInput& input);
 
 	// XXH64 of SerializeNavigationBakeInput: the NavMesh asset's InputHash. Pure.
