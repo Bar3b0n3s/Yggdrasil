@@ -7140,7 +7140,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "16d660a4f396f5d1",
+			"XXH64": "128aa9dc080eff9b",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

@@ -444,11 +444,11 @@
 		},
 		{
 			"Path": "Tetris.eproj",
-			"XXH64": "7b50e8480509cc09",
-			"Method": "project.setSettings",
-			"RequestId": 19,
-			"Client": "engine-mcp",
-			"TranscriptLine": 35
+			"XXH64": "385eb0bd373bc76b",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 389
 		}
 	]
 }

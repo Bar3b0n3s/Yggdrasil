@@ -396,11 +396,11 @@
 		},
 		{
 			"Path": "Breakout.eproj",
-			"XXH64": "b935ade9ea81ef3f",
+			"XXH64": "374da79ef0821c2b",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 441
+			"TranscriptLine": 511
 		}
 	]
 }
