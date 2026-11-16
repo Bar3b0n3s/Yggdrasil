@@ -349,6 +349,22 @@ namespace Engine {
 			return update;
 		}
 
+		std::vector<PrefabRebuildDiagnostic> MakeRebuildDiagnostics(std::span<const PrefabRebuildIssue> issues)
+		{
+			std::vector<PrefabRebuildDiagnostic> diagnostics;
+			diagnostics.reserve(issues.size());
+			for (const PrefabRebuildIssue& issue : issues)
+			{
+				diagnostics.push_back(PrefabRebuildDiagnostic{ .Scene = issue.Scene,
+					.Severity = issue.Diagnostic.Severity,
+					.Code = issue.Diagnostic.Code,
+					.Message = issue.Diagnostic.Message,
+					.Pointer = issue.Diagnostic.JsonPointer,
+					.Entity = issue.Diagnostic.Entity.IsValid() ? issue.Diagnostic.Entity.ToString() : std::string() });
+			}
+			return diagnostics;
+		}
+
 		Result<uint64_t> ExecuteImportSettingsWrite(EditorContext& editor, AssetHandle asset, Scope<Command> write, std::string label)
 		{
 			if (!UpdatesPrefabInstances(editor, asset))

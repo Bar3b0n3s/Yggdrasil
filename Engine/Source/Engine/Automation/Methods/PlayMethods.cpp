@@ -284,6 +284,9 @@ namespace Engine {
 			result.EntityCount = ToAutomationCounter(session->GetScene().GetEntityCount());
 			result.MaxEntities = session->GetMaxEntities();
 			result.Input = session->GetInput().GetSummary(InputPhase::Step);
+			result.WorldPaused = session->IsWorldPaused();
+			result.WorldSounds = session->GetWorldPauseSounds();
+			result.WorldTick = ToAutomationCounter(session->GetWorldTick());
 			return result;
 		}
 
@@ -428,6 +431,26 @@ namespace Engine {
 			return MakePlayStateResult(context);
 		}
 
+		Result<PlayStateResult> PlaySetWorldPaused(AutomationMethodContext& context, const PlaySetWorldPausedParams& params)
+		{
+			ENGINE_TRY_ASSIGN(PlaySession * session, Utils::RequirePlaySession(context));
+			ENGINE_TRY(Utils::CheckLockstepOwner(context, *session));
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 5): a recording or a replay reproduces its world
+			// pauses from its scripts, so automation sets none while one records or plays.
+			if (session->GetRecorder() != nullptr && session->GetRecorder()->IsRecording())
+			{
+				return std::unexpected(Error(ErrorCode::InvalidState, "an input recording is active, and a recording reproduces its world pauses from its scripts")
+						.WithHint("pause the world from the game's scripts (Time.PauseWorld), or stop the recording first"));
+			}
+			if (session->IsStepping())
+			{
+				return std::unexpected(Error(ErrorCode::InvalidState, "a play.step, play.waitFor or replay is advancing the session")
+						.WithHint("set the world pause between them, or from the game's scripts (Time.PauseWorld)"));
+			}
+			ENGINE_TRY(session->RequestWorldPause(params.Paused, params.Sounds));
+			return MakePlayStateResult(context);
+		}
+
 	}
 
 	void RegisterPlayMethodTypes(TypeRegistry& registry)
@@ -443,6 +466,11 @@ namespace Engine {
 			.Entry(PlayRunState::Play, "Play", "A running Play session.")
 			.Entry(PlayRunState::Simulate, "Simulate", "A running Simulate session.")
 			.Entry(PlayRunState::Paused, "Paused", "A paused session of either mode.");
+
+		// M35 (decision 5). The script API registers the same vocabulary for Time.PauseWorld (Scripting/Bindings/Time.cpp).
+		registry.Enum<WorldPauseSounds>("WorldPauseSounds", "What a world pause does to the world's playing voices; the Ui group's play on either way.")
+			.Entry(WorldPauseSounds::Pause, "Pause", "The voices outside the Ui group pause until the world resumes.")
+			.Entry(WorldPauseSounds::Finish, "Finish", "The voices play on to their end.");
 
 		registry.Enum<PlayStepRender>("PlayStepRender", "Which ticks of a play.step extract the play scene's game view (its primary camera) for rendering.")
 			.Entry(PlayStepRender::Every, "Every", "Every tick, one tick per frame.")
@@ -474,7 +502,10 @@ namespace Engine {
 			.Field("stopError", &PlayStateResult::StopError, "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs.")
 			.Field("entityCount", &PlayStateResult::EntityCount, "The entities of the play scene.")
 			.Field("maxEntities", &PlayStateResult::MaxEntities, "The project's entity cap of a session (Simulation.MaxEntities).")
-			.Field("input", &PlayStateResult::Input, "The game input as the last tick's step view saw it.");
+			.Field("input", &PlayStateResult::Input, "The game input as the last tick's step view saw it.")
+			.Field("worldPaused", &PlayStateResult::WorldPaused, "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.")
+			.Field("worldSounds", &PlayStateResult::WorldSounds, "The world pause's choice for the world's voices: Pause or Finish.")
+			.Field("worldTick", &PlayStateResult::WorldTick, "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.");
 
 		registry.Struct<PlayStopResult>("PlayStopResult", "Where a stopped play session ended.")
 			.Field("tick", &PlayStopResult::Tick, "The ticks the session ran.")
@@ -497,6 +528,9 @@ namespace Engine {
 
 		registry.Struct<PlaySetTimeScaleParams>("PlaySetTimeScaleParams", "The params of play.setTimeScale.")
 			.Field("scale", &PlaySetTimeScaleParams::Scale, "The time scale, 0 to 100 (required; 1 is real time).", timeScaleMeta);
+		registry.Struct<PlaySetWorldPausedParams>("PlaySetWorldPausedParams", "The params of play.setWorldPaused.")
+			.Field("paused", &PlaySetWorldPausedParams::Paused, "Pause (true) or resume (false) the world from the next tick on (required).")
+			.Field("sounds", &PlaySetWorldPausedParams::Sounds, "A pause's choice for the world's voices: Pause (the default) or Finish; the Ui group's play on either way.");
 		registry.Struct<PlayWaitForParams>("PlayWaitForParams", "Advance until a Luau predicate becomes truthy.")
 			.Field("until", &PlayWaitForParams::Until, "Expression or chunk evaluated after every tick in the live VM. Its value must be JSON: one that is not, a vector, Color or Quat included (only script.eval returns those as arrays), ends the wait with its Script error.")
 			.Field("timeoutTicks", &PlayWaitForParams::TimeoutTicks, "Maximum ticks to advance.", { .Min = 1.0, .Max = static_cast<double>(MaxPlayStepTicks) });
@@ -600,6 +634,20 @@ namespace Engine {
 				.Examples = { { .Description = "Half speed.", .Params = scaleExample } },
 			},
 			&Automation::PlaySetTimeScale);
+
+		// M35 (decision 5): the world pause, beside the run state's play.pause.
+		Json worldPauseExample = Json::object();
+		worldPauseExample["paused"] = true;
+		worldPauseExample["sounds"] = "Pause";
+		methods.Add(
+			{
+				.Name = "play.setWorldPaused",
+				.Description = "Pauses or resumes the play session's world from its next tick on, as Time.PauseWorld and Time.ResumeWorld do: the world's physics, animation, particles and native systems hold, bodies keep their velocities, and only behaviours whose class sets RunsWhileWorldPaused update, while ticks, input, the UI and its callbacks run on. Not play.pause, which stops every tick. Refused while an input recording is active or a play.step, play.waitFor or replay advances the session. Returns the session's state.",
+				.RequiredParams = { "paused" },
+				.AvailableInRuntime = true,
+				.Examples = { { .Description = "Pause the world, holding its sounds.", .Params = worldPauseExample } },
+			},
+			&Automation::PlaySetWorldPaused);
 	}
 
 }

@@ -149,6 +149,7 @@ namespace Engine {
 				{ "play.pause", SceneRelation::None },
 				{ "play.resume", SceneRelation::None },
 				{ "play.setTimeScale", SceneRelation::None },
+				{ "play.setWorldPaused", SceneRelation::None },
 				{ "play.state", SceneRelation::None },
 				{ "play.step", SceneRelation::None },
 				{ "play.stop", SceneRelation::None },

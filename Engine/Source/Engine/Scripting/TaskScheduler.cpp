@@ -22,7 +22,16 @@ namespace Engine {
 			ScriptReference Thread{};
 			ScriptTaskOwner Owner{};
 			uint64_t Due = 0;
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): Due counts the world's ticks, which hold while the
+			// world is paused (ScriptEngineAccess::UsesWorldClock); otherwise the session's.
+			bool WorldClock = false;
 		};
+
+		// The current tick of a task's clock (the host's session tick, or the world's: Tick - WorldHeldTicks).
+		[[nodiscard]] static uint64_t ClockTick(const ScriptFrameState& frame, bool worldClock)
+		{
+			return worldClock ? frame.Tick - std::min(frame.WorldHeldTicks, frame.Tick) : frame.Tick;
+		}
 
 		explicit State(ScriptEngine& engine)
 			: Engine(engine)
@@ -82,7 +91,8 @@ namespace Engine {
 	{
 		m_State->AssertOwner();
 		ENGINE_TRY_ASSIGN(auto thread, Detail::ScriptEngineAccess::CreateThread(m_State->Engine, function, owner, Detail::ScriptThreadKind::Task));
-		m_State->Tasks.emplace(thread.Index, State::Task{ thread, owner, m_State->Engine.GetHost().GetFrameState().Tick });
+		const bool worldClock = Detail::ScriptEngineAccess::UsesWorldClock(m_State->Engine, thread);
+		m_State->Tasks.emplace(thread.Index, State::Task{ thread, owner, State::ClockTick(m_State->Engine.GetHost().GetFrameState(), worldClock), worldClock });
 		m_State->Resume(thread);
 		return thread;
 	}
@@ -102,7 +112,9 @@ namespace Engine {
 		if (ticks > std::numeric_limits<uint64_t>::max() - frame.Tick)
 			return MakeError(ErrorCode::InvalidArgument, "Task.Delay exceeds the simulation tick range");
 		ENGINE_TRY_ASSIGN(auto thread, Detail::ScriptEngineAccess::CreateThread(m_State->Engine, function, owner, Detail::ScriptThreadKind::Task));
-		m_State->Tasks.emplace(thread.Index, State::Task{ thread, owner, frame.Tick + ticks });
+		// The delay counts the task's clock: a world behaviour's holds while the world is paused (M35, decision 2).
+		const bool worldClock = Detail::ScriptEngineAccess::UsesWorldClock(m_State->Engine, thread);
+		m_State->Tasks.emplace(thread.Index, State::Task{ thread, owner, State::ClockTick(frame, worldClock) + ticks, worldClock });
 		return thread;
 	}
 
@@ -159,12 +171,15 @@ namespace Engine {
 	void TaskScheduler::ResumeDue()
 	{
 		m_State->AssertOwner();
-		const uint64_t now = m_State->Engine.GetHost().GetFrameState().Tick;
+		const ScriptFrameState frame = m_State->Engine.GetHost().GetFrameState();
 		std::vector<State::Task> due;
 		for (const auto& [index, task] : m_State->Tasks)
 		{
 			static_cast<void>(index);
-			if (task.Due <= now)
+			// M35 (decision 2): while the world is paused its behaviours' tasks hold, whatever their due tick.
+			if (task.WorldClock && frame.WorldPaused)
+				continue;
+			if (task.Due <= State::ClockTick(frame, task.WorldClock))
 				due.push_back(task);
 		}
 		std::sort(due.begin(), due.end(), [](const State::Task& left, const State::Task& right)

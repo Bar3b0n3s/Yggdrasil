@@ -267,6 +267,81 @@ namespace Engine {
 			CHECK(tooFast.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 5): the world pause beside the run state.
+		TEST_CASE("PlayMethods: play.setWorldPaused pauses the world from the next tick, play.state reports it beside the run state, and both refuse what they must")
+		{
+			Test::AutomationFixture fixture("PlayMethods");
+			OpenSceneWithEntity(fixture);
+			const Result<Json> edit = fixture.Call("play.setWorldPaused", Json{ { "paused", true } });
+			REQUIRE_FALSE(edit.has_value());
+			CHECK(edit.error().GetCode() == ErrorCode::InvalidState);
+
+			const Result<Json> playing = fixture.Call("play.start", Json{ { "lockstep", true } });
+			REQUIRE(playing.has_value());
+			CHECK((*playing)["worldPaused"] == Json(false));
+			CHECK((*playing)["worldSounds"] == Json("Pause"));
+			CHECK((*playing)["worldTick"] == Json(0));
+			const Result<Json> paused = fixture.Call("play.setWorldPaused", Json{ { "paused", true }, { "sounds", "finish" } });
+			REQUIRE_MESSAGE(paused.has_value(), paused.error().ToString());
+			// The world is paused, the session is not: it keeps its run state and ticks on.
+			CHECK((*paused)["state"] == Json("Play"));
+			CHECK((*paused)["worldPaused"] == Json(true));
+			CHECK((*paused)["worldSounds"] == Json("Finish"));
+			REQUIRE(fixture.Call("play.step", Json{ { "ticks", 5 } }).has_value());
+			const Result<Json> held = fixture.Call("play.state", Json::object());
+			REQUIRE(held.has_value());
+			CHECK((*held)["tick"] == Json(5));
+			CHECK((*held)["worldTick"] == Json(0));
+			const PlaySession* session = fixture.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			CHECK(session->IsWorldPaused());
+			CHECK(session->GetWorldPauseSounds() == WorldPauseSounds::Finish);
+			REQUIRE(fixture.Call("play.setWorldPaused", Json{ { "paused", false } }).has_value());
+			REQUIRE(fixture.Call("play.step", Json{ { "ticks", 3 } }).has_value());
+			const Result<Json> resumed = fixture.Call("play.state", Json::object());
+			REQUIRE(resumed.has_value());
+			CHECK((*resumed)["worldPaused"] == Json(false));
+			CHECK((*resumed)["tick"] == Json(8));
+			CHECK((*resumed)["worldTick"] == Json(3));
+
+			// Another client of a lockstep session, a missing paused and an unknown sounds choice are refused.
+			AutomationServer& server = fixture.GetClient().GetServer();
+			const ClientId other = server.ConnectInProcess("other");
+			CHECK(GetErrorCode(RequestAs(fixture, other, "play.setWorldPaused", Json{ { "paused", true } })) == "InvalidState");
+			CHECK_FALSE(fixture.Call("play.setWorldPaused", Json::object()).has_value());
+			CHECK_FALSE(fixture.Call("play.setWorldPaused", Json{ { "paused", true }, { "sounds", "Later" } }).has_value());
+			// A recording reproduces its world pauses from its scripts.
+			REQUIRE(fixture.Call("play.stop", Json::object()).has_value());
+			REQUIRE(fixture.Call("scene.save", Json{ { "path", "Assets/Scenes/WorldPause.scene" } }).has_value());
+			const Result<Json> started = fixture.Call("input.record", Json{ { "action", "Start" } });
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			const Result<Json> recording = fixture.Call("play.setWorldPaused", Json{ { "paused", true } });
+			REQUIRE_FALSE(recording.has_value());
+			CHECK(recording.error().GetCode() == ErrorCode::InvalidState);
+			const PlaySession* recorded = fixture.GetEditor().GetPlay().GetSession();
+			REQUIRE(recorded != nullptr);
+			CHECK_FALSE(recorded->IsWorldPaused());
+		}
+
+		TEST_CASE("PlayMethods: play.setWorldPaused is refused while a play.step advances the session")
+		{
+			Test::AutomationFixture fixture("PlayMethods");
+			OpenSceneWithEntity(fixture);
+			AutomationServer& server = fixture.GetClient().GetServer();
+			REQUIRE(fixture.Call("play.start", Json{ { "paused", true } }).has_value());
+			// Far more ticks than one frame's budget runs, so the step is still pending after a few frames.
+			static_cast<void>(fixture.GetClient().Submit("play.step", Json{ { "ticks", MaxPlayStepTicks }, { "render", "none" } }));
+			server.Pump();
+			server.Pump();
+			PlaySession* session = fixture.GetEditor().GetPlay().GetSession();
+			REQUIRE(session != nullptr);
+			REQUIRE(session->IsStepping());
+			const ClientId other = server.ConnectInProcess("other");
+			CHECK(GetErrorCode(RequestAs(fixture, other, "play.setWorldPaused", Json{ { "paused", true } })) == "InvalidState");
+			CHECK_FALSE(session->IsWorldPaused());
+			REQUIRE(RequestAs(fixture, other, "play.stop", Json::object()).contains("result"));
+		}
+
 		TEST_CASE("PlayMethods: dryRun is Unsupported for every play method")
 		{
 			// §13.4: play.* return Unsupported for dryRun, in Edit mode and while playing, and change nothing.
@@ -280,6 +355,7 @@ namespace Engine {
 				{ "play.step", Json{ { "ticks", 1 } } },
 				{ "play.state", Json::object() },
 				{ "play.setTimeScale", Json{ { "scale", 1.0 } } },
+				{ "play.setWorldPaused", Json{ { "paused", true } } },
 			};
 			for (const bool playing : { false, true })
 			{
@@ -314,6 +390,7 @@ namespace Engine {
 				{ "play.pause", Json::object() },
 				{ "play.resume", Json::object() },
 				{ "play.setTimeScale", Json{ { "scale", 2.0 } } },
+				{ "play.setWorldPaused", Json{ { "paused", true } } },
 				{ "input.inject", Json{ { "events", Json::array() } } },
 			};
 			for (const auto& [method, params] : refused)

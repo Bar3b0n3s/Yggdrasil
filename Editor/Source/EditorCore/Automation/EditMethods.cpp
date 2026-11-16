@@ -2,6 +2,7 @@
 #include "EditorCore/Automation/EditMethods.h"
 
 #include "EditorCore/Automation/EditorMethodContext.h"
+#include "EditorCore/Automation/Private/AssetMethodSupport.h"
 #include "EditorCore/Automation/Private/MethodSupport.h"
 #include "EditorCore/EditorContext.h"
 #include "EditorCore/Play/EditorPlayController.h"
@@ -252,6 +253,8 @@ namespace Engine {
 			EditorContext& editor = context.GetEditor();
 			CommandHistory& history = editor.GetHistory();
 			const size_t before = history.GetUndoCount();
+			// An undone prefab write makes the other open scenes' instances follow it; what their rebuilds drop is reported.
+			PrefabRebuildCollector rebuilds(editor);
 			const Result<size_t> undone = history.Undo(editor, params.Steps);
 			if (!undone)
 			{
@@ -264,6 +267,7 @@ namespace Engine {
 			result.UndoIndex = ToAutomationCounter(history.GetCurrentSequence());
 			result.UndoLabel = history.GetUndoLabel();
 			result.RedoLabel = history.GetRedoLabel();
+			result.RebuildDiagnostics = Utils::MakeRebuildDiagnostics(rebuilds.Take());
 			return result;
 		}
 
@@ -273,6 +277,7 @@ namespace Engine {
 			EditorContext& editor = context.GetEditor();
 			CommandHistory& history = editor.GetHistory();
 			const size_t before = history.GetRedoCount();
+			PrefabRebuildCollector rebuilds(editor);
 			const Result<size_t> redone = history.Redo(editor, params.Steps);
 			if (!redone)
 			{
@@ -285,6 +290,7 @@ namespace Engine {
 			result.UndoIndex = ToAutomationCounter(history.GetCurrentSequence());
 			result.UndoLabel = history.GetUndoLabel();
 			result.RedoLabel = history.GetRedoLabel();
+			result.RebuildDiagnostics = Utils::MakeRebuildDiagnostics(rebuilds.Take());
 			return result;
 		}
 
@@ -376,11 +382,23 @@ namespace Engine {
 		registry.Struct<EditUndoParams>("EditUndoParams", "The params of edit.undo.")
 			.Field("steps", &EditUndoParams::Steps, "How many commands to undo.", stepsMeta);
 
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): declared with the asset methods (AssetMethods.h),
+		// registered here, the first of the domains whose results report it (RegisterEditorMethodTypes registers the edit
+		// methods' types before the asset and prefab methods' ones, and the registry wants a struct before its use).
+		registry.Struct<PrefabRebuildDiagnostic>("PrefabRebuildDiagnostic", "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.")
+			.Field("scene", &PrefabRebuildDiagnostic::Scene, "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).")
+			.Field("severity", &PrefabRebuildDiagnostic::Severity, "How serious it is.")
+			.Field("code", &PrefabRebuildDiagnostic::Code, "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.")
+			.Field("message", &PrefabRebuildDiagnostic::Message, "What happened: which override was dropped and why.")
+			.Field("pointer", &PrefabRebuildDiagnostic::Pointer, "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.")
+			.Field("entity", &PrefabRebuildDiagnostic::Entity, "The instance root (16 hex digits).");
 		registry.Struct<EditUndoResult>("EditUndoResult", "Where the history stands after edit.undo.")
 			.Field("undone", &EditUndoResult::Undone, "Commands undone; fewer than steps when the history ran out.")
 			.Field("undoIndex", &EditUndoResult::UndoIndex, "The newest applied command's undo index; 0 when none.")
 			.Field("undoLabel", &EditUndoResult::UndoLabel, "What a further edit.undo would undo.")
-			.Field("redoLabel", &EditUndoResult::RedoLabel, "What edit.redo would redo.");
+			.Field("redoLabel", &EditUndoResult::RedoLabel, "What edit.redo would redo.")
+			.Field("rebuildDiagnostics", &EditUndoResult::RebuildDiagnostics,
+				"The diagnostics of the rebuilds of the other open scenes' prefab instances that an undone prefab write made follow it, each override they dropped among them (also logged); empty when none.");
 
 		registry.Struct<EditRedoParams>("EditRedoParams", "The params of edit.redo.")
 			.Field("steps", &EditRedoParams::Steps, "How many commands to redo.", stepsMeta);
@@ -389,7 +407,9 @@ namespace Engine {
 			.Field("redone", &EditRedoResult::Redone, "Commands redone; fewer than steps when nothing more was undone.")
 			.Field("undoIndex", &EditRedoResult::UndoIndex, "The newest applied command's undo index.")
 			.Field("undoLabel", &EditRedoResult::UndoLabel, "What edit.undo would undo.")
-			.Field("redoLabel", &EditRedoResult::RedoLabel, "What a further edit.redo would redo.");
+			.Field("redoLabel", &EditRedoResult::RedoLabel, "What a further edit.redo would redo.")
+			.Field("rebuildDiagnostics", &EditRedoResult::RebuildDiagnostics,
+				"The diagnostics of the rebuilds of the other open scenes' prefab instances that a redone prefab write made follow it, each override they dropped among them (also logged); empty when none.");
 
 		registry.Struct<EditHistoryParams>("EditHistoryParams", "The params of edit.history.")
 			.Field("limit", &EditHistoryParams::Limit, "The most entries returned, ending with the newest.", stepsMeta);

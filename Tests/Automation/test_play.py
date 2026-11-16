@@ -202,6 +202,47 @@ return Script.Define("StartupError", {
         self.assertEqual(client.call("play.state")["state"], "Play")
         client.call("play.stop")
 
+    def test_set_world_paused_holds_the_world_while_the_session_ticks(self) -> None:
+        # M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 5): play.setWorldPaused and play.state's world
+        # fields; Time.PauseWorld's script side is the same request (decision 1).
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Ball", "components": {
+            "Transform": {"Translation": [0, 20, 0]}, "RigidBody": {"Type": "Dynamic"},
+            "SphereCollider": {"Radius": 0.5}}})
+        with self.assertRaises(engine_client.EngineError) as raised:
+            client.call("play.setWorldPaused", {"paused": True})
+        self.assert_engine_error(raised.exception, engine_client.INVALID_STATE, "InvalidState")
+
+        started = self.start_lockstep(client)
+        self.assertFalse(started["worldPaused"])
+        self.assertEqual(started["worldTick"], 0)
+        client.call("play.step", {"ticks": 5, "render": "none"})
+        paused = client.call("play.setWorldPaused", {"paused": True, "sounds": "Finish"})
+        # The world pause is not the run state's pause: the session keeps playing in lockstep.
+        self.assertEqual(paused["state"], "Play")
+        self.assertTrue(paused["worldPaused"])
+        self.assertEqual(paused["worldSounds"], "Finish")
+        held = client.call("physics.bodyInfo", {"entity": "/Ball"})
+        client.call("play.step", {"ticks": 30, "render": "none"})
+        state = client.call("play.state")
+        self.assertEqual(state["tick"], 35)
+        self.assertEqual(state["worldTick"], 5)
+        still = client.call("physics.bodyInfo", {"entity": "/Ball"})
+        self.assertEqual(still["position"], held["position"])
+        self.assertEqual(still["linearVelocity"], held["linearVelocity"])
+        self.assertEqual(client.call("script.eval", {"context": "play", "code": "Time.GetTick()"})["value"], 5)
+        self.assertEqual(client.call("script.eval", {"context": "play", "code": "Time.GetSessionTick()"})["value"], 35)
+        self.assertTrue(client.call("script.eval", {"context": "play", "code": "Time.IsWorldPaused()"})["value"])
+
+        # A script's resume is the same request; the ball falls on with the velocity it had.
+        client.call("script.eval", {"context": "play", "code": "Time.ResumeWorld()"})
+        self.assertFalse(client.call("play.state")["worldPaused"])
+        client.call("play.step", {"ticks": 1, "render": "none"})
+        resumed = client.call("play.state")
+        self.assertEqual(resumed["worldTick"], 6)
+        self.assertLess(client.call("physics.bodyInfo", {"entity": "/Ball"})["position"][1], held["position"][1])
+        client.call("play.stop")
+
     def test_dry_runs_and_failed_batches_leave_the_play_session_unchanged(self) -> None:
         # Section 13.4: a dry run leaves no trace, and a failed edit.batch takes every op back. A play-scene creation
         # draws a runtime id from the session's seeded generator, whose draw count is part of the state hash, so taking

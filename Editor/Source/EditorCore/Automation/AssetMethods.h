@@ -134,6 +134,21 @@ namespace Engine {
 		AssetType Type = AssetType::None;
 	};
 
+	// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): registry struct "PrefabRebuildDiagnostic", a diagnostic
+	// of a rebuild of an open scene's prefab instances that a method caused (EditorContext's PrefabRebuildCollector), every
+	// override the rebuild dropped (PREFAB_STALE_OVERRIDE) among them; asset.import, asset.reimport, asset.setImportSettings,
+	// prefab.apply, prefab.revert, edit.undo and edit.redo report them as rebuildDiagnostics, also logged. Registered by
+	// RegisterEditMethodTypes, the first of those domains to register its types.
+	struct PrefabRebuildDiagnostic
+	{
+		std::string Scene{}; // the open scene's project path; empty for a scene never saved
+		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
+		std::string Code{};
+		std::string Message{};
+		std::string Pointer{}; // within the instance root's entity: /Components/Prefab/Overrides/<i> for a dropped override
+		std::string Entity{};  // the instance root, 16 hex digits
+	};
+
 	struct AssetImportResult
 	{
 		AssetSummary Asset{};
@@ -150,6 +165,8 @@ namespace Engine {
 		// A replace: the files the previous version referenced that the new one does not, left in place; project-relative,
 		// sorted.
 		std::vector<std::string> UnreferencedFiles{};
+		// M35: the diagnostics of the rebuilds of the open scenes' prefab instances a replace of a prefab caused.
+		std::vector<PrefabRebuildDiagnostic> RebuildDiagnostics{};
 	};
 
 	// asset.reimport {asset}: EditorAssetManager::ReimportAsync of a main asset, bypassing the cache; a pending operation.
@@ -169,6 +186,7 @@ namespace Engine {
 		AssetSummary Asset{};
 		std::vector<AssetSummary> SubAssets{};
 		std::vector<AssetDiagnosticInfo> Diagnostics{};
+		std::vector<PrefabRebuildDiagnostic> RebuildDiagnostics{}; // M35: those of the prefab instances it rebuilt
 	};
 
 	// Registry enum "AssetCreateType" (§13.5 asset.create {type: Material|Scene|Prefab|SoundEffect|Folder|SpriteSheet|Tilemap|
@@ -303,6 +321,7 @@ namespace Engine {
 		std::string Importer{};
 		VariantValue Settings{}; // after the patch, every field
 		uint32_t UndoIndex = 0;
+		std::vector<PrefabRebuildDiagnostic> RebuildDiagnostics{}; // M35: those of the prefab instances it rebuilt
 	};
 
 	// asset.move {asset, path}: AssetMoveCommand of a main asset to project-relative `path` (below Assets/); the handle and

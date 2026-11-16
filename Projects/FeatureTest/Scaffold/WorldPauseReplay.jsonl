@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/WorldPause.scene"}}
+{"method": "play.step", "params": {"ticks": 150, "input": [{"tick": 20, "type": "Key", "key": "P", "state": "Tap"}, {"tick": 70, "type": "Key", "key": "Down", "state": "Tap"}, {"tick": 80, "type": "Key", "key": "Enter", "state": "Tap"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/WorldPause.replay", "expect": [{"tick": 50, "luau": "local menu = Scene.FindByName(\"Menu\"):GetScript(\"PauseMenu\")\nreturn Time.IsWorldPaused() and menu.PausedAt == 20 and Time.GetSessionTick() > Time.GetTick()"}, {"tick": 120, "luau": "local menu = Scene.FindByName(\"Menu\"):GetScript(\"PauseMenu\")\nreturn not Time.IsWorldPaused() and menu.Clicks.Resume == 1 and Time.GetSessionTick() - Time.GetTick() == menu.ResumedAt - menu.PausedAt"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

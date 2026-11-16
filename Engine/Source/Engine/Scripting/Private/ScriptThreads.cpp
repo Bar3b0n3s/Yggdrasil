@@ -149,7 +149,8 @@ namespace Engine {
 			return MakeError(ErrorCode::Script, "Task.Wait can only be used inside Task.Spawn, Task.Delay or a Test.Case body");
 		if (thread->Wait.has_value())
 			return MakeError(ErrorCode::InvalidState, "This thread already has a pending wait");
-		const uint64_t now = Engine.GetHost().GetFrameState().Tick;
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): a wait counts the thread's clock.
+		const uint64_t now = GetClockTick(thread->WorldClock);
 		const uint64_t delay = wait.Kind == Detail::ScriptWaitKind::Ticks ? std::max(uint64_t{ 1 }, wait.Ticks) : wait.Ticks;
 		if (delay > std::numeric_limits<uint64_t>::max() - now)
 			return MakeError(ErrorCode::InvalidArgument, "The wait exceeds the simulation tick range");
@@ -222,7 +223,7 @@ namespace Engine {
 		if (found->second.Wait)
 		{
 			const Detail::ScriptTestWait wait = *found->second.Wait;
-			const uint64_t now = Engine.GetHost().GetFrameState().Tick;
+			const uint64_t now = GetClockTick(found->second.WorldClock);
 			bool ready = wait.Kind == Detail::ScriptWaitKind::Ticks && now >= found->second.Due;
 			std::optional<ScriptError> waitFailure;
 			if (wait.Kind != Detail::ScriptWaitKind::Ticks)
@@ -348,7 +349,7 @@ namespace Engine {
 			Release(wait.Predicate);
 			found->second.Wait.reset();
 		}
-		else if (found->second.Started && Engine.GetHost().GetFrameState().Tick < found->second.Due)
+		else if (found->second.Started && GetClockTick(found->second.WorldClock) < found->second.Due)
 			return ScriptCaseResume{};
 
 		const auto resumeProtected = [this, id, owner, origin, thread, caseBody, resumeArguments]() -> Result<ScriptCallResult>
@@ -452,7 +453,7 @@ namespace Engine {
 		}
 		if (!found->second.Wait)
 		{
-			const uint64_t now = Engine.GetHost().GetFrameState().Tick;
+			const uint64_t now = GetClockTick(found->second.WorldClock);
 			found->second.Due = now == std::numeric_limits<uint64_t>::max() ? now : now + 1;
 		}
 		ScriptCaseResume waiting{};

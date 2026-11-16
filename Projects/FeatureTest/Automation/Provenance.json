@@ -3667,6 +3667,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/WorldPause.scene",
+			"XXH64": "df8002ff41eac06a",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/WorldPause.scene.meta",
+			"XXH64": "29c3a0dd370c893d",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scripts/Animation/Director.luau",
 			"XXH64": "88d386433805299d",
 			"Method": "script.write",
@@ -4333,6 +4349,38 @@
 		{
 			"Path": "Assets/Scripts/UiWorld/WorldRecorder.luau.meta",
 			"XXH64": "fe7dcca0326b5372",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/WorldPause/PauseMenu.luau",
+			"XXH64": "aa77442f37d0a357",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/WorldPause/PauseMenu.luau.meta",
+			"XXH64": "6732b4a33bab27af",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/WorldPause/WorldCounter.luau",
+			"XXH64": "67cff3563ccdb061",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/WorldPause/WorldCounter.luau.meta",
+			"XXH64": "f3ccf19ca455c95a",
 			"Method": "script.write",
 			"RequestId": 1,
 			"Client": "batch",
@@ -6051,6 +6099,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/WorldPause.replay",
+			"XXH64": "71e20e4456174f8d",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/WorldPause.replay.meta",
+			"XXH64": "7963ec9437fb3012",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/SceneLoad/SceneLoad.test.luau",
 			"XXH64": "daec3a5d78be3f29",
 			"Method": "script.write",
@@ -6191,6 +6255,22 @@
 			"XXH64": "53d060d8560a1797",
 			"Method": "script.write",
 			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/WorldPause/WorldPause.test.luau",
+			"XXH64": "c87a07fbf23889d6",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/WorldPause/WorldPause.test.luau.meta",
+			"XXH64": "5c356b06fe4c476f",
+			"Method": "script.write",
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},

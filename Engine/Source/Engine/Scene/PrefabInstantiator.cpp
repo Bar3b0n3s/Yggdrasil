@@ -1248,10 +1248,12 @@ namespace Engine {
 			return removed;
 		}
 
-		// Applies the prefab overrides to the instance's member JSON, each validated against the registry on its own (as a
-		// file read validates it: unresolvable Variant values are kept). An override that no longer matches, or whose value
-		// is no longer valid there, is dropped with a PREFAB_STALE_OVERRIDE warning. Returns the overrides that were applied,
-		// sorted. RemoveEntity overrides were applied when the targets were chosen (`removed`), so only their problems are
+		// Applies the prefab overrides to the instance's member JSON, validated against the registry (as a file read
+		// validates it: unresolvable Variant values are kept). An entity's Field overrides of one component apply as one write
+		// whose combined component is validated once, as entity.update with the same fields would (M35,
+		// Docs/Decisions/0050-m35-pause-entity-state.md decision 9; ApplyFields); every other override is validated on its own. An override that no longer matches, or whose
+		// value is no longer valid there, is dropped with a PREFAB_STALE_OVERRIDE warning. Returns the overrides that were
+		// applied, sorted. RemoveEntity overrides were applied when the targets were chosen (`removed`), so only their problems are
 		// reported here, and an override of a removed entity is dropped. RemoveComponent overrides go first so that an added
 		// component may replace one the prefab excludes it with. Unique-per-scene components are checked against `taken`
 		// and the other targets when `checkUnique` (an instance in a scene; a prefab's document does not limit them).
@@ -1283,6 +1285,11 @@ namespace Engine {
 				for (const PrefabOverrideKind phase : { PrefabOverrideKind::RemoveEntity, PrefabOverrideKind::RemoveComponent,
 						 PrefabOverrideKind::AddComponent, PrefabOverrideKind::Field, PrefabOverrideKind::EntityKey })
 				{
+					if (phase == PrefabOverrideKind::Field)
+					{
+						ApplyFields(overrides, applied);
+						continue;
+					}
 					for (size_t index = 0; index < overrides.size(); ++index)
 					{
 						const PrefabOverride& prefabOverride = overrides[index];
@@ -1295,16 +1302,189 @@ namespace Engine {
 							applied.push_back(prefabOverride);
 							continue;
 						}
-						m_Report.Diagnostics.push_back(LoadDiagnostic{ DiagnosticSeverity::Warning, std::string(PrefabStaleOverrideCode),
-							std::format("dropped the {} override {}at path {}: {}", GetKindName(m_Registry, prefabOverride.Kind),
-								DescribeTarget(prefabOverride), FormatPath(prefabOverride.Path), problem),
-							std::format("/Components/Prefab/Overrides/{}", index), m_InstanceRoot });
+						ReportDropped(index, prefabOverride, problem);
 					}
 				}
 				std::sort(applied.begin(), applied.end(), &IsLess);
 				return applied;
 			}
 		private:
+			// Appends the PREFAB_STALE_OVERRIDE warning of the dropped override `index`, located at its record.
+			void ReportDropped(size_t index, const PrefabOverride& prefabOverride, std::string_view problem)
+			{
+				m_Report.Diagnostics.push_back(LoadDiagnostic{ DiagnosticSeverity::Warning, std::string(PrefabStaleOverrideCode),
+					std::format("dropped the {} override {}at path {}: {}", GetKindName(m_Registry, prefabOverride.Kind),
+						DescribeTarget(prefabOverride), FormatPath(prefabOverride.Path), problem),
+					std::format("/Components/Prefab/Overrides/{}", index), m_InstanceRoot });
+			}
+
+			// The Field overrides, an entity's overrides of one component (the same Path and Component) as one write (M35,
+			// decision 9): each whose own target is gone is dropped alone; the others' values are written into the component
+			// in their order and the combined component is validated once. Valid, every one of them applies; invalid, the
+			// overrides whose fields the error locates are dropped and the rest written again, until the write is valid or none
+			// is left; an error that locates none of them (a rule of the component that blames a field no override writes)
+			// sends the rest one at a time, in their order, over the component as written so far (ApplyEach), so only those
+			// invalid there are dropped.
+			void ApplyFields(std::span<const PrefabOverride> overrides, std::vector<PrefabOverride>& applied)
+			{
+				std::vector<std::vector<size_t>> groups;
+				for (size_t index = 0; index < overrides.size(); ++index)
+				{
+					const PrefabOverride& prefabOverride = overrides[index];
+					if (prefabOverride.Kind != PrefabOverrideKind::Field)
+						continue;
+					const auto group = std::ranges::find_if(groups, [&overrides, &prefabOverride](const std::vector<size_t>& members)
+					{
+						const PrefabOverride& first = overrides[members.front()];
+						return first.Path == prefabOverride.Path && first.Component == prefabOverride.Component;
+					});
+					if (group == groups.end())
+						groups.push_back({ index });
+					else
+						group->push_back(index);
+				}
+				for (const std::vector<size_t>& group : groups)
+				{
+					MemberTarget* target = nullptr;
+					const ComponentInfo* info = nullptr;
+					std::vector<size_t> remaining;
+					for (const size_t index : group)
+					{
+						const PrefabOverride& prefabOverride = overrides[index];
+						if (std::string problem = FindFieldTarget(prefabOverride, target, info); !problem.empty())
+						{
+							ReportDropped(index, prefabOverride, problem);
+							continue;
+						}
+						remaining.push_back(index);
+					}
+					// The write of the remaining overrides, validated whole; an override the error locates (an invalid value of
+					// its field, or the field a rule of the component blames) is dropped and the rest are written again, so a
+					// valid override is never dropped for another's value, and the overrides that only hold together hold.
+					while (!remaining.empty())
+					{
+						Json candidate = GetMember(target->Object[ComponentsKey], info->GetName());
+						std::vector<size_t> written;
+						for (const size_t index : remaining)
+						{
+							if (std::string problem = WriteField(*info, overrides[index], candidate); !problem.empty())
+								ReportDropped(index, overrides[index], problem);
+							else
+								written.push_back(index);
+						}
+						Result<Json> canonical = Canonicalize(*info, candidate, m_Options.Schemas);
+						if (canonical)
+						{
+							target->Object[ComponentsKey][info->GetName()] = std::move(*canonical);
+							for (const size_t index : written)
+								applied.push_back(overrides[index]);
+							break;
+						}
+						std::vector<size_t> blamed;
+						for (const size_t index : written)
+						{
+							if (IsBlamed(overrides[index], canonical.error()))
+								blamed.push_back(index);
+						}
+						// An error that locates none of them names no override to drop: each is tried alone instead, so a
+						// valid one never goes with an invalid sibling (the review of W35.2).
+						if (blamed.empty())
+						{
+							ApplyEach(*info, *target, written, overrides, applied);
+							break;
+						}
+						const std::string problem = written.size() == 1 ? canonical.error().ToString()
+																		: std::format("with the instance's other overrides of '{}': {}", info->GetName(), canonical.error().ToString());
+						for (const size_t index : blamed)
+							ReportDropped(index, overrides[index], problem);
+						std::erase_if(written, [&blamed](size_t index)
+						{
+							return std::ranges::find(blamed, index) != blamed.end();
+						});
+						remaining = std::move(written);
+					}
+				}
+			}
+
+			// Writes the overrides `indices` of one component one at a time, in their order, each over the component as the ones
+			// before it left it, validating after each: an override invalid there is dropped with its error and the next is
+			// written over the component without it. The component holds what applied.
+			void ApplyEach(const ComponentInfo& info, MemberTarget& target, std::span<const size_t> indices, std::span<const PrefabOverride> overrides,
+				std::vector<PrefabOverride>& applied)
+			{
+				Json component = GetMember(target.Object[ComponentsKey], info.GetName());
+				for (const size_t index : indices)
+				{
+					Json candidate = component;
+					if (std::string problem = WriteField(info, overrides[index], candidate); !problem.empty())
+					{
+						ReportDropped(index, overrides[index], problem);
+						continue;
+					}
+					Result<Json> canonical = Canonicalize(info, candidate, m_Options.Schemas);
+					if (!canonical)
+					{
+						ReportDropped(index, overrides[index], canonical.error().ToString());
+						continue;
+					}
+					component = std::move(*canonical);
+					applied.push_back(overrides[index]);
+				}
+				target.Object[ComponentsKey][info.GetName()] = std::move(component);
+			}
+
+			// Whether `error`, the component's validation of a combined write, locates the field that `prefabOverride` writes:
+			// a JSON pointer of the error or of one of its issues inside that field (a slot member's override, the slot's
+			// member or the slot itself).
+			[[nodiscard]] static bool IsBlamed(const PrefabOverride& prefabOverride, const Error& error)
+			{
+				const std::string field = "/" + prefabOverride.Field;
+				const auto inside = [&field](std::string_view pointer)
+				{
+					return pointer.starts_with(field) && (pointer.size() == field.size() || pointer[field.size()] == '/');
+				};
+				// A per-slot override's field "Scripts/<slot>/<member>" is blamed for an error in its slot as a whole too.
+				const std::optional<ScriptSlotField> slot = PrefabInstantiator::ParseScriptSlotField(prefabOverride.Field);
+				const std::string slotPointer = slot.has_value() ? std::format("/Scripts/{}", slot->Slot) : std::string();
+				const auto blames = [&inside, &slotPointer](std::string_view pointer)
+				{
+					return inside(pointer) || (!slotPointer.empty() && pointer == slotPointer);
+				};
+				if (error.GetLocation().JsonPointer.has_value() && blames(*error.GetLocation().JsonPointer))
+					return true;
+				return std::ranges::any_of(error.GetIssues(), [&blames](const ErrorIssue& issue)
+				{
+					return blames(issue.JsonPointer);
+				});
+			}
+
+			// The member and component a Field override writes, or the reason it is stale on its own: the entity is gone or
+			// removed, the component is not registered, not one overrides change or not on the entity.
+			[[nodiscard]] std::string FindFieldTarget(const PrefabOverride& prefabOverride, MemberTarget*& target, const ComponentInfo*& info)
+			{
+				const DocumentEntity* entity = m_Document.FindByPath(prefabOverride.Path);
+				if (entity == nullptr)
+					return "the prefab no longer has that entity";
+				if (m_Removed.IDs.contains(entity->ID))
+					return "a RemoveEntity override removes that entity from the instance";
+				const auto found = m_TargetIndex.find(entity->ID);
+				if (found == m_TargetIndex.end())
+					return "the prefab no longer has that entity";
+				target = &m_Targets[found->second];
+				const bool isRoot = target->DocumentID == m_Document.GetRootID();
+				info = m_Registry.FindComponent(prefabOverride.Component);
+				if (info == nullptr)
+					return std::format("'{}' is not a registered component", prefabOverride.Component);
+				if (!IsOverridable(*info, isRoot, m_Transform))
+				{
+					return isRoot && info == m_Transform ? std::string("the instance root's Transform is an implicit override")
+														 : std::format("'{}' is not a component overrides can change", info->GetName());
+				}
+				if (!GetMember(target->Object[ComponentsKey], info->GetName()).is_object())
+					return std::format("the prefab entity no longer has '{}'", info->GetName());
+				return {};
+			}
+
 			// "of '<target>' " for an override of a component, a field or an entity key; empty for a RemoveEntity, whose
 			// target is the entity itself.
 			[[nodiscard]] static std::string DescribeTarget(const PrefabOverride& prefabOverride)
@@ -1358,10 +1538,9 @@ namespace Engine {
 					case PrefabOverrideKind::AddComponent:
 						return AddComponent(*info, prefabOverride, target);
 					case PrefabOverrideKind::Field:
-						return SetField(*info, prefabOverride, components);
 					case PrefabOverrideKind::EntityKey:
 					case PrefabOverrideKind::RemoveEntity:
-						break; // applied above, before the component lookup, and when the targets were chosen
+						break; // Field: by component in ApplyFields; EntityKey above; RemoveEntity when the targets were chosen
 				}
 				ENGINE_CORE_ASSERT(false, "PrefabOverrideKind {} reached the component overrides", std::to_underlying(prefabOverride.Kind));
 				return "unknown override kind";
@@ -1420,18 +1599,29 @@ namespace Engine {
 				return {};
 			}
 
-			[[nodiscard]] std::string SetField(const ComponentInfo& info, const PrefabOverride& prefabOverride, Json& components) const
+			// Writes one Field override's value into `candidate`, the component's JSON, without validating the component
+			// (ApplyFields validates the combined write once); the reason it is stale on its own when its field or script slot
+			// is gone.
+			[[nodiscard]] std::string WriteField(const ComponentInfo& info, const PrefabOverride& prefabOverride, Json& candidate) const
 			{
 				if (const std::optional<ScriptSlotTarget> slot = FindScriptSlotTarget(m_Registry, info, prefabOverride.Field))
-					return SetScriptSlotMember(info, *slot, prefabOverride, components);
+				{
+					// A per-slot override (Docs/Decisions/0031-m20-contract.md decision 19): the member of the prefab entity's slot
+					// at that index, a Fields key patch applied key by key; stale when the prefab entity has no such slot.
+					Json* target = FindScriptSlot(candidate, slot->Slot);
+					if (target == nullptr)
+						return std::format("the prefab entity's '{}' has no slot {}", info.GetName(), slot->Slot);
+					Json value = prefabOverride.Value.Get();
+					m_ToInstance.RemapField(value, *slot->Member, *slot->SlotType, *target);
+					if (IsKeyedVariantMap(*slot->Member) && value.is_object())
+						ApplyKeyPatch((*target)[slot->Member->GetName()], value);
+					else
+						(*target)[slot->Member->GetName()] = std::move(value);
+					return {};
+				}
 				const FieldInfo* field = info.FindField(prefabOverride.Field);
 				if (field == nullptr || !field->IsStored() || !field->GetMeta().Serialized)
 					return std::format("'{}' has no serialized field '{}'", info.GetName(), prefabOverride.Field);
-				const auto component = components.find(info.GetName());
-				if (component == components.end())
-					return std::format("the prefab entity no longer has '{}'", info.GetName());
-
-				Json candidate = *component;
 				Json value = prefabOverride.Value.Get();
 				m_ToInstance.RemapField(value, *field, info, candidate);
 				if (IsKeyedVariantMap(*field) && value.is_object())
@@ -1443,36 +1633,6 @@ namespace Engine {
 				{
 					candidate[field->GetName()] = std::move(value);
 				}
-				Result<Json> canonical = Canonicalize(info, candidate, m_Options.Schemas);
-				if (!canonical)
-					return canonical.error().ToString();
-				*component = std::move(*canonical);
-				return {};
-			}
-
-			// A per-slot override (Docs/Decisions/0031-m20-contract.md decision 19): the member of the prefab entity's slot at
-			// that index, a Fields key patch applied key by key; stale when the prefab entity has no such slot.
-			[[nodiscard]] std::string SetScriptSlotMember(const ComponentInfo& info, const ScriptSlotTarget& slot, const PrefabOverride& prefabOverride,
-				Json& components) const
-			{
-				const auto component = components.find(info.GetName());
-				if (component == components.end())
-					return std::format("the prefab entity no longer has '{}'", info.GetName());
-
-				Json candidate = *component;
-				Json* target = FindScriptSlot(candidate, slot.Slot);
-				if (target == nullptr)
-					return std::format("the prefab entity's '{}' has no slot {}", info.GetName(), slot.Slot);
-				Json value = prefabOverride.Value.Get();
-				m_ToInstance.RemapField(value, *slot.Member, *slot.SlotType, *target);
-				if (IsKeyedVariantMap(*slot.Member) && value.is_object())
-					ApplyKeyPatch((*target)[slot.Member->GetName()], value);
-				else
-					(*target)[slot.Member->GetName()] = std::move(value);
-				Result<Json> canonical = Canonicalize(info, candidate, m_Options.Schemas);
-				if (!canonical)
-					return canonical.error().ToString();
-				*component = std::move(*canonical);
 				return {};
 			}
 

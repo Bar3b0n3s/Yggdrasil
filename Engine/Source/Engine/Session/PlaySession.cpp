@@ -462,6 +462,23 @@ namespace Engine {
 		TransitionOrigin PendingOrigin = TransitionOrigin::Frame;
 		bool InFixedStep = false; // FixedStep is running
 		bool InStartup = false;   // StartScripts is running (a session's or a scene transition's startup)
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decisions 1 to 4): the world pause. WorldPaused and
+		// WorldPauseSoundsInForce hold for the current tick: each fixed step applies the pending request (PendingWorldPause,
+		// the latest RequestWorldPause since the last step) before anything of the step runs, so a tick runs wholly paused or
+		// wholly not. WorldTick counts the fixed steps the world ran (the session's Tick less the ticks the pause held), the
+		// world's clock. WorldPauseUsed is set by the first request to pause; from then on the state hash carries the
+		// world-pause block, so a session that never paused hashes as before M35. All of it is session state that a scene
+		// transition keeps, as it keeps the tick and the time scale.
+		struct WorldPauseRequest
+		{
+			bool Paused = false;
+			WorldPauseSounds Sounds = WorldPauseSounds::Pause;
+		};
+		bool WorldPaused = false;
+		WorldPauseSounds WorldPauseSoundsInForce = WorldPauseSounds::Pause;
+		std::optional<WorldPauseRequest> PendingWorldPause{};
+		uint64_t WorldTick = 0;
+		bool WorldPauseUsed = false;
 
 		[[nodiscard]] Scene& GetScene() override { return *RuntimeScene; }
 		[[nodiscard]] const TypeRegistry& GetTypes() const override { return *Registry; }
@@ -494,6 +511,9 @@ namespace Engine {
 			const std::optional<glm::quat>& rotation, UUID parent) override;
 		void MarkTeleported(UUID entity) override;
 		[[nodiscard]] Status SetTimeScale(double scale) override { return Session.SetTimeScale(scale); }
+		// M35 (decision 1): Time.PauseWorld, Time.ResumeWorld and Time.IsWorldPaused.
+		[[nodiscard]] Status RequestWorldPause(bool paused, WorldPauseSounds sounds) override { return Session.RequestWorldPause(paused, sounds); }
+		[[nodiscard]] bool IsWorldPaused() const override { return Session.IsWorldPaused(); }
 		[[nodiscard]] Status SetCursorMode(CursorMode mode) override;
 		[[nodiscard]] CursorMode GetCursorMode() const override { return Host != nullptr ? Host->GetScriptCursorMode() : CursorMode::Normal; }
 		[[nodiscard]] Status RequestSceneLoad(AssetHandle scene, Json parameters) override;
@@ -557,6 +577,15 @@ namespace Engine {
 
 		// The observer's notification at the start of `phase` (IPlaySessionObserver).
 		void EnterPhase(PlaySession& session, PlaySessionPhase phase, uint64_t tick) const;
+		// M35 (decisions 1 and 3): the pending world-pause request applied, at the start of a fixed step; then the world
+		// pause's sounds choice applied to the AudioSystem (ApplyWorldPauseToAudio).
+		void ApplyWorldPauseRequest();
+		void ApplyWorldPauseToAudio();
+		// The fixed step's physics phases of both worlds (PhysicsPreStep to Physics2DPostStep) as tick `tick` with `step`,
+		// the world's; FixedStep skips them while the world is paused (M35, decision 2).
+		void StepPhysics(PlaySession& session, uint64_t tick, const SimStep& step);
+		// M35 (decision 2): the session ticks the world pause has held the world's clock so far (ScriptFrameState::WorldHeldTicks).
+		[[nodiscard]] uint64_t GetWorldHeldTicks() const { return Tick - WorldTick; }
 		// TransformSystem::Update, remembering the revision it saw.
 		void UpdateTransforms();
 		// §5.7 step 0 (see PlaySessionPhase::InterpolationSnapshot).
@@ -982,13 +1011,15 @@ namespace Engine {
 			SceneAudio->InitializeMix();
 			AudioHeld = true;
 			ApplyAudioRunState();
+			// M35 (decision 3): the world pause outlives the scene, so the new scene's voices follow it from the start.
+			ApplyWorldPauseToAudio();
 		}
 		ReplacingScene = false;
 		// ADR 0038 decision 14: the new scene's startup callbacks run as a session's do, in the step view of the tick the
 		// frame ended with and with the fixed delta, so what they read does not depend on how the frame grouped its ticks;
 		// the frame's state comes back for what runs between frames (an evaluation).
 		const ScriptFrameState frameState = ScriptFrame;
-		ScriptFrame = { .Phase = InputPhase::Step, .Tick = Tick, .Frame = FrameIndex, .DeltaTime = FixedDelta, .FixedDeltaTime = FixedDelta, .TimeScale = TimeScale, .InterpolationAlpha = 1.0f };
+		ScriptFrame = { .Phase = InputPhase::Step, .Tick = Tick, .Frame = FrameIndex, .DeltaTime = FixedDelta, .FixedDeltaTime = FixedDelta, .TimeScale = TimeScale, .InterpolationAlpha = 1.0f, .WorldPaused = WorldPaused, .WorldHeldTicks = GetWorldHeldTicks() };
 		const Status prepared = PrepareScripts();
 		if (!prepared)
 		{
@@ -1055,6 +1086,55 @@ namespace Engine {
 			registry.emplace_or_replace<InterpolationResetTag>(entity);
 	}
 
+	void PlaySession::State::StepPhysics(PlaySession& session, uint64_t tick, const SimStep& step)
+	{
+		PhysicsSystem& physics = *Physics;
+		Physics2DSystem& physics2D = *Physics2D;
+		EnterPhase(session, PlaySessionPhase::PhysicsPreStep, tick);
+		physics.PreStep(step);
+		EnterPhase(session, PlaySessionPhase::PhysicsStep, tick);
+		physics.Step(step);
+		EnterPhase(session, PlaySessionPhase::PhysicsPostStep, tick);
+		physics.PostStep(step);
+		// M21 (decision 10): the 2D world after the 3D one. Its pre-step reads cached world matrices and detects teleports
+		// from local writes, so the transform update runs first when the 3D post-step may have changed a transform: when the
+		// scene holds 2D components and the 3D world holds a body or a character (whose write-back and callbacks write
+		// transforms) or the scene changed since the last update. A scene without 2D components skips it, so every 3D game
+		// steps as before.
+		EnterPhase(session, PlaySessionPhase::Physics2DPreStep, tick);
+		if (Utils::HoldsPhysics2DComponents(*RuntimeScene))
+		{
+			const PhysicsSystemStats stats3D = physics.GetStats();
+			if (stats3D.BodyCount != 0 || stats3D.CharacterCount != 0 || RuntimeScene->GetRevision() != TransformRevision)
+				UpdateTransforms();
+		}
+		physics2D.PreStep(step);
+		EnterPhase(session, PlaySessionPhase::Physics2DStep, tick);
+		physics2D.Step(step);
+		EnterPhase(session, PlaySessionPhase::Physics2DPostStep, tick);
+		physics2D.PostStep(step);
+	}
+
+	void PlaySession::State::ApplyWorldPauseRequest()
+	{
+		if (!PendingWorldPause.has_value())
+			return;
+		const WorldPauseRequest request = *PendingWorldPause;
+		PendingWorldPause.reset();
+		WorldPaused = request.Paused;
+		if (request.Paused)
+			WorldPauseSoundsInForce = request.Sounds;
+		ApplyWorldPauseToAudio();
+	}
+
+	void PlaySession::State::ApplyWorldPauseToAudio()
+	{
+		// M35 (decision 3): Pause holds the world's voices (every group but Ui) while the world is paused; Finish lets them
+		// play on, as a world that is not paused does.
+		if (SceneAudio != nullptr)
+			SceneAudio->SetWorldPaused(WorldPaused && WorldPauseSoundsInForce == WorldPauseSounds::Pause);
+	}
+
 	void PlaySession::State::RefreshViewState()
 	{
 		if (RuntimeScene->GetRevision() != TransformRevision)
@@ -1074,7 +1154,9 @@ namespace Engine {
 		Scene& scene = *RuntimeScene;
 		const bool play = Mode == PlayMode::Play;
 		scene.SetInterpolationAlpha(alpha);
-		ScriptFrame = { .Phase = InputPhase::Frame, .Tick = tick, .Frame = FrameIndex, .DeltaTime = frame.DeltaTime, .FixedDeltaTime = FixedDelta, .TimeScale = TimeScale, .InterpolationAlpha = alpha };
+		// M35 (decision 2): the frame phase runs with the world pause the last fixed step applied (a request since waits for
+		// the next fixed step), so OnUpdate and OnLateUpdate reach only the behaviours that run while the world is paused.
+		ScriptFrame = { .Phase = InputPhase::Frame, .Tick = tick, .Frame = FrameIndex, .DeltaTime = frame.DeltaTime, .FixedDeltaTime = FixedDelta, .TimeScale = TimeScale, .InterpolationAlpha = alpha, .WorldPaused = WorldPaused, .WorldHeldTicks = GetWorldHeldTicks() };
 
 		EnterPhase(session, PlaySessionPhase::LatchFrame, tick);
 		// W-CLOCK (Docs/Decisions/0033-m22-contract.md decision 12): live play previews the device input queued for the next
@@ -1105,9 +1187,14 @@ namespace Engine {
 			UpdateAudio(frame.DeltaTime);
 		}
 		// M26 (decision 6): the particles, one fixed step per tick run since each emitter's last phase, in Play and Simulate,
-		// whether or not the game view is extracted; it writes nothing the state hash covers.
-		EnterPhase(session, PlaySessionPhase::Particles, tick);
-		Particles->Step(scene, tick);
+		// whether or not the game view is extracted; it writes nothing the state hash covers. M35 (decision 2): they are the
+		// world's, so they step on the world's clock and hold while the world is paused (the ticks the world ran before the
+		// pause took effect step at the first phase after it resumes).
+		if (!WorldPaused)
+		{
+			EnterPhase(session, PlaySessionPhase::Particles, tick);
+			Particles->Step(scene, WorldTick);
+		}
 		EnterPhase(session, PlaySessionPhase::RenderExtraction, tick);
 		if (ExtractionEnabled)
 			ExtractGameView(alpha);
@@ -1552,8 +1639,6 @@ namespace Engine {
 		const ScopedFlag inFixedStep(state.InFixedStep);
 		const uint64_t tick = state.Tick;
 		const SimStep step = SimStep::FromTick(tick, state.FixedDelta);
-		PhysicsSystem& physics = *state.Physics;
-		Physics2DSystem& physics2D = *state.Physics2D;
 		const bool play = state.Mode == PlayMode::Play;
 		// The checkpoint of the completed-tick boundary this step starts from, before anything of the step runs
 		// (ReplayRecorder.h). A step that follows the previous one in the same frame (a grouping scripted clock) starts from
@@ -1562,7 +1647,15 @@ namespace Engine {
 		state.PreviousStepFrame = state.FrameIndex;
 		if (completedBoundary && state.Recorder != nullptr && state.Recorder->IsRecording())
 			state.Recorder->CaptureCheckpoint(*this);
-		state.ScriptFrame = { .Phase = InputPhase::Step, .Tick = tick, .Frame = state.FrameIndex, .DeltaTime = state.FixedDelta, .FixedDeltaTime = state.FixedDelta, .TimeScale = state.TimeScale, .InterpolationAlpha = 1.0f };
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decisions 1 and 2): the world pause requested since the last step
+		// takes effect now, so this tick runs wholly paused or wholly not. While it holds, the world's phases (NativeStep,
+		// SpriteAnimation, AnimationSystem and the physics phases of both worlds) do not run, scripts' OnFixedUpdate and tasks
+		// reach only the behaviours that run while the world is paused, and the world's clock holds; the world's systems step
+		// on the world's clock (worldStep), which is the session's in a session that never paused.
+		state.ApplyWorldPauseRequest();
+		const bool worldPaused = state.WorldPaused;
+		const SimStep worldStep = SimStep::FromTick(state.WorldTick, state.FixedDelta);
+		state.ScriptFrame = { .Phase = InputPhase::Step, .Tick = tick, .Frame = state.FrameIndex, .DeltaTime = state.FixedDelta, .FixedDeltaTime = state.FixedDelta, .TimeScale = state.TimeScale, .InterpolationAlpha = 1.0f, .WorldPaused = worldPaused, .WorldHeldTicks = state.GetWorldHeldTicks() };
 		state.DebugDraw.Advance(static_cast<float>(state.FixedDelta));
 
 		state.EnterPhase(*this, PlaySessionPhase::InterpolationSnapshot, tick);
@@ -1606,48 +1699,30 @@ namespace Engine {
 		}
 		// M19 (decision 28): the native module's systems, whose Transform writes the transform update below propagates
 		// before physics. A fault in native code stops the session at once: no later phase or tick runs (NativeWorld.h).
-		if (state.Native != nullptr && !state.FatalStop)
+		if (state.Native != nullptr && !state.FatalStop && !worldPaused)
 		{
 			state.EnterPhase(*this, PlaySessionPhase::NativeStep, tick);
-			state.Native->Step(*this, step);
+			state.Native->Step(*this, worldStep);
 			if (state.FatalStop)
 				return;
 		}
-		// M21 (decision 5): every playing SpriteAnimator advances one tick, after the tick's gameplay code started or stopped
-		// its clip and before the transform update, in Play and Simulate alike.
-		state.EnterPhase(*this, PlaySessionPhase::SpriteAnimation, tick);
-		if (state.SpriteAnimation != nullptr)
-			state.SpriteAnimation->Step(step);
-		// M23 (decision 29): every Animator's layers advance and its pose is sampled after the tick's gameplay code, which
-		// starts clips and sets weights, and before the transform update, so root motion reaches physics; in Play and
-		// Simulate alike. Its events reach the scripts after every Animator was stepped.
-		state.EnterPhase(*this, PlaySessionPhase::AnimationSystem, tick);
-		state.Animation->Step(step);
+		if (!worldPaused)
+		{
+			// M21 (decision 5): every playing SpriteAnimator advances one tick, after the tick's gameplay code started or
+			// stopped its clip and before the transform update, in Play and Simulate alike.
+			state.EnterPhase(*this, PlaySessionPhase::SpriteAnimation, tick);
+			if (state.SpriteAnimation != nullptr)
+				state.SpriteAnimation->Step(worldStep);
+			// M23 (decision 29): every Animator's layers advance and its pose is sampled after the tick's gameplay code, which
+			// starts clips and sets weights, and before the transform update, so root motion reaches physics; in Play and
+			// Simulate alike. Its events reach the scripts after every Animator was stepped.
+			state.EnterPhase(*this, PlaySessionPhase::AnimationSystem, tick);
+			state.Animation->Step(worldStep);
+		}
 		state.EnterPhase(*this, PlaySessionPhase::PreStepTransformUpdate, tick);
 		state.UpdateTransforms();
-		state.EnterPhase(*this, PlaySessionPhase::PhysicsPreStep, tick);
-		physics.PreStep(step);
-		state.EnterPhase(*this, PlaySessionPhase::PhysicsStep, tick);
-		physics.Step(step);
-		state.EnterPhase(*this, PlaySessionPhase::PhysicsPostStep, tick);
-		physics.PostStep(step);
-		// M21 (decision 10): the 2D world after the 3D one. Its pre-step reads cached world matrices and detects teleports
-		// from local writes, so the transform update runs first when the 3D post-step may have changed a transform: when the
-		// scene holds 2D components and the 3D world holds a body or a character (whose write-back and callbacks write
-		// transforms) or the scene changed since the last update. A scene without 2D components skips it, so every 3D game
-		// steps as before.
-		state.EnterPhase(*this, PlaySessionPhase::Physics2DPreStep, tick);
-		if (Utils::HoldsPhysics2DComponents(*state.RuntimeScene))
-		{
-			const PhysicsSystemStats stats3D = physics.GetStats();
-			if (stats3D.BodyCount != 0 || stats3D.CharacterCount != 0 || state.RuntimeScene->GetRevision() != state.TransformRevision)
-				state.UpdateTransforms();
-		}
-		physics2D.PreStep(step);
-		state.EnterPhase(*this, PlaySessionPhase::Physics2DStep, tick);
-		physics2D.Step(step);
-		state.EnterPhase(*this, PlaySessionPhase::Physics2DPostStep, tick);
-		physics2D.PostStep(step);
+		if (!worldPaused)
+			state.StepPhysics(*this, tick, worldStep);
 		state.EnterPhase(*this, PlaySessionPhase::DestroyFlush, tick);
 		state.FlushDestroyed();
 		state.EnterPhase(*this, PlaySessionPhase::PostStepTransformUpdate, tick);
@@ -1657,6 +1732,9 @@ namespace Engine {
 		state.EnterPhase(*this, PlaySessionPhase::UiLayout, tick);
 		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
 		state.Tick = tick + 1;
+		// M35 (decision 2): the world's clock advances with the steps the world ran.
+		if (!worldPaused)
+			++state.WorldTick;
 		// ADR 0038 decision 15: a startup callback's request waited for this tick, which has now run in the requesting scene.
 		if (state.PendingScene != nullptr && state.PendingOrigin == State::TransitionOrigin::Startup)
 			state.PendingOrigin = State::TransitionOrigin::FixedStep;
@@ -1931,6 +2009,19 @@ namespace Engine {
 		// M22 (C22.2, decision 29; ADR 0028's phase-2 ledger: after M21's physics2d block): the ui block, the interaction
 		// state and the queued UI events; nothing while both are empty, as in every scene without a canvas.
 		state.Ui.AppendStateHash(hasher);
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 4; phase 5's ledger: after M28's save-data block): the
+		// world-pause block, from the session's first request to pause on: the pause in force and its sounds choice, the
+		// pending request (0 none, 1 pause, 2 resume) and its sounds choice, and the world's clock. Nothing before, so a session
+		// that never paused hashes as before.
+		if (state.WorldPauseUsed)
+		{
+			hasher.UpdateU64(state.WorldPaused ? 1U : 0U);
+			hasher.UpdateU64(std::to_underlying(state.WorldPauseSoundsInForce));
+			hasher.UpdateU64(!state.PendingWorldPause.has_value() ? 0U : state.PendingWorldPause->Paused ? 1U
+																										 : 2U);
+			hasher.UpdateU64(state.PendingWorldPause.has_value() ? std::to_underlying(state.PendingWorldPause->Sounds) : 0U);
+			hasher.UpdateU64(state.WorldTick);
+		}
 		return hasher.Digest();
 	}
 
@@ -2009,6 +2100,39 @@ namespace Engine {
 		}
 		m_State->TimeScale = timeScale;
 		return {};
+	}
+
+	Status PlaySession::RequestWorldPause(bool paused, WorldPauseSounds sounds)
+	{
+		if (sounds != WorldPauseSounds::Pause && sounds != WorldPauseSounds::Finish)
+			return MakeError(ErrorCode::InvalidArgument, "unknown world-pause sounds choice {}", std::to_underlying(sounds));
+		State& state = *m_State;
+		// The latest request replaces a pending one; one that asks for what is already in force leaves nothing pending, so a
+		// pause and a resume in one tick change nothing.
+		const bool inForce = state.WorldPaused == paused && (!paused || state.WorldPauseSoundsInForce == sounds);
+		if (inForce)
+			state.PendingWorldPause.reset();
+		else
+			state.PendingWorldPause = State::WorldPauseRequest{ .Paused = paused, .Sounds = sounds };
+		state.WorldPauseUsed = state.WorldPauseUsed || paused;
+		return {};
+	}
+
+	bool PlaySession::IsWorldPaused() const
+	{
+		const State& state = *m_State;
+		return state.PendingWorldPause.has_value() ? state.PendingWorldPause->Paused : state.WorldPaused;
+	}
+
+	WorldPauseSounds PlaySession::GetWorldPauseSounds() const
+	{
+		const State& state = *m_State;
+		return state.PendingWorldPause.has_value() && state.PendingWorldPause->Paused ? state.PendingWorldPause->Sounds : state.WorldPauseSoundsInForce;
+	}
+
+	uint64_t PlaySession::GetWorldTick() const
+	{
+		return m_State->WorldTick;
 	}
 
 	bool PlaySession::IsLockstep() const

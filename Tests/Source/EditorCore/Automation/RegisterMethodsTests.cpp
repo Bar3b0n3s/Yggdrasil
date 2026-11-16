@@ -39,7 +39,7 @@ namespace Engine {
 			"input.record", "input.replay", "lighting.bake", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
 			"physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
-			"play.setTimeScale", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
+			"play.setTimeScale", "play.setWorldPaused", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "scene.activate", "scene.close", "scene.diff", "scene.get",
 			"scene.list", "scene.new", "scene.open", "scene.query", "scene.raycast", "scene.save", "scene.tree", "script.check", "script.create", "script.errors", "script.eval", "script.fields", "script.read", "script.write",
@@ -69,7 +69,7 @@ namespace Engine {
 			RegisterEditorMethods(methods, {});
 			methods.Freeze();
 			for (const std::string_view name : { "play.start", "play.stop", "play.pause", "play.resume", "play.step", "play.state", "play.setTimeScale",
-					 "input.inject" })
+					 "play.setWorldPaused", "input.inject" })
 			{
 				INFO(std::string(name));
 				const MethodDescriptor* method = methods.Find(name);

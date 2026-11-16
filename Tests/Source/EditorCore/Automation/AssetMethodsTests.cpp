@@ -563,6 +563,32 @@ namespace Engine {
 			CHECK(CallOrFail(setup, "entity.bounds", boundsParams)["bounds"][0]["size"] == before["bounds"][0]["size"]);
 		}
 
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10; the review of W35.2, its finding 6): an override that
+		// a new import setting leaves without a target is dropped by the rebuild of the instance, and asset.setImportSettings
+		// reports it in its result. MergeMeshes draws the merged mesh from the prefab root, so the glTF's node no longer has a
+		// MeshRenderer and the instance's override of one is stale.
+		TEST_CASE("AssetMethods: asset.setImportSettings reports the overrides its rebuild of the asset's instances drops")
+		{
+			Test::AutomationFixture setup("AssetSettingsDropsOverride");
+			WriteGltfFixture(setup, "Box.glb");
+			CallOrFail(setup, "project.refreshAssets", Json::object());
+			const Json instance = CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Models/Box.glb" } })["entity"];
+			Scene& scene = setup.GetEditor().GetScene();
+			const Entity root = scene.FindEntityByPath(JsonReader(instance["path"]).ReadString().value_or(std::string()));
+			REQUIRE(root.IsValid());
+			REQUIRE(root.GetChildren().size() == 1);
+			const std::string node = scene.GetEntityPath(scene.FindEntityByID(root.GetChildren()[0]));
+			CallOrFail(setup, "entity.update", Json{ { "entity", node }, { "components", Json{ { "MeshRenderer", Json{ { "CastShadows", false } } } } } });
+
+			const Json changed = CallOrFail(setup, "asset.setImportSettings", Json{ { "asset", "Assets/Models/Box.glb" }, { "settings", Json{ { "MergeMeshes", true } } } });
+			REQUIRE(changed["rebuildDiagnostics"].size() == 1);
+			const Json& dropped = changed["rebuildDiagnostics"][0];
+			CHECK(dropped["code"] == Json("PREFAB_STALE_OVERRIDE"));
+			CHECK(dropped["entity"] == instance["id"]);
+			CHECK(dropped["scene"] == Json("Assets/Scenes/Main.scene"));
+			CHECK(JsonReader(dropped["pointer"]).ReadString().value_or(std::string()).starts_with("/Components/Prefab/Overrides/"));
+		}
+
 		// Docs/Decisions/0031-m20-contract.md decision 8 (W20.1's integration left it to W20.2's stream S-B): a new version of
 		// a prefab rewrites every prefab nesting it, also when an import setting gives it that version. The scene holds the glTF
 		// only nested in a Room instance, so it has no outermost instance of it; Room.prefab and the room still follow its new

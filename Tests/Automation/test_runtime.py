@@ -172,6 +172,14 @@ class RuntimeTests(AutomationTestCase):
             client.call("viewport.screenshot", {"view": "scene"})
         self.assert_engine_error(scene_view.exception, engine_client.UNSUPPORTED, "Unsupported")
         self.assertEqual(scene_view.exception.issues[0]["pointer"], "/view")
+        # The world pause is in the Runtime's subset too (M35, Docs/Decisions/0050-m35-pause-entity-state.md
+        # decision 5): the world holds while the session's ticks go on.
+        self.assertTrue(client.call("play.setWorldPaused", {"paused": True})["worldPaused"])
+        client.call("play.step", {"ticks": 3})
+        world = client.call("play.state")
+        self.assertEqual(world["tick"], STEPPED_TICKS + 3)
+        self.assertEqual(world["worldTick"], STEPPED_TICKS)
+        self.assertFalse(client.call("play.setWorldPaused", {"paused": False})["worldPaused"])
         client.call("play.resume")
         self.assertEqual(client.call("session.info")["playState"], "Play")
         client.call("session.shutdown")

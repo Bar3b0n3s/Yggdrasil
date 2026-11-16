@@ -29,6 +29,15 @@ namespace Engine {
 	class TypeRegistry;
 	class UiSystem;
 
+	// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): what a world pause does to the world's playing voices
+	// (Time.PauseWorld's `sounds`, play.setWorldPaused's): Pause holds every voice outside the Ui group until the world
+	// resumes, Finish lets them play on to their end; the Ui group's voices play on either way.
+	enum class WorldPauseSounds : uint8_t
+	{
+		Pause,
+		Finish
+	};
+
 	struct ScriptFrameState
 	{
 		InputPhase Phase = InputPhase::Step;
@@ -38,6 +47,13 @@ namespace Engine {
 		double FixedDeltaTime = 1.0 / 60.0;
 		double TimeScale = 1.0;
 		float InterpolationAlpha = 1.0f;
+		// M35 (decisions 1 and 2): whether the world pause holds this phase (the fixed step that runs, or the frame phase
+		// after it), so OnFixedUpdate, OnUpdate, OnLateUpdate and tasks run only for the behaviours that run while the world
+		// is paused; and the session ticks the world pause has held the world's clock so far, so the world's tick (what
+		// Time.GetTick and Time.GetTime read, and what a behaviour's tasks count) is Tick - WorldHeldTicks. A host without a
+		// world pause keeps both defaults, so its world's clock is its session's.
+		bool WorldPaused = false;
+		uint64_t WorldHeldTicks = 0;
 	};
 
 	struct ScriptEnvironment
@@ -148,6 +164,17 @@ namespace Engine {
 		// wherever it was created; every other host (the edit evaluation, test fixtures without a session) keeps the
 		// default, which does nothing.
 		virtual void SynchronizePhysicsBodies() {}
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 1): the world pause (Time.PauseWorld,
+		// Time.ResumeWorld). RequestWorldPause records the request, which takes effect at the session's next fixed step, so
+		// a tick runs wholly paused or wholly not; a later request before that step replaces it. A play session's host
+		// forwards it to PlaySession::RequestWorldPause; every other host (the edit evaluation, test fixtures without a
+		// session) keeps the default, which refuses it with Unsupported. IsWorldPaused is the state the next fixed step runs
+		// with (the latest request, or the state in force when none is pending); false by default.
+		[[nodiscard]] virtual Status RequestWorldPause(bool /*paused*/, WorldPauseSounds /*sounds*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "this script host has no world to pause");
+		}
+		[[nodiscard]] virtual bool IsWorldPaused() const { return false; }
 	};
 
 }

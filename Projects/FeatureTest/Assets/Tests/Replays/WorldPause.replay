@@ -1,0 +1,291 @@
+{
+	"Format": "Replay",
+	"Version": 3,
+	"Scene": {
+		"Handle": "40e5ebc6558855eb",
+		"Path": "Assets/Scenes/WorldPause.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.5.0",
+	"Config": "Editor",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "148a8971e5357941",
+				"Path": "/Sparks",
+				"Hash": "a77ae22d67cf7253",
+				"Components": {
+					"Transform": "934d9abf9ba82208",
+					"ParticleEmitter": "b537e5f370986775"
+				}
+			},
+			{
+				"Id": "262f317152404a0d",
+				"Path": "/Skinned/Armature/Body",
+				"Hash": "3b217dd95bcbdda7",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "465b0c6cff71574a",
+					"MeshRenderer": "78299808b9993faa",
+					"SkinnedMesh": "64a263dfbb2c1662"
+				}
+			},
+			{
+				"Id": "350a8ef48203b9df",
+				"Path": "/World",
+				"Hash": "5ebd66565ca1e871",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "c4d333f01dab93d1"
+				}
+			},
+			{
+				"Id": "3a33037627411124",
+				"Path": "/Menu/Options",
+				"Hash": "43c2ccff1df522f3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "8bfc54faed117606",
+					"UiImage": "c3b1f727855571cb",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "3c0ad023ee7fd954",
+				"Path": "/Hum",
+				"Hash": "c2ea26851c70a4b3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"AudioSource": "795c6e0eaf8ad55b"
+				}
+			},
+			{
+				"Id": "5516b12cc8b97d85",
+				"Path": "/Skinned",
+				"Hash": "379628e5f51d5d48",
+				"Components": {
+					"Transform": "6916e545152670e8",
+					"Prefab": "cb2409301cc20370",
+					"PrefabLink": "b5fc2fb6c8a51803"
+				}
+			},
+			{
+				"Id": "89691aa72c783fa3",
+				"Path": "/Menu/Resume/ResumeLabel",
+				"Hash": "3f525fa763e1bbb8",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "0839d1ea4224146e"
+				}
+			},
+			{
+				"Id": "8db7799bd02464ad",
+				"Path": "/Menu/Options/OptionsLabel",
+				"Hash": "5b90979c5e705176",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "03793cb79c1eb999",
+					"UiText": "74a4e2d91a833e2f"
+				}
+			},
+			{
+				"Id": "a41a026f397697f5",
+				"Path": "/Strider",
+				"Hash": "74b03a1641c94c2e",
+				"Components": {
+					"Transform": "07292f68fd911210",
+					"SpriteRenderer": "4d7eb4fa0bcf0f72",
+					"SpriteAnimator": "a0276a4914b6aacb"
+				}
+			},
+			{
+				"Id": "c370d476aef5f616",
+				"Path": "/Ground",
+				"Hash": "4755afe4f1082c44",
+				"Components": {
+					"Transform": "ea712709ea9d5e96",
+					"RigidBody": "cea9cf4aa5bfe949",
+					"BoxCollider": "9e0227308dae8f9b"
+				}
+			},
+			{
+				"Id": "e2899ba540987e62",
+				"Path": "/Chime",
+				"Hash": "c4a1568b2a9bf952",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"AudioSource": "7ba39b02004aa45d"
+				}
+			},
+			{
+				"Id": "e6c6a583f354ebd3",
+				"Path": "/Camera",
+				"Hash": "daf2770d720f7e6a",
+				"Components": {
+					"Transform": "2a26c848c6713885",
+					"Camera": "54f8e13e3eff7131"
+				}
+			},
+			{
+				"Id": "eb476591d7f95e67",
+				"Path": "/Menu",
+				"Hash": "0a098f57548dc7b6",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "e168ccf46fbdd0a7",
+					"UiCanvas": "9d424589ed37d2b5"
+				}
+			},
+			{
+				"Id": "ec553ac6e28fa507",
+				"Path": "/Skinned/Armature",
+				"Hash": "b93516bf366d6562",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "7a9ca25f507d6265",
+					"Animator": "bc7313e24fa0e102"
+				}
+			},
+			{
+				"Id": "f065814d04dabe72",
+				"Path": "/Shard",
+				"Hash": "db8dde7f1cf4de78",
+				"Components": {
+					"Transform": "014ab2a636ede25d",
+					"RigidBody": "21a265e619ba7dc7",
+					"SphereCollider": "f10269c4752eb906"
+				}
+			},
+			{
+				"Id": "f18cc3e66a38b9af",
+				"Path": "/Menu/Resume",
+				"Hash": "a8bd11e20df4746e",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiRect": "8c1bc92eaa51c1f4",
+					"UiImage": "c3b1f727855571cb",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "033aa3a4e67931b1",
+				"Path": "Assets/Scripts/WorldPause/WorldCounter.luau",
+				"Type": "Script",
+				"Hash": "dd592c2b1fb0fd7b"
+			},
+			{
+				"Handle": "503b1f98ce848765",
+				"Path": "Assets/Sprites/Sprites2D/Walker.spritesheet",
+				"Type": "SpriteSheet",
+				"Hash": "f97967e4a88fe336"
+			},
+			{
+				"Handle": "57e9754aa8546eed",
+				"Path": "Assets/Audio/Beep.sfx",
+				"Type": "AudioClip",
+				"Hash": "fad483954f94cf0b"
+			},
+			{
+				"Handle": "5a831424c6906c00",
+				"Path": "Assets/Models/Animation/Skinned.gltf#mesh:0:Strip",
+				"Type": "Mesh",
+				"Hash": "f93b6f3e2e93b029"
+			},
+			{
+				"Handle": "79e581911985caaf",
+				"Path": "Assets/Models/Animation/Skinned.gltf#animation:0:Wave",
+				"Type": "AnimationClip",
+				"Hash": "4eb078fb55869fc8"
+			},
+			{
+				"Handle": "8437e42391ce559f",
+				"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
+				"Type": "Font",
+				"Hash": "e67ffca513fb248d"
+			},
+			{
+				"Handle": "aa94bd7ed48f6cb8",
+				"Path": "Assets/Models/Animation/Skinned.gltf#skin:0",
+				"Type": "Skeleton",
+				"Hash": "c2a60019d7f58e51"
+			},
+			{
+				"Handle": "aad4995e348d4030",
+				"Path": "Assets/Scripts/WorldPause/PauseMenu.luau",
+				"Type": "Script",
+				"Hash": "76278aad14577a09"
+			},
+			{
+				"Handle": "e707c63160b28aa4",
+				"Path": "Assets/Models/Animation/Skinned.gltf",
+				"Type": "Prefab",
+				"Hash": "ffc5b9f6a954d240"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 20,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "P"
+		},
+		{
+			"Tick": 21,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "P"
+		},
+		{
+			"Tick": 70,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Down"
+		},
+		{
+			"Tick": 71,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Down"
+		},
+		{
+			"Tick": 80,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 81,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Enter"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 50,
+			"Luau": "local menu = Scene.FindByName(\"Menu\"):GetScript(\"PauseMenu\")\nreturn Time.IsWorldPaused() and menu.PausedAt == 20 and Time.GetSessionTick() > Time.GetTick()"
+		},
+		{
+			"Tick": 120,
+			"Luau": "local menu = Scene.FindByName(\"Menu\"):GetScript(\"PauseMenu\")\nreturn not Time.IsWorldPaused() and menu.Clicks.Resume == 1 and Time.GetSessionTick() - Time.GetTick() == menu.ResumedAt - menu.PausedAt"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "ed905f6c4dbe505e"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "d8ac6e97f09f4cf6"
+		}
+	],
+	"FinalTick": 150,
+	"FinalStateHash": "b2a52e826c57d7ef"
+}

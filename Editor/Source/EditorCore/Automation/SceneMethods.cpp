@@ -296,7 +296,10 @@ namespace Engine {
 			bool dirty = params.Repair && !report.Repairs.empty();
 			SceneOpenResult result;
 			std::vector<std::pair<UUID, AssetHandle>> rebuilt;
-			if (Result<bool> updated = editor.UpdatePrefabInstances(*scene, {}, &rebuilt); updated)
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): the overrides the rebuild drops are reported in
+			// the result's diagnostics, after the file's own.
+			LoadReport rebuildReport;
+			if (Result<bool> updated = editor.UpdatePrefabInstances(*scene, {}, &rebuilt, &rebuildReport); updated)
 			{
 				dirty = dirty || *updated;
 				// ADR 0038, friction F14: which instances changed, so a caller knows why a freshly opened scene is dirty.
@@ -331,6 +334,8 @@ namespace Engine {
 			result.Scene = Utils::MakeSceneSummary(editor);
 			result.Migrated = report.Migrated;
 			for (const LoadDiagnostic& diagnostic : report.Diagnostics)
+				result.Diagnostics.push_back(Utils::MakeLoadIssue(diagnostic));
+			for (const LoadDiagnostic& diagnostic : rebuildReport.Diagnostics)
 				result.Diagnostics.push_back(Utils::MakeLoadIssue(diagnostic));
 			for (const LoadRepair& repair : report.Repairs)
 				result.Repairs.push_back(Utils::MakeLoadRepair(repair));
@@ -560,7 +565,7 @@ namespace Engine {
 		registry.Struct<SceneOpenResult>("SceneOpenResult", "The opened scene and what loading it reported.")
 			.Field("scene", &SceneOpenResult::Scene, "The open scene.")
 			.Field("migrated", &SceneOpenResult::Migrated, "The file was in an older format; saving it, or project.upgrade, rewrites it.")
-			.Field("diagnostics", &SceneOpenResult::Diagnostics, "The load warnings, also logged.")
+			.Field("diagnostics", &SceneOpenResult::Diagnostics, "The load warnings, also logged, then the warnings of the rebuild of its prefab instances: each override the rebuild dropped (PREFAB_STALE_OVERRIDE, located at the instance root's /Components/Prefab/Overrides/<i>, entity the instance root).")
 			.Field("repairs", &SceneOpenResult::Repairs, "The repairs a repair load applied.")
 			.Field("id", &SceneOpenResult::Id, "The scene's open-scene id, which the scene target accepts.")
 			.Field("rebuiltInstances", &SceneOpenResult::RebuiltInstances,

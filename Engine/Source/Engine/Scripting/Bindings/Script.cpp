@@ -360,6 +360,13 @@ namespace Engine {
 				}
 			}
 			lua_pop(call.State, 1);
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): the class's opt-in to run while the world is
+			// paused, a boolean or nil (false).
+			lua_rawgetfield(call.State, 2, "RunsWhileWorldPaused");
+			if (!lua_isnil(call.State, -1) && !lua_isboolean(call.State, -1))
+				return Lua::RaiseError(call, "RunsWhileWorldPaused must be a boolean or nil");
+			const bool runsWhileWorldPaused = lua_toboolean(call.State, -1) != 0;
+			lua_pop(call.State, 1);
 			std::ranges::sort(fields, {}, &ScriptFieldSchema::Name);
 			budget.CheckDeadline();
 			auto valid = ValidateFields(name, fields);
@@ -376,6 +383,7 @@ namespace Engine {
 			SetInteger(call, record, "Kind", static_cast<uint32_t>(ScriptKind::Behaviour));
 			SetString(call, record, "Name", name);
 			SetString(call, record, "Fields", encoded);
+			SetInteger(call, record, "RunsWhileWorldPaused", runsWhileWorldPaused ? 1U : 0U);
 			SetLocation(call, record);
 			StoreRecord(call, 2, record);
 			lua_pop(call.State, 1);
@@ -457,6 +465,7 @@ namespace Engine {
 			registration.Location = Utils::GetLocation(call, record);
 			if (registration.Kind == ScriptKind::Behaviour)
 			{
+				registration.RunsWhileWorldPaused = Utils::GetInteger(call, record, "RunsWhileWorldPaused") != 0;
 				const auto encoded = Utils::ReadEncodedFields(call, record, "Fields", budget);
 				lua_pop(call.State, 1);
 				ENGINE_TRY_ASSIGN(const auto fields, JsonReader::Parse(encoded));
@@ -562,7 +571,10 @@ namespace Engine {
 			// M23 (Docs/Decisions/0034-m23-contract.md decision 31).
 			ENGINE_TRY(api.RegisterAlias("AnimationEvent", "{Name: string, Layer: number, Clip: AssetRef, Time: number}",
 				"An animation clip's named event that an Animator layer's time passed: its name, the 1-based layer, the layer's clip and the event's time in it."));
-			api.Module("Script", "Behaviour class registration.").Function("Define", Utils::Define, "<T>(name: string, class: T) -> T", "Authenticate a behaviour class and return the exact same table.", pure);
+			api.Module("Script", "Behaviour class registration.").Function("Define", Utils::Define, "<T>(name: string, class: T) -> T", "Authenticate a behaviour class and return the exact same table. The class may set RunsWhileWorldPaused = true (a boolean, "
+																																		"read by Script.Define, so set it on the class before the call): its OnFixedUpdate, OnUpdate, OnLateUpdate and tasks then run while the world is paused "
+																																		"(Time.PauseWorld), as a pause menu's must, and its tasks count the session's ticks; every other behaviour holds then.",
+				pure);
 			api.Module("Field", "Persistent behaviour field schemas.")
 				.Function("Number", Utils::FieldConstructor<FieldType::Float>, "(default: number?, options: FieldOptions?) -> FieldDescriptor", "Declare a finite f32 number; the omitted default is zero.", pure)
 				.Function("Integer", Utils::FieldConstructor<FieldType::Int32>, "(default: number?, options: FieldOptions?) -> FieldDescriptor", "Declare an exact signed 32-bit integer; the omitted default is zero.", pure)

@@ -19,6 +19,7 @@
 #include "Engine/Core/UUIDGenerator.h"
 #include "Engine/Core/UniqueFunction.h"
 #include "Engine/Core/VfsPath.h"
+#include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 
@@ -95,6 +96,37 @@ namespace Engine {
 	{
 		Scope<Command> Rewrite{};
 		std::vector<AssetHandle> Prefabs{}; // in nesting order (EditorContext::GetNestingPrefabs)
+	};
+
+	// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): one diagnostic of a rebuild of prefab instances (an
+	// override the rebuild dropped, PREFAB_STALE_OVERRIDE, among them), with the project path of the open scene it rebuilt.
+	struct PrefabRebuildIssue
+	{
+		std::string Scene{};
+		LoadDiagnostic Diagnostic{};
+	};
+
+	class EditorContext;
+
+	// M35 (decision 10): collects the diagnostics of every rebuild of an open scene's prefab instances that runs while it
+	// lives (EditorContext::UpdatePrefabInstances, through CreatePrefabUpdateCommand and PropagatePrefabUpdate too), so the
+	// automation method that caused them reports them in its result as well as in the log. Scoped, main thread; nested
+	// collectors each get the rebuilds of their own scope, the outer one those around it. The context outlives it.
+	class PrefabRebuildCollector
+	{
+	public:
+		explicit PrefabRebuildCollector(EditorContext& editor);
+		~PrefabRebuildCollector();
+		PrefabRebuildCollector(const PrefabRebuildCollector&) = delete;
+		PrefabRebuildCollector& operator=(const PrefabRebuildCollector&) = delete;
+
+		// The issues collected so far, in the order the rebuilds found them; the collector is empty afterwards.
+		[[nodiscard]] std::vector<PrefabRebuildIssue> Take();
+	private:
+		friend class EditorContext;
+		EditorContext& m_Editor;                      // documented back-reference
+		PrefabRebuildCollector* m_Previous = nullptr; // the collector this one replaced, restored at its end
+		std::vector<PrefabRebuildIssue> m_Issues{};
 	};
 
 	// Main-thread host hooks. Captured services must outlive the binding; clear it only after asynchronous writers
@@ -442,8 +474,11 @@ namespace Engine {
 		// root IDs, each with the handle of the prefab it was rebuilt from), in canonical order: exactly those whose subtree
 		// differs after the rebuild and the refresh of its overrides, so empty when it returns false (ADR 0038, friction F14:
 		// scene.open reports them as rebuiltInstances). It is left unchanged on error.
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): `rebuild`, when given, receives the rebuild's
+		// diagnostics (every override it dropped among them), which are logged as before; a rebuild of the addressed scene
+		// also reaches the active PrefabRebuildCollector, with the scene's project path.
 		[[nodiscard]] Result<bool> UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs,
-			std::vector<std::pair<UUID, AssetHandle>>* changed = nullptr);
+			std::vector<std::pair<UUID, AssetHandle>>* changed = nullptr, LoadReport* rebuild = nullptr);
 
 		// The undoable form for the open scene: a SceneEditCommand labelled "Update Prefab Instances" whose effect is
 		// UpdatePrefabInstances(GetScene(), prefabs), or nullptr when it would change nothing. The methods that give a
@@ -815,10 +850,11 @@ namespace Engine {
 		// OpenProject deferred the asset scan (EditorContextSpecification::DeferAssetScan) and OpenDeferredAssets has not run it
 		// yet (IsAssetScanDeferred).
 		bool m_AssetScanDeferred = false;
-		std::optional<ProvenanceRecorder> m_Provenance;  // the open writable project's provenance
-		std::optional<uint64_t> m_PendingRevisionBefore; // GetRevisionBeforeCommand's value while SceneEdit::Commit executes
-		EditorTransaction* m_Transaction = nullptr;      // the outermost open transaction, which registers itself
-		EditorDryRunScope* m_DryRun = nullptr;           // the open dry run, which registers itself
+		std::optional<ProvenanceRecorder> m_Provenance;       // the open writable project's provenance
+		std::optional<uint64_t> m_PendingRevisionBefore;      // GetRevisionBeforeCommand's value while SceneEdit::Commit executes
+		EditorTransaction* m_Transaction = nullptr;           // the outermost open transaction, which registers itself
+		PrefabRebuildCollector* m_RebuildCollector = nullptr; // M35: the innermost live collector, which registers itself
+		EditorDryRunScope* m_DryRun = nullptr;                // the open dry run, which registers itself
 		std::optional<int> m_ShutdownRequest;
 		// While a write path member that can change provenance (WriteProjectFile, MoveProjectFile, RemoveProjectFile) runs, the
 		// write observer keeps the first provenance save failure here for that member to return; otherwise it logs it.
@@ -842,6 +878,7 @@ namespace Engine {
 		friend class EditorDryRunScope;
 		friend class EditorSceneTargetScope; // M20: swaps the addressed scene in and out
 		friend class EditorTransaction;
+		friend class PrefabRebuildCollector; // M35: registers itself in m_RebuildCollector
 		friend class ProjectSettingsCommand; // the one caller of ApplyProjectSettings
 		friend class SceneEdit;              // sets m_PendingRevisionBefore around its Execute and appends m_TransientPlayUndos
 	};

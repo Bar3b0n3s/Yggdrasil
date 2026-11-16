@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorCore/Automation/AssetMethods.h"
 #include "EditorCore/Automation/AutomationTypes.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
@@ -118,6 +119,9 @@ namespace Engine {
 		// they became, with their new IDs, in canonical order; empty when none was added.
 		std::vector<EntitySummary> AddedEntities{};
 		uint32_t UndoIndex = 0;
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): the diagnostics of the rebuilds of the open scenes'
+		// instances, every override they dropped among them (also logged).
+		std::vector<PrefabRebuildDiagnostic> RebuildDiagnostics{};
 	};
 
 	// Registry struct "PrefabOverrideKey": selects overrides of an instance (prefab.revert {overrides}), matching
@@ -147,6 +151,8 @@ namespace Engine {
 		EntitySummary Instance{};
 		uint32_t RemovedOverrides = 0;
 		uint32_t UndoIndex = 0;
+		// M35 (decision 10): the diagnostics of the instance's rebuild, every override it dropped among them (also logged).
+		std::vector<PrefabRebuildDiagnostic> RebuildDiagnostics{};
 	};
 
 	// prefab.unpack {instance}: PrefabInstantiator::Unpack on an outermost instance root; the entities and their data stay,

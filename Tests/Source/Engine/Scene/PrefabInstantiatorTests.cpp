@@ -12,6 +12,7 @@
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/UiRectComponent.h"
 #include "Engine/Scene/Components/UnknownComponentsComponent.h"
 #include "Engine/Scene/PrefabAsset.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -576,6 +577,91 @@ namespace Engine {
 			REQUIRE(member.IsValid());
 			CHECK(member.GetComponent<TransformComponent>().Scale == glm::vec3(1.0f, 3.0f, 1.0f));
 			CHECK(root->GetComponent<TransformComponent>().Scale == glm::vec3(1.0f));
+		}
+
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 9; World Tree's brief 13, its second item): an entity's
+		// overrides of one component are one write. The pair below is valid only together (AnchorMax [0, 0] alone is below the
+		// prefab's AnchorMin [0.5, 0.5]); before M35 the rebuild applied them one at a time, so AnchorMax, sorted first, was
+		// dropped as stale and AnchorMin applied, and the panel stretched. UiRect's rule blames AnchorMin, which an override
+		// need not write: such an error names no override, and then the overrides are tried one at a time, so a valid
+		// sibling of the invalid one stays (the review of W35.2, its finding 1).
+		TEST_CASE("PrefabInstantiator: an entity's overrides of one component apply together, and a write's error drops only the overrides it locates")
+		{
+			constexpr std::string_view OptionsPrefab = R"({
+				"Format": "Prefab", "Version": 1, "Name": "Options", "Root": "0000000000350001", "ComponentVersions": { "Transform": 1 },
+				"Entities": [
+					{ "ID": "0000000000350001", "Name": "Options", "Parent": null, "Active": true, "Tags": [], "Components": { "Transform": {} } },
+					{ "ID": "0000000000350002", "Name": "Panel", "Parent": "0000000000350001", "Active": true, "Tags": [],
+					  "Components": { "Transform": {}, "UiRect": { "AnchorMin": [0.5, 0.5], "AnchorMax": [0.5, 0.5], "Size": [200, 100] } } }
+				]
+			})";
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab prefab = ParsePrefab(setup.GetRegistry(), OptionsPrefab);
+			const UUID panel(0x0000000000350002);
+			const auto rebuild = [&scene, &prefab, panel](UUID rootID, std::vector<PrefabOverride> overrides, LoadReport& report)
+			{
+				LoadReport instantiated;
+				const Result<Entity> root = PrefabInstantiator::Instantiate(scene, prefab, MakeOptions(rootID), PrefabOptions{}, instantiated);
+				REQUIRE(root.has_value());
+				root->Patch<PrefabInstanceComponent>([&overrides](PrefabInstanceComponent& instance)
+				{
+					instance.Overrides = std::move(overrides);
+				});
+				REQUIRE(PrefabInstantiator::UpdateInstance(scene, *root, prefab, PrefabOptions{}, report).has_value());
+				const Entity member = scene.FindEntityByID(PrefabInstantiator::DeriveInstanceID(rootID, panel));
+				REQUIRE(member.IsValid());
+				return std::make_pair(*root, member.GetComponent<UiRectComponent>());
+			};
+
+			// The pair applies together.
+			LoadReport together;
+			const auto [first, anchored] = rebuild(UUID(0x3501),
+				{ MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "AnchorMax", Json::array({ 0, 0 })),
+					MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "AnchorMin", Json::array({ 0, 0 })) },
+				together);
+			CHECK(CountDiagnostics(together, PrefabStaleOverrideCode) == 0);
+			CHECK(anchored.AnchorMin == glm::vec2(0.0f));
+			CHECK(anchored.AnchorMax == glm::vec2(0.0f));
+			CHECK(first.GetComponent<PrefabInstanceComponent>().Overrides.size() == 2);
+
+			// An invalid value drops its own override; the pair still applies.
+			LoadReport mixed;
+			const auto [second, kept] = rebuild(UUID(0x3502),
+				{ MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "AnchorMax", Json::array({ 0, 0 })),
+					MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "AnchorMin", Json::array({ 0, 0 })),
+					MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "Size", Json::array({ "wide", 100 })) },
+				mixed);
+			REQUIRE(CountDiagnostics(mixed, PrefabStaleOverrideCode) == 1);
+			CHECK(mixed.Diagnostics.front().JsonPointer == "/Components/Prefab/Overrides/2");
+			CHECK(mixed.Diagnostics.front().Entity == UUID(0x3502));
+			CHECK(kept.AnchorMin == glm::vec2(0.0f));
+			CHECK(kept.AnchorMax == glm::vec2(0.0f));
+			CHECK(kept.Size == glm::vec2(200.0f, 100.0f));
+
+			// One that is invalid with the prefab's other values is dropped, and the entity keeps the prefab's component.
+			LoadReport alone;
+			const auto [third, prefabs] = rebuild(UUID(0x3503), { MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "AnchorMax", Json::array({ 0.2, 0.2 })) },
+				alone);
+			CHECK(CountDiagnostics(alone, PrefabStaleOverrideCode) == 1);
+			CHECK(prefabs.AnchorMin == glm::vec2(0.5f));
+			CHECK(prefabs.AnchorMax == glm::vec2(0.5f));
+			CHECK(third.GetComponent<PrefabInstanceComponent>().Overrides.empty());
+
+			// An error that names no override (the rule blames AnchorMin, which no override writes): the overrides are tried one
+			// at a time, so AnchorMax, invalid below the prefab's AnchorMin, is dropped and Size, valid, is kept.
+			LoadReport unnamed;
+			const auto [fourth, sized] = rebuild(UUID(0x3504),
+				{ MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "AnchorMax", Json::array({ 0.2, 0.2 })),
+					MakeOverride(panel, PrefabOverrideKind::Field, "UiRect", "Size", Json::array({ 300, 50 })) },
+				unnamed);
+			REQUIRE(CountDiagnostics(unnamed, PrefabStaleOverrideCode) == 1);
+			CHECK(unnamed.Diagnostics.front().JsonPointer == "/Components/Prefab/Overrides/0");
+			CHECK(sized.AnchorMax == glm::vec2(0.5f));
+			CHECK(sized.Size == glm::vec2(300.0f, 50.0f));
+			const std::vector<PrefabOverride>& sizeKept = fourth.GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(sizeKept.size() == 1);
+			CHECK(sizeKept[0].Field == "Size");
 		}
 
 		TEST_CASE("PrefabInstantiator: members whose prefab entity is gone disappear and their user children move up")

@@ -64,7 +64,11 @@ namespace Engine {
 	};
 
 	// The documented step order (§5.7), one value per phase in the order a tick runs them. A tick is one fixed step; the
-	// frame phase runs once per frame, and once per tick in lockstep and with a ManualClock (Tick()).
+	// frame phase runs once per frame, and once per tick in lockstep and with a ManualClock (Tick()). M35
+	// (Docs/Decisions/0050-m35-pause-entity-state.md decision 2) classifies each phase as the world's or the UI's: while the
+	// world is paused the world's phases (NativeStep, SpriteAnimation, AnimationSystem, PhysicsPreStep to Physics2DPostStep,
+	// Particles) do not run, FixedUpdate, Tasks, Update and LateUpdate run only for the behaviours that run while the world
+	// is paused, and every other phase (the UI's) runs as always; a phase added later is classified when it lands.
 	enum class PlaySessionPhase : uint8_t
 	{
 		// Fixed step.
@@ -202,7 +206,8 @@ namespace Engine {
 	// ("Interpolation: script-moved entities interpolate; frame-phase writes, teleports and new entities do not").
 	// Production code installs none. Simulate mode skips the script and audio
 	// phases (StartFlush, UiEvents, FixedUpdate, Tasks, Update, LateUpdate, AudioUpdate) entirely, so they are
-	// not reported there. NativeStep (M19) runs, and is reported, only in Play mode with a native module. UiLayout and
+	// not reported there. The world's phases are not run, so not reported, while the world is paused (M35; see "World pause"
+	// in PlaySession's comment). NativeStep (M19) runs, and is reported, only in Play mode with a native module. UiLayout and
 	// FrameUiLayout (M22), UiInput (M22 C22.2) and TextLatch (M22 C22.3), run, and are reported, in both modes, with or without
 	// a canvas.
 	class IPlaySessionObserver
@@ -359,6 +364,24 @@ namespace Engine {
 	//     first. Destroying the session is Stop: the AudioSystem releases every voice and restores the group volumes, and
 	//     only then does time go back.
 	// Audio is not simulated state: it never reaches the state hash.
+	//
+	// World pause (M35, Docs/Decisions/0050-m35-pause-entity-state.md decisions 1 to 4). Distinct from the run state's
+	// pause (SetPaused, play.pause, play.state's Paused), which stops every tick: the session keeps ticking while its world
+	// is paused. Scripts (Time.PauseWorld, Time.ResumeWorld) and automation (play.setWorldPaused) request it
+	// (RequestWorldPause), and each fixed step applies the latest request before anything of it runs, so a tick runs wholly
+	// paused or wholly not. While it holds:
+	//   - the world's phases do not run: NativeStep, SpriteAnimation, AnimationSystem, PhysicsPreStep to Physics2DPostStep
+	//     (so bodies keep their velocities for the resume) and the frame's Particles phase;
+	//   - FixedUpdate, Tasks, Update and LateUpdate reach only the behaviours whose class sets RunsWhileWorldPaused (and a
+	//     test case and the tasks without an instance owner): ScriptFrameState::WorldPaused;
+	//   - the world's clock (GetWorldTick; Time.GetTick and Time.GetTime) holds, while GetTick counts on, and a world
+	//     behaviour's tasks count the world's clock (ScriptFrameState::WorldHeldTicks);
+	//   - the AudioSystem holds the voices outside the Ui group when the pause's sounds choice is Pause (SetWorldPaused);
+	// and every other phase runs as before: the input, text, UI input, start flush, UI events, transform updates, destroy
+	// flushes and layouts, so a menu works, deterministically from latched input. The world's systems step on the world's
+	// clock (SimStep::FromTick(GetWorldTick(), ...)), which is the session's in every session that never paused. The pause,
+	// its pending request and the world's clock are session state, kept across Scene.Load and Scene.Reload, and from the
+	// first request to pause they form a block of the state hash (ComputeStateHash).
 	//
 	// Determinism (§1.3, §4.12): the scene, the state hash, the UUIDs it creates and its Random stream depend only on the
 	// document, the seed, the FixedHz and the input applied per tick, in every configuration.
@@ -580,6 +603,9 @@ namespace Engine {
 		// in the scene's serialization.
 		// M23 adds no block (Docs/Decisions/0034-m23-contract.md decision 29): an Animator's playback state is component data,
 		// which the scene's serialization covers, and its sampled pose is a function of that data and the assets.
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 4; phase 5's ledger: after M28's save-data block): the
+		// world-pause block, empty until the session's first request to pause (RequestWorldPause), then the pause in force,
+		// its sounds choice, the pending request and the world's clock (GetWorldTick).
 		[[nodiscard]] uint64_t ComputeStateHash() const;
 
 		// The entity cap (see the class comment).
@@ -603,6 +629,20 @@ namespace Engine {
 		[[nodiscard]] double GetTimeScale() const;
 		// Errors: InvalidArgument for a scale that is not finite or outside [0, MaxTimeScale].
 		[[nodiscard]] Status SetTimeScale(double timeScale);
+
+		// --- The world pause (M35, Docs/Decisions/0050-m35-pause-entity-state.md decisions 1 to 4; see "World pause") ---
+		// Records a request to pause (`paused`) or resume the world, which the next fixed step applies before anything of it
+		// runs; a later request before then replaces it, and one asking for what is already in force cancels the pending
+		// one. `sounds` is the paused world's choice for its voices (ignored for a resume). Time.PauseWorld,
+		// Time.ResumeWorld and play.setWorldPaused call it. Errors: InvalidArgument for a `sounds` value outside the enum.
+		[[nodiscard]] Status RequestWorldPause(bool paused, WorldPauseSounds sounds = WorldPauseSounds::Pause);
+		// The world pause the next fixed step runs with: the pending request's, else the one in force.
+		[[nodiscard]] bool IsWorldPaused() const;
+		// The sounds choice the next fixed step runs with: the pending pause's, else the one in force (the last pause's after
+		// a resume; Pause before any).
+		[[nodiscard]] WorldPauseSounds GetWorldPauseSounds() const;
+		// The world's clock: the fixed steps the world ran (GetTick less the ticks the world pause held).
+		[[nodiscard]] uint64_t GetWorldTick() const;
 		[[nodiscard]] bool IsLockstep() const;
 		// The client that owns lockstep; NoClient when the session is not in lockstep or an in-process driver owns it.
 		[[nodiscard]] ClientId GetLockstepOwner() const;
