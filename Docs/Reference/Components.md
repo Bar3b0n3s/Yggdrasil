@@ -58,6 +58,7 @@ Every component of the type registry, in canonical component order: the order of
 | `ReflectionProbe` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it. |
 | `Terrain` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit. |
 | `TerrainCollider` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn. |
+| `MaterialParameters` | MaterialParameters | Serializable, ScriptVisible, EditorVisible, Removable | Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes. |
 
 ## ID
 
@@ -1676,6 +1677,46 @@ Script members of `TerrainCollider`:
 | `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). A value a script writes holds at most 4096 bytes of text. |
 | `Restitution` | proxy field | `number` | read/write | All | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values. |
+
+## MaterialParameters
+
+Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes.
+
+- Category: MaterialParameters
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `MeshRenderer`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Tint` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The linear colour that multiplies the base colour of every material. |
+| `Emissive` | `Color3` | `[1,1,1]` | 0 to 1 |  |  | The linear colour of the glow added to every material's emission, scaled by EmissiveStrength. |
+| `EmissiveStrength` | `Float` | `0` | 0 to 1000 |  |  | How bright the added glow is: Emissive times this, in the units of a material's emission; 0 adds none. |
+| `UVOffset` | `Vec2` | `[0,0]` | -1000 to 1000 |  |  | Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture. |
+| `UVScroll` | `Vec2` | `[0,0]` | -1000 to 1000 | 1/s |  | How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only. |
+| `DissolveAmount` | `Float` | `0` | 0 to 1 |  |  | How much of the surface has dissolved, from 0 (none) to 1 (all), by a built-in noise over the first texture coordinates; shadows dissolve too. |
+| `DissolveEdgeColor` | `Color3` | `[1,0.5,0.1]` | 0 to 1 |  |  | The linear colour of the glow along the dissolve's edge, scaled by DissolveEdgeStrength. |
+| `DissolveEdgeStrength` | `Float` | `2` | 0 to 1000 |  |  | How bright the dissolve's edge glows: DissolveEdgeColor times this, in the units of a material's emission. |
+| `DissolveEdgeWidth` | `Float` | `0.05` | 0 to 1 |  |  | How wide the glowing edge is, as the share of the noise just above DissolveAmount that glows; 0 draws no edge. |
+| `DissolveNoiseScale` | `Float` | `1` | 0.01 to 100 |  |  | How many times the dissolve noise repeats per unit of the mesh's first texture coordinates. |
+| `Opacity` | `Float` | `1` | 0 to 1 |  |  | The fade, from 1 (solid) to 0 (gone): a dithered see-through pattern on Opaque and Mask materials, which keep their depth, sorting and shadow, and a factor of a Blend material's alpha. |
+
+Script members of `MaterialParameters`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `DissolveAmount` | proxy field | `number` | read/write | All | How much of the surface has dissolved, from 0 (none) to 1 (all), by a built-in noise over the first texture coordinates; shadows dissolve too. |
+| `DissolveEdgeColor` | proxy field | `Color` | read/write | All | The linear colour of the glow along the dissolve's edge, scaled by DissolveEdgeStrength. |
+| `DissolveEdgeStrength` | proxy field | `number` | read/write | All | How bright the dissolve's edge glows: DissolveEdgeColor times this, in the units of a material's emission. |
+| `DissolveEdgeWidth` | proxy field | `number` | read/write | All | How wide the glowing edge is, as the share of the noise just above DissolveAmount that glows; 0 draws no edge. |
+| `DissolveNoiseScale` | proxy field | `number` | read/write | All | How many times the dissolve noise repeats per unit of the mesh's first texture coordinates. |
+| `Emissive` | proxy field | `Color` | read/write | All | The linear colour of the glow added to every material's emission, scaled by EmissiveStrength. |
+| `EmissiveStrength` | proxy field | `number` | read/write | All | How bright the added glow is: Emissive times this, in the units of a material's emission; 0 adds none. |
+| `Opacity` | proxy field | `number` | read/write | All | The fade, from 1 (solid) to 0 (gone): a dithered see-through pattern on Opaque and Mask materials, which keep their depth, sorting and shadow, and a factor of a Blend material's alpha. |
+| `Tint` | proxy field | `Color` | read/write | All | The linear colour that multiplies the base colour of every material. |
+| `UVOffset` | proxy field | `vector` | read/write | All | Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture. |
+| `UVScroll` | proxy field | `vector` | read/write | All | How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only. |
 
 ## Structs
 

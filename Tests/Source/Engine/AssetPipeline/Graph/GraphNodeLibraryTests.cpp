@@ -247,6 +247,29 @@ namespace Engine {
 			CHECK(library.Find("Call.Test.GetParticleDigest") == nullptr);
 		}
 
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 1): the MaterialParameters proxy gives its nodes with no
+		// change to the library, so a graph animates a hit flash or a dissolve as a script does.
+		TEST_CASE("GraphNodeLibrary: the MaterialParameters proxy reads and writes its fields")
+		{
+			const LibrarySetup setup;
+			const GraphNodeLibrary& library = *setup.Library;
+			const GraphNodeDescription* proxy = library.Find("Get.Entity.MaterialParameters");
+			REQUIRE(proxy != nullptr);
+			REQUIRE(FindPin(*proxy, "Value") != nullptr);
+			CHECK(FindPin(*proxy, "Value")->TypeName == "MaterialParameters");
+			CHECK(FindPin(*proxy, "Value")->Optional);
+			for (const std::string_view field : { "Tint", "EmissiveStrength", "UVScroll", "DissolveAmount", "Opacity" })
+			{
+				CAPTURE(field);
+				CHECK(library.Find(std::format("Get.MaterialParameters.{}", field)) != nullptr);
+				CHECK(library.Find(std::format("Set.MaterialParameters.{}", field)) != nullptr);
+			}
+			const GraphNodeDescription* dissolve = library.Find("Set.MaterialParameters.DissolveAmount");
+			REQUIRE(dissolve != nullptr);
+			REQUIRE(FindPin(*dissolve, "Value") != nullptr);
+			CHECK(FindPin(*dissolve, "Value")->Type == GraphPinType::Number);
+		}
+
 		TEST_CASE("GraphNodeLibrary: a graph's fields and variables resolve as Self.Get and Self.Set nodes of their kinds")
 		{
 			const LibrarySetup setup;

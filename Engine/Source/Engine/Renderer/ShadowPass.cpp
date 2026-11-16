@@ -4,6 +4,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
@@ -36,7 +37,11 @@ namespace Engine {
 			view.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(0), nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
 				nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask)
+			{
+				// M31 (decision 6): the dissolve noise and its sampler.
+				view.bindings.push_back(nvrhi::BindingLayoutItem::Texture_SRV(DissolveNoiseRegister));
 				view.bindings.push_back(nvrhi::BindingLayoutItem::Sampler(2));
+			}
 			PipelineLayoutDescription result;
 			result.Name = std::format("Shadow{}Cull{}", mask ? "Mask" : "Opaque", Names[variant % 3]);
 			result.Program = "Shadow";
@@ -109,14 +114,17 @@ namespace Engine {
 		GraphicsDevice* Device = nullptr; // back-reference; the device outlives the pass
 		std::array<GraphicsPipeline, PipelineCount> Pipelines{};
 		nvrhi::SamplerHandle AnisoWrap{};
+		// M31 (decision 6): the 1 x 1 white R8 texture the Mask casters' set binds without ShadowRenderInputs::DissolveNoise.
+		nvrhi::TextureHandle NeutralNoise{};
 
 		// The Mask casters' material sets (null for Opaque casters), one per draw of `casters`, from the caller's cache.
 		[[nodiscard]] Result<std::vector<nvrhi::IBindingSet*>> ResolveMaterialSets(PassBindingCache& bindings, const ShadowCasterSet& casters);
 		// One face: every batch's runs of the draws the face's frustum does not cull, each one instanced draw. `reflected`: the
 		// face's projection is a reflection (a point-shadow face), so the draws use their ReflectedVariant.
 		[[nodiscard]] Status RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
-			std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport,
-			nvrhi::IBuffer& casterConstants, uint32_t slot, const ShadowCasterConstants& constants, RenderPassCounters& counters, bool reflected);
+			std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IFramebuffer& framebuffer,
+			const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot, const ShadowCasterConstants& constants, RenderPassCounters& counters,
+			bool reflected);
 	};
 
 	ShadowPass::ShadowPass(ConstructionKey /*key*/)
@@ -166,6 +174,19 @@ namespace Engine {
 		nvrhi::SamplerDesc sampler;
 		sampler.setAllFilters(true).setAllAddressModes(nvrhi::SamplerAddressMode::Wrap).setMaxAnisotropy(16);
 		ENGINE_TRY_ASSIGN(state.AnisoWrap, device.CreateSampler(sampler));
+		nvrhi::TextureDesc noise;
+		noise.width = 1;
+		noise.height = 1;
+		noise.format = nvrhi::Format::R8_UNORM;
+		noise.isRenderTarget = true;
+		noise.initialState = nvrhi::ResourceStates::ShaderResource;
+		noise.keepInitialState = true;
+		noise.debugName = "ShadowPass.NeutralNoise";
+		ENGINE_TRY_ASSIGN(state.NeutralNoise, device.CreateTexture(noise));
+		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle list, device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
+		CommandListRecording recording(device, *list);
+		list->clearTextureFloat(state.NeutralNoise, nvrhi::AllSubresources, nvrhi::Color(1.0f));
+		recording.Execute();
 		return pass;
 	}
 
@@ -278,7 +299,9 @@ namespace Engine {
 				const GpuMaterial& material = cache.GetMaterial(materialHandle);
 				if (material.AlphaMode == AlphaMode::Blend || !material.Constants || !material.BaseColorMap)
 					continue;
-				const bool mask = material.AlphaMode == AlphaMode::Mask;
+				// M31 (decision 5): a dissolving item's Opaque material casts through the Mask variant, its material bound.
+				const AlphaMode mode = SelectMeshAlphaMode(material.AlphaMode, item.Parameters, true);
+				const bool mask = mode == AlphaMode::Mask;
 				Candidate candidate;
 				candidate.Draw = { .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
 					.Attributes = mesh.AttributeBuffer,
@@ -287,8 +310,8 @@ namespace Engine {
 					.IndexCount = submesh.IndexCount,
 					.Bounds = source.Vertices != nullptr ? source.Bounds : submesh.Bounds,
 					.World = item.World,
-					.Variant = Utils::GetPrepassVariant(material.AlphaMode, Utils::SelectCullMode(mirrored, material.DoubleSided)),
-					.ReflectedVariant = Utils::GetPrepassVariant(material.AlphaMode, Utils::SelectCullMode(!mirrored, material.DoubleSided)),
+					.Variant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(mirrored, material.DoubleSided)),
+					.ReflectedVariant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(!mirrored, material.DoubleSided)),
 					.MaterialConstants = mask ? material.Constants : nvrhi::BufferHandle(),
 					.BaseColorMap = mask ? material.BaseColorMap : nvrhi::TextureHandle() };
 				// An Opaque caster binds no material, so the Opaque casters of one mesh batch whatever their materials.
@@ -351,8 +374,9 @@ namespace Engine {
 	}
 
 	Status ShadowPass::State::RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
-		std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::IFramebuffer& framebuffer, const nvrhi::Viewport& viewport,
-		nvrhi::IBuffer& casterConstants, uint32_t slot, const ShadowCasterConstants& constants, RenderPassCounters& counters, bool reflected)
+		std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IFramebuffer& framebuffer,
+		const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot, const ShadowCasterConstants& constants, RenderPassCounters& counters,
+		bool reflected)
 	{
 		// The slot's range of the caller's buffer (NVRHI binds constant-buffer ranges in whole 256-byte units): the same desc
 		// every frame, so the caller's cache keeps the sets.
@@ -366,7 +390,10 @@ namespace Engine {
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, &instances),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask != 0)
+			{
+				desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, &noise));
 				desc.bindings.push_back(nvrhi::BindingSetItem::Sampler(2, AnisoWrap));
+			}
 			ENGINE_TRY_ASSIGN(viewSets[mask], bindings.GetOrCreate(*Device, desc, *Pipelines[mask * 3].BindingLayouts[0]));
 		}
 		// One instanced draw of `count` draws from `first`, whose instance records are adjacent. A batch's draws share their key,
@@ -442,6 +469,7 @@ namespace Engine {
 					&& inputs.Instances->getDesc().byteSize >= (static_cast<uint64_t>(casters.Draws.back().Instance) + 1) * sizeof(InstanceRecord)),
 			"Shadow casters need the view's Instances buffer holding their records");
 		ENGINE_TRY_ASSIGN(const std::vector<nvrhi::IBindingSet*> materialSets, m_State->ResolveMaterialSets(bindings, casters));
+		nvrhi::ITexture& noise = inputs.DissolveNoise != nullptr ? *inputs.DissolveNoise : *m_State->NeutralNoise;
 
 		// Every slot this record uses, written with one command before any draw: cascades in slots [0, 4), spot tiles from
 		// slot MaxShadowCascades, point faces from ShadowCasterFirstPointSlot. Each slot is ShadowCasterSlotStride bytes, so
@@ -510,7 +538,7 @@ namespace Engine {
 					"Cascade framebuffer {} does not attach slice {} of the cascade target", index, index);
 				if (!casters.Draws.empty())
 				{
-					ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *framebuffer,
+					ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *framebuffer,
 						nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, index,
 						constants[index], scope.Counters, false));
 				}
@@ -539,7 +567,7 @@ namespace Engine {
 				const float size = static_cast<float>(tile.Size - 2 * SpotShadowGuardTexels);
 				if (!casters.Draws.empty())
 				{
-					ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *inputs.AtlasFramebuffer,
+					ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *inputs.AtlasFramebuffer,
 						nvrhi::Viewport(left, left + size, top, top + size, 0, 1), *inputs.CasterConstants, slot, constants[slot],
 						scope.Counters, false));
 				}
@@ -574,7 +602,7 @@ namespace Engine {
 					const uint32_t slot = ShadowCasterFirstPointSlot + static_cast<uint32_t>(index) * PointShadowFaceCount + face;
 					if (!casters.Draws.empty())
 					{
-						ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, *framebuffer,
+						ENGINE_TRY(m_State->RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *framebuffer,
 							nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, slot,
 							constants[slot], scope.Counters, true));
 					}

@@ -11,6 +11,7 @@
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
+#include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
@@ -599,6 +600,30 @@ namespace Engine {
 		return Utils::ComposeMatrix(translation, rotation, scale);
 	}
 
+	MeshMaterialParameters ResolveMaterialParameters(const MaterialParametersComponent& component, double time)
+	{
+		// One offset component scrolled to `time` and wrapped into [0, 1).
+		const auto scroll = [time](float offset, float speed)
+		{
+			const double value = static_cast<double>(offset) + static_cast<double>(speed) * time;
+			const auto wrapped = static_cast<float>(value - std::floor(value));
+			return wrapped < 1.0f ? wrapped : 0.0f;
+		};
+		MeshMaterialParameters result;
+		result.Tint = component.Tint;
+		result.Emissive = component.Emissive * component.EmissiveStrength;
+		result.UVOffset = glm::vec2(scroll(component.UVOffset.x, component.UVScroll.x), scroll(component.UVOffset.y, component.UVScroll.y));
+		result.DissolveAmount = component.DissolveAmount;
+		if (component.DissolveAmount > 0.0f)
+		{
+			result.DissolveEdge = component.DissolveEdgeColor * component.DissolveEdgeStrength;
+			result.DissolveEdgeWidth = component.DissolveEdgeWidth;
+			result.DissolveNoiseScale = component.DissolveNoiseScale;
+		}
+		result.Opacity = component.Opacity;
+		return result;
+	}
+
 	Result<RenderSnapshot> ExtractRenderSnapshot(const Scene& scene, const RenderExtractionRequest& request, std::pmr::memory_resource* resource)
 	{
 		ENGINE_PROFILE_SCOPE("ExtractRenderSnapshot");
@@ -616,6 +641,8 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "a render extraction needs a view of at least 1x1 pixels, got {}x{}", request.Width, request.Height);
 		if (!std::isfinite(request.Alpha) || request.Alpha < 0.0f || request.Alpha > 1.0f)
 			return MakeError(ErrorCode::InvalidArgument, "a render extraction needs an interpolation alpha in [0, 1], got {}", request.Alpha);
+		if (!std::isfinite(request.SimulationTime) || request.SimulationTime < 0.0)
+			return MakeError(ErrorCode::InvalidArgument, "a render extraction needs a finite simulation time of at least 0 s, got {}", request.SimulationTime);
 
 		RenderSnapshot snapshot(resource != nullptr ? resource : std::pmr::get_default_resource());
 		snapshot.Alpha = request.Alpha;
@@ -671,6 +698,8 @@ namespace Engine {
 				item.Entity = id;
 				if (const SkinnedMeshComponent* skinned = entity.TryGetComponent<SkinnedMeshComponent>())
 					Utils::ExtractSkinnedItem(entity, *skinned, request.Alpha, item);
+				if (const MaterialParametersComponent* parameters = entity.TryGetComponent<MaterialParametersComponent>())
+					item.Parameters = ResolveMaterialParameters(*parameters, request.SimulationTime);
 				snapshot.PickTable.push_back(id);
 				item.PickId = static_cast<uint32_t>(snapshot.PickTable.size());
 				snapshot.Meshes.push_back(std::move(item));

@@ -6,6 +6,11 @@
 // locations 2 and 3), which a Mask caster's alpha test reads: the base colour map's UV set and the vertex colour's alpha.
 // The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment shader, which does
 // not read it, leaves it out of its interface, which the validation layer reports (WARNING-Shader-OutputNotConsumed).
+// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 5): the Mask variants, which an Opaque material takes while
+// its instance dissolves (Renderer/RenderPrepare.h's SelectMeshAlphaMode), test a material's alpha only when it is a Mask
+// material, and clip a dissolving instance's fragments as Scene.slang does: where the dissolve noise (t15, at the first
+// texture coordinates times DissolveNoiseScale) lies below its DissolveAmount. The vertex shader hands them the record's
+// index (flat). A fading instance keeps its whole shadow.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/InstanceRecord.h"
@@ -20,6 +25,7 @@ ConstantBuffer<ShadowCasterConstants> Caster : register(b0, space0);
 StructuredBuffer<InstanceRecord> Instances : register(t10, space0);
 [[vk::push_constant]] ConstantBuffer<DrawConstants> Draw;
 #if ALPHA_MASK
+Texture2D<float> DissolveNoise : register(t15, space0); // M31: the dissolve noise (Renderer/ShadowPass.h)
 SamplerState AnisoWrap : register(s2, space0);
 ConstantBuffer<MaterialConstants> Material : register(b0, space1);
 Texture2D<float4> BaseColorMap : register(t0, space1);
@@ -42,6 +48,9 @@ struct VertexOutput
 	// The caster's light-space depth, interpolated linearly in screen space exactly as the rasterizer interpolates
 	// SV_Position.z. Read only when Caster.Bias.z pancakes (orthographic directional maps, w = 1).
 	noperspective float Depth : TEXCOORD1;
+#if ALPHA_MASK
+	nointerpolation uint Instance : INSTANCE; // M31: the record's index in Instances
+#endif
 };
 
 // SV_VulkanInstanceID is gl_InstanceIndex, counted from 0 within the draw (Scene.slang's VSMain).
@@ -50,6 +59,9 @@ VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	VertexOutput output;
 	float4 clip = mul(Caster.ViewProjection, mul(Instances[Draw.FirstInstance + instance].World, float4(input.Position, 1.0)));
+#if ALPHA_MASK
+	output.Instance = Draw.FirstInstance + instance;
+#endif
 	output.Position = clip;
 	output.Depth = clip.z / clip.w;
 	// Pancaking is per fragment, as hardware depth clamp does it (NVRHI's Vulkan backend does not expose depth clamp): the
@@ -80,7 +92,14 @@ ShadowPixel PSMain(VertexOutput input)
 	float2 uv = ((Material.Flags & MaterialFlagBaseColorUV1) != 0 ? input.TexCoord1 : input.TexCoord) * Material.UVScale + Material.UVOffset;
 	float alpha = BaseColorMap.Sample(AnisoWrap, uv).a * Material.BaseColor.a * input.Color.a;
 	// Match Scene.slang's coverage mask without requiring shader-demote support.
-	output.Coverage = alpha < Material.AlphaCutoff ? 0 : 1;
+	output.Coverage = Material.AlphaMode == MaterialAlphaModeMask && alpha < Material.AlphaCutoff ? 0 : 1;
+	const InstanceRecord record = Instances[input.Instance];
+	if ((record.Flags & DrawFlagMaterialParameters) != 0 && record.DissolveAmount > 0.0)
+	{
+		const float noise = DissolveNoise.Sample(AnisoWrap, input.TexCoord * record.DissolveNoiseScale);
+		if (record.DissolveAmount >= 1.0 || noise < record.DissolveAmount)
+			output.Coverage = 0;
+	}
 #endif
 	float depth = Caster.Bias.z != 0.0 ? input.Depth : input.Position.z;
 	float slope = max(abs(ddx(depth)), abs(ddy(depth)));

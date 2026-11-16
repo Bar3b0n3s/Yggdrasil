@@ -18,14 +18,19 @@ namespace Engine {
 	// DrawFlagPreviousPositions (M26, R-TAA-VEL; Docs/Decisions/0037-m26-contract.md decision 11): the prepass's motion
 	// vectors take the instance's previous local positions from vertex binding 2 (a deformed item's previous deformation,
 	// M23's Skinning pass) instead of its current ones; set only for a deformed item that continues its view's history.
+	// DrawFlagMaterialParameters (M31; Docs/Decisions/0046-m31-material-parameters.md decision 4): the record's material
+	// parameters are not neutral, so the fragment shaders read and apply them (MakeMeshInstanceRecord, Renderer/RenderPrepare.h);
+	// without it they never read them and draw as before M31.
 #if defined(ENGINE_SHADER)
 	static const uint DrawFlagMirrored = 1;
 	static const uint DrawFlagReceiveShadows = 2;
 	static const uint DrawFlagPreviousPositions = 4;
+	static const uint DrawFlagMaterialParameters = 8;
 #else
 inline constexpr uint32_t DrawFlagMirrored = 1;
 inline constexpr uint32_t DrawFlagReceiveShadows = 2;
 inline constexpr uint32_t DrawFlagPreviousPositions = 4;
+inline constexpr uint32_t DrawFlagMaterialParameters = 8;
 #endif
 
 	// The Scene program's debug views (§8.5): Vulkan specialization constant SceneDebugViewConstantId of the forward

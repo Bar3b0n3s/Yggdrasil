@@ -5,7 +5,9 @@
 // binding 1, locations 2 and 3), which a Mask material's alpha test reads: the base colour map's UV set and the vertex
 // colour's alpha. The vertex colour reaches the fragment shader whole: as a scalar alpha, the Opaque variants' fragment
 // shader, which does not read it, leaves it out of its interface, which the validation layer reports
-// (WARNING-Shader-OutputNotConsumed).
+// (WARNING-Shader-OutputNotConsumed). M31 (Docs/Decisions/0046-m31-material-parameters.md decision 7): the mask reads only
+// the record's World, so an instance's material parameters change nothing of its outline: a faded or dissolving mesh is
+// outlined whole.
 
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"

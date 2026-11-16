@@ -71,6 +71,10 @@ namespace Engine {
 		// M26 (C26.1, C-PART; Docs/Decisions/0037-m26-contract.md decision 7; ADR 0028's phase-3 ledger): engine://Textures/Particle,
 		// the procedural particle texture (BuiltinTexture::Particle), never compressed. Its catalogue entries are stream P-B's.
 		static constexpr AssetHandle ParticleTexture{ 0x018b };
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6; ADR 0042's phase-5 ledger): engine://Textures/
+		// DissolveNoise, the procedural noise a MaterialParameters dissolve clips by (BuiltinTexture::DissolveNoise), never
+		// compressed.
+		static constexpr AssetHandle DissolveNoiseTexture{ 0x018c };
 		// engine://Fonts/Default: Inter Regular (SIL OFL), Resources/Fonts/Inter-Regular.ttf through FontImporter.
 		static constexpr AssetHandle DefaultFont{ 0x01c1 };
 		// engine://Environments/{Studio, Sky}: Poly Haven CC0 studio_small_09 and kloofendal_48d_partly_cloudy_puresky at 1k,

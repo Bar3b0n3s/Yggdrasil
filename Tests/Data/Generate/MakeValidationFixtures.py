@@ -78,7 +78,7 @@ COMPONENT_ORDER = [
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
     "Animator", "SkinnedMesh", "ParticleEmitter", "IrradianceVolume", "ReflectionProbe", "Terrain", "TerrainCollider",
-    "ValidatorTarget", "ValidatorFollower",
+    "MaterialParameters", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.

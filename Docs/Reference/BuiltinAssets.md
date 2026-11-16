@@ -65,6 +65,7 @@ The assets the engine ships, which every project references by engine path, such
 | `engine://Textures/Black` | Texture | `0000000000000182` | procedural: generated in code |
 | `engine://Textures/BlueNoise` | Texture | `0000000000000186` | generated at bake time by `BlueNoise` |
 | `engine://Textures/Checker` | Texture | `0000000000000184` | procedural: generated in code |
+| `engine://Textures/DissolveNoise` | Texture | `000000000000018c` | procedural: generated in code |
 | `engine://Textures/FlatNormal` | Texture | `0000000000000183` | procedural: generated in code |
 | `engine://Textures/Missing` | Texture | `0000000000000185` | procedural: generated in code |
 | `engine://Textures/Particle` | Texture | `000000000000018b` | procedural: generated in code |

@@ -46,6 +46,17 @@
 // cofactor of the world matrix's upper 3x3 (§8.4), negated for a mirroring world (DrawFlagMirrored), whose draws use the
 // CullFront pipelines; front faces are SV_IsFrontFace, inverted when mirrored, and double-sided materials (CullNone) flip
 // the normals of back faces.
+// M31 (Docs/Decisions/0046-m31-material-parameters.md decisions 4 and 5): an instance with DrawFlagMaterialParameters
+// applies its record's material parameters on top of its material: the vertex shader hands the record's index to the
+// fragment shaders (flat), which multiply the base colour by its Tint, add its Emissive (and, along a dissolve's edge, its
+// DissolveEdge) to the emission and add its UVOffset to every map's coordinates after the material's UV transform. The
+// Mask variants, which an Opaque material takes while its instance dissolves or fades (Renderer/RenderPrepare.h's
+// SelectMeshAlphaMode), test a material's alpha only when it is a Mask material, and clip a dissolving instance's
+// fragments whose noise (DissolveNoise, t15, at the first texture coordinates times DissolveNoiseScale) lies below its
+// DissolveAmount and a fading instance's fragments by a 4 x 4 ordered dither of its Opacity (screen-door transparency,
+// the pattern moved by TAA's jitter so that successive frames resolve it); the prepass and the forward passes evaluate
+// the same clip, so the forward pass's depth test keeps exactly the prepass's surface. A Blend material's instance
+// multiplies its alpha by Opacity and drops it to 0 where it dissolves. An instance without the flag reads none of it.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
@@ -88,6 +99,8 @@ TextureCubeArray<float> PointShadowMaps : register(t12, space0); // M23 (R-PLS):
 ConstantBuffer<ProbeConstants> Probes : register(b4, space0);
 StructuredBuffer<float4> IrradianceProbes : register(t13, space0);
 TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
+// M31: the dissolve noise (Renderer/Private/ForwardPipelines.h's DissolveNoiseRegister), sampled with AnisoWrap.
+Texture2D<float> DissolveNoise : register(t15, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -140,6 +153,9 @@ struct VertexOutput
 	float4 Color : COLOR;
 	// The instance record's draw flags (a fragment shader has no instance index to read the record with).
 	nointerpolation uint Flags : DRAWFLAGS;
+	// M31: the instance record's index in Instances, whose material parameters the fragment shaders read with
+	// DrawFlagMaterialParameters.
+	nointerpolation uint Instance : INSTANCE;
 };
 
 // VSPrepass's outputs, which PSPrepass reads: VSMain's and the surface point's current and previous clip positions (M26).
@@ -247,21 +263,60 @@ float2 GetMapTexCoord(float2 texCoord, float2 texCoord1, uint uv1Flag)
 	return ((Material.Flags & uv1Flag) != 0 ? texCoord1 : texCoord) * Material.UVScale + Material.UVOffset;
 }
 
+// M31: whether the instance applies its record's material parameters.
+bool HasMaterialParameters(VertexOutput input)
+{
+	return (input.Flags & DrawFlagMaterialParameters) != 0;
+}
+
+// The coordinates a map samples: GetMapTexCoord's, plus the instance's UVOffset with DrawFlagMaterialParameters (M31).
+float2 GetSurfaceTexCoord(VertexOutput input, uint uv1Flag)
+{
+	float2 texCoord = GetMapTexCoord(input.TexCoord, input.TexCoord1, uv1Flag);
+	if (HasMaterialParameters(input))
+		texCoord += Instances[input.Instance].UVOffset;
+	return texCoord;
+}
+
+// M31: the dissolve noise of the instance's fragment, at its first texture coordinates times its DissolveNoiseScale.
+float SampleDissolveNoise(VertexOutput input, InstanceRecord record)
+{
+	return DissolveNoise.Sample(AnisoWrap, input.TexCoord * record.DissolveNoiseScale);
+}
+
+// M31: whether a dissolve of `record` removes a fragment of noise `noise`: below DissolveAmount, and everywhere at 1.
+bool IsDissolved(InstanceRecord record, float noise)
+{
+	return record.DissolveAmount >= 1.0 || noise < record.DissolveAmount;
+}
+
+// M31: the 4 x 4 ordered-dither threshold of `pixel` in (0, 1), the Bayer matrix's index plus one half over 16: its 2 x 2
+// level from the coordinates' low bits, then the next level from their second bits. The pattern moves with TAA's jitter
+// (zero without TAA), so successive frames dither different pixels and TAA resolves the fade.
+float GetFadeThreshold(uint2 pixel)
+{
+	const uint2 offset = uint2(clamp(floor((View.Jitter + 0.5) * 4.0), 0.0, 3.0));
+	const uint2 p = (pixel + offset) & 3u;
+	const uint low = (((p.x ^ p.y) & 1u) << 1) | (p.y & 1u);
+	const uint high = ((((p.x ^ p.y) >> 1) & 1u) << 1) | ((p.y >> 1) & 1u);
+	return (float((low << 2) | high) + 0.5) / 16.0;
+}
+
 // Samples the material's maps, each with its UV set, and builds the normal-mapped shading frame. The vertex colour
-// multiplies the base colour (M23).
+// multiplies the base colour (M23). M31: an instance with DrawFlagMaterialParameters offsets the maps' coordinates, tints
+// the base colour, adds its emission and its dissolve's edge, and, for a Blend material, scales the alpha by its Opacity
+// and drops it where it dissolves.
 Surface EvaluateSurface(VertexOutput input, bool isFrontFace)
 {
-	const float4 baseColor = BaseColorMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagBaseColorUV1)) * Material.BaseColor
-		* input.Color;
-	const float4 metallicRoughness =
-		MetallicRoughnessMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagMetallicRoughnessUV1));
-	float3 tangentNormal = NormalMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagNormalUV1)).xyz * 2.0 - 1.0;
+	const float4 baseColor = BaseColorMap.Sample(AnisoWrap, GetSurfaceTexCoord(input, MaterialFlagBaseColorUV1)) * Material.BaseColor * input.Color;
+	const float4 metallicRoughness = MetallicRoughnessMap.Sample(AnisoWrap, GetSurfaceTexCoord(input, MaterialFlagMetallicRoughnessUV1));
+	float3 tangentNormal = NormalMap.Sample(AnisoWrap, GetSurfaceTexCoord(input, MaterialFlagNormalUV1)).xyz * 2.0 - 1.0;
 	// A two-channel normal map (BC5, or the decode fallback's RGBA8 copy of one, MaterialFlagNormalMapTwoChannel) stores x
 	// and y only: z is reconstructed from them, before NormalScale scales x and y, as glTF's unit normals have it.
 	if ((Material.Flags & MaterialFlagNormalMapTwoChannel) != 0)
 		tangentNormal.z = sqrt(saturate(1.0 - dot(tangentNormal.xy, tangentNormal.xy)));
-	const float occlusion = OcclusionMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagOcclusionUV1)).r;
-	const float3 emissiveMap = EmissiveMap.Sample(AnisoWrap, GetMapTexCoord(input.TexCoord, input.TexCoord1, MaterialFlagEmissiveUV1)).rgb;
+	const float occlusion = OcclusionMap.Sample(AnisoWrap, GetSurfaceTexCoord(input, MaterialFlagOcclusionUV1)).r;
+	const float3 emissiveMap = EmissiveMap.Sample(AnisoWrap, GetSurfaceTexCoord(input, MaterialFlagEmissiveUV1)).rgb;
 
 	Surface surface;
 	surface.BaseColor = baseColor;
@@ -269,6 +324,22 @@ Surface EvaluateSurface(VertexOutput input, bool isFrontFace)
 	surface.PerceptualRoughness = clamp(Material.Roughness * metallicRoughness.g, MinPerceptualRoughness, 1.0);
 	surface.Occlusion = 1.0 + Material.OcclusionStrength * (occlusion - 1.0);
 	surface.Emissive = (Material.Flags & MaterialFlagEmissiveMap) != 0 ? Material.Emissive * emissiveMap : Material.Emissive;
+	if (HasMaterialParameters(input))
+	{
+		const InstanceRecord record = Instances[input.Instance];
+		surface.BaseColor.rgb *= record.Tint;
+		surface.Emissive += record.Emissive;
+		if (record.DissolveAmount > 0.0)
+		{
+			const float noise = SampleDissolveNoise(input, record);
+			if (noise < record.DissolveAmount + record.DissolveEdgeWidth)
+				surface.Emissive += record.DissolveEdge;
+			if (Material.AlphaMode == MaterialAlphaModeBlend && IsDissolved(record, noise))
+				surface.BaseColor.a = 0.0;
+		}
+		if (Material.AlphaMode == MaterialAlphaModeBlend)
+			surface.BaseColor.a *= record.Opacity;
+	}
 
 	// The tangent frame: the tangent made orthogonal to the interpolated normal (Gram-Schmidt), the bitangent from their
 	// cross product and the tangent's sign.
@@ -301,16 +372,23 @@ float3 GetDebugViewValue(Surface surface)
 	}
 }
 
-// Instance `instance` of the draw: its record. SV_VulkanInstanceID is gl_InstanceIndex itself, which counts from 0 within
-// the draw since every draw's own first instance is 0; SV_InstanceID would subtract the base instance and need the
-// DrawParameters capability, which needs the shaderDrawParameters device feature.
-InstanceRecord GetInstance(uint instance)
+// The index in Instances of instance `instance` of the draw. SV_VulkanInstanceID is gl_InstanceIndex itself, which counts
+// from 0 within the draw since every draw's own first instance is 0; SV_InstanceID would subtract the base instance and
+// need the DrawParameters capability, which needs the shaderDrawParameters device feature.
+uint GetInstanceIndex(uint instance)
 {
-	return Instances[Draw.FirstInstance + instance];
+	return Draw.FirstInstance + instance;
 }
 
-// The vertex placed by `record`: every vertex entry's position comes from these two products.
-VertexOutput TransformVertex(VertexInput input, InstanceRecord record)
+// Instance `instance` of the draw: its record.
+InstanceRecord GetInstance(uint instance)
+{
+	return Instances[GetInstanceIndex(instance)];
+}
+
+// The vertex placed by `record`, the record at `recordIndex` of Instances: every vertex entry's position comes from these
+// two products.
+VertexOutput TransformVertex(VertexInput input, InstanceRecord record, uint recordIndex)
 {
 	const bool mirrored = IsMirrored(record.Flags);
 	const float4 world = MultiplyExact(record.World, float4(input.Position, 1.0));
@@ -324,6 +402,7 @@ VertexOutput TransformVertex(VertexInput input, InstanceRecord record)
 	output.TexCoord1 = input.TexCoord1;
 	output.Color = input.Color;
 	output.Flags = record.Flags;
+	output.Instance = recordIndex;
 	return output;
 }
 
@@ -340,7 +419,7 @@ float4 GetPreviousClip(PrepassVertexInput input, InstanceRecord record)
 [shader("vertex")]
 VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 {
-	return TransformVertex(input, GetInstance(instance));
+	return TransformVertex(input, GetInstance(instance), GetInstanceIndex(instance));
 }
 
 [shader("vertex")]
@@ -348,7 +427,7 @@ PrepassVertexOutput VSPrepass(PrepassVertexInput input, uint instance : SV_Vulka
 {
 	const InstanceRecord record = GetInstance(instance);
 	PrepassVertexOutput output;
-	output.Surface = TransformVertex(input.Vertex, record);
+	output.Surface = TransformVertex(input.Vertex, record, GetInstanceIndex(instance));
 	output.CurrentClip = output.Surface.Position;
 	output.PreviousClip = GetPreviousClip(input, record);
 	return output;
@@ -359,7 +438,7 @@ PickingVertexOutput VSPicking(PrepassVertexInput input, uint instance : SV_Vulka
 {
 	const InstanceRecord record = GetInstance(instance);
 	PickingVertexOutput output;
-	output.Surface = TransformVertex(input.Vertex, record);
+	output.Surface = TransformVertex(input.Vertex, record, GetInstanceIndex(instance));
 	output.CurrentClip = output.Surface.Position;
 	output.PreviousClip = GetPreviousClip(input, record);
 	output.EntityId = record.EntityId;
@@ -378,11 +457,23 @@ OverdrawVertexOutput VSOverdraw(OverdrawVertexInput input, uint instance : SV_Vu
 	return output;
 }
 
-// The coverage of a fragment: all of it, or none for a Mask material's point below the cutoff (ALPHA_MASK).
-uint GetCoverage(Surface surface)
+// The coverage of a fragment: all of it, or (ALPHA_MASK) none for a Mask material's point below the cutoff and (M31) for
+// a point its instance's dissolve or fade removes. An Opaque material draws with the Mask variants only for its
+// instance's parameters, so only a Mask material tests its alpha.
+uint GetCoverage(VertexOutput input, Surface surface)
 {
 #if ALPHA_MASK
-	return surface.BaseColor.a < Material.AlphaCutoff ? 0u : 0xFFFFFFFFu;
+	if (Material.AlphaMode == MaterialAlphaModeMask && surface.BaseColor.a < Material.AlphaCutoff)
+		return 0u;
+	if (HasMaterialParameters(input))
+	{
+		const InstanceRecord record = Instances[input.Instance];
+		if (record.DissolveAmount > 0.0 && IsDissolved(record, SampleDissolveNoise(input, record)))
+			return 0u;
+		if (record.Opacity < GetFadeThreshold(uint2(input.Position.xy)))
+			return 0u;
+	}
+	return 0xFFFFFFFFu;
 #else
 	return 0xFFFFFFFFu;
 #endif
@@ -461,7 +552,7 @@ PrepassOutput PSPrepass(PrepassVertexOutput input, bool isFrontFace : SV_IsFront
 	output.Velocity = ComputeMotionVector(input.CurrentClip, input.PreviousClip, View.ViewportSize);
 	output.Roughness = EncodeSpecularInputs(input.Surface, surface);
 #if ALPHA_MASK
-	output.Coverage = GetCoverage(surface);
+	output.Coverage = GetCoverage(input.Surface, surface);
 #endif
 	return output;
 }
@@ -527,7 +618,7 @@ ForwardOutput PSForward(VertexOutput input, bool isFrontFace : SV_IsFrontFace)
 	ForwardOutput output;
 	output.Color = ShadeForward(input, surface);
 #if ALPHA_MASK
-	output.Coverage = GetCoverage(surface);
+	output.Coverage = GetCoverage(input, surface);
 #endif
 	return output;
 }
@@ -552,7 +643,7 @@ PickingOutput PSPicking(PickingVertexOutput input, bool isFrontFace : SV_IsFront
 	output.EntityId = input.EntityId;
 	output.Velocity = ComputeMotionVector(input.CurrentClip, input.PreviousClip, View.ViewportSize);
 	output.Roughness = EncodeSpecularInputs(input.Surface, surface);
-	output.Coverage = GetCoverage(surface);
+	output.Coverage = GetCoverage(input.Surface, surface);
 	return output;
 }
 

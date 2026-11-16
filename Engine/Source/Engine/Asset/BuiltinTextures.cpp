@@ -77,6 +77,15 @@ namespace Engine {
 		constexpr uint32_t ParticleSize = 32;
 		constexpr int64_t ParticleRimSquared = static_cast<int64_t>(ParticleSize) * ParticleSize;
 
+		// The dissolve noise (M31, BuiltinTexture::DissolveNoise): its side, and its octaves' cell sizes in texels (32, 16 and
+		// 8: lattices of 4, 8 and 16 cells a side) with their weights.
+		constexpr uint32_t DissolveNoiseSize = 128;
+		constexpr std::array<uint32_t, 3> DissolveNoiseCellSizes = { 32, 16, 8 };
+		constexpr std::array<int64_t, 3> DissolveNoiseWeights = { 4, 2, 1 };
+		// The equalized values: 1 to 254, so a linear sampler's blend of them stays above 0 and below 1.
+		constexpr uint32_t DissolveNoiseLowest = 1;
+		constexpr uint32_t DissolveNoiseLevels = 254;
+
 	}
 
 	namespace Utils {
@@ -270,6 +279,56 @@ namespace Engine {
 			return static_cast<uint8_t>((2 * numerator + denominator) / (2 * denominator));
 		}
 
+		// The lattice value (0 to 255) of point (i, j) of octave `octave`: an integer hash of the three (a multiply-xorshift
+		// finalizer), so the values depend on nothing but the integers.
+		static int64_t GetDissolveLatticeValue(uint32_t octave, uint32_t i, uint32_t j)
+		{
+			uint32_t hash = (octave + 1U) * 0x9E3779B9U;
+			hash ^= i * 0x85EBCA6BU;
+			hash = (hash ^ (hash >> 15)) * 0x2C1B3C6DU;
+			hash ^= j * 0xC2B2AE35U;
+			hash = (hash ^ (hash >> 12)) * 0x297A2D39U;
+			hash ^= hash >> 15;
+			return static_cast<int64_t>(hash & 0xFFU);
+		}
+
+		// The smoothstep weight of texel offset `offset` in a cell of `cellSize` texels, at the texel's centre t = (2 offset +
+		// 1) / (2 cellSize): t^2 (3 - 2t), as an integer over (2 cellSize)^3.
+		static int64_t GetDissolveSmoothstep(uint32_t offset, uint32_t cellSize)
+		{
+			const int64_t numerator = 2 * static_cast<int64_t>(offset) + 1;
+			const int64_t denominator = 2 * static_cast<int64_t>(cellSize);
+			return numerator * numerator * (3 * denominator - 2 * numerator);
+		}
+
+		// The unequalized noise of texel (x, y): each octave's bilinear blend of its four lattice values with smoothstep
+		// weights, scaled to the common denominator 64^6 (every octave's (2 cellSize)^6 divides it, a power of two), weighted
+		// and summed. Exact integers.
+		static int64_t GetDissolveNoiseValue(uint32_t x, uint32_t y)
+		{
+			int64_t total = 0;
+			const int64_t largest = 2 * static_cast<int64_t>(DissolveNoiseCellSizes[0]);
+			for (uint32_t octave = 0; octave < DissolveNoiseCellSizes.size(); ++octave)
+			{
+				const uint32_t cellSize = DissolveNoiseCellSizes[octave];
+				const uint32_t cells = DissolveNoiseSize / cellSize;
+				const uint32_t i = x / cellSize;
+				const uint32_t j = y / cellSize;
+				const int64_t side = 2 * static_cast<int64_t>(cellSize);
+				const int64_t whole = side * side * side;
+				const int64_t sx = GetDissolveSmoothstep(x % cellSize, cellSize);
+				const int64_t sy = GetDissolveSmoothstep(y % cellSize, cellSize);
+				const uint32_t nextI = (i + 1) % cells;
+				const uint32_t nextJ = (j + 1) % cells;
+				const int64_t blend = GetDissolveLatticeValue(octave, i, j) * (whole - sx) * (whole - sy)
+					+ GetDissolveLatticeValue(octave, nextI, j) * sx * (whole - sy) + GetDissolveLatticeValue(octave, i, nextJ) * (whole - sx) * sy
+					+ GetDissolveLatticeValue(octave, nextI, nextJ) * sx * sy;
+				const int64_t scale = (largest / side) * (largest / side) * (largest / side) * (largest / side) * (largest / side) * (largest / side);
+				total += DissolveNoiseWeights[octave] * blend * scale;
+			}
+			return total;
+		}
+
 		[[maybe_unused]] static bool IsSpriteTexture(BuiltinTexture texture)
 		{
 			return texture == BuiltinTexture::SpriteSquare || texture == BuiltinTexture::SpriteRounded || texture == BuiltinTexture::SpriteBevel
@@ -292,6 +351,8 @@ namespace Engine {
 					return GenerateBuiltinSpriteTexture(texture);
 				case BuiltinTexture::Particle:
 					return GenerateBuiltinParticleTexture();
+				case BuiltinTexture::DissolveNoise:
+					return GenerateBuiltinDissolveNoiseTexture();
 			}
 			ENGINE_CORE_ASSERT(false, "Unknown BuiltinTexture {}", std::to_underlying(texture));
 			return CreateChecker(Magenta, Black);
@@ -313,6 +374,7 @@ namespace Engine {
 			case BuiltinTexture::SpriteBevel:   return "SpriteBevel";
 			case BuiltinTexture::SpriteCircle:  return "SpriteCircle";
 			case BuiltinTexture::Particle:      return "Particle";
+			case BuiltinTexture::DissolveNoise: return "DissolveNoise";
 		}
 		return "Unknown";
 	}
@@ -352,6 +414,38 @@ namespace Engine {
 		}
 		// One level, as the sprite textures: the particles' quads sample without mips.
 		Utils::AppendLevel(generated, ParticleSize, ParticleSize, texels);
+		return generated;
+	}
+
+	TextureData GenerateBuiltinDissolveNoiseTexture()
+	{
+		constexpr size_t TexelCount = static_cast<size_t>(DissolveNoiseSize) * DissolveNoiseSize;
+		std::vector<int64_t> values(TexelCount);
+		for (uint32_t y = 0; y < DissolveNoiseSize; ++y)
+		{
+			for (uint32_t x = 0; x < DissolveNoiseSize; ++x)
+				values[static_cast<size_t>(y) * DissolveNoiseSize + x] = Utils::GetDissolveNoiseValue(x, y);
+		}
+		// The equalization: the texels by rank (value, then index), the k-th of them taking level 1 + k * 254 / 16384.
+		std::vector<uint32_t> order(TexelCount);
+		for (uint32_t index = 0; index < order.size(); ++index)
+			order[index] = index;
+		std::ranges::sort(order, [&values](uint32_t left, uint32_t right)
+		{
+			return values[left] != values[right] ? values[left] < values[right] : left < right;
+		});
+		TextureData generated;
+		generated.Format = TextureFormat::R8Unorm;
+		generated.Width = DissolveNoiseSize;
+		generated.Height = DissolveNoiseSize;
+		generated.Pixels.resize(TexelCount);
+		for (size_t rank = 0; rank < order.size(); ++rank)
+		{
+			const auto level = static_cast<uint32_t>(rank * DissolveNoiseLevels / TexelCount);
+			generated.Pixels[order[rank]] = static_cast<std::byte>(DissolveNoiseLowest + level);
+		}
+		// One level: the dissolve samples the noise without mips, so a distant surface keeps its pattern instead of a grey mean.
+		generated.Mips.push_back({ .Width = DissolveNoiseSize, .Height = DissolveNoiseSize, .Offset = 0, .Size = TexelCount });
 		return generated;
 	}
 

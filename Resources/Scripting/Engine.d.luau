@@ -639,6 +639,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "ReflectionProbe"): ReflectionProbe?
 	function GetComponent(self, name: "Terrain"): Terrain?
 	function GetComponent(self, name: "TerrainCollider"): TerrainCollider?
+	function GetComponent(self, name: "MaterialParameters"): MaterialParameters?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -665,6 +666,8 @@ declare extern type Entity with
 	IsValid: (self: Entity) -> boolean
 	-- The entity's Light2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Light2D: Light2D?
+	-- The entity's MaterialParameters component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	MaterialParameters: MaterialParameters?
 	-- The entity's MeshCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	MeshCollider: MeshCollider?
 	-- The entity's MeshRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -795,6 +798,32 @@ declare extern type Light2D with
 	Radius: number
 	-- Whether the light is a point light around the entity or a global light of the whole view. [All modes; Runtime|Test; pure/read; setter mutates]
 	Type: Light2DType
+end
+
+-- Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes.
+declare extern type MaterialParameters with
+	-- How much of the surface has dissolved, from 0 (none) to 1 (all), by a built-in noise over the first texture coordinates; shadows dissolve too. [All modes; Runtime|Test; pure/read; setter mutates]
+	DissolveAmount: number
+	-- The linear colour of the glow along the dissolve's edge, scaled by DissolveEdgeStrength. [All modes; Runtime|Test; pure/read; setter mutates]
+	DissolveEdgeColor: Color
+	-- How bright the dissolve's edge glows: DissolveEdgeColor times this, in the units of a material's emission. [All modes; Runtime|Test; pure/read; setter mutates]
+	DissolveEdgeStrength: number
+	-- How wide the glowing edge is, as the share of the noise just above DissolveAmount that glows; 0 draws no edge. [All modes; Runtime|Test; pure/read; setter mutates]
+	DissolveEdgeWidth: number
+	-- How many times the dissolve noise repeats per unit of the mesh's first texture coordinates. [All modes; Runtime|Test; pure/read; setter mutates]
+	DissolveNoiseScale: number
+	-- The linear colour of the glow added to every material's emission, scaled by EmissiveStrength. [All modes; Runtime|Test; pure/read; setter mutates]
+	Emissive: Color
+	-- How bright the added glow is: Emissive times this, in the units of a material's emission; 0 adds none. [All modes; Runtime|Test; pure/read; setter mutates]
+	EmissiveStrength: number
+	-- The fade, from 1 (solid) to 0 (gone): a dithered see-through pattern on Opaque and Mask materials, which keep their depth, sorting and shadow, and a factor of a Blend material's alpha. [All modes; Runtime|Test; pure/read; setter mutates]
+	Opacity: number
+	-- The linear colour that multiplies the base colour of every material. [All modes; Runtime|Test; pure/read; setter mutates]
+	Tint: Color
+	-- Added to every map's texture coordinates after the material's own scale and offset; whole units repeat the texture. [All modes; Runtime|Test; pure/read; setter mutates]
+	UVOffset: vector
+	-- How fast the texture coordinates move, in texture units per second of simulation time, added to UVOffset; it advances in play only. [All modes; Runtime|Test; pure/read; setter mutates]
+	UVScroll: vector
 end
 
 -- A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies.

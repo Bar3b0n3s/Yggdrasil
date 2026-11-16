@@ -89,6 +89,10 @@ namespace Engine {
 		const PointShadowSet* Points = nullptr;                        // borrowed for Record only
 		nvrhi::ITexture* PointTarget = nullptr;                        // GetPointTargetDesc, 6 x MaxPointShadowLights layers
 		std::span<const nvrhi::FramebufferHandle> PointFramebuffers{}; // CreateFramebuffers(PointTarget), one per layer
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6): the dissolve noise the Mask casters sample for an
+		// instance that dissolves (BuiltinAssetHandles::DissolveNoiseTexture's mirror); null binds the pass's own neutral
+		// white texture, under which only an amount of 1 dissolves anything.
+		nvrhi::ITexture* DissolveNoise = nullptr;
 	};
 
 	struct ShadowRenderResult
@@ -100,7 +104,8 @@ namespace Engine {
 	// Shared immutable pipelines; per-view targets, framebuffers, caster constants, instance buffer and binding cache supplied
 	// by the caller. Main thread, no stored spans. M23 (R-INST): every caster draw is instanced (Shadow.slang reads its world
 	// matrix from its instance record), and RenderPassStats::DrawCalls counts the instanced draws. Six variants: Opaque/Mask
-	// x back/front/none cull, matching M8 alpha test, mirrored determinant and DoubleSided. Blend does not cast. Reverse-Z
+	// x back/front/none cull, matching M8 alpha test, mirrored determinant and DoubleSided (M31: the Mask variants also clip a
+	// dissolving instance by its noise, Docs/Decisions/0046-m31-material-parameters.md decision 5). Blend does not cast. Reverse-Z
 	// clear 0/GreaterOrEqual. Directional casters nearer the light than the map's near plane are pancaked per fragment
 	// (GraphicsDeviceInfo::DepthClamp, no device feature: Shadow.slang clamps the exactly interpolated depth);
 	// GraphicsSpecification::DisableDepthClamp forces the extended-near fallback, which clips them. Both paths are tested.
@@ -134,7 +139,8 @@ namespace Engine {
 
 		// M23 (C23.1, R-INST; Docs/Decisions/0034-m23-contract.md decision 2): resolves `casters` through the cache's mirrors
 		// into the submesh draws that cast (the items with CastShadows and a mesh whose buffers exist; each submesh with
-		// indices whose material is Opaque, or Mask with its constants and base colour map: Blend does not cast), sorted so
+		// indices whose material is Opaque, or Mask with its constants and base colour map: Blend does not cast; M31: an
+		// Opaque material's draw of a dissolving item takes the Mask variant with its material, SelectMeshAlphaMode), sorted so
 		// that equal draws are adjacent: by (variant, Mask material, mesh, submesh), then caster order (a depth-only pass's
 		// result does not depend on its order, and an Opaque caster binds no material). Appends one instance record per draw
 		// to `instances` (MakeMeshInstanceRecord's, RenderPrepare.h: {World, PreviousWorld or World, PickId, the mirroring

@@ -34,15 +34,15 @@
 // bytes, the binding's stride 16).
 //
 // Binding layouts (§8.4), shared through PipelineFactory::CreateBindingLayouts so one binding set serves every variant:
-//   - prepass set 0: b0 ViewConstants, t5 BRDFLut, t10 Instances, s0 LinearClamp, s2 AnisoWrap and the DrawConstants push
-//     constants (M26: the DFG LUT and its sampler for SceneRoughness's specular inputs);
+//   - prepass set 0: b0 ViewConstants, t5 BRDFLut, t10 Instances, t15 the dissolve noise (M31), s0 LinearClamp, s2 AnisoWrap
+//     and the DrawConstants push constants (M26: the DFG LUT and its sampler for SceneRoughness's specular inputs);
 //   - overdraw set 0 (the Overdraw data view's pipelines, M26: the prepass's before M26): b0 ViewConstants, t10 Instances,
 //     s2 AnisoWrap and the push constants;
 //   - forward set 0: b0 ViewConstants, b1 ShadowConstants, b2 EnvironmentConstants, b3 LightClusterConstants, b4
 //     ProbeConstants (M26), t0 Lights, t1 ShadowCascades, t2 ShadowAtlas, t3 EnvSpecular, t5 BRDFLut, t6 AmbientOcclusion,
 //     t8 ViewDepth, t9 SceneNormals, t10 Instances, t11 the light cluster masks (M23, Renderer/LightClusterPass.h), t12
-//     PointShadowMaps, t13 the irradiance volumes' coefficients and t14 the reflection probes' cubes (M26), s0 LinearClamp,
-//     s1 ShadowCompare, s2 AnisoWrap and the push constants;
+//     PointShadowMaps, t13 the irradiance volumes' coefficients and t14 the reflection probes' cubes (M26), t15 the dissolve
+//     noise (M31), s0 LinearClamp, s1 ShadowCompare, s2 AnisoWrap and the push constants;
 //   - set 1 (every variant): b0 MaterialConstants and t0..t4 the base colour, metallic-roughness, normal, occlusion and
 //     emissive maps.
 
@@ -83,6 +83,11 @@ namespace Engine {
 		// array), which Common/Probes.slang reads with ProbeConstantsRegister's constants.
 		inline constexpr uint32_t IrradianceProbesRegister = 13;
 		inline constexpr uint32_t ReflectionProbeCubesRegister = 14;
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6): the dissolve noise (BuiltinAssetHandles::
+		// DissolveNoiseTexture), sampled with AnisoWrapRegister's sampler by the prepass and forward variants' fragment shaders
+		// for an instance that dissolves, and by the Shadow program's Mask casters (Renderer/ShadowPass.h) at the same
+		// register. The Terrain program declares it unread, since it shares the forward set (ADR 0042's Terrain.slang row).
+		inline constexpr uint32_t DissolveNoiseRegister = 15;
 		inline constexpr uint32_t LinearClampRegister = 0;
 		inline constexpr uint32_t ShadowCompareRegister = 1;
 		inline constexpr uint32_t AnisoWrapRegister = 2;

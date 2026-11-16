@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/MaterialParameters.scene"}}
+{"method": "play.step", "params": {"ticks": 160, "input": [{"tick": 64, "type": "Action", "name": "Jump", "state": "Tap"}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/MaterialParameters.replay", "expect": [{"tick": 159, "luau": "local enemy = Scene.FindByName(\"Enemy\").MaterialParameters\nlocal lava = Scene.FindByName(\"Lava\").MaterialParameters\nreturn enemy.DissolveAmount == 1 and enemy.EmissiveStrength == 0 and lava.UVScroll.x > 0"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

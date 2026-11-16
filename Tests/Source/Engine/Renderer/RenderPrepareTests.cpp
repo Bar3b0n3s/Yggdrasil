@@ -2,6 +2,7 @@
 
 #include "Engine/Renderer/RenderPrepare.h"
 
+#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
 #include "Engine/Graphics/Image.h"
@@ -16,10 +17,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The CPU rules of §8.3 pass 1 (Architecture §15.2 "Renderer (CPU): ... light culling; transparent sort ties";
@@ -223,6 +227,84 @@ namespace Engine {
 			CHECK(mirroredRecord.EntityId == 0);
 			CHECK(mirroredRecord.Flags == DrawFlagMirrored);
 		}
+
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 4): non-neutral parameters ride in the record with
+		// DrawFlagMaterialParameters, which tells the fragment shaders to read them; neutral ones leave the record as it was
+		// before M31, flag clear, so an item without the component draws exactly as before.
+		TEST_CASE("RenderPrepare: an instance record carries its item's material parameters and their flag only when they are not neutral")
+		{
+			MeshDrawItem item{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)), .PickId = 3 };
+			const InstanceRecord neutral = MakeMeshInstanceRecord(item, DrawFlagReceiveShadows);
+			CHECK(neutral.Flags == DrawFlagReceiveShadows);
+			CHECK(neutral.Tint == glm::vec3(1.0f));
+			CHECK(neutral.Emissive == glm::vec3(0.0f));
+			CHECK(neutral.UVOffset == glm::vec2(0.0f));
+			CHECK(neutral.Opacity == 1.0f);
+			CHECK(neutral.DissolveAmount == 0.0f);
+			CHECK(neutral.DissolveEdge == glm::vec3(0.0f));
+			CHECK(neutral.DissolveEdgeWidth == 0.0f);
+			CHECK(neutral.DissolveNoiseScale == 1.0f);
+
+			item.Parameters = { .Tint = glm::vec3(1.0f, 0.5f, 0.25f),
+				.Emissive = glm::vec3(2.0f, 0.0f, 0.0f),
+				.UVOffset = glm::vec2(0.25f, 0.75f),
+				.DissolveAmount = 0.5f,
+				.DissolveEdge = glm::vec3(0.0f, 0.0f, 3.0f),
+				.DissolveEdgeWidth = 0.1f,
+				.DissolveNoiseScale = 4.0f,
+				.Opacity = 0.75f };
+			const InstanceRecord record = MakeMeshInstanceRecord(item, DrawFlagReceiveShadows);
+			CHECK(record.Flags == (DrawFlagReceiveShadows | DrawFlagMaterialParameters));
+			CHECK(record.World == item.World);
+			CHECK(record.EntityId == 3);
+			CHECK(record.Tint == item.Parameters.Tint);
+			CHECK(record.Emissive == item.Parameters.Emissive);
+			CHECK(record.UVOffset == item.Parameters.UVOffset);
+			CHECK(record.Opacity == 0.75f);
+			CHECK(record.DissolveAmount == 0.5f);
+			CHECK(record.DissolveEdge == item.Parameters.DissolveEdge);
+			CHECK(record.DissolveEdgeWidth == 0.1f);
+			CHECK(record.DissolveNoiseScale == 4.0f);
+
+			// Any one member off its neutral value sets the flag.
+			item.Parameters = {};
+			item.Parameters.Opacity = 0.99f;
+			CHECK((MakeMeshInstanceRecord(item).Flags & DrawFlagMaterialParameters) != 0);
+			item.Parameters = {};
+			item.Parameters.UVOffset.y = 0.5f;
+			CHECK((MakeMeshInstanceRecord(item).Flags & DrawFlagMaterialParameters) != 0);
+			item.Parameters = {};
+			CHECK(item.Parameters.IsNeutral());
+			CHECK((MakeMeshInstanceRecord(item).Flags & DrawFlagMaterialParameters) == 0);
+		}
+
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 5): an Opaque material draws with the Mask variants
+		// while its item dissolves or fades, so its fragment shaders can clip; its shadow casters only while it dissolves,
+		// since a fade keeps the shadow. Mask and Blend materials keep their modes.
+		TEST_CASE("RenderPrepare: an Opaque material takes the Mask variants while its item dissolves or fades, its shadow only while it dissolves")
+		{
+			const MeshMaterialParameters neutral;
+			MeshMaterialParameters tinted;
+			tinted.Tint = glm::vec3(0.5f);
+			MeshMaterialParameters dissolving;
+			dissolving.DissolveAmount = 0.25f;
+			MeshMaterialParameters fading;
+			fading.Opacity = 0.5f;
+			for (const bool shadow : { false, true })
+			{
+				CAPTURE(shadow);
+				CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, neutral, shadow) == AlphaMode::Opaque);
+				CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, tinted, shadow) == AlphaMode::Opaque);
+				CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, dissolving, shadow) == AlphaMode::Mask);
+				for (const MeshMaterialParameters& parameters : { neutral, tinted, dissolving, fading })
+				{
+					CHECK(SelectMeshAlphaMode(AlphaMode::Mask, parameters, shadow) == AlphaMode::Mask);
+					CHECK(SelectMeshAlphaMode(AlphaMode::Blend, parameters, shadow) == AlphaMode::Blend);
+				}
+			}
+			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, fading, false) == AlphaMode::Mask);
+			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, fading, true) == AlphaMode::Opaque);
+		}
 	}
 
 	TEST_SUITE(Test::GpuSuite)
@@ -386,6 +468,313 @@ namespace Engine {
 				const SelectionDrawSet mask = SelectionPass::PrepareDraws(setup.Cache(), snapshot, true, selection);
 				CHECK(mask.Draws.size() == 2);
 				checkRecords(selection);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M31's acceptance (Docs/Decisions/0046-m31-material-parameters.md decision 4; World Tree's brief 5): the parameters
+		// ride in the instance records, so 200 instances of one mesh and material with 200 different tints draw in as few
+		// draws as 200 untinted ones: one instanced draw in each opaque pass.
+		TEST_CASE("SceneRenderer: 200 tinted instances of one mesh and material draw in as few draws as untinted ones")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				const MeshDrawItem quad = snapshot.Meshes.front();
+				snapshot.Meshes.clear();
+				for (int index = 0; index < 200; ++index)
+				{
+					MeshDrawItem item = quad;
+					item.World = glm::translate(glm::mat4(1.0f), glm::vec3(static_cast<float>(index % 20) * 0.25f - 2.4f, static_cast<float>(index / 20) * 0.25f - 1.2f, -8.0f))
+						* glm::scale(glm::mat4(1.0f), glm::vec3(0.1f));
+					item.Entity = UUID(static_cast<uint64_t>(5000 + index));
+					item.PickId = 0;
+					snapshot.Meshes.push_back(std::move(item));
+				}
+				const auto draws = [&setup](std::string_view pass)
+				{
+					const RenderStats stats = setup.Renderer().GetRenderStats();
+					const RenderPassStats* found = Test::SceneRendererIntegrationFixture::FindPass(stats, pass);
+					return found != nullptr ? found->DrawCalls : 0U;
+				};
+				const Image untinted = setup.Render(snapshot);
+				const uint32_t untintedForward = draws("ForwardOpaque");
+				const uint32_t untintedDepth = draws("DepthNormal");
+				for (size_t index = 0; index < snapshot.Meshes.size(); ++index)
+				{
+					const float step = static_cast<float>(index) / 199.0f;
+					snapshot.Meshes[index].Parameters.Tint = glm::vec3(1.0f - step, step, 0.5f);
+				}
+				++snapshot.FrameIndex;
+				const Image tinted = setup.Render(snapshot);
+				CHECK(untintedForward == 1);
+				CHECK(untintedDepth == 1);
+				CHECK(draws("ForwardOpaque") == untintedForward);
+				CHECK(draws("DepthNormal") == untintedDepth);
+				CHECK(tinted.Pixels != untinted.Pixels);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M31 (decisions 2 and 5): the tint multiplies the base colour, the emission adds to the material's, and the offset
+		// moves every map's texture coordinates: by half a checker period it swaps the squares, by a whole period it gives the
+		// same image again.
+		TEST_CASE("SceneRenderer: a tint multiplies an item's base colour, its emission adds and its offset moves its textures")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				const auto centre = [](const Image& image, size_t channel)
+				{
+					return Test::SceneRendererIntegrationFixture::Channel(image, 32, 32, channel);
+				};
+				const Image plain = setup.Render(snapshot);
+				REQUIRE(centre(plain, 1) > 8);
+				snapshot.Meshes[0].Parameters.Tint = glm::vec3(1.0f, 0.0f, 0.0f);
+				++snapshot.FrameIndex;
+				const Image red = setup.Render(snapshot);
+				CHECK(centre(red, 0) == centre(plain, 0));
+				CHECK(centre(red, 1) < centre(plain, 1) / 2);
+				CHECK(centre(red, 2) < centre(plain, 2) / 2);
+				snapshot.Meshes[0].Parameters = {};
+				snapshot.Meshes[0].Parameters.Emissive = glm::vec3(0.0f, 1.0f, 0.0f);
+				++snapshot.FrameIndex;
+				const Image glowing = setup.Render(snapshot);
+				CHECK(centre(glowing, 1) > centre(plain, 1) + 64);
+				CHECK(centre(glowing, 0) == centre(plain, 0));
+
+				// The engine's checker texture (8 squares a side) as the base colour.
+				auto checker = CreateRef<MaterialData>();
+				checker->BaseColorMap = TypedAssetHandle<AssetType::Texture>(BuiltinAssetHandles::CheckerTexture);
+				setup.Assets().Publish(UUID(8914), checker);
+				snapshot.Meshes[0].Parameters = {};
+				snapshot.Meshes[0].Materials = { UUID(8914) };
+				const auto renderOffset = [&setup, &snapshot](float offset)
+				{
+					snapshot.Meshes[0].Parameters.UVOffset = glm::vec2(offset, 0.0f);
+					++snapshot.FrameIndex;
+					return setup.Render(snapshot);
+				};
+				const Image squares = renderOffset(0.0f);
+				const Image swapped = renderOffset(0.125f);
+				const Image period = renderOffset(0.25f);
+				size_t changed = 0;
+				int periodDelta = 0;
+				for (size_t index = 0; index < squares.Pixels.size(); ++index)
+				{
+					const int before = std::to_integer<int>(squares.Pixels[index]);
+					changed += std::abs(before - std::to_integer<int>(swapped.Pixels[index])) > 16 ? 1U : 0U;
+					periodDelta = std::max(periodDelta, std::abs(before - std::to_integer<int>(period.Pixels[index])));
+				}
+				CAPTURE(changed);
+				CAPTURE(periodDelta);
+				CHECK(changed > squares.Pixels.size() / 8);
+				CHECK(periodDelta <= 3);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M31 (decision 5): a dissolve clips the fragments whose noise lies below its amount (none at 0, about half at one
+		// half, all at 1) through the Mask variants, which an Opaque material takes while it dissolves, and glows along the
+		// edge; a fade dithers the share 1 - Opacity of the pixels away. The opaque passes keep one draw each.
+		TEST_CASE("SceneRenderer: a dissolve and a fade clip an Opaque item's pixels through the Mask variants")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				// The quad 1.5 m away fills the middle of the view: the 24 x 24 pixels around the centre are all its own.
+				snapshot.Meshes[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.5f));
+				const auto shownShare = [](const Image& image)
+				{
+					size_t shown = 0;
+					for (uint32_t y = 20; y < 44; ++y)
+						for (uint32_t x = 20; x < 44; ++x)
+							shown += Test::SceneRendererIntegrationFixture::Channel(image, x, y, 1) > 2 ? 1U : 0U;
+					return static_cast<double>(shown) / (24.0 * 24.0);
+				};
+				const auto render = [&setup, &snapshot](const MeshMaterialParameters& parameters)
+				{
+					snapshot.Meshes[0].Parameters = parameters;
+					++snapshot.FrameIndex;
+					return setup.Render(snapshot);
+				};
+				CHECK(shownShare(render({})) == 1.0);
+				CHECK(shownShare(render({ .DissolveAmount = 1.0f })) == 0.0);
+				// The noise repeated 8 times over the quad: the 24 x 24 pixels see about two of its tiles.
+				const double half = shownShare(render({ .DissolveAmount = 0.5f, .DissolveNoiseScale = 8.0f }));
+				CAPTURE(half);
+				CHECK(half > 0.25);
+				CHECK(half < 0.75);
+				const RenderStats stats = setup.Renderer().GetRenderStats();
+				const RenderPassStats* depth = Test::SceneRendererIntegrationFixture::FindPass(stats, "DepthNormal");
+				REQUIRE(depth != nullptr);
+				CHECK(depth->DrawCalls == 1);
+
+				// The edge glows blue where the noise lies just above the amount.
+				const Image edged = render({ .DissolveAmount = 0.4f, .DissolveEdge = glm::vec3(0.0f, 0.0f, 4.0f), .DissolveEdgeWidth = 0.2f, .DissolveNoiseScale = 8.0f });
+				size_t blue = 0;
+				for (uint32_t y = 20; y < 44; ++y)
+					for (uint32_t x = 20; x < 44; ++x)
+						blue += Test::SceneRendererIntegrationFixture::Channel(edged, x, y, 2) > Test::SceneRendererIntegrationFixture::Channel(edged, x, y, 1) + 64 ? 1U : 0U;
+				CHECK(blue > 24);
+
+				CHECK(shownShare(render({ .Opacity = 0.0f })) == 0.0);
+				const double faded = shownShare(render({ .Opacity = 0.5f }));
+				CAPTURE(faded);
+				CHECK(faded > 0.4);
+				CHECK(faded < 0.6);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M31 (decision 5): a dissolve removes its share of the item's shadow too (its casters take the Mask variant), while a
+		// fade keeps the whole shadow: a faded wall still shades what it hides, as the brief's walls in front of the player do.
+		TEST_CASE("SceneRenderer: a dissolved caster casts no shadow while a faded one keeps its whole shadow")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				RenderSnapshot snapshot = setup.Snapshot();
+				// A wall 6 m away and a caster 4 m away left of the centre; the sun shines down -Z and to the right, so the caster's
+				// shadow falls on the wall right of the centre, beside the caster, not behind it.
+				const MeshDrawItem quad = snapshot.Meshes.front();
+				MeshDrawItem wall = quad;
+				wall.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(4.0f));
+				// A dark caster, so the camera tells it from the lit wall behind it.
+				auto dark = CreateRef<MaterialData>();
+				dark->BaseColor = glm::vec4(0.02f, 0.02f, 0.02f, 1.0f);
+				setup.Assets().Publish(UUID(8917), dark);
+				MeshDrawItem caster = quad;
+				caster.World = glm::translate(glm::mat4(1.0f), glm::vec3(-0.5f, 0.0f, -4.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f));
+				caster.Materials = { UUID(8917) };
+				caster.Entity = UUID(40);
+				caster.PickId = 2;
+				snapshot.Meshes = { wall, caster };
+				snapshot.Lights.push_back({ .Type = RenderLightType::Directional,
+					.Intensity = 3.0f,
+					.Direction = glm::normalize(glm::vec3(0.5f, 0.0f, -1.0f)),
+					.CastShadows = true,
+					.ShadowDistance = 20.0f });
+				const auto render = [&setup, &snapshot](const MeshMaterialParameters& parameters)
+				{
+					snapshot.Meshes[1].Parameters = parameters;
+					++snapshot.FrameIndex;
+					return setup.Render(snapshot);
+				};
+				const auto green = [](const Image& image, uint32_t x)
+				{
+					return Test::SceneRendererIntegrationFixture::Channel(image, x, 32, 1);
+				};
+				// Pixel 37 sees the wall in the caster's shadow and pixel 25 the caster itself; the wall alone shows both lit.
+				const Image shadowed = render({});
+				const MeshDrawItem kept = snapshot.Meshes[1];
+				snapshot.Meshes = { wall };
+				++snapshot.FrameIndex;
+				const Image bare = setup.Render(snapshot);
+				snapshot.Meshes = { wall, kept };
+				REQUIRE(green(shadowed, 37) + 24 < green(bare, 37));
+				REQUIRE(std::abs(green(shadowed, 25) - green(bare, 25)) > 8);
+				// Dissolved: neither the caster nor its shadow is left. Faded: the caster is gone and its whole shadow stays.
+				const Image dissolved = render({ .DissolveAmount = 1.0f });
+				CHECK(std::abs(green(dissolved, 37) - green(bare, 37)) <= 2);
+				CHECK(std::abs(green(dissolved, 25) - green(bare, 25)) <= 2);
+				const Image faded = render({ .Opacity = 0.0f });
+				CHECK(green(faded, 37) == green(shadowed, 37));
+				CHECK(std::abs(green(faded, 25) - green(bare, 25)) <= 2);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M31 (decision 5): a Blend material stays in the transparent pass: its Opacity scales its alpha (a true fade) and its
+		// dissolved fragments blend nothing.
+		TEST_CASE("SceneRenderer: a Blend material's opacity scales its alpha and its dissolve leaves nothing behind")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				auto glass = CreateRef<MaterialData>();
+				glass->AlphaMode = AlphaMode::Blend;
+				glass->Emissive = glm::vec3(1.0f);
+				setup.Assets().Publish(UUID(8915), glass);
+				RenderSnapshot snapshot = setup.Snapshot();
+				snapshot.Meshes[0].Materials = { UUID(8915) };
+				const auto render = [&setup, &snapshot](const MeshMaterialParameters& parameters)
+				{
+					snapshot.Meshes[0].Parameters = parameters;
+					++snapshot.FrameIndex;
+					return setup.Render(snapshot);
+				};
+				const auto centre = [](const Image& image)
+				{
+					return Test::SceneRendererIntegrationFixture::Channel(image, 32, 32, 1);
+				};
+				const int solid = centre(render({}));
+				const int half = centre(render({ .Opacity = 0.5f }));
+				CAPTURE(solid);
+				CAPTURE(half);
+				CHECK(half > 16);
+				CHECK(half < solid - 16);
+				CHECK(centre(render({ .DissolveAmount = 1.0f })) == 0);
+				const RenderStats stats = setup.Renderer().GetRenderStats();
+				const RenderPassStats* transparent = Test::SceneRendererIntegrationFixture::FindPass(stats, "ForwardTransparent");
+				REQUIRE(transparent != nullptr);
+				CHECK(transparent->DrawCalls == 1);
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// M31 (World Tree's brief 5, "they work on skinned meshes too"): a deformed item's draws carry its record's parameters
+		// as any item's do.
+		TEST_CASE("SceneRenderer: a skinned item takes its tint and its dissolve")
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Test::SceneRendererIntegrationFixture setup(gpu);
+				// The fixture's quad skinned to one joint, which the palette moves 0.5 m right.
+				auto skinned = CreateRef<MeshData>();
+				skinned->Vertices = {
+					{ .Position = { -1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 1 } },
+					{ .Position = { 1, -1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 1 } },
+					{ .Position = { 1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 1, 0 } },
+					{ .Position = { -1, 1, 0 }, .Normal = { 0, 0, 1 }, .Tangent = { 1, 0, 0, 1 }, .TexCoord = { 0, 0 } },
+				};
+				skinned->Indices = { 0, 1, 2, 0, 2, 3 };
+				skinned->Bounds = { { -1, -1, 0 }, { 1, 1, 0 } };
+				skinned->Submeshes = { { .IndexCount = 6, .Bounds = skinned->Bounds } };
+				skinned->Slots = { {} };
+				skinned->Skin = { MeshSkinVertex{}, MeshSkinVertex{}, MeshSkinVertex{}, MeshSkinVertex{} };
+				skinned->SkinJointCount = 1;
+				setup.Assets().Publish(UUID(8916), skinned);
+				RenderSnapshot snapshot = setup.Snapshot();
+				snapshot.Meshes[0].Mesh = UUID(8916);
+				snapshot.Meshes[0].JointPalette = { glm::translate(glm::mat4(1.0f), glm::vec3(0.5f, 0.0f, 0.0f)) };
+				const auto render = [&setup, &snapshot](const MeshMaterialParameters& parameters)
+				{
+					snapshot.Meshes[0].Parameters = parameters;
+					++snapshot.FrameIndex;
+					return setup.Render(snapshot);
+				};
+				const Image plain = render({});
+				const Image red = render({ .Tint = glm::vec3(1.0f, 0.0f, 0.0f) });
+				const Image gone = render({ .DissolveAmount = 1.0f });
+				// Pixel 40 lies inside the moved quad.
+				const auto at = [](const Image& image, size_t channel)
+				{
+					return Test::SceneRendererIntegrationFixture::Channel(image, 40, 32, channel);
+				};
+				REQUIRE(at(plain, 1) > 8);
+				CHECK(at(red, 0) == at(plain, 0));
+				CHECK(at(red, 1) < at(plain, 1) / 2);
+				CHECK(at(gone, 1) == 0);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

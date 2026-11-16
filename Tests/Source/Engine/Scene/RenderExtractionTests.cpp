@@ -10,6 +10,7 @@
 #include "Engine/Scene/Components/EnvironmentComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
+#include "Engine/Scene/Components/MaterialParametersComponent.h"
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/ParticleEmitterComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
@@ -395,6 +396,102 @@ namespace Engine {
 			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(fixture.GetScene(), { .Width = 8, .Height = 8, .Alpha = 0.75f });
 			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
 			CHECK(snapshot->Alpha == 0.75f);
+		}
+
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 3): the request's simulation time is validated as its
+		// alpha is.
+		TEST_CASE("RenderExtraction: a simulation time that is negative or not finite is InvalidArgument")
+		{
+			Test::SceneTestFixture fixture;
+			for (const double time : { -0.5, std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() })
+			{
+				CAPTURE(time);
+				const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(fixture.GetScene(), { .Width = 8, .Height = 8, .SimulationTime = time });
+				REQUIRE_FALSE(snapshot.has_value());
+				CHECK(snapshot.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(fixture.GetScene(), { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+		}
+
+		// M31 (decision 3): a MeshRenderer's MaterialParameters reach its item resolved at the request's simulation time: the
+		// emissions times their strengths, the offset scrolled and wrapped into [0, 1), the edge only while it dissolves; an
+		// entity without the component, and one with the component's defaults at any time, get the neutral parameters.
+		TEST_CASE("RenderExtraction: a mesh's MaterialParameters reach its item, its offset scrolled by the simulation time and wrapped")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity plain = scene.CreateEntity("Plain");
+			plain.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			Entity lava = scene.CreateEntity("Lava");
+			lava.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::PlaneMesh));
+			lava.AddComponent<MaterialParametersComponent>(MaterialParametersComponent{ .Tint = glm::vec3(1.0f, 0.5f, 0.25f),
+				.Emissive = glm::vec3(1.0f, 0.5f, 0.0f),
+				.EmissiveStrength = 4.0f,
+				.UVOffset = glm::vec2(0.25f, -0.5f),
+				.UVScroll = glm::vec2(0.5f, -0.25f),
+				.DissolveAmount = 0.5f,
+				.DissolveEdgeColor = glm::vec3(0.0f, 0.5f, 1.0f),
+				.DissolveEdgeStrength = 2.0f,
+				.DissolveEdgeWidth = 0.125f,
+				.DissolveNoiseScale = 3.0f,
+				.Opacity = 0.75f });
+			Entity defaults = scene.CreateEntity("Defaults");
+			defaults.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::SphereMesh));
+			static_cast<void>(defaults.AddComponent<MaterialParametersComponent>());
+			TransformSystem::Update(scene);
+
+			const auto extract = [&scene](double time)
+			{
+				Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = time });
+				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+				REQUIRE(snapshot->Meshes.size() == 3);
+				return std::move(*snapshot);
+			};
+			const RenderSnapshot atStart = extract(0.0);
+			CHECK(atStart.Meshes[0].Parameters.IsNeutral());
+			CHECK(atStart.Meshes[2].Parameters.IsNeutral());
+			const MeshMaterialParameters& resolved = atStart.Meshes[1].Parameters;
+			CHECK(resolved.Tint == glm::vec3(1.0f, 0.5f, 0.25f));
+			CHECK(resolved.Emissive == glm::vec3(4.0f, 2.0f, 0.0f));
+			CHECK(resolved.UVOffset == glm::vec2(0.25f, 0.5f)); // -0.5 wraps to 0.5
+			CHECK(resolved.DissolveAmount == 0.5f);
+			CHECK(resolved.DissolveEdge == glm::vec3(0.0f, 1.0f, 2.0f));
+			CHECK(resolved.DissolveEdgeWidth == 0.125f);
+			CHECK(resolved.DissolveNoiseScale == 3.0f);
+			CHECK(resolved.Opacity == 0.75f);
+
+			// 3 s later the offset moved (1.5, -0.75) and wrapped: (0.75, 0.75); after an hour of 60 Hz ticks it stays exact.
+			const RenderSnapshot later = extract(3.0);
+			CHECK(later.Meshes[1].Parameters.UVOffset == glm::vec2(0.75f, 0.75f));
+			CHECK(later.Meshes[2].Parameters.IsNeutral());
+			const RenderSnapshot hour = extract(3600.0);
+			CHECK(hour.Meshes[1].Parameters.UVOffset == glm::vec2(0.25f, 0.5f));
+			CHECK(hour.Meshes[2].Parameters.IsNeutral());
+
+			// Without a dissolve the edge is neutral whatever its fields hold, so the parameters are neutral unless something
+			// else is set.
+			MaterialParametersComponent undissolved;
+			undissolved.DissolveEdgeColor = glm::vec3(0.0f, 1.0f, 0.0f);
+			undissolved.DissolveEdgeWidth = 0.5f;
+			undissolved.DissolveNoiseScale = 8.0f;
+			CHECK(ResolveMaterialParameters(undissolved, 7.25).IsNeutral());
+		}
+
+		// M31 (decision 3): a wrapped offset never reaches 1, also where the scrolled value lies a hair below a whole number.
+		TEST_CASE("RenderExtraction: a scrolled offset wraps into [0, 1) at any time")
+		{
+			MaterialParametersComponent component;
+			component.UVScroll = glm::vec2(-1.0f / 3.0f, 0.1f);
+			for (const double time : { 0.0, 1.0 / 60.0, 3.0, 2.5e-8, 1000.0 / 3.0, 12345.678 })
+			{
+				CAPTURE(time);
+				const glm::vec2 offset = ResolveMaterialParameters(component, time).UVOffset;
+				CHECK(offset.x >= 0.0f);
+				CHECK(offset.x < 1.0f);
+				CHECK(offset.y >= 0.0f);
+				CHECK(offset.y < 1.0f);
+			}
 		}
 
 		TEST_CASE("RenderExtraction: runtime scenes interpolate between the previous and the current pose")

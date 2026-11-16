@@ -22,22 +22,41 @@ namespace Engine {
 	//     MeshDrawItem::PreviousWorld, or World when the item has none (no motion), which is every item until M26;
 	//   - EntityId: what the picking prepass writes into EntityId (MeshDrawItem::PickId: 0 not pickable);
 	//   - Flags: the DrawFlag bits of Shared/DrawConstants.h (DrawFlagMirrored, DrawFlagReceiveShadows), which therefore
-	//     move from the per-draw push constants into the record.
-	// The members are ordered so that every Float4x4 starts at a 16-byte boundary and the size is a multiple of 16, which
-	// makes the C++ layout equal the std430 layout of a Vulkan structured buffer.
+	//     move from the per-draw push constants into the record;
+	//   - M31 (Docs/Decisions/0046-m31-material-parameters.md decision 4): the item's material parameters
+	//     (MeshDrawItem::Parameters, the MaterialParameters component as extraction resolved it), which the fragment shaders
+	//     of the Scene program and of the Shadow program's Mask casters read only for an instance with
+	//     DrawFlagMaterialParameters, so an instance without it draws exactly as before M31: Opacity (the dithered fade, 1
+	//     opaque), DissolveAmount (0 none), Tint (multiplies the base colour), Emissive (radiance added to the material's
+	//     emission), DissolveEdge (the radiance added along the dissolve's edge) with DissolveEdgeWidth, DissolveNoiseScale
+	//     (the dissolve noise's repeats per unit of the first texture coordinates) and UVOffset (added to every map's
+	//     texture coordinates after the material's UV transform, the scroll included, in [0, 1)). The neutral values are
+	//     MeshMaterialParameters' defaults (Renderer/RenderSnapshot.h).
+	// The members are ordered so that every Float4x4 and Float3 starts at a 16-byte boundary, every Float2 at an 8-byte one,
+	// and the size is a multiple of 16, which makes the C++ layout equal the std430 layout of a Vulkan structured buffer.
 	struct InstanceRecord
 	{
 		Float4x4 World;
 		Float4x4 PreviousWorld;
 		uint32_t EntityId = 0;
 		uint32_t Flags = 0;
+		float Opacity = 1.0f;
+		float DissolveAmount = 0.0f;
+		Float3 Tint = Float3(1.0f, 1.0f, 1.0f);
+		float DissolveEdgeWidth = 0.0f;
+		Float3 Emissive = Float3(0.0f, 0.0f, 0.0f);
+		float DissolveNoiseScale = 1.0f;
+		Float3 DissolveEdge = Float3(0.0f, 0.0f, 0.0f);
 		uint32_t Padding0 = 0;
+		Float2 UVOffset = Float2(0.0f, 0.0f);
 		uint32_t Padding1 = 0;
+		uint32_t Padding2 = 0;
 	};
 
 #if !defined(ENGINE_SHADER)
-	static_assert(sizeof(InstanceRecord) == 144, "InstanceRecord must match its 144-byte structured-buffer layout");
-	static_assert(offsetof(InstanceRecord, PreviousWorld) == 64 && offsetof(InstanceRecord, EntityId) == 128,
+	static_assert(sizeof(InstanceRecord) == 208, "InstanceRecord must match its 208-byte structured-buffer layout");
+	static_assert(offsetof(InstanceRecord, PreviousWorld) == 64 && offsetof(InstanceRecord, EntityId) == 128 && offsetof(InstanceRecord, Tint) == 144
+			&& offsetof(InstanceRecord, Emissive) == 160 && offsetof(InstanceRecord, DissolveEdge) == 176 && offsetof(InstanceRecord, UVOffset) == 192,
 		"InstanceRecord members must sit where the structured-buffer layout puts them");
 
 }

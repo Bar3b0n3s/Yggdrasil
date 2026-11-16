@@ -95,8 +95,8 @@ namespace Engine {
 		{
 			const std::span<const BuiltinAssetEntry> entries = GetProceduralBuiltinEntries();
 			// M6's 15 (7 meshes, 2 materials, 5 textures, the silent clip), M21's four sprite textures, M26's particle texture and
-			// its identity LUT.
-			REQUIRE(entries.size() == 21);
+			// its identity LUT, and M31's dissolve noise.
+			REQUIRE(entries.size() == 22);
 			std::set<std::string> paths;
 			for (size_t index = 0; index < entries.size(); ++index)
 			{
@@ -158,6 +158,19 @@ namespace Engine {
 			const AssetRef<TextureData> texture = AssetCast<TextureData>(*created);
 			REQUIRE(texture != nullptr);
 			CHECK(std::ranges::equal(texture->Pixels, GenerateBuiltinParticleTexture().Pixels));
+
+			// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 6): the dissolve noise at its reserved handle (ADR
+			// 0042's phase-5 ledger's 0x018c), generated in code.
+			const auto noise = std::ranges::find(entries, BuiltinAssetHandles::DissolveNoiseTexture, &BuiltinAssetEntry::Handle);
+			REQUIRE(noise != entries.end());
+			CHECK(noise->Handle == AssetHandle(0x018c));
+			CHECK(noise->Path == "engine://Textures/DissolveNoise");
+			CHECK(noise->Type == AssetType::Texture);
+			const Result<AssetRef<Asset>> createdNoise = CreateProceduralBuiltinAsset(BuiltinAssetHandles::DissolveNoiseTexture);
+			REQUIRE_MESSAGE(createdNoise.has_value(), createdNoise.error().ToString());
+			const AssetRef<TextureData> noiseTexture = AssetCast<TextureData>(*createdNoise);
+			REQUIRE(noiseTexture != nullptr);
+			CHECK(std::ranges::equal(noiseTexture->Pixels, GenerateBuiltinDissolveNoiseTexture().Pixels));
 		}
 
 		TEST_CASE("BuiltinAssets: EngineAssets.json names exactly the compiled-in handles")
@@ -230,9 +243,9 @@ namespace Engine {
 				REQUIRE(texture != nullptr);
 				CHECK_FALSE(GetTextureBlockCodec(texture->Format).has_value());
 			}
-			// White, Black, FlatNormal, Checker, Missing, M21's SpriteSquare, SpriteRounded, SpriteBevel and SpriteCircle, and
-			// M26's Particle.
-			CHECK(procedural == 10);
+			// White, Black, FlatNormal, Checker, Missing, M21's SpriteSquare, SpriteRounded, SpriteBevel and SpriteCircle, M26's
+			// Particle and M31's DissolveNoise.
+			CHECK(procedural == 11);
 			const BuiltinAssetEntry* font = catalog->Find(BuiltinAssetHandles::DefaultFont);
 			REQUIRE(font != nullptr);
 			CHECK(font->Type == AssetType::Font);

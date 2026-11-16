@@ -53,6 +53,7 @@ namespace Engine {
 
 	class ConstEntity;
 	class Scene;
+	struct MaterialParametersComponent;
 	struct UiInteractionState;
 
 	// The camera a view renders through.
@@ -86,6 +87,12 @@ namespace Engine {
 		uint32_t Width = 1;                    // the view's size in pixels (the projection's aspect ratio), both >= 1
 		uint32_t Height = 1;
 		float Alpha = 1.0f; // the interpolation factor in [0, 1] (FrameTime::Alpha; 1 for ManualClock frames and lockstep)
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 3): the simulation time the view renders at, in
+		// seconds, finite and >= 0, by which a MaterialParameters' UVScroll advances. The play session passes its rendered
+		// time ((Tick - 1 + Alpha) fixed steps, between its last two simulated states that Alpha interpolates; 0 before its
+		// first tick) for its game view and every view it extracts (PlaySession::ExtractView); every other request (the edit
+		// scene's views, thumbnails, bakes) leaves 0, so edit-time images show UVOffset alone and never move.
+		double SimulationTime = 0.0;
 		RenderViewFlags Flags = RenderViewFlags::None;
 		std::vector<UUID> SelectedEntities{};
 		RenderAnnotations Annotations{};
@@ -100,6 +107,15 @@ namespace Engine {
 		// ExtractView); null (every other host, the edit scene) draws every widget Normal, or Disabled when not interactable.
 		const UiInteractionState* UiInteraction = nullptr;
 	};
+
+	// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 3): `component` as the renderer draws it at `time` seconds
+	// of simulation time (finite, >= 0; RenderSnapshot.h's MeshMaterialParameters): Tint and Opacity as they are, Emissive
+	// times EmissiveStrength, UVOffset plus UVScroll times `time` in double precision, each component wrapped into [0, 1)
+	// (value - floor(value), and 0 for a result that rounds to 1 as a float), and, while DissolveAmount is above 0, the edge
+	// (DissolveEdgeColor times DissolveEdgeStrength), its width and the noise scale; without a dissolve those three keep
+	// their neutral values. So the component's defaults resolve to the neutral parameters at any time. IEEE-exact operations
+	// only. Pure.
+	[[nodiscard]] MeshMaterialParameters ResolveMaterialParameters(const MaterialParametersComponent& component, double time);
 
 	// The scene's primary camera: the first entity in canonical order (§5.1) that is effectively enabled (no
 	// HierarchyDisabledTag) and has a CameraComponent with Primary set (§5.3; the validator reports SCENE_NO_PRIMARY_CAMERA
@@ -133,7 +149,9 @@ namespace Engine {
 	//     from its Clear mode. The camera entity's own HierarchyDisabledTag does not stop an Entity request (a screenshot
 	//     through a disabled camera is allowed), but does exclude it from Primary.
 	//   - Meshes: every effectively enabled entity with a MeshRendererComponent whose Visible is set and whose Mesh is not
-	//     null, at its rendered world matrix, with its Materials, CastShadows and ReceiveShadows.
+	//     null, at its rendered world matrix, with its Materials, CastShadows and ReceiveShadows; M31 (decision 3): with its
+	//     MaterialParametersComponent resolved into Parameters (ResolveMaterialParameters at request.SimulationTime), neutral
+	//     without one.
 	//   - Lights: every effectively enabled DirectionalLight, PointLight and SpotLight, at its rendered world pose (position
 	//     from the matrix's translation, direction its normalized -Z axis), with the component's fields.
 	//   - Environment and Post: the first effectively enabled EnvironmentComponent and PostProcessComponent in canonical
@@ -184,7 +202,8 @@ namespace Engine {
 	// (AppendUiDrawItems' worldOnly for the Explicit source), at their render pose at request.Alpha, as the meshes (the
 	// milestone review); Screen canvases still draw in the Primary and Entity views only.
 	// Asset-dependent overlays are appended afterwards with AppendRenderAnnotations at the snapshot's Alpha.
-	// Errors: InvalidArgument for a zero Width or Height or an Alpha that is not finite or outside [0, 1]; NotFound for an
+	// Errors: InvalidArgument for a zero Width or Height, an Alpha that is not finite or outside [0, 1] or (M31) a
+	// SimulationTime that is not finite or is negative; NotFound for an
 	// Entity request whose CameraEntity names no entity of the scene, and InvalidArgument when that entity has no
 	// CameraComponent (both name the id); InvalidArgument for an Explicit camera whose Target equals its Position.
 	// Also rejects unknown flag bits, invalid annotation enums and invalid ShadowMapSize before copying

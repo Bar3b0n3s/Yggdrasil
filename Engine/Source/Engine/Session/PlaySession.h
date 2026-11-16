@@ -641,8 +641,9 @@ namespace Engine {
 		// refresh), and InterpolationResetTag on every entity whose world matrix changed outside the fixed steps (the
 		// comparison of FrameTransformUpdate), so a write made since the last step (entity.update {target: "play"} at the safe
 		// point, the editor) shows at once and is never interpolated from its stale pose. Then ExtractRenderSnapshot with
-		// `request` and GetViewAlpha() in place of request.Alpha. The simulation state (the state hash) is unchanged. Errors:
-		// those of ExtractRenderSnapshot.
+		// `request` and GetViewAlpha() in place of request.Alpha (M31: and the session's rendered time at that alpha in place
+		// of request.SimulationTime, as its game view's extraction passes it). The simulation state (the state hash) is
+		// unchanged. Errors: those of ExtractRenderSnapshot.
 		[[nodiscard]] Result<RenderSnapshot> ExtractView(const RenderExtractionRequest& request);
 		// The interpolation alpha of a view between ticks (ExtractView): 1 while the session is paused or in lockstep and when
 		// its last frame phase ran through Tick() (a ManualClock frame, play.step); otherwise the Alpha of the last FrameUpdate

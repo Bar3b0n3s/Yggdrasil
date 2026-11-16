@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Asset/AssetHandle.h"
+#include "Engine/Asset/MaterialData.h"
 #include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/UUID.h"
@@ -128,6 +129,17 @@ namespace Engine {
 	// when it has none (no motion: every item until M26 fills it for TAA's motion vectors, plan §4.1); Flags is
 	// DrawFlagMirrored for a World whose upper 3 x 3 determinant is negative, combined with `flags` (the camera draws'
 	// DrawFlagReceiveShadows). Pure.
+	// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 4): the record also carries the item's Parameters
+	// (MeshDrawItem::Parameters) and DrawFlagMaterialParameters when they are not neutral; neutral parameters leave the
+	// record's parameter members at their neutral defaults and the flag clear, so such an item draws as before M31.
 	[[nodiscard]] InstanceRecord MakeMeshInstanceRecord(const MeshDrawItem& item, uint32_t flags = 0);
+
+	// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 5): the alpha mode whose pipeline variant draws a submesh
+	// of an item with `parameters` and a material of `material`'s alpha mode, in the camera's passes (the prepass and the
+	// forward passes) or, with `shadowCaster`, among the shadow casters. A Blend or Mask material keeps its mode; an Opaque
+	// material takes the Mask variants (whose fragment shaders clip by the parameters) while the item dissolves
+	// (DissolveAmount > 0) and, in the camera's passes only, while it fades (Opacity < 1), since a faded item keeps its
+	// shadow. Pure.
+	[[nodiscard]] AlphaMode SelectMeshAlphaMode(AlphaMode material, const MeshMaterialParameters& parameters, bool shadowCaster);
 
 }

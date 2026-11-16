@@ -259,6 +259,37 @@ namespace Engine {
 		float DeltaTime = 0.0f;
 	};
 
+	// M31 (Docs/Decisions/0046-m31-material-parameters.md decisions 2 and 3): an item's per-entity material parameters, its
+	// MaterialParameters component as render extraction resolves it (RenderExtraction.h), applied on top of every material of
+	// the item's submeshes. The defaults are neutral: an item that holds them draws exactly as one without the component
+	// (MakeMeshInstanceRecord leaves DrawFlagMaterialParameters clear, RenderPrepare.h). Every value is finite.
+	//   - Tint: linear, multiplies the base colour's RGB (after the material's factor, its map and the vertex colour).
+	//   - Emissive: linear radiance added to the material's emission (the component's Emissive times EmissiveStrength).
+	//   - UVOffset: added to every map's texture coordinates after the material's UV transform (the component's UVOffset plus
+	//     UVScroll times the request's simulation time), each component wrapped into [0, 1), since every map samples with a
+	//     repeating sampler.
+	//   - DissolveAmount in [0, 1]: the fragments whose dissolve noise (BuiltinAssetHandles::DissolveNoiseTexture, sampled at
+	//     the first texture coordinates times DissolveNoiseScale) lies below it are clipped; DissolveEdge (linear radiance,
+	//     the component's DissolveEdgeColor times DissolveEdgeStrength) is added where the noise lies below DissolveAmount +
+	//     DissolveEdgeWidth. Without a dissolve (DissolveAmount 0) the three edge values are neutral.
+	//   - Opacity in [0, 1]: the fade, a dithered clip of an Opaque or Mask material (shadows unchanged) and a factor of a
+	//     Blend material's alpha.
+	struct MeshMaterialParameters
+	{
+		glm::vec3 Tint = glm::vec3(1.0f);
+		glm::vec3 Emissive = glm::vec3(0.0f);
+		glm::vec2 UVOffset = glm::vec2(0.0f);
+		float DissolveAmount = 0.0f;
+		glm::vec3 DissolveEdge = glm::vec3(0.0f);
+		float DissolveEdgeWidth = 0.0f;
+		float DissolveNoiseScale = 1.0f;
+		float Opacity = 1.0f;
+
+		// Whether these are the neutral defaults, which draw as no parameters at all.
+		[[nodiscard]] bool IsNeutral() const { return *this == MeshMaterialParameters{}; }
+		bool operator==(const MeshMaterialParameters&) const = default;
+	};
+
 	// One MeshRenderer to draw (§8.2 "world matrix, mesh handle+version, material per submesh, flags"). The renderer resolves
 	// the asset versions, the mesh's default materials and placeholders through the AssetManager and its GpuResourceCache,
 	// so extraction never touches assets. M23 (C23.1, decision 2): each of its submesh draws is one instance record
@@ -295,6 +326,11 @@ namespace Engine {
 		// extraction fills them (RenderExtraction.h).
 		std::vector<glm::mat4> JointPalette{};
 		std::vector<float> MorphWeights{};
+		// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 3): the entity's MaterialParameters as extraction resolved
+		// them; neutral without the component. They ride in the item's instance records, so items that differ only in them
+		// still share instanced draws, but a dissolving or fading item of an Opaque material draws with the Mask variants
+		// (SelectMeshAlphaMode, RenderPrepare.h).
+		MeshMaterialParameters Parameters{};
 	};
 
 	// One light (§8.2: directional, point, spot). The renderer culls them on the CPU and lights with at most

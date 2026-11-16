@@ -409,6 +409,25 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "MaterialParameters.jsonl",
+			"IdSeed": 2801,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenMaterialParameters.jsonl",
+			"IdSeed": 2802,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenMaterialParameters",
+				"Assets/Scenes/GoldenMaterialParameters"
+			]
+		},
+		{
+			"File": "MaterialParametersReplay.jsonl",
+			"IdSeed": 2803,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"
