@@ -460,7 +460,12 @@ namespace Engine {
 			ENGINE_ASSERT(settingsType != nullptr, "The project settings types are registered by the engine context");
 			Utils::CanonicalizeEnumSpellings(patch, settingsType->GetType());
 
-			Result<Scope<ProjectSettingsCommand>> command = ProjectSettingsCommand::CreateFromPatch(editor, patch, std::string(Utils::SettingsLabel));
+			// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): an agent's patch leaving an input action play.start
+			// would refuse is refused; the editor's Project Settings panel, which calls this method as the user, commits it with
+			// each problem in the warnings, so a binding it adds empty can be filled in next.
+			const InputActionCheck inputCheck = editor.GetCommandOrigin() == CommandOrigin::Agent ? InputActionCheck::Refuse : InputActionCheck::Warn;
+			Result<Scope<ProjectSettingsCommand>> command =
+				ProjectSettingsCommand::CreateFromPatch(editor, patch, std::string(Utils::SettingsLabel), inputCheck);
 			if (!command)
 				return std::unexpected(Utils::PrefixPointers(command.error(), "/patch"));
 			ProjectSetSettingsResult result;
@@ -785,7 +790,8 @@ namespace Engine {
 			{
 				.Name = "project.setSettings",
 				.Description = "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A "
-							   "member the settings do not have is dropped and named in warnings; a --strict editor refuses it.",
+							   "member the settings do not have is dropped and named in warnings; a --strict editor refuses it. A patch that "
+							   "writes Input is refused, each problem under /patch, when an action is one play.start would refuse.",
 				.RequiredParams = { "patch" },
 				.ExposeAsTool = true,
 				.Mutates = true,

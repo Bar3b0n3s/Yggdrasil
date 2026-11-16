@@ -4545,7 +4545,7 @@
 								"minimum": 0
 							},
 							"Mass": {
-								"description": "The character's mass in kilograms, used when it pushes bodies.",
+								"description": "The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character.",
 								"type": "number",
 								"minimum": 0.001,
 								"maximum": 1000000000
@@ -4559,7 +4559,7 @@
 								"type": "string"
 							},
 							"InheritGroundVelocity": {
-								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.",
 								"type": "boolean"
 							}
 						},
@@ -8479,7 +8479,7 @@
 								"minimum": 0
 							},
 							"Mass": {
-								"description": "The character's mass in kilograms, used when it pushes bodies.",
+								"description": "The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character.",
 								"type": "number",
 								"minimum": 0.001,
 								"maximum": 1000000000
@@ -8493,7 +8493,7 @@
 								"type": "string"
 							},
 							"InheritGroundVelocity": {
-								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.",
 								"type": "boolean"
 							}
 						},
@@ -18077,7 +18077,7 @@
 								"minimum": 0
 							},
 							"Mass": {
-								"description": "The character's mass in kilograms, used when it pushes bodies.",
+								"description": "The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character.",
 								"type": "number",
 								"minimum": 0.001,
 								"maximum": 1000000000
@@ -18091,7 +18091,7 @@
 								"type": "string"
 							},
 							"InheritGroundVelocity": {
-								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.",
+								"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.",
 								"type": "boolean"
 							}
 						},
@@ -22097,7 +22097,7 @@
 		{
 			"name": "project.setSettings",
 			"domain": "project",
-			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it.",
+			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it. A patch that writes Input is refused, each problem under /patch, when an action is one play.start would refuse.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": true,

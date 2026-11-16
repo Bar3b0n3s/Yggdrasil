@@ -67,7 +67,8 @@ namespace Engine {
 		ENGINE_ASSERT(m_Before != nullptr && m_After != nullptr, "ProjectSettingsCommand '{}' needs both documents", m_Label);
 	}
 
-	Result<Scope<ProjectSettingsCommand>> ProjectSettingsCommand::CreateFromPatch(const EditorContext& context, const Json& patch, std::string label)
+	Result<Scope<ProjectSettingsCommand>> ProjectSettingsCommand::CreateFromPatch(const EditorContext& context, const Json& patch, std::string label,
+		InputActionCheck inputCheck)
 	{
 		if (!context.HasProject())
 			return MakeError(ErrorCode::InvalidState, "the project settings cannot change: no project is open");
@@ -90,12 +91,28 @@ namespace Engine {
 		std::vector<ValidationIssue> warnings;
 		const ReadContext read{ .Schemas = nullptr, .Strict = context.GetSpecification().StrictUnknowns, .Diagnostics = &warnings };
 		ENGINE_TRY(info->ApplyMergePatch(&patched, JsonReader(exposed, reader.GetPointer()), read));
-		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): a patch that writes the input settings leaves
-		// every action as play.start accepts it, so a bad binding is refused here, each problem located, not at the next
-		// play; a patch of other sections never fails on actions the project already holds (project.validate reports
-		// those, INPUT_INVALID_ACTION).
+		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): a patch that writes the input settings is checked
+		// as play.start checks them, so an agent learns of a bad binding here, each problem located, not at the next play,
+		// and the editor's own settings paths name each one among the command's warnings; a patch of other sections never
+		// fails on actions the project already holds (project.validate reports those, INPUT_INVALID_ACTION).
 		if (patch.contains("Input"))
-			ENGINE_TRY(ValidateInputActions(patched.Input));
+		{
+			Status actions = ValidateInputActions(patched.Input);
+			if (!actions && inputCheck == InputActionCheck::Refuse)
+				return std::unexpected(std::move(actions).error());
+			if (!actions)
+			{
+				for (const ErrorIssue& issue : actions.error().GetIssues())
+				{
+					warnings.push_back(ValidationIssue{ .Severity = DiagnosticSeverity::Warning,
+						.Code = {},
+						.JsonPointer = issue.JsonPointer,
+						.Message = issue.Message,
+						.Hint = issue.Hint,
+						.Suggestions = issue.Suggestions });
+				}
+			}
+		}
 		ENGINE_TRY_ASSIGN(Json after, ProjectSerializer::ToJson(patched, registry));
 		// The document the command will apply must load as a project file (header and every rule of ProjectSerializer).
 		ProjectLoadReport report;

@@ -45,8 +45,8 @@
 // Dynamic bodies (M34, ADR 0049 decision 2). The character pushes Dynamic bodies through CharacterVirtual's own contacts
 // alone, with a strength of its Mass times PushAcceleration. A Dynamic body lighter than the character
 // (IsLighterThanCharacter) never moves it: it cannot push it or carry it up a surface of its own (the recorder), it gives
-// it none of its velocity as its ground (Update), it is never a stair (WalkStairs, Jolt's step without light bodies) and it carries at most its own weight
-// from the character (PushGround, which replaces CharacterVirtual's weight impulse).
+// it none of its velocity as its ground (Update), it is never a stair (WalkStairs, Jolt's step without light bodies) and
+// it carries at most its own weight from the character (PushGround, which replaces CharacterVirtual's weight impulse).
 //
 // Contacts. A CharacterContactRecorder records the character's contacts during ExtendedUpdate; Update then appends each as
 // a ContactEvent with FromCharacter, BodyA the inner body, ColliderA 0 (the capsule is the character's only collider) and

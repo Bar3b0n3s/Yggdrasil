@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +23,13 @@ namespace Engine {
 		UUID Id{};
 		std::string Label{};
 		std::string Path{};
+	};
+
+	// A problem a drawer shows under the value it concerns (ReflectedDrawerContext::Notes).
+	struct ReflectedDrawerNote
+	{
+		std::string Path{};    // the value's drawer Path, such as "ProjectSettings.Input.Actions[Jump].Bindings[1]"
+		std::string Message{}; // shown as written, wrapped
 	};
 
 	struct ReflectedDrawerContext
@@ -46,6 +54,10 @@ namespace Engine {
 		std::string DisplayLabel{};
 		// Optional memory-only lookup for the current reference; independent of the searchable picker.
 		std::function<std::optional<ReflectedReferenceCandidate>(const FieldInfo&, UUID)> DescribeReference{};
+		// Optional problems, borrowed for Draw only: each note whose Path equals a drawn value's Path is shown under that
+		// value in a warning colour. The Project Settings panel's input-action problems (M34,
+		// Docs/Decisions/0049-m34-characters-input.md decision 6), shown beside their bindings until they are fixed.
+		std::span<const ReflectedDrawerNote> Notes{};
 	};
 	struct ReflectedDrawerResult
 	{

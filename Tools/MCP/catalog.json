@@ -2549,7 +2549,7 @@
 		{
 			"name": "project_set_settings",
 			"method": "project.setSettings",
-			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it.",
+			"description": "Applies an RFC 7386 merge patch to the project settings as one undoable command, which writes the .eproj. A member the settings do not have is dropped and named in warnings; a --strict editor refuses it. A patch that writes Input is refused, each problem under /patch, when an action is one play.start would refuse.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "ProjectSetSettingsParams",

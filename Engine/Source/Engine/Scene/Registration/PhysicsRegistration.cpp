@@ -127,12 +127,15 @@ namespace Engine {
 				{ .Min = 0.0, .Max = Utils::MaxCharacterSlopeAngle, .Unit = "deg" })
 			.Field("StepHeight", &CharacterControllerComponent::StepHeight, "The highest step the character climbs without jumping, in metres.",
 				{ .Min = 0.0, .Unit = "m" })
-			.Field("Mass", &CharacterControllerComponent::Mass, "The character's mass in kilograms, used when it pushes bodies.",
+			.Field("Mass", &CharacterControllerComponent::Mass,
+				"The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or "
+				"carries the character.",
 				{ .Min = Utils::MinPhysicsMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
 			.Field("GravityFactor", &CharacterControllerComponent::GravityFactor, "The multiplier of the project's gravity for the character.")
 			.Field("Layer", &CharacterControllerComponent::Layer, "Physics layer name from project settings.")
 			.Field("InheritGroundVelocity", &CharacterControllerComponent::InheritGroundVelocity,
-				"While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.");
+				"While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; "
+				"a Dynamic platform lighter than the character never does.");
 	}
 
 }

@@ -487,13 +487,13 @@ declare extern type CharacterController with
 	GravityFactor: number
 	-- The character's total height, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	Height: number
-	-- While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. [All modes; Runtime|Test; pure/read; setter mutates]
 	InheritGroundVelocity: boolean
 	-- Whether the last character update found supporting ground. [All modes; Runtime|Test; pure/read]
 	IsGrounded: (self: CharacterController) -> boolean
 	-- Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layer: string
-	-- The character's mass in kilograms, used when it pushes bodies. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. [All modes; Runtime|Test; pure/read; setter mutates]
 	Mass: number
 	-- The steepest slope the character can walk up, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
 	MaxSlopeAngle: number

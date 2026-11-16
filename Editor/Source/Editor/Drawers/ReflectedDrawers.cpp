@@ -35,6 +35,21 @@ namespace Engine {
 			into.Active |= child.Active;
 		}
 
+		// The notes of `context` for the value at its Path, wrapped, in a warning colour.
+		static void DrawDrawerNotes(const ReflectedDrawerContext& context)
+		{
+			for (const ReflectedDrawerNote& note : context.Notes)
+			{
+				if (note.Path != context.Path)
+					continue;
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.35f, 1.0f));
+				ImGui::PushTextWrapPos(0.0f);
+				ImGui::TextUnformatted(note.Message.data(), note.Message.data() + note.Message.size());
+				ImGui::PopTextWrapPos();
+				ImGui::PopStyleColor();
+			}
+		}
+
 		static ReflectedDrawerResult DrawerItemResult(bool changed, bool immediate = false)
 		{
 			return { .Activated = ImGui::IsItemActivated(), .Changed = changed, .Committed = ImGui::IsItemDeactivatedAfterEdit() || (changed && immediate), .Cancelled = (ImGui::IsItemActive() || ImGui::IsItemDeactivated()) && ImGui::IsKeyPressed(ImGuiKey_Escape), .Active = ImGui::IsItemActive() };
@@ -761,6 +776,7 @@ namespace Engine {
 		}
 		ImGui::EndDisabled();
 		ImGui::PopID();
+		Utils::DrawDrawerNotes(context);
 		if (!result)
 			return result;
 		if (result->Changed && !context.ReadOnly && !field.IsReadOnly())

@@ -6,6 +6,7 @@
 #include "EditorCore/Automation/RegisterMethods.h"
 #include "EditorCore/Commands/ProjectSettingsCommand.h"
 #include "EditorCore/Commands/SceneEdit.h"
+#include "EditorCore/EditorActions.h"
 #include "EditorCore/EditorContext.h"
 #include "Engine/App/EngineContext.h"
 #include "Engine/AssetPipeline/Graph/GraphDocument.h"
@@ -289,6 +290,51 @@ namespace Engine {
 				}
 			}
 			CHECK(reported);
+		}
+
+		// M34 review finding 7 (decision 6): the Project Settings panel's "Add element" commits an empty binding at once, which
+		// the refusal left the panel no way to add; the panel calls project.setSettings as the user, which commits it warned.
+		TEST_CASE("ProjectMethods: project.setSettings from the editor's panel commits a binding added empty, naming its problem in warnings, and the binding is filled in next")
+		{
+			Test::AutomationFixture setup("ProjectSetSettingsPanelBinding");
+			EditorContext& editor = setup.GetEditor();
+			EditorActions actions(editor, setup.GetClient().GetServer());
+			const auto panelCall = [&actions](const Json& params) -> Result<Json>
+			{
+				ENGINE_TRY_ASSIGN(const uint64_t ticket, actions.Submit("project.setSettings", params));
+				actions.Pump();
+				ENGINE_TRY_ASSIGN(auto completion, actions.TakeResult(ticket));
+				REQUIRE(completion.has_value());
+				return std::move(*completion);
+			};
+			const auto jumpBindings = [&editor]()
+			{
+				const auto& actionsByName = editor.GetProject().GetSettings().Input.Actions;
+				const auto jump = actionsByName.find("Jump");
+				return jump == actionsByName.end() ? std::vector<std::string>{} : jump->second.Bindings;
+			};
+			REQUIRE(setup.Call("project.setSettings", ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Jump":{"Type":"Button","Bindings":["Key.Space"]}}}}})")));
+
+			// The agent's call refuses the empty binding; the panel's commits it, warned at its pointer.
+			const Json added = ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Jump":{"Type":"Button","Bindings":["Key.Space",""]}}}}})");
+			const Result<Json> refused = setup.Call("project.setSettings", added);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetCode() == ErrorCode::Validation);
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space" });
+			const size_t history = editor.GetHistory().GetUndoCount();
+			const Result<Json> committed = panelCall(added);
+			REQUIRE_MESSAGE(committed.has_value(), committed.error().ToString());
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "" });
+			REQUIRE((*committed)["warnings"].size() == 1);
+			CHECK(JsonReader((*committed)["warnings"][0]).ReadString().value_or("").starts_with("/patch/Input/Actions/Jump/Bindings/1: "));
+			CHECK(editor.GetHistory().GetUndoCount() == history + 1);
+			CHECK(editor.GetHistory().GetEntries(1).front().Origin == CommandOrigin::User);
+
+			// The user fills it in: the next patch commits without a warning.
+			const Result<Json> filled = panelCall(ParseProjectJson(R"({"patch":{"Input":{"Actions":{"Jump":{"Type":"Button","Bindings":["Key.Space","Key.J"]}}}}})"));
+			REQUIRE_MESSAGE(filled.has_value(), filled.error().ToString());
+			CHECK((*filled)["warnings"].empty());
+			CHECK(jumpBindings() == std::vector<std::string>{ "Key.Space", "Key.J" });
 		}
 
 		// Docs/Decisions/0030-m19-contract.md "Integration of W19.2": a non-strict editor dropped a member the settings do not

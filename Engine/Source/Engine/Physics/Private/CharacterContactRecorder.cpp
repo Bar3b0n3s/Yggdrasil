@@ -64,17 +64,27 @@ namespace Engine {
 		JPH::Vec3Arg characterVelocity, JPH::Vec3& newCharacterVelocity)
 	{
 		// Jolt slides the character along the contact's plane, which for a surface facing upwards (a shard's sloped top, a
-		// box's edge below the capsule's middle) carries it up onto the body. A surface facing downwards or straight up
-		// (a body above, or one the character stands on) keeps Jolt's answer, which never lifts the character.
+		// box's edge below the capsule's middle) carries it up onto the body. A surface facing downwards or straight up keeps
+		// Jolt's answer, which never lifts the character, and so does the body the character stands on (its ground of the
+		// last update, walkable): the rule stops a character getting onto a light body, never moving across the one it is on,
+		// such as up a tilted plank.
 		const JPH::Vec3 up = character->GetUp();
 		const float upwards = contactNormal.Dot(up);
 		JPH::Vec3 across = contactNormal - upwards * up;
 		const float length = across.Length();
-		if (!(upwards > 0.0f) || !(length > Utils::MinWallNormalLength) || !IsLighterThanCharacter(*m_Locks, body, character->GetMass()))
+		const bool standsOn = character->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround && character->GetGroundBodyID() == body;
+		if (!(upwards > 0.0f) || !(length > Utils::MinWallNormalLength) || standsOn || !IsLighterThanCharacter(*m_Locks, body, character->GetMass()))
 			return;
 		across /= length;
 		const float into = characterVelocity.Dot(across);
-		newCharacterVelocity = characterVelocity - std::min(0.0f, into) * across;
+		JPH::Vec3 velocity = characterVelocity - std::min(0.0f, into) * across;
+		// What still moves into the contact's plane (a fall onto a steep face, with no motion into the body across) slides along it
+		// instead: Jolt would meet the same contact again at once with nowhere to go, and the character would hang on the face.
+		// The vertical part only moves towards zero (the normal faces upwards), so this never lifts the character.
+		const float intoPlane = velocity.Dot(contactNormal);
+		if (intoPlane < 0.0f)
+			velocity -= intoPlane * contactNormal;
+		newCharacterVelocity = velocity;
 	}
 
 	void CharacterContactRecorder::OnContactAdded(const JPH::CharacterVirtual* character, const JPH::CharacterContact& contact,

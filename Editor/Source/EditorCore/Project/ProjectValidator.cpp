@@ -2812,7 +2812,8 @@ namespace Engine {
 			Json patch = Json::object();
 			patch["Export"] = Json::object();
 			patch["Export"]["BuildScenes"] = std::move(scenes);
-			ENGINE_TRY_ASSIGN(Scope<ProjectSettingsCommand> command, ProjectSettingsCommand::CreateFromPatch(editor, patch, std::string(FixLabel)));
+			ENGINE_TRY_ASSIGN(Scope<ProjectSettingsCommand> command,
+				ProjectSettingsCommand::CreateFromPatch(editor, patch, std::string(FixLabel), InputActionCheck::Refuse));
 			ENGINE_TRY(editor.Execute(std::move(command)));
 			return {};
 		}

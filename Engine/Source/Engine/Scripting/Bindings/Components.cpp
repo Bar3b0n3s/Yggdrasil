@@ -432,9 +432,8 @@ namespace Engine {
 		{
 			const Entity entity = ComponentReadSelf(call, "Camera");
 			const auto size = CameraSize(call);
+			// Lua::Check refuses a vector with a non-finite component, so the position is finite here.
 			const glm::vec3 position = Lua::Check<glm::vec3>(call, 4);
-			if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
-				return Lua::RaiseError(call, "the camera position is not a finite vector");
 			const glm::quat rotation = UnitRotation(call, 5);
 			return PushCameraRay(call, entity, size, position, rotation);
 		}

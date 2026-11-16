@@ -2118,7 +2118,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it.
+While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2142,7 +2142,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The character's mass in kilograms, used when it pushes bodies.
+The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

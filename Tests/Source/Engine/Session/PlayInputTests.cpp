@@ -632,8 +632,6 @@ namespace Engine {
 			CHECK_FALSE(devices.IsKeyDown(InputPhase::Frame, Key::A));
 		}
 
-		// Injected input queued for a tick before a device event the frame previewed reaches the frame view through the levels
-		// the tick leaves: the frame view saw the device event first, so it never reports an edge the ticks did not make.
 		// M34 (Docs/Decisions/0049-m34-characters-input.md decision 6): project.setSettings and project.validate make this
 		// check of the project's actions, PlayInput::Create's, without a session.
 		TEST_CASE("PlayInput: ValidateInputActions refuses what play.start refuses, below /Input/Actions, and takes a trigger as a button")
@@ -689,6 +687,8 @@ namespace Engine {
 			CHECK(input.GetSummary(InputPhase::Frame).Down == input.GetSummary(InputPhase::Step).Down);
 		}
 
+		// Injected input queued for a tick before a device event the frame previewed reaches the frame view through the levels
+		// the tick leaves: the frame view saw the device event first, so it never reports an edge the ticks did not make.
 		TEST_CASE("PlayInput: after a tick the frame view holds the applied levels, whatever the tick queued before a previewed event")
 		{
 			Result<PlayInput> created = PlayInput::Create(MakeActions());

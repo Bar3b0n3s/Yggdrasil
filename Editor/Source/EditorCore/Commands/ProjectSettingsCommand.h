@@ -7,12 +7,26 @@
 #include "Engine/Reflection/ValidationContext.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace Engine {
+
+	// What ProjectSettingsCommand::CreateFromPatch does with a patch that writes "Input" and leaves an input action that
+	// play.start would refuse (M34: Docs/Decisions/0049-m34-characters-input.md decision 6).
+	enum class InputActionCheck : uint8_t
+	{
+		// Refuse the patch: project.setSettings from automation, so an agent learns at the set what play.start would refuse,
+		// and the validator's fixes.
+		Refuse,
+		// Make the command and name each problem among its warnings: the editor's own settings paths, the Project Settings
+		// panel (project.setSettings called as the user) and the inspector, whose "Add element" commits an empty binding that
+		// the user fills in next; the panel shows each problem beside its binding until it is fixed.
+		Warn
+	};
 
 	// Changes the project settings (§12.3 "settings JSON before/after"): project.setSettings and the ProjectSettingsPanel
 	// (M10). Execute and Undo apply the canonical settings document of their side through EditorContext::ApplyProjectSettings,
@@ -35,11 +49,13 @@ namespace Engine {
 		// (EditorContextSpecification::StrictUnknowns), is refused as an error, as the strict reader refuses it in the .eproj.
 		// Errors: InvalidState without an open project; Validation (located, with issues relative to the settings root, such
 		// as "/Simulation/FixedHz" or "/Window/Titel") for a patch that is not an object, yields invalid settings or, in a
-		// --strict editor, has a member the settings do not have; M34 (Docs/Decisions/0049-m34-characters-input.md
-		// decision 6): Validation from ValidateInputActions (Session/PlayInput.h), one issue per problem below
-		// "/Input/Actions", for a patch with an "Input" member whose result holds an input action play.start would refuse.
+		// --strict editor, has a member the settings do not have. M34 (Docs/Decisions/0049-m34-characters-input.md
+		// decision 6): for a patch with an "Input" member whose result holds an input action play.start would refuse
+		// (ValidateInputActions, Session/PlayInput.h), with `inputCheck` Refuse (the default) the Validation error of that
+		// check, one issue per problem below "/Input/Actions"; with Warn the command, each problem a warning at its pointer
+		// (no code), also in a --strict editor. A patch of other sections never fails on actions the project already holds.
 		[[nodiscard]] static Result<Scope<ProjectSettingsCommand>> CreateFromPatch(const EditorContext& context, const Json& patch,
-			std::string label);
+			std::string label, InputActionCheck inputCheck = InputActionCheck::Refuse);
 
 		// Applies the After document. Errors: those of EditorContext::ApplyProjectSettings (the write); nothing changed then.
 		[[nodiscard]] Status Execute(EditorContext& context) override;
@@ -53,7 +69,8 @@ namespace Engine {
 		[[nodiscard]] const Json& GetBefore() const { return *m_Before; }
 		[[nodiscard]] const Json& GetAfter() const { return *m_After; }
 		// The warnings of the patch CreateFromPatch read (above), located relative to the settings root, in the order the read
-		// met them: what was dropped or kept as written. Empty for a command built from documents, and in a --strict editor.
+		// met them: what was dropped or kept as written (none in a --strict editor), then, with InputActionCheck::Warn, the
+		// problems of the input actions. Empty for a command built from documents.
 		[[nodiscard]] std::span<const ValidationIssue> GetWarnings() const { return m_Warnings; }
 	private:
 		std::string m_Label;

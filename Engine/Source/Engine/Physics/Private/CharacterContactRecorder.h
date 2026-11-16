@@ -29,7 +29,10 @@
 // (IsLighterThanCharacter) never pushes it, so the recorder turns CharacterContactSettings::mCanPushCharacter off for one
 // in OnContactAdded and OnContactPersisted; the character still pushes it (mCanReceiveImpulses stays on). Nor does the
 // character climb one by sliding up a surface of it that faces upwards: OnContactSolve meets such a contact as a vertical
-// wall, so the character's motion into the body stops and its vertical motion stays as it was.
+// wall, so the character's motion into the body stops and its vertical motion stays as it was, except on the body the
+// character stands on (its walkable ground of the last update), which it moves across as Jolt slides it; and whatever the
+// wall leaves moving into the contact's plane (a fall onto a steep face) slides along the plane, never lifting the
+// character, so the solver never leaves it hanging on the face.
 //
 // Private to the Physics module. Main thread only: CharacterVirtual calls it synchronously from ExtendedUpdate, in an order
 // that depends only on the world's state, so the records are deterministic.

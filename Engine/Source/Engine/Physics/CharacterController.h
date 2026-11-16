@@ -17,14 +17,18 @@
 // the world's ContactBuffer (ContactEvent::FromCharacter, BodyA the inner body), so the character's entity and the other
 // body receive collision events with the same sorting and exit rules as bodies (§9.4).
 //
-// Characters and Dynamic bodies (M34, Docs/Decisions/0049-m34-characters-input.md decisions 1 and 2, World Tree's brief
+// Characters and Dynamic bodies (M34, Docs/Decisions/0049-m34-characters-input.md decisions 1 to 3, World Tree's brief
 // 11). The inner body's object layer has the Character kind (PhysicsLayers.h), so the solver never resolves a contact
 // between it and another body but a sensor: placed rather than swept, it would push a Dynamic body with infinite mass. A
 // character pushes Dynamic bodies only through CharacterVirtual's own contacts, with at most Mass * 9.81 N, and a Dynamic
-// body lighter than its Mass never moves it: it cannot push the character or carry it up a surface of its own, gives it
-// none of its velocity as its ground (so standing on one never launches it), is never a stair (the character pushes it along instead of climbing it) and
-// carries at most its own weight from the character. Characters still block each other through their inner bodies. What
-// that leaves (§9.6, Docs/Backlog.md §6): a Dynamic body moving into a character is not stopped by it.
+// body lighter than its Mass never moves it: it cannot push the character or carry it up a surface of its own (but the
+// one the character stands on, which it walks across), gives it none of its velocity as its ground (so standing on one
+// never launches it), is never a stair (the character pushes it along instead of climbing it) and carries at most its own
+// weight from the character. Characters still block each other through their inner bodies. What that leaves (§9.6,
+// Docs/Backlog.md §6): a light body moving into a character is stopped by the character's push, and passes into the
+// capsule only when it outruns the character's look-ahead within one tick or is driven harder than the push; a light
+// platform never lifts or carries a character; a heavy body shoves the character, and overlaps it only when it is pinned
+// or under the body.
 //
 // ECS-agnostic, like PhysicsWorld; Scene/PhysicsSystem owns one per CharacterControllerComponent and drives it from
 // PreStep. Main thread only. Determinism: the same calls in the same order give the same results; the inner body is
