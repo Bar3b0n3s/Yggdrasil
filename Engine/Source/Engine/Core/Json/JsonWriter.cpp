@@ -331,6 +331,22 @@ namespace Engine {
 		state.AddScalar(value == 0.0f ? std::string("0") : Utils::NumberText(value));
 	}
 
+	void JsonWriter::WriteDouble(double value)
+	{
+		State& state = *m_State;
+		if (!std::isfinite(value))
+		{
+			if (state.CanWriteValue())
+			{
+				state.RecordError(std::format("{} cannot be written: JSON numbers are finite", value), state.ValuePointer());
+				state.AddValue("null", false);
+			}
+			return;
+		}
+		// -0 is written as 0; std::to_chars on double gives the shortest text that round-trips the value.
+		state.AddScalar(value == 0.0 ? std::string("0") : Utils::NumberText(value));
+	}
+
 	void JsonWriter::WriteString(std::string_view value)
 	{
 		State& state = *m_State;
@@ -350,7 +366,7 @@ namespace Engine {
 		WriteString(std::format("{}", value));
 	}
 
-	void JsonWriter::WriteJson(const Json& value)
+	void JsonWriter::WriteJson(const Json& value, JsonNumbers numbers)
 	{
 		// Iterative, so the writer itself never recurses per level; the bound protects the code that copies and destroys
 		// trees, which does.
@@ -361,7 +377,7 @@ namespace Engine {
 		};
 		std::vector<Frame> frames;
 
-		const auto writeValue = [this, &frames](const Json& item)
+		const auto writeValue = [this, &frames, numbers](const Json& item)
 		{
 			switch (item.type())
 			{
@@ -391,6 +407,11 @@ namespace Engine {
 				case Json::value_t::number_float:
 				{
 					const auto number = item.get<double>();
+					if (numbers == JsonNumbers::Double)
+					{
+						WriteDouble(number);
+						break;
+					}
 					if (std::isfinite(number) && !(std::fabs(number) < Utils::FloatRoundingLimit))
 					{
 						if (m_State->CanWriteValue())
@@ -459,10 +480,10 @@ namespace Engine {
 		return std::move(state.Output);
 	}
 
-	Result<std::string> JsonWriter::Write(const Json& value, JsonStyle style)
+	Result<std::string> JsonWriter::Write(const Json& value, JsonStyle style, JsonNumbers numbers)
 	{
 		JsonWriter writer(style);
-		writer.WriteJson(value);
+		writer.WriteJson(value, numbers);
 		return writer.Finish();
 	}
 

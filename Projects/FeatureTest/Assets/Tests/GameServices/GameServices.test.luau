@@ -1,7 +1,8 @@
 --!strict
 -- M28's game services (Docs/Decisions/0043-m28-game-services.md decisions 3 to 6) in GameServices.scene (GameServices.jsonl,
 -- IdSeed 2501), in every run mode: the display settings, the performance readout, presentation text and frame-time
--- signals. Each case runs on a fresh load of the scene.
+-- signals (the session's audio mix is the SaveData suite's, whose cases share a session). Each case runs on a fresh load
+-- of the scene.
 local HudScript = require("../../Scripts/GameServices/Hud")
 
 local function hud(): Entity
@@ -67,7 +68,7 @@ return Test.Suite("GameServices", function()
 		Test.ExpectEqual(Application.GetDisplaySettings().VSync, true)
 		-- A malformed request raises in a test run too.
 		Test.ExpectEqual((pcall(function()
-			Application.SetDisplaySettings({ WindowMode = "Fullscreen" })
+			Application.SetDisplaySettings({ WindowMode = "Fullscreen" :: any })
 		end)), false)
 		Test.ExpectEqual((pcall(function()
 			Application.SetDisplaySettings({ Width = 0 })

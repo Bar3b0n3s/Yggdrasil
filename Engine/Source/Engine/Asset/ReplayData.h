@@ -73,8 +73,10 @@ namespace Engine {
 		// bytes do not depend on it (§9.1). Informational; never a reason to select a different expected hash.
 		std::string Config{};
 		// Version 4 (M28, decision 7): the session's save-data store at the recording's start, an object of the store's
-		// values by key (Null storage normalizes to an empty object; files always write an object), canonical as Parameters
-		// are (CanonicalizeReplayParameters: numbers as float), which seeds every playback's store.
+		// values by key (Null storage normalizes to an empty object; files always write an object), which seeds every
+		// playback's store. Its numbers are the store's doubles, written exactly (JsonNumbers::Double, in the text and the
+		// cooked payload) and read back exactly, so a recording starts from the store as it is; the session canonicalizes
+		// them as it seeds its store (SaveDataStore).
 		VariantValue SaveData{};
 	};
 
@@ -239,10 +241,12 @@ namespace Engine {
 	// Version must be ReplayFormatVersion (readers migrate older files first); newer is UnsupportedVersion. No compiler
 	// runs here.
 	[[nodiscard]] Status ValidateReplayDocument(const ReplayDocument& document);
-	// The readers accept versions 1 to 3. Version 1 has no Checkpoints member (one is an unknown member there) and
+	// The readers accept versions 1 to 4. Version 1 has no Checkpoints member (one is an unknown member there) and
 	// migrates with none; the document returned is always ReplayFormatVersion, and report.FileVersion keeps the file's own
-	// version. Versions 2 and 3 require Checkpoints. Version 3 (decision 2) requires Fingerprint (an object or null); in
-	// versions 1 and 2 a Fingerprint member is unknown, and both migrate with a null one.
+	// version. Versions 2 to 4 require Checkpoints. Versions 3 and 4 (decision 2) require Fingerprint (an object or null); in
+	// versions 1 and 2 a Fingerprint member is unknown, and both migrate with a null one. Version 4 (M28) requires SaveData
+	// (an object whose numbers are finite doubles); in versions 1 to 3 a SaveData member is unknown, and they migrate with
+	// an empty one.
 	[[nodiscard]] Result<ReplayDocument> ReplayFromJson(const Json& document, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<ReplayDocument> ReplayFromText(std::string_view text, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<Json> ReplayToJson(const ReplayDocument& document);
@@ -254,16 +258,16 @@ namespace Engine {
 	// non-object, a float outside the float range, invalid UTF-8 or nesting deeper than MaxJsonDepth.
 	[[nodiscard]] Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer = "/Parameters");
 
-	// Cooked FormatVersion 3 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
+	// Cooked FormatVersion 4 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
 	// u64; length-prefixed UTF-8 scene path and canonical Parameters JSON; seed u64; FixedHz u32; length-prefixed
-	// EngineVersion and Config; event count u32; events in array order; expectation count u32; expectations;
+	// EngineVersion and Config; length-prefixed SaveData JSON (M28: minified, its numbers as doubles); event count u32; events in array order; expectation count u32; expectations;
 	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64; then the fingerprint
 	// (decision 2): u8 present (0 or 1); when present, entity count u32 and per entity its id u64, length-prefixed path,
 	// hash u64, component count u32 and per component its length-prefixed name and hash u64; then asset count u32 and per
-	// asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 and 2 artifacts (no checkpoints, no
-	// fingerprint) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache key) and
-	// exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the nine kinds
-	// above in that order), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;
+	// asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 to 3 artifacts (no checkpoints, no
+	// fingerprint or no SaveData) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache key) and
+	// exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the ten kinds
+	// above in that order, Signal's tag 9), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;
 	// Action has a u8 State/Value discriminant; MouseButton has a u8 HasPosition; gamepad index is u32. Expectations:
 	// Tick u64, length-prefixed complete CookScript artifact. The nested artifact preserves source maps and compiler
 	// ABI checks without a second bytecode envelope. Check counts, tags, lengths, finite values and trailing bytes.

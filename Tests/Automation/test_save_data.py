@@ -9,8 +9,9 @@ import unittest
 
 from harness import AutomationTestCase, engine_client
 
-# A Saver that starts at the height its save data says (so the state hash depends on the store) and steps one unit along X
-# per fixed step while Space is held (so a recording's outcome depends on its input, which input.record stop checks).
+# A Saver that starts at the height its save data says (so the state hash depends on the store) and steps one unit
+# along X per fixed step while Space is held (so a recording's outcome depends on its input, which input.record stop
+# checks).
 SAVER = """local Saver = {}
 function Saver.OnCreate(self: any)
 \tlocal realm = SaveData.Get("Realm")
@@ -28,8 +29,8 @@ return Script.Define("Saver", Saver)
 class SaveDataTests(AutomationTestCase):
     def add_saver(self, client: engine_client.EngineClient) -> None:
         client.call("script.write", {"path": "Assets/Scripts/Saver.luau", "source": SAVER})
-        client.call("entity.create", {"name": "Saver",
-                                       "components": {"Script": {"Scripts": [{"Script": "Assets/Scripts/Saver.luau"}]}}})
+        scripts = {"Scripts": [{"Script": "Assets/Scripts/Saver.luau"}]}
+        client.call("entity.create", {"name": "Saver", "components": {"Script": scripts}})
         client.call("scene.save")
 
     def test_save_data_methods_seed_read_merge_and_clear_the_play_store(self) -> None:
@@ -60,7 +61,8 @@ class SaveDataTests(AutomationTestCase):
         client, root = self.open_editor_with_scene()
         client.call("savedata.set", {"values": {"Realm": 2}})
         client.call("play.start")
-        self.assertEqual(client.call("script.eval", {"context": "play", "code": "return SaveData.Get('Realm')"})["value"], 2)
+        realm = client.call("script.eval", {"context": "play", "code": "return SaveData.Get('Realm')"})
+        self.assertEqual(realm["value"], 2)
         committed = client.call("script.eval", {"context": "play",
                                                 "code": "SaveData.Set('Best', 12.5) return { SaveData.Commit() }"})
         self.assertEqual(committed["value"], [True])
@@ -79,16 +81,21 @@ class SaveDataTests(AutomationTestCase):
     def test_a_recording_records_the_play_store_and_its_replay_verifies_whatever_the_store_holds(self) -> None:
         client, root = self.open_editor_with_scene()
         self.add_saver(client)
-        client.call("savedata.set", {"values": {"Realm": 2, "Ratio": 0.1}})
+        # A large count and precise doubles, which a float would round (16,777,217 to 16,777,216): the replay's
+        # header keeps the store's doubles exactly (ADR 0043 decision 7), and the recorded run reads them as stored.
+        store = {"Realm": 2, "Ratio": 0.1, "Count": 16777217, "Stamp": 1731700000.123456}
+        client.call("savedata.set", {"values": store})
         client.call("input.record", {"action": "start", "seed": 42})
-        client.call("play.step", {"ticks": 4, "render": "none", "input": [{"type": "key", "key": "Space", "state": "tap"}]})
+        client.call("play.step", {"ticks": 4, "render": "none",
+                                  "input": [{"type": "key", "key": "Space", "state": "tap"}]})
+        exact = ("SaveData.Get('Realm') == 2 and SaveData.Get('Ratio') == 0.1 and SaveData.Get('Count') == 16777217"
+                 " and SaveData.Get('Stamp') == 1731700000.123456")
         client.call("input.record", {"action": "stop", "path": "Assets/Tests/Replays/Saved.replay",
-                                     "expect": [{"tick": 4, "luau": "SaveData.Get('Realm') == 2"}]})
+                                     "expect": [{"tick": 4, "luau": exact}]})
         client.call("play.stop")
         replay = json.loads((root / "Assets" / "Tests" / "Replays" / "Saved.replay").read_text(encoding="utf-8"))
         self.assertEqual(replay["Version"], 4)
-        self.assertEqual(replay["SaveData"]["Realm"], 2)
-        self.assertAlmostEqual(replay["SaveData"]["Ratio"], 0.1, places=6)
+        self.assertEqual(replay["SaveData"], store)
         # The machine's store holds something else now: the replay starts with its own and verifies at its hash.
         client.call("savedata.set", {"values": {"Realm": 9}})
         verified = client.call("input.replay", {"path": "Assets/Tests/Replays/Saved.replay", "verify": True,
@@ -106,8 +113,8 @@ class SaveDataTests(AutomationTestCase):
         self.assertTrue((directory / "Store.corrupt-1.json").is_file())
         self.assertFalse((directory / "Store.json").exists())
         client.call("play.start")
-        self.assertEqual(client.call("script.eval", {"context": "play", "code": "return SaveData.GetLoadError()"})["value"],
-                         None)
+        load_error = client.call("script.eval", {"context": "play", "code": "return SaveData.GetLoadError()"})
+        self.assertIsNone(load_error.get("value"))
         client.call("play.stop")
 
 

@@ -538,6 +538,50 @@ namespace Engine {
 			CHECK_FALSE(ReplayToText(bad).has_value());
 		}
 
+		// M28 (decision 7; the lead's decision on the W28.1 review's departure 1): the header's SaveData holds the save-data
+		// store's doubles, which the text and the cooked replay keep exactly, while Parameters keep the authored floats.
+		TEST_CASE("ReplayData: the header's SaveData keeps the store's doubles exactly through text and cooking")
+		{
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v3.upgraded.replay");
+			REQUIRE(upgraded.has_value());
+			ReplayLoadReport report;
+			auto document = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			const Json store{ { "Big", 1e300 }, { "Count", 16777217.0 }, { "Nested", Json{ { "Values", Json::array({ 0.1, 2.000000001 }) } } },
+				{ "Stamp", 1731700000.123456 } };
+			document->Header.SaveData.Set(store);
+			document->Header.Parameters.Set(Json{ { "Ratio", 0.1 } });
+
+			const auto text = ReplayToText(*document);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			CHECK(text->contains("\"Count\": 16777217,"));
+			CHECK(text->contains("\"Stamp\": 1731700000.123456"));
+			const auto read = ReplayFromText(*text, report, true);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			// JSON numbers compare by value: a double written as 16777217 reads back as that integer.
+			CHECK(read->Header.SaveData.Get() == store);
+			// Load then save is byte-identical.
+			CHECK(ReplayToText(*read) == *text);
+
+			ReplayDocument withoutExpect = *read;
+			withoutExpect.Expect.clear();
+			const auto cooked = CookReplay(withoutExpect, std::vector<ReplayBytecodeExpectation>{}, 1);
+			REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+			const auto loaded = LoadCookedReplay(*cooked);
+			REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+			CHECK((*loaded)->Header.SaveData.Get() == store);
+
+			// A store number JSON cannot hold is refused at its pointer; Parameters still take only the float range.
+			ReplayDocument infinite = *read;
+			infinite.Header.SaveData.Set(Json{ { "Bad", std::numeric_limits<double>::infinity() } });
+			const auto refused = ReplayToText(infinite);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(refused.error().GetLocation().JsonPointer == "/SaveData/Bad");
+			ReplayDocument parameters = *read;
+			parameters.Header.Parameters.Set(Json{ { "Big", 1e300 } });
+			CHECK_FALSE(ReplayToText(parameters).has_value());
+		}
+
 		TEST_CASE("ReplayData: a version 2 replay migrates to the current version with a null fingerprint")
 		{
 			const Result<std::string> v2 = Test::ReadTestDataText("Formats/Replay/v2.replay");

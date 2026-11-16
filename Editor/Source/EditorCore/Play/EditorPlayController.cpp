@@ -1017,17 +1017,12 @@ namespace Engine {
 		ENGINE_TRY(ValidatePlayRequest(recording));
 		ENGINE_TRY(CheckPlayScripts(editor.GetProject().GetSettings()));
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): a recording starts with the play store's save data
-		// (savedata.set seeds it), as its replay header stores it (numbers as float, §6.7), so every replay of it starts with
-		// the same values whatever the machine's store holds then.
+		// (savedata.set seeds it), which its replay header stores exactly (decision 7: the store's doubles), so every replay of
+		// it starts with the same values whatever the machine's store holds then.
 		if (recording.SaveData.IsNull())
 		{
-			ENGINE_TRY_ASSIGN(const SaveDataFileLoad saveData, m_State->ReadSaveData());
-			Result<Json> canonical = CanonicalizeReplayParameters(saveData.Values.Get(), "/SaveData");
-			if (!canonical)
-			{
-				return std::unexpected(Error(canonical.error()).WithHint("a replay header stores numbers as float (§6.7): save values within the float range"));
-			}
-			recording.SaveData = VariantValue(std::move(*canonical));
+			ENGINE_TRY_ASSIGN(SaveDataFileLoad saveData, m_State->ReadSaveData());
+			recording.SaveData = std::move(saveData.Values);
 		}
 		ENGINE_TRY(editor.PrepareForPlay());
 		ENGINE_TRY(ReplaceSession(recording, editor.GetProject().GetSettings()));

@@ -1,0 +1,63 @@
+{
+	"Format": "Replay",
+	"Version": 4,
+	"Scene": {
+		"Handle": "98fc80140ad51d9c",
+		"Path": "Assets/Scenes/SaveData.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.5.0",
+	"Config": "Editor",
+	"SaveData": {
+		"Realm": 2,
+		"Visits": 10
+	},
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "8b7116acdd152eae",
+				"Path": "/Gate",
+				"Hash": "1a7473901ce55c8b",
+				"Components": {
+					"Transform": "07292f68fd911210",
+					"Script": "61de03161db0cd39"
+				}
+			},
+			{
+				"Id": "e456be02a7a2a0ea",
+				"Path": "/Camera",
+				"Hash": "174e0672a78219df",
+				"Components": {
+					"Transform": "b571ff7d96fca57d",
+					"Camera": "280661e01a10689e"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "98d469c9e850cba8",
+				"Path": "Assets/Scripts/SaveData/Gate.luau",
+				"Type": "Script",
+				"Hash": "806b1c090aa0c652"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 30,
+			"Type": "Signal",
+			"Name": "Checkpoint"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 59,
+			"Luau": "local gate = Scene.FindByName(\"Gate\")\nreturn gate:GetScript(\"Gate\").Open and (SaveData.Get(\"Visits\") :: number) > 10 and SaveData.Get(\"Checkpoint\") ~= nil"
+		}
+	],
+	"Checkpoints": [],
+	"FinalTick": 60,
+	"FinalStateHash": "6a1239e58547828e"
+}

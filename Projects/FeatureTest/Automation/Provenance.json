@@ -3507,6 +3507,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/SaveData.scene",
+			"XXH64": "212fa9f5473b5595",
+			"Method": "scene.save",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/SaveData.scene.meta",
+			"XXH64": "8a98399b6aefb9d1",
+			"Method": "edit.batch",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/SceneLoadA.scene",
 			"XXH64": "6ddfa8158aaec2eb",
 			"Method": "scene.save",
@@ -4111,6 +4127,22 @@
 			"XXH64": "2fc1e5ed3e821c4b",
 			"Method": "script.write",
 			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/SaveData/Gate.luau",
+			"XXH64": "4a461778df004485",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/SaveData/Gate.luau.meta",
+			"XXH64": "60322bf16bf6bba7",
+			"Method": "script.write",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -5492,7 +5524,7 @@
 		},
 		{
 			"Path": "Assets/Tests/GameServices/GameServices.test.luau",
-			"XXH64": "1046441340fcd692",
+			"XXH64": "238c33899f96add2",
 			"Method": "script.write",
 			"RequestId": 5,
 			"Client": "batch",
@@ -5971,6 +6003,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/SaveData.replay",
+			"XXH64": "9887bbd0f28c1257",
+			"Method": "input.record",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/SaveData.replay.meta",
+			"XXH64": "6e41691009779bd9",
+			"Method": "input.record",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/Sprites2D.replay",
 			"XXH64": "80144c178250eea5",
 			"Method": "input.record",
@@ -6063,6 +6111,22 @@
 			"XXH64": "36f75eb13fe0b7d4",
 			"Method": "test.run",
 			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/SaveData/SaveData.test.luau",
+			"XXH64": "d7f9371ecd42bd40",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/SaveData/SaveData.test.luau.meta",
+			"XXH64": "274e5ef69c42b21a",
+			"Method": "script.write",
+			"RequestId": 5,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6660,7 +6724,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "dd56b107b9f837fe",
+			"XXH64": "7b547be7deaa80f7",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

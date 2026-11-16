@@ -14,8 +14,8 @@
 
 	#include <windows.h>
 
-	#include <cstddef>
 	#include <algorithm>
+	#include <cstddef>
 	#include <cstring>
 	#include <format>
 	#include <limits>

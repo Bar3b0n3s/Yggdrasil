@@ -1127,8 +1127,8 @@ namespace Engine {
 			properties["Config"] = StringSchema("The run mode that recorded the replay (Editor, Release or Dist), never the build configuration; informational.");
 			properties["SaveData"] = Described(Json{ { "type", "object" } },
 				"Version 4: the session's save-data store at the recording's start (SaveData's values by key), which seeds every playback's store, so "
-				"the replay verifies whatever the machine's store holds; numbers as float, as in Parameters; empty for a replay upgraded from an "
-				"earlier version.");
+				"the replay verifies whatever the machine's store holds; its numbers are the store's doubles, written exactly (unlike Parameters, "
+				"whose numbers are floats); empty for a replay upgraded from an earlier version.");
 			properties["Fingerprint"] = fingerprint;
 			properties["Events"] = Described(Json{ { "type", "array" }, { "items", ObjectSchema("One input event.", std::move(event), { "Tick", "Type" }) } },
 				"The applied input events, ordered by tick.");

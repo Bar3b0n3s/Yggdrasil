@@ -116,11 +116,9 @@ namespace Engine {
 			CHECK(FileSystem::ReadText(file).value_or("") == second);
 			std::error_code error;
 			size_t entries = 0;
-			for (const auto& entry : std::filesystem::directory_iterator(temp.GetPath(), error))
-			{
-				static_cast<void>(entry);
+			for (std::filesystem::directory_iterator entry(temp.GetPath(), error); !error && entry != std::filesystem::directory_iterator(); entry.increment(error))
 				++entries;
-			}
+			CHECK_FALSE(error);
 			CHECK(entries == 1);
 			// Its parent must exist.
 			CHECK_FALSE(PublishedFile::WriteDurably(temp.GetPath() / "Missing" / "Store.json", std::as_bytes(std::span(first.data(), first.size()))).has_value());

@@ -49,7 +49,9 @@ namespace Engine {
 			return {};
 		}
 
-		Status CheckTree(const JsonReader& root)
+		// A header tree's strings, nesting and numbers: fractional numbers within the float range that `numbers` Float (the
+		// authored form, §6) writes, or any finite double for JsonNumbers::Double (the header's SaveData, M28 decision 7).
+		Status CheckTree(const JsonReader& root, JsonNumbers numbers = JsonNumbers::Float)
 		{
 			std::vector<std::pair<JsonReader, size_t>> pending{ { root, 0 } };
 			while (!pending.empty())
@@ -82,7 +84,10 @@ namespace Engine {
 				}
 				else if (reader.GetType() == JsonType::Float)
 				{
-					ENGINE_TRY(reader.ReadFloat());
+					if (numbers == JsonNumbers::Double)
+						ENGINE_TRY(reader.ReadDouble());
+					else
+						ENGINE_TRY(reader.ReadFloat());
 				}
 				else if (reader.GetType() == JsonType::String)
 				{
@@ -586,7 +591,7 @@ namespace Engine {
 		{
 			JsonReader saveData(d.Header.SaveData.Get(), "/SaveData");
 			ENGINE_TRY(saveData.ExpectType(JsonType::Object));
-			ENGINE_TRY(CheckTree(saveData));
+			ENGINE_TRY(CheckTree(saveData, JsonNumbers::Double));
 		}
 		ENGINE_TRY(Hash(d.FinalStateHash, "/FinalStateHash"));
 		if (d.Events.size() > std::numeric_limits<uint32_t>::max() || d.Expect.size() > std::numeric_limits<uint32_t>::max()
@@ -667,7 +672,7 @@ namespace Engine {
 		{
 			ENGINE_TRY_ASSIGN(auto saveData, root.GetMember("SaveData"));
 			ENGINE_TRY(saveData.ExpectType(JsonType::Object));
-			ENGINE_TRY(CheckTree(saveData));
+			ENGINE_TRY(CheckTree(saveData, JsonNumbers::Double));
 			d.Header.SaveData.Set(saveData.GetValue());
 		}
 		else
@@ -742,8 +747,18 @@ namespace Engine {
 
 	Result<std::string> ReplayToText(const ReplayDocument& document)
 	{
-		ENGINE_TRY_ASSIGN(auto value, ReplayToJson(document));
-		return JsonWriter::Write(value);
+		ENGINE_TRY_ASSIGN(const Json value, ReplayToJson(document));
+		// Every member as authored files write it (§6), but the header's SaveData, the save-data store's doubles, which are
+		// written exactly (M28, Docs/Decisions/0043-m28-game-services.md decision 7).
+		JsonWriter writer;
+		writer.BeginObject();
+		for (const auto& [key, member] : value.items())
+		{
+			writer.WriteKey(key);
+			writer.WriteJson(member, key == "SaveData" ? JsonNumbers::Double : JsonNumbers::Float);
+		}
+		writer.EndObject();
+		return writer.Finish();
 	}
 
 	Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer)
@@ -772,7 +787,7 @@ namespace Engine {
 		w.WriteU32(d.Header.FixedHz);
 		w.WriteString(d.Header.EngineVersion);
 		w.WriteString(d.Header.Config);
-		ENGINE_TRY_ASSIGN(auto saveData, JsonWriter::Write(d.Header.SaveData.IsNull() ? Json::object() : d.Header.SaveData.Get(), JsonStyle::Minified));
+		ENGINE_TRY_ASSIGN(auto saveData, JsonWriter::Write(d.Header.SaveData.IsNull() ? Json::object() : d.Header.SaveData.Get(), JsonStyle::Minified, JsonNumbers::Double));
 		ENGINE_TRY(Text(saveData, "/SaveData"));
 		w.WriteString(saveData);
 		w.WriteU32(static_cast<uint32_t>(d.Events.size()));

@@ -53,7 +53,7 @@
 			"type": "string"
 		},
 		"SaveData": {
-			"description": "Version 4: the session's save-data store at the recording's start (SaveData's values by key), which seeds every playback's store, so the replay verifies whatever the machine's store holds; numbers as float, as in Parameters; empty for a replay upgraded from an earlier version.",
+			"description": "Version 4: the session's save-data store at the recording's start (SaveData's values by key), which seeds every playback's store, so the replay verifies whatever the machine's store holds; its numbers are the store's doubles, written exactly (unlike Parameters, whose numbers are floats); empty for a replay upgraded from an earlier version.",
 			"type": "object"
 		},
 		"Fingerprint": {

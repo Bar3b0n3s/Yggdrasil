@@ -20,6 +20,14 @@ namespace Engine {
 		Minified // cooked scene, prefab, material and project payloads (§6.8): no whitespace, no final newline
 	};
 
+	// How WriteJson writes a tree's fractional numbers.
+	enum class JsonNumbers : uint8_t
+	{
+		Float, // as float, the authored files' form (§6): the value rounded to float; outside the float range is a data error
+		Double // as double (WriteDouble): only where a format documents its numbers as exact doubles, a replay header's
+			   // save data (M28, Docs/Decisions/0043-m28-game-services.md decision 7)
+	};
+
 	// The canonical JSON writer (Architecture §6). Every authored file is written through it, which is what makes
 	// "load then save is byte-identical" hold. The caller decides the member order (registry order for reflected types,
 	// "Format" and "Version" first); the writer decides everything else:
@@ -28,6 +36,7 @@ namespace Engine {
 	//     scalars (null, boolean, number, string) stays on one line, "[1, 2, 3]" with ", " separators; an array with at
 	//     least one object or array element puts each element on its own line like an object. Empty containers are
 	//     "{}" and "[]". The document ends with exactly one "\n". Minified drops every space and line break.
+	//   - Doubles (WriteDouble, JsonNumbers::Double): the same rules on double, the shortest text that round-trips the double.
 	//   - Floats: the shortest text that round-trips the float value (std::to_chars on float, so 0.1f is "0.1", 1.0f is
 	//     "1", 1e8f is "1e+08"); -0 is written as "0"; NaN and infinities are rejected.
 	//   - Integers: decimal, exact over the full int64 and uint64 ranges. UUIDs: 16-digit lowercase hex strings (§4.8).
@@ -60,13 +69,17 @@ namespace Engine {
 		void WriteInt(int64_t value);
 		void WriteUInt(uint64_t value);
 		void WriteFloat(float value);
+		// The shortest text that round-trips the double (std::to_chars on double); -0 is written as 0, and NaN and infinities
+		// are data errors, as for WriteFloat. Only where a format documents its numbers as doubles (JsonNumbers::Double).
+		void WriteDouble(double value);
 		void WriteString(std::string_view value);
 		void WriteUUID(UUID value);
 
-		// Writes a whole tree, object members in the tree's order. Float numbers are written as float (the shortest form
-		// of the value rounded to float; outside the float range is a data error), integers exactly. The tree must nest
-		// at most MaxJsonDepth arrays and objects deep (asserted; JsonReader::Parse never produces deeper trees).
-		void WriteJson(const Json& value);
+		// Writes a whole tree, object members in the tree's order. Fractional numbers are written as `numbers` says: as float
+		// by default (the shortest form of the value rounded to float; outside the float range is a data error), or as double
+		// (WriteDouble); integers exactly. The tree must nest at most MaxJsonDepth arrays and objects deep (asserted;
+		// JsonReader::Parse never produces deeper trees).
+		void WriteJson(const Json& value, JsonNumbers numbers = JsonNumbers::Float);
 
 		// Writes `map` as an object with keys in std::map (byte-wise) order; `writeValue(writer, value)` writes each value.
 		template<typename T, typename WriteValue>
@@ -85,8 +98,8 @@ namespace Engine {
 		// Validation for the first data problem (see the class comment).
 		[[nodiscard]] Result<std::string> Finish();
 
-		// Writes `value` as one document.
-		[[nodiscard]] static Result<std::string> Write(const Json& value, JsonStyle style = JsonStyle::Pretty);
+		// Writes `value` as one document (WriteJson with `numbers`).
+		[[nodiscard]] static Result<std::string> Write(const Json& value, JsonStyle style = JsonStyle::Pretty, JsonNumbers numbers = JsonNumbers::Float);
 	private:
 		struct State; // the document under construction and the open containers (JsonWriter.cpp)
 	private:
