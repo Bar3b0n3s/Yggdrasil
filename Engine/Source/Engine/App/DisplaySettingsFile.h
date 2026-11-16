@@ -36,11 +36,19 @@ namespace Engine {
 	// the file system's.
 	[[nodiscard]] Status WriteDisplaySettingsFile(VirtualFileSystem& vfs, const DisplaySettings& settings);
 
+	// What the Runtime's startup read found: the settings (nullopt without a readable file) and, for a file that cannot be read
+	// or parsed, the problem, which the Runtime logs once logging exists (the factory runs before the process level).
+	struct StartupDisplaySettings
+	{
+		std::optional<DisplaySettings> Settings{};
+		std::string Problem{};
+	};
+
 	// The settings a Runtime starts with, read before the process level exists (the application factory): `appName`'s
 	// Display.json under `userDataRoot` (--user-data-dir), or under the operating system's root when it is empty
-	// (Paths::GetUserDataPaths). nullopt when there is none; a file that cannot be read or parsed is logged as a warning and
-	// gives nullopt, so the project's Window settings apply. Reads only.
-	[[nodiscard]] std::optional<DisplaySettings> ReadStartupDisplaySettings(std::string_view appName, const std::filesystem::path& userDataRoot);
+	// (Paths::GetUserDataPaths). No settings without a file; a file that cannot be read or parsed gives no settings and its
+	// problem, so the project's Window settings apply. Reads only; logs nothing.
+	[[nodiscard]] StartupDisplaySettings ReadStartupDisplaySettings(std::string_view appName, const std::filesystem::path& userDataRoot);
 
 	// Makes `specification` create its window in `settings`' mode (WindowSpecification::DisplayMode and RefreshRate; Width
 	// and Height but in Borderless, which covers the monitor) with `settings`' VSync (GraphicsSpecification::VSync), so the

@@ -31,6 +31,8 @@ namespace Engine {
 			d.Header.Seed = std::numeric_limits<uint64_t>::max();
 			d.Header.EngineVersion = "1";
 			d.Header.Config = "Debug";
+			// M28 (Docs/Decisions/0043-m28-game-services.md decision 7): version 4's store, nested.
+			d.Header.SaveData.Set(Json{ { "Best", 12.5f }, { "Progress", Json{ { "Realm", 2 }, { "Seen", Json::array({ "Fire", "Ice" }) } } } });
 			d.FinalTick = 2;
 			d.FinalStateHash = "0123456789abcdef";
 			d.Events = {
@@ -43,7 +45,8 @@ namespace Engine {
 				{ .Tick = 0, .Type = "Scroll", .Delta = glm::vec2(0, 2) },
 				{ .Tick = 0, .Type = "GamepadButton", .State = "Down", .ButtonName = "South", .Gamepad = 3 },
 				{ .Tick = 1, .Type = "GamepadAxis", .Value = 0.7f, .Gamepad = 2, .AxisName = "LeftTrigger" },
-				{ .Tick = 1, .Type = "Text", .Text = "hello ☃" }
+				{ .Tick = 1, .Type = "Text", .Text = "hello ☃" },
+				{ .Tick = 1, .Type = "Signal", .Name = "FrameTimeExceeded" }
 			};
 			return d;
 		}
@@ -370,7 +373,7 @@ namespace Engine {
 		TEST_CASE("ReplayData: seeded source and binary mutations never assert or crash" * doctest::test_suite(Test::FuzzSuite))
 		{
 			// The seed corpus (Docs/Decisions/0024-m15-contract.md decision 13): the synthetic document, which holds every
-			// event kind, and FeatureTest's committed replays (long event lists, multi-line Luau expectations), each as text
+			// event kind (M28's Signal included) and a nested SaveData header, and FeatureTest's committed replays (long event lists, multi-line Luau expectations), each as text
 			// and cooked with its expectations compiled as ReplayImporter compiles them. Each iteration draws its seed from its
 			// own Random.
 			struct ReplaySeed

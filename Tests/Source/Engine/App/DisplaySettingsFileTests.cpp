@@ -8,7 +8,6 @@
 #include "Engine/Core/Random.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Paths.h"
-#include "Support/ExpectLog.h"
 #include "Support/Fuzz.h"
 #include "Support/TempDirectory.h"
 
@@ -67,10 +66,12 @@ namespace Engine {
 			refused(R"({"Format":"DisplaySettings","Version":1,"WindowMode":"Windowed","Width":1,"Height":1,"RefreshRate":0,"VSync":"yes"})", ErrorCode::Validation, "/VSync");
 		}
 
-		TEST_CASE("DisplaySettingsFile: the Runtime's startup read takes the game's Display.json, and a missing or invalid one gives nothing")
+		TEST_CASE("DisplaySettingsFile: the Runtime's startup read takes the game's Display.json, and a missing or invalid one gives its problem")
 		{
 			const Test::TempDirectory temp;
-			CHECK_FALSE(ReadStartupDisplaySettings("Game", temp.GetPath()).has_value());
+			const StartupDisplaySettings missing = ReadStartupDisplaySettings("Game", temp.GetPath());
+			CHECK_FALSE(missing.Settings.has_value());
+			CHECK(missing.Problem.empty());
 			const Result<UserDataPaths> paths = Paths::GetUserDataPaths("Game", temp.GetPath());
 			REQUIRE(paths.has_value());
 			std::error_code error;
@@ -80,15 +81,17 @@ namespace Engine {
 			const Result<std::string> text = SerializeDisplaySettingsFile(settings);
 			REQUIRE(text.has_value());
 			REQUIRE(FileSystem::WriteFileAtomic(paths->Root / "Display.json", std::as_bytes(std::span(text->data(), text->size()))).has_value());
-			const std::optional<DisplaySettings> read = ReadStartupDisplaySettings("Game", temp.GetPath());
-			REQUIRE(read.has_value());
-			CHECK(*read == settings);
+			const StartupDisplaySettings read = ReadStartupDisplaySettings("Game", temp.GetPath());
+			REQUIRE(read.Settings.has_value());
+			CHECK(*read.Settings == settings);
+			CHECK(read.Problem.empty());
 
+			// The factory runs before logging exists: the problem comes back for the Runtime to log, and nothing is logged here.
 			const std::string truncated = text->substr(0, text->size() / 2);
 			REQUIRE(FileSystem::WriteFileAtomic(paths->Root / "Display.json", std::as_bytes(std::span(truncated.data(), truncated.size()))).has_value());
-			Test::ExpectLog warning(LogLevel::Warn, "display settings");
-			CHECK_FALSE(ReadStartupDisplaySettings("Game", temp.GetPath()).has_value());
-			CHECK(warning.GetMatchCount() == 1);
+			const StartupDisplaySettings invalid = ReadStartupDisplaySettings("Game", temp.GetPath());
+			CHECK_FALSE(invalid.Settings.has_value());
+			CHECK(invalid.Problem.find("user://Display.json") != std::string::npos);
 		}
 
 		TEST_CASE("DisplaySettingsFile: the startup settings make the Runtime's first window in the chosen mode")

@@ -6,6 +6,7 @@
 #include "Engine/Platform/Window.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
+#include "Engine/Scripting/ScriptLimits.h"
 
 #include <type_traits>
 
@@ -109,7 +110,8 @@ namespace Engine {
 		// a recording records; a fixed-step gameplay callback acts directly instead, so posting there raises.
 		static int InputPostSignal(ScriptCall& call)
 		{
-			const std::string name = Lua::Check<std::string>(call, 1);
+			// The input queue keeps the name: its length is checked before the copy.
+			const std::string name = Lua::CheckBoundedString(call, 1, MaxScriptSignalNameBytes);
 			IScriptHost& host = call.Engine->GetHost();
 			const bool gameplay = call.Execution != nullptr && call.Execution->Origin == ScriptExecutionOrigin::Gameplay;
 			if (gameplay && host.GetFrameState().Phase == InputPhase::Step)

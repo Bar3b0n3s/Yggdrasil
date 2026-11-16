@@ -4,7 +4,6 @@
 #include "Engine/App/Application.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Json/JsonWriter.h"
-#include "Engine/Core/Log.h"
 #include "Engine/Core/Mounts/NativeDirectoryMount.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Platform/Paths.h"
@@ -72,31 +71,25 @@ namespace Engine {
 		return vfs.WriteFileAtomic(path, std::as_bytes(std::span(text.data(), text.size())));
 	}
 
-	std::optional<DisplaySettings> ReadStartupDisplaySettings(std::string_view appName, const std::filesystem::path& userDataRoot)
+	StartupDisplaySettings ReadStartupDisplaySettings(std::string_view appName, const std::filesystem::path& userDataRoot)
 	{
 		const Result<UserDataPaths> paths = Paths::GetUserDataPaths(appName, userDataRoot);
 		if (!paths.has_value())
-			return std::nullopt;
+			return {};
 		Result<Scope<NativeDirectoryMount>> mount = NativeDirectoryMount::Create(paths->Root, MountAccess::ReadOnly);
 		VirtualFileSystem vfs;
 		if (!mount.has_value() || !vfs.Mount("user", std::move(*mount)).has_value())
-			return std::nullopt;
+			return {};
 		const Result<VfsPath> path = VfsPath::Parse(DisplaySettingsPath);
 		if (!path.has_value() || !vfs.Exists(*path))
-			return std::nullopt;
+			return {};
 		const Result<std::string> text = vfs.ReadText(*path);
 		if (!text.has_value())
-		{
-			ENGINE_CORE_WARN("The display settings in {} cannot be read, so the project's window settings apply: {}", DisplaySettingsPath, text.error().ToString());
-			return std::nullopt;
-		}
+			return { .Problem = std::format("The display settings in {} cannot be read, so the project's window settings apply: {}", DisplaySettingsPath, text.error().ToString()) };
 		Result<DisplaySettings> settings = ParseDisplaySettingsFile(*text);
 		if (!settings.has_value())
-		{
-			ENGINE_CORE_WARN("The display settings in {} are invalid, so the project's window settings apply: {}", DisplaySettingsPath, settings.error().ToString());
-			return std::nullopt;
-		}
-		return *settings;
+			return { .Problem = std::format("The display settings in {} are invalid, so the project's window settings apply: {}", DisplaySettingsPath, settings.error().ToString()) };
+		return { .Settings = *settings };
 	}
 
 	void ApplyStartupDisplaySettings(ApplicationSpecification& specification, const DisplaySettings& settings)

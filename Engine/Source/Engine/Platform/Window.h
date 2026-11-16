@@ -119,6 +119,10 @@ namespace Engine {
 		[[nodiscard]] glm::vec2 GetContentScale() const;
 
 		[[nodiscard]] bool IsMinimized() const;
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): whether the window is full screen on a monitor (GLFW's
+		// monitor window: the project's Fullscreen, or the Exclusive display mode); false again once it left the monitor, also
+		// when the monitor was disconnected.
+		[[nodiscard]] bool IsFullScreen() const;
 		[[nodiscard]] bool IsFocused() const;
 
 		// The GLFWwindow*, for the code outside Platform that must call GLFW with it: the GLFW glue of Dear ImGui

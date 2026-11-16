@@ -115,33 +115,51 @@ namespace Engine {
 		GLFWmonitor* monitor = Utils::FindWindowMonitor(handle);
 		if (monitor == nullptr)
 			return MakeError(ErrorCode::Unsupported, "no monitor is connected");
-		const GLFWvidmode* current = glfwGetVideoMode(monitor);
-		if (current == nullptr)
-			return MakeError(ErrorCode::Unsupported, "the monitor reports no current video mode");
-		int left = 0;
-		int top = 0;
-		glfwGetMonitorPos(monitor, &left, &top);
 		switch (settings.WindowMode)
 		{
 			case DisplayWindowMode::Windowed:
+			case DisplayWindowMode::Borderless:
 			{
-				if (settings.Width == 0 || settings.Height == 0)
+				if (settings.WindowMode == DisplayWindowMode::Windowed && (settings.Width == 0 || settings.Height == 0))
 					return MakeError(ErrorCode::InvalidArgument, "a windowed size needs a width and a height of at least 1");
-				// A window leaving a full-screen mode is centred on its monitor; a window already windowed keeps its place.
-				int x = left + std::max(0, (current->width - static_cast<int>(settings.Width)) / 2);
-				int y = top + std::max(0, (current->height - static_cast<int>(settings.Height)) / 2);
-				const bool wasWindowed = glfwGetWindowMonitor(handle) == nullptr && glfwGetWindowAttrib(handle, GLFW_DECORATED) == GLFW_TRUE;
-				if (wasWindowed)
+				// A window already windowed keeps its place; one leaving a full-screen mode is centred on its monitor.
+				std::optional<std::pair<int32_t, int32_t>> windowedPosition;
+				const bool exclusive = glfwGetWindowMonitor(handle) != nullptr;
+				if (!exclusive && glfwGetWindowAttrib(handle, GLFW_DECORATED) == GLFW_TRUE)
+				{
+					int x = 0;
+					int y = 0;
 					glfwGetWindowPos(handle, &x, &y);
-				glfwSetWindowAttrib(handle, GLFW_DECORATED, GLFW_TRUE);
-				glfwSetWindowMonitor(handle, nullptr, x, y, static_cast<int>(settings.Width), static_cast<int>(settings.Height), GLFW_DONT_CARE);
+					windowedPosition = std::pair<int32_t, int32_t>(x, y);
+				}
+				// Leaving an exclusive mode restores the desktop's video mode, so the window leaves the monitor before the mode
+				// and position are read: read before, they would be the exclusive mode's.
+				if (exclusive)
+				{
+					const GLFWvidmode* held = glfwGetVideoMode(monitor);
+					glfwSetWindowMonitor(handle, nullptr, 0, 0, held != nullptr ? held->width : 1, held != nullptr ? held->height : 1, GLFW_DONT_CARE);
+				}
+				const GLFWvidmode* desktop = glfwGetVideoMode(monitor);
+				if (desktop == nullptr || desktop->width <= 0 || desktop->height <= 0)
+					return MakeError(ErrorCode::Unsupported, "the monitor reports no current video mode");
+				int left = 0;
+				int top = 0;
+				glfwGetMonitorPos(monitor, &left, &top);
+				const DisplayWindowRect rect = ComputeDisplayWindowRect(settings, left, top,
+					DisplayVideoMode{ .Width = static_cast<uint32_t>(desktop->width), .Height = static_cast<uint32_t>(desktop->height) }, windowedPosition);
+				const int width = static_cast<int>(rect.Width);
+				const int height = static_cast<int>(rect.Height);
+				if (settings.WindowMode == DisplayWindowMode::Borderless)
+				{
+					glfwSetWindowMonitor(handle, nullptr, rect.X, rect.Y, width, height, GLFW_DONT_CARE);
+					glfwSetWindowAttrib(handle, GLFW_DECORATED, GLFW_FALSE);
+				}
+				else
+					glfwSetWindowAttrib(handle, GLFW_DECORATED, GLFW_TRUE);
+				// Again after the decoration changed, which moves the client area.
+				glfwSetWindowMonitor(handle, nullptr, rect.X, rect.Y, width, height, GLFW_DONT_CARE);
 				return {};
 			}
-			case DisplayWindowMode::Borderless:
-				glfwSetWindowMonitor(handle, nullptr, left, top, current->width, current->height, GLFW_DONT_CARE);
-				glfwSetWindowAttrib(handle, GLFW_DECORATED, GLFW_FALSE);
-				glfwSetWindowMonitor(handle, nullptr, left, top, current->width, current->height, GLFW_DONT_CARE);
-				return {};
 			case DisplayWindowMode::Exclusive:
 			{
 				ENGINE_TRY_ASSIGN(const std::vector<DisplayVideoMode> modes, Utils::ReadVideoModes(monitor));

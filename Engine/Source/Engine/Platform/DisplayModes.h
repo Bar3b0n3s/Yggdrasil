@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <utility>
 #include <string_view>
 #include <vector>
 
@@ -51,6 +52,25 @@ namespace Engine {
 	// Whether `modes` lists `mode` (a lambda's comparison: MSVC's vectorized std::find has no path for a 12-byte element, which
 	// clang-cl cannot instantiate).
 	[[nodiscard]] bool ContainsDisplayVideoMode(std::span<const DisplayVideoMode> modes, const DisplayVideoMode& mode);
+
+	// The screen rectangle of a window in a non-exclusive display mode.
+	struct DisplayWindowRect
+	{
+		int32_t X = 0;
+		int32_t Y = 0;
+		uint32_t Width = 0;
+		uint32_t Height = 0;
+
+		bool operator==(const DisplayWindowRect&) const = default;
+	};
+
+	// Where ApplyDisplaySettings puts a Windowed or Borderless window, on a monitor at (monitorX, monitorY) whose desktop
+	// video mode is `desktop` (read once the window has left any exclusive mode, which changes the monitor's mode):
+	// Borderless covers the monitor; Windowed takes settings' Width x Height at `windowedPosition` (the place of a window
+	// that was windowed already), else centred on the monitor and never above or left of its origin. Pure; the Exclusive
+	// mode has no rectangle (the monitor's mode is the window).
+	[[nodiscard]] DisplayWindowRect ComputeDisplayWindowRect(const DisplaySettings& settings, int32_t monitorX, int32_t monitorY,
+		const DisplayVideoMode& desktop, const std::optional<std::pair<int32_t, int32_t>>& windowedPosition);
 
 	// The ranges every display request and user://Display.json take (ValidateDisplaySettings).
 	inline constexpr uint32_t MaxDisplayExtent = 16384;

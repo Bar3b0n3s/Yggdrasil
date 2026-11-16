@@ -36,6 +36,25 @@ namespace Engine {
 		});
 	}
 
+	DisplayWindowRect ComputeDisplayWindowRect(const DisplaySettings& settings, int32_t monitorX, int32_t monitorY, const DisplayVideoMode& desktop,
+		const std::optional<std::pair<int32_t, int32_t>>& windowedPosition)
+	{
+		if (settings.WindowMode == DisplayWindowMode::Borderless)
+			return { .X = monitorX, .Y = monitorY, .Width = desktop.Width, .Height = desktop.Height };
+		DisplayWindowRect rect{ .Width = settings.Width, .Height = settings.Height };
+		if (windowedPosition.has_value())
+		{
+			rect.X = windowedPosition->first;
+			rect.Y = windowedPosition->second;
+			return rect;
+		}
+		const int64_t spareX = static_cast<int64_t>(desktop.Width) - static_cast<int64_t>(settings.Width);
+		const int64_t spareY = static_cast<int64_t>(desktop.Height) - static_cast<int64_t>(settings.Height);
+		rect.X = monitorX + static_cast<int32_t>(std::max<int64_t>(0, spareX / 2));
+		rect.Y = monitorY + static_cast<int32_t>(std::max<int64_t>(0, spareY / 2));
+		return rect;
+	}
+
 	Status ValidateDisplaySettings(const DisplaySettings& settings)
 	{
 		if (DisplayWindowModeToString(settings.WindowMode).empty())

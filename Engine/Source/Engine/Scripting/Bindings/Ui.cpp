@@ -172,9 +172,8 @@ namespace Engine {
 			std::optional<std::string> text;
 			if (!Lua::IsNoneOrNil(call, 2))
 			{
-				text = Lua::Check<std::string>(call, 2);
-				if (text->size() > MaxScriptPresentationTextBytes)
-					return Lua::RaiseError(call, std::format("a presentation text holds at most {} bytes; this one has {}", MaxScriptPresentationTextBytes, text->size()));
+				// The UI keeps the text: its length is checked before the copy.
+				text = Lua::CheckBoundedString(call, 2, MaxScriptPresentationTextBytes);
 				if (!IsValidUtf8(*text))
 					return Lua::RaiseError(call, std::format("the presentation text is not valid UTF-8 (at byte {})", FindInvalidUtf8(*text)));
 			}

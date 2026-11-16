@@ -411,7 +411,7 @@ namespace Engine {
 		// path checks the name (1 to MaxScriptSignalNameBytes bytes of UTF-8).
 		static int InjectSignal(ScriptCall& call)
 		{
-			std::string name = Lua::Check<std::string>(call, 1);
+			std::string name = Lua::CheckBoundedString(call, 1, MaxScriptSignalNameBytes);
 			return Inject(call, { { "type", "signal" }, { "name", std::move(name) } });
 		}
 

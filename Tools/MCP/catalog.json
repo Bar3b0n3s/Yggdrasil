@@ -1496,7 +1496,7 @@
 									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 								},
 								"name": {
-									"description": "action: the project action's name (exact, case-sensitive).",
+									"description": "action: the project action's name (exact, case-sensitive); signal: the frame-time signal's name, 1 to 64 bytes of UTF-8.",
 									"type": "string"
 								},
 								"state": {
@@ -2114,7 +2114,7 @@
 									"enum": ["Action", "Key", "MouseButton", "MouseMove", "MouseDelta", "Scroll", "GamepadButton", "GamepadAxis", "Text", "Signal"]
 								},
 								"name": {
-									"description": "action: the project action's name (exact, case-sensitive).",
+									"description": "action: the project action's name (exact, case-sensitive); signal: the frame-time signal's name, 1 to 64 bytes of UTF-8.",
 									"type": "string"
 								},
 								"state": {

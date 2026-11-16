@@ -861,6 +861,9 @@ namespace Engine {
 
 	Status RuntimeApp::OnInitialize()
 	{
+		// M28 (decision 3): the startup read's problem, now that the game's log exists (the Dist game's included).
+		if (!m_State->Options.DisplaySettingsProblem.empty())
+			ENGINE_WARN("{}", m_State->Options.DisplaySettingsProblem);
 #if !defined(ENGINE_DIST)
 		// The overlay's ImGui never changes the OS cursor, so the game's cursor mode holds as in Dist, which has no ImGui. The
 		// line says so once per windowed run; the F1 test (RuntimeAppTests) checks that the Runtime configured its context.
@@ -1620,8 +1623,10 @@ namespace Engine {
 		// chose (user://Display.json) before its window first shows; FeatureTest and replay runs keep the project's window.
 		if (specification.Window == WindowMode::Windowed && !runtime.FeatureTest && runtime.Replay.empty())
 		{
-			if (const std::optional<DisplaySettings> display = ReadStartupDisplaySettings(manifest->Name, specification.UserDataRoot))
-				ApplyStartupDisplaySettings(specification, *display);
+			StartupDisplaySettings display = ReadStartupDisplaySettings(manifest->Name, specification.UserDataRoot);
+			if (display.Settings.has_value())
+				ApplyStartupDisplaySettings(specification, *display.Settings);
+			runtime.DisplaySettingsProblem = std::move(display.Problem);
 		}
 #if !defined(ENGINE_DIST)
 		// The F1 stats overlay (§14.4; Docs/Decisions/0024-m15-contract.md decision 17) needs Dear ImGui, which a windowed

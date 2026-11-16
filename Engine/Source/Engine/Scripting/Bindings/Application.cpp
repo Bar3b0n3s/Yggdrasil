@@ -256,10 +256,10 @@ namespace Engine {
 				"Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number}",
 				"The performance readout of Application.GetStats: frame-paced observations, never simulation state."));
 			ENGINE_TRY(api.RegisterAlias("DisplayMode", "{Width: number, Height: number, RefreshRate: number}", "One video mode of the monitor: its size in pixels and refresh rate in Hz."));
-			ENGINE_TRY(api.RegisterAlias("DisplaySettings", "{WindowMode: string, Width: number, Height: number, RefreshRate: number, VSync: boolean}",
+			ENGINE_TRY(api.RegisterAlias("DisplaySettings", "{WindowMode: \"Windowed\" | \"Borderless\" | \"Exclusive\", Width: number, Height: number, RefreshRate: number, VSync: boolean}",
 				"A window's display settings: WindowMode Windowed, Borderless or Exclusive; the window's size in screen units (the video mode's in the "
 				"full-screen modes); the refresh rate of a full-screen mode (0 windowed); and vertical sync."));
-			ENGINE_TRY(api.RegisterAlias("DisplaySettingsRequest", "{WindowMode: string?, Width: number?, Height: number?, RefreshRate: number?, VSync: boolean?}",
+			ENGINE_TRY(api.RegisterAlias("DisplaySettingsRequest", "{WindowMode: (\"Windowed\" | \"Borderless\" | \"Exclusive\")?, Width: number?, Height: number?, RefreshRate: number?, VSync: boolean?}",
 				"A request of Application.SetDisplaySettings: the DisplaySettings members to change; a member left out keeps its current value."));
 			api.Module("Application", "Application identity, window state and deferred quit requests.")
 				.Function("Quit", &Utils::ApplicationQuit, "(exitCode: number?) -> ()", "Requests exit (default 0): stops editor Play, exits Runtime, or records quit and ends the current test suite. Never destroys the executing VM inline.")
@@ -292,12 +292,12 @@ namespace Engine {
 					read)
 				.Function("GetDisplaySettings", &Utils::ApplicationDisplaySettings, "() -> DisplaySettings",
 					"Returns the display settings in force: the window mode, the window's size in screen units (the video mode's in the full-screen "
-					"modes; 0 x 0 while the window is minimized, so a request then gives Width and Height), the refresh rate of a full-screen mode "
-					"(0 windowed) and VSync. Where display settings do nothing it returns the "
+					"modes; its last size while the window is minimized), the refresh rate of a full-screen mode (0 windowed) and VSync. Where display settings do nothing it returns the "
 					"session's view as a Windowed window with the project's Window.VSync.",
 					read)
 				.Function("SetDisplaySettings", &Utils::ApplicationSetDisplaySettings, "(settings: DisplaySettingsRequest) -> (boolean, string?)",
-					"Requests display settings for the next frame boundary (a member left out keeps its current value): Windowed takes Width x "
+					"Requests display settings for the next frame boundary (a member left out keeps its value in force, so a later request in the "
+					"same frame replaces an earlier one: give every member that should change): Windowed takes Width x "
 					"Height; Borderless covers the monitor at its current mode; Exclusive switches the monitor to one of GetDisplayModes(). The "
 					"Runtime keeps the choice in user://Display.json and applies it at the next start, before its window shows. Returns true when "
 					"the request was accepted, or false and the reason where display settings do nothing (the editor, headless runs, test runs, "

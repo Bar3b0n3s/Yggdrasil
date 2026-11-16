@@ -261,8 +261,8 @@ namespace Engine {
 		// thread, while the frame loop runs. GetDisplayVideoModes: QueryDisplayVideoModes of the window.
 		[[nodiscard]] Result<std::vector<DisplayVideoMode>> GetDisplayVideoModes() const;
 		// The settings in force: the window's mode (the specification's at the start, Exclusive for WindowSettings.Fullscreen,
-		// then each applied request's), its size in screen units (0 x 0 while minimized), its monitor's current refresh rate in
-		// the full-screen modes (0 windowed) and the VSync in force.
+		// then each applied request's; Windowed once the monitor let an Exclusive window go), its size in screen units (its last
+		// size while minimized), its monitor's current refresh rate in the full-screen modes (0 windowed) and the VSync in force.
 		[[nodiscard]] DisplaySettings GetDisplaySettings() const;
 		// Checks `settings` now and applies them at the next frame boundary (the frame's safe point, before OnSafePoint and
 		// the fixed steps; the last request before it wins): the window's mode (ApplyDisplaySettings) and the swapchain's
@@ -392,6 +392,9 @@ namespace Engine {
 		std::optional<DisplaySettings> m_PendingDisplay{};
 		DisplayWindowMode m_DisplayMode = DisplayWindowMode::Windowed;
 		bool m_VSync = true;
+		// The window's last size that was not 0 x 0 (minimized), which GetDisplaySettings reports while it is.
+		uint32_t m_LastWindowWidth = 0;
+		uint32_t m_LastWindowHeight = 0;
 		Scope<EngineContext> m_Context;    // between the start of initialization and the end of OnShutdown
 		Scope<FrameLoop> m_FrameLoop;      // while the frame loop runs
 		Scope<FrameRendering> m_Rendering; // with a device, from InitializeRendering to ShutdownRendering

@@ -311,7 +311,7 @@ namespace Engine {
 			.Field("tick", &InputEventParams::Tick,
 				"The tick offset: from the session's next tick (input.inject) or from the first tick of the play.step that carries it.")
 			.Field("type", &InputEventParams::Type, "The event type (required).")
-			.Field("name", &InputEventParams::Name, "action: the project action's name (exact, case-sensitive).")
+			.Field("name", &InputEventParams::Name, "action: the project action's name (exact, case-sensitive); signal: the frame-time signal's name, 1 to 64 bytes of UTF-8.")
 			.Field("state", &InputEventParams::State, "action, key, mouseButton, gamepadButton: down (the default), up or tap.")
 			.Field("value", &InputEventParams::Value,
 				"action: an axis value in [-1, 1]; gamepadAxis: [-1, 1] for sticks (up positive), [0, 1] for triggers. A value holds on every later "

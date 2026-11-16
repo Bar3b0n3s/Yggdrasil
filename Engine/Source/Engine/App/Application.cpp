@@ -468,6 +468,8 @@ namespace Engine {
 		const WindowSpecification& window = m_Specification.WindowSettings;
 		m_DisplayMode = window.DisplayMode == DisplayWindowMode::Windowed && window.Fullscreen ? DisplayWindowMode::Exclusive : window.DisplayMode;
 		m_VSync = m_Specification.Graphics.VSync;
+		m_LastWindowWidth = window.Width;
+		m_LastWindowHeight = window.Height;
 	}
 
 	Result<std::vector<DisplayVideoMode>> Application::GetDisplayVideoModes() const
@@ -482,11 +484,21 @@ namespace Engine {
 		DisplaySettings settings;
 		settings.WindowMode = m_DisplayMode;
 		settings.VSync = m_VSync;
+		settings.Width = m_LastWindowWidth;
+		settings.Height = m_LastWindowHeight;
 		const Window* window = m_Context != nullptr ? m_Context->GetWindow() : nullptr;
 		if (window != nullptr)
 		{
-			settings.Width = window->GetWidth();
-			settings.Height = window->GetHeight();
+			// A window the monitor let go (disconnected) is no longer exclusive, whatever the last request said.
+			if (settings.WindowMode == DisplayWindowMode::Exclusive && m_Specification.Window != WindowMode::Headless && !window->IsFullScreen())
+				settings.WindowMode = DisplayWindowMode::Windowed;
+			// While minimized (an Exclusive window is, whenever it loses the focus) the window reports 0 x 0: its last size
+			// stands in, so a partial request (a VSync toggle) keeps a valid size.
+			if (window->GetWidth() > 0 && window->GetHeight() > 0)
+			{
+				settings.Width = window->GetWidth();
+				settings.Height = window->GetHeight();
+			}
 			// A full-screen window runs at its monitor's current video mode: Exclusive's own, Borderless's the desktop's.
 			if (m_DisplayMode != DisplayWindowMode::Windowed && m_Specification.Window != WindowMode::Headless)
 			{
@@ -719,7 +731,18 @@ namespace Engine {
 
 	void Application::OnFrameSafePoint()
 	{
-		// M28 (decision 3): a display-settings request applies at the frame boundary, before the subclass's safe point.
+		// M28 (decision 3): the window's last size that was not a minimized 0 x 0, and the mode in force when the monitor let an
+		// exclusive window go; then a display-settings request applies at the frame boundary, before the subclass's safe point.
+		if (const Window* window = m_Context != nullptr ? m_Context->GetWindow() : nullptr)
+		{
+			if (window->GetWidth() > 0 && window->GetHeight() > 0)
+			{
+				m_LastWindowWidth = window->GetWidth();
+				m_LastWindowHeight = window->GetHeight();
+			}
+			if (m_DisplayMode == DisplayWindowMode::Exclusive && m_Specification.Window != WindowMode::Headless && !window->IsFullScreen())
+				m_DisplayMode = DisplayWindowMode::Windowed;
+		}
 		ApplyPendingDisplaySettings();
 		OnSafePoint();
 	}

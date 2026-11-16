@@ -16,10 +16,13 @@
 #include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Engine/Scripting/ScriptEngine.h"
+#include "Engine/Scripting/ScriptLimits.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/ScriptTestFixture.h"
 
 #include <doctest/doctest.h>
+
+#include <format>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 
@@ -105,6 +108,53 @@ return rect ~= nil and rect.Min == vector.create(10, 20, 0) and rect.Max == vect
 
 	TEST_SUITE("Scripting")
 	{
+		// M28 (Docs/Decisions/0043-m28-game-services.md decision 5; the W28.1 review's finding 8): presentation text is at most
+		// MaxScriptPresentationTextBytes of valid UTF-8, refused before the UI keeps it, and an evaluation without a session's
+		// UI (an edit evaluation) cannot show it.
+		TEST_CASE("UiBindings: presentation text is refused past its byte limit, as invalid UTF-8 and without a game UI")
+		{
+			Test::ScriptTestFixture fixture;
+			PopulateUiModuleScene(fixture.GetScene());
+			Entity caption = fixture.GetScene().CreateEntity("Caption", fixture.GetScene().FindEntityByPath("/Canvas"));
+			caption.AddComponent<UiRectComponent>(UiRectComponent{});
+			caption.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "--", .RaycastTarget = false });
+			UiSystem ui;
+			ui.LayoutStep(fixture.GetScene(), glm::uvec2(320, 180));
+			fixture.Ui = &ui;
+			REQUIRE(fixture.Start().has_value());
+			const auto result = fixture.Evaluate(std::format(R"(
+local caption = Scene.FindByName("Caption").UiText
+caption:SetPresentationText(string.rep("x", {0}))
+assert(#caption:GetPresentationText() == {0})
+assert(not pcall(function() caption:SetPresentationText(string.rep("x", {1})) end))
+assert(#caption:GetPresentationText() == {0})
+assert(not pcall(function() caption:SetPresentationText("\xff") end))
+local set = caption.SetPresentationText
+assert(not pcall(function() set(Scene.FindByName("Button").UiRect, "x") end))
+return true
+)",
+				MaxScriptPresentationTextBytes, MaxScriptPresentationTextBytes + 1));
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			CHECK(result->Value.Get() == Json(true));
+			REQUIRE(ui.FindPresentationText(caption.GetUUID()) != nullptr);
+			CHECK(ui.FindPresentationText(caption.GetUUID())->size() == MaxScriptPresentationTextBytes);
+
+			// Without a session's UI: an edit evaluation refuses the set and reads nothing.
+			Test::ScriptTestFixture edit;
+			PopulateUiModuleScene(edit.GetScene());
+			Entity label = edit.GetScene().CreateEntity("Caption", edit.GetScene().FindEntityByPath("/Canvas"));
+			label.AddComponent<UiRectComponent>(UiRectComponent{});
+			label.AddComponent<UiTextComponent>(UiTextComponent{ .Text = "--", .RaycastTarget = false });
+			REQUIRE(edit.Start().has_value());
+			const auto refused = edit.Evaluate(R"(
+local caption = Scene.FindByName("Caption").UiText
+assert(not pcall(function() caption:SetPresentationText("16.7 ms") end))
+return caption:GetPresentationText() == nil
+)");
+			REQUIRE_MESSAGE(refused.has_value(), (refused ? "" : refused.error().ToString()));
+			CHECK(refused->Value.Get() == Json(true));
+		}
+
 		// Decision 28: GetRect reads the UiSystem's current layout in scene pixels (nil for an entity it does not lay out); with
 		// no interaction yet the state reads empty; without a session's UI (an edit evaluation) every read reports nothing and
 		// SetFocus raises, with an element or nil.

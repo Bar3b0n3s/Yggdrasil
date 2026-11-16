@@ -18,7 +18,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> DisplaySettings`
 
-Returns the display settings in force: the window mode, the window's size in screen units (the video mode's in the full-screen modes; 0 x 0 while the window is minimized, so a request then gives Width and Height), the refresh rate of a full-screen mode (0 windowed) and VSync. Where display settings do nothing it returns the session's view as a Windowed window with the project's Window.VSync.
+Returns the display settings in force: the window mode, the window's size in screen units (the video mode's in the full-screen modes; its last size while the window is minimized), the refresh rate of a full-screen mode (0 windowed) and VSync. Where display settings do nothing it returns the session's view as a Windowed window with the project's Window.VSync.
 
 All modes; Runtime|Test; pure/read.
 
@@ -90,7 +90,7 @@ All modes; Runtime|Test; mutates.
 
 `(settings: DisplaySettingsRequest) -> (boolean, string?)`
 
-Requests display settings for the next frame boundary (a member left out keeps its current value): Windowed takes Width x Height; Borderless covers the monitor at its current mode; Exclusive switches the monitor to one of GetDisplayModes(). The Runtime keeps the choice in user://Display.json and applies it at the next start, before its window shows. Returns true when the request was accepted, or false and the reason where display settings do nothing (the editor, headless runs, test runs, replays, recordings, lockstep sessions, Linux and macOS), so they never touch the project's Window settings or the state hash. An unknown mode, a Width or Height outside 1 to 16384 or a RefreshRate over 1000 raises an error wherever the call is made, and in the Runtime so does an Exclusive mode the monitor does not list.
+Requests display settings for the next frame boundary (a member left out keeps its value in force, so a later request in the same frame replaces an earlier one: give every member that should change): Windowed takes Width x Height; Borderless covers the monitor at its current mode; Exclusive switches the monitor to one of GetDisplayModes(). The Runtime keeps the choice in user://Display.json and applies it at the next start, before its window shows. Returns true when the request was accepted, or false and the reason where display settings do nothing (the editor, headless runs, test runs, replays, recordings, lockstep sessions, Linux and macOS), so they never touch the project's Window settings or the state hash. An unknown mode, a Width or Height outside 1 to 16384 or a RefreshRate over 1000 raises an error wherever the call is made, and in the Runtime so does an Exclusive mode the monitor does not list.
 
 All modes; Runtime|Test; mutates.
 
@@ -7154,13 +7154,13 @@ One video mode of the monitor: its size in pixels and refresh rate in Hz.
 
 ## DisplaySettings
 
-`{WindowMode: string, Width: number, Height: number, RefreshRate: number, VSync: boolean}`
+`{WindowMode: "Windowed" | "Borderless" | "Exclusive", Width: number, Height: number, RefreshRate: number, VSync: boolean}`
 
 A window's display settings: WindowMode Windowed, Borderless or Exclusive; the window's size in screen units (the video mode's in the full-screen modes); the refresh rate of a full-screen mode (0 windowed); and vertical sync.
 
 ## DisplaySettingsRequest
 
-`{WindowMode: string?, Width: number?, Height: number?, RefreshRate: number?, VSync: boolean?}`
+`{WindowMode: ("Windowed" | "Borderless" | "Exclusive")?, Width: number?, Height: number?, RefreshRate: number?, VSync: boolean?}`
 
 A request of Application.SetDisplaySettings: the DisplaySettings members to change; a member left out keeps its current value.
 

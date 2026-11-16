@@ -549,6 +549,12 @@ namespace Engine {
 		return m_Impl->Cursor;
 	}
 
+	bool Window::IsFullScreen() const
+	{
+		Impl::CheckUsable(m_Impl.get(), "IsFullScreen");
+		return glfwGetWindowMonitor(m_Impl->Handle) != nullptr;
+	}
+
 	uint32_t Window::GetWidth() const
 	{
 		Impl::CheckUsable(m_Impl.get(), "GetWidth");
