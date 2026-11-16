@@ -1139,6 +1139,81 @@ return Script.Define("Hud", Hud)
 			CHECK(FileSystem::ReadText(prefabFile).value_or(std::string()) == *applyOnce);
 		}
 
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 11; World Tree's brief 13, its third item): a patch of one
+		// script field at instantiation merges into the slot as the instantiation mapped it. Before M35 the slot's other entity
+		// field kept the prefab's own ID of its target, which named the source entity outside the instance, and the commit only
+		// warned that the overrides could not record it.
+		TEST_CASE("PrefabMethods: a script-field patch at instantiation keeps the slot's other references on the instance's own members")
+		{
+			Test::AutomationFixture setup("PrefabScriptPatch");
+			CallOrFail(setup, "script.write", Json{ { "path", "Assets/Scripts/GameFlow.luau" }, { "source", R"(
+local GameFlow = { Fields = { Menus = Field.Entity(), Warden = Field.Entity() } }
+return Script.Define("GameFlow", GameFlow)
+)" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Game" } });
+			const Json menus = CallOrFail(setup, "entity.create", Json{ { "name", "Menus" }, { "parent", "/Game" } })["entity"]["id"];
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Game" }, { "components", Json{ { "Script", ScriptSlots(Json{ { "Script", "Assets/Scripts/GameFlow.luau" }, { "Fields", Json{ { "Menus", menus } } } }) } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Game" }, { "path", "Assets/Prefabs/GameUi.prefab" } });
+			const Json warden = CallOrFail(setup, "entity.create", Json{ { "name", "Warden" } })["entity"]["id"];
+			const Json response = setup.Request("prefab.instantiate",
+				Json{ { "prefab", "Assets/Prefabs/GameUi.prefab" }, { "name", "Hub" },
+					{ "components", Json{ { "Script", ScriptSlots(Json{ { "Fields", Json{ { "Warden", "/Warden" } } } }) } } } });
+			REQUIRE_MESSAGE(response.contains("result"), response.dump());
+			const Json& diagnostics = response["result"]["_meta"]["diagnostics"];
+			CHECK(diagnostics["newWarnings"] == Json(0));
+			CHECK(diagnostics["newErrors"] == Json(0));
+			const Json hubMenus = CallOrFail(setup, "entity.get", Json{ { "entity", "/Hub/Menus" } })["entity"]["id"];
+			const Json fields = CallOrFail(setup, "entity.get", Json{ { "entity", "/Hub" } })["entity"]["components"]["Script"]["Scripts"][0]["Fields"];
+			CHECK(fields["Menus"] == hubMenus);
+			CHECK(fields["Warden"] == warden);
+			CHECK(fields["Menus"] != menus);
+		}
+
+		// M35 (decisions 9 and 10; World Tree's brief 13, its second item): a rebuild writes an instance's overrides of one
+		// component together, so the anchors overridden together survive a change of the prefab, and every override a rebuild
+		// drops is in the result of the method that rebuilt: prefab.apply's rebuildDiagnostics and scene.open's diagnostics.
+		TEST_CASE("PrefabMethods: a rebuild keeps overrides valid only together and reports each it drops in prefab.apply's and scene.open's results")
+		{
+			Test::AutomationFixture setup("PrefabOverridesTogether");
+			const Json centred = Json::array({ 0.5, 0.5 });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Options" } });
+			CallOrFail(setup, "entity.create", Json{ { "name", "Panel" }, { "parent", "/Options" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", centred }, { "AnchorMax", centred } } } } } });
+			CallOrFail(setup, "prefab.create", Json{ { "entity", "/Options" }, { "path", "Assets/Prefabs/Options.prefab" }, { "replaceWithInstance", true } });
+			CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Options.prefab" }, { "name", "Second" } });
+			CallOrFail(setup, "prefab.instantiate", Json{ { "prefab", "Assets/Prefabs/Options.prefab" }, { "name", "Third" } });
+			const Json corner = Json::array({ 0, 0 });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Options/Panel" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", corner }, { "AnchorMax", corner } } } } } });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Second/Panel" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", Json::array({ 0.375, 0.375 }) } } } } } });
+			CallOrFail(setup, "scene.save", Json{ { "path", "Assets/Scenes/Title.scene" } });
+
+			// The prefab's anchors move below Second's AnchorMin: its override is dropped, and reported; Options keeps its pair.
+			const Json low = Json::array({ 0.25, 0.25 });
+			CallOrFail(setup, "entity.update", Json{ { "entity", "/Third/Panel" }, { "components", Json{ { "UiRect", Json{ { "AnchorMin", low }, { "AnchorMax", low } } } } } });
+			const Json applied = CallOrFail(setup, "prefab.apply", Json{ { "instance", "/Third" } });
+			const Json second = CallOrFail(setup, "entity.get", Json{ { "entity", "/Second" } })["entity"]["id"];
+			REQUIRE(applied["rebuildDiagnostics"].size() == 1);
+			CHECK(applied["rebuildDiagnostics"][0]["code"] == Json("PREFAB_STALE_OVERRIDE"));
+			CHECK(applied["rebuildDiagnostics"][0]["entity"] == second);
+			CHECK(applied["rebuildDiagnostics"][0]["scene"] == Json("Assets/Scenes/Title.scene"));
+			const auto anchors = [&setup](std::string_view path)
+			{
+				const Json rect = CallOrFail(setup, "entity.get", Json{ { "entity", path } })["entity"]["components"]["UiRect"];
+				return std::make_pair(rect["AnchorMin"], rect["AnchorMax"]);
+			};
+			CHECK(anchors("/Options/Panel") == std::make_pair(corner, corner));
+			CHECK(anchors("/Second/Panel") == std::make_pair(low, low));
+
+			// The saved scene, reopened after the prefab changed, is rebuilt the same way, and scene.open reports the drop.
+			const Json opened = CallOrFail(setup, "scene.open", Json{ { "path", "Assets/Scenes/Title.scene" }, { "reload", true }, { "discardChanges", true } });
+			const auto stale = std::ranges::count_if(opened["diagnostics"], [&second](const Json& diagnostic)
+			{
+				return diagnostic["code"] == Json("PREFAB_STALE_OVERRIDE") && diagnostic["entity"] == second;
+			});
+			CHECK(stale == 1);
+			CHECK(anchors("/Options/Panel") == std::make_pair(corner, corner));
+			CHECK(anchors("/Second/Panel") == std::make_pair(low, low));
+		}
+
 		TEST_CASE("PrefabMethods: errors name the problem")
 		{
 			Test::AutomationFixture setup("PrefabErrors");

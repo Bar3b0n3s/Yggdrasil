@@ -295,7 +295,7 @@ namespace Engine {
 		// was rebuilt from, in canonical order). Errors: Validation PREFAB_CYCLE when the propagation from `prefabs` meets a
 		// nesting cycle (EditorContext::GetNestingPrefabs); those of the rebuild.
 		static Result<bool> RebuildPrefabInstances(EditorContext& context, Scene& scene,
-			std::span<const AssetHandle> prefabs, std::vector<std::pair<UUID, AssetHandle>>& changed)
+			std::span<const AssetHandle> prefabs, std::vector<std::pair<UUID, AssetHandle>>& changed, LoadReport& report)
 		{
 			ENGINE_TRY_ASSIGN(const std::vector<AssetHandle> rebuilt, AddNestingPrefabs(context, prefabs));
 			const std::vector<std::pair<UUID, AssetHandle>> instances = Utils::FindPrefabInstances(scene, rebuilt);
@@ -310,7 +310,6 @@ namespace Engine {
 			std::map<AssetHandle, Prefab> loaded;
 			std::set<AssetHandle> missing;
 			const PrefabOptions options{ .Schemas = schemas.get() };
-			LoadReport report;
 			bool anyChanged = false;
 			for (const auto& [rootID, handle] : instances)
 			{
@@ -872,28 +871,57 @@ namespace Engine {
 		return Utils::ToEditorFileStatus(m_Assets->GetWriter().CreateDirectories(directory));
 	}
 
+	PrefabRebuildCollector::PrefabRebuildCollector(EditorContext& editor)
+		: m_Editor(editor), m_Previous(std::exchange(editor.m_RebuildCollector, this))
+	{
+	}
+
+	PrefabRebuildCollector::~PrefabRebuildCollector()
+	{
+		m_Editor.m_RebuildCollector = m_Previous;
+	}
+
+	std::vector<PrefabRebuildIssue> PrefabRebuildCollector::Take()
+	{
+		return std::exchange(m_Issues, {});
+	}
+
 	Result<bool> EditorContext::UpdatePrefabInstances(Scene& scene, std::span<const AssetHandle> prefabs,
-		std::vector<std::pair<UUID, AssetHandle>>* changed)
+		std::vector<std::pair<UUID, AssetHandle>>* changed, LoadReport* rebuild)
 	{
 		// Atomic for a caller that does not track the scene itself (scene.open's loaded scene): a failure restores every
 		// instance it already rebuilt. CreatePrefabUpdateCommand tracks and rolls back on its own.
 		std::vector<std::pair<UUID, AssetHandle>> rebuilt;
+		LoadReport report;
 		ChangeTracker& tracker = scene.GetChangeTracker();
 		Result<bool> updated = false;
 		if (tracker.IsTracking())
 		{
-			updated = Utils::RebuildPrefabInstances(*this, scene, prefabs, rebuilt);
+			updated = Utils::RebuildPrefabInstances(*this, scene, prefabs, rebuilt, report);
 		}
 		else
 		{
 			tracker.Begin();
-			updated = Utils::RebuildPrefabInstances(*this, scene, prefabs, rebuilt);
+			updated = Utils::RebuildPrefabInstances(*this, scene, prefabs, rebuilt, report);
 			const std::vector<EntityChange> tracked = tracker.End();
 			if (!updated)
 				Utils::RollBackTrackedChanges(scene, tracked, "Update Prefab Instances");
 		}
 		if (updated && changed != nullptr)
 			*changed = std::move(rebuilt);
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): the rebuild's diagnostics reach the caller and,
+		// for the addressed scene, the active collector, besides the log.
+		if (updated)
+		{
+			if (m_RebuildCollector != nullptr && m_Scene != nullptr && &scene == m_Scene.get())
+			{
+				const std::string path = m_ScenePath.has_value() ? std::string(m_ScenePath->GetPath()) : std::string();
+				for (const LoadDiagnostic& diagnostic : report.Diagnostics)
+					m_RebuildCollector->m_Issues.push_back({ .Scene = path, .Diagnostic = diagnostic });
+			}
+			if (rebuild != nullptr)
+				rebuild->Diagnostics.insert(rebuild->Diagnostics.end(), report.Diagnostics.begin(), report.Diagnostics.end());
+		}
 		return updated;
 	}
 

@@ -18,6 +18,16 @@ Brick.Fields = {
 return Script.Define("Brick", Brick)
 """
 BRICK_PREFAB = "Assets/Prefabs/Brick.prefab"
+GAME_FLOW_SCRIPT = """--!strict
+local GameFlow = {}
+
+GameFlow.Fields = {
+	Menus = Field.Entity(),
+	Warden = Field.Entity(),
+}
+
+return Script.Define("GameFlow", GameFlow)
+"""
 HUD_SCRIPT = """--!strict
 local Hud = {}
 
@@ -133,6 +143,58 @@ class PrefabTests(AutomationTestCase):
                                         "--check-scripts", "--project", str(root)])
         self.assertEqual(code, 0, output)
         self.assertNotIn("REFLECTION_VARIANT_UNRESOLVED", output)
+
+    def test_rebuild_keeps_overrides_valid_together_and_reports_what_it_drops(self) -> None:
+        # M35 (Docs/Decisions/0050-m35-pause-entity-state.md decisions 9 to 11; World Tree's brief 13): a rebuild writes
+        # an instance's overrides of one component together, and the methods that rebuild report each override they
+        # drop; a script-field patch at instantiation keeps the slot's other references on the instance's own members.
+        client, _ = self.open_editor_with_scene()
+        options = "Assets/Prefabs/Options.prefab"
+
+        def anchors(min_anchor: list[float], max_anchor: list[float] | None = None) -> dict[str, Any]:
+            rect: dict[str, Any] = {"AnchorMin": min_anchor}
+            if max_anchor is not None:
+                rect["AnchorMax"] = max_anchor
+            return {"UiRect": rect}
+
+        client.call("entity.create", {"name": "Options"})
+        centred = anchors([0.5, 0.5], [0.5, 0.5])
+        client.call("entity.create", {"name": "Panel", "parent": "/Options", "components": centred})
+        client.call("prefab.create", {"entity": "/Options", "path": options, "replaceWithInstance": True})
+        for name in ("Second", "Third"):
+            client.call("prefab.instantiate", {"prefab": options, "name": name})
+        client.call("entity.update", {"entity": "/Options/Panel", "components": anchors([0, 0], [0, 0])})
+        client.call("entity.update", {"entity": "/Second/Panel", "components": anchors([0.375, 0.375])})
+        client.call("scene.save", {"path": "Assets/Scenes/Title.scene"})
+        client.call("entity.update", {"entity": "/Third/Panel", "components": anchors([0.25, 0.25], [0.25, 0.25])})
+        applied = client.call("prefab.apply", {"instance": "/Third"})
+        second = client.call("entity.get", {"entity": "/Second"})["entity"]["id"]
+        dropped = [(row["code"], row["entity"]) for row in applied["rebuildDiagnostics"]]
+        self.assertEqual(dropped, [("PREFAB_STALE_OVERRIDE", second)])
+        reopen = {"path": "Assets/Scenes/Title.scene", "reload": True, "discardChanges": True}
+        opened = client.call("scene.open", reopen)
+        stale = [row["entity"] for row in opened["diagnostics"] if row["code"] == "PREFAB_STALE_OVERRIDE"]
+        self.assertEqual(stale, [second])
+        panel = client.call("entity.get", {"entity": "/Options/Panel", "components": ["UiRect"]})
+        rect = panel["entity"]["components"]["UiRect"]
+        self.assertEqual((rect["AnchorMin"], rect["AnchorMax"]), ([0, 0], [0, 0]))
+
+        # The patch of one script field names the instance's own Menus, and nothing is logged.
+        client.call("script.write", {"path": "Assets/Scripts/GameFlow.luau", "source": GAME_FLOW_SCRIPT})
+        client.call("entity.create", {"name": "Game"})
+        menus = client.call("entity.create", {"name": "Menus", "parent": "/Game"})["entity"]["id"]
+        slot = {"Script": "Assets/Scripts/GameFlow.luau", "Fields": {"Menus": menus}}
+        client.call("entity.update", {"entity": "/Game", "components": {"Script": {"Scripts": [slot]}}})
+        client.call("prefab.create", {"entity": "/Game", "path": "Assets/Prefabs/GameUi.prefab"})
+        warden = client.call("entity.create", {"name": "Warden"})["entity"]["id"]
+        patch = {"Script": {"Scripts": [{"Fields": {"Warden": "/Warden"}}]}}
+        game_ui = "Assets/Prefabs/GameUi.prefab"
+        hub = client.call("prefab.instantiate", {"prefab": game_ui, "name": "Hub", "components": patch})
+        diagnostics = hub["_meta"]["diagnostics"]
+        self.assertEqual((diagnostics["newWarnings"], diagnostics["newErrors"]), (0, 0))
+        fields = client.call("entity.get", {"entity": "/Hub"})["entity"]["components"]["Script"]["Scripts"][0]["Fields"]
+        self.assertEqual(fields["Menus"], client.call("entity.get", {"entity": "/Hub/Menus"})["entity"]["id"])
+        self.assertEqual(fields["Warden"], warden)
 
     def test_destroying_a_prefab_member_records_its_deletion(self) -> None:
         # Docs/Decisions/0031-m20-contract.md decision 7 (E-PFB-DEL): RemoveEntity replaces the setup's refusal

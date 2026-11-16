@@ -601,7 +601,10 @@ return Script.Define("UiCoverage", T)
 			CHECK(fixture.Errors.empty());
 		}
 
-		TEST_CASE("ScriptInstanceLifecycle: disable then enable before flushing still replaces the old instance")
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 8): a disable that was never flushed is undone by the
+		// enable that follows it, as Architecture §11.3 says (before M35 the instance was torn down at the flush and a new
+		// one created, its state lost, which this case pinned under another name).
+		TEST_CASE("ScriptInstanceLifecycle: disable then enable before flushing keeps the instance, its state and its tasks")
 		{
 			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
 			const AssetHandle script(0x200007);
@@ -609,16 +612,48 @@ return Script.Define("UiCoverage", T)
 			const Entity entity = fixture.GetScene().CreateEntity("Owner");
 			Test::AttachLifecycleScript(entity, script);
 			REQUIRE(fixture.Start());
-			REQUIRE(fixture.Evaluate("self.Marker = 91; self.Entity:SetActive(false); self.Entity:SetActive(true)", entity.GetUUID()));
+			REQUIRE(fixture.Evaluate("self.Marker = 91; self.Task = Task.Delay(100, function() end); self.Entity:SetActive(false); self.Entity:SetActive(true)",
+				entity.GetUUID()));
+			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Owner:create", "Owner:start", "Owner:disable", "Owner:enable" });
 			fixture.GetEngine()->FixedUpdate();
-			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Owner:create", "Owner:start", "Owner:disable" });
-			CHECK(fixture.GetEngine()->PrepareDestroyFlush() == 1);
+			CHECK(fixture.GetEngine()->PrepareDestroyFlush() == 0);
 			fixture.GetEngine()->FinishDestroyFlush();
 			fixture.GetEngine()->StartPending();
-			const auto value = fixture.Evaluate("return self.Marker == nil", entity.GetUUID());
+			const auto value = fixture.Evaluate("return self.Marker", entity.GetUUID());
 			REQUIRE(value);
-			CHECK(value->Value.Get() == Json(true));
-			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Owner:create", "Owner:start", "Owner:disable", "Owner:destroy", "Owner:create", "Owner:enable", "Owner:start" });
+			CHECK(value->Value.Get() == Json(91));
+			CHECK(fixture.GetEngine()->GetTaskScheduler()->GetCount() == 1);
+			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Owner:create", "Owner:start", "Owner:disable", "Owner:enable", "Owner:fixed" });
+			CHECK(fixture.Errors.empty());
+		}
+
+		// M35 (decision 8): the disable a flush observes stays a teardown, even when the flush's own callbacks switch the
+		// entity on again, and a disable flushed in an earlier phase recreates the instance; both as before M35.
+		TEST_CASE("ScriptInstanceLifecycle: a disable whose script changed before the enable is still torn down and replaced")
+		{
+			Test::ScriptTestFixture fixture(Test::LifecycleSpecification());
+			const AssetHandle script(0x20000b);
+			const AssetHandle other(0x20000c);
+			REQUIRE(fixture.AddScript(script, "Assets/Scripts/Lifecycle.luau", std::string(Test::LifecycleSource)));
+			REQUIRE(fixture.AddScript(other, "Assets/Scripts/Other.luau", std::string(Test::LifecycleSource)));
+			const Entity entity = fixture.GetScene().CreateEntity("Owner");
+			Test::AttachLifecycleScript(entity, script);
+			REQUIRE(fixture.Start());
+			entity.SetActive(false);
+			REQUIRE(fixture.GetEngine()->SynchronizeInstances());
+			entity.Patch<ScriptComponent>([other](ScriptComponent& component)
+			{
+				component.Scripts[0].Script.SetHandle(other);
+			});
+			entity.SetActive(true);
+			REQUIRE(fixture.GetEngine()->SynchronizeInstances());
+			CHECK(fixture.GetEngine()->PrepareDestroyFlush() == 1);
+			fixture.GetEngine()->FinishDestroyFlush();
+			REQUIRE(fixture.GetEngine()->SynchronizeInstances());
+			const auto instances = fixture.GetEngine()->GetInstances();
+			REQUIRE(instances.size() == 1);
+			CHECK(instances[0].Script == other);
+			CHECK(Test::ScriptLifecycleTrace(fixture.GetScene()) == std::vector<std::string>{ "Owner:create", "Owner:start", "Owner:disable", "Owner:destroy", "Owner:create", "Owner:enable" });
 			CHECK(fixture.Errors.empty());
 		}
 

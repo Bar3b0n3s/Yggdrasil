@@ -145,8 +145,11 @@ namespace Engine {
 		// (§5.5 "Update"): members keep their derived IDs and internal references are remapped again; members whose prefab
 		// entity no longer exists, or is removed by a RemoveEntity override with its prefab descendants, disappear (their
 		// user children move to the nearest surviving ancestor), and another entity may hold a removed entity's derived ID;
-		// new prefab entities appear; Field, component and EntityKey overrides are applied, each validated against the
-		// registry on its own as ComponentAccess validates a write (relations, uniqueness, field metadata, type-level rules),
+		// new prefab entities appear; Field, component and EntityKey overrides are applied, validated against the registry
+		// as ComponentAccess validates a write (relations, uniqueness, field metadata, type-level rules): an entity's Field
+		// overrides of one component as one write (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 9: the write's
+		// error drops the overrides it locates and the rest are written again; one that locates none drops them all), the
+		// others each on its own,
 		// with script field overrides resolved against the member's own script slot and, as in a file read, unresolvable
 		// Variant values kept; overrides that no longer match a field, component or entity key, or whose value is no longer
 		// valid there, overrides of a removed entity, and RemoveEntity overrides of an entity the prefab no longer has, of

@@ -25,6 +25,7 @@
 #include "Engine/Reflection/Value.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
+#include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/Prefab.h"
@@ -379,6 +380,50 @@ namespace Engine {
 			return result;
 		}
 
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 11; World Tree's brief 13, its third item): `script`, the
+		// Script component prefab.instantiate's components give the new instance root `root`, as the request's preparation
+		// completed it: a slot entry that gave Fields without a Script took the prefab root's slot, its other field values in
+		// prefab space (EditorMethodContext::CompleteParameterOwners). Each value of an entry for a slot whose script the
+		// instance's slot holds that still equals the prefab root's slot value takes the instance's value instead, the same
+		// value with its references mapped to the instance's own members, so the patch merges into the slot as the
+		// instantiation mapped it.
+		static void MapScriptPatchToInstance(const Prefab& prefab, ConstEntity root, Json& script)
+		{
+			static const Json Missing;
+			const auto member = [](const Json& object, const char* key) -> const Json&
+			{
+				if (!object.is_object())
+					return Missing;
+				const auto found = object.find(key);
+				return found != object.end() ? *found : Missing;
+			};
+			const ScriptComponent* instance = root.TryGetComponent<ScriptComponent>();
+			const Json* prefabRoot = prefab.FindEntity(prefab.GetRootID());
+			const auto slots = script.find("Scripts");
+			if (instance == nullptr || prefabRoot == nullptr || slots == script.end() || !slots->is_array())
+				return;
+			const Json& prefabComponents = member(*prefabRoot, "Components");
+			const Json& prefabSlots = member(member(prefabComponents, "Script"), "Scripts");
+			for (size_t slot = 0; slot < slots->size() && slot < instance->Scripts.size(); ++slot)
+			{
+				Json& entry = (*slots)[slot];
+				const ScriptSlot& instanceSlot = instance->Scripts[slot];
+				if (!entry.is_object() || !prefabSlots.is_array() || slot >= prefabSlots.size() || member(entry, "Script") != Json(instanceSlot.Script.GetHandle().ToString()))
+					continue;
+				const Json& prefabFields = member(prefabSlots[slot], "Fields");
+				const auto fields = entry.find("Fields");
+				if (fields == entry.end() || !fields->is_object() || !prefabFields.is_object())
+					continue;
+				for (auto field = fields->begin(); field != fields->end(); ++field)
+				{
+					const auto prefabValue = prefabFields.find(field.key());
+					const auto instanceValue = instanceSlot.Fields.find(field.key());
+					if (prefabValue != prefabFields.end() && *prefabValue == *field && instanceValue != instanceSlot.Fields.end())
+						*field = instanceValue->second.Get();
+				}
+			}
+		}
+
 		Result<PrefabInstantiateResult> PrefabInstantiate(EditorMethodContext& context, const PrefabInstantiateParams& params)
 		{
 			EditorContext& editor = context.GetEditor();
@@ -422,8 +467,27 @@ namespace Engine {
 				root.SetName(params.Name);
 			if (hasTransform)
 				ENGINE_TRY(WriteTransform(root, params.Transform.Get(), "/transform"));
-			// Per-instance values are ordinary writes to the new root, which the commit records as its overrides (§5.5).
-			ENGINE_TRY(Utils::WriteComponents(editor, root, params.Components));
+			// Per-instance values are ordinary writes to the new root, which the commit records as its overrides (§5.5); a
+			// script-field patch first takes the instance's mapped values for the fields it does not change (M35, decision 11).
+			std::map<std::string, VariantValue> components = params.Components;
+			if (const auto script = components.find("Script"); script != components.end() && script->second.Get().is_object())
+			{
+				LoadReport prefabReport;
+				ENGINE_TRY_ASSIGN(const Prefab prefab, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), schemas.get(), prefabReport));
+				Json patched = script->second.Get();
+				MapScriptPatchToInstance(prefab, root, patched);
+				script->second = VariantValue(std::move(patched));
+			}
+			ENGINE_TRY(Utils::WriteComponents(editor, root, components));
+			// The instance's overrides must be storable: a reference they cannot record (one naming an entity outside the
+			// instance by a prefab-local ID) refuses the call, which creates nothing, instead of leaving it behind a warning.
+			if (!components.empty())
+			{
+				LoadReport prefabReport;
+				ENGINE_TRY_ASSIGN(const Prefab prefab, LoadPrefabAsset(assets, handle, editor.GetTypeRegistry(), schemas.get(), prefabReport));
+				if (const Result<std::vector<PrefabOverride>> overrides = PrefabInstantiator::ComputeOverrides(root, prefab, prefabOptions); !overrides)
+					return std::unexpected(Utils::LocateAtParam(overrides.error(), "/components"));
+			}
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
 
 			PrefabInstantiateResult result;
@@ -491,9 +555,12 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, source, AsBytes(text), label));
 				write = std::move(command);
 			}
+			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): the rebuilds' dropped overrides, for the result.
+			PrefabRebuildCollector rebuilds(editor);
 			ENGINE_TRY_ASSIGN(const Utils::PrefabVersionUpdate update, Utils::UpdatePrefabVersion(editor, handle, current, std::move(write), nesting, label));
 
 			PrefabApplyResult result;
+			result.RebuildDiagnostics = Utils::MakeRebuildDiagnostics(rebuilds.Take());
 			result.Prefab = Utils::MakeAssetSummary(assets, handle);
 			result.UpdatedInstances = ToAutomationCounter(update.UpdatedInstances);
 			result.UpdatedPrefabs.reserve(update.UpdatedPrefabs.size());
@@ -564,6 +631,12 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, edit.Commit());
 
 			PrefabRevertResult result;
+			// M35 (decision 10): the rebuild's dropped overrides, in the addressed scene.
+			const std::string scenePath = editor.GetScenePath().has_value() ? std::string(editor.GetScenePath()->GetPath()) : std::string();
+			std::vector<PrefabRebuildIssue> issues;
+			for (const LoadDiagnostic& diagnostic : report.Diagnostics)
+				issues.push_back({ .Scene = scenePath, .Diagnostic = diagnostic });
+			result.RebuildDiagnostics = Utils::MakeRebuildDiagnostics(issues);
 			result.Instance = context.MakeEntitySummary(root);
 			result.RemovedOverrides = ToAutomationCounter(removed);
 			result.UndoIndex = ToAutomationCounter(undoIndex);
@@ -656,7 +729,9 @@ namespace Engine {
 			.Field("addedEntities", &PrefabApplyResult::AddedEntities,
 				"The entities added below the instance that the prefab now holds (the top of each added subtree), as the members they became, "
 				"with new ids; empty when none was added.")
-			.Field("undoIndex", &PrefabApplyResult::UndoIndex, "The undo index; 0 in a batch.");
+			.Field("undoIndex", &PrefabApplyResult::UndoIndex, "The undo index; 0 in a batch.")
+			.Field("rebuildDiagnostics", &PrefabApplyResult::RebuildDiagnostics,
+				"The diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).");
 
 		registry.Struct<PrefabRevertParams>("PrefabRevertParams", "The params of prefab.revert.")
 			.Field("instance", &PrefabRevertParams::Instance,
@@ -666,7 +741,9 @@ namespace Engine {
 		registry.Struct<PrefabRevertResult>("PrefabRevertResult", "The reverted instance.")
 			.Field("instance", &PrefabRevertResult::Instance, "The instance root.")
 			.Field("removedOverrides", &PrefabRevertResult::RemovedOverrides, "The overrides removed.")
-			.Field("undoIndex", &PrefabRevertResult::UndoIndex, "The undo index; 0 when nothing changed, in a dry run or a batch.");
+			.Field("undoIndex", &PrefabRevertResult::UndoIndex, "The undo index; 0 when nothing changed, in a dry run or a batch.")
+			.Field("rebuildDiagnostics", &PrefabRevertResult::RebuildDiagnostics,
+				"The diagnostics of the instance's rebuild, every override it dropped among them (also logged).");
 
 		registry.Struct<PrefabUnpackParams>("PrefabUnpackParams", "The params of prefab.unpack.")
 			.Field("instance", &PrefabUnpackParams::Instance,

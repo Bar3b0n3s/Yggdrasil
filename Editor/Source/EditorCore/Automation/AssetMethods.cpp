@@ -1012,12 +1012,15 @@ namespace Engine {
 				Result<AssetImportOutcome> outcome = m_Reimport.Take();
 				if (!outcome)
 					return std::unexpected(std::move(outcome).error().WithContext(std::format("reimporting '{}'", assets.GetReferencePath(m_Handle))));
+				// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): the rebuilds' dropped overrides, for the result.
+				PrefabRebuildCollector rebuilds(*m_Editor);
 				if (Utils::UpdatesPrefabInstances(*m_Editor, m_Handle))
 				{
 					if (Status updated = UpdateReimportedPrefab(*m_Editor, m_Handle); !updated)
 						return std::unexpected(std::move(updated).error());
 				}
 				AssetReimportResult result;
+				result.RebuildDiagnostics = Utils::MakeRebuildDiagnostics(rebuilds.Take());
 				result.Asset = Utils::MakeAssetSummary(assets, m_Handle);
 				result.SubAssets = MakeSubAssetSummaries(assets, outcome->SubAssets);
 				result.Diagnostics = MakeDiagnosticInfos(outcome->Diagnostics);
@@ -1277,12 +1280,14 @@ namespace Engine {
 				Result<AssetImportOutcome> outcome = m_Reimport.Take();
 				if (!outcome)
 					return std::unexpected(std::move(outcome).error().WithContext(std::format("importing the replaced '{}'", m_Result.Asset.Path)));
+				PrefabRebuildCollector rebuilds(*m_Editor);
 				if (Utils::UpdatesPrefabInstances(*m_Editor, m_Handle))
 				{
 					if (Status updated = UpdateReimportedPrefab(*m_Editor, m_Handle); !updated)
 						return std::unexpected(std::move(updated).error());
 				}
 				CompleteReplaceResult(assets, *outcome, m_Previous, m_Result);
+				m_Result.RebuildDiagnostics = Utils::MakeRebuildDiagnostics(rebuilds.Take());
 				return context.SerializeResult(m_Result);
 			}
 
@@ -1899,8 +1904,10 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(Scope<AssetEditCommand> command, AssetEditCommand::CreateForWrite(editor, metaPath, AsBytes(text), label));
 
 			// A Prefab's instances and the prefabs nesting it follow the new settings in the same undo step (§5.5 "Update").
+			PrefabRebuildCollector rebuilds(editor);
 			ENGINE_TRY_ASSIGN(const uint64_t undoIndex, Utils::ExecuteImportSettingsWrite(editor, handle, std::move(command), label));
 			result.UndoIndex = ToAutomationCounter(undoIndex);
+			result.RebuildDiagnostics = Utils::MakeRebuildDiagnostics(rebuilds.Take());
 			result.Asset = Utils::MakeAssetSummary(assets, handle);
 			return result;
 		}
@@ -1975,6 +1982,14 @@ namespace Engine {
 				"A .heightfield heightfield for a Terrain: a flat square of 129 x 129 samples at height 0; takes no values (terrain.importHeightmap converts "
 				"a heightmap, terrain.edit sculpts it).");
 
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10).
+		registry.Struct<PrefabRebuildDiagnostic>("PrefabRebuildDiagnostic", "A diagnostic of a rebuild of an open scene's prefab instances, an override it dropped among them.")
+			.Field("scene", &PrefabRebuildDiagnostic::Scene, "The open scene whose instances were rebuilt (its project path; empty for a scene never saved).")
+			.Field("severity", &PrefabRebuildDiagnostic::Severity, "How serious it is.")
+			.Field("code", &PrefabRebuildDiagnostic::Code, "The diagnostic code: PREFAB_STALE_OVERRIDE for an override the rebuild dropped.")
+			.Field("message", &PrefabRebuildDiagnostic::Message, "What happened: which override was dropped and why.")
+			.Field("pointer", &PrefabRebuildDiagnostic::Pointer, "Where, within the instance root: /Components/Prefab/Overrides/<i> for a dropped override.")
+			.Field("entity", &PrefabRebuildDiagnostic::Entity, "The instance root (16 hex digits).");
 		registry.Struct<AssetDiagnosticInfo>("AssetDiagnosticInfo", "A diagnostic of an asset.")
 			.Field("severity", &AssetDiagnosticInfo::Severity, "How serious it is.")
 			.Field("code", &AssetDiagnosticInfo::Code, "The diagnostic code, such as ASSET_IMPORT_FAILED.")
@@ -2045,7 +2060,9 @@ namespace Engine {
 			.Field("removedSubAssets", &AssetImportResult::RemovedSubAssets,
 				"With replace: the sub-assets the new version no longer has; project.validate reports what still references them (ASSET_MISSING).")
 			.Field("unreferencedFiles", &AssetImportResult::UnreferencedFiles,
-				"With replace: the files the previous version referenced that the new one does not, left in place (never deleted).");
+				"With replace: the files the previous version referenced that the new one does not, left in place (never deleted).")
+			.Field("rebuildDiagnostics", &AssetImportResult::RebuildDiagnostics,
+				"With replace of a prefab: the diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).");
 
 		registry.Struct<AssetReimportParams>("AssetReimportParams", "The params of asset.reimport.")
 			.Field("asset", &AssetReimportParams::Asset, "The asset to import again (a source, not a sub-asset).");
@@ -2053,7 +2070,9 @@ namespace Engine {
 		registry.Struct<AssetReimportResult>("AssetReimportResult", "The reimported asset.")
 			.Field("asset", &AssetReimportResult::Asset, "The reimported asset.")
 			.Field("subAssets", &AssetReimportResult::SubAssets, "Its sub-assets.")
-			.Field("diagnostics", &AssetReimportResult::Diagnostics, "The importer's warnings.");
+			.Field("diagnostics", &AssetReimportResult::Diagnostics, "The importer's warnings.")
+			.Field("rebuildDiagnostics", &AssetReimportResult::RebuildDiagnostics,
+				"For a prefab: the diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).");
 
 		registry.Struct<AssetCreateParams>("AssetCreateParams", "The params of asset.create.")
 			.Field("type", &AssetCreateParams::Type, "What to create.")
@@ -2113,7 +2132,9 @@ namespace Engine {
 			.Field("asset", &AssetSetImportSettingsResult::Asset, "The asset.")
 			.Field("importer", &AssetSetImportSettingsResult::Importer, "The importer's id.")
 			.Field("settings", &AssetSetImportSettingsResult::Settings, "Every field after the patch.")
-			.Field("undoIndex", &AssetSetImportSettingsResult::UndoIndex, "The undo index; 0 when nothing changed or in a batch.");
+			.Field("undoIndex", &AssetSetImportSettingsResult::UndoIndex, "The undo index; 0 when nothing changed or in a batch.")
+			.Field("rebuildDiagnostics", &AssetSetImportSettingsResult::RebuildDiagnostics,
+				"For a prefab: the diagnostics of the rebuilds of the open scenes' instances, every override they dropped among them (also logged).");
 
 		registry.Struct<AssetMoveParams>("AssetMoveParams", "The params of asset.move.")
 			.Field("asset", &AssetMoveParams::Asset, "The asset to move (a source, not a sub-asset).")

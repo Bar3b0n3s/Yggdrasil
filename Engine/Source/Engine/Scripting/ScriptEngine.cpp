@@ -255,6 +255,17 @@ namespace Engine {
 		m_State->AssertOwner();
 		if (!m_State->Initialized || IsStopped())
 			return MakeError(ErrorCode::InvalidState, "Script instances are not running");
+		struct DepthScope
+		{
+			uint32_t& Depth;
+			explicit DepthScope(uint32_t& depth)
+				: Depth(depth)
+			{
+				++Depth;
+			}
+			~DepthScope() { --Depth; }
+		} depth(m_State->SynchronizationDepth);
+		const bool outermost = m_State->SynchronizationDepth == 1;
 		Scene& scene = GetHost().GetScene();
 		m_State->RefreshLifecycleOrder();
 		// Only entities with a Script component and existing instances can change, so only those are visited, in canonical
@@ -361,9 +372,26 @@ namespace Engine {
 			{
 				const InstanceKey key{ id, slot };
 				const auto found = m_State->Instances.find(key);
-				if (found != m_State->Instances.end() && (found->second.DestroyPrepared || m_State->DisabledHistory.contains(key)))
-					continue;
 				const Detail::ScriptSlotView view = Detail::GetScriptSlot(*component, slot);
+				if (found != m_State->Instances.end() && found->second.DestroyPrepared)
+					continue;
+				if (found != m_State->Instances.end() && m_State->DisabledHistory.contains(key))
+				{
+					// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 8; Architecture §11.3): a disable observed but
+					// not flushed yet, whose entity is active again and whose slot still holds the instance's script, is undone:
+					// the instance keeps its table, fields, start state and tasks, and receives the OnEnable that pairs its
+					// OnDisable, so the instance GetScript returned is the one that starts or goes on. Only the outermost
+					// synchronization does it (SynchronizationDepth); otherwise, or with another script in the slot, the
+					// observed disable keeps its teardown at the next flush and a new instance follows, as before.
+					if (!outermost || !active || found->second.Handle != view.Script)
+						continue;
+					m_State->DisabledHistory.erase(key);
+					found->second.Order = view.ExecutionOrder;
+					found->second.Name = entity.GetName();
+					found->second.Active = true;
+					transitions.push_back({ key, true, found->second.Order, found->second.Table });
+					continue;
+				}
 				if (found == m_State->Instances.end())
 				{
 					if (view.Script.IsValid() && mayCreate(entity, key))

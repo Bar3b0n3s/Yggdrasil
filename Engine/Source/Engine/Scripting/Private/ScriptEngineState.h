@@ -238,6 +238,13 @@ namespace Engine {
 		// Instances whose entity was observed inactive and that were not enabled since. Kept per slot, so a slot torn down
 		// while its entity is inactive is recreated only when the entity is enabled again, whatever its other slots did.
 		std::set<InstanceKey> DisabledHistory{};
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 8): how many SynchronizeInstances calls are running,
+		// the outermost one counting 1. Only the outermost one re-enables an instance whose entity was switched on again
+		// before its disable was flushed: a nested one (a callback of the outer one's transitions that switches entities)
+		// leaves that to the next outermost synchronization, so no instance receives OnEnable before the OnDisable the outer
+		// one observed, and a switch back on inside a destroy flush's own synchronization still completes that flush's
+		// teardown.
+		uint32_t SynchronizationDepth = 0;
 		std::map<uint64_t, Reference> References{};
 		// The index in References of each live coroutine (Reference::Thread, unique while rooted), so FindThread, which
 		// CheckExecution runs around every binding call outside a task or case body, is logarithmic in the references

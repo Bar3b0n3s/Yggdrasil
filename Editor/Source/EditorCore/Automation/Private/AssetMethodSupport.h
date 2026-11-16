@@ -4,6 +4,7 @@
 #include "EditorCore/Automation/AutomationTypes.h"
 #include "EditorCore/Commands/AssetEditCommand.h"
 #include "EditorCore/Commands/Command.h"
+#include "EditorCore/EditorContext.h"
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
@@ -132,6 +133,10 @@ namespace Engine {
 		// write loaded first. Errors: those of the write; for a Prefab that updates instances, those of loading it,
 		// FindNestingPrefabs's (PREFAB_CYCLE, nothing written) and UpdatePrefabVersion's.
 		[[nodiscard]] Result<uint64_t> ExecuteImportSettingsWrite(EditorContext& editor, AssetHandle asset, Scope<Command> write, std::string label);
+
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 10): the rebuildDiagnostics of a method's result, from the
+		// issues its PrefabRebuildCollector took, in their order.
+		[[nodiscard]] std::vector<PrefabRebuildDiagnostic> MakeRebuildDiagnostics(std::span<const PrefabRebuildIssue> issues);
 
 	}
 
