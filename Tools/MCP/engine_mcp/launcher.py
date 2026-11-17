@@ -44,9 +44,11 @@ the editor exits, however it exits (Launcher.release_when_exits), or until the b
 running with unsaved changes when the MCP client goes away holds none (Docs/Architecture.md §2.3). Under a process that
 already holds the lock (the automation suite's Test.py, whose bridge tests launch rendering editors) the launch runs
 under that hold and waits for nothing. The wait tries the lock without waiting (locks' no-wait acquisition) every
-WAIT_POLL_SECONDS, so it can end between two tries when the launch's tool call is cancelled. While it waits, the
-launcher's current activity (Activity) is the wait (LockWait: the lock, its holder's pid, worktree and command, when the
-wait began and its bound), which the server's progress notifications carry to the client with the seconds waited
+WAIT_POLL_SECONDS, so it can end between two tries when the launch's tool call is cancelled; a wait for the GPU lock
+keeps one place in the lock's queue for all its tries (locks.queued), so it takes its turn first come, first served
+like every other waiting run. While it waits, the launcher's current activity (Activity) is the wait (LockWait: the
+lock, its holder's pid, worktree and command and the earlier requests queued for it, when the wait began and its
+bound), which the server's progress notifications carry to the client with the seconds waited
 counted when each is sent (server.py, "Progress"); the bridge's log gets the same report when the wait starts, when the
 holder changes and every locks.REPORT_SECONDS. A wait lasts at most the launcher's lock_wait_seconds (LOCK_WAIT_SECONDS
 by default); then the launch fails with LockUnavailable naming the holder, and no editor is spawned. A launch whose tool
@@ -109,8 +111,8 @@ class EditorAlreadyOpen(Exception):
 @dataclasses.dataclass(frozen=True)
 class LockWait:
     """editor_launch's wait for a machine-wide lock: what it waits for (locks' description: "gpu lock", "end of the
-    running gate"), the lock in the way and its holders (pid, worktree, command, since), when the wait began
-    (time.monotonic()) and its bound in seconds."""
+    running gate"), the lock in the way and its holders (pid, worktree, command, since) and the earlier requests queued
+    for it (locks.describe_blockers), when the wait began (time.monotonic()) and its bound in seconds."""
 
     description: str
     lock: str
@@ -356,8 +358,11 @@ class Launcher:
         locks.LockUnavailable after lock_wait_seconds, or LaunchCancelled once `cancelled` is set."""
         if renderer == "vulkan":
             command = f"MCP bridge (pid {os.getpid()}): a rendering editor for {project}"
-            return self.wait_for_lock(f"{locks.GPU} lock", lambda: locks.acquire_gpu(0.0, _unreported, command),
-                                      cancelled)
+            # One place in the GPU lock's queue for the whole wait, so the tries take their turn first come, first
+            # served instead of coming after every queued request each time.
+            with locks.queued(locks.GPU, command):
+                return self.wait_for_lock(f"{locks.GPU} lock", lambda: locks.acquire_gpu(0.0, _unreported, command),
+                                          cancelled)
         return self.wait_for_lock("end of the running gate", lambda: locks.wait_for_gate(0.0, _unreported), cancelled)
 
     def wait_for_lock(self, description: str, attempt: Callable[[], locks.Hold | None],
@@ -382,8 +387,9 @@ class Launcher:
                     now = time.monotonic()
                     if now - started >= self.lock_wait_seconds:
                         raise locks.LockUnavailable(error.lock, error.holders, now - started,
-                                                    timed_out=self.lock_wait_seconds > 0) from None
-                    holders = "; ".join(holder.describe() for holder in error.holders) or "another process"
+                                                    timed_out=self.lock_wait_seconds > 0,
+                                                    waiting=error.waiting) from None
+                    holders = locks.describe_blockers(error.holders, error.waiting)
                     wait = LockWait(description, error.lock, holders, started, self.lock_wait_seconds)
                     self.activity.set(wait)
                     if holders != logged or now >= next_log:

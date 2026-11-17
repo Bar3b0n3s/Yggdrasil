@@ -1,7 +1,8 @@
 """The machine-wide locks of Scripts/Lib/locks.py (Docs/Architecture.md §2.3; Docs/Decisions/0028-backlog-program.md
 decision 16, T-LOCKS): the counted build lock, the exclusive GPU and gate locks, inheritance by child processes, release
-when a holder dies, the holder in every waiting and refusal message, and the scripts that take them (Build.py, Test.py,
-CI.py, Scaffold.py, Perf.py, Hardening.py, Export.py, Locks.py).
+when a holder dies, the holder in every waiting and refusal message, the queue that gives each lock first come, first
+served (waiters in arrival order, a dead waiter skipped, the build slots in order, the gate's precedence), and the
+scripts that take them (Build.py, Test.py, CI.py, Scaffold.py, Perf.py, Hardening.py, Export.py, Locks.py).
 
 Every test runs on a lock directory of its own (lock_holder.isolated_lock_directory), with other processes holding
 locks (lock_holder.LockHolder), so it never touches the machine's real locks. Waits that must end are bounded by a
@@ -19,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -359,6 +361,189 @@ class ProbeTests(LockTestCase):
         self.assertIsNone(attempt.claim)
         gate.release()
         capped.release()
+
+
+class QueueTests(LockTestCase):
+    """First come, first served: a request that waits queues (a ticket in the lock directory), and only the earliest
+    live requests may take a lock. Every order below is forced by the processes' states, never by timing: a waiter that
+    took the lock out of turn would keep it until the test's end, so the waiter whose turn it was would never print
+    "ready" and its bounded wait fails the test."""
+
+    def waiting_pids(self, lock: str) -> list[int]:
+        return [waiter.pid for waiter in locks.waiters(lock)]
+
+    def queued_holder(self, *requests: str, marker: str = "") -> LockHolder:
+        """A holder that waits for `requests` and has joined their queue (it reported its wait)."""
+        holder = self.holder(*requests, timeout=DEADLINE_SECONDS, marker=marker)
+        holder.wait_for("waiting")
+        return holder
+
+    def test_two_waiters_take_the_lock_in_their_arrival_order(self) -> None:
+        for lock in (GPU, GATE):
+            with self.subTest(lock=lock):
+                running = self.holder(lock).ready()
+                first = self.queued_holder(lock)
+                second = self.queued_holder(lock)
+                self.assertEqual(self.waiting_pids(lock), [first.pid, second.pid])
+                running.release()
+                first.ready()
+                self.assertIn(f"held {lock} exclusive owned", first.output)
+                self.assertEqual(self.waiting_pids(lock), [second.pid])
+                first.release()
+                second.ready()
+                self.assertEqual(self.waiting_pids(lock), [])
+                second.release()
+
+    def test_a_request_never_overtakes_a_queued_one_even_when_the_lock_is_free(self) -> None:
+        # The queued waiter keeps its place without asking for the lock, so the lock stays free throughout: under
+        # polling, the newer request took it.
+        queued = self.holder(f"queue:{GPU}").ready()
+        refusal = self.refused(lambda: locks.acquire_gpu(0, quiet), GPU, set())
+        self.assertEqual([waiter.pid for waiter in refusal.waiting], [queued.pid])
+        self.assertIn(f"pid {queued.pid}", str(refusal))
+        self.assertEqual(refusal.to_json()["waiting"][0]["pid"], queued.pid)
+        stranger = self.holder(GPU, environment=self.stranger_environment())
+        self.assertEqual(stranger.wait_for("unavailable", "held"), f"unavailable gpu {EXIT_INIT_FAILED}")
+        queued.release()
+        self.hold(locks.acquire_gpu(0, quiet))
+
+    def test_a_place_kept_across_no_wait_tries_takes_its_turn(self) -> None:
+        # The MCP bridge's cancellable wait tries the lock without waiting, from one place in the queue (locks.queued):
+        # its tries are refused while the lock is held, and its place stays ahead of every later waiter.
+        running = self.holder(GPU).ready()
+        with locks.queued(GPU, "a waiting bridge"):
+            self.assertEqual(self.waiting_pids(GPU), [os.getpid()])
+            self.refused(lambda: locks.acquire_gpu(0, quiet), GPU, {running.pid})
+            later = self.queued_holder(GPU)
+            self.assertEqual(self.waiting_pids(GPU), [os.getpid(), later.pid])
+            running.release()
+            hold = self.hold(locks.acquire_gpu(DEADLINE_SECONDS, quiet))
+            self.assertEqual([holder.pid for holder in locks.holders(GPU)], [os.getpid()])
+        self.assertEqual(self.waiting_pids(GPU), [later.pid], "the place is given up at the end of the block")
+        hold.release()
+        later.ready()
+
+    def test_a_dead_waiters_ticket_is_skipped_and_removed(self) -> None:
+        running = self.holder(GPU).ready()
+        dead = self.queued_holder(GPU)
+        alive = self.queued_holder(GPU)
+        tickets = sorted(locks.queue_directory().glob(f"{GPU}-*{locks.TICKET_SUFFIX}"))
+        self.assertEqual(len(tickets), 2)
+        dead.kill()
+        self.assertEqual([waiter.pid for waiter in locks.waiters(GPU, tidy=False)], [alive.pid])
+        self.assertTrue(tickets[0].exists(), "a listing that does not tidy leaves the dead ticket")
+        self.assertEqual(self.waiting_pids(GPU), [alive.pid])
+        deadline = time.monotonic() + DEADLINE_SECONDS
+        while tickets[0].exists() and time.monotonic() < deadline:
+            locks.waiters(GPU)  # a reader that takes the queue's claim removes the dead ticket
+            time.sleep(locks.POLL_SECONDS)
+        self.assertFalse(tickets[0].exists(), "the dead waiter's ticket is removed")
+        self.assertTrue(tickets[1].exists())
+        running.release()
+        alive.ready()
+        # A waiter killed while it keeps a place without asking (queued) is skipped too.
+        alive.release()
+        frozen = self.holder(f"queue:{GPU}").ready()
+        frozen.kill()
+        self.hold(locks.acquire_gpu(0, quiet))
+
+    def test_the_build_slots_are_given_in_arrival_order(self) -> None:
+        first_slot = self.holder("build:capped").ready()
+        second_slot = self.holder("build:capped").ready()
+        waiting = [self.queued_holder("build:capped") for _ in range(3)]
+        self.assertEqual(self.waiting_pids(BUILD), [waiter.pid for waiter in waiting])
+        self.assertEqual([waiter.mode for waiter in locks.waiters(BUILD)], [CAPPED] * 3)
+        first_slot.release()
+        waiting[0].ready()
+        second_slot.release()
+        waiting[1].ready()
+        self.assertEqual(self.waiting_pids(BUILD), [waiting[2].pid])
+        waiting[0].release()
+        waiting[2].ready()
+        for holder in waiting[1:]:
+            self.assertIn("held build capped owned", holder.output)
+
+    def test_an_automatic_build_behind_a_capped_one_takes_the_slot_beside_it(self) -> None:
+        # Both slots come free at once: the capped request goes first, and the automatic one behind it takes only the
+        # other slot, beside it, never the whole lock.
+        uncapped = self.holder("build:uncapped").ready()
+        capped = self.queued_holder("build:capped")
+        automatic = self.queued_holder("build:auto")
+        uncapped.release()
+        capped.ready()
+        automatic.ready()
+        self.assertIn("held build capped owned", capped.output)
+        self.assertIn("held build capped owned", automatic.output)
+
+    def test_a_waiting_uncapped_build_is_not_overtaken_by_a_later_capped_one(self) -> None:
+        capped = self.holder("build:capped").ready()
+        uncapped = self.queued_holder("build:uncapped")
+        later = self.queued_holder("build:capped")
+        self.assertEqual(self.waiting_pids(BUILD), [uncapped.pid, later.pid])
+        capped.release()
+        uncapped.ready()
+        self.assertIn("held build uncapped owned", uncapped.output)
+        uncapped.release()
+        later.ready()
+
+    def test_the_gate_goes_before_earlier_gpu_requests(self) -> None:
+        # A CI.py takes the gate, then waits for the GPU lock: the earlier GPU request waits for the gate, so it is
+        # passed over (were it not, each would wait for the other).
+        running = self.holder(GPU).ready()
+        earlier = self.queued_holder(GPU)
+        gate = self.holder(GATE, GPU, timeout=DEADLINE_SECONDS)
+        self.assertEqual(gate.wait_for("held", "unavailable"), "held gate exclusive owned")
+        gate.wait_for("waiting")
+        self.assertEqual(self.waiting_pids(GPU), [earlier.pid, gate.pid])
+        running.release()
+        gate.ready()
+        self.assertIn("held gpu exclusive owned", gate.output)
+        self.assertEqual(self.waiting_pids(GPU), [earlier.pid])
+        gate.release()
+        earlier.ready()
+
+    def test_a_ci_queued_for_the_gate_holds_off_new_gpu_and_build_requests(self) -> None:
+        queued = self.holder(f"queue:{GATE}").ready()
+        for name, request in (("gpu", lambda: locks.acquire_gpu(0, quiet)),
+                              ("build", lambda: locks.acquire_build(CAPPED, 0, quiet)),
+                              ("wait for the gate", lambda: locks.wait_for_gate(0, quiet))):
+            with self.subTest(name):
+                refusal = self.refused(request, GATE, set())
+                self.assertEqual([waiter.pid for waiter in refusal.waiting], [queued.pid])
+        queued.release()
+        self.hold(locks.acquire_gpu(0, quiet))
+        # A run that began before the CI queued (it holds the GPU lock) is not held back: its children finish it, while
+        # a new request outside it waits for the gate.
+        queued = self.holder(f"queue:{GATE}").ready()
+        child = self.holder("wait-gate", "build:capped", environment=dict(os.environ)).ready()
+        self.assertEqual(child.output, ["held wait-gate none owned", "held build capped owned", "ready"])
+        stranger = self.holder("build:capped", environment=self.stranger_environment())
+        self.assertEqual(stranger.wait_for("unavailable", "held"), f"unavailable gate {EXIT_INIT_FAILED}")
+        child.release()
+        queued.release()
+
+    def test_locks_py_lists_the_queue(self) -> None:
+        running = self.holder(GPU).ready()
+        waiter = self.queued_holder(GPU, marker="waiter-marker")
+        for _ in range(locks.BUILD_SLOTS):
+            self.holder("build:capped").ready()
+        build_waiter = self.queued_holder("build:uncapped")
+        completed = subprocess.run([sys.executable, str(REPOSITORY_ROOT / "Scripts" / "Locks.py"), "--json"],
+                                   capture_output=True, text=True, encoding="utf-8", timeout=DEADLINE_SECONDS,
+                                   check=False)
+        self.assertEqual(completed.returncode, EXIT_SUCCESS, completed.stderr)
+        document = json.loads(completed.stdout)
+        self.assertEqual([holder["pid"] for holder in document["locks"][GPU]], [running.pid])
+        self.assertEqual(document["queues"][GATE], [])
+        (queued,) = document["queues"][GPU]
+        self.assertEqual((queued["pid"], queued["worktree"], queued["mode"]),
+                         (waiter.pid, REPOSITORY_ROOT.as_posix(), locks.EXCLUSIVE))
+        self.assertIn("--waiter-marker", queued["command"])
+        self.assertGreaterEqual(queued["waitedSeconds"], 0)
+        self.assertEqual([(entry["pid"], entry["mode"]) for entry in document["queues"][BUILD]],
+                         [(build_waiter.pid, UNCAPPED)])
+        self.assertIn(f"{GPU}: waiting #1", completed.stderr)
+        self.assertIn(f"pid {waiter.pid}", completed.stderr)
 
 
 class ScriptTests(LockTestCase):

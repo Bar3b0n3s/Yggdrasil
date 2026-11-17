@@ -8,9 +8,12 @@ The holder is a child Python process (the base interpreter, so its pid is the pr
 it ends that process, fake_editor.PYTHON's reason). It asks for each request in turn and prints one line per outcome:
   "waiting <message>"            each report of a wait (locks.Reporter)
   "held <lock> <mode> <owned|inherited>"
+  "queued <lock>"                a place kept in a lock's queue (locks.queued)
   "unavailable <lock> <exit code>" and it exits with that code
 then "ready", and holds everything until its standard input gets a line (release) or it is killed. A request is a lock
-name (gate, gpu), "build:<capped|uncapped|auto>", or "wait-gate" (locks.wait_for_gate).
+name (gate, gpu), "build:<capped|uncapped|auto>", "wait-gate" (locks.wait_for_gate), or "queue:<gate|gpu>" or
+"queue:build:<mode>", a place in that lock's queue that the holder keeps without asking for the lock: a waiter that
+stays in the queue as long as a test needs.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ PYTHON = Path(getattr(sys, "_base_executable", sys.executable))
 DEADLINE_SECONDS = 60.0
 
 HOLDER_SCRIPT = r"""
+import contextlib
 import sys
 sys.path.insert(0, sys.argv[1])
 from Lib import locks
@@ -48,8 +52,14 @@ def report(message):
 
 timeout = float(sys.argv[2])
 holds = []
+places = contextlib.ExitStack()
 for request in sys.argv[3:]:
     if request.startswith("--"):
+        continue
+    if request.startswith("queue:"):
+        lock, _, mode = request.split(":", 1)[1].partition(":")
+        places.enter_context(locks.queued(lock, mode=mode or locks.EXCLUSIVE))
+        print(f"queued {lock}", flush=True)
         continue
     try:
         if request == "gate":
@@ -71,6 +81,7 @@ print("ready", flush=True)
 sys.stdin.readline()
 for hold in reversed(holds):
     hold.release()
+places.close()
 """
 
 

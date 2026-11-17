@@ -3,10 +3,11 @@ friction F14), through the official SDK's client on its in-memory transport: a r
 notifications/progress while the call waits for its turn behind another call and while it runs, naming the holder of a
 machine-wide lock while editor_launch waits for it, with the seconds waited counted when each is sent, and then
 answering with LockUnavailable; a request without one gets none; a notification that cannot be sent never fails the
-call; the launch's default wait ends before a client that hears nothing gives up; and a launch whose call the client
-cancels stops waiting at once, spawns nothing and leaves the bridge free for the next call (ADR 0036's milestone
-review). No editor is spawned: the waits are for a lock of a test's own lock directory (lock_holder), and the long calls
-and the launches that proceed are stand-ins."""
+call; the launch's default wait ends before a client that hears nothing gives up; a launch waiting for the GPU lock
+keeps its place in the lock's queue across its tries; and a launch whose call the client cancels stops waiting at once,
+spawns nothing and leaves the bridge free for the next call (ADR 0036's milestone review). No editor is spawned: the
+waits are for a lock of a test's own lock directory (lock_holder), and the long calls and the launches that proceed are
+stand-ins."""
 
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -314,6 +316,34 @@ class ProgressTests(unittest.TestCase):
         with self.stand_in_spawn(launch_editor), self.assertRaises(launcher.LaunchCancelled):
             self.launcher.launch(launcher.LaunchRequest(project=self.project, renderer="none"), cancelled)
         launch_editor.assert_not_called()
+
+    def test_a_launch_waiting_for_the_gpu_lock_keeps_its_place_in_the_queue(self) -> None:
+        # First come, first served (Docs/Architecture.md §2.3): the launch tries the lock without waiting, from one
+        # place in its queue (locks.queued), so a run that began to wait after it never takes the lock first. Were each
+        # try a request of its own, it would come after that run's ticket every time and only get the lock after it.
+        self.launcher.lock_wait_seconds = WAIT_SECONDS
+        launch_editor = mock.Mock(return_value=mock.Mock())
+        with lock_holder.LockHolder(locks.GPU) as running, self.stand_in_spawn(launch_editor):
+            running.ready()
+            request = launcher.LaunchRequest(project=self.project, renderer="vulkan")
+            worker = threading.Thread(target=self.launcher.launch, args=(request,), daemon=True)
+            worker.start()
+            deadline = time.monotonic() + WAIT_SECONDS
+            while not locks.waiters(locks.GPU) and time.monotonic() < deadline:
+                time.sleep(locks.POLL_SECONDS)
+            self.assertEqual([waiter.pid for waiter in locks.waiters(locks.GPU)], [os.getpid()])
+            with lock_holder.LockHolder(locks.GPU, timeout=WAIT_SECONDS) as later:
+                later.wait_for("waiting")
+                running.release()
+                worker.join(WAIT_SECONDS)
+                self.assertFalse(worker.is_alive(), "the launch took the lock")
+                launch_editor.assert_called_once()
+                self.assertEqual([holder.pid for holder in locks.holders(locks.GPU)], [os.getpid()])
+                self.assertEqual([waiter.pid for waiter in locks.waiters(locks.GPU)], [later.pid],
+                                 "the launch's place is given up once it has the lock")
+                # The launched editor exits: the later run takes the lock.
+                self.launcher.release_when_exits.call_args.args[1].release()
+                later.ready()
 
     def test_a_long_call_reports_how_long_it_has_run(self) -> None:
         for mode in MODES:
