@@ -32,13 +32,14 @@ namespace Engine {
 		// The fixture graphs whose transpiled bytes are committed: their texts are the output contract's examples, compared byte
 		// for byte in the Debug and the Release unit runs (decision 7: one text in every configuration). Bumper reads a component
 		// proxy (an optional output) of its event's Entity through Flow.IfNotNil, so the strict check covers optional values. M39
-		// (Docs/Decisions/0056-m39-graphs-behaviours.md decisions 2 to 6) adds Rune (methods with parameters of several kinds and
-		// Any, a result, a Return through a merge, a void early Return, a method without an event node, an OnUiClick Return, an
-		// Any variable, Script.Get of a table) and Valve (the world-pause opt-in and the instance chain: Scene.FindByPath,
-		// Flow.IfNotNil, Entity:GetScript, Script.Set, Script.Call by name and by index, Script.Get of a call's result,
-		// Self.Instance) and, from the review of W39.1, Paths (every return path the transpiler writes: a returning merge that
-		// ends "return false", one returning merge called from another, a Return in a loop's body, typed and nil returns of one
-		// method, and a Return entered by several links).
+		// (Docs/Decisions/0056-m39-graphs-behaviours.md decisions 2 to 6) adds Rune (methods with parameters of several
+		// kinds and Any, a result, a Return through a merge, a void early Return, a method without an event node, an
+		// OnUiClick Return, an Any variable, Script.Get of a table) and Valve (the world-pause opt-in and the instance
+		// chain: Scene.FindByPath, Flow.IfNotNil, Entity:GetScript, Script.Set, Script.Call by name and by index,
+		// Script.Get of a call's result and of the instance's member, Self.Instance) and, from the review of W39.1, Paths
+		// (every return path the transpiler writes: a returning merge that ends "return false", one returning merge called
+		// from another, a Return in a loop's body, typed and nil returns of one method, and a Return entered by several
+		// links).
 		constexpr std::string_view FixtureGraphs[] = { "Door", "Counter", "Mover", "Bumper", "Rune", "Valve", "Paths" };
 
 		// M24's fixture graphs, which hold none of M39's methods, Returns or opt-in.

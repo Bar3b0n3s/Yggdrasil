@@ -9,6 +9,7 @@ Graph.RunsWhileWorldPaused = true
 
 function Graph.OnCreate(self: any)
 	self.__GraphLive = {}
+	self.PressSpeed = nil
 	self.Pressure = nil
 end
 
@@ -62,6 +63,13 @@ function Graph.OnStart(self: any)
 						local o12: any = n5_Result
 						n12_Result = (o12["Speed-Up"](o12, nil, 2) :: any)
 						self.__GraphLive["12.Result"] = n12_Result
+					end
+					-- 14: Self.Set.PressSpeed
+					do
+						-- 13: Script.Get
+						local v13_Value: any = (n5_Result :: any)["Speed"]
+						self.__GraphLive["13.Value"] = v13_Value
+						self.PressSpeed = v13_Value
 					end
 				end
 			end

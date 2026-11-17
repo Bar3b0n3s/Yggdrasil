@@ -154,7 +154,9 @@ namespace Engine {
 	{
 		// Decision 2 and brief 18's SteamValve and GameFlow checks: the Valve fixture graph finds the press by path
 		// (Scene.FindByPath, Flow.IfNotNil, Entity:GetScript), writes its Running, calls its Toggle with the graph's own
-		// instance and reads a member of the table it returns, and calls a method whose name is no Luau name by index.
+		// instance and reads a member of the table it returns, calls a method whose name is no Luau name by index, and reads a
+		// member of the press instance itself (its Speed field, as an interactable reads GameFlow's Paused; the review of
+		// W39.2).
 		TEST_CASE("GraphTranspiler: Script.Get, Script.Set and Script.Call read, write and call a behaviour's members")
 		{
 			const BehaviourGraphs graphs;
@@ -183,8 +185,8 @@ return Script.Define("Press", P)
 			CHECK(EvaluateText(fixture, R"(local press = Scene.FindByPath("/Press"):GetScript("Press")
 local valve = Scene.FindByPath("/Valve"):GetScript("Valve")
 return table.concat({ tostring(press.Running), tostring(press.By == valve), tostring(valve.Pressure), tostring(press.SpeedUpFirst),
-	tostring(press.SpeedUpSecond) }, ","))")
-				== "false,true,20,nil,2");
+	tostring(press.SpeedUpSecond), tostring(valve.PressSpeed) }, ","))")
+				== "false,true,20,nil,2,2");
 			CHECK(fixture.Errors.empty());
 		}
 

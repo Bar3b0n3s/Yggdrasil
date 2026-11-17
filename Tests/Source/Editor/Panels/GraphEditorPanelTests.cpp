@@ -447,7 +447,8 @@ namespace Engine {
 		}
 
 		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 13): the side panel's opt-in checkbox and Methods section
-		// submit graph.setMembers, the method written whole each time (its parameters and its result).
+		// submit graph.setMembers, the method written whole each time (its parameters and its result); a name the graph holds
+		// adds nothing, and the panel's own listing of the graph's kinds, which its node menu offers, follows the method.
 		TEST_CASE("GraphEditorPanel: the members panel sets the world-pause opt-in and adds a method, its parameter and its result through graph.setMembers")
 		{
 			Test::UtilityPanelFixture fixture;
@@ -479,10 +480,36 @@ namespace Engine {
 			CHECK(methods[0]["Parameters"][0] == Json{ { "Name", "arg1" }, { "Kind", "Any" }, { "AssetType", "" } });
 			CHECK(methods[0]["Results"].empty());
 
-			// The graph's own kinds follow: the node menu's listing holds the method's Method and Return kinds.
+			// The result: Bool, chosen in the method's result combo ("No result" first), with the parameter kept.
 			static_cast<void>(Settle(fixture, panel));
-			const Json nodes = CallOrFail(fixture, "graph.nodes", Json{ { "graph", std::string(DoorPath) }, { "kinds", Json::array({ "Method.Pull", "Return.Pull" }) } });
-			CHECK(nodes["nodes"].size() == 2);
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "No result");
+			static_cast<void>(fixture.Draw(panel));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Bool");
+			fixture.Pump();
+			methods = ReadDocument(fixture)["Methods"];
+			REQUIRE(methods.size() == 1);
+			CHECK(methods[0]["Results"] == Json::array({ Json{ { "Kind", "Bool" }, { "AssetType", "" } } }));
+			CHECK(methods[0]["Parameters"].size() == 1);
+
+			// Pull again: Add method stays disabled, so the method keeps its parameter and result.
+			static_cast<void>(Settle(fixture, panel));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "New method name");
+			TypeText(fixture, panel, "Pull");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add method");
+			fixture.Pump();
+			CHECK(ReadDocument(fixture)["Methods"] == methods);
+
+			// The panel's own listing of the graph's kinds follows the method: its node menu adds a Method.Pull node.
+			const uint32_t start = AddNode(fixture, "Event.OnStart", 0.0f, 0.0f);
+			static_cast<void>(Settle(fixture, panel));
+			Click(fixture, panel, TitlePoint(panel, start) + glm::vec2(0.0f, 200.0f), ImGuiMouseButton_Right);
+			static_cast<void>(fixture.Draw(panel));
+			TypeText(fixture, panel, "Method.Pull");
+			fixture.Press(panel, ImGuiKey_Enter);
+			fixture.Pump();
+			const Json document = ReadDocument(fixture);
+			REQUIRE(document["Nodes"].size() == 2);
+			CHECK(document["Nodes"][1]["Kind"] == "Method.Pull");
 		}
 
 		TEST_CASE("GraphEditorPanel: Undo and Redo submit edit.undo and edit.redo")

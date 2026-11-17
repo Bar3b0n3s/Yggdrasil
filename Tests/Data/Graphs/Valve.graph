@@ -16,6 +16,14 @@
 	],
 	"Variables": [
 		{
+			"Name": "PressSpeed",
+			"Kind": "Any",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
 			"Name": "Pressure",
 			"Kind": "Any",
 			"Default": null,
@@ -109,6 +117,20 @@
 				"Arg2": 2,
 				"Method": "Speed-Up"
 			}
+		},
+		{
+			"Id": 13,
+			"Kind": "Script.Get",
+			"Position": [1440, 160],
+			"Values": {
+				"Member": "Speed"
+			}
+		},
+		{
+			"Id": 14,
+			"Kind": "Self.Set.PressSpeed",
+			"Position": [1680, 0],
+			"Values": {}
 		}
 	],
 	"Links": [
@@ -195,6 +217,16 @@
 		{
 			"From": {
 				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "Object"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
 				"Pin": "True"
 			},
 			"To": {
@@ -269,6 +301,26 @@
 			},
 			"To": {
 				"Node": 10,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 14,
 				"Pin": "Value"
 			}
 		}

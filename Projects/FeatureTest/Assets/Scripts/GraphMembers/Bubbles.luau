@@ -1,7 +1,7 @@
 --!strict
 -- The menu of GraphMembers.scene (M39, Docs/Decisions/0056-m39-graphs-behaviours.md decision 12): it counts the clicks that
--- bubble up from its buttons, whose Clicker graphs consume a click with Return.OnUiClick of true (Consuming) or let it
--- bubble with false (Bubbling, whose slot sets the graph's Consume field false).
+-- bubble up from its buttons, whose slots of the one Clicker graph consume a click with Return.OnUiClick of true
+-- (Consuming) or let it bubble with false (Bubbling, whose slot sets the graph's Consume field false).
 export type Bubbles = ScriptInstance & {
 	Heard: number,
 }

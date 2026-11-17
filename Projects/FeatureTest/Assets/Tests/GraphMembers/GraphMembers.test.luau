@@ -3,9 +3,10 @@
 -- graphs that talk to Luau behaviours, built by Scaffold/GraphMembers.jsonl through the graph.* methods alone and run in
 -- every mode as their cooked Luau. The Valve graph finds the Press behaviour through the instance chain (Scene.FindByPath,
 -- Flow.IfNotNil, Entity:GetScript), writes its Running, calls its Toggle with the graph's own instance and reads the table
--- it returns; the Rune graph's methods answer the Crystal's Luau Health (Blocks and Damaged, as the game's Health calls
--- them) and a Luau caller; the Clicker graphs consume a UI click or let it bubble; the Ticker graph runs while the world is
--- paused. Also driven by Assets/Tests/Replays/GraphMembers.replay (Scaffold/GraphMembersReplay.jsonl), in which input
+-- it returns; the Lamp graph reads the Luau GameFlow's Paused member through the same chain and Script.Get, as the game's
+-- interactables ask GameFlow; the Rune graph's methods answer the Crystal's Luau Health (Blocks and Damaged, as the game's
+-- Health calls them) and a Luau caller; the Clicker graph, on two buttons, consumes a UI click or lets it bubble; the Ticker
+-- graph runs while the world is paused. Also driven by Assets/Tests/Replays/GraphMembers.replay (Scaffold/GraphMembersReplay.jsonl), in which input
 -- strikes the Rune through its Health.
 local Support = require("../Api/Support")
 
@@ -35,6 +36,21 @@ return Test.Suite("GraphMembers", function()
 		local strokes = press.Strokes
 		Test.WaitTicks(3)
 		Test.ExpectEqual(press.Strokes, strokes, "the press stopped running")
+	end)
+
+	Test.Case("a graph reads a behaviour's member found through the instance chain, as an interactable reads GameFlow's Paused", function()
+		Test.WaitTicks(2)
+		local flow = Instance("Game", "GameFlow")
+		local lamp = Instance("Lamp", "Lamp")
+		Test.Expect(lamp.Lit > 0, "the lamp counts while GameFlow runs")
+		flow.Paused = true
+		Test.WaitTicks(1)
+		local held = lamp.Lit
+		Test.WaitTicks(5)
+		Test.ExpectEqual(lamp.Lit, held, "Script.Get read GameFlow's Paused as true, so the lamp held")
+		flow.Paused = false
+		Test.WaitTicks(3)
+		Test.Expect(lamp.Lit > held, "and counts again once it reads false")
 	end)
 
 	Test.Case("a Luau behaviour strikes a graph through its methods, which return their results", function()

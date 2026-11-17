@@ -54,14 +54,15 @@ namespace Engine {
 
 		// GraphValueKind's names in value order: a field takes the first 11, a variable every one (M39's Any last), an Array's
 		// element the first 10 (GraphDocument.h).
-		constexpr std::array<std::string_view, 12> GraphValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity",
-			"Asset", "Enum", "Array", "Any" };
+		constexpr std::array<std::string_view, 12> GraphValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat",
+			"Entity", "Asset", "Enum", "Array", "Any" };
 		constexpr int FieldKindCount = 11;
 		constexpr int ElementKindCount = 10;
 
 		// The kinds a method's parameter or result may have (M39, IsGraphMethodValueKind), in GraphValueKind's order.
-		constexpr std::array<GraphValueKind, 10> MethodValueKinds = { GraphValueKind::Number, GraphValueKind::Integer, GraphValueKind::Bool, GraphValueKind::String,
-			GraphValueKind::Vector, GraphValueKind::Color, GraphValueKind::Quat, GraphValueKind::Entity, GraphValueKind::Asset, GraphValueKind::Any };
+		constexpr std::array<GraphValueKind, 10> MethodValueKinds = { GraphValueKind::Number, GraphValueKind::Integer, GraphValueKind::Bool,
+			GraphValueKind::String, GraphValueKind::Vector, GraphValueKind::Color, GraphValueKind::Quat, GraphValueKind::Entity, GraphValueKind::Asset,
+			GraphValueKind::Any };
 
 		// A pin the node's kind no longer has, and its label (M24's review): the error outline's colour.
 		constexpr ImU32 StalePinColor = IM_COL32(236, 86, 86, 255);
@@ -139,15 +140,20 @@ namespace Engine {
 		// A method's signature as the side panel shows it (M39): "(hit: Any, amount: Number) -> Bool".
 		static std::string DescribeMethodSignature(const GraphMethod& method)
 		{
+			// A kind's name; a value past the enum's (never in a valid graph) as the last one's.
+			const auto kindName = [](GraphValueKind kind)
+			{
+				return GraphValueKindNames[std::min<size_t>(std::to_underlying(kind), GraphValueKindNames.size() - 1)];
+			};
 			std::string signature = "(";
 			for (size_t index = 0; index < method.Parameters.size(); ++index)
 			{
 				const GraphParameter& parameter = method.Parameters[index];
-				signature += std::format("{}{}: {}", index == 0 ? "" : ", ", parameter.Name, GraphValueKindNames[std::min<size_t>(std::to_underlying(parameter.Kind), GraphValueKindNames.size() - 1)]);
+				signature += std::format("{}{}: {}", index == 0 ? "" : ", ", parameter.Name, kindName(parameter.Kind));
 			}
 			signature += ")";
 			if (!method.Results.empty())
-				signature += std::format(" -> {}", GraphValueKindNames[std::min<size_t>(std::to_underlying(method.Results.front().Kind), GraphValueKindNames.size() - 1)]);
+				signature += std::format(" -> {}", kindName(method.Results.front().Kind));
 			return signature;
 		}
 
@@ -1845,13 +1851,20 @@ namespace Engine {
 			ImGui::TextDisabled("No methods: scripts call them on the instance.");
 		ImGui::SetNextItemWidth(-1.0f);
 		ImGui::InputTextWithHint("##NewMethodName", "New method name", &m_NewMethodName);
-		ImGui::BeginDisabled(!IsGraphMethodName(m_NewMethodName));
+		// A name the graph already holds adds nothing: the new method would replace that method (or be refused as a field's or
+		// variable's name), so it is renamed or edited in its own row instead.
+		const bool taken = std::ranges::find(graph.Methods, m_NewMethodName, &GraphMethod::Name) != graph.Methods.end()
+			|| std::ranges::find(graph.Fields, m_NewMethodName, &GraphField::Name) != graph.Fields.end()
+			|| std::ranges::find(graph.Variables, m_NewMethodName, &GraphVariable::Name) != graph.Variables.end();
+		ImGui::BeginDisabled(!IsGraphMethodName(m_NewMethodName) || taken);
 		if (ImGui::Button("Add method", ImVec2(-1.0f, 0.0f)))
 		{
 			Submit(context, MakeGraphMethodRequest(types, m_Reference, GraphMethod{ .Name = m_NewMethodName, .Parameters = {}, .Results = {} }));
 			m_NewMethodName.clear();
 		}
 		ImGui::EndDisabled();
+		ImGui::SetItemTooltip(taken ? "A field, variable or method of the graph has this name: edit that one in its row."
+									: "Adds a method without parameters or a result; scripts call it on the instance.");
 		ImGui::EndDisabled();
 	}
 
@@ -1904,15 +1917,35 @@ namespace Engine {
 		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.45f);
 		if (ImGui::InputText("##Name", &renamed, ImGuiInputTextFlags_EnterReturnsTrue) && renamed != method.Name)
 		{
-			Submit(context, MakeGraphEditorRequest(types, GraphSetMembersParams{ .Graph = m_Reference, .Name = {}, .Rename = { GraphMemberRename{ .From = method.Name, .To = renamed } }, .Remove = {}, .Fields = {}, .Variables = {}, .Methods = {}, .RunsWhileWorldPaused = false }));
+			Submit(context,
+				MakeGraphEditorRequest(types,
+					GraphSetMembersParams{ .Graph = m_Reference,
+						.Name = {},
+						.Rename = { GraphMemberRename{ .From = method.Name, .To = renamed } },
+						.Remove = {},
+						.Fields = {},
+						.Variables = {},
+						.Methods = {},
+						.RunsWhileWorldPaused = false }));
 		}
-		ImGui::SetItemTooltip("The method's name. Press Enter to rename it with its Method and Return nodes; its callers name it by a string, which no rename rewrites.");
+		ImGui::SetItemTooltip(
+			"The method's name. Press Enter to rename it with its Method and Return nodes; its callers name it by a string, which no rename "
+			"rewrites.");
 		ImGui::SameLine();
 		ImGui::TextDisabled("%s", Utils::DescribeMethodSignature(method).c_str());
 		ImGui::SameLine();
 		if (ImGui::Button("x", ImVec2(ImGui::GetFrameHeight(), 0.0f)))
 		{
-			Submit(context, MakeGraphEditorRequest(types, GraphSetMembersParams{ .Graph = m_Reference, .Name = {}, .Rename = {}, .Remove = { method.Name }, .Fields = {}, .Variables = {}, .Methods = {}, .RunsWhileWorldPaused = false }));
+			Submit(context,
+				MakeGraphEditorRequest(types,
+					GraphSetMembersParams{ .Graph = m_Reference,
+						.Name = {},
+						.Rename = {},
+						.Remove = { method.Name },
+						.Fields = {},
+						.Variables = {},
+						.Methods = {},
+						.RunsWhileWorldPaused = false }));
 		}
 		ImGui::SetItemTooltip("Remove this method (refused while a node uses it).");
 
@@ -1964,7 +1997,8 @@ namespace Engine {
 		if (ImGui::Button("Add parameter"))
 		{
 			GraphMethod replaced = method;
-			replaced.Parameters.push_back(GraphParameter{ .Name = Utils::MakeParameterName(method), .Kind = GraphValueKind::Any, .AssetType = {} });
+			replaced.Parameters.push_back(
+				GraphParameter{ .Name = Utils::MakeParameterName(method), .Kind = GraphValueKind::Any, .AssetType = {} });
 			replace(replaced);
 		}
 		ImGui::EndDisabled();

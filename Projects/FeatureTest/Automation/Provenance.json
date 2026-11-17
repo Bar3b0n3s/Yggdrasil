@@ -3604,17 +3604,17 @@
 		},
 		{
 			"Path": "Assets/Scenes/GraphMembers.scene",
-			"XXH64": "2f91f3951b866415",
+			"XXH64": "7777815264969f40",
 			"Method": "scene.save",
-			"RequestId": 25,
+			"RequestId": 30,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Scenes/GraphMembers.scene.meta",
-			"XXH64": "36005cc95466be9e",
+			"XXH64": "b2ea96c13ee62e69",
 			"Method": "edit.batch",
-			"RequestId": 24,
+			"RequestId": 29,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4292,7 +4292,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/GraphMembers/Bubbles.luau",
-			"XXH64": "ab3b1a93e5a39989",
+			"XXH64": "417658103efe8072",
 			"Method": "script.write",
 			"RequestId": 3,
 			"Client": "batch",
@@ -4310,15 +4310,31 @@
 			"Path": "Assets/Scripts/GraphMembers/Clicker.graph",
 			"XXH64": "332db354a556e26e",
 			"Method": "edit.batch",
-			"RequestId": 16,
+			"RequestId": 21,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Scripts/GraphMembers/Clicker.graph.meta",
-			"XXH64": "0bbd23f29ef6e5d1",
+			"XXH64": "9e0ba08db5ba6831",
 			"Method": "graph.create",
-			"RequestId": 13,
+			"RequestId": 18,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/GameFlow.luau",
+			"XXH64": "1ea3a00f80be0be3",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/GameFlow.luau.meta",
+			"XXH64": "9e897915b6c4e0d0",
+			"Method": "script.write",
+			"RequestId": 5,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4335,6 +4351,22 @@
 			"XXH64": "fc4ddeff70a9de0f",
 			"Method": "script.write",
 			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Lamp.graph",
+			"XXH64": "25c7114ea9c621ae",
+			"Method": "edit.batch",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Lamp.graph.meta",
+			"XXH64": "508b9c9bbab5205d",
+			"Method": "graph.create",
+			"RequestId": 14,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4358,15 +4390,15 @@
 			"Path": "Assets/Scripts/GraphMembers/Rune.graph",
 			"XXH64": "6ba6c44379b90c5a",
 			"Method": "edit.batch",
-			"RequestId": 8,
+			"RequestId": 9,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Scripts/GraphMembers/Rune.graph.meta",
-			"XXH64": "0c82749eefe28781",
+			"XXH64": "f40d8b0a5c4e1236",
 			"Method": "graph.create",
-			"RequestId": 5,
+			"RequestId": 6,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4390,15 +4422,15 @@
 			"Path": "Assets/Scripts/GraphMembers/Ticker.graph",
 			"XXH64": "de68ce29d391281c",
 			"Method": "edit.batch",
-			"RequestId": 20,
+			"RequestId": 25,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Scripts/GraphMembers/Ticker.graph.meta",
-			"XXH64": "508b9c9bbab5205d",
+			"XXH64": "428061b4ea4a02d4",
 			"Method": "graph.create",
-			"RequestId": 17,
+			"RequestId": 22,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4406,15 +4438,15 @@
 			"Path": "Assets/Scripts/GraphMembers/Valve.graph",
 			"XXH64": "ed844b6faad7b732",
 			"Method": "edit.batch",
-			"RequestId": 12,
+			"RequestId": 13,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Scripts/GraphMembers/Valve.graph.meta",
-			"XXH64": "f40d8b0a5c4e1236",
+			"XXH64": "0bbd23f29ef6e5d1",
 			"Method": "graph.create",
-			"RequestId": 9,
+			"RequestId": 10,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6292,17 +6324,17 @@
 		},
 		{
 			"Path": "Assets/Tests/GraphMembers/GraphMembers.test.luau",
-			"XXH64": "d2fcb308a4b5e1e8",
+			"XXH64": "58aea273ce99005f",
 			"Method": "script.write",
-			"RequestId": 21,
+			"RequestId": 26,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Tests/GraphMembers/GraphMembers.test.luau.meta",
-			"XXH64": "2b0c2096fb9cad60",
+			"XXH64": "e5e120ea37cd11e7",
 			"Method": "script.write",
-			"RequestId": 21,
+			"RequestId": 26,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6724,7 +6756,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/GraphMembers.replay",
-			"XXH64": "9508d55243d39424",
+			"XXH64": "a8d0c976ade90245",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
