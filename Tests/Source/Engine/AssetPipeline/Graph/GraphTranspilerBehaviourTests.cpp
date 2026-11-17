@@ -438,6 +438,30 @@ return Script.Define("Menu", M)
 			CHECK(holder10 < ticker10);
 			CHECK(session.GetScriptErrors().GetErrors().empty());
 		}
+
+		// Phase 6's landing (the merge notes: each phase-6 callback through a graph, against the transpiler's locals): M38's
+		// OnLocaleChanged (Docs/Decisions/0055-m38-runtime-locale.md decision 2), dispatched by Loc.SetLocale, reaches a graph's
+		// Event.OnLocaleChanged with its locale and previous parameters under their own names, which the graph stores.
+		TEST_CASE("GraphTranspiler: a graph's OnLocaleChanged receives the new and the previous locale")
+		{
+			const BehaviourGraphs graphs;
+			Test::ScriptTestFixture fixture({ .Locale = "fr" });
+			fixture.SessionLocale = "fr";
+			const AssetHandle watcher(0x390101);
+			const GraphDocument graph = MakeGraph("Watcher", { MakeNode(1, "Event.OnLocaleChanged"), MakeNode(2, "Self.Set.Locale"), MakeNode(3, "Self.Set.Previous") },
+				{ MakeLink(1, "Then", 2, "In"), MakeLink(1, "locale", 2, "Value"), MakeLink(2, "Then", 3, "In"), MakeLink(1, "previous", 3, "Value") },
+				{ MakeVariable("Locale", GraphValueKind::String, Json("")), MakeVariable("Previous", GraphValueKind::String, Json("")) });
+			const GraphTranspileResult text = graphs.Add(fixture, watcher, graph, "Assets/Scripts/Watcher.graph");
+			CHECK(text.Luau.find("function Graph.OnLocaleChanged(self: any, locale: string, previous: string)") != std::string::npos);
+			AttachScripts(fixture, fixture.GetScene().CreateEntity("Watcher"), Slot(watcher));
+			REQUIRE(fixture.Start());
+			const Result<ScriptEvaluation> changed = fixture.Evaluate("Loc.SetLocale('ar')");
+			REQUIRE_MESSAGE(changed.has_value(), changed.error().ToString());
+			CHECK(EvaluateText(fixture, R"(local watcher = Scene.FindByPath("/Watcher"):GetScript("Watcher")
+return watcher.Locale .. "," .. watcher.Previous)")
+				== "ar,fr");
+			CHECK(fixture.Errors.empty());
+		}
 	}
 
 }

@@ -216,9 +216,9 @@ namespace Engine {
 
 		// Phase 6's landing (the merge notes: every new callback's parameters against M39's transpiler locals): an event's
 		// parameters are its function's parameters under their binding names, so none may be a name the text declares itself
-		// (Graph, self, result, v<Id>_<Pin>, n<Id>_<Pin>, o<Id>, flow<Id>, p_<Name>). Every event of the script API, each of
-		// its parameters stored in an Any variable, transpiles to a text the strict checker accepts without a warning, Luau's
-		// shadowing lints included, so a callback added later with such a parameter fails here.
+		// (Graph, self, result, v<Id>_<Pin>, n<Id>_<Pin>, o<Id>, flow<Id>, index<Id>, element<Id>, p_<Name>). Every event of
+		// the script API, each of its parameters stored in an Any variable, transpiles to a text the strict checker accepts
+		// without a warning, Luau's shadowing lints included, so a callback added later with such a parameter fails here.
 		TEST_CASE("GraphTranspiler: every event's parameters reach its flow under their own names, shadowing nothing")
 		{
 			const TranspileSetup setup;
@@ -257,7 +257,7 @@ namespace Engine {
 					CHECK_MESSAGE(!name.starts_with("p_"), name);
 					for (const std::string_view prefix : { "v", "n" })
 						CHECK_MESSAGE(!isNumberedLocal(name, prefix, true), name);
-					for (const std::string_view prefix : { "o", "flow" })
+					for (const std::string_view prefix : { "o", "flow", "index", "element" })
 						CHECK_MESSAGE(!isNumberedLocal(name, prefix, false), name);
 					parameters.push_back(pin.Name);
 					const std::string variable = "Got" + pin.Name;
