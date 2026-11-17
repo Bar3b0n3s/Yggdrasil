@@ -544,8 +544,8 @@ namespace Engine {
 					"the engine makes no escape and deals no damage.",
 					read)
 				.Method("GetSqueezingBody", Utils::CharacterEntityRead<1>, "(self: CharacterController) -> Entity?",
-					"The owner of the body that squeezed the character in its last update (the first in canonical order when several did), or "
-					"nil while it is not squeezed or that entity is disabled or destroyed.",
+					"The owner of the body that squeezed the character in its last update (the one with the lowest body handle when several did, a "
+					"deterministic choice), or nil while it is not squeezed or that entity is disabled or destroyed.",
 					read);
 			api.Type("AudioSource")
 				.Method("Play", Utils::SourceWrite<&AudioSystem::Play, true>, "(self: AudioSource) -> ()", "Start or restart this active source.", write)

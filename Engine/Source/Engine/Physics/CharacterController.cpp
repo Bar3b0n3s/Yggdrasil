@@ -62,7 +62,10 @@
 // ground body and sub-shape of the update (resolved as a contact's, ResolvePhysicsCollider), and its surface velocity
 // (PhysicsBodyRecord::Surfaces) joins the ground's velocity, turned by the body's rotation when it is read: at the start of
 // Update for the step's velocity (the ground of the last update, where it is now), at its end for the ground state it
-// reports (the new ground). Without a surface the update computes exactly what it did before M36.
+// reports (the new ground). Only its part along the ground counts (Utils::AlongGround: projected onto the plane of the
+// ground normal of that moment), as a body takes a surface velocity only through friction along the contact (the lead's
+// decision on the W36.2 review, ADR 0053), so a belt whose velocity leaves its surface neither lifts a character nor
+// presses it in. Without a surface the update computes exactly what it did before M36.
 //
 // The squeeze (M36 W36.2, ADR 0053 decision 12). After the update, the contacts of its last pass (GetActiveContacts) name the
 // bodies that push the character: not sensors or discarded, able to push it (CharacterContactSettings::mCanPushCharacter,
@@ -119,6 +122,17 @@ namespace Engine {
 			const JPH::Vec3 direction = (velocity / largest).Normalized();
 			const float length = largest * (velocity / largest).Length();
 			return length > MaxCharacterSpeed ? direction * MaxCharacterSpeed : velocity;
+		}
+
+		// M36 (the lead's decision on the W36.2 review, ADR 0053): `surface`, a ground collider's surface velocity, without its
+		// part along `normal`, the ground normal Jolt reports (pointing out of the ground); `up` stands in for a normal that is
+		// not finite or not near unit length. A velocity already along the ground keeps every bit when the normal is exactly
+		// perpendicular to it (a flat belt on a flat floor).
+		[[nodiscard]] static glm::vec3 AlongGround(const glm::vec3& surface, JPH::Vec3Arg normal, JPH::Vec3Arg up)
+		{
+			const bool usable = Detail::IsFinite(Detail::ToGlm(normal)) && normal.LengthSq() > 0.25f;
+			const glm::vec3 axis = Detail::ToGlm(usable ? normal.Normalized() : up);
+			return surface - glm::dot(surface, axis) * axis;
 		}
 
 		[[nodiscard]] static Status ValidateDescription(const PhysicsWorld& world, const CharacterControllerDescription& description)
@@ -614,17 +628,20 @@ namespace Engine {
 		// a platform moving at v carries the character v * t. The platform the character stands on may have moved since the
 		// last update, so its velocity is read first; a light body's is none (M34, see the file comment), so a shard the
 		// character stands on never launches it.
-		// M36 (ADR 0053 decision 4): the surface velocity of the collider the character stands on joins the ground's velocity,
-		// its vertical part as every ground's, and its horizontal part carries a grounded character whatever
-		// InheritGroundVelocity says (a belt). A light body gives none, as it gives no velocity of its own.
+		// M36 (ADR 0053 decision 4): the surface velocity of the collider the character stands on, its part along the ground
+		// alone (AlongGround), joins the ground's velocity, its vertical part (an inclined belt's) as every ground's, and its
+		// horizontal part carries a grounded character whatever InheritGroundVelocity says (a belt). A light body gives none,
+		// as it gives no velocity of its own.
 		character.UpdateGroundVelocity();
 		const JPH::Vec3 up = character.GetUp();
 		const JPH::Vec3 desired = Detail::ToJolt(desiredVelocity);
 		const JPH::Vec3 desiredVertical = desired.Dot(up) * up;
 		const JPH::Vec3 currentVertical = character.GetLinearVelocity().Dot(up) * up;
 		const bool lightGround = state.IsLightBody(character.GetGroundBodyID());
-		const std::optional<glm::vec3> groundSurface =
+		std::optional<glm::vec3> groundSurface =
 			lightGround ? std::nullopt : state.FindGroundCollider(character.GetGroundBodyID(), character.GetGroundSubShapeID()).SurfaceVelocity;
+		if (groundSurface.has_value())
+			groundSurface = Utils::AlongGround(*groundSurface, character.GetGroundNormal(), up);
 		JPH::Vec3 groundVelocity = lightGround ? JPH::Vec3::sZero() : character.GetGroundVelocity();
 		if (groundSurface.has_value())
 			groundVelocity += Detail::ToJolt(*groundSurface);
@@ -692,8 +709,8 @@ namespace Engine {
 			const State::GroundColliderInfo ground = state.FindGroundCollider(character.GetGroundBodyID(), character.GetGroundSubShapeID());
 			state.GroundBody = Detail::ToBodyHandle(character.GetGroundBodyID());
 			state.GroundCollider = ground.Collider;
-			if (!state.IsLightBody(character.GetGroundBodyID()))
-				state.GroundSurfaceVelocity = ground.SurfaceVelocity;
+			if (!state.IsLightBody(character.GetGroundBodyID()) && ground.SurfaceVelocity.has_value())
+				state.GroundSurfaceVelocity = Utils::AlongGround(*ground.SurfaceVelocity, character.GetGroundNormal(), character.GetUp());
 		}
 	}
 

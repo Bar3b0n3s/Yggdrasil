@@ -684,7 +684,7 @@ Script members of `CharacterController`:
 |---|---|---|---|---|---|
 | `GetGroundCollider` | method | `(self: CharacterController) -> Entity?` |  | All | The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity. |
 | `GetGroundNormal` | method | `(self: CharacterController) -> vector` |  | All | Ground normal from the last update. |
-| `GetSqueezingBody` | method | `(self: CharacterController) -> Entity?` |  | All | The owner of the body that squeezed the character in its last update (the first in canonical order when several did), or nil while it is not squeezed or that entity is disabled or destroyed. |
+| `GetSqueezingBody` | method | `(self: CharacterController) -> Entity?` |  | All | The owner of the body that squeezed the character in its last update (the one with the lowest body handle when several did, a deterministic choice), or nil while it is not squeezed or that entity is disabled or destroyed. |
 | `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | Velocity after the last update. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for the character. |
 | `Height` | proxy field | `number` | read/write | All | The character's total height, in metres. |
@@ -712,7 +712,7 @@ The surface of the solid colliders on this entity: their own friction and restit
 |---|---|---|---|---|---|---|
 | `Friction` | `Float` | `0.5` | 0 to 1000 |  |  | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
 | `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. |
-| `SurfaceVelocity` | `Vec3` | `[0,0,0]` | -500 to 500 | m/s |  | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
+| `SurfaceVelocity` | `Vec3` | `[0,0,0]` | -500 to 500 | m/s |  | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
 
 Script members of `ColliderSurface`:
 
@@ -720,7 +720,7 @@ Script members of `ColliderSurface`:
 |---|---|---|---|---|---|
 | `Friction` | proxy field | `number` | read/write | All | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
 | `Restitution` | proxy field | `number` | read/write | All | The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. |
-| `SurfaceVelocity` | proxy field | `vector` | read/write | All | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
+| `SurfaceVelocity` | proxy field | `vector` | read/write | All | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
 
 ## AudioSource
 

@@ -1067,6 +1067,49 @@ namespace Engine {
 			}
 		}
 
+		// The lead's decision on the W36.2 review (Docs/Decisions/0053-m36-contact-surfaces.md, "The W36.2 review's fixes"): a
+		// character takes only the part of its ground collider's surface velocity along the ground (projected onto the ground
+		// plane by the ground normal), as a body takes it through friction, so a belt whose velocity leaves its surface neither
+		// lifts the character nor presses it in, and carries it along the surface at the tangential speed.
+		TEST_CASE("CharacterController: a belt whose surface velocity leaves its surface carries a character along it without lifting it")
+		{
+			for (const bool inherit : { false, true })
+			{
+				for (const float normal : { 1.5f, -1.5f })
+				{
+					CAPTURE(inherit);
+					CAPTURE(normal);
+					Scope<PhysicsWorld> world = CreateCharacterWorld();
+					const BodyHandle belt = CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 2.0f));
+					Result<Scope<CharacterController>> created =
+						CharacterController::Create(*world, { .Pose = { .Position = glm::vec3(-10.0f, 0.05f, 0.0f) }, .InheritGroundVelocity = inherit });
+					REQUIRE(created.has_value());
+					CharacterController& character = **created;
+					Walk(*world, character, glm::vec3(0.0f), 30);
+					REQUIRE(character.GetGroundState().IsGrounded);
+					const float height = character.GetPose().Position.y;
+
+					REQUIRE(world->SetColliderSurfaces(belt, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(2.5f, normal, 0.0f) } })
+							.has_value());
+					const float start = character.GetPose().Position.x;
+					float drift = 0.0f;
+					bool grounded = true;
+					for (uint32_t tick = 0; tick < 60; ++tick)
+					{
+						Walk(*world, character, glm::vec3(0.0f), 1);
+						drift = std::max(drift, std::abs(character.GetPose().Position.y - height));
+						grounded = grounded && character.GetGroundState().IsGrounded;
+					}
+					CHECK(drift < 1.0e-3f);
+					CHECK(grounded);
+					// Along the belt at its tangential 2.5 m/s, as a belt without the normal part carries it.
+					CHECK(character.GetPose().Position.x - start == doctest::Approx(2.5f).epsilon(0.02));
+					CHECK(character.GetGroundState().GroundVelocity.x == doctest::Approx(2.5f).epsilon(1.0e-3));
+					CHECK(std::abs(character.GetGroundState().GroundVelocity.y) < 1.0e-4f);
+				}
+			}
+		}
+
 		// --- Pushes and the squeeze (M36 W36.2, Docs/Decisions/0053-m36-contact-surfaces.md decisions 11 and 12) -------------
 
 		// World Tree's brief 16: a Kinematic piston moved into a character pushes it at the piston's velocity. Within the
@@ -1177,6 +1220,55 @@ namespace Engine {
 			CHECK(squeezed);
 			// Pushed up to the wall, no farther.
 			CHECK(character->GetPose().Position.x < 1.0f - 0.29f);
+		}
+
+		// The W36.2 review's finding 1: a character's own ground is its most common pusher. A Kinematic lift rising under it
+		// pushes it in every tick it rises, and the character is not squeezed because its update takes the ground's vertical
+		// velocity, so it leaves a push ahead of the lift; held under a ceiling, it is squeezed by the lift.
+		TEST_CASE("CharacterController: a character a Kinematic lift carries up is never squeezed, and one it lifts into a ceiling is squeezed by the lift")
+		{
+			for (const float speed : { 1.0f, 2.0f })
+			{
+				CAPTURE(speed);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				// The lift's top at y 0; a static ceiling 0.3 m above the 1.8 m character once the lift has risen for a second.
+				const float rise = speed;
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f, rise + 1.8f + 0.3f + 1.0f, 0.0f), glm::vec3(3.0f, 0.5f, 3.0f)));
+				KinematicBox lift(*world, glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(2.0f, 0.5f, 2.0f), glm::vec3(0.0f));
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+				for (uint32_t tick = 0; tick < 30; ++tick)
+					lift.Step(*character);
+				REQUIRE(character->GetGroundState().IsGrounded);
+
+				// Up for a second, then at rest: never squeezed, its start and its stop included, and carried with the lift.
+				bool squeezed = false;
+				lift.SetVelocity(glm::vec3(0.0f, speed, 0.0f));
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					lift.Step(*character);
+					squeezed = squeezed || character->GetSqueeze().IsSqueezed;
+				}
+				lift.SetVelocity(glm::vec3(0.0f));
+				for (uint32_t tick = 0; tick < 30; ++tick)
+				{
+					lift.Step(*character);
+					squeezed = squeezed || character->GetSqueeze().IsSqueezed;
+				}
+				CHECK_FALSE(squeezed);
+				CHECK(character->GetGroundState().IsGrounded);
+				CHECK(std::abs(character->GetPose().Position.y - rise) < 0.03f);
+
+				// Up again into the ceiling: the ceiling holds the character, and the lift squeezes it.
+				lift.SetVelocity(glm::vec3(0.0f, speed, 0.0f));
+				for (uint32_t tick = 0; tick < 60 && !squeezed; ++tick)
+				{
+					lift.Step(*character);
+					squeezed = character->GetSqueeze().IsSqueezed;
+					if (squeezed)
+						CHECK(character->GetSqueeze().Body == lift.GetBody());
+				}
+				CHECK(squeezed);
+			}
 		}
 
 		// World Tree's brief 16: a husk carried by a belt into a resting hammer stops against it, and a hammer at rest pushes

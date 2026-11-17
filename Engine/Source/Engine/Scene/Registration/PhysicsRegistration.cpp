@@ -9,10 +9,11 @@
 // The Physics category (Docs/Decisions/0006-m3-decisions.md, decision 9; Architecture §5.3, §9). Field bounds keep every
 // value Jolt receives valid (§9.1 "nothing invalid reaches Jolt"): masses above 0 and at most MaxPhysicsMass (the most the
 // physics world accepts, Docs/Decisions/0014-m11-decisions.md decision 34), friction from 0 to MaxPhysicsFriction (M36,
-// Docs/Decisions/0053-m36-contact-surfaces.md decision 2), non-negative damping and velocity limits, restitution in [0, 1] and collider dimensions of at least MinColliderDimension. The composition rules
-// that span several components or entities (a non-convex MeshCollider on a Dynamic body, Dynamic triggers, all six
-// degrees of freedom locked, mixed triggers, unknown layers) are diagnostics of the physics validator (M11,
-// PHYSICS_* codes of §13.7), not rules of a single component.
+// Docs/Decisions/0053-m36-contact-surfaces.md decision 2), non-negative damping and velocity limits, restitution in
+// [0, 1] and collider dimensions of at least MinColliderDimension. The composition rules that span several components or
+// entities (a non-convex MeshCollider on a Dynamic body, Dynamic triggers, all six degrees of freedom locked, mixed
+// triggers, unknown layers) are diagnostics of the physics validator (M11, PHYSICS_* codes of §13.7), not rules of a
+// single component.
 
 namespace Engine {
 
@@ -157,8 +158,8 @@ namespace Engine {
 			.Field("SurfaceVelocity", &ColliderSurfaceComponent::SurfaceVelocity,
 				"The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own "
 				"axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its "
-				"InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse "
-				"or speed up at any tick.",
+				"InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write "
+				"takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick.",
 				{ .Min = -static_cast<double>(MaxCharacterSpeed), .Max = static_cast<double>(MaxCharacterSpeed), .Unit = "m/s" });
 	}
 

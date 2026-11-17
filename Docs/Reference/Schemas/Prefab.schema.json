@@ -1150,7 +1150,7 @@
 					"maximum": 1
 				},
 				"SurfaceVelocity": {
-					"description": "The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick.",
+					"description": "The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick.",
 					"type": "array",
 					"prefixItems": [
 						{

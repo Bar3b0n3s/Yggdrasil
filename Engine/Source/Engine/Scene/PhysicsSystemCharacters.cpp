@@ -47,7 +47,8 @@ namespace Engine {
 			if (const std::optional<PhysicsOverlapHit> hit = ResolveHit(ground.GroundBody, ground.GroundCollider))
 				state.GroundCollider = hit->Entity;
 		}
-		// M36 W36.2: the squeeze, and the owner of the body that squeezes (a body's owner, or a character's entity).
+		// M36 W36.2: the squeeze, and the owner of the body that squeezes. Never a character's inner body: it is placed, never
+		// moved at a velocity of its own, so it pushes nothing (CharacterController.h, the squeeze's pushers).
 		const CharacterSqueeze squeeze = controller.GetSqueeze();
 		state.IsSqueezed = squeeze.IsSqueezed;
 		if (squeeze.IsSqueezed)
@@ -55,8 +56,6 @@ namespace Engine {
 			// The body may be gone since the update (FindBody verifies what an index names; this handle is the controller's).
 			if (const auto body = Bodies.find(squeeze.Body.GetValue()); body != Bodies.end() && IsPresent(body->second.Owner))
 				state.SqueezedBy = body->second.Owner;
-			else if (const UUID owner = FindCharacterOwner(squeeze.Body); owner.IsValid() && IsPresent(owner))
-				state.SqueezedBy = owner;
 		}
 		return state;
 	}

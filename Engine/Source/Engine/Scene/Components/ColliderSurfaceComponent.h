@@ -13,7 +13,8 @@ namespace Engine {
 	// Friction and Restitution instead of their body's, combined with the other side's as bodies are (the geometric mean of
 	// the frictions, the larger restitution), and SurfaceVelocity, the velocity the surface moves at while the body stays
 	// where it is (a conveyor belt): a body resting on it is carried by friction, and a character standing on it is carried
-	// whatever its InheritGroundVelocity says. Requires Transform. Not descendants' colliders, triggers, a character's capsule
+	// whatever its InheritGroundVelocity says, each by the velocity's part along the surface alone (a character's projected
+	// onto the plane of its ground normal), so a part off the surface lifts and presses nothing. Requires Transform. Not descendants' colliders, triggers, a character's capsule
 	// or 2D colliders (PHYSICS_SURFACE_UNUSED). Friction in [0, MaxPhysicsFriction] and Restitution in [0, 1], as RigidBody's,
 	// whose defaults these are, so a component added for its velocity alone changes nothing else. SurfaceVelocity in m/s in
 	// the entity's own axes (its world rotation, never its scale), each component within MaxCharacterSpeed. A write takes

@@ -516,7 +516,7 @@ declare extern type CharacterController with
 	GetGroundCollider: (self: CharacterController) -> Entity?
 	-- Ground normal from the last update. [All modes; Runtime|Test; pure/read]
 	GetGroundNormal: (self: CharacterController) -> vector
-	-- The owner of the body that squeezed the character in its last update (the first in canonical order when several did), or nil while it is not squeezed or that entity is disabled or destroyed. [All modes; Runtime|Test; pure/read]
+	-- The owner of the body that squeezed the character in its last update (the one with the lowest body handle when several did, a deterministic choice), or nil while it is not squeezed or that entity is disabled or destroyed. [All modes; Runtime|Test; pure/read]
 	GetSqueezingBody: (self: CharacterController) -> Entity?
 	-- Velocity after the last update. [All modes; Runtime|Test; pure/read]
 	GetVelocity: (self: CharacterController) -> vector
@@ -560,7 +560,7 @@ declare extern type ColliderSurface with
 	Friction: number
 	-- The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. [All modes; Runtime|Test; pure/read; setter mutates]
 	Restitution: number
-	-- The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. [All modes; Runtime|Test; pure/read; setter mutates]
 	SurfaceVelocity: vector
 end
 
@@ -1938,7 +1938,7 @@ declare Physics: {
 	GetColliderBounds: (entity: Entity) -> (vector?, vector?),
 	-- Current world gravity. [All modes; Runtime|Test; pure/read]
 	GetGravity: () -> vector,
-	-- The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use, as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for nil, for a disabled entity and for one without a solid collider in a body (a character's capsule, triggers alone); a destroyed entity is an error. Physics.GetSurface(controller:GetGroundCollider()) reads what a character stands on, nil while it is in the air. [All modes; Runtime|Test; pure/read]
+	-- The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use (of the velocity, its part along the surface alone), as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for nil, for a disabled entity and for one without a solid collider in a body (a character's capsule, triggers alone); a destroyed entity is an error. Physics.GetSurface(controller:GetGroundCollider()) reads what a character stands on, nil while it is in the air. [All modes; Runtime|Test; pure/read]
 	GetSurface: (collider: Entity?) -> SurfaceInfo?,
 	-- Combine named project layers; omitted query masks include every layer. [All modes; Runtime|Test; pure/read]
 	LayerMask: (...string) -> number,

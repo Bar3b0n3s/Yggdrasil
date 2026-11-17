@@ -232,8 +232,9 @@ namespace Engine {
 				.Function("GetBodyBounds", Utils::PhysicsBounds<false>, "(entity: Entity) -> (vector?, vector?)", "World AABB of the body's complete compound, or nil if no body is owned.", read)
 				.Function("GetColliderBounds", Utils::PhysicsBounds<true>, "(entity: Entity) -> (vector?, vector?)", "World AABB of this entity's collider sub-shapes, or nil if absent.", read)
 				.Function("GetSurface", Utils::PhysicsGetSurface, "(collider: Entity?) -> SurfaceInfo?",
-					"The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use, as its ColliderSurface "
-					"holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for nil, for a "
+					"The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use (of the velocity, its "
+					"part along the surface alone), as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or "
+					"its body's material with no velocity; nil for nil, for a "
 					"disabled entity and for one without a solid collider in a body (a character's capsule, triggers alone); a destroyed entity is an "
 					"error. Physics.GetSurface(controller:GetGroundCollider()) reads what a character stands on, nil while it is in the air.",
 					read)

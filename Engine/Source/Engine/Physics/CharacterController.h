@@ -38,7 +38,10 @@
 // Surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 4; World Tree's briefs 15 and 16). The ground state
 // names the body and the collider the character stands on (Jolt's ground body and sub-shape of the update, no query), and a
 // collider surface's velocity (PhysicsWorld::SetColliderSurfaces) carries a grounded character: a conveyor belt moves it
-// whatever InheritGroundVelocity says, which stays about ground that really moves.
+// whatever InheritGroundVelocity says, which stays about ground that really moves. Only the surface velocity's part along
+// the ground carries it (projected onto the plane of the ground normal), as a body takes it only through friction, so a
+// belt whose velocity leaves its surface neither lifts the character nor presses it in (the lead's decision on the W36.2
+// review, ADR 0053).
 //
 // Pushes and the squeeze (M36 W36.2, ADR 0053 decisions 11 and 12; World Tree's brief 16). A Kinematic body, or a Dynamic
 // body not lighter than the character, that moves into the character pushes it along the contact's normal at the body's
@@ -46,8 +49,8 @@
 // at its update, so up to about 6 m/s at 60 Hz with no overlap; a faster one overlaps the character for one tick and pushes
 // it out at the next update, and one beyond about 0.1 m plus Radius a tick can pass through it (Docs/Backlog.md §6). A
 // character such a body cannot move out of the way (pinned under a press, against a wall by a piston) is squeezed: after its
-// update, the body's push this step would leave it overlapping the character by more than CharacterSqueezeTolerance
-// (GetSqueeze). The engine makes no escape and deals no damage: the game decides.
+// update, the body's push this step would leave it more than CharacterSqueezeTolerance inside the character's padded
+// capsule (GetSqueeze). The engine makes no escape and deals no damage: the game decides.
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8); M34 changes what it documents of Mass,
 // Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1); M36 adds the ground's body,
@@ -110,8 +113,8 @@ namespace Engine {
 		bool IsGrounded = false;                              // standing on walkable ground (Jolt's EGroundState::OnGround)
 		glm::vec3 GroundNormal = glm::vec3(0.0f, 1.0f, 0.0f); // unit; (0, 1, 0) when not grounded
 		// The velocity of what the character stands on (a moving platform), M36: with the surface velocity of the collider it
-		// stands on (PhysicsWorld::SetColliderSurfaces, in world space at the update), which a Dynamic body lighter than the
-		// character never gives.
+		// stands on (PhysicsWorld::SetColliderSurfaces, in world space at the update, its part along the ground alone), which
+		// a Dynamic body lighter than the character never gives.
 		glm::vec3 GroundVelocity = glm::vec3(0.0f);
 		// M36: the body the character stands on (Jolt's ground body of the update: another character's inner body when it stands
 		// on one) and the collider of it (ColliderShapeDescription::UserData, as a contact on that sub-shape names it); the
@@ -124,8 +127,9 @@ namespace Engine {
 	struct CharacterSqueeze
 	{
 		bool IsSqueezed = false;
-		// The squeezing body of the lowest handle (canonical creation order) when several squeeze it; invalid otherwise. It
-		// may have been destroyed since the update.
+		// The squeezing body of the lowest body handle when several squeeze it (a deterministic choice; a handle follows the
+		// canonical creation order only among the bodies created together, a body created again in play takes a higher
+		// one); invalid otherwise. It may have been destroyed since the update.
 		BodyHandle Body{};
 	};
 
@@ -161,9 +165,9 @@ namespace Engine {
 		// 36): with CharacterControllerDescription::InheritGroundVelocity and while grounded, plus the horizontal part of the
 		// ground's velocity (Jolt's ground velocity, updated first: a kinematic platform's velocity, a rotating body's surface
 		// velocity at the contact); M36 (ADR 0053 decision 4): the ground's velocity includes the surface velocity of the collider
-		// the character stands on (turned by its body's current rotation; none on a light body), and while grounded its
-		// horizontal part is added whatever InheritGroundVelocity says, so a conveyor belt carries the character; that velocity
-		// is clamped to MaxCharacterSpeed.
+		// the character stands on (turned by its body's current rotation, its part along the ground alone: projected onto the
+		// plane of the ground normal; none on a light body), and while grounded its horizontal part is added whatever
+		// InheritGroundVelocity says, so a conveyor belt carries the character; that velocity is clamped to MaxCharacterSpeed.
 		// "Grounded" is Jolt's OnGround while the character does not move away from the ground faster than 0.1 m/s (else
 		// the step after a jump would cancel it); the ground's velocity is none when the ground is a Dynamic body lighter than
 		// the character (M34). Then ExtendedUpdate with stick-to-floor (down to StepHeight) and ExtendedUpdate's walk-stairs
