@@ -1,0 +1,425 @@
+{
+	"Format": "Graph",
+	"Version": 2,
+	"Name": "Rune",
+	"RunsWhileWorldPaused": false,
+	"Fields": [
+		{
+			"Name": "Glyphs",
+			"Kind": "Integer",
+			"Default": 3,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Blows",
+			"Kind": "Integer",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "LastKind",
+			"Kind": "Any",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Methods": [
+		{
+			"Name": "Blocks",
+			"Parameters": [
+				{
+					"Name": "hit",
+					"Kind": "Any",
+					"AssetType": ""
+				}
+			],
+			"Results": [
+				{
+					"Kind": "Bool",
+					"AssetType": ""
+				}
+			]
+		},
+		{
+			"Name": "Count",
+			"Parameters": [],
+			"Results": [
+				{
+					"Kind": "Integer",
+					"AssetType": ""
+				}
+			]
+		},
+		{
+			"Name": "Damaged",
+			"Parameters": [
+				{
+					"Name": "hit",
+					"Kind": "Any",
+					"AssetType": ""
+				},
+				{
+					"Name": "amount",
+					"Kind": "Number",
+					"AssetType": ""
+				}
+			],
+			"Results": []
+		}
+	],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Method.Blocks",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Flow.Branch",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Compare.Equal",
+			"Position": [0, 160],
+			"Values": {
+				"B": "Ice"
+			}
+		},
+		{
+			"Id": 4,
+			"Kind": "Script.Get",
+			"Position": [-240, 160],
+			"Values": {
+				"Member": "Kind"
+			}
+		},
+		{
+			"Id": 5,
+			"Kind": "Call.Log.Info",
+			"Position": [720, 0],
+			"Values": {
+				"Values": "blocked"
+			}
+		},
+		{
+			"Id": 6,
+			"Kind": "Return.Blocks",
+			"Position": [960, 0],
+			"Values": {
+				"Value": true
+			}
+		},
+		{
+			"Id": 7,
+			"Kind": "Flow.Branch",
+			"Position": [480, 160],
+			"Values": {}
+		},
+		{
+			"Id": 8,
+			"Kind": "Compare.Equal",
+			"Position": [240, 320],
+			"Values": {
+				"B": "Stone"
+			}
+		},
+		{
+			"Id": 10,
+			"Kind": "Method.Damaged",
+			"Position": [0, 480],
+			"Values": {}
+		},
+		{
+			"Id": 11,
+			"Kind": "Flow.Branch",
+			"Position": [240, 480],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Compare.Less",
+			"Position": [0, 640],
+			"Values": {
+				"B": 1
+			}
+		},
+		{
+			"Id": 13,
+			"Kind": "Return.Damaged",
+			"Position": [480, 480],
+			"Values": {}
+		},
+		{
+			"Id": 14,
+			"Kind": "Self.Set.Blows",
+			"Position": [480, 640],
+			"Values": {}
+		},
+		{
+			"Id": 15,
+			"Kind": "Number.Add",
+			"Position": [240, 800],
+			"Values": {
+				"B": 1
+			}
+		},
+		{
+			"Id": 16,
+			"Kind": "Self.Get.Blows",
+			"Position": [0, 800],
+			"Values": {}
+		},
+		{
+			"Id": 17,
+			"Kind": "Self.Set.LastKind",
+			"Position": [720, 640],
+			"Values": {}
+		},
+		{
+			"Id": 18,
+			"Kind": "Script.Get",
+			"Position": [480, 800],
+			"Values": {
+				"Member": "Kind"
+			}
+		},
+		{
+			"Id": 20,
+			"Kind": "Event.OnUiClick",
+			"Position": [0, 960],
+			"Values": {}
+		},
+		{
+			"Id": 21,
+			"Kind": "Return.OnUiClick",
+			"Position": [240, 960],
+			"Values": {
+				"Value": true
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "hit"
+			},
+			"To": {
+				"Node": 4,
+				"Pin": "Object"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "False"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "amount"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "hit"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "Object"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "False"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 14,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 15,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 18,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 20,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 21,
+				"Pin": "In"
+			}
+		}
+	]
+}

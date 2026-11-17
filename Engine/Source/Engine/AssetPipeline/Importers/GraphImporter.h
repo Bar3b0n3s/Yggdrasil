@@ -46,7 +46,9 @@ namespace Engine {
 	{
 	public:
 		static constexpr std::string_view Id = "Graph";
-		// Bumped whenever the transpiler's output for an existing graph changes (decision 10).
+		// Bumped whenever the transpiler's output for an existing graph changes (decision 10). Graph format 2 (M39,
+		// Docs/Decisions/0056-m39-graphs-behaviours.md decision 9) keeps it: a graph without methods, Returns or the world-pause
+		// opt-in transpiles to the text it had.
 		static constexpr uint32_t Version = 1;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }

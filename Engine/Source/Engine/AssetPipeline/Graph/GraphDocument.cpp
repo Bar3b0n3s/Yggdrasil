@@ -6,6 +6,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/Utf8.h"
+#include "Engine/Reflection/FieldInfo.h"
 #include "Engine/Reflection/FieldType.h"
 #include "Engine/Reflection/TypeRegistry.h"
 
@@ -36,9 +37,19 @@ namespace Engine {
 		static constexpr std::array<std::string_view, 21> LuauReservedWords = { "and", "break", "do", "else", "elseif", "end", "false", "for",
 			"function", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while" };
 
-		// The oldest readable .graph version (there has been no other yet). A later version migrates in ReadGraphDocument, so
-		// every reader sees the current form (decision 10).
+		// The oldest readable .graph version. An older version migrates in ReadGraphDocument, so every reader sees the current
+		// form (decision 10).
 		static constexpr uint32_t MinimumGraphVersion = 1;
+		// The version that added the methods, the world-pause opt-in and the Any kind (M39,
+		// Docs/Decisions/0056-m39-graphs-behaviours.md decision 1).
+		static constexpr uint32_t GraphMethodsVersion = 2;
+		// The document members version 2 added, which a version 1 file does not have (in member order).
+		static constexpr std::array<std::string_view, 2> GraphMethodsVersionMembers = { "RunsWhileWorldPaused", "Methods" };
+		// The class key Script.Define reads as a boolean (Scripting/Bindings/Script.cpp), which no method may take.
+		static constexpr std::string_view RunsWhileWorldPausedKey = "RunsWhileWorldPaused";
+		// The names no method parameter takes: the instance's ("self") and the exec output of its Method.<Name> event nodes,
+		// whose data outputs are the parameters.
+		static constexpr std::array<std::string_view, 2> ReservedParameterNames = { "self", "Then" };
 
 		// MaxGraphPosition as the whole number its float holds, for messages and descriptions (std::format writes the float 1e+06).
 		static constexpr uint32_t MaxGraphPositionInteger = static_cast<uint32_t>(MaxGraphPosition);
@@ -50,8 +61,8 @@ namespace Engine {
 		static constexpr std::string_view TooltipOption = "Tooltip";
 
 		// The registry names of GraphValueKind's values, in value order (RegisterGraphTypes), for messages.
-		static constexpr std::array<std::string_view, 11> ValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity",
-			"Asset", "Enum", "Array" };
+		static constexpr std::array<std::string_view, 12> ValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity",
+			"Asset", "Enum", "Array", "Any" };
 
 		// What the Generate hook gives a value the rules refuse (GenerateGraph).
 		static constexpr std::string_view GeneratedGraphName = "Graph";
@@ -104,7 +115,7 @@ namespace Engine {
 
 		[[nodiscard]] static bool IsValueKind(GraphValueKind kind)
 		{
-			return std::to_underlying(kind) <= std::to_underlying(GraphValueKind::Array);
+			return std::to_underlying(kind) <= std::to_underlying(GraphValueKind::Any);
 		}
 
 		[[nodiscard]] static std::string_view GetValueKindName(GraphValueKind kind)
@@ -125,10 +136,11 @@ namespace Engine {
 		}
 
 		// Whether the Luau Field constructor of `kind` takes FieldOptions (Field.Entity, Field.Asset, Field.Enum and
-		// Field.Array take none).
+		// Field.Array take none, and Any has no Field constructor).
 		[[nodiscard]] static bool TakesOptions(GraphValueKind kind)
 		{
-			return kind != GraphValueKind::Entity && kind != GraphValueKind::Asset && kind != GraphValueKind::Enum && kind != GraphValueKind::Array;
+			return kind != GraphValueKind::Entity && kind != GraphValueKind::Asset && kind != GraphValueKind::Enum && kind != GraphValueKind::Array
+				&& kind != GraphValueKind::Any;
 		}
 
 		// Whether a field of `kind` takes the numeric options Min, Max and Step.
@@ -402,6 +414,7 @@ namespace Engine {
 				}
 				case GraphValueKind::Entity:
 				case GraphValueKind::Asset:
+				case GraphValueKind::Any:
 					return value.is_null() ? std::nullopt : std::optional<std::string>("is not null");
 				case GraphValueKind::Enum:
 				{
@@ -429,6 +442,13 @@ namespace Engine {
 				context.AddIssue(MakeIssue(base + "/Kind", std::format("{}'s Kind {} is not a GraphValueKind", what, static_cast<uint32_t>(std::to_underlying(kind)))));
 				return;
 			}
+			// A field is declared by its Luau Field constructor, and no constructor holds any value (M39).
+			if (options != nullptr && kind == GraphValueKind::Any)
+			{
+				context.AddIssue(MakeIssue(base + "/Kind", std::format("{} is of kind Any, which no Field constructor holds", what),
+					"a field has a Field constructor's kind; a variable may be Any"));
+				return;
+			}
 
 			// The options first, so the default is checked against the bounds they give; their issues follow in member order.
 			GraphFieldBounds bounds;
@@ -448,7 +468,7 @@ namespace Engine {
 
 			if (kind == GraphValueKind::Array)
 			{
-				if (!IsValueKind(element) || element == GraphValueKind::Array)
+				if (!IsValueKind(element) || element == GraphValueKind::Array || element == GraphValueKind::Any)
 					context.AddIssue(MakeIssue(base + "/Element", std::format("{}'s Element is {}, which an Array's element cannot be", what, GetValueKindName(element))));
 			}
 			else if (element != GraphValueKind::Number)
@@ -524,6 +544,107 @@ namespace Engine {
 			}
 		}
 
+		// The kind and asset type of a method's parameter or result (M39), located below `base`, its absolute pointer.
+		static void CheckMethodValue(GraphValueKind kind, std::string_view assetType, std::string_view what, const std::string& base, ValidationContext& context)
+		{
+			if (!IsValueKind(kind) || !IsGraphMethodValueKind(kind))
+			{
+				context.AddIssue(MakeIssue(base + "/Kind", std::format("{}'s Kind is {}, which a method's parameter or result cannot be", what, GetValueKindName(kind)),
+					"a parameter or a result is Number, Integer, Bool, String, Vector, Color, Quat, Entity, Asset or Any (a String carries an enum's choice, an Any a "
+					"table)"));
+			}
+			if (kind == GraphValueKind::Asset)
+			{
+				if (assetType.empty())
+					return;
+				const std::optional<AssetType> type = AssetTypeFromString(assetType);
+				if (!type || *type == AssetType::None)
+				{
+					context.AddIssue(MakeIssue(base + "/AssetType", std::format("{}'s AssetType '{}' is not an AssetType", what, assetType),
+						"name the AssetType the asset has, such as Texture, AudioClip or Prefab, or leave it empty for any asset"));
+				}
+			}
+			else if (!assetType.empty())
+				context.AddIssue(MakeIssue(base + "/AssetType", std::format("{} names the AssetType '{}', but only an Asset has one", what, assetType)));
+		}
+
+		// The rules of the methods (M39, decision 1), located below `root`, after the fields' and variables' (whose valid
+		// names `names` holds, so a method's name is unique across the three lists).
+		static void CheckMethods(const GraphDocument& graph, const std::string& root, std::set<std::string_view>& names, ValidationContext& context)
+		{
+			if (graph.Methods.size() > MaxGraphMethods)
+				context.AddIssue(MakeIssue(root + "/Methods", std::format("the graph has {} methods, more than the {} a graph may have", graph.Methods.size(), MaxGraphMethods)));
+			const size_t methodCount = std::min(graph.Methods.size(), MaxGraphMethods);
+			for (size_t index = 0; index < methodCount; ++index)
+			{
+				const GraphMethod& method = graph.Methods[index];
+				const std::string base = JsonReader::AppendPointer(root + "/Methods", index);
+				const std::string what = std::format("method {}", index);
+				const std::string name = base + "/Name";
+				if (!IsGraphIdentifier(method.Name))
+				{
+					context.AddIssue(MakeIssue(name, std::format("{}'s Name '{}' is not a Luau identifier of 1 to {} bytes that is not a reserved word and does not start with \"__\"", what, method.Name, MaxGraphNameBytes),
+						"a method is named like a Luau function, such as Damaged or Pull"));
+				}
+				else if (IsReservedScriptFieldName(method.Name) || method.Name == RunsWhileWorldPausedKey)
+				{
+					context.AddIssue(MakeIssue(name, std::format("{}'s Name '{}' is reserved for the behaviour's own members", what, method.Name),
+						"Entity, Fields, RunsWhileWorldPaused and the callbacks' names (OnStart, OnUpdate, ...) are reserved: rename it"));
+				}
+				else if (!names.insert(method.Name).second)
+				{
+					context.AddIssue(MakeIssue(name, std::format("{}'s Name '{}' is the name of an earlier field, variable or method", what, method.Name),
+						"a name is unique across the graph's fields, variables and methods"));
+				}
+				else if (index != 0 && method.Name < graph.Methods[index - 1].Name)
+				{
+					context.AddIssue(MakeIssue(name, std::format("{}'s Name '{}' comes before the previous method's '{}'", what, method.Name, graph.Methods[index - 1].Name),
+						"methods are sorted by Name, byte-wise (graph.setMembers keeps them sorted)"));
+				}
+
+				if (method.Parameters.size() > MaxGraphMethodParameters)
+				{
+					context.AddIssue(MakeIssue(base + "/Parameters", std::format("{} has {} parameters, more than the {} a method may have", what, method.Parameters.size(), MaxGraphMethodParameters),
+						"Script.Call passes at most four arguments: pass a table of them as one Any parameter"));
+				}
+				std::set<std::string_view> parameters;
+				const size_t parameterCount = std::min(method.Parameters.size(), MaxGraphMethodParameters);
+				for (size_t which = 0; which < parameterCount; ++which)
+				{
+					const GraphParameter& parameter = method.Parameters[which];
+					const std::string parameterBase = JsonReader::AppendPointer(base + "/Parameters", which);
+					const std::string parameterWhat = std::format("{}'s parameter {}", what, which);
+					if (!IsGraphIdentifier(parameter.Name) || std::ranges::find(ReservedParameterNames, parameter.Name) != ReservedParameterNames.end())
+					{
+						context.AddIssue(MakeIssue(parameterBase + "/Name",
+							std::format("{}'s Name '{}' is not a Luau identifier of 1 to {} bytes that is not a reserved word, \"self\", \"Then\" or a name starting "
+										"with \"__\"",
+								parameterWhat, parameter.Name, MaxGraphNameBytes),
+							"a parameter is named like a Luau variable, such as hit or amount (self is the instance, Then its event's exec output)"));
+					}
+					else if (!parameters.insert(parameter.Name).second)
+					{
+						context.AddIssue(MakeIssue(parameterBase + "/Name", std::format("{}'s Name '{}' is the name of an earlier parameter of the method", parameterWhat, parameter.Name),
+							"a parameter's name is unique in its method"));
+					}
+					CheckMethodValue(parameter.Kind, parameter.AssetType, parameterWhat, parameterBase, context);
+				}
+
+				if (method.Results.size() > MaxGraphMethodResults)
+				{
+					context.AddIssue(MakeIssue(JsonReader::AppendPointer(base + "/Results", MaxGraphMethodResults),
+						std::format("{} has {} results, more than the {} a method may have", what, method.Results.size(), MaxGraphMethodResults),
+						"a method returns at most one value: return a table of several as one Any result"));
+				}
+				const size_t resultCount = std::min(method.Results.size(), MaxGraphMethodResults);
+				for (size_t which = 0; which < resultCount; ++which)
+				{
+					const GraphResult& result = method.Results[which];
+					CheckMethodValue(result.Kind, result.AssetType, std::format("{}'s result", what), JsonReader::AppendPointer(base + "/Results", which), context);
+				}
+			}
+		}
+
 		// Every rule of ValidateGraphStructure, located below the context's pointer, in document order. `requireName` false
 		// leaves an empty Name unreported: the registry's default object (the "Graph" Validate hook), which a document never is
 		// (GraphFromJson runs ValidateGraphStructure, which requires it).
@@ -562,6 +683,7 @@ namespace Engine {
 				CheckMemberName(variable.Name, index == 0 ? nullptr : &graph.Variables[index - 1].Name, what, base, names, context);
 				CheckMember(variable.Kind, variable.Default, variable.Element, variable.AssetType, variable.EnumValues, nullptr, what, base, context);
 			}
+			CheckMethods(graph, root, names, context);
 
 			// Nodes. The links name nodes by id, so their nodes are checked only while every id is valid and in order (the
 			// sorted ids FindGraphNode searches); otherwise the ids' issues stand for them.
@@ -681,11 +803,12 @@ namespace Engine {
 			CheckGraph(graph, context, false);
 		}
 
-		// `name` as a member name that IsGraphIdentifier accepts, is not reserved and is not in `taken` (which it joins):
-		// itself when it can be, else GeneratedMemberName or the first candidate numbered after it.
-		[[nodiscard]] static std::string MakeMemberName(const std::string& name, std::set<std::string>& taken)
+		// `name` as a member name that IsGraphIdentifier accepts, is not reserved (for a `method`, IsGraphMethodName) and is
+		// not in `taken` (which it joins): itself when it can be, else GeneratedMemberName or the first candidate numbered
+		// after it.
+		[[nodiscard]] static std::string MakeMemberName(const std::string& name, std::set<std::string>& taken, bool method = false)
 		{
-			const bool usable = IsGraphIdentifier(name) && !IsReservedScriptFieldName(name);
+			const bool usable = method ? IsGraphMethodName(name) : IsGraphIdentifier(name) && !IsReservedScriptFieldName(name);
 			std::string candidate = usable ? name : std::string(GeneratedMemberName);
 			const std::string stem = candidate.substr(0, MaxGraphNameBytes - 8);
 			for (uint32_t number = 1; taken.contains(candidate); ++number)
@@ -709,7 +832,8 @@ namespace Engine {
 				case GraphValueKind::Enum:    return enumValues.empty() ? Json(nullptr) : Json(enumValues.front());
 				case GraphValueKind::Array:   return Json::array();
 				case GraphValueKind::Entity:
-				case GraphValueKind::Asset:   return Json(nullptr);
+				case GraphValueKind::Asset:
+				case GraphValueKind::Any:     return Json(nullptr);
 			}
 			return Json(nullptr);
 		}
@@ -719,7 +843,7 @@ namespace Engine {
 		static void RepairMember(GraphValueKind kind, VariantValue& defaultValue, GraphValueKind& element, std::string& assetType, std::vector<std::string>& enumValues,
 			std::map<std::string, VariantValue>* options)
 		{
-			if (kind != GraphValueKind::Array || element == GraphValueKind::Array)
+			if (kind != GraphValueKind::Array || element == GraphValueKind::Array || element == GraphValueKind::Any || !IsValueKind(element))
 				element = GraphValueKind::Number;
 			if (TakesAssetType(kind, element))
 			{
@@ -782,6 +906,8 @@ namespace Engine {
 			for (GraphField& field : graph.Fields)
 			{
 				field.Name = MakeMemberName(field.Name, taken);
+				if (field.Kind == GraphValueKind::Any)
+					field.Kind = GraphValueKind::Number;
 				RepairMember(field.Kind, field.Default, field.Element, field.AssetType, field.EnumValues, &field.Options);
 			}
 			graph.Variables.resize(std::min(graph.Variables.size(), MaxGraphVariables));
@@ -789,6 +915,31 @@ namespace Engine {
 			{
 				variable.Name = MakeMemberName(variable.Name, taken);
 				RepairMember(variable.Kind, variable.Default, variable.Element, variable.AssetType, variable.EnumValues, nullptr);
+			}
+			// Methods (M39): names unique across the members, parameters and results of the kinds and counts a method takes.
+			const auto repairValue = [](GraphValueKind& kind, std::string& assetType)
+			{
+				if (!IsValueKind(kind) || !IsGraphMethodValueKind(kind))
+					kind = GraphValueKind::Any;
+				if (kind != GraphValueKind::Asset)
+					assetType.clear();
+				else if (const std::optional<AssetType> type = AssetTypeFromString(assetType); !assetType.empty() && (!type || *type == AssetType::None))
+					assetType = GeneratedAssetType;
+			};
+			graph.Methods.resize(std::min(graph.Methods.size(), MaxGraphMethods));
+			for (GraphMethod& method : graph.Methods)
+			{
+				method.Name = MakeMemberName(method.Name, taken, true);
+				method.Parameters.resize(std::min(method.Parameters.size(), MaxGraphMethodParameters));
+				std::set<std::string> parameters(ReservedParameterNames.begin(), ReservedParameterNames.end());
+				for (GraphParameter& parameter : method.Parameters)
+				{
+					parameter.Name = MakeMemberName(parameter.Name, parameters);
+					repairValue(parameter.Kind, parameter.AssetType);
+				}
+				method.Results.resize(std::min(method.Results.size(), MaxGraphMethodResults));
+				for (GraphResult& result : method.Results)
+					repairValue(result.Kind, result.AssetType);
 			}
 
 			graph.Nodes.resize(std::min(graph.Nodes.size(), MaxGraphNodes));
@@ -849,17 +1000,56 @@ namespace Engine {
 			const JsonReader root(document);
 			ENGINE_TRY_ASSIGN(report.FileVersion, root.ReadFormatHeader(GraphFormatName, MinimumGraphVersion, GraphFormatVersion));
 
-			// Everything below the header is the Graph object; the header check above guarantees an object. Version 1 is the
-			// only version, so nothing migrates yet.
+			// Everything below the header is the Graph object; the header check above guarantees an object.
 			Json fields = document;
 			fields.erase("Format");
 			fields.erase("Version");
+
+			// Version 1 migrates to version 2 (M39) as it reads: its document has no methods and RunsWhileWorldPaused false,
+			// so the members version 2 added are unknown in it, warned of and dropped as every unknown member, or with
+			// `strictUnknowns` refused.
+			if (report.FileVersion < GraphMethodsVersion)
+			{
+				ValidationContext unknowns;
+				for (const std::string_view key : GraphMethodsVersionMembers)
+				{
+					if (!fields.contains(key))
+						continue;
+					ValidationIssue issue;
+					issue.Severity = strictUnknowns ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning;
+					issue.Code = std::string(UnknownFieldCode);
+					issue.JsonPointer = JsonReader::AppendPointer("", key);
+					issue.Message = std::format("unknown field '{}' on 'Graph': a version {} graph has none (version {} added it)", key, report.FileVersion,
+						GraphMethodsVersion);
+					issue.Hint = std::format("write \"Version\": {} to declare it", GraphMethodsVersion);
+					fields.erase(key);
+					if (strictUnknowns)
+						unknowns.AddIssue(std::move(issue));
+					else
+						report.Diagnostics.push_back(std::move(issue));
+				}
+				ENGINE_TRY(unknowns.ToStatus("the graph"));
+			}
 
 			GraphDocument graph;
 			ReadContext context;
 			context.Strict = strictUnknowns;
 			context.Diagnostics = &report.Diagnostics;
 			ENGINE_TRY(type->FromJson(&graph, JsonReader(fields), context));
+			if (report.FileVersion < GraphMethodsVersion)
+			{
+				// The Any kind is version 2's too.
+				ValidationContext kinds;
+				for (size_t index = 0; index < graph.Variables.size(); ++index)
+				{
+					if (graph.Variables[index].Kind != GraphValueKind::Any)
+						continue;
+					kinds.AddIssue(MakeIssue(JsonReader::AppendPointer("/Variables", index) + "/Kind",
+						std::format("variable {} is of kind Any, which a version {} graph does not have (version {} added it)", index, report.FileVersion, GraphMethodsVersion),
+						std::format("write \"Version\": {} to declare it", GraphMethodsVersion)));
+				}
+				ENGINE_TRY(kinds.ToStatus("the graph"));
+			}
 			ENGINE_TRY(ValidateGraphStructure(graph));
 			return graph;
 		}
@@ -871,7 +1061,7 @@ namespace Engine {
 		// The rules across fields and objects (names, ids, kinds, positions, literals, members, canonical order, limits) are
 		// ValidateGraphStructure's, run as the graph's Validate hook; the member structs have none of their own, so a document
 		// reports each violation once, in document order.
-		registry.Enum<GraphValueKind>("GraphValueKind", "The kind of a graph field or variable: its Luau Field constructor.")
+		registry.Enum<GraphValueKind>("GraphValueKind", "The kind of a graph field, variable or method parameter or result: its Luau Field constructor, or Any.")
 			.Entry(GraphValueKind::Number, "Number", "A finite f32 number (Field.Number); Default a number.")
 			.Entry(GraphValueKind::Integer, "Integer", "An exact signed 32-bit integer (Field.Integer); Default an integer.")
 			.Entry(GraphValueKind::Bool, "Bool", "A boolean (Field.Bool); Default true or false.")
@@ -882,7 +1072,8 @@ namespace Engine {
 			.Entry(GraphValueKind::Entity, "Entity", "An Entity (Field.Entity); Default null.")
 			.Entry(GraphValueKind::Asset, "Asset", "An asset reference of one AssetType (Field.Asset); Default null.")
 			.Entry(GraphValueKind::Enum, "Enum", "One of EnumValues (Field.Enum); Default one of them.")
-			.Entry(GraphValueKind::Array, "Array", "An array of Element values (Field.Array); Default [].");
+			.Entry(GraphValueKind::Array, "Array", "An array of Element values (Field.Array); Default [].")
+			.Entry(GraphValueKind::Any, "Any", "Any value, a table included: a variable's (Default null), a method parameter's or a method result's; never a field's.");
 
 		registry.Struct<GraphPinRef>("GraphPinRef", "One pin of one node: an end of a link.")
 			.Field("Node", &GraphPinRef::Node, "The node's Id.")
@@ -899,7 +1090,7 @@ namespace Engine {
 
 		registry.Struct<GraphField>("GraphField", "A behaviour field, set per script slot (§6.11).")
 			.Field("Name", &GraphField::Name, NameRule)
-			.Field("Kind", &GraphField::Kind, "Its Luau Field constructor.")
+			.Field("Kind", &GraphField::Kind, "Its Luau Field constructor; never Any.")
 			.Field("Default", &GraphField::Default, DefaultRule)
 			.Field("Element", &GraphField::Element, ElementRule)
 			.Field("AssetType", &GraphField::AssetType, AssetTypeRule)
@@ -908,11 +1099,27 @@ namespace Engine {
 
 		registry.Struct<GraphVariable>("GraphVariable", "Instance state, set to its Default at OnCreate (§6.11).")
 			.Field("Name", &GraphVariable::Name, NameRule)
-			.Field("Kind", &GraphVariable::Kind, "Its kind, as a field's.")
+			.Field("Kind", &GraphVariable::Kind, "Its kind, as a field's, or Any.")
 			.Field("Default", &GraphVariable::Default, DefaultRule)
 			.Field("Element", &GraphVariable::Element, ElementRule)
 			.Field("AssetType", &GraphVariable::AssetType, AssetTypeRule)
 			.Field("EnumValues", &GraphVariable::EnumValues, EnumValuesRule);
+
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 1): the methods.
+		constexpr std::string_view MethodKindRule = "Its kind: any but Enum and Array.";
+		constexpr std::string_view MethodAssetTypeRule = "An Asset's AssetType, or empty for any asset; empty otherwise.";
+		registry.Struct<GraphParameter>("GraphParameter", "A parameter of a graph method.")
+			.Field("Name", &GraphParameter::Name, "A Luau identifier other than self and Then, unique in its method.")
+			.Field("Kind", &GraphParameter::Kind, MethodKindRule)
+			.Field("AssetType", &GraphParameter::AssetType, MethodAssetTypeRule);
+		registry.Struct<GraphResult>("GraphResult", "The result of a graph method.")
+			.Field("Kind", &GraphResult::Kind, MethodKindRule)
+			.Field("AssetType", &GraphResult::AssetType, MethodAssetTypeRule);
+		registry.Struct<GraphMethod>("GraphMethod",
+					"A method of the behaviour, which scripts call on its instance and its Method.<Name> nodes run (§6.11).")
+			.Field("Name", &GraphMethod::Name, "A Luau identifier, not a reserved name, unique across fields, variables and methods.")
+			.Field("Parameters", &GraphMethod::Parameters, std::format("At most {} parameters, in call order.", MaxGraphMethodParameters))
+			.Field("Results", &GraphMethod::Results, std::format("At most {} result; empty when the method returns nothing.", MaxGraphMethodResults));
 
 		registry.Struct<GraphNode>("GraphNode", "One node: a node kind of the library at a place on the canvas, with literals of its input pins.")
 			.Field("Id", &GraphNode::Id, std::format("From 1 to {}, unique in the graph and stable for the node's life.", MaxGraphNodeId))
@@ -931,12 +1138,16 @@ namespace Engine {
 			.Field("From", &GraphLink::From, "The output pin.")
 			.Field("To", &GraphLink::To, "The input pin.");
 
-		registry.Struct<GraphDocument>("Graph", "A visual-scripting graph (.graph): one behaviour's fields, variables, nodes and links, transpiled to Luau at import.")
+		registry.Struct<GraphDocument>("Graph",
+					"A visual-scripting graph (.graph): one behaviour's fields, variables, methods, nodes and links, transpiled to Luau at import.")
 			.Field("Name", &GraphDocument::Name,
 				std::format("The behaviour's Script.Define name: a Luau identifier of 1 to {} bytes that is not a reserved word and does not start with \"__\".",
 					MaxGraphNameBytes))
+			.Field("RunsWhileWorldPaused", &GraphDocument::RunsWhileWorldPaused,
+				"Whether the behaviour updates while the world is paused (Time.PauseWorld), as a Luau class that sets RunsWhileWorldPaused.")
 			.Field("Fields", &GraphDocument::Fields, std::format("At most {} fields, sorted by Name.", MaxGraphFields))
 			.Field("Variables", &GraphDocument::Variables, std::format("At most {} variables, sorted by Name.", MaxGraphVariables))
+			.Field("Methods", &GraphDocument::Methods, std::format("At most {} methods, sorted by Name.", MaxGraphMethods))
 			.Field("Nodes", &GraphDocument::Nodes, std::format("At most {} nodes, sorted by Id.", MaxGraphNodes))
 			.Field("Links", &GraphDocument::Links,
 				std::format("At most {} links, sorted by (From.Node, From.Pin, To.Node, To.Pin) byte-wise, each once, joining two different nodes.", MaxGraphLinks))
@@ -960,6 +1171,16 @@ namespace Engine {
 		}) && std::ranges::find(Utils::LuauReservedWords, name) == Utils::LuauReservedWords.end();
 	}
 
+	bool IsGraphMethodValueKind(GraphValueKind kind)
+	{
+		return kind != GraphValueKind::Enum && kind != GraphValueKind::Array;
+	}
+
+	bool IsGraphMethodName(std::string_view name)
+	{
+		return IsGraphIdentifier(name) && !IsReservedScriptFieldName(name) && name != Utils::RunsWhileWorldPausedKey;
+	}
+
 	Status ValidateGraphStructure(const GraphDocument& graph)
 	{
 		ValidationContext context;
@@ -975,6 +1196,7 @@ namespace Engine {
 		};
 		std::ranges::stable_sort(graph.Fields, std::ranges::less{}, byName);
 		std::ranges::stable_sort(graph.Variables, std::ranges::less{}, byName);
+		std::ranges::stable_sort(graph.Methods, std::ranges::less{}, byName);
 		std::ranges::stable_sort(graph.Nodes, std::ranges::less{}, &GraphNode::Id);
 		std::ranges::stable_sort(graph.Links, [](const GraphLink& left, const GraphLink& right)
 		{

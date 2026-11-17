@@ -52,8 +52,12 @@ namespace Engine {
 			Any
 		};
 
-		constexpr std::array<std::string_view, 11> GraphValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity",
-			"Asset", "Enum", "Array" };
+		// GraphValueKind's names in value order: a field takes the first 11, a variable every one (M39's Any last), an Array's
+		// element the first 10 (GraphDocument.h).
+		constexpr std::array<std::string_view, 12> GraphValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity",
+			"Asset", "Enum", "Array", "Any" };
+		constexpr int FieldKindCount = 11;
+		constexpr int ElementKindCount = 10;
 
 		// A pin the node's kind no longer has, and its label (M24's review): the error outline's colour.
 		constexpr ImU32 StalePinColor = IM_COL32(236, 86, 86, 255);
@@ -107,7 +111,8 @@ namespace Engine {
 			return IM_COL32(86, 88, 100, 255);
 		}
 
-		// The members a graph's Self kinds are listed for: each field's and variable's name and kind.
+		// The members a graph's own kinds are listed for: each field's and variable's name and kind, and (M39) each method's
+		// name and signature, whose Method and Return kinds' pins follow it.
 		static std::string DescribeGraphMembers(const GraphDocument& graph)
 		{
 			std::string members;
@@ -115,6 +120,15 @@ namespace Engine {
 				members += std::format("{}:{};", field.Name, std::to_underlying(field.Kind));
 			for (const GraphVariable& variable : graph.Variables)
 				members += std::format("{}:{};", variable.Name, std::to_underlying(variable.Kind));
+			for (const GraphMethod& method : graph.Methods)
+			{
+				members += std::format("{}(", method.Name);
+				for (const GraphParameter& parameter : method.Parameters)
+					members += std::format("{}:{}:{},", parameter.Name, std::to_underlying(parameter.Kind), parameter.AssetType);
+				for (const GraphResult& result : method.Results)
+					members += std::format(")->{}:{}", std::to_underlying(result.Kind), result.AssetType);
+				members += ";";
+			}
 			return members;
 		}
 
@@ -193,7 +207,8 @@ namespace Engine {
 				case GraphValueKind::Enum:    return GraphValueWidget::Choice;
 				case GraphValueKind::Entity:
 				case GraphValueKind::Asset:
-				case GraphValueKind::Array:   return GraphValueWidget::None; // nil and [] by default (GraphDocument.h)
+				case GraphValueKind::Array:
+				case GraphValueKind::Any:     return GraphValueWidget::None; // nil and [] by default (GraphDocument.h)
 			}
 			return GraphValueWidget::None;
 		}
@@ -219,7 +234,8 @@ namespace Engine {
 				case GraphValueKind::Enum:    return choices.empty() ? Json("") : Json(choices.front());
 				case GraphValueKind::Array:   return Json::array();
 				case GraphValueKind::Entity:
-				case GraphValueKind::Asset:   return Json();
+				case GraphValueKind::Asset:
+				case GraphValueKind::Any:     return Json();
 			}
 			return Json();
 		}
@@ -1734,20 +1750,23 @@ namespace Engine {
 		std::array<const char*, GraphValueKindNames.size()> kindLabels{};
 		for (size_t index = 0; index < kindLabels.size(); ++index)
 			kindLabels[index] = GraphValueKindNames[index].data();
+		// A field's kinds, and a variable's, Any (M39) included.
+		const int kindCount = m_NewMemberVariable ? static_cast<int>(kindLabels.size()) : FieldKindCount;
+		m_NewMemberKind = std::clamp(m_NewMemberKind, 0, kindCount - 1);
 		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
-		ImGui::Combo("##NewMemberKind", &m_NewMemberKind, kindLabels.data(), static_cast<int>(kindLabels.size()));
+		ImGui::Combo("##NewMemberKind", &m_NewMemberKind, kindLabels.data(), kindCount);
 		ImGui::SameLine();
 		ImGui::Checkbox("Variable", &m_NewMemberVariable);
 		ImGui::SetItemTooltip("A variable is instance state OnCreate sets; a field is set per script slot in the inspector.");
-		const auto kind = static_cast<GraphValueKind>(m_NewMemberKind);
+		const auto kind = static_cast<GraphValueKind>(std::clamp(m_NewMemberKind, 0, kindCount - 1));
 		const std::vector<std::string_view> assetTypes = Utils::GetGraphAssetTypeNames();
 		GraphValueKind element = GraphValueKind::Number;
 		if (kind == GraphValueKind::Array)
 		{
-			// Any kind but Array (GraphDocument.h).
+			// Any kind but Array and Any (GraphDocument.h).
 			ImGui::SetNextItemWidth(-1.0f);
-			ImGui::Combo("##NewMemberElement", &m_NewMemberElement, kindLabels.data(), static_cast<int>(kindLabels.size()) - 1);
-			element = static_cast<GraphValueKind>(m_NewMemberElement);
+			ImGui::Combo("##NewMemberElement", &m_NewMemberElement, kindLabels.data(), ElementKindCount);
+			element = static_cast<GraphValueKind>(std::clamp(m_NewMemberElement, 0, ElementKindCount - 1));
 		}
 		const GraphValueKind typed = kind == GraphValueKind::Array ? element : kind;
 		if (typed == GraphValueKind::Asset)

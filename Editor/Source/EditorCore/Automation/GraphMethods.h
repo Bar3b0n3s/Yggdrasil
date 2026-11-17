@@ -113,7 +113,8 @@ namespace Engine {
 	// --- graph.nodes ---------------------------------------------------------------------------------------------------------
 
 	// graph.nodes {graph?, prefix?, kinds?}: the node library (GraphNodeLibrary::GetNodes) for the canvas's menu and for an agent
-	// choosing kinds, with graph its Self.Get and Self.Set kinds too, filtered by a kind prefix and an exact list.
+	// choosing kinds, with graph its own kinds too (GraphNodeLibrary::GetMemberNodes: Self.Get and Self.Set, and M39's Method and
+	// Return of its methods), filtered by a kind prefix and an exact list.
 	struct GraphNodesParams
 	{
 		std::string Graph{};              // empty: the graph-independent kinds alone
@@ -238,19 +239,24 @@ namespace Engine {
 
 	// --- graph.setMembers ----------------------------------------------------------------------------------------------------
 
-	// Registry struct "GraphMemberRename".
+	// Registry struct "GraphMemberRename": a field, a variable or (M39) a method to rename.
 	struct GraphMemberRename
 	{
 		std::string From{};
 		std::string To{};
 	};
 
-	// graph.setMembers {graph, name?, rename?, remove?, fields?, variables?} (label "Set Graph Members"), applied in that order:
-	// the behaviour's name; renames of fields and variables, each rewriting its Self.Get and Self.Set node kinds; removals of
-	// fields and variables, refused at /remove/<i> while a node uses the member (its hint names graph.removeNodes and the node
-	// ids); then each field and variable given, added or replacing the member of its name (a member may not change between a
-	// field and a variable but by its removal and addition, and a replaced member's kind change is refused at
-	// /fields/<i>/Kind or /variables/<i>/Kind while a node's link or literal needs the old kind).
+	// graph.setMembers {graph, name?, rename?, remove?, fields?, variables?, methods?, runsWhileWorldPaused?} (label "Set Graph
+	// Members"), applied in that order: the behaviour's name; renames of fields, variables and methods, each rewriting its
+	// nodes' kinds (Self.Get and Self.Set of a field or variable, Method and Return of a method); removals, refused at
+	// /remove/<i> while a node uses the member (its hint names graph.removeNodes and the node ids); then each field, variable
+	// and method given, added or replacing the member of its name (a member may not change between a field, a variable and a
+	// method but by its removal and addition, and a replaced member's kind change is refused at /fields/<i>/Kind or
+	// /variables/<i>/Kind, a method's signature change at /methods/<i>/Parameters or /methods/<i>/Results, while a node's link
+	// or literal needs the old one); then the world-pause opt-in. M39 (Docs/Decisions/0056-m39-graphs-behaviours.md
+	// decision 8 and departure 1): `methods` are free-form values, so the MCP tool's compact schema stays small, each read
+	// strictly through the registry's "GraphMethod" struct and refused at /methods/<i>/... when it is not one. A method's
+	// callers name it by a string (Script.Call's Method, Luau's ":Name()"), which no rename rewrites.
 	struct GraphSetMembersParams
 	{
 		std::string Graph{}; // required
@@ -259,12 +265,14 @@ namespace Engine {
 		std::vector<std::string> Remove{};
 		std::vector<GraphField> Fields{};
 		std::vector<GraphVariable> Variables{};
+		std::vector<VariantValue> Methods{}; // M39: GraphMethod values
+		bool RunsWhileWorldPaused = false;   // M39: applied only when the param is given
 	};
 
 	struct GraphSetMembersResult
 	{
 		AssetSummary Graph{};
-		uint32_t RenamedNodes = 0; // the Self.Get and Self.Set nodes the renames rewrote
+		uint32_t RenamedNodes = 0; // the Self.Get, Self.Set, Method and Return nodes the renames rewrote
 		uint32_t UndoIndex = 0;
 	};
 

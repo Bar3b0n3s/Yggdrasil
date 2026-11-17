@@ -24,21 +24,36 @@
 //   - Its layout, in order: "--!strict"; the comment line "-- Generated from <path> by the graph transpiler: edit the
 //     graph, not this text."; "local Graph = {}"; "Graph.Fields = { ... }" with one "<Name> = Field.<Kind>(<default>,
 //     <options>)," line per field in the graph's (byte-wise) order, Array fields as Field.Array(<element constructor>);
+//     "Graph.RunsWhileWorldPaused = true" when the graph opts in (M39; nothing otherwise);
 //     "function Graph.OnCreate(self: any)", always, which first sets "self.__GraphLive = {}" (ScriptLiveValuesKey,
 //     Scripting/ScriptEngine.h), then each variable to its Default in name order, then runs the OnCreate event nodes' flows;
 //     then one "function Graph.<Callback>(self: any, <the callback's parameters>)" per other callback the graph has an event
-//     node of, in byte-wise callback order, each running its event nodes' flows in id order; and last "return
-//     Script.Define("<Name>", Graph)". Nothing else is global: no require, no upvalue across functions.
+//     node of, in byte-wise callback order, each running its event nodes' flows in id order; then (M39) one
+//     "function Graph.<Method>(self: any, p_<parameter>: <type>, ...)" per declared method in name order, running its
+//     Method.<Name> nodes' flows in id order, whether or not it has any; and last "return Script.Define("<Name>", Graph)".
+//     Nothing else is global: no require, no upvalue across functions.
 //   - Names, stable under edits that do not touch them: a statement's outputs are the locals "n<Id>_<Pin>"; a pure node's
 //     value computed for one statement is "v<Id>_<Pin>" inside that statement's own do ... end block (so a function's
-//     active locals stay below Luau's 200); an event's data outputs are its callback's parameters; a flow that several exec
-//     links enter is the local function "flow<Id>" of its event function. Each node's code starts with the comment line
-//     "-- <Id>: <Kind>".
+//     active locals stay below Luau's 200); an event's data outputs are its callback's parameters, a Method node's its
+//     method's parameters "p_<Name>" (so no parameter shadows a global or a generated local); a flow that several exec links
+//     enter is the local function "flow<Id>" of its event function; Script.Set's and Script.Call's object is the local
+//     "o<Id>: any". Each node's code starts with the comment line "-- <Id>: <Kind>".
 //   - Semantics: a statement runs when its "In" is reached and continues at "Then" (Flow's outputs as decision 6 states);
 //     a pure node is evaluated again for every statement input it feeds (in pin order, depth first), so a value is always
 //     current; Flow.Delay continues at "Then" at once and at "Later" from Task.Delay(<Seconds>, function() ... end);
 //     Flow.IfNotNil continues at "True" when its Value is not nil (its Result is the Value) and at "False" otherwise; a
-//     statement's output read later in its flow is the value of its last run. An Event node's function returns nothing.
+//     statement's output read later in its flow is the value of its last run. M39
+//     (Docs/Decisions/0056-m39-graphs-behaviours.md decisions 2 and 4): Script.Get is "(<object> :: any)[<member>]",
+//     Script.Set "o<Id>[<member>] = <value>", Script.Call "n<Id>_Result = (o<Id>:<Method>(<Arg1..Arg4>) :: any)" for a
+//     literal Method that is a Luau name, else "(o<Id>[<method>](o<Id>, ...) :: any)", trailing unset arguments left out,
+//     Self.Instance "self". A Return ends the function that runs it, Luau's return, always in a do ... end block of its
+//     own: "return <Value>" ("return" without a value); a merge whose flow reaches a Return is "local function
+//     flow<Id>(): boolean", in which a Return sets the function's local "result" (declared "local result: any") and
+//     returns true and which ends with "return false" unless it always returns, and each of its calls is "if flow<Id>()
+//     then return result end" ("return" without a value; "return true" inside another flow function). A function that
+//     returns a value (a method with a result, a callback's with a Return of a value) ends with "return nil" unless its
+//     body always returns, judged as Luau's UnreachableCode lint judges a block, so every path returns one value and the
+//     text adds no unreachable line of its own. A graph without methods, Returns or the opt-in has exactly M24's text.
 //   - Values and types: a literal is written in Luau's spelling of its pin's type (a vector as vector.create(x, y, z), a
 //     Color as Color.New(r, g, b, a), a Quat as Quat.New(x, y, z, w), an Enum's choice as its string); an Asset literal (an
 //     AssetHandle) as (Assets.Load("<16 hex digits>") :: AssetRef), an AssetRef as a required Asset input takes, nil at run

@@ -1168,7 +1168,7 @@
 		{
 			"name": "graph_nodes",
 			"method": "graph.nodes",
-			"description": "Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own Self.Get and Self.Set kinds.",
+			"description": "Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own Self.Get, Self.Set, Method and Return kinds.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "GraphNodesParams",
@@ -1176,7 +1176,7 @@
 				"type": "object",
 				"properties": {
 					"graph": {
-						"description": "A graph whose Self.Get and Self.Set kinds to add; empty for none.",
+						"description": "A graph whose own kinds (Self.Get, Self.Set, Method, Return) to add; empty for none.",
 						"type": "string"
 					},
 					"prefix": {
@@ -1276,7 +1276,7 @@
 		{
 			"name": "graph_set_members",
 			"method": "graph.setMembers",
-			"description": "Renames the behaviour and renames, removes, adds or replaces its fields and variables as one undoable edit.",
+			"description": "Renames the behaviour, sets its world-pause opt-in, and renames, removes, adds or replaces its fields, variables and methods as one undoable edit; a method's callers name it by a string, which no rename rewrites.",
 			"inputSchema": {
 				"$schema": "https://json-schema.org/draft/2020-12/schema",
 				"title": "GraphSetMembersParams",
@@ -1292,10 +1292,10 @@
 						"type": "string"
 					},
 					"rename": {
-						"description": "Fields and variables to rename, with their Self nodes.",
+						"description": "Fields, variables and methods to rename, with their nodes.",
 						"type": "array",
 						"items": {
-							"description": "One field or variable to rename.",
+							"description": "One field, variable or method to rename.",
 							"type": "object",
 							"properties": {
 								"from": {
@@ -1311,7 +1311,7 @@
 						}
 					},
 					"remove": {
-						"description": "Fields and variables to remove; refused while a node uses one.",
+						"description": "Fields, variables and methods to remove; refused while a node uses one.",
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -1329,15 +1329,15 @@
 									"type": "string"
 								},
 								"Kind": {
-									"description": "Its Luau Field constructor.",
-									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+									"description": "Its Luau Field constructor; never Any.",
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 								},
 								"Default": {
 									"description": "Its default, in its Kind's JSON spelling (§6.11)."
 								},
 								"Element": {
 									"description": "An Array's element kind; Number otherwise.",
-									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 								},
 								"AssetType": {
 									"description": "An Asset's AssetType; empty otherwise.",
@@ -1371,15 +1371,15 @@
 									"type": "string"
 								},
 								"Kind": {
-									"description": "Its kind, as a field's.",
-									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+									"description": "Its kind, as a field's, or Any.",
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 								},
 								"Default": {
 									"description": "Its default, in its Kind's JSON spelling (§6.11)."
 								},
 								"Element": {
 									"description": "An Array's element kind; Number otherwise.",
-									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+									"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 								},
 								"AssetType": {
 									"description": "An Asset's AssetType; empty otherwise.",
@@ -1395,6 +1395,15 @@
 							},
 							"additionalProperties": false
 						}
+					},
+					"methods": {
+						"description": "Methods to add or replace, by name: GraphMethod objects {Name, Parameters: [{Name, Kind, AssetType}], Results: [] or [{Kind, AssetType}]}.",
+						"type": "array",
+						"items": {}
+					},
+					"runsWhileWorldPaused": {
+						"description": "Whether the behaviour updates while the world is paused; absent keeps it.",
+						"type": "boolean"
 					},
 					"dryRun": {
 						"description": "Validate and return the would-be result without applying anything.",

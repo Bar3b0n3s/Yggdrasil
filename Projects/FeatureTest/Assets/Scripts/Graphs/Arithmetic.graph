@@ -1,7 +1,8 @@
 {
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Arithmetic",
+	"RunsWhileWorldPaused": false,
 	"Fields": [
 		{
 			"Name": "A",
@@ -68,6 +69,7 @@
 			"EnumValues": []
 		}
 	],
+	"Methods": [],
 	"Nodes": [
 		{
 			"Id": 1,

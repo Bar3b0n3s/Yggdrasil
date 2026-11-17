@@ -1,0 +1,721 @@
+{
+	"Format": "Graph",
+	"Version": 2,
+	"Name": "Counter",
+	"RunsWhileWorldPaused": false,
+	"Fields": [
+		{
+			"Name": "Label",
+			"Kind": "String",
+			"Default": "Count",
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Tooltip": "Shown in the log"
+			}
+		},
+		{
+			"Name": "Mode",
+			"Kind": "Enum",
+			"Default": "Up",
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": ["Up", "Down"],
+			"Options": {}
+		},
+		{
+			"Name": "Step",
+			"Kind": "Integer",
+			"Default": 1,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Max": 10,
+				"Min": 1
+			}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Count",
+			"Kind": "Number",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "History",
+			"Kind": "Array",
+			"Default": [],
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "Ready",
+			"Kind": "Bool",
+			"Default": false,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Methods": [],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnStart",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Flow.Sequence",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Flow.ForRange",
+			"Position": [480, 0],
+			"Values": {
+				"First": 1
+			}
+		},
+		{
+			"Id": 4,
+			"Kind": "Self.Get.Step",
+			"Position": [240, 160],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Self.Set.Count",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Number.Add",
+			"Position": [720, 160],
+			"Values": {}
+		},
+		{
+			"Id": 7,
+			"Kind": "Self.Get.Count",
+			"Position": [480, 320],
+			"Values": {}
+		},
+		{
+			"Id": 8,
+			"Kind": "Call.Log.Info",
+			"Position": [960, 240],
+			"Values": {}
+		},
+		{
+			"Id": 9,
+			"Kind": "Text.Concat",
+			"Position": [720, 400],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Self.Get.Label",
+			"Position": [480, 480],
+			"Values": {}
+		},
+		{
+			"Id": 11,
+			"Kind": "Flow.ForEach",
+			"Position": [480, 640],
+			"Values": {}
+		},
+		{
+			"Id": 12,
+			"Kind": "Self.Get.History",
+			"Position": [240, 720],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Call.Log.Info",
+			"Position": [720, 640],
+			"Values": {}
+		},
+		{
+			"Id": 14,
+			"Kind": "Flow.Delay",
+			"Position": [480, 880],
+			"Values": {
+				"Seconds": 0.5
+			}
+		},
+		{
+			"Id": 15,
+			"Kind": "Self.Set.Ready",
+			"Position": [720, 880],
+			"Values": {
+				"Value": true
+			}
+		},
+		{
+			"Id": 16,
+			"Kind": "Event.OnFixedUpdate",
+			"Position": [0, 1120],
+			"Values": {}
+		},
+		{
+			"Id": 17,
+			"Kind": "Flow.Branch",
+			"Position": [1200, 1120],
+			"Values": {}
+		},
+		{
+			"Id": 18,
+			"Kind": "Logic.And",
+			"Position": [960, 1200],
+			"Values": {}
+		},
+		{
+			"Id": 19,
+			"Kind": "Self.Get.Ready",
+			"Position": [720, 1200],
+			"Values": {}
+		},
+		{
+			"Id": 20,
+			"Kind": "Logic.Or",
+			"Position": [720, 1360],
+			"Values": {}
+		},
+		{
+			"Id": 21,
+			"Kind": "Compare.LessEqual",
+			"Position": [480, 1360],
+			"Values": {
+				"B": 100
+			}
+		},
+		{
+			"Id": 22,
+			"Kind": "Logic.Not",
+			"Position": [480, 1520],
+			"Values": {}
+		},
+		{
+			"Id": 23,
+			"Kind": "Compare.NotEqual",
+			"Position": [240, 1520],
+			"Values": {
+				"B": "Up"
+			}
+		},
+		{
+			"Id": 24,
+			"Kind": "Self.Get.Mode",
+			"Position": [0, 1520],
+			"Values": {}
+		},
+		{
+			"Id": 25,
+			"Kind": "Self.Set.Count",
+			"Position": [1440, 1120],
+			"Values": {}
+		},
+		{
+			"Id": 26,
+			"Kind": "Number.Subtract",
+			"Position": [1200, 1680],
+			"Values": {}
+		},
+		{
+			"Id": 27,
+			"Kind": "Number.Add",
+			"Position": [960, 1680],
+			"Values": {}
+		},
+		{
+			"Id": 28,
+			"Kind": "Number.Modulo",
+			"Position": [960, 1840],
+			"Values": {
+				"B": 1
+			}
+		},
+		{
+			"Id": 29,
+			"Kind": "Number.Multiply",
+			"Position": [720, 1680],
+			"Values": {}
+		},
+		{
+			"Id": 30,
+			"Kind": "Number.Divide",
+			"Position": [720, 1840],
+			"Values": {
+				"B": 2
+			}
+		},
+		{
+			"Id": 31,
+			"Kind": "Number.Negate",
+			"Position": [240, 2000],
+			"Values": {}
+		},
+		{
+			"Id": 32,
+			"Kind": "Flow.Branch",
+			"Position": [1440, 1360],
+			"Values": {}
+		},
+		{
+			"Id": 33,
+			"Kind": "Compare.Greater",
+			"Position": [1200, 2000],
+			"Values": {}
+		},
+		{
+			"Id": 34,
+			"Kind": "Self.Set.Count",
+			"Position": [1680, 1360],
+			"Values": {
+				"Value": 0
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then1"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then2"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then3"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Body"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Completed"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Index"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "Last"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 29,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 21,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 27,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 30,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 33,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "Values"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 9,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Body"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Completed"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Element"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "Values"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "Array"
+			}
+		},
+		{
+			"From": {
+				"Node": 14,
+				"Pin": "Later"
+			},
+			"To": {
+				"Node": 15,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "dt"
+			},
+			"To": {
+				"Node": 29,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 16,
+				"Pin": "dt"
+			},
+			"To": {
+				"Node": 31,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 17,
+				"Pin": "False"
+			},
+			"To": {
+				"Node": 32,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 17,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 25,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 18,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 17,
+				"Pin": "Condition"
+			}
+		},
+		{
+			"From": {
+				"Node": 19,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 20,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 18,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 21,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 20,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 22,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 20,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 23,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 22,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 24,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 23,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 26,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 25,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 27,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 26,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 28,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 26,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 29,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 27,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 30,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 28,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 31,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 33,
+				"Pin": "B"
+			}
+		},
+		{
+			"From": {
+				"Node": 32,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 34,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 33,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 32,
+				"Pin": "Condition"
+			}
+		}
+	]
+}

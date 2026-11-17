@@ -118,7 +118,31 @@ namespace Engine {
 
 	Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphSetMembersParams& params)
 	{
-		return Utils::MakeGraphRequest(types, GraphEditorAction::SetMembers, params);
+		ENGINE_TRY_ASSIGN(GraphEditorRequest request, Utils::MakeGraphRequest(types, GraphEditorAction::SetMembers, params));
+		// The struct always holds the opt-in, which graph.setMembers applies whenever it is given (M39).
+		request.Params.erase("runsWhileWorldPaused");
+		return request;
+	}
+
+	GraphEditorRequest MakeGraphWorldPauseRequest(std::string_view graph, bool runsWhileWorldPaused)
+	{
+		return GraphEditorRequest{ .Action = GraphEditorAction::SetMembers,
+			.Method = std::string(GetGraphEditorActionMethod(GraphEditorAction::SetMembers)),
+			.Params = Json{ { "graph", std::string(graph) }, { "runsWhileWorldPaused", runsWhileWorldPaused } } };
+	}
+
+	Result<GraphEditorRequest> MakeGraphMethodRequest(const TypeRegistry& types, std::string_view graph, const GraphMethod& method)
+	{
+		ENGINE_TRY_ASSIGN(Json written, Utils::WriteGraphParams(types, method));
+		return MakeGraphEditorRequest(types,
+			GraphSetMembersParams{ .Graph = std::string(graph),
+				.Name = {},
+				.Rename = {},
+				.Remove = {},
+				.Fields = {},
+				.Variables = {},
+				.Methods = { VariantValue(std::move(written)) },
+				.RunsWhileWorldPaused = false });
 	}
 
 	GraphEditorRequest MakeGraphUndoRequest()

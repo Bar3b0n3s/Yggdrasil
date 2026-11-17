@@ -54,7 +54,19 @@ namespace Engine {
 	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphConnectParams& params);     // Connect
 	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphDisconnectParams& params);  // Disconnect
 	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphSetValuesParams& params);   // SetValues
-	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphSetMembersParams& params);  // SetMembers
+	// SetMembers: M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 13) leaves runsWhileWorldPaused out, which the
+	// struct always holds, so a members edit keeps the graph's opt-in (graph.setMembers applies it only when given);
+	// MakeGraphWorldPauseRequest sets it.
+	[[nodiscard]] Result<GraphEditorRequest> MakeGraphEditorRequest(const TypeRegistry& types, const GraphSetMembersParams& params); // SetMembers
+
+	// SetMembers: the side panel's "Runs while the world is paused" checkbox (M39, decision 13): graph.setMembers {graph,
+	// runsWhileWorldPaused}.
+	[[nodiscard]] GraphEditorRequest MakeGraphWorldPauseRequest(std::string_view graph, bool runsWhileWorldPaused);
+
+	// SetMembers: the side panel's Methods section (M39, decision 13): graph.setMembers {graph, methods: [`method`]}, which adds
+	// the method or replaces the one of its name, `method` written through the registry's "GraphMethod" struct as the method
+	// reads it back. Errors: InvalidState when `types` lacks the graph types; the struct's ToJson errors.
+	[[nodiscard]] Result<GraphEditorRequest> MakeGraphMethodRequest(const TypeRegistry& types, std::string_view graph, const GraphMethod& method);
 
 	// Undo and Redo: edit.undo and edit.redo of one step.
 	[[nodiscard]] GraphEditorRequest MakeGraphUndoRequest();

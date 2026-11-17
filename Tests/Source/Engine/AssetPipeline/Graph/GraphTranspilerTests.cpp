@@ -31,8 +31,16 @@ namespace Engine {
 
 		// The fixture graphs whose transpiled bytes are committed: their texts are the output contract's examples, compared byte
 		// for byte in the Debug and the Release unit runs (decision 7: one text in every configuration). Bumper reads a component
-		// proxy (an optional output) of its event's Entity through Flow.IfNotNil, so the strict check covers optional values.
-		constexpr std::string_view FixtureGraphs[] = { "Door", "Counter", "Mover", "Bumper" };
+		// proxy (an optional output) of its event's Entity through Flow.IfNotNil, so the strict check covers optional values. M39
+		// (Docs/Decisions/0056-m39-graphs-behaviours.md decisions 2 to 6) adds Rune (methods with parameters of several kinds and
+		// Any, a result, a Return through a merge, a void early Return, a method without an event node, an OnUiClick Return, an
+		// Any variable, Script.Get of a table) and Valve (the world-pause opt-in and the instance chain: Scene.FindByPath,
+		// Flow.IfNotNil, Entity:GetScript, Script.Set, Script.Call by name and by index, Script.Get of a call's result,
+		// Self.Instance).
+		constexpr std::string_view FixtureGraphs[] = { "Door", "Counter", "Mover", "Bumper", "Rune", "Valve" };
+
+		// M24's fixture graphs, which hold none of M39's methods, Returns or opt-in.
+		constexpr std::string_view M24FixtureGraphs[] = { "Door", "Counter", "Mover", "Bumper" };
 
 		struct TranspileSetup
 		{
@@ -115,6 +123,34 @@ namespace Engine {
 			}
 		}
 
+		// M39 (decision 9): GraphImporter's version stays 1 because a graph without methods, Returns or the world-pause opt-in
+		// transpiles to the text it had, so nothing imports again and no .meta changes: M24's fixture texts are M24's bytes, and
+		// a version 1 file (Counter at version 1) gives Counter's text.
+		TEST_CASE("GraphTranspiler: a graph without methods or the opt-in keeps its text byte for byte")
+		{
+			const TranspileSetup setup;
+			for (const std::string_view name : M24FixtureGraphs)
+			{
+				CAPTURE(name);
+				const Result<GraphTranspileResult> result = TranspileGraph(setup.Read(name), *setup.Library, std::string("Assets/Scripts/") + std::string(name) + ".graph");
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				const Result<std::string> expected = Test::ReadTestDataText(std::string("Graphs/") + std::string(name) + ".luau");
+				REQUIRE(expected.has_value());
+				CHECK(result->Luau == *expected);
+				for (const std::string_view added : { "RunsWhileWorldPaused", "return nil", "): boolean", "result", "p_" })
+					CHECK_MESSAGE(result->Luau.find(added) == std::string::npos, added);
+			}
+			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Graph/v1.graph");
+			REQUIRE(v1.has_value());
+			GraphLoadReport report;
+			const Result<GraphDocument> counter = GraphFromText(*v1, *setup.Types, report, true);
+			REQUIRE_MESSAGE(counter.has_value(), counter.error().ToString());
+			CHECK(report.FileVersion == 1);
+			const Result<GraphTranspileResult> text = TranspileGraph(*counter, *setup.Library, "Assets/Scripts/Counter.graph");
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			CHECK(text->Luau == Test::ReadTestDataText("Graphs/Counter.luau").value_or(std::string()));
+		}
+
 		TEST_CASE("GraphTranspiler: every line maps back to the node whose code it is, and every computed value is a live value")
 		{
 			const TranspileSetup setup;
@@ -164,7 +200,12 @@ namespace Engine {
 				REQUIRE(vfsPath.has_value());
 				const std::vector<ScriptDiagnostic> diagnostics = (*checker)->CheckScript({ .Path = *vfsPath, .Source = result->Luau, .Modules = &modules });
 				for (const ScriptDiagnostic& diagnostic : diagnostics)
+				{
 					CHECK_MESSAGE(diagnostic.Severity != DiagnosticSeverity::Error, diagnostic.Line, ": ", diagnostic.Message);
+					// No warning either, Luau's lints included: the returns M39 writes add no unreachable line of their own
+					// (Docs/Decisions/0056-m39-graphs-behaviours.md decision 4).
+					CHECK_MESSAGE(diagnostic.Severity != DiagnosticSeverity::Warning, diagnostic.Line, ": ", diagnostic.Message);
+				}
 			}
 		}
 

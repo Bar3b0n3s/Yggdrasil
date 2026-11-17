@@ -194,6 +194,49 @@ class GraphTests(AutomationTestCase):
             client.call("graph.liveValues", {"entity": "/Counter"})
         self.assertEqual(stopped.exception.error_code, "InvalidState")
 
+    def test_graph_methods_and_the_world_pause_opt_in_are_set_and_called_from_luau(self) -> None:
+        # M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 8): graph.setMembers sets a method and the opt-in,
+        # graph.nodes lists the method's kinds with the graph and the members of any value without it, and a Luau caller
+        # gets the method's result in play; a malformed method is refused at its pointer.
+        client, _ = self.open_editor_with_scene()
+        client.call("graph.create", {"path": "Assets/Scripts/Rune.graph"})
+        doubled = {"Name": "Doubled", "Parameters": [{"Name": "value", "Kind": "Number", "AssetType": ""}],
+                   "Results": [{"Kind": "Number", "AssetType": ""}]}
+        client.call("graph.setMembers", {"graph": "Assets/Scripts/Rune.graph", "methods": [doubled],
+                                         "runsWhileWorldPaused": True})
+        document = client.call("graph.read", {"graph": "Assets/Scripts/Rune.graph"})["document"]
+        self.assertEqual(document["Methods"], [doubled])
+        self.assertTrue(document["RunsWhileWorldPaused"])
+        own = client.call("graph.nodes", {"graph": "Assets/Scripts/Rune.graph", "prefix": "Method."})["nodes"]
+        self.assertEqual([node["kind"] for node in own], ["Method.Doubled"])
+        members = client.call("graph.nodes", {"prefix": "Script."})["nodes"]
+        self.assertEqual([node["kind"] for node in members], ["Script.Call", "Script.Get", "Script.Set"])
+        with self.assertRaises(engine_client.EngineError) as malformed:
+            client.call("graph.setMembers", {"graph": "Assets/Scripts/Rune.graph",
+                                             "methods": [{**doubled, "Results": doubled["Results"] * 2}]})
+        self.assertEqual(malformed.exception.error_code, "InvalidArgument")
+
+        # Doubled(value) returns value * 2 through its Return node.
+        graph = "Assets/Scripts/Rune.graph"
+        event = client.call("graph.addNode", {"graph": graph, "kind": "Method.Doubled"})["node"]
+        times = client.call("graph.addNode", {"graph": graph, "kind": "Number.Multiply", "values": {"B": 2}})["node"]
+        returned = client.call("graph.addNode", {"graph": graph, "kind": "Return.Doubled"})["node"]
+        for source, target in (((event, "Then"), (returned, "In")), ((event, "value"), (times, "A")),
+                               ((times, "Result"), (returned, "Value"))):
+            client.call("graph.connect", {"graph": graph, "from": pin(*source), "to": pin(*target)})
+        read = client.call("graph.read", {"graph": graph, "luau": True})
+        self.assertEqual(read["diagnostics"], [])
+        self.assertIn("Graph.RunsWhileWorldPaused = true", read["luau"])
+        self.assertIn("function Graph.Doubled(self: any, p_value: number)", read["luau"])
+        client.call("entity.create", {"name": "Rune", "components": {
+            "Script": {"Scripts": [{"Script": graph, "Fields": {}, "ExecutionOrder": 0}]}}})
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 1})
+        result = client.call("script.eval", {"context": "play", "entity": "/Rune",
+                                             "code": "return self:Doubled(21)"})
+        self.assertEqual(result["value"], 42)
+        client.call("play.stop")
+
 
 if __name__ == "__main__":
     unittest.main()

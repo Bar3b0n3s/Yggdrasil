@@ -11,7 +11,7 @@ Every authored file is UTF-8 JSON with LF line ends and tabs, written by the can
 | AssetMeta | `.meta` | 1 | [Schemas/AssetMeta.schema.json](Schemas/AssetMeta.schema.json) |
 | BatchRequest | `.jsonl` | none | [Schemas/BatchRequest.schema.json](Schemas/BatchRequest.schema.json) |
 | GameManifest | `Game.json` | 2 | [Schemas/GameManifest.schema.json](Schemas/GameManifest.schema.json) |
-| Graph | `.graph` | 1 | [Schemas/Graph.schema.json](Schemas/Graph.schema.json) |
+| Graph | `.graph` | 2 | [Schemas/Graph.schema.json](Schemas/Graph.schema.json) |
 | Material | `.material` | 2 | [Schemas/Material.schema.json](Schemas/Material.schema.json) |
 | Prefab | `.prefab` | 1 | [Schemas/Prefab.schema.json](Schemas/Prefab.schema.json) |
 | Project | `.eproj` | 1 | [Schemas/Project.schema.json](Schemas/Project.schema.json) |
@@ -100,15 +100,16 @@ Header: `"Format": "GameManifest", "Version": 2`. Schema: [Schemas/GameManifest.
 
 ### Graph (`.graph`)
 
-A visual-scripting graph (§6.11): one behaviour, whose fields, variables, nodes and links GraphImporter transpiles to Luau and compiles into a Script asset, so a graph fills a script slot as a `.luau` behaviour does. A node is a node kind of the library (`graph.nodes` lists them) with literals of its input pins; a link joins an output pin to an input pin of another node. Every list is in its canonical order (fields and variables by Name, nodes by Id, links by From and To), so each write of a graph is byte-identical; the `graph.*` methods edit it. A field's or variable's `Name` is a Luau identifier of 1 to 64 bytes, not a reserved word, not starting with `__` and not a reserved script field name (`Entity`, `Fields`, the callbacks), unique across both lists; its `Default` has its `Kind`'s spelling (a Number a finite number, an Integer an int32, a Bool a boolean, a String a string of at most 4,096 bytes, a Vector `[x, y, z]`, a Color `[r, g, b, a]`, a Quat `[x, y, z, w]`, nonzero and, for a field, of unit length, an Entity or Asset null, an Enum one of `EnumValues`, an Array `[]`); `Element` is an Array's element kind (not Array; Number for other kinds), `AssetType` an Asset's type, `EnumValues` an Enum's 1 to 64 unique choices of 1 to 64 bytes (an Array of Asset or of Enum has them too); a field's `Options` are its Luau `FieldOptions` (Number, Integer, Bool, String, Vector, Color and Quat only): `Min`, `Max` and `Step` for Number, Integer and Vector (`Min <= Max`, `Step > 0`, the default within them) and a `Tooltip` of at most 256 bytes. The tables below list every field and the limits.
+A visual-scripting graph (§6.11): one behaviour, whose fields, variables, methods, nodes and links GraphImporter transpiles to Luau and compiles into a Script asset, so a graph fills a script slot as a `.luau` behaviour does. A node is a node kind of the library (`graph.nodes` lists them) with literals of its input pins; a link joins an output pin to an input pin of another node. Every list is in its canonical order (fields, variables and methods by Name, nodes by Id, links by From and To), so each write of a graph is byte-identical; the `graph.*` methods edit it. A field's, variable's or method's `Name` is a Luau identifier of 1 to 64 bytes, not a reserved word, not starting with `__` and not a reserved script field name (`Entity`, `Fields`, the callbacks; for a method also not `RunsWhileWorldPaused`), unique across the three lists; a field's or variable's `Default` has its `Kind`'s spelling (a Number a finite number, an Integer an int32, a Bool a boolean, a String a string of at most 4,096 bytes, a Vector `[x, y, z]`, a Color `[r, g, b, a]`, a Quat `[x, y, z, w]`, nonzero and, for a field, of unit length, an Entity, Asset or Any null, an Enum one of `EnumValues`, an Array `[]`; a field is never Any); `Element` is an Array's element kind (not Array or Any; Number for other kinds), `AssetType` an Asset's type, `EnumValues` an Enum's 1 to 64 unique choices of 1 to 64 bytes (an Array of Asset or of Enum has them too); a field's `Options` are its Luau `FieldOptions` (Number, Integer, Bool, String, Vector, Color and Quat only): `Min`, `Max` and `Step` for Number, Integer and Vector (`Min <= Max`, `Step > 0`, the default within them) and a `Tooltip` of at most 256 bytes. A method (version 2) has at most 4 `Parameters` (a `Name` other than `self` and `Then`, unique in the method, a `Kind` but Enum and Array, and an Asset's optional `AssetType`) and at most one of `Results`; its `Method.<Name>` nodes run it and its `Return.<Name>` nodes end it. `RunsWhileWorldPaused` true lets the behaviour update while the world is paused. A version 1 file reads as version 2 without methods. The tables below list every field and the limits.
 
-Header: `"Format": "Graph", "Version": 1`. Schema: [Schemas/Graph.schema.json](Schemas/Graph.schema.json).
+Header: `"Format": "Graph", "Version": 2`. Schema: [Schemas/Graph.schema.json](Schemas/Graph.schema.json).
 
 ```json
 {
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Door",
+	"RunsWhileWorldPaused": false,
 	"Fields": [
 		{
 			"Name": "Player",
@@ -140,6 +141,24 @@ Header: `"Format": "Graph", "Version": 1`. Schema: [Schemas/Graph.schema.json](S
 			"Element": "Number",
 			"AssetType": "",
 			"EnumValues": []
+		}
+	],
+	"Methods": [
+		{
+			"Name": "IsOpen",
+			"Parameters": [
+				{
+					"Name": "by",
+					"Kind": "Entity",
+					"AssetType": ""
+				}
+			],
+			"Results": [
+				{
+					"Kind": "Bool",
+					"AssetType": ""
+				}
+			]
 		}
 	],
 	"Nodes": [
@@ -254,8 +273,10 @@ Header: `"Format": "Graph", "Version": 1`. Schema: [Schemas/Graph.schema.json](S
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `Name` | `String` | `""` |  |  |  | The behaviour's Script.Define name: a Luau identifier of 1 to 64 bytes that is not a reserved word and does not start with "__". |
+| `RunsWhileWorldPaused` | `Bool` | `false` |  |  |  | Whether the behaviour updates while the world is paused (Time.PauseWorld), as a Luau class that sets RunsWhileWorldPaused. |
 | `Fields` | `Array<GraphField>` | `[]` |  |  |  | At most 128 fields, sorted by Name. |
 | `Variables` | `Array<GraphVariable>` | `[]` |  |  |  | At most 128 variables, sorted by Name. |
+| `Methods` | `Array<GraphMethod>` | `[]` |  |  |  | At most 64 methods, sorted by Name. |
 | `Nodes` | `Array<GraphNode>` | `[]` |  |  |  | At most 4096 nodes, sorted by Id. |
 | `Links` | `Array<GraphLink>` | `[]` |  |  |  | At most 16384 links, sorted by (From.Node, From.Pin, To.Node, To.Pin) byte-wise, each once, joining two different nodes. |
 
@@ -266,7 +287,7 @@ A behaviour field, set per script slot (§6.11).
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields and variables (§6.11). |
-| `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its Luau Field constructor. |
+| `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its Luau Field constructor; never Any. |
 | `Default` | `Variant` | `null` |  |  |  | Its default, in its Kind's JSON spelling (§6.11). |
 | `Element` | `GraphValueKind` | `"Number"` |  |  |  | An Array's element kind; Number otherwise. |
 | `AssetType` | `String` | `""` |  |  |  | An Asset's AssetType; empty otherwise. |
@@ -280,11 +301,40 @@ Instance state, set to its Default at OnCreate (§6.11).
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields and variables (§6.11). |
-| `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its kind, as a field's. |
+| `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its kind, as a field's, or Any. |
 | `Default` | `Variant` | `null` |  |  |  | Its default, in its Kind's JSON spelling (§6.11). |
 | `Element` | `GraphValueKind` | `"Number"` |  |  |  | An Array's element kind; Number otherwise. |
 | `AssetType` | `String` | `""` |  |  |  | An Asset's AssetType; empty otherwise. |
 | `EnumValues` | `Array<String>` | `[]` |  |  |  | An Enum's choices; empty otherwise. |
+
+#### Fields of GraphMethod
+
+A method of the behaviour, which scripts call on its instance and its Method.\<Name> nodes run (§6.11).
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `""` |  |  |  | A Luau identifier, not a reserved name, unique across fields, variables and methods. |
+| `Parameters` | `Array<GraphParameter>` | `[]` |  |  |  | At most 4 parameters, in call order. |
+| `Results` | `Array<GraphResult>` | `[]` |  |  |  | At most 1 result; empty when the method returns nothing. |
+
+#### Fields of GraphParameter
+
+A parameter of a graph method.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Name` | `String` | `""` |  |  |  | A Luau identifier other than self and Then, unique in its method. |
+| `Kind` | `GraphValueKind` | `"Any"` |  |  |  | Its kind: any but Enum and Array. |
+| `AssetType` | `String` | `""` |  |  |  | An Asset's AssetType, or empty for any asset; empty otherwise. |
+
+#### Fields of GraphResult
+
+The result of a graph method.
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Kind` | `GraphValueKind` | `"Any"` |  |  |  | Its kind: any but Enum and Array. |
+| `AssetType` | `String` | `""` |  |  |  | An Asset's AssetType, or empty for any asset; empty otherwise. |
 
 #### Fields of GraphNode
 
@@ -317,7 +367,7 @@ One pin of one node: an end of a link.
 
 #### Values of GraphValueKind
 
-The kind of a graph field or variable: its Luau Field constructor.
+The kind of a graph field, variable or method parameter or result: its Luau Field constructor, or Any.
 
 | Value | Description |
 |---|---|
@@ -332,6 +382,7 @@ The kind of a graph field or variable: its Luau Field constructor.
 | `Asset` | An asset reference of one AssetType (Field.Asset); Default null. |
 | `Enum` | One of EnumValues (Field.Enum); Default one of them. |
 | `Array` | An array of Element values (Field.Array); Default []. |
+| `Any` | Any value, a table included: a variable's (Default null), a method parameter's or a method result's; never a field's. |
 
 ### Material (`.material`)
 

@@ -6634,11 +6634,11 @@ Gamepad button positions.
 
 Where the graph editor's node menu lists a node kind.
 
-- `Event`: A behaviour callback: where a flow starts (Event.*).
+- `Event`: A behaviour callback or a graph method: where a flow starts (Event.*, Method.*).
 
-- `Flow`: Branches, sequences, loops and delays (Flow.*).
+- `Flow`: Branches, sequences, loops, delays and returns (Flow.*, Return.*).
 
-- `Member`: The behaviour's own entity, fields and variables (Self.*).
+- `Member`: This or another behaviour's members: the entity, fields, variables and instance (Self.*), and any value's (Script.*).
 
 - `Operator`: Arithmetic, comparison, logic, vector and text operators.
 
@@ -6686,7 +6686,7 @@ What a graph pin carries.
 
 ## GraphValueKind
 
-The kind of a graph field or variable: its Luau Field constructor.
+The kind of a graph field, variable or method parameter or result: its Luau Field constructor, or Any.
 
 - `Number`: A finite f32 number (Field.Number); Default a number.
 
@@ -6709,6 +6709,8 @@ The kind of a graph field or variable: its Luau Field constructor.
 - `Enum`: One of EnumValues (Field.Enum); Default one of them.
 
 - `Array`: An array of Element values (Field.Array); Default [].
+
+- `Any`: Any value, a table included: a variable's (Default null), a method parameter's or a method result's; never a field's.
 
 ## InputActionType
 

@@ -856,6 +856,35 @@ namespace Engine {
 		// rewrites them as it rewrites string tables: a minified graph gets the editor's bytes back, one that leaves its lists
 		// out gets them written, both are recorded, and a graph with an unknown member, or whose nodes are not in their
 		// canonical order (a rule of the format, which its importer applies), fails at its pointer, unchanged.
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 1): graph format 2. project.upgrade rewrites a version 1 graph
+		// as its version 2 text (the bytes of Tests/Data/Formats/Graph/v1.upgraded.graph), naming the version change, records it,
+		// and then leaves it alone; the .meta is not rewritten, since GraphImporter's version stays 1 (decision 9).
+		TEST_CASE("ProjectMethods: project.upgrade rewrites a version 1 graph as its version 2 text")
+		{
+			Test::AutomationFixture setup("ProjectUpgradeGraphV1", false);
+			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Graph/v1.graph");
+			const Result<std::string> expected = Test::ReadTestDataText("Formats/Graph/v1.upgraded.graph");
+			REQUIRE(v1.has_value());
+			REQUIRE(expected.has_value());
+			const std::filesystem::path root = setup.GetEditor().GetProject().GetRoot();
+			REQUIRE(FileSystem::CreateDirectories(root / "Assets/Scripts").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Scripts/Counter.graph", AsBytes(*v1), { .KeepBackup = false }).has_value());
+
+			Result<Json> upgraded = setup.Call("project.upgrade", Json::object());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			CHECK((*upgraded)["changes"] == ParseProjectJson(R"([{"path": "Assets/Scripts/Counter.graph", "reason": "format version 1 to 2"}])"));
+			CHECK(FileSystem::ReadText(root / "Assets/Scripts/Counter.graph").value_or("") == *expected);
+			const ProvenanceRecorder* provenance = setup.GetEditor().GetProvenance();
+			REQUIRE(provenance != nullptr);
+			const ProvenanceEntry* entry = provenance->Find("Assets/Scripts/Counter.graph");
+			REQUIRE(entry != nullptr);
+			CHECK(entry->Method == "project.upgrade");
+
+			Result<Json> again = setup.Call("project.upgrade", Json::object());
+			REQUIRE(again.has_value());
+			CHECK((*again)["changedFiles"] == Json::array());
+		}
+
 		TEST_CASE("ProjectMethods: project.upgrade rewrites .graph files canonically and fails at an unknown member or a noncanonical order")
 		{
 			Test::AutomationFixture setup("ProjectUpgradeGraphs", false);
@@ -873,8 +902,9 @@ namespace Engine {
 			REQUIRE(FileSystem::CreateDirectories(root / "Assets/Scripts").has_value());
 			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Scripts/Counter.graph", AsBytes(ParseProjectJson(*canonical).dump()), { .KeepBackup = false })
 					.has_value());
-			// A valid graph written by hand with its lists left out.
-			const std::string sparse = R"({"Format": "Graph", "Version": 1, "Name": "Sparse"})";
+			// A valid graph written by hand with its lists left out (at the current version: a version 1 file's rewrite is the case
+			// below's).
+			const std::string sparse = R"({"Format": "Graph", "Version": 2, "Name": "Sparse"})";
 			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Scripts/Sparse.graph", AsBytes(sparse), { .KeepBackup = false }).has_value());
 
 			const Json expected = ParseProjectJson(R"([

@@ -196,7 +196,8 @@ namespace Engine {
 				case GraphValueKind::Color:   return FormatColor(value);
 				case GraphValueKind::Quat:    return FormatQuat(value);
 				case GraphValueKind::Entity:
-				case GraphValueKind::Asset:   return "nil";
+				case GraphValueKind::Asset:
+				case GraphValueKind::Any:     return "nil";
 				case GraphValueKind::Array:   return "{}";
 			}
 			return "nil";
@@ -225,7 +226,8 @@ namespace Engine {
 				case GraphValueKind::Entity:  return "Field.Entity()";
 				case GraphValueKind::Asset:   return std::format("Field.Asset({})", FormatLuauString(assetType));
 				case GraphValueKind::Enum:    return std::format("Field.Enum({})", FormatEnumChoices(choices));
-				case GraphValueKind::Array:   return "Field.Array(Field.Number())";
+				case GraphValueKind::Array:
+				case GraphValueKind::Any:     return "Field.Array(Field.Number())"; // never an element (GraphDocument.h)
 			}
 			return "Field.Number()";
 		}
@@ -266,6 +268,7 @@ namespace Engine {
 				case GraphValueKind::Array:
 					constructor = std::format("Field.Array({})", FormatElementConstructor(field.Element, field.AssetType, field.EnumValues));
 					break;
+				case GraphValueKind::Any: constructor = "nil"; break; // never a field's kind (GraphDocument.h)
 			}
 			return std::format("{} = {},", field.Name, constructor);
 		}
@@ -279,6 +282,40 @@ namespace Engine {
 				return { {}, {} };
 			return { kind.substr(first + 1, second - first - 1), kind.substr(second + 1) };
 		}
+
+		// Luau's reserved words, which Script.Call's literal method name may not be to be written as a method call.
+		static constexpr std::array<std::string_view, 22> LuauKeywords = { "and", "break", "continue", "do", "else", "elseif", "end", "false", "for", "function",
+			"if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while" };
+
+		// Whether `text` is a Luau name that may follow ':' in a method call: [A-Za-z_][A-Za-z0-9_]* and not a reserved word.
+		[[nodiscard]] static bool IsLuauMethodName(std::string_view text)
+		{
+			const auto letter = [](char c)
+			{
+				return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
+			};
+			if (text.empty() || !letter(text.front()))
+				return false;
+			const bool characters = std::ranges::all_of(text, [&letter](char c)
+			{
+				return letter(c) || (c >= '0' && c <= '9');
+			});
+			return characters && std::ranges::find(LuauKeywords, text) == LuauKeywords.end();
+		}
+
+		// The Luau local a graph method's parameter is in its function (M39, Docs/Decisions/0056-m39-graphs-behaviours.md
+		// departure 3): "p_<Name>", so no parameter shadows a global the text uses or a generated local.
+		[[nodiscard]] static std::string GetParameterLocal(std::string_view name)
+		{
+			return std::format("p_{}", name);
+		}
+
+		// The local of a function whose merges reach a valued Return, which such a Return sets before its flow function
+		// returns true (decision 4).
+		constexpr std::string_view ResultLocal = "result";
+
+		// Flow.Sequence's exec outputs, in the order it runs them.
+		constexpr std::array<std::string_view, 4> SequenceOutputs = { "Then1", "Then2", "Then3", "Then4" };
 
 		// --- The text -------------------------------------------------------------------------------------------------
 
@@ -314,6 +351,12 @@ namespace Engine {
 				: m_Graph(graph), m_Path(path)
 			{
 				const std::vector<GraphNodeDescription> members = library.GetMemberNodes(graph);
+				// The Method.<Name> kinds of the declared methods, in name order (GetMemberNodes sorts by kind).
+				for (const GraphNodeDescription& member : members)
+				{
+					if (member.Kind.starts_with(GraphMethodKindPrefix))
+						m_MethodEvents.push_back(member);
+				}
 				m_Descriptions.reserve(graph.Nodes.size());
 				for (size_t i = 0; i < graph.Nodes.size(); ++i)
 				{
@@ -328,6 +371,7 @@ namespace Engine {
 					}
 				}
 				std::ranges::sort(m_Ids);
+				m_ReachesReturn.assign(graph.Nodes.size(), Walk::Unvisited);
 				for (const GraphLink& link : graph.Links)
 				{
 					const std::optional<size_t> from = FindNode(link.From.Node);
@@ -362,21 +406,41 @@ namespace Engine {
 						Emit(1, FormatField(field), 0, std::nullopt);
 					Emit(0, "}", 0, std::nullopt);
 				}
+				// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 6): the class's world-pause opt-in, only when set.
+				if (m_Graph.RunsWhileWorldPaused)
+					Emit(0, "Graph.RunsWhileWorldPaused = true", 0, std::nullopt);
+				// The event nodes of each callback and of each method (decision 3), in id order.
 				std::map<std::string, std::vector<size_t>> callbacks;
+				std::map<std::string, std::vector<size_t>> methods;
 				for (size_t i = 0; i < m_Graph.Nodes.size(); ++i)
 				{
-					if (IsEvent(i))
-						callbacks[m_Descriptions[i].Kind.substr(std::string_view("Event.").size())].push_back(i);
+					if (!IsEvent(i))
+						continue;
+					const std::string& kind = m_Descriptions[i].Kind;
+					if (kind.starts_with(GraphMethodKindPrefix))
+						methods[kind.substr(GraphMethodKindPrefix.size())].push_back(i);
+					else
+						callbacks[kind.substr(std::string_view("Event.").size())].push_back(i);
 				}
 				Emit(0, "", 0, std::nullopt);
 				const auto onCreate = callbacks.find("OnCreate");
-				EmitFunction("OnCreate", onCreate != callbacks.end() ? onCreate->second : std::vector<size_t>());
+				EmitFunction("OnCreate", onCreate != callbacks.end() ? onCreate->second : std::vector<size_t>(), nullptr);
 				for (const auto& [callback, events] : callbacks)
 				{
 					if (callback == "OnCreate" || m_Full)
 						continue;
 					Emit(0, "", 0, std::nullopt);
-					EmitFunction(callback, events);
+					EmitFunction(callback, events, nullptr);
+				}
+				// One function per method in name order, after the callbacks', whether or not an event node runs it.
+				for (const GraphNodeDescription& method : m_MethodEvents)
+				{
+					if (m_Full)
+						break;
+					const std::string name = method.Kind.substr(GraphMethodKindPrefix.size());
+					const auto events = methods.find(name);
+					Emit(0, "", 0, std::nullopt);
+					EmitFunction(name, events != methods.end() ? events->second : std::vector<size_t>(), &method);
 				}
 				Emit(0, "", 0, std::nullopt);
 				Emit(0, std::format("return Script.Define({}, Graph)", FormatLuauString(m_Graph.Name)), 0, std::nullopt);
@@ -409,6 +473,9 @@ namespace Engine {
 				uint32_t Node = 0;
 				size_t Target = 0;   // Flow: the statement's index
 				bool Define = false; // Flow: the statement's own code even when it is a merge (its flow function's body)
+				// Flow: whether the code is inside a merge's flow function, where a Return sets the result and returns true, and a
+				// call of a merge that returns returns true in its turn (M39, decision 4).
+				bool InFlowFunction = false;
 				// Flow: the pure values' locals declared in the blocks around it, which a value computed again assigns instead
 				// of declaring a second local that would shadow the first (shared, immutable).
 				Ref<const std::set<std::string>> Declared{};
@@ -472,7 +539,7 @@ namespace Engine {
 			[[nodiscard]] std::string GetOutputName(size_t node, std::string_view pin) const
 			{
 				if (IsEvent(node))
-					return std::string(pin);
+					return GetKind(node).starts_with(GraphMethodKindPrefix) ? GetParameterLocal(pin) : std::string(pin);
 				return std::format("{}{}_{}", IsPure(node) ? "v" : "n", GetId(node), pin);
 			}
 
@@ -572,12 +639,19 @@ namespace Engine {
 
 			[[nodiscard]] static Work TextWork(size_t indent, std::string text, uint32_t node)
 			{
-				return Work{ .Flow = false, .Indent = indent, .Text = std::move(text), .Node = node, .Target = 0, .Define = false };
+				return Work{ .Flow = false, .Indent = indent, .Text = std::move(text), .Node = node, .Target = 0, .Define = false, .InFlowFunction = false };
 			}
 
-			[[nodiscard]] static Work FlowWork(size_t indent, size_t target, bool define, Ref<const std::set<std::string>> declared)
+			[[nodiscard]] static Work FlowWork(size_t indent, size_t target, bool define, Ref<const std::set<std::string>> declared, bool inFlowFunction)
 			{
-				return Work{ .Flow = true, .Indent = indent, .Text = {}, .Node = 0, .Target = target, .Define = define, .Declared = std::move(declared) };
+				return Work{ .Flow = true,
+					.Indent = indent,
+					.Text = {},
+					.Node = 0,
+					.Target = target,
+					.Define = define,
+					.InFlowFunction = inFlowFunction,
+					.Declared = std::move(declared) };
 			}
 
 			// The pure locals in scope where a statement's code goes: those of the blocks around it (`Declared`) and those its
@@ -665,6 +739,10 @@ namespace Engine {
 					expression = std::format("self.{}", kind.substr(std::string_view("Self.Get.").size()));
 				else if (kind == "Self.Entity")
 					expression = "self.Entity";
+				else if (kind == "Self.Instance")
+					expression = "self"; // M39 (decision 2)
+				else if (kind == "Script.Get")
+					expression = std::format("{}[{}]", CastToAny(input("Object")), input("Member")); // M39 (decision 2)
 				else if (kind == "Number.Negate")
 				{
 					const std::string value = input("Value");
@@ -742,9 +820,10 @@ namespace Engine {
 				return lines;
 			}
 
-			// The code of the statement `node` at `indent`: its comment, its do ... end block of pure values (when it reads
-			// any), its own code with its nested flows, then its continuation.
-			[[nodiscard]] std::vector<Work> ExpandStatement(size_t node, size_t indent, const Ref<const std::set<std::string>>& declared)
+			// The code of the statement `node` at `indent`: its comment, its do ... end block (when it reads pure values, binds
+			// an object, or is a Return, whose return ends a block of its own), its own code with its nested flows, then its
+			// continuation. `inFlowFunction`: the code is inside a merge's flow function (M39, decision 4).
+			[[nodiscard]] std::vector<Work> ExpandStatement(size_t node, size_t indent, const Ref<const std::set<std::string>>& declared, bool inFlowFunction)
 			{
 				const std::string& kind = GetKind(node);
 				const uint32_t id = GetId(node);
@@ -752,11 +831,21 @@ namespace Engine {
 				out.push_back(TextWork(indent, std::format("-- {}: {}", id, kind), id));
 				PureScope scope{ .Declared = declared.get(), .Added = {} };
 				std::vector<Work> pure = EvaluatePureInputs(node, indent + 1, scope);
-				// A call or a write on an object that is no name (a cast or a literal) binds it first, so no line starts with "(".
+				const bool memberWrite = kind == "Script.Set" || kind == "Script.Call";
+				const bool returns = IsReturn(node);
 				std::string self;
 				std::string selfLocal;
-				if (FindPin(node, "self", GraphPinDirection::Input) != nullptr)
+				if (memberWrite)
 				{
+					// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 2): Script.Set and Script.Call bind their object to
+					// an any local, so no line starts with "(" and the strict checker accepts every member.
+					self = std::format("o{}", id);
+					selfLocal = std::format("local {}: any = {}", self, GetNamedInput(node, "Object"));
+				}
+				else if (FindPin(node, "self", GraphPinDirection::Input) != nullptr)
+				{
+					// A call or a write on an object that is no name (a cast or a literal) binds it first, so no line starts with
+					// "(".
 					self = GetNamedInput(node, "self");
 					if (self.starts_with('('))
 					{
@@ -764,7 +853,7 @@ namespace Engine {
 						self = std::format("o{}", id);
 					}
 				}
-				const bool block = !pure.empty() || !selfLocal.empty();
+				const bool block = !pure.empty() || !selfLocal.empty() || returns;
 				const size_t inner = block ? indent + 1 : indent;
 				// The flows nested in this statement's block see its pure locals too.
 				Ref<const std::set<std::string>> nested = declared;
@@ -783,16 +872,17 @@ namespace Engine {
 						out.push_back(TextWork(inner, selfLocal, id));
 				}
 				std::optional<size_t> continuation = GetExecTarget(node, "Then");
-				const auto branch = [&out, &nested, inner, id](std::string_view condition, std::string_view negated, std::optional<size_t> whenTrue, std::optional<size_t> whenFalse)
+				const auto branch = [&out, &nested, inner, id, inFlowFunction](std::string_view condition, std::string_view negated, std::optional<size_t> whenTrue,
+										std::optional<size_t> whenFalse)
 				{
 					if (!whenTrue.has_value() && !whenFalse.has_value())
 						return;
 					out.push_back(TextWork(inner, std::format("if {} then", whenTrue.has_value() ? condition : negated), id));
-					out.push_back(FlowWork(inner + 1, whenTrue.has_value() ? *whenTrue : *whenFalse, false, nested));
+					out.push_back(FlowWork(inner + 1, whenTrue.has_value() ? *whenTrue : *whenFalse, false, nested, inFlowFunction));
 					if (whenTrue.has_value() && whenFalse.has_value())
 					{
 						out.push_back(TextWork(inner, "else", id));
-						out.push_back(FlowWork(inner + 1, *whenFalse, false, nested));
+						out.push_back(FlowWork(inner + 1, *whenFalse, false, nested, inFlowFunction));
 					}
 					out.push_back(TextWork(inner, "end", id));
 				};
@@ -804,10 +894,10 @@ namespace Engine {
 				else if (kind == "Flow.Sequence")
 				{
 					continuation.reset();
-					for (const std::string_view output : { "Then1", "Then2", "Then3", "Then4" })
+					for (const std::string_view output : SequenceOutputs)
 					{
 						if (const std::optional<size_t> target = GetExecTarget(node, output))
-							out.push_back(FlowWork(inner, *target, false, nested));
+							out.push_back(FlowWork(inner, *target, false, nested, inFlowFunction));
 					}
 				}
 				else if (kind == "Flow.ForRange" || kind == "Flow.ForEach")
@@ -826,7 +916,7 @@ namespace Engine {
 					}
 					AddProbes(node, inner + 1, out);
 					if (const std::optional<size_t> body = GetExecTarget(node, "Body"))
-						out.push_back(FlowWork(inner + 1, *body, false, nested));
+						out.push_back(FlowWork(inner + 1, *body, false, nested, inFlowFunction));
 					out.push_back(TextWork(inner, "end", id));
 					continuation = GetExecTarget(node, "Completed");
 				}
@@ -835,7 +925,7 @@ namespace Engine {
 					if (const std::optional<size_t> later = GetExecTarget(node, "Later"))
 					{
 						out.push_back(TextWork(inner, std::format("Task.Delay({}, function()", GetNamedInput(node, "Seconds")), id));
-						out.push_back(FlowWork(inner + 1, *later, false, nested));
+						out.push_back(FlowWork(inner + 1, *later, false, nested, inFlowFunction));
 						out.push_back(TextWork(inner, "end)", id));
 					}
 				}
@@ -845,6 +935,47 @@ namespace Engine {
 					out.push_back(TextWork(inner, std::format("{} = {}", result, GetNamedInput(node, "Value")), id));
 					AddProbes(node, inner, out);
 					branch(result + " ~= nil", result + " == nil", GetExecTarget(node, "True"), GetExecTarget(node, "False"));
+				}
+				else if (returns)
+				{
+					// M39 (decision 4): a Return ends its function, Luau's own return, the last statement of its own block. Inside a
+					// merge's flow function it sets the function's result and returns true, which the merge's calls test.
+					const bool valued = FindPin(node, "Value", GraphPinDirection::Input) != nullptr;
+					if (inFlowFunction)
+					{
+						if (valued)
+							out.push_back(TextWork(inner, std::format("{} = {}", ResultLocal, GetNamedInput(node, "Value")), id));
+						out.push_back(TextWork(inner, "return true", id));
+					}
+					else
+						out.push_back(TextWork(inner, valued ? std::format("return {}", GetNamedInput(node, "Value")) : std::string("return"), id));
+				}
+				else if (kind == "Script.Set")
+					out.push_back(TextWork(inner, std::format("{}[{}] = {}", self, GetNamedInput(node, "Member"), GetNamedInput(node, "Value")), id));
+				else if (kind == "Script.Call")
+				{
+					// Arg1 to Arg4, trailing unset ones left out; a literal method name that is a Luau name is a method call, any
+					// other name an index of the object called with the object; the first result, cast to any.
+					std::vector<const GraphPinDescription*> arguments = GetDataPins(node, GraphPinDirection::Input);
+					std::erase_if(arguments, [](const GraphPinDescription* pin)
+					{
+						return !pin->Name.starts_with("Arg");
+					});
+					while (!arguments.empty() && IsUnset(node, *arguments.back()))
+						arguments.pop_back();
+					std::string list;
+					for (const GraphPinDescription* pin : arguments)
+						list += (list.empty() ? "" : ", ") + GetInput(node, *pin);
+					std::string call;
+					const auto literal = m_Graph.Nodes[node].Values.find("Method");
+					const bool named = !m_DataSources.contains({ node, std::string("Method") }) && literal != m_Graph.Nodes[node].Values.end()
+						&& literal->second.Get().is_string() && IsLuauMethodName(ReadText(literal->second.Get()));
+					if (named)
+						call = std::format("{}:{}({})", self, ReadText(literal->second.Get()), list);
+					else
+						call = std::format("{}[{}]({}{}{})", self, GetNamedInput(node, "Method"), self, list.empty() ? "" : ", ", list);
+					out.push_back(TextWork(inner, std::format("{} = {}", GetOutputName(node, "Result"), CastToAny(call)), id));
+					AddProbes(node, inner, out);
 				}
 				else if (kind.starts_with("Self.Set."))
 					out.push_back(TextWork(inner, std::format("self.{} = {}", kind.substr(std::string_view("Self.Set.").size()), GetNamedInput(node, "Value")), id));
@@ -871,15 +1002,16 @@ namespace Engine {
 				if (block)
 					out.push_back(TextWork(indent, "end", id));
 				if (continuation.has_value())
-					out.push_back(FlowWork(indent, *continuation, false, declared));
+					out.push_back(FlowWork(indent, *continuation, false, declared, inFlowFunction));
 				return out;
 			}
 
 			// Emits the flow that enters `target` at `indent`, without recursion: a merge (several exec links enter it) is a
-			// call of its flow function unless `define` asks for its own code.
+			// call of its flow function unless `define` asks for its own code (then `target`'s flow function's body, so
+			// inside a flow function, M39).
 			void EmitFlow(size_t indent, size_t target, bool define)
 			{
-				std::vector<Work> stack{ FlowWork(indent, target, define, CreateRef<const std::set<std::string>>()) };
+				std::vector<Work> stack{ FlowWork(indent, target, define, CreateRef<const std::set<std::string>>(), define) };
 				while (!stack.empty() && !m_Full)
 				{
 					Work work = std::move(stack.back());
@@ -899,10 +1031,20 @@ namespace Engine {
 					}
 					if (!work.Define && m_Merges.contains(work.Target))
 					{
-						Emit(work.Indent, std::format("flow{}()", GetId(work.Target)), GetId(work.Target), work.Target);
+						const std::string call = std::format("flow{}()", GetId(work.Target));
+						if (m_ReturningMerges.contains(work.Target))
+						{
+							// M39 (decision 4): a merge whose flow reaches a Return returns true when one ran, and its caller then
+							// returns in turn: the result from an event's or a method's function, true from another flow function.
+							const std::string exit = work.InFlowFunction ? std::string("return true")
+																		 : (m_ValuedFunction ? std::format("return {}", ResultLocal) : std::string("return"));
+							Emit(work.Indent, std::format("if {} then {} end", call, exit), GetId(work.Target), work.Target);
+						}
+						else
+							Emit(work.Indent, call, GetId(work.Target), work.Target);
 						continue;
 					}
-					std::vector<Work> expanded = ExpandStatement(work.Target, work.Indent, work.Declared);
+					std::vector<Work> expanded = ExpandStatement(work.Target, work.Indent, work.Declared, work.InFlowFunction);
 					for (auto it = expanded.rbegin(); it != expanded.rend(); ++it)
 					{
 						if (!it->Flow)
@@ -912,18 +1054,138 @@ namespace Engine {
 				}
 			}
 
-			// One callback's function: its header, OnCreate's live-value table and variables, the statements' output locals,
-			// the merges' flow functions and the event nodes' flows in id order.
-			void EmitFunction(std::string_view callback, const std::vector<size_t>& events)
+			[[nodiscard]] bool IsReturn(size_t node) const { return GetKind(node).starts_with(GraphReturnKindPrefix); }
+
+			// The exec targets of `node`'s outputs but a Flow.Delay's Later, whose flow runs after its function returned.
+			[[nodiscard]] std::vector<size_t> GetImmediateExecTargets(size_t node) const
+			{
+				std::vector<size_t> targets;
+				for (const GraphPinDescription& pin : m_Descriptions[node].Pins)
+				{
+					if (pin.Direction != GraphPinDirection::Output || pin.Type != GraphPinType::Exec || (GetKind(node) == "Flow.Delay" && pin.Name == "Later"))
+						continue;
+					if (const std::optional<size_t> target = GetExecTarget(node, pin.Name))
+						targets.push_back(*target);
+				}
+				return targets;
+			}
+
+			// The states of a node in the walks below (M39, decision 4).
+			enum class Walk : uint8_t
+			{
+				Unvisited,
+				InProgress,
+				No,
+				Yes
+			};
+
+			// Computes `state[node]` and the states of everything it needs, post-order and without recursion: `successors(n)`
+			// lists what n's value reads, which an in-progress node (never in an acyclic flow) reads as No, and `decide(n)` gives
+			// n's value from theirs.
+			template<typename Successors, typename Decide>
+			static bool ResolveWalk(size_t node, std::vector<Walk>& state, const Successors& successors, const Decide& decide)
+			{
+				std::vector<size_t> stack{ node };
+				while (!stack.empty())
+				{
+					const size_t current = stack.back();
+					if (state[current] == Walk::No || state[current] == Walk::Yes)
+					{
+						stack.pop_back();
+						continue;
+					}
+					if (state[current] == Walk::Unvisited)
+					{
+						state[current] = Walk::InProgress;
+						for (const size_t next : successors(current))
+						{
+							if (state[next] == Walk::Unvisited)
+								stack.push_back(next);
+						}
+						continue;
+					}
+					stack.pop_back();
+					state[current] = decide(current) ? Walk::Yes : Walk::No;
+				}
+				return state[node] == Walk::Yes;
+			}
+
+			// Whether a Return is reached from `node`'s flow (it included), the Later flows aside: a merge whose flow reaches one
+			// returns a flag its calls test (decision 4).
+			[[nodiscard]] bool ReachesReturn(size_t node)
+			{
+				return ResolveWalk(node, m_ReachesReturn, [this](size_t current)
+				{
+					return GetImmediateExecTargets(current);
+				}, [this](size_t current)
+				{
+					return IsReturn(current) || std::ranges::any_of(GetImmediateExecTargets(current), [this](size_t next)
+					{
+						return m_ReachesReturn[next] == Walk::Yes;
+					});
+				});
+			}
+
+			// Whether the code of statement `node`, laid out as its own code (a merge's as its flow function's body), always
+			// returns as Luau's UnreachableCode lint judges a block (decision 4): a Return does; a branch when both its flows do;
+			// a sequence when one of its flows does; any other statement when its continuation does. A flow that enters a merge
+			// is that merge's call, which never always returns. Of the function being emitted (its merges).
+			[[nodiscard]] bool AlwaysReturns(size_t node)
+			{
+				const auto entered = [this](std::optional<size_t> target)
+				{
+					return target.has_value() && !m_Merges.contains(*target) && m_AlwaysReturns[*target] == Walk::Yes;
+				};
+				return ResolveWalk(node, m_AlwaysReturns, [this](size_t current)
+				{
+					std::vector<size_t> next = GetExecTargets(current);
+					std::erase_if(next, [this](size_t target)
+					{
+						return m_Merges.contains(target);
+					});
+					return next;
+				}, [this, &entered](size_t current)
+				{
+					const std::string& kind = GetKind(current);
+					if (IsReturn(current))
+						return true;
+					if (kind == "Flow.Branch" || kind == "Flow.IfNotNil")
+						return entered(GetExecTarget(current, "True")) && entered(GetExecTarget(current, "False"));
+					if (kind == "Flow.Sequence")
+					{
+						return std::ranges::any_of(SequenceOutputs, [this, current, &entered](std::string_view output)
+						{
+							return entered(GetExecTarget(current, output));
+						});
+					}
+					if (kind == "Flow.ForRange" || kind == "Flow.ForEach")
+						return entered(GetExecTarget(current, "Completed"));
+					return entered(GetExecTarget(current, "Then"));
+				});
+			}
+
+			// One function, a callback's or a graph method's (`method` its Method.<Name> kind, M39): its header (a method's
+			// parameters its declared ones), OnCreate's live-value table and variables, the statements' output locals, the
+			// result local, the merges' flow functions, the event nodes' flows in id order and the closing return nil of a
+			// function that returns a value and does not always return.
+			void EmitFunction(std::string_view name, const std::vector<size_t>& events, const GraphNodeDescription* method)
 			{
 				std::string parameters;
-				if (!events.empty())
+				if (method != nullptr)
+				{
+					for (const GraphPinDescription& pin : method->Pins)
+					{
+						if (pin.Direction == GraphPinDirection::Output && pin.Type != GraphPinType::Exec)
+							parameters += std::format(", {}: {}", GetParameterLocal(pin.Name), GetLuauType(pin));
+					}
+				}
+				else if (!events.empty())
 				{
 					for (const GraphPinDescription* pin : GetDataPins(events.front(), GraphPinDirection::Output))
 						parameters += std::format(", {}: {}", pin->Name, GetLuauType(*pin));
 				}
-				Emit(0, std::format("function Graph.{}(self: any{})", callback, parameters), 0, std::nullopt);
-				if (callback == "OnCreate")
+				Emit(0, std::format("function Graph.{}(self: any{})", name, parameters), 0, std::nullopt);
+				if (method == nullptr && name == "OnCreate")
 				{
 					Emit(1, std::format("self.{} = {{}}", ScriptLiveValuesKey), 0, std::nullopt);
 					for (const GraphVariable& variable : m_Graph.Variables)
@@ -952,16 +1214,34 @@ namespace Engine {
 					}
 				}
 				m_Merges.clear();
+				m_ReturningMerges.clear();
+				m_AlwaysReturns.assign(count, Walk::Unvisited);
+				// M39 (decision 4): a function returns a value when its method declares a result, or when a Return of a value
+				// (a callback's) runs in it.
+				m_ValuedFunction = false;
+				if (method != nullptr)
+				{
+					const auto declared = std::ranges::find(m_Graph.Methods, name, &GraphMethod::Name);
+					m_ValuedFunction = declared != m_Graph.Methods.end() && !declared->Results.empty();
+				}
 				for (size_t i = 0; i < count; ++i)
 				{
 					if (reached[i] && !IsEvent(i))
 					{
 						if (entries[i] > 1)
+						{
 							m_Merges.insert(i);
+							if (ReachesReturn(i))
+								m_ReturningMerges.insert(i);
+						}
+						if (method == nullptr && IsReturn(i) && FindPin(i, "Value", GraphPinDirection::Input) != nullptr)
+							m_ValuedFunction = true;
 						for (const GraphPinDescription* pin : GetDataPins(i, GraphPinDirection::Output))
 							Emit(1, std::format("local {}: {}", GetOutputName(i, pin->Name), GetLuauType(*pin)), GetId(i), i);
 					}
 				}
+				if (m_ValuedFunction && !m_ReturningMerges.empty())
+					Emit(1, std::format("local {}: any", ResultLocal), 0, std::nullopt);
 				// Flow functions, each after the ones its flow calls: the merges in reverse topological order.
 				if (!m_Merges.empty())
 				{
@@ -991,16 +1271,25 @@ namespace Engine {
 					{
 						if (!m_Merges.contains(*it))
 							continue;
-						Emit(1, std::format("local function flow{}()", GetId(*it)), GetId(*it), *it);
+						const bool returning = m_ReturningMerges.contains(*it);
+						Emit(1, std::format("local function flow{}(){}", GetId(*it), returning ? ": boolean" : ""), GetId(*it), *it);
 						EmitFlow(2, *it, true);
+						if (returning && !AlwaysReturns(*it))
+							Emit(2, "return false", GetId(*it), *it);
 						Emit(1, "end", GetId(*it), *it);
 					}
 				}
+				bool returned = false;
 				for (const size_t event : events)
 				{
 					if (const std::optional<size_t> target = GetExecTarget(event, "Then"))
+					{
 						EmitFlow(1, *target, false);
+						returned = returned || (!m_Merges.contains(*target) && AlwaysReturns(*target));
+					}
 				}
+				if (m_ValuedFunction && !returned)
+					Emit(1, "return nil", 0, std::nullopt);
 				Emit(0, "end", 0, std::nullopt);
 			}
 
@@ -1030,6 +1319,13 @@ namespace Engine {
 			std::map<std::pair<size_t, std::string>, size_t> m_ExecTargets{};
 			std::map<std::pair<size_t, std::string>, Source> m_DataSources{};
 			std::set<size_t> m_Merges{}; // of the function being emitted
+			// M39 (decision 4), of the function being emitted: its merges whose flow reaches a Return, whether it returns a
+			// value, and which statements' code always returns; and, for the whole graph, which flows reach a Return.
+			std::set<size_t> m_ReturningMerges{};
+			bool m_ValuedFunction = false;
+			std::vector<Walk> m_AlwaysReturns{};
+			std::vector<Walk> m_ReachesReturn{};
+			std::vector<GraphNodeDescription> m_MethodEvents{}; // the Method.<Name> kinds of the declared methods, by name
 			std::set<std::pair<uint32_t, std::string>> m_Probes{};
 			LuauText m_Text{};
 			std::set<size_t> m_TooDeep{};            // the statements whose code would start deeper than MaxGraphTextDepth
