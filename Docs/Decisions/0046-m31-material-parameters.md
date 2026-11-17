@@ -143,10 +143,11 @@ From the Roadmap's M31 and brief 5's "How the game will check it", each a named 
 
 ## Before milestone completion
 
-- [ ] W31.1's checkpoint commits on `milestone/m31`, each reviewed, with their targeted runs.
-- [ ] The lead's review pass of the wave, every finding fixed.
-- [ ] The milestone end: `milestone/m31` merges main, the milestone review, `CI.py --require-clang-cl` green, main fast-forwards (ADR 0042 decision 6).
-- [ ] At the merge: FeatureTest regenerated with `Scaffold.py` on the merged tree (the replay at version 4 after M28), the references regenerated, the golden re-rendered if a sibling changed a pipeline it uses (M29's shadows, M32's fog); M29's caster signature hashes the dissolve's record members (Risks); the lead amends ADR 0042's ledger for the rendered-time scroll (decision 3).
+- [x] W31.1's checkpoint commits on `milestone/m31`, each reviewed, with their targeted runs.
+- [x] The lead's review pass of the wave, every finding fixed.
+- [x] The milestone end: `milestone/m31` merges main, the milestone review, `CI.py --require-clang-cl` green, main fast-forwards (ADR 0042 decision 6).
+- [x] At the merge: FeatureTest regenerated with `Scaffold.py` on the merged tree (the replay at version 4 after M28), the references regenerated, the golden re-rendered if a sibling changed a pipeline it uses (M29's shadows, M32's fog); M29's caster signature hashes the dissolve's record members (Risks); the lead amends ADR 0042's ledger for the rendered-time scroll (decision 3).
+- [x] Landed 2026-11-16 in phase 5's batch 1 (`Docs/Decisions/0051-gates-in-proportion.md` decision 3): `landing/batch1` merged main and M29, M35, M31, M32 and M34 with their adaptations, the merge review's 5 findings were fixed, and one `CI.py --require-clang-cl` passed at its first run on `9ac024e2` (8,892 s); main fast-forwarded to it.
 
 ## Review (W31.1)
 

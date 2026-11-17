@@ -161,5 +161,6 @@ Appended after main's in both tables, in this order (the ledger: after every oth
 ## Before milestone completion
 
 - [x] W30.1 landed on `milestone/m30` and reviewed by the lead (`af188e96`; the review's fixes `a55c3170`).
-- [ ] W30.2 landed and reviewed.
-- [ ] The milestone end: main merged, the milestone review, `CI.py --require-clang-cl` green (the lead's).
+- [x] W30.2 landed and reviewed.
+- [x] The milestone end: main merged, the milestone review, `CI.py --require-clang-cl` green (the lead's).
+- [x] Landed 2026-11-17 in phase 5's batch 2 (`Docs/Decisions/0051-gates-in-proportion.md` decision 3): `landing/batch2` merged main and M33, M28 and M30 with their adaptations and the last lander's duties (0.6.0), the merge review's 15 findings were fixed, and `CI.py --require-clang-cl` passed on `7f7a83aa` after three reruns of failed stages (ADR 0051, "The second batch gate"); main fast-forwarded to it.

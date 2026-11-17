@@ -198,8 +198,9 @@ The checks (targeted, after the last code edit; the GPU runs one job at a time):
 
 ## Before milestone completion
 
-- [ ] W32.1 committed as checkpoints, each reviewed with every finding fixed, strict (no stub, no skip).
-- [ ] Acceptance 1 to 9 met, each by its named check, with the measured runs recorded.
-- [ ] Architecture, the skills, `Docs/Backlog.md` and the generated references describe what landed.
-- [ ] The games suite: on this branch it fails its upgrade dry run for the four audited demos until the landing's recorded `--upgrade` (decision 12).
-- [ ] The lead's wave review with every finding fixed; the milestone end (merge main, the milestone review, `CI.py --require-clang-cl`), the demos' recorded upgrades for the setting at the landing, and the report to the World Tree session.
+- [x] W32.1 committed as checkpoints, each reviewed with every finding fixed, strict (no stub, no skip).
+- [x] Acceptance 1 to 9 met, each by its named check, with the measured runs recorded.
+- [x] Architecture, the skills, `Docs/Backlog.md` and the generated references describe what landed.
+- [x] The games suite: on this branch it fails its upgrade dry run for the four audited demos until the landing's recorded `--upgrade` (decision 12).
+- [x] The lead's wave review with every finding fixed; the milestone end (merge main, the milestone review, `CI.py --require-clang-cl`), the demos' recorded upgrades for the setting at the landing, and the report to the World Tree session.
+- [x] Landed 2026-11-16 in phase 5's batch 1 (`Docs/Decisions/0051-gates-in-proportion.md` decision 3): `landing/batch1` merged main and M29, M35, M31, M32 and M34 with their adaptations, the merge review's 5 findings were fixed, and one `CI.py --require-clang-cl` passed at its first run on `9ac024e2` (8,892 s); main fast-forwarded to it.

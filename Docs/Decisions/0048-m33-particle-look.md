@@ -139,6 +139,7 @@ Roadmap M33's acceptance and the brief's "How the game will check it", each with
 
 ## Before milestone completion
 
-- [ ] W33.1 complete: every decision above built, with its tests, FeatureTest coverage and documents; the lead's wave review with every finding fixed.
-- [ ] The merge after M32 (decision 10): fog in the particle program and its golden, `HdrAdditive` removed, the registries, references and FeatureTest redone on the merged tree, the gpu and golden suites run there.
-- [ ] The milestone review and `CI.py --require-clang-cl` on the final tree (the lead's), and the fast-forward.
+- [x] W33.1 complete: every decision above built, with its tests, FeatureTest coverage and documents; the lead's wave review with every finding fixed.
+- [x] The merge after M32 (decision 10): fog in the particle program and its golden, `HdrAdditive` removed, the registries, references and FeatureTest redone on the merged tree, the gpu and golden suites run there.
+- [x] The milestone review and `CI.py --require-clang-cl` on the final tree (the lead's), and the fast-forward.
+- [x] Landed 2026-11-17 in phase 5's batch 2 (`Docs/Decisions/0051-gates-in-proportion.md` decision 3): `landing/batch2` merged main and M33, M28 and M30 with their adaptations and the last lander's duties (0.6.0), the merge review's 15 findings were fixed, and `CI.py --require-clang-cl` passed on `7f7a83aa` after three reruns of failed stages (ADR 0051, "The second batch gate"); main fast-forwarded to it.

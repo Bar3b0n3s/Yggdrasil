@@ -3,6 +3,7 @@
 - **Status:** accepted. The product owner, 2026-11-15, after the setup gate of the World Tree program ran for hours on one editor method ("if we're taking hours and hours for a few changes, we're doing something wrong"), on the lead's proposal: "yes, adopt 1 and 2". Lead-owned.
 - **Date:** 2026-11-15.
 - **Amended 2026-11-16 (the first batch gate):** decision 4's measurement, in "The first batch gate" below.
+- **Amended 2026-11-17 (the second batch gate):** "The second batch gate" below.
 - **Decided by:** the product owner; recorded by the lead.
 - **Base:** main `bb51e110` (phase 5 forked: M28 to M35, `Docs/Decisions/0042-world-tree-engine-program.md`).
 - **Authority:** amends `Docs/Decisions/0023-verification-without-duplicate-work.md` for commits straight to main outside a milestone, and `Docs/Decisions/0042-world-tree-engine-program.md` decisions 6 and 8 and its merge train; Architecture §15.9; `AGENTS.md`'s Commit gate.
@@ -38,6 +39,17 @@ Batch 1 (M29, M35, M31, M32 and M34 on `landing/batch1`, `9ac024e2`) ran one `CI
 | portability (generate, clang-cl Release and Dist) | 6.6 min | |
 
 The candidates for decision 4's proposal, where a stage repeats work for little assurance: `CheckBuildConfig.py`'s fixtures (13 min each gate, proving the checker still fails on fixtures that change only when the checker or the build files do) and the gpu suite's Vulkan 1.3 cap in Release as well as Debug (6 min). Together about 19 min of 148; the rest checks something no other stage does (Debug's iterator and heap checks, Release's optimizer, the 1.3 fallback, the four run modes). The lead puts them to the product owner at phase 5's end.
+
+## The second batch gate
+
+Batch 2 (M33, M28 and M30, with 0.6.0, on `landing/batch2`) passed in four runs, each after the last's failed stage, as ADR 0023 decision 5 has it:
+
+1. `83ae4655`, 6,397 s: every stage to the gpu suite green but its Release run under Vulkan 1.3, where the windowed child of "ImGuiPlatformWindows: a platform window's swapchain out of memory at its creation or resize is retried after a trim, or the window waits for its next size" hung past the case's 120 s limit. The case takes about 3 s, passed in the gate's three other gpu runs and in batch 1's gate, and passed 10 runs of 10 alone in the failing configuration; no change of the batch reaches it. An intermittent hang, recorded with R-GPUCRASH's evidence (`Docs/Backlog.md` §3).
+2. The gpu stage in Release, then golden, feature and automation, 2,390 s: one automation test of 890 failed, `test_replay`'s recording read at replay format 3 after M28's version 4 (M28's builders ran its other Python tests filtered); fixed in `054950eb`, a test file.
+3. Automation, export, determinism, games and portability, 3,193 s: the clang-cl Dist build refused M30's assert-only `IsNavigationQueryPosition` (`-Wunneeded-internal-declaration`), which Dist's compiled-out asserts leave unused; fixed in `7f7a83aa` with `[[maybe_unused]]`, as M19 did for `IsValidBuildId`.
+4. The builds and portability, 215 s: green.
+
+Both defects were the kind only a full gate finds: a Python test outside the milestone's filtered runs and a configuration (clang-cl Dist) no targeted run builds. That is the cost decision 2 accepted, and the batch gate found them before main moved.
 
 ## Consequences
 

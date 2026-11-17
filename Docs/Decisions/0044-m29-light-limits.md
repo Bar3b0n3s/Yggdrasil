@@ -142,4 +142,5 @@ Roadmap M29's acceptance and brief 07's "How the game will check it", each with 
 - [x] Checkpoints 1 to 3 committed, each with its targeted runs and review: `4d688a82`, `9ce976b4` and `108cadb9`.
 - [x] The wave's suites, as the lead's GPU discipline allows: the unfiltered Debug unit suite, the Debug feature suite and the filtered goldens ("Checkpoint record", the wave's end); the unfiltered gpu, golden and automation suites are the batch gate's.
 - [x] The lead's review of the wave, every finding fixed: `bin/Reviews/P5/M29-review.md`'s 13 findings, checkpoint 4 (the commit after `f304b52a`).
-- [ ] The landing: main merged, the ledger's redo, the milestone review, `CI.py --require-clang-cl` green on the final tree, main fast-forwarded.
+- [x] The landing: main merged, the ledger's redo, the milestone review, `CI.py --require-clang-cl` green on the final tree, main fast-forwarded.
+- [x] Landed 2026-11-16 in phase 5's batch 1 (`Docs/Decisions/0051-gates-in-proportion.md` decision 3): `landing/batch1` merged main and M29, M35, M31, M32 and M34 with their adaptations, the merge review's 5 findings were fixed, and one `CI.py --require-clang-cl` passed at its first run on `9ac024e2` (8,892 s); main fast-forwarded to it.
