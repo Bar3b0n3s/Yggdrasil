@@ -59,6 +59,7 @@
 #include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -204,6 +205,9 @@ namespace Engine {
 			// after main's (ADR 0042's phase-5 ledger: after every other lander's, M34's and M33's codes among them).
 			NavMeshNotBakedCode,
 			NavMeshStaleCode,
+			// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9), appended in landing order after main's (ADR
+			// 0052's phase-6 ledger: after M36's PHYSICS_SURFACE_UNUSED), an array of its own (PhysicsJointDiagnosticCodes).
+			PhysicsJointInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -450,6 +454,14 @@ namespace Engine {
 				"A scene's static colliders, NavModifiers or Navigation settings changed after its navigation mesh was baked, or its bake "
 				"input can no longer be read (an unknown layer, a setting out of range); queries follow the old mesh.",
 				"Bake the scene's navigation again with navigation.bake (the editor's Bake Navigation) and save the scene." },
+			ValidationCodeInfo{ PhysicsJointInvalidCode, "Error", false,
+				"A HingeJoint, SliderJoint, DistanceJoint or FixedJoint cannot be made: no RigidBody with a collider at or above its entity, a "
+				"ConnectedBody that names no entity or resolves to no body, an end under a CharacterController or a RigidBody2D, both ends one "
+				"body, a zero Axis, equal limits while UseLimits holds, or a MinDistance above MaxDistance; the joint is not created and its "
+				"bodies simulate unjoined.",
+				"Correct the field or the hierarchy the finding names: put the joint on a RigidBody's entity or a child of it, name another "
+				"body (or null for the world) in ConnectedBody, give Axis a direction, separate the limits (a FixedJoint for a joint that does "
+				"not move), or set MinDistance at or below MaxDistance." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1205,6 +1217,10 @@ namespace Engine {
 			std::vector<PhysicsDiagnostic> found = ValidateScenePhysics(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager());
 			std::vector<PhysicsDiagnostic> found2D = ValidateScenePhysics2D(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager());
 			found.insert(found.end(), std::make_move_iterator(found2D.begin()), std::make_move_iterator(found2D.end()));
+			// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9): PHYSICS_JOINT_INVALID, from the joint
+			// composition over the scene's bodies, as the play session's PhysicsSystem raises it.
+			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, ComposePhysicsBodies(*checked.Target, *checked.Layers));
+			found.insert(found.end(), std::make_move_iterator(joints.Diagnostics.begin()), std::make_move_iterator(joints.Diagnostics.end()));
 			for (const PhysicsDiagnostic& physics : found)
 			{
 				DiagnosticSite site;

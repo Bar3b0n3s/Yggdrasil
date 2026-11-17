@@ -4,6 +4,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Physics/ContactBuffer.h"
+#include "Engine/Physics/PhysicsJoint.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Physics/PhysicsQueries.h"
 #include "Engine/Physics/PhysicsShape.h"
@@ -43,7 +44,8 @@
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 3). M20, which owns the contact path in phase 1,
 // adds GetSubShapeCollider and the touching test of speculative contacts (Physics/ContactBuffer.h,
-// Docs/Decisions/0031-m20-contract.md decisions 2 and 3).
+// Docs/Decisions/0031-m20-contract.md decisions 2 and 3). M37 appends the joints section (Docs/Decisions/0054-m37-joints.md
+// decision 2), reviewed as a change to a frozen interface.
 
 namespace Engine {
 
@@ -170,7 +172,8 @@ namespace Engine {
 		// sensor, and PhysicsShape::CheckDynamicBody's errors for a Dynamic body (its Mass, its degrees of freedom, a mesh,
 		// an inertia too large); InvalidState "PHYSICS_LIMIT_EXCEEDED: ..." when the world holds Limits.MaxBodies bodies.
 		[[nodiscard]] Result<BodyHandle> CreateBody(const BodyDescription& description);
-		// Removes and destroys a body and wakes the bodies around it. Jolt reports the Removed records of its contacts at the
+		// Removes and destroys a body and wakes the bodies around it, after destroying its joints (M37: the joints section
+		// below; the bodies they joined it to are woken too). Jolt reports the Removed records of its contacts at the
 		// next step, with the destroyed (stale) handle; a consumer that already closed those pairs ignores them
 		// (Scene/PhysicsSystem synthesizes the exits itself, §9.4). A handle that names no live body of this world is a
 		// programmer error (asserted) and ignored.
@@ -190,8 +193,10 @@ namespace Engine {
 		// velocities and contacts' bookkeeping to Jolt (its contacts are re-evaluated at the next step, and Jolt reports the
 		// sub-shape contacts that ended and began as usual). A Dynamic body keeps its Mass, its inertia recomputed from the
 		// new shape and scaled to it; other bodies keep the mass properties CreateBody gave them (never the shape's, so a
-		// Kinematic body may take a mesh). Errors: InvalidArgument for a dead handle or a missing shape; for a Dynamic body,
-		// PhysicsShape::CheckDynamicBody's errors with its Mass and degrees of freedom.
+		// Kinematic body may take a mesh). M37: the body's joints keep their frames, which are relative to the body's origin;
+		// the world moves their centre-of-mass offsets (Jolt's NotifyShapeChanged). Errors: InvalidArgument for a dead handle
+		// or a missing shape; for a Dynamic body, PhysicsShape::CheckDynamicBody's errors with its Mass and degrees of
+		// freedom.
 		[[nodiscard]] Status SetShape(BodyHandle body, const Ref<const PhysicsShape>& shape);
 		// The collider index (ColliderShapeDescription::UserData) of the sub-shape `subShape`, a Jolt SubShapeID value as a
 		// ContactEvent's SubShapeA or SubShapeB reports it, on the body's current shape (§9.2 "Collider identity in compounds"):
@@ -269,6 +274,40 @@ namespace Engine {
 		[[nodiscard]] const PhysicsLayerTable& GetLayers() const;
 		[[nodiscard]] const PhysicsWorldLimits& GetLimits() const;
 		[[nodiscard]] PhysicsWorldStats GetStats() const;
+
+		// --- Joints (M37, Docs/Decisions/0054-m37-joints.md decision 2; Physics/PhysicsJoint.h; Physics/PhysicsWorldJoints.cpp)
+		// Jolt constraints between two bodies or a body and the world. Jolt holds raw body pointers in a constraint, so the
+		// world never leaves one behind a body: DestroyBody destroys the body's joints first (their handles go invalid, and
+		// the bodies they joined are woken), SetShape tells them that the body's centre of mass moved, and destroying the
+		// world destroys every joint before its bodies. A joint between two bodies whose CollideConnected is false keeps
+		// them apart in both of Jolt's collision passes: the body-pair hook drops the pair before the narrow phase
+		// (Physics/Private/PhysicsEdgeRemoval.h) and a simulation shape filter drops it from continuous collision casts, so no
+		// contact or contact record is ever made between them; whenever that changes (a joint made, destroyed or switched by
+		// SetJointSettings), the pair's cached contacts are dropped (Jolt's InvalidateContactCache), so it collides afresh at
+		// the next step. Jolt solves a joint only while one of its bodies is Dynamic and awake. Main thread, between steps.
+		//
+		// Creates a joint (Jolt's constraint in the bodies' space, its frames converted from the origins to the centres of
+		// mass) and wakes its bodies. Errors, with nothing created: InvalidArgument for an unknown type or motor, a Body that
+		// names no live body, a ConnectedBody that is neither invalid nor live, the same body twice, a frame point that is
+		// not finite or beyond MaxPhysicsCoordinate, an axis or normal that is not unit or not perpendicular to its axis, a
+		// setting that is not finite or outside PhysicsJointSettings' range, or a hinge's or slider's equal limits while
+		// UseLimits holds.
+		[[nodiscard]] Result<JointHandle> CreateJoint(const PhysicsJointDescription& description);
+		// Destroys a joint and wakes its bodies. A handle that names no live joint of this world (one destroyed with a body
+		// included) is ignored.
+		void DestroyJoint(JointHandle joint);
+		// Whether `joint` names a live joint of this world.
+		[[nodiscard]] bool IsJointValid(JointHandle joint) const;
+		// Applies `settings` to a live joint in place (its limits, friction, motor, spring and CollideConnected; its type,
+		// bodies and frames stay) and wakes its bodies. Errors: InvalidArgument for a dead handle or invalid settings (as
+		// CreateJoint), with nothing changed.
+		[[nodiscard]] Status SetJointSettings(JointHandle joint, const PhysicsJointSettings& settings);
+		// Sets a live joint's solver priority (PhysicsJointDescription::Priority); a dead handle is ignored.
+		void SetJointPriority(JointHandle joint, uint32_t priority);
+		// The joint's reading after the last step (PhysicsJointState); zero for a dead handle.
+		[[nodiscard]] PhysicsJointState GetJointState(JointHandle joint) const;
+		// The number of live joints.
+		[[nodiscard]] uint32_t GetJointCount() const;
 	private:
 		// The Jolt objects (Physics/Private/PhysicsWorldState.h, shared by the world's .cpp files and CharacterController).
 		struct State;

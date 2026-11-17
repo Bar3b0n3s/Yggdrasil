@@ -63,6 +63,10 @@ Every component of the type registry, in canonical component order: the order of
 | `Fog` | Fog | Serializable, ScriptVisible, EditorVisible, Removable, UniquePerScene | The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene). |
 | `Navigation` | Navigation | Serializable, EditorVisible, Removable, UniquePerScene | The scene's navigation mesh (one per scene): its agent types and bake settings, and the mesh navigation.bake builds from the scene's static colliders for the Navigation script namespace's queries. |
 | `NavModifier` | Navigation | Serializable, EditorVisible, Removable | A box around the entity that marks the navigation mesh at the next bake: not walkable, or walkable at a cost that paths avoid. |
+| `HingeJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Joins the body of the RigidBody at or above the entity to another body or the world so it only turns about an axis, like a door or a trap door, with optional limits, motor and breaking. |
+| `SliderJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking. |
+| `DistanceJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Keeps a point of the body of the RigidBody at or above the entity between a minimum and a maximum distance from a point of another body or of the world, like a rope, a chain link or a rod, with an optional spring and breaking. |
+| `FixedJoint` | Joints | Serializable, ScriptVisible, EditorVisible, Removable | Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break. |
 
 ## ID
 
@@ -1842,6 +1846,178 @@ A box around the entity that marks the navigation mesh at the next bake: not wal
 | `Cost` | `Float` | `4` | 1 to 10000 |  |  | How many times the distance a path inside the box costs (Kind Cost). |
 | `HalfExtents` | `Vec3` | `[0.5,0.5,0.5]` | 0.01 to 10000 | m |  | Half the box's size along the entity's axes, in metres; the entity's scale applies and its rotation's yaw turns it. |
 
+## HingeJoint
+
+Joins the body of the RigidBody at or above the entity to another body or the world so it only turns about an axis, like a door or a trap door, with optional limits, motor and breaking.
+
+- Category: Joints
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: `SliderJoint`, `DistanceJoint`, `FixedJoint`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The hinge's pivot in this entity's space, in metres (its scale applies). |
+| `Axis` | `Vec3` | `[1,0,0]` |  |  |  | The axis the body turns about, in this entity's space; positive angles turn it by the right-hand rule. Normalized when used; a zero axis makes the joint invalid. |
+| `UseLimits` | `Bool` | `false` |  |  |  | Whether the angle stays between LowerAngle and UpperAngle. |
+| `LowerAngle` | `Float` | `-90` | -180 to 0 | deg |  | The smallest angle, in degrees from the authored pose, while UseLimits holds. |
+| `UpperAngle` | `Float` | `90` | 0 to 180 | deg |  | The largest angle, in degrees from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint). |
+| `MaxFrictionTorque` | `Float` | `0` | >= 0 | N m |  | The friction torque, in newton metres, that resists turning while the motor is Off. |
+| `Motor` | `JointMotorMode` | `"Off"` |  |  |  | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
+| `MotorTargetVelocity` | `Float` | `0` | -1e+06 to 1e+06 | deg/s |  | The angular velocity a Velocity motor drives to, in degrees per second. |
+| `MotorTargetAngle` | `Float` | `0` | -180 to 180 | deg |  | The angle a Position motor drives to, in degrees from the authored pose; clamped to the limits while UseLimits holds. |
+| `MotorMaxTorque` | `Float` | `1000` | 0 to 1e+12 | N m |  | The most torque the motor applies, in newton metres. |
+| `MotorFrequency` | `Float` | `2` | 0.001 to 1000 | Hz |  | The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). |
+| `MotorDamping` | `Float` | `1` | 0 to 1000 |  |  | The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `BreakTorque` | `Float` | `0` | >= 0 | N m |  | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
+| `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+
+Script members of `HingeJoint`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Anchor` | proxy field | `vector` | read/write | All | The hinge's pivot in this entity's space, in metres (its scale applies). |
+| `Axis` | proxy field | `vector` | read/write | All | The axis the body turns about, in this entity's space; positive angles turn it by the right-hand rule. Normalized when used; a zero axis makes the joint invalid. |
+| `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `BreakTorque` | proxy field | `number` | read/write | All | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
+| `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `LowerAngle` | proxy field | `number` | read/write | All | The smallest angle, in degrees from the authored pose, while UseLimits holds. |
+| `MaxFrictionTorque` | proxy field | `number` | read/write | All | The friction torque, in newton metres, that resists turning while the motor is Off. |
+| `Motor` | proxy field | `JointMotorMode` | read/write | All | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
+| `MotorDamping` | proxy field | `number` | read/write | All | The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. |
+| `MotorFrequency` | proxy field | `number` | read/write | All | The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). |
+| `MotorMaxTorque` | proxy field | `number` | read/write | All | The most torque the motor applies, in newton metres. |
+| `MotorTargetAngle` | proxy field | `number` | read/write | All | The angle a Position motor drives to, in degrees from the authored pose; clamped to the limits while UseLimits holds. |
+| `MotorTargetVelocity` | proxy field | `number` | read/write | All | The angular velocity a Velocity motor drives to, in degrees per second. |
+| `UpperAngle` | proxy field | `number` | read/write | All | The largest angle, in degrees from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint). |
+| `UseLimits` | proxy field | `boolean` | read/write | All | Whether the angle stays between LowerAngle and UpperAngle. |
+
+## SliderJoint
+
+Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking.
+
+- Category: Joints
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: `HingeJoint`, `DistanceJoint`, `FixedJoint`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The joint's point in this entity's space, in metres (its scale applies). |
+| `Axis` | `Vec3` | `[1,0,0]` |  |  |  | The axis the body moves along, in this entity's space; positive positions move it along the axis. Normalized when used; a zero axis makes the joint invalid. |
+| `UseLimits` | `Bool` | `false` |  |  |  | Whether the position stays between LowerLimit and UpperLimit. |
+| `LowerLimit` | `Float` | `-1` | -1e+09 to 0 | m |  | The smallest position, in metres from the authored pose, while UseLimits holds. |
+| `UpperLimit` | `Float` | `1` | 0 to 1e+09 | m |  | The largest position, in metres from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint). |
+| `MaxFrictionForce` | `Float` | `0` | >= 0 | N |  | The friction force, in newtons, that resists sliding while the motor is Off. |
+| `Motor` | `JointMotorMode` | `"Off"` |  |  |  | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
+| `MotorTargetVelocity` | `Float` | `0` | -1e+06 to 1e+06 | m/s |  | The velocity a Velocity motor drives to, in metres per second. |
+| `MotorTargetPosition` | `Float` | `0` | -1e+06 to 1e+06 | m |  | The position a Position motor drives to, in metres from the authored pose; clamped to the limits while UseLimits holds. |
+| `MotorMaxForce` | `Float` | `1000` | 0 to 1e+12 | N |  | The most force the motor applies, in newtons. |
+| `MotorFrequency` | `Float` | `2` | 0.001 to 1000 | Hz |  | The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). |
+| `MotorDamping` | `Float` | `1` | 0 to 1000 |  |  | The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `BreakTorque` | `Float` | `0` | >= 0 | N m |  | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
+| `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+
+Script members of `SliderJoint`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Anchor` | proxy field | `vector` | read/write | All | The joint's point in this entity's space, in metres (its scale applies). |
+| `Axis` | proxy field | `vector` | read/write | All | The axis the body moves along, in this entity's space; positive positions move it along the axis. Normalized when used; a zero axis makes the joint invalid. |
+| `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `BreakTorque` | proxy field | `number` | read/write | All | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
+| `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `LowerLimit` | proxy field | `number` | read/write | All | The smallest position, in metres from the authored pose, while UseLimits holds. |
+| `MaxFrictionForce` | proxy field | `number` | read/write | All | The friction force, in newtons, that resists sliding while the motor is Off. |
+| `Motor` | proxy field | `JointMotorMode` | read/write | All | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
+| `MotorDamping` | proxy field | `number` | read/write | All | The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. |
+| `MotorFrequency` | proxy field | `number` | read/write | All | The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). |
+| `MotorMaxForce` | proxy field | `number` | read/write | All | The most force the motor applies, in newtons. |
+| `MotorTargetPosition` | proxy field | `number` | read/write | All | The position a Position motor drives to, in metres from the authored pose; clamped to the limits while UseLimits holds. |
+| `MotorTargetVelocity` | proxy field | `number` | read/write | All | The velocity a Velocity motor drives to, in metres per second. |
+| `UpperLimit` | proxy field | `number` | read/write | All | The largest position, in metres from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint). |
+| `UseLimits` | proxy field | `boolean` | read/write | All | Whether the position stays between LowerLimit and UpperLimit. |
+
+## DistanceJoint
+
+Keeps a point of the body of the RigidBody at or above the entity between a minimum and a maximum distance from a point of another body or of the world, like a rope, a chain link or a rod, with an optional spring and breaking.
+
+- Category: Joints
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: `HingeJoint`, `SliderJoint`, `FixedJoint`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The joint's point in this entity's space, in metres (its scale applies). |
+| `ConnectedAnchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null. |
+| `MinDistance` | `Float` | `0` | 0 to 1e+09 | m |  | The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid. |
+| `MaxDistance` | `Float` | `1` | 0 to 1e+09 | m |  | The longest the distance between the anchors gets, in metres. |
+| `Frequency` | `Float` | `0` | 0 to 1000 | Hz |  | The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope. |
+| `Damping` | `Float` | `0` | 0 to 1000 |  |  | The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped. |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+
+Script members of `DistanceJoint`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Anchor` | proxy field | `vector` | read/write | All | The joint's point in this entity's space, in metres (its scale applies). |
+| `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `ConnectedAnchor` | proxy field | `vector` | read/write | All | The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `Damping` | proxy field | `number` | read/write | All | The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped. |
+| `Frequency` | proxy field | `number` | read/write | All | The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope. |
+| `MaxDistance` | proxy field | `number` | read/write | All | The longest the distance between the anchors gets, in metres. |
+| `MinDistance` | proxy field | `number` | read/write | All | The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid. |
+
+## FixedJoint
+
+Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break.
+
+- Category: Joints
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: `HingeJoint`, `SliderJoint`, `DistanceJoint`
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The weld's point in this entity's space, in metres (its scale applies). |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `BreakTorque` | `Float` | `0` | >= 0 | N m |  | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
+| `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+
+Script members of `FixedJoint`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Anchor` | proxy field | `vector` | read/write | All | The weld's point in this entity's space, in metres (its scale applies). |
+| `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
+| `BreakTorque` | proxy field | `number` | read/write | All | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
+| `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+
 ## Structs
 
 The structs component fields hold, in name order.
@@ -2018,6 +2194,16 @@ How the image is exposed.
 |---|---|
 | `Manual` | The image is multiplied by 2^ExposureEV. |
 | `Auto` | A histogram of the image's luminance adapts the exposure towards middle grey, ExposureEV added as compensation. |
+
+### JointMotorMode
+
+What a HingeJoint's or SliderJoint's motor does.
+
+| Value | Description |
+|---|---|
+| `Off` | No drive: the joint moves freely, against its MaxFrictionTorque or MaxFrictionForce. |
+| `Velocity` | Drives the joint at MotorTargetVelocity with at most MotorMaxTorque or MotorMaxForce. |
+| `Position` | Drives the joint to MotorTargetAngle or MotorTargetPosition through a spring of MotorFrequency and MotorDamping, with at most MotorMaxTorque or MotorMaxForce. |
 
 ### Light2DType
 

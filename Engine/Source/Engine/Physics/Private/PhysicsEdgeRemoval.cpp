@@ -225,6 +225,47 @@ namespace Engine {
 			edgeRemoving.Flush();
 		}
 
+		std::pair<uint32_t, uint32_t> PhysicsJointedPairs::MakeKey(const JPH::BodyID& a, const JPH::BodyID& b)
+		{
+			const uint32_t first = a.GetIndexAndSequenceNumber();
+			const uint32_t second = b.GetIndexAndSequenceNumber();
+			return first < second ? std::make_pair(first, second) : std::make_pair(second, first);
+		}
+
+		void PhysicsJointedPairs::Add(const JPH::BodyID& a, const JPH::BodyID& b)
+		{
+			++m_Counts[MakeKey(a, b)];
+		}
+
+		void PhysicsJointedPairs::Remove(const JPH::BodyID& a, const JPH::BodyID& b)
+		{
+			const auto found = m_Counts.find(MakeKey(a, b));
+			if (found == m_Counts.end())
+				return;
+			if (--found->second == 0)
+				m_Counts.erase(found);
+		}
+
+		bool PhysicsJointedPairs::Contains(const JPH::BodyID& a, const JPH::BodyID& b) const
+		{
+			return !m_Counts.empty() && m_Counts.contains(MakeKey(a, b));
+		}
+
+		void CollideBodiesUnlessJointed(const PhysicsJointedPairs& pairs, const JPH::Body& body1, const JPH::Body& body2,
+			JPH::Mat44Arg centerOfMassTransform1, JPH::Mat44Arg centerOfMassTransform2, JPH::CollideShapeSettings& settings,
+			JPH::CollideShapeCollector& collector, const JPH::ShapeFilter& shapeFilter)
+		{
+			if (pairs.Contains(body1.GetID(), body2.GetID()))
+				return;
+			CollideBodiesWithEdgeRemoval(body1, body2, centerOfMassTransform1, centerOfMassTransform2, settings, collector, shapeFilter);
+		}
+
+		bool PhysicsJointedPairFilter::ShouldCollide(const JPH::Body& body1, const JPH::Shape* /*shape1*/, const JPH::SubShapeID& /*subShape1*/,
+			const JPH::Body& body2, const JPH::Shape* /*shape2*/, const JPH::SubShapeID& /*subShape2*/) const
+		{
+			return !m_Pairs.Contains(body1.GetID(), body2.GetID());
+		}
+
 	}
 
 }

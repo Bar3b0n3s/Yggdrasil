@@ -517,6 +517,8 @@ namespace Engine {
 		registry.on_destroy<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_construct<PendingDestroyTag>().connect<&State::OnEntityLeavingPlay>(*this);
 		registry.on_construct<HierarchyDisabledTag>().connect<&State::OnEntityLeavingPlay>(*this);
+		// M37: the joint components mark the joints, never the bodies (PhysicsSystemJoints.cpp).
+		ConnectJointSignals(registry);
 	}
 
 	void PhysicsSystem::State::DisconnectSignals()
@@ -535,6 +537,7 @@ namespace Engine {
 		registry.on_destroy<DisabledTag>().disconnect(this);
 		registry.on_construct<PendingDestroyTag>().disconnect(this);
 		registry.on_construct<HierarchyDisabledTag>().disconnect(this);
+		DisconnectJointSignals(registry);
 	}
 
 	void PhysicsSystem::State::OnComponentChanged(entt::registry& registry, entt::entity entity)
@@ -1053,6 +1056,8 @@ namespace Engine {
 		const uint32_t value = handle->GetValue();
 		BodiesByOwner[{ plan.Owner, plan.Origin }] = value;
 		AssignPlan(Bodies.emplace(value, std::move(entry)).first->second, plan);
+		// M37: a new body may complete a joint.
+		JointsChanged = true;
 		return true;
 	}
 
@@ -1151,6 +1156,8 @@ namespace Engine {
 			return;
 		const PhysicsBodyEntry& entry = found->second;
 		PurgeBodyContacts(handle, woken);
+		// M37: its joints before the body (a Jolt constraint holds raw body pointers).
+		RemoveBodyJoints(entry.Handle);
 		World->DestroyBody(entry.Handle);
 		BodiesByOwner.erase({ entry.Owner, entry.Origin });
 		for (const UUID collider : entry.Colliders)
@@ -1259,7 +1266,7 @@ namespace Engine {
 	void PhysicsSystem::State::Rebuild(bool hierarchyChanged, std::set<UUID>& woken)
 	{
 		Scene& scene = *Specification.RuntimeScene;
-		const PhysicsComposition composition = ComposePhysicsBodies(scene, Layers, Specification.Limits.MaxBodies);
+		PhysicsComposition composition = ComposePhysicsBodies(scene, Layers, Specification.Limits.MaxBodies);
 		// Each entity refused by the body limit gets its diagnostic (recorded and heard by the listener), but only the first
 		// is logged: a scene far over the limit would log thousands of identical lines.
 		bool loggedBodyLimit = false;
@@ -1362,6 +1369,12 @@ namespace Engine {
 				static_cast<void>(ReplaceShape(*existing, plan, woken));
 		}
 		MeshShapes.Prune();
+
+		// M37: the joints after every body of the pass, over this composition (PhysicsSystemJoints.cpp).
+		Composition = std::move(composition);
+		JointPlansStale = true;
+		JointsChanged = true;
+		SynchronizeJoints();
 	}
 
 	void PhysicsSystem::State::RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken)
@@ -1392,10 +1405,12 @@ namespace Engine {
 		State& state = *m_State;
 		if (state.Specification.RuntimeScene != nullptr && state.World != nullptr)
 			state.DisconnectSignals();
-		// Characters first (their inner bodies live in the world), then the bodies, then the world; no events.
+		// Characters first (their inner bodies live in the world), then (M37) the joints, then the bodies, then the world; no
+		// events.
 		state.Characters.clear();
 		if (state.World != nullptr)
 		{
+			state.DestroyAllJoints();
 			for (const auto& [handle, entry] : state.Bodies)
 				state.World->DestroyBody(entry.Handle);
 		}
@@ -1465,6 +1480,8 @@ namespace Engine {
 			state.RefreshShapes(changed, woken);
 		state.ComponentsChanged = false;
 		state.ChangedEntities.clear();
+		// M37: the joints, when a joint component changed or a body was created or removed (a rebuild did it already).
+		state.SynchronizeJoints();
 
 		// 3-4. Kinematic moves and teleports, in canonical order of the owners; entities pending destruction or disabled keep
 		// their bodies as they are until FlushDestroyed.
@@ -1608,13 +1625,16 @@ namespace Engine {
 	{
 		State& state = *m_State;
 		ENGINE_CORE_ASSERT(!state.Dispatching, "PhysicsSystem::SynchronizeBodies was called from a physics listener callback");
-		if (!state.ComponentsChanged)
+		if (!state.ComponentsChanged && !state.JointsChanged)
 			return;
 		// PreStep's items 1 and 2: a hierarchy change seen here is consumed with the rebuild, as PreStep consumes it.
 		std::set<UUID> woken;
-		state.Rebuild(state.HasHierarchyChanged(), woken);
+		if (state.ComponentsChanged)
+			state.Rebuild(state.HasHierarchyChanged(), woken);
 		state.ComponentsChanged = false;
 		state.ChangedEntities.clear();
+		// M37: a joint change alone is synchronized here too (a rebuild did it already).
+		state.SynchronizeJoints();
 		state.WakeOwners(woken);
 		state.DeliverPendingDiagnostics();
 	}
@@ -1667,6 +1687,8 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(!state.Dispatching, "PhysicsSystem::PostStep was called from a physics listener callback");
 		Scene& scene = *state.Specification.RuntimeScene;
 		state.LastEvents.clear();
+		// M37: the joints over their thresholds break, measured on the step that just ran (dispatched after the pair events).
+		state.BreakJoints(step.Tick);
 
 		// Write-back (§9.3), in canonical order: Dynamic bodies that are awake or have a parent, then characters.
 		const std::vector<UUID> order(scene.GetCanonicalOrder().begin(), scene.GetCanonicalOrder().end());
@@ -2095,6 +2117,8 @@ namespace Engine {
 				deliver(event.Type, high, low, highBody, highContact, event.Synthesized);
 		}
 		state.Dispatching = false;
+		// M37: the joints that broke, after the pair events, in UUID order.
+		state.DispatchJointBreaks();
 	}
 
 	void PhysicsSystem::FlushDestroyed(uint64_t tick)
@@ -2108,6 +2132,8 @@ namespace Engine {
 			std::vector<UUID> gone;
 			const std::set<UUID> candidates = std::move(state.FlushCandidates);
 			state.FlushCandidates.clear();
+			// M37: the joints of entities that left play go now; a body's go with it below (RemoveBody).
+			state.RemoveLeavingJoints(candidates);
 			for (const UUID candidate : candidates)
 			{
 				if (handled.contains(candidate) || state.IsPresent(candidate))
@@ -2495,7 +2521,8 @@ namespace Engine {
 	void PhysicsSystem::AppendStateHash(XXH64Hasher& hasher) const
 	{
 		const State& state = *m_State;
-		if (state.Bodies.empty() && state.Characters.empty())
+		// M37: kept joint frames outlive their bodies while an entity is disabled, so they alone keep the block.
+		if (state.Bodies.empty() && state.Characters.empty() && !state.HasKeptJointFrames())
 			return;
 
 		const Scene& scene = *state.Specification.RuntimeScene;
@@ -2530,6 +2557,8 @@ namespace Engine {
 				append(id, controller.GetPose(), controller.GetVelocity(), glm::vec3(0.0f), false);
 			}
 		}
+		// M37: the joint part, after the bodies and characters.
+		state.AppendJointHash(bytes);
 		hasher.Update(bytes);
 	}
 

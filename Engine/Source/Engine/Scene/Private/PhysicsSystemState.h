@@ -11,6 +11,7 @@
 #include "Engine/Physics/PhysicsWorld.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/PhysicsComposition.h"
+#include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSystem.h"
 
 #include <entt/entity/entity.hpp>
@@ -19,6 +20,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -31,7 +33,8 @@
 
 // The state of a PhysicsSystem (Architecture §9.2 to §9.6), shared by the system's .cpp files: PhysicsSystem.cpp
 // (composition, sync, events, exits, body control, observability, and the characters' lifecycle within the step),
-// PhysicsSystemQueries.cpp (queries and bounds) and PhysicsSystemCharacters.cpp (MoveCharacter and GetCharacterState).
+// PhysicsSystemQueries.cpp (queries and bounds), PhysicsSystemCharacters.cpp (MoveCharacter and GetCharacterState) and
+// (M37) PhysicsSystemJoints.cpp (joints).
 // Private to Scene, so it changes without the contract owner's review (Docs/Decisions/0014-m11-decisions.md decision 17).
 // The entry structs are at namespace scope, not nested: Clang with libstdc++ cannot default-construct a nested struct with
 // default member initializers inside its enclosing class (ADR 0012 decision 24).
@@ -168,6 +171,60 @@ namespace Engine {
 		// M20 (Docs/Decisions/0031-m20-contract.md decision 3): it touched (an Added record that touched, or a Touched record
 		// since). A contact that has not touched counts for its pairs but cannot start them.
 		bool Touching = true;
+	};
+
+	// M37: what decides whether a joint's plan must be composed again (PhysicsSystem.h's M37 paragraph): the fields that
+	// change which bodies it joins or whether it is valid. Compared exactly.
+	struct PhysicsJointKey
+	{
+		PhysicsJointType Type = PhysicsJointType::Hinge;
+		UUID ConnectedBody{};
+		glm::vec3 Anchor = glm::vec3(0.0f);
+		glm::vec3 Axis = glm::vec3(1.0f, 0.0f, 0.0f);
+		glm::vec3 ConnectedAnchor = glm::vec3(0.0f);
+		bool UseLimits = false;
+		float LowerLimit = 0.0f;
+		float UpperLimit = 0.0f;
+
+		bool operator==(const PhysicsJointKey&) const = default;
+	};
+
+	// M37: what a joint's kept frames were formed from; frames are formed again when it differs.
+	struct PhysicsJointFormation
+	{
+		PhysicsJointType Type = PhysicsJointType::Hinge;
+		UUID Body{};
+		UUID Connected{};
+		PhysicsBodyOrigin ConnectedOrigin = PhysicsBodyOrigin::RigidBody;
+		UUID ConnectedBody{};
+		glm::vec3 Anchor = glm::vec3(0.0f);
+		glm::vec3 Axis = glm::vec3(1.0f, 0.0f, 0.0f);
+		// The joint's entity and its ancestors up to its body's owner, inclusive.
+		std::vector<UUID> Chain{};
+
+		bool operator==(const PhysicsJointFormation&) const = default;
+	};
+
+	// M37: one joint entity the session knows (Scene/PhysicsSystemJoints.cpp): its last plan, its live joint and its kept
+	// frames.
+	struct PhysicsJointEntry
+	{
+		UUID Entity{};
+		// The plan the last joint composition gave it, and the key it read.
+		PhysicsJointPlan Plan{};
+		PhysicsJointKey PlannedKey{};
+		// The live joint (invalid while it is not in force) and the bodies it joins (the connected one invalid for the world).
+		JointHandle Handle{};
+		BodyHandle Body{};
+		BodyHandle Connected{};
+		// The settings the live joint has.
+		PhysicsJointSettings Settings{};
+		// The kept frames (hinge, slider and fixed joints) on the joint's body and on the connected body, relative to their
+		// origins, and what they were formed from.
+		bool HasFrames = false;
+		PhysicsJointFrame Frame{};
+		PhysicsJointFrame ConnectedFrame{};
+		PhysicsJointFormation Formation{};
 	};
 
 	struct PhysicsPair
@@ -322,6 +379,43 @@ namespace Engine {
 		//     or implicit static body, before its implicit sensor body); the invalid handle when it owns none.
 		[[nodiscard]] std::optional<PhysicsOverlapHit> ResolveHit(BodyHandle body, uint32_t collider) const;
 		[[nodiscard]] BodyHandle FindOwnedBodyHandle(UUID owner) const;
+
+		// --- Joints (M37, Scene/PhysicsSystemJoints.cpp; PhysicsSystem.h's M37 paragraph) -------------------------------
+		// The last Rebuild's body composition (the joints' input), the joint entities by UUID (so every walk is in UUID
+		// order), what changed since the joints were last synchronized, and the last PostStep's breaks.
+		PhysicsComposition Composition{};
+		std::map<UUID, PhysicsJointEntry> Joints;
+		// A joint component changed, or a body was created or removed: SynchronizeJoints has work.
+		bool JointsChanged = false;
+		// The bodies were composed again or a joint component was added or removed: the joint plan is composed again.
+		bool JointPlansStale = false;
+		// The joint entities whose components changed (their plan is composed again when their key changed).
+		std::set<UUID> ChangedJoints;
+		std::vector<PhysicsJointBreak> LastJointBreaks;
+
+		void OnJointChanged(entt::registry& registry, entt::entity entity);
+		void OnJointAddedOrRemoved(entt::registry& registry, entt::entity entity);
+		void ConnectJointSignals(entt::registry& registry);
+		void DisconnectJointSignals(entt::registry& registry);
+		// Brings the joints in step with the scene and the bodies (PhysicsSystem.h's M37 paragraph); nothing unless
+		// JointsChanged.
+		void SynchronizeJoints();
+		// Destroys every live joint of the body `handle` (RemoveBody, before the body) and marks the joints for the next
+		// synchronization.
+		void RemoveBodyJoints(BodyHandle handle);
+		// The break pass at the start of PostStep: fills LastJointBreaks.
+		void BreakJoints(uint64_t tick);
+		// Delivers LastJointBreaks to the listener (the end of PostStep).
+		void DispatchJointBreaks();
+		// FlushDestroyed's part: the joints of `candidates` that left play (a destroyed entity's entry goes, a disabled one's
+		// keeps its frames).
+		void RemoveLeavingJoints(const std::set<UUID>& candidates);
+		// The joint part of the state hash (AppendStateHash).
+		void AppendJointHash(std::vector<std::byte>& bytes) const;
+		// Whether any joint has kept frames (the hash's joint part is not empty).
+		[[nodiscard]] bool HasKeptJointFrames() const;
+		// Destroys every live joint (the session's end, before the bodies); the world's destructor would too.
+		void DestroyAllJoints();
 	};
 
 }

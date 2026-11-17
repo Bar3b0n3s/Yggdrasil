@@ -42,6 +42,7 @@
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -1376,8 +1377,9 @@ end
 			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
 			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, M23's
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
-			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes.
-			CHECK(codes.size() == 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; M37's joint code
+			// (an array of its own, PhysicsJointDiagnosticCodes).
+			CHECK(codes.size() == 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1433,7 +1435,10 @@ end
 			CHECK(position("INPUT_INVALID_ACTION") + 1 == position(ParticleFrameOutOfRangeCode));
 			CHECK(position(ParticleFrameOutOfRangeCode) + 1 == position(NavMeshNotBakedCode));
 			CHECK(position(NavMeshNotBakedCode) + 1 == position(NavMeshStaleCode));
-			CHECK(codes.back() == NavMeshStaleCode);
+			// Phase 6's codes follow phase 5's in landing order (ADR 0052's ledger): M36's PHYSICS_SURFACE_UNUSED, then M37's
+			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36 and ends the list.
+			CHECK(position(NavMeshStaleCode) < position(PhysicsJointInvalidCode));
+			CHECK(codes.back() == PhysicsJointInvalidCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -2277,6 +2282,59 @@ end
 			const ProjectDiagnostic* layer = FindDiagnostic(*report, PhysicsUnknownLayerCode);
 			REQUIRE(layer != nullptr);
 			CHECK(layer->Field == "Layer");
+		}
+
+		// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9): the joint composition's diagnostics.
+		TEST_CASE("ProjectValidator: PHYSICS_JOINT_INVALID reports a joint without a body, with equal limits or with a zero axis")
+		{
+			Test::EditorTestFixture fixture("ValidatorJoints");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto addBody = [&editor](std::string_view name, std::string_view joint, std::string_view fields)
+			{
+				const Entity entity = editor.GetScene().CreateEntity(name);
+				const Json body = ParseValidatorJson(R"({"Type":"Dynamic"})");
+				REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", &body).has_value());
+				REQUIRE(ComponentAccess::AddComponent(entity, "BoxCollider", nullptr).has_value());
+				const Json value = ParseValidatorJson(fields);
+				REQUIRE(ComponentAccess::AddComponent(entity, joint, &value).has_value());
+			};
+			{
+				SceneEdit edit(editor, "Joints");
+				const Entity loose = editor.GetScene().CreateEntity("Loose");
+				REQUIRE(ComponentAccess::AddComponent(loose, "FixedJoint", nullptr).has_value());
+				addBody("Locked", "HingeJoint", R"({"UseLimits":true,"LowerAngle":0,"UpperAngle":0})");
+				addBody("Pointless", "SliderJoint", R"({"Axis":[0,0,0]})");
+				addBody("Door", "HingeJoint", R"({"Axis":[0,1,0],"UseLimits":true})");
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> joints;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == PhysicsJointInvalidCode)
+					joints.emplace(diagnostic.Entity, &diagnostic);
+			}
+			REQUIRE(joints.size() == 3);
+			const auto check = [&editor, &joints](std::string_view path, std::string_view component, std::string_view field)
+			{
+				CAPTURE(path);
+				const auto found = joints.find(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+				REQUIRE(found != joints.end());
+				const ProjectDiagnostic& diagnostic = *found->second;
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Error);
+				CHECK_FALSE(diagnostic.AutoFixable);
+				CHECK(diagnostic.Component == component);
+				CHECK(diagnostic.Field == field);
+				CHECK(diagnostic.File == "Assets/Scenes/Main.scene");
+			};
+			check("/Loose", "FixedJoint", "");
+			check("/Locked", "HingeJoint", "UpperAngle");
+			check("/Pointless", "SliderJoint", "Axis");
+			CHECK_FALSE(joints.contains(editor.GetScene().FindEntityByPath("/Door").GetUUID().ToString()));
 		}
 
 		TEST_CASE("ProjectValidator: fixing PHYSICS_ADJACENT_STATIC_BODIES adds a Static RigidBody to the common parent in one undo step")

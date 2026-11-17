@@ -3195,6 +3195,404 @@
 			},
 			"additionalProperties": false
 		},
+		"HingeJoint": {
+			"description": "Joins the body of the RigidBody at or above the entity to another body or the world so it only turns about an axis, like a door or a trap door, with optional limits, motor and breaking.",
+			"type": "object",
+			"properties": {
+				"ConnectedBody": {
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Anchor": {
+					"description": "The hinge's pivot in this entity's space, in metres (its scale applies).",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Axis": {
+					"description": "The axis the body turns about, in this entity's space; positive angles turn it by the right-hand rule. Normalized when used; a zero axis makes the joint invalid.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"UseLimits": {
+					"description": "Whether the angle stays between LowerAngle and UpperAngle.",
+					"type": "boolean"
+				},
+				"LowerAngle": {
+					"description": "The smallest angle, in degrees from the authored pose, while UseLimits holds.",
+					"type": "number",
+					"minimum": -180,
+					"maximum": 0
+				},
+				"UpperAngle": {
+					"description": "The largest angle, in degrees from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 180
+				},
+				"MaxFrictionTorque": {
+					"description": "The friction torque, in newton metres, that resists turning while the motor is Off.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Motor": {
+					"description": "What the motor does: Off, drive to a target velocity, or drive to a target through a spring.",
+					"enum": ["Off", "Velocity", "Position"]
+				},
+				"MotorTargetVelocity": {
+					"description": "The angular velocity a Velocity motor drives to, in degrees per second.",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"MotorTargetAngle": {
+					"description": "The angle a Position motor drives to, in degrees from the authored pose; clamped to the limits while UseLimits holds.",
+					"type": "number",
+					"minimum": -180,
+					"maximum": 180
+				},
+				"MotorMaxTorque": {
+					"description": "The most torque the motor applies, in newton metres.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 999999995904
+				},
+				"MotorFrequency": {
+					"description": "The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default).",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000
+				},
+				"MotorDamping": {
+					"description": "The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"CollideConnected": {
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"type": "boolean"
+				},
+				"BreakForce": {
+					"description": "The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.",
+					"type": "number",
+					"minimum": 0
+				},
+				"BreakTorque": {
+					"description": "The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Broken": {
+					"description": "Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"SliderJoint": {
+			"description": "Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking.",
+			"type": "object",
+			"properties": {
+				"ConnectedBody": {
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Anchor": {
+					"description": "The joint's point in this entity's space, in metres (its scale applies).",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Axis": {
+					"description": "The axis the body moves along, in this entity's space; positive positions move it along the axis. Normalized when used; a zero axis makes the joint invalid.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"UseLimits": {
+					"description": "Whether the position stays between LowerLimit and UpperLimit.",
+					"type": "boolean"
+				},
+				"LowerLimit": {
+					"description": "The smallest position, in metres from the authored pose, while UseLimits holds.",
+					"type": "number",
+					"minimum": -1000000000,
+					"maximum": 0
+				},
+				"UpperLimit": {
+					"description": "The largest position, in metres from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000000
+				},
+				"MaxFrictionForce": {
+					"description": "The friction force, in newtons, that resists sliding while the motor is Off.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Motor": {
+					"description": "What the motor does: Off, drive to a target velocity, or drive to a target through a spring.",
+					"enum": ["Off", "Velocity", "Position"]
+				},
+				"MotorTargetVelocity": {
+					"description": "The velocity a Velocity motor drives to, in metres per second.",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"MotorTargetPosition": {
+					"description": "The position a Position motor drives to, in metres from the authored pose; clamped to the limits while UseLimits holds.",
+					"type": "number",
+					"minimum": -1000000,
+					"maximum": 1000000
+				},
+				"MotorMaxForce": {
+					"description": "The most force the motor applies, in newtons.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 999999995904
+				},
+				"MotorFrequency": {
+					"description": "The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default).",
+					"type": "number",
+					"minimum": 0.001,
+					"maximum": 1000
+				},
+				"MotorDamping": {
+					"description": "The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"CollideConnected": {
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"type": "boolean"
+				},
+				"BreakForce": {
+					"description": "The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.",
+					"type": "number",
+					"minimum": 0
+				},
+				"BreakTorque": {
+					"description": "The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Broken": {
+					"description": "Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"DistanceJoint": {
+			"description": "Keeps a point of the body of the RigidBody at or above the entity between a minimum and a maximum distance from a point of another body or of the world, like a rope, a chain link or a rod, with an optional spring and breaking.",
+			"type": "object",
+			"properties": {
+				"ConnectedBody": {
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Anchor": {
+					"description": "The joint's point in this entity's space, in metres (its scale applies).",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"ConnectedAnchor": {
+					"description": "The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"MinDistance": {
+					"description": "The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000000
+				},
+				"MaxDistance": {
+					"description": "The longest the distance between the anchors gets, in metres.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000000000
+				},
+				"Frequency": {
+					"description": "The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"Damping": {
+					"description": "The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"CollideConnected": {
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"type": "boolean"
+				},
+				"BreakForce": {
+					"description": "The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Broken": {
+					"description": "Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"FixedJoint": {
+			"description": "Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break.",
+			"type": "object",
+			"properties": {
+				"ConnectedBody": {
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Anchor": {
+					"description": "The weld's point in this entity's space, in metres (its scale applies).",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						},
+						{
+							"type": "number",
+							"minimum": -1000000000,
+							"maximum": 1000000000
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"CollideConnected": {
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"type": "boolean"
+				},
+				"BreakForce": {
+					"description": "The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.",
+					"type": "number",
+					"minimum": 0
+				},
+				"BreakTorque": {
+					"description": "The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks.",
+					"type": "number",
+					"minimum": 0
+				},
+				"Broken": {
+					"description": "Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.",
+					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
 		"PrefabOverride": {
 			"description": "One recorded difference between an outermost prefab instance and its prefab.",
 			"type": "object",
@@ -3808,6 +4206,18 @@
 						},
 						"NavModifier": {
 							"$ref": "#/$defs/NavModifier"
+						},
+						"HingeJoint": {
+							"$ref": "#/$defs/HingeJoint"
+						},
+						"SliderJoint": {
+							"$ref": "#/$defs/SliderJoint"
+						},
+						"DistanceJoint": {
+							"$ref": "#/$defs/DistanceJoint"
+						},
+						"FixedJoint": {
+							"$ref": "#/$defs/FixedJoint"
 						}
 					},
 					"additionalProperties": true

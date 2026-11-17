@@ -95,6 +95,12 @@ export type InputEventType = "Action" | "Key" | "MouseButton" | "MouseMove" | "M
 -- Start a fresh recording or stop and save it.
 export type InputRecordAction = "Start" | "Stop"
 
+-- What a HingeJoint's or SliderJoint's motor does.
+export type JointMotorMode = "Off" | "Velocity" | "Position"
+
+-- Which joint component a joint is (physics.jointInfo's type).
+export type JointType = "Hinge" | "Slider" | "Distance" | "Fixed"
+
 -- Keyboard keys by their US-layout position.
 export type Key = "Space" | "Apostrophe" | "Comma" | "Minus" | "Period" | "Slash" | "D0" | "D1" | "D2" | "D3" | "D4" | "D5" | "D6" | "D7" | "D8" | "D9" | "Semicolon" | "Equal" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "LeftBracket" | "Backslash" | "RightBracket" | "GraveAccent" | "World1" | "World2" | "Escape" | "Enter" | "Tab" | "Backspace" | "Insert" | "Delete" | "Right" | "Left" | "Down" | "Up" | "PageUp" | "PageDown" | "Home" | "End" | "CapsLock" | "ScrollLock" | "NumLock" | "PrintScreen" | "Pause" | "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12" | "F13" | "F14" | "F15" | "F16" | "F17" | "F18" | "F19" | "F20" | "F21" | "F22" | "F23" | "F24" | "F25" | "Keypad0" | "Keypad1" | "Keypad2" | "Keypad3" | "Keypad4" | "Keypad5" | "Keypad6" | "Keypad7" | "Keypad8" | "Keypad9" | "KeypadDecimal" | "KeypadDivide" | "KeypadMultiply" | "KeypadSubtract" | "KeypadAdd" | "KeypadEnter" | "KeypadEqual" | "LeftShift" | "LeftControl" | "LeftAlt" | "LeftSuper" | "RightShift" | "RightControl" | "RightAlt" | "RightSuper" | "Menu"
 
@@ -590,6 +596,30 @@ declare extern type DirectionalLight with
 	ShadowDistance: number
 end
 
+-- Keeps a point of the body of the RigidBody at or above the entity between a minimum and a maximum distance from a point of another body or of the world, like a rope, a chain link or a rod, with an optional spring and breaking.
+declare extern type DistanceJoint with
+	-- The joint's point in this entity's space, in metres (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	Anchor: vector
+	-- The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. [All modes; Runtime|Test; pure/read; setter mutates]
+	BreakForce: number
+	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
+	Broken: boolean
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	CollideConnected: boolean
+	-- The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null. [All modes; Runtime|Test; pure/read; setter mutates]
+	ConnectedAnchor: vector
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	ConnectedBody: Entity?
+	-- The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped. [All modes; Runtime|Test; pure/read; setter mutates]
+	Damping: number
+	-- The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope. [All modes; Runtime|Test; pure/read; setter mutates]
+	Frequency: number
+	-- The longest the distance between the anchors gets, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxDistance: number
+	-- The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid. [All modes; Runtime|Test; pure/read; setter mutates]
+	MinDistance: number
+end
+
 -- A UUID and scene generation identifying an entity; no native address is exposed. After a Destroy, the entity's reads keep working until the destruction flush, while IsValid is false and its writes raise.
 declare extern type Entity with
 	-- Validate and add a component and return its proxy; Script instances are synchronized before returning, and nil is returned when the new Script's OnCreate destroyed the entity. Each value holds at most 4096 bytes of text (strings, map keys and Variant text together). [All modes; Runtime|Test; mutates]
@@ -618,10 +648,14 @@ declare extern type Entity with
 	Destroy: (self: Entity) -> ()
 	-- The entity's DirectionalLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	DirectionalLight: DirectionalLight?
+	-- The entity's DistanceJoint component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	DistanceJoint: DistanceJoint?
 	-- The entity's Environment component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Environment: Environment?
 	-- Find the first exact child name in depth-first sibling order; recursive defaults false. [All modes; Runtime|Test; pure/read]
 	FindChild: (self: Entity, name: string, recursive: boolean?) -> Entity?
+	-- The entity's FixedJoint component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	FixedJoint: FixedJoint?
 	-- The entity's Fog component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Fog: Fog?
 	-- Copy the children in sibling order. [All modes; Runtime|Test; pure/read]
@@ -676,6 +710,10 @@ declare extern type Entity with
 	function GetComponent(self, name: "TerrainCollider"): TerrainCollider?
 	function GetComponent(self, name: "MaterialParameters"): MaterialParameters?
 	function GetComponent(self, name: "Fog"): Fog?
+	function GetComponent(self, name: "HingeJoint"): HingeJoint?
+	function GetComponent(self, name: "SliderJoint"): SliderJoint?
+	function GetComponent(self, name: "DistanceJoint"): DistanceJoint?
+	function GetComponent(self, name: "FixedJoint"): FixedJoint?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -690,6 +728,8 @@ declare extern type Entity with
 	HasComponent: (self: Entity, name: string) -> boolean
 	-- Check an exact tag. [All modes; Runtime|Test; pure/read]
 	HasTag: (self: Entity, tag: string) -> boolean
+	-- The entity's HingeJoint component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	HingeJoint: HingeJoint?
 	-- The immutable 16-digit hexadecimal UUID. [All modes; Runtime|Test; pure/read]
 	ID: string
 	-- The entity's IrradianceVolume component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -738,6 +778,8 @@ declare extern type Entity with
 	SetParent: (self: Entity, parent: Entity?, keepWorld: boolean?) -> ()
 	-- The entity's SkinnedMesh component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SkinnedMesh: SkinnedMesh?
+	-- The entity's SliderJoint component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	SliderJoint: SliderJoint?
 	-- The entity's SphereCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SphereCollider: SphereCollider?
 	-- The entity's SpotLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -804,6 +846,22 @@ end
 declare extern type FieldDescriptor with
 end
 
+-- Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break.
+declare extern type FixedJoint with
+	-- The weld's point in this entity's space, in metres (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	Anchor: vector
+	-- The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. [All modes; Runtime|Test; pure/read; setter mutates]
+	BreakForce: number
+	-- The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. [All modes; Runtime|Test; pure/read; setter mutates]
+	BreakTorque: number
+	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
+	Broken: boolean
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	CollideConnected: boolean
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	ConnectedBody: Entity?
+end
+
 -- The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene).
 declare extern type Fog with
 	-- How much the environment's ambient light tints Color: 0 keeps Color, 1 multiplies it by the ambient light. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -828,6 +886,44 @@ declare extern type Fog with
 	SunGlow: number
 	-- How tightly the sun glow gathers around the light's direction: higher is tighter. [All modes; Runtime|Test; pure/read; setter mutates]
 	SunGlowExponent: number
+end
+
+-- Joins the body of the RigidBody at or above the entity to another body or the world so it only turns about an axis, like a door or a trap door, with optional limits, motor and breaking.
+declare extern type HingeJoint with
+	-- The hinge's pivot in this entity's space, in metres (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	Anchor: vector
+	-- The axis the body turns about, in this entity's space; positive angles turn it by the right-hand rule. Normalized when used; a zero axis makes the joint invalid. [All modes; Runtime|Test; pure/read; setter mutates]
+	Axis: vector
+	-- The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. [All modes; Runtime|Test; pure/read; setter mutates]
+	BreakForce: number
+	-- The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. [All modes; Runtime|Test; pure/read; setter mutates]
+	BreakTorque: number
+	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
+	Broken: boolean
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	CollideConnected: boolean
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	ConnectedBody: Entity?
+	-- The smallest angle, in degrees from the authored pose, while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
+	LowerAngle: number
+	-- The friction torque, in newton metres, that resists turning while the motor is Off. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxFrictionTorque: number
+	-- What the motor does: Off, drive to a target velocity, or drive to a target through a spring. [All modes; Runtime|Test; pure/read; setter mutates]
+	Motor: JointMotorMode
+	-- The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorDamping: number
+	-- The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorFrequency: number
+	-- The most torque the motor applies, in newton metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorMaxTorque: number
+	-- The angle a Position motor drives to, in degrees from the authored pose; clamped to the limits while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorTargetAngle: number
+	-- The angular velocity a Velocity motor drives to, in degrees per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorTargetVelocity: number
+	-- The largest angle, in degrees from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint). [All modes; Runtime|Test; pure/read; setter mutates]
+	UpperAngle: number
+	-- Whether the angle stays between LowerAngle and UpperAngle. [All modes; Runtime|Test; pure/read; setter mutates]
+	UseLimits: boolean
 end
 
 -- A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it.
@@ -1296,6 +1392,44 @@ declare extern type SkinnedMesh with
 	MorphWeights: {number}
 	-- Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one. [All modes; Runtime|Test; mutates]
 	SetMorphWeight: (self: SkinnedMesh, target: string, weight: number) -> ()
+end
+
+-- Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking.
+declare extern type SliderJoint with
+	-- The joint's point in this entity's space, in metres (its scale applies). [All modes; Runtime|Test; pure/read; setter mutates]
+	Anchor: vector
+	-- The axis the body moves along, in this entity's space; positive positions move it along the axis. Normalized when used; a zero axis makes the joint invalid. [All modes; Runtime|Test; pure/read; setter mutates]
+	Axis: vector
+	-- The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. [All modes; Runtime|Test; pure/read; setter mutates]
+	BreakForce: number
+	-- The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. [All modes; Runtime|Test; pure/read; setter mutates]
+	BreakTorque: number
+	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
+	Broken: boolean
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	CollideConnected: boolean
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	ConnectedBody: Entity?
+	-- The smallest position, in metres from the authored pose, while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
+	LowerLimit: number
+	-- The friction force, in newtons, that resists sliding while the motor is Off. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxFrictionForce: number
+	-- What the motor does: Off, drive to a target velocity, or drive to a target through a spring. [All modes; Runtime|Test; pure/read; setter mutates]
+	Motor: JointMotorMode
+	-- The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorDamping: number
+	-- The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorFrequency: number
+	-- The most force the motor applies, in newtons. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorMaxForce: number
+	-- The position a Position motor drives to, in metres from the authored pose; clamped to the limits while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorTargetPosition: number
+	-- The velocity a Velocity motor drives to, in metres per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	MotorTargetVelocity: number
+	-- The largest position, in metres from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint). [All modes; Runtime|Test; pure/read; setter mutates]
+	UpperLimit: number
+	-- Whether the position stays between LowerLimit and UpperLimit. [All modes; Runtime|Test; pure/read; setter mutates]
+	UseLimits: boolean
 end
 
 -- A sphere-shaped collider in the entity's space.
