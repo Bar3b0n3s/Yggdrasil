@@ -782,6 +782,14 @@ Current world gravity.
 
 All modes; Runtime|Test; pure/read.
 
+### Physics.GetSurface
+
+`(collider: Entity?) -> SurfaceInfo?`
+
+The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use (of the velocity, its part along the surface alone), as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for nil, for a disabled entity and for one without a solid collider in a body (a character's capsule, triggers alone); a destroyed entity is an error. Physics.GetSurface(controller:GetGroundCollider()) reads what a character stands on, nil while it is in the air.
+
+All modes; Runtime|Test; pure/read.
+
 ### Physics.LayerMask
 
 `(...string) -> number`
@@ -2292,11 +2300,27 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 Moves the entity as a walking character that climbs steps and slopes and collides with the world.
 
+### CharacterController.GetGroundCollider
+
+`(self: CharacterController) -> Entity?`
+
+The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity.
+
+All modes; Runtime|Test; pure/read.
+
 ### CharacterController.GetGroundNormal
 
 `(self: CharacterController) -> vector`
 
 Ground normal from the last update.
+
+All modes; Runtime|Test; pure/read.
+
+### CharacterController.GetSqueezingBody
+
+`(self: CharacterController) -> Entity?`
+
+The owner of the body that squeezed the character in its last update (the one with the lowest body handle when several did, a deterministic choice), or nil while it is not squeezed or that entity is disabled or destroyed.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2328,7 +2352,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.
+While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2337,6 +2361,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `(self: CharacterController) -> boolean`
 
 Whether the last character update found supporting ground.
+
+All modes; Runtime|Test; pure/read.
+
+### CharacterController.IsSqueezed
+
+`(self: CharacterController) -> boolean`
+
+Whether the last character update found the character squeezed: a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it (a press onto the floor, a piston against a wall). Read in the next fixed update; the engine makes no escape and deals no damage.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2413,6 +2445,34 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `number`
 
 The circle's radius; at least 1 mm.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## ColliderSurface
+
+The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them (a conveyor belt).
+
+### ColliderSurface.Friction
+
+`number`
+
+The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ColliderSurface.Restitution
+
+`number`
+
+The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### ColliderSurface.SurfaceVelocity
+
+`vector`
+
+The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity, each by its part along the surface alone (a part off the surface lifts and presses nothing). A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2652,6 +2712,14 @@ The entity's CircleCollider2D component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.ColliderSurface
+
+`ColliderSurface?`
+
+The entity's ColliderSurface component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.Destroy
 
 `(self: Entity) -> ()`
@@ -2702,7 +2770,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?)`
 
 Get a component proxy, or nil when absent.
 
@@ -4472,7 +4540,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts.
+The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -4600,7 +4668,7 @@ All modes; Runtime|Test; mutates.
 
 `number`
 
-Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface.
+The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5240,7 +5308,7 @@ The entity's Terrain as a static height field in the physics world, colliding wi
 
 `number`
 
-The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values.
+The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5256,7 +5324,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values.
+The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -7653,6 +7721,12 @@ Owned script diagnostic with exclusive occurrence cursor.
 `{Entity: Entity}`
 
 Every behaviour instance owns an Entity identity and copies its declared field defaults.
+
+## SurfaceInfo
+
+`{Friction: number, Restitution: number, SurfaceVelocity: vector}`
+
+The values contacts with a collider use: its ColliderSurface's friction and restitution and its surface velocity in world space (m/s), or its body's friction and restitution with no velocity.
 
 ## TestAudioLevels
 

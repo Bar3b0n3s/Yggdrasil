@@ -26,7 +26,8 @@ namespace Engine {
 
 	// Registry name "RigidBody" (Architecture §5.3, §9.2): simulates the entity (and its collider-only descendants, as one
 	// compound) with Jolt. Requires Transform; excludes CharacterController. Mass in kilograms (Dynamic only, > 0);
-	// Friction and Restitution live on the body because Jolt stores them per body; Layer names a project physics layer;
+	// Friction and Restitution are the material of the body's colliders, which a ColliderSurface replaces for the colliders on
+	// its entity (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 1); Layer names a project physics layer;
 	// MaxAngularVelocity in rad/s (Jolt's default 0.25 * pi * 60); EnhancedInternalEdgeRemoval is Jolt's
 	// mEnhancedInternalEdgeRemoval, set on rolling bodies (§9.2); initial velocities apply when the body is created. The
 	// MotionQuality member shares its enum's name, so the type is qualified with the namespace.

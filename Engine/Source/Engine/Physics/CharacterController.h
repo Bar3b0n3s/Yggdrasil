@@ -35,8 +35,26 @@
 // created as the world's next body at Create, so a caller that creates characters and bodies in canonical order (§5.1)
 // gets the same inner body handle every run (§9.6: the inner body ID comes from the canonical body-ID sequence).
 //
+// Surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 4; World Tree's briefs 15 and 16). The ground state
+// names the body and the collider the character stands on (Jolt's ground body and sub-shape of the update, no query), and a
+// collider surface's velocity (PhysicsWorld::SetColliderSurfaces) carries a grounded character: a conveyor belt moves it
+// whatever InheritGroundVelocity says, which stays about ground that really moves. Only the surface velocity's part along
+// the ground carries it (projected onto the plane of the ground normal), as a body takes it only through friction, so a
+// belt whose velocity leaves its surface neither lifts the character nor presses it in (the lead's decision on the W36.2
+// review, ADR 0053).
+//
+// Pushes and the squeeze (M36 W36.2, ADR 0053 decisions 11 and 12; World Tree's brief 16). A Kinematic body, or a Dynamic
+// body not lighter than the character, that moves into the character pushes it along the contact's normal at the body's
+// velocity, through CharacterVirtual's moving contact planes: while the body is within the character's look-ahead (0.1 m)
+// at its update, so up to about 6 m/s at 60 Hz with no overlap; a faster one overlaps the character for one tick and pushes
+// it out at the next update, and one beyond about 0.1 m plus Radius a tick can pass through it (Docs/Backlog.md §6). A
+// character such a body cannot move out of the way (pinned under a press, against a wall by a piston) is squeezed: after its
+// update, the body's push this step would leave it more than CharacterSqueezeTolerance inside the character's padded
+// capsule (GetSqueeze). The engine makes no escape and deals no damage: the game decides.
+//
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8); M34 changes what it documents of Mass,
-// Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1).
+// Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1); M36 adds the ground's body,
+// collider and surface velocity and the squeeze, reviewed as such a change too (ADR 0053 decisions 4 and 12).
 
 namespace Engine {
 
@@ -47,6 +65,12 @@ namespace Engine {
 	// component. Far beyond any game's character, and small enough that a step's movement stays well inside Jolt's world
 	// bounds whatever the gravity.
 	inline constexpr float MaxCharacterSpeed = 500.0f;
+
+	// M36 W36.2 (Docs/Decisions/0053-m36-contact-surfaces.md decision 12): how far, in metres, a body that pushes a character
+	// may end its step inside the character's padded capsule before the character counts as squeezed (GetSqueeze). Below one
+	// tick of a press at 1 m/s (1.6 cm at 60 Hz), above what Jolt's solver leaves of a push it follows (its tolerances are a
+	// millimetre).
+	inline constexpr float CharacterSqueezeTolerance = 0.01f;
 
 	// What a controller is created with (CharacterControllerComponent, §5.3). Every float finite.
 	struct CharacterControllerDescription
@@ -79,7 +103,7 @@ namespace Engine {
 		// M19 (Docs/Decisions/0030-m19-contract.md decision 36, P-CARRY; CharacterControllerComponent::InheritGroundVelocity):
 		// while grounded, the character also moves with the horizontal velocity of what it stands on (see Update), so a
 		// platform moving at v carries it v * t in t seconds. Off by default: the character then keeps only the ground's
-		// vertical velocity, as before.
+		// vertical velocity, as before, and, from M36, a collider surface's horizontal velocity (see Update).
 		bool InheritGroundVelocity = false;
 	};
 
@@ -88,7 +112,25 @@ namespace Engine {
 	{
 		bool IsGrounded = false;                              // standing on walkable ground (Jolt's EGroundState::OnGround)
 		glm::vec3 GroundNormal = glm::vec3(0.0f, 1.0f, 0.0f); // unit; (0, 1, 0) when not grounded
-		glm::vec3 GroundVelocity = glm::vec3(0.0f);           // the velocity of what the character stands on (a moving platform)
+		// The velocity of what the character stands on (a moving platform), M36: with the surface velocity of the collider it
+		// stands on (PhysicsWorld::SetColliderSurfaces, in world space at the update, its part along the ground alone), which
+		// a Dynamic body lighter than the character never gives.
+		glm::vec3 GroundVelocity = glm::vec3(0.0f);
+		// M36: the body the character stands on (Jolt's ground body of the update: another character's inner body when it stands
+		// on one) and the collider of it (ColliderShapeDescription::UserData, as a contact on that sub-shape names it); the
+		// invalid handle and 0 when not grounded. The body may have been destroyed since the update.
+		BodyHandle GroundBody{};
+		uint32_t GroundCollider = 0;
+	};
+
+	// M36 W36.2: whether the last update found the character squeezed, and by which body (GetSqueeze).
+	struct CharacterSqueeze
+	{
+		bool IsSqueezed = false;
+		// The squeezing body of the lowest body handle when several squeeze it (a deterministic choice; a handle follows the
+		// canonical creation order only among the bodies created together, a body created again in play takes a higher
+		// one); invalid otherwise. It may have been destroyed since the update.
+		BodyHandle Body{};
 	};
 
 	class CharacterController
@@ -122,7 +164,10 @@ namespace Engine {
 		// `gravity` * `deltaTime` (the desired vertical part is ignored); M19 (Docs/Decisions/0030-m19-contract.md decision
 		// 36): with CharacterControllerDescription::InheritGroundVelocity and while grounded, plus the horizontal part of the
 		// ground's velocity (Jolt's ground velocity, updated first: a kinematic platform's velocity, a rotating body's surface
-		// velocity at the contact); that velocity is clamped to MaxCharacterSpeed.
+		// velocity at the contact); M36 (ADR 0053 decision 4): the ground's velocity includes the surface velocity of the collider
+		// the character stands on (turned by its body's current rotation, its part along the ground alone: projected onto the
+		// plane of the ground normal; none on a light body), and while grounded its horizontal part is added whatever
+		// InheritGroundVelocity says, so a conveyor belt carries the character; that velocity is clamped to MaxCharacterSpeed.
 		// "Grounded" is Jolt's OnGround while the character does not move away from the ground faster than 0.1 m/s (else
 		// the step after a jump would cancel it); the ground's velocity is none when the ground is a Dynamic body lighter than
 		// the character (M34). Then ExtendedUpdate with stick-to-floor (down to StepHeight) and ExtendedUpdate's walk-stairs
@@ -145,8 +190,19 @@ namespace Engine {
 		[[nodiscard]] glm::vec3 GetVelocity() const;
 		// Sets the velocity the next Update starts from (Scene/PhysicsSystem uses it for teleports that zero it).
 		void SetVelocity(const glm::vec3& velocity);
-		// The ground state of the last Update.
+		// The ground state of the last Update (its ground's surface velocity as that update turned it).
 		[[nodiscard]] CharacterGroundState GetGroundState() const;
+		// M36 W36.2: the squeeze of the last Update (see the file comment). A body pushes the character when it is Kinematic, or
+		// Dynamic and not lighter than the character, and its velocity at a contact of the update moves it towards the character
+		// faster than 1 mm/s; it squeezes the character when, at the character's position after the update, its push over the
+		// step (that speed times the step) would leave it more than CharacterSqueezeTolerance inside the character's padded
+		// capsule: the update could not move the character ahead of it, so it is held by something else (the floor under a
+		// press, a wall behind a piston). A body the character merely touches, one at rest (a resting ram the character is carried
+		// into), one moving away, a static wall the character walks into, a corner or a steep face never squeezes; a press's first
+		// contact, while it is still above the character's head, does not either. Read with one extra shape query of the
+		// character's capsule against the pushing bodies alone, only in an update that met one. A teleport keeps the last
+		// update's value.
+		[[nodiscard]] CharacterSqueeze GetSqueeze() const;
 		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see; its object layer has the Character kind
 		// (M34), so no other body meets it in the solver.
 		[[nodiscard]] BodyHandle GetInnerBody() const;

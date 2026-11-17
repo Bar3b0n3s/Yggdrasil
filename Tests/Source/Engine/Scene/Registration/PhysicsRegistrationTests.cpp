@@ -2,8 +2,16 @@
 
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Reflection/Value.h"
+#include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
+#include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Scene.h"
 #include "Support/SceneTestFixture.h"
+
+#include <cmath>
+#include <limits>
+#include <string>
 
 namespace Engine {
 
@@ -82,7 +90,7 @@ namespace Engine {
 		TEST_CASE("PhysicsRegistration: body and character bounds keep every value valid for Jolt")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
-			for (const std::string_view field : { "Friction", "LinearDamping", "AngularDamping", "MaxLinearVelocity", "MaxAngularVelocity" })
+			for (const std::string_view field : { "LinearDamping", "AngularDamping", "MaxLinearVelocity", "MaxAngularVelocity" })
 			{
 				INFO(std::string(field));
 				const FieldMeta& meta = FindPhysicsMeta(*registry, "RigidBody", field);
@@ -108,6 +116,37 @@ namespace Engine {
 				const FieldMeta& mass = FindPhysicsMeta(*registry, component, "Mass");
 				REQUIRE(mass.Max.has_value());
 				CHECK(*mass.Max == static_cast<double>(MaxPhysicsMass));
+			}
+		}
+
+		// The W36.1 review's finding 1 (Docs/Decisions/0053-m36-contact-surfaces.md decision 2): the physics world refuses a
+		// friction above MaxPhysicsFriction, the 2D world's bodies included, so every Friction field stops there at every
+		// write.
+		TEST_CASE("PhysicsRegistration: every Friction field, 3D and 2D, refuses a friction above MaxPhysicsFriction")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const float above = std::nextafter(MaxPhysicsFriction, std::numeric_limits<float>::infinity());
+			for (const std::string_view component : { "RigidBody", "ColliderSurface", "TerrainCollider", "RigidBody2D" })
+			{
+				INFO(std::string(component));
+				const FieldMeta& meta = FindPhysicsMeta(*registry, component, "Friction");
+				CHECK(meta.Min == 0.0);
+				REQUIRE(meta.Max.has_value());
+				CHECK(*meta.Max == static_cast<double>(MaxPhysicsFriction));
+
+				Entity entity = scene.CreateEntity(std::string(component));
+				if (component == "TerrainCollider")
+					REQUIRE(ComponentAccess::AddComponent(entity, "Terrain", nullptr).has_value());
+				REQUIRE(ComponentAccess::AddComponent(entity, component, nullptr).has_value());
+				REQUIRE(ComponentAccess::SetFieldValue(entity, component, "Friction", Value::FromFloat(MaxPhysicsFriction)).has_value());
+				const Status refused = ComponentAccess::SetFieldValue(entity, component, "Friction", Value::FromFloat(above));
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::Validation);
+				const Result<Value> kept = ComponentAccess::GetFieldValue(entity, component, "Friction");
+				REQUIRE(kept.has_value());
+				CHECK(kept->AsFloat() == MaxPhysicsFriction);
 			}
 		}
 

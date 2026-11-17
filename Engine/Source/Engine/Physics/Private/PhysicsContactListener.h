@@ -3,6 +3,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Physics/ContactBuffer.h"
 #include "Engine/Physics/PhysicsShape.h"
+#include "Engine/Physics/PhysicsWorld.h"
 
 // Jolt/Jolt.h must be included before any other Jolt header (Vendor/JoltPhysics/VENDOR.md).
 #include <Jolt/Jolt.h>
@@ -29,6 +30,12 @@
 // or it touches, and at the first collision step in which OnContactPersisted finds it touching the listener appends one
 // Touched record. Which contacts are remembered depends only on the contacts Jolt reports, never on the order its threads
 // report them in, so the records stay deterministic once sorted.
+//
+// Collider surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 2; PhysicsWorld::SetColliderSurfaces): in
+// OnContactAdded and OnContactPersisted (which Jolt calls with freshly combined settings for every new, cached and
+// continuous-collision contact), a contact of which a side's collider has a surface in its body's record gets its
+// settings from both sides (ApplySurfaces), each a function of the pair's records and bodies alone, so the result does not
+// depend on Jolt's threads. A contact neither of whose colliders has a surface is left as Jolt combined it.
 
 namespace Engine {
 
@@ -55,7 +62,17 @@ namespace Engine {
 			bool WantsLinearCast = false;
 			// BodyDescription::SpheresAsDiscs of a Dynamic body, which PhysicsWorld::SetShape keeps.
 			bool SpheresAsDiscs = false;
+			// M36: the surfaces of the body's colliders (PhysicsWorld::SetColliderSurfaces), sorted by collider, at most one
+			// each; empty for a body without any (every body until it is given some).
+			std::vector<PhysicsColliderSurface> Surfaces{};
 		};
+
+		// M36: the record of the body `body` names, or null when it has none (a free or reused slot). Any thread, while no
+		// record is written (the main thread writes them only between steps).
+		[[nodiscard]] const PhysicsBodyRecord* FindPhysicsBodyRecord(const std::vector<PhysicsBodyRecord>& bodies, const JPH::BodyID& body);
+
+		// M36: the surface of the collider `collider` in `record` (PhysicsBodyRecord::Surfaces), or null. Any thread.
+		[[nodiscard]] const PhysicsColliderSurface* FindColliderSurface(const PhysicsBodyRecord& record, uint32_t collider);
 
 		// The collider index of `subShape` on a body whose Jolt shape is `shape` (PhysicsShape.h "Collider identity"): for a
 		// compound, the compound's sub-shape user data of the SubShapeID's first level (never the leaf's own user data, which
@@ -129,6 +146,11 @@ namespace Engine {
 			[[nodiscard]] bool IsRecordedSensor(const JPH::BodyID& body) const;
 			// The Added or Touched record of a manifold, its Touching set by PhysicsContactTouches.
 			[[nodiscard]] ContactEvent MakeRecord(ContactEventKind kind, const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold) const;
+			// M36: when a side's collider of the manifold has a surface, sets the contact's combined friction (the geometric
+			// mean), combined restitution (the larger) and relative linear surface velocity (body 2's side's minus body 1's,
+			// each turned by its body's rotation) from both sides, each side's value its surface's or else its body's; a sensor
+			// contact, or one without a surface on either collider, is left as Jolt combined it.
+			void ApplySurfaces(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold, JPH::ContactSettings& settings) const;
 		private:
 			ContactBuffer* m_Buffer = nullptr;
 			const std::vector<PhysicsBodyRecord>* m_Bodies = nullptr;

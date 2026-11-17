@@ -17,12 +17,15 @@
 #include <Jolt/Physics/Body/MotionProperties.h>
 #include <Jolt/Physics/Character/CharacterID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/CollisionGroup.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 // The character controller (Architecture §9.6) over a JPH::CharacterVirtual.
@@ -54,6 +57,23 @@
 // versus sensor, SubShapeA the capsule's empty sub-shape ID, all bits set), which the character's recorder refuses; the
 // two sources never share a sub-shape key, and each reports every removal of what it added, so the session's per-pair
 // reference count stays exact.
+//
+// Surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 4). The collider a character stands on is Jolt's
+// ground body and sub-shape of the update (resolved as a contact's, ResolvePhysicsCollider), and its surface velocity
+// (PhysicsBodyRecord::Surfaces) joins the ground's velocity, turned by the body's rotation when it is read: at the start of
+// Update for the step's velocity (the ground of the last update, where it is now), at its end for the ground state it
+// reports (the new ground). Only its part along the ground counts (Utils::AlongGround: projected onto the plane of the
+// ground normal of that moment), as a body takes a surface velocity only through friction along the contact (the lead's
+// decision on the W36.2 review, ADR 0053), so a belt whose velocity leaves its surface neither lifts a character nor
+// presses it in. Without a surface the update computes exactly what it did before M36.
+//
+// The squeeze (M36 W36.2, ADR 0053 decision 12). After the update, the contacts of its last pass (GetActiveContacts) name the
+// bodies that push the character: not sensors or discarded, able to push it (CharacterContactSettings::mCanPushCharacter,
+// which the recorder turns off for a light Dynamic body), not Static, and moving towards it (the contact point's velocity
+// along the contact's normal, which points at the character) faster than MinPushSpeed. Their contacts' distances are those
+// of the pass's start, so the controller measures them again where the update left the character: one CheckCollision of the
+// character's capsule against those bodies alone. A body whose push over the step (its speed times the step) would end more
+// than CharacterSqueezeTolerance inside the padded capsule squeezes it; the update could not keep the character ahead of it.
 //
 // Range. A character never leaves the range physics places bodies in (IsPlaceablePhysicsPose): an update that would
 // carry it beyond MaxPhysicsCoordinate leaves it where it was, with no velocity, and logs a warning once per controller.
@@ -102,6 +122,17 @@ namespace Engine {
 			const JPH::Vec3 direction = (velocity / largest).Normalized();
 			const float length = largest * (velocity / largest).Length();
 			return length > MaxCharacterSpeed ? direction * MaxCharacterSpeed : velocity;
+		}
+
+		// M36 (the lead's decision on the W36.2 review, ADR 0053): `surface`, a ground collider's surface velocity, without its
+		// part along `normal`, the ground normal Jolt reports (pointing out of the ground); `up` stands in for a normal that is
+		// not finite or not near unit length. A velocity already along the ground keeps every bit when the normal is exactly
+		// perpendicular to it (a flat belt on a flat floor).
+		[[nodiscard]] static glm::vec3 AlongGround(const glm::vec3& surface, JPH::Vec3Arg normal, JPH::Vec3Arg up)
+		{
+			const bool usable = Detail::IsFinite(Detail::ToGlm(normal)) && normal.LengthSq() > 0.25f;
+			const glm::vec3 axis = Detail::ToGlm(usable ? normal.Normalized() : up);
+			return surface - glm::dot(surface, axis) * axis;
 		}
 
 		[[nodiscard]] static Status ValidateDescription(const PhysicsWorld& world, const CharacterControllerDescription& description)
@@ -163,6 +194,57 @@ namespace Engine {
 			PhysicsObjectLayer m_Layer = 0;
 		};
 
+		// M36 W36.2: the speed, in m/s, at which a body's contact point must move towards the character for the body to push it
+		// (FindSqueeze): far below any machine's, above the drift of a body at rest.
+		constexpr float MinPushSpeed = 1.0e-3f;
+
+		// M36 W36.2: the squeeze's query sees the pushing bodies alone (FindSqueeze).
+		class PusherFilter final : public JPH::BodyFilter
+		{
+		public:
+			// `pushers` is a documented back-reference to FindSqueeze's list, which outlives the query.
+			explicit PusherFilter(const std::vector<std::pair<JPH::BodyID, float>>& pushers)
+				: m_Pushers(&pushers)
+			{
+			}
+
+			bool ShouldCollide(const JPH::BodyID& body) const override
+			{
+				return std::any_of(m_Pushers->begin(), m_Pushers->end(), [&body](const std::pair<JPH::BodyID, float>& pusher)
+				{
+					return pusher.first == body;
+				});
+			}
+		private:
+			const std::vector<std::pair<JPH::BodyID, float>>* m_Pushers = nullptr;
+		};
+
+		// M36 W36.2: the deepest penetration of each pushing body into the capsule the squeeze's query found (positive inside,
+		// negative while apart within the query's reach). The narrow phase reports hits on the main thread in an order of its
+		// own; the deepest of each body is the same whatever the order.
+		class PenetrationCollector final : public JPH::CollideShapeCollector
+		{
+		public:
+			void AddHit(const JPH::CollideShapeResult& result) override
+			{
+				m_Hits.emplace_back(result.mBodyID2, result.mPenetrationDepth);
+			}
+
+			// The deepest hit of `pushers[index]`'s body, or nullopt when the query met none.
+			[[nodiscard]] std::optional<float> GetDepth(size_t index, const std::vector<std::pair<JPH::BodyID, float>>& pushers) const
+			{
+				std::optional<float> deepest;
+				for (const auto& [body, depth] : m_Hits)
+				{
+					if (body == pushers[index].first && (!deepest.has_value() || depth > *deepest))
+						deepest = depth;
+				}
+				return deepest;
+			}
+		private:
+			std::vector<std::pair<JPH::BodyID, float>> m_Hits;
+		};
+
 		// The character's own collision (CharacterVirtual's queries): never its inner body, and no body of its collision
 		// group, decided by the inner body's CollisionGroup as the world installed it (its GroupFilter), so the rule is the
 		// world's own.
@@ -209,6 +291,22 @@ namespace Engine {
 		Scope<JPH::CharacterVirtual> Character;
 		// Whether Update logged that it kept the character in range (once per controller).
 		bool HasWarnedRange = false;
+		// M36: the ground of the last update (CharacterGroundState::GroundBody, GroundCollider) and its collider's surface
+		// velocity in world space as the update ended, when it has a surface (none on a light body).
+		BodyHandle GroundBody{};
+		uint32_t GroundCollider = 0;
+		std::optional<glm::vec3> GroundSurfaceVelocity{};
+
+		// M36 W36.2: the squeeze of the last update (GetSqueeze).
+		CharacterSqueeze Squeeze{};
+
+		// M36: a collider a character stands on (FindGroundCollider).
+		struct GroundColliderInfo
+		{
+			uint32_t Collider = 0;
+			// Its surface velocity in world space, when it has a surface.
+			std::optional<glm::vec3> SurfaceVelocity{};
+		};
 
 		// Where the inner body goes: the character's base raised by its padding, as CharacterVirtual places an inner body.
 		[[nodiscard]] PhysicsPose GetInnerBodyPose() const
@@ -232,6 +330,26 @@ namespace Engine {
 		[[nodiscard]] bool IsLightBody(const JPH::BodyID& body) const
 		{
 			return IsLighterThanCharacter(World->m_State->System->GetBodyLockInterfaceNoLock(), body, Character->GetMass());
+		}
+
+		// M36: the collider behind `subShape` of `body` (ColliderShapeDescription::UserData) and its surface velocity turned
+		// by the body's rotation now, when it has a surface; nothing for an invalid body or one that no longer exists. Main
+		// thread, between steps.
+		[[nodiscard]] GroundColliderInfo FindGroundCollider(const JPH::BodyID& body, const JPH::SubShapeID& subShape) const
+		{
+			if (body.IsInvalid())
+				return {};
+			const std::vector<Detail::PhysicsBodyRecord>& records = World->m_State->Bodies;
+			const JPH::BodyLockRead lock(World->m_State->System->GetBodyLockInterfaceNoLock(), body);
+			if (!lock.SucceededAndIsInBroadPhase())
+				return {};
+			const JPH::Body& ground = lock.GetBody();
+			GroundColliderInfo found{ .Collider = Detail::ResolvePhysicsCollider(records, ground, subShape) };
+			const Detail::PhysicsBodyRecord* record = Detail::FindPhysicsBodyRecord(records, body);
+			const PhysicsColliderSurface* surface = record != nullptr ? Detail::FindColliderSurface(*record, found.Collider) : nullptr;
+			if (surface != nullptr)
+				found.SurfaceVelocity = Detail::ToGlm(ground.GetRotation() * Detail::ToJolt(surface->SurfaceVelocity));
+			return found;
 		}
 
 		// Whether `contact` of the last update is a stair against a movement at `velocity`: CharacterVirtual::CanWalkStairs's
@@ -323,6 +441,63 @@ namespace Engine {
 			const double magnitude = std::min(mass * -static_cast<double>(normalDotGravity) * static_cast<double>(deltaTime), Utils::MaxGroundImpulse);
 			const JPH::Vec3 impulse = joltGravity * static_cast<float>(magnitude / gravityLength);
 			World->m_State->System->GetBodyInterfaceNoLock().AddImpulse(ground, impulse, character.GetGroundPosition());
+		}
+
+		// M36 W36.2: the squeeze of the update that just ran (see the file comment).
+		[[nodiscard]] CharacterSqueeze FindSqueeze(float deltaTime, const JPH::BroadPhaseLayerFilter& broadPhaseFilter,
+			const JPH::ObjectLayerFilter& objectLayerFilter) const
+		{
+			const JPH::CharacterVirtual& character = *Character;
+			// The bodies that push the character this step, with the distance each push covers over it (the largest of the
+			// body's contacts).
+			std::vector<std::pair<JPH::BodyID, float>> pushers;
+			for (const JPH::CharacterContact& contact : character.GetActiveContacts())
+			{
+				// mCanPushCharacter is the recorder's answer only for a contact the update collided with, so a light body is
+				// asked here too.
+				if (contact.mIsSensorB || contact.mWasDiscarded || !contact.mCanPushCharacter || contact.mBodyB.IsInvalid()
+					|| contact.mMotionTypeB == JPH::EMotionType::Static || (contact.mMotionTypeB == JPH::EMotionType::Dynamic && IsLightBody(contact.mBodyB)))
+				{
+					continue;
+				}
+				const float speed = contact.mLinearVelocity.Dot(contact.mContactNormal);
+				if (!(speed > Utils::MinPushSpeed))
+					continue;
+				const float push = speed * deltaTime;
+				const auto found = std::find_if(pushers.begin(), pushers.end(), [&contact](const std::pair<JPH::BodyID, float>& pusher)
+				{
+					return pusher.first == contact.mBodyB;
+				});
+				if (found == pushers.end())
+					pushers.emplace_back(contact.mBodyB, push);
+				else
+					found->second = std::max(found->second, push);
+			}
+			if (pushers.empty())
+				return {};
+
+			// Where the update left the character: each pusher's deepest penetration of the capsule (negative while apart),
+			// within the farthest push.
+			float farthest = 0.0f;
+			for (const auto& [body, push] : pushers)
+				farthest = std::max(farthest, push);
+			Utils::PusherFilter bodyFilter(pushers);
+			Utils::PenetrationCollector collector;
+			character.CheckCollision(character.GetPosition(), character.GetRotation(), JPH::Vec3::sZero(), farthest, character.GetShape(),
+				character.GetPosition(), collector, broadPhaseFilter, objectLayerFilter, bodyFilter, JPH::ShapeFilter());
+
+			CharacterSqueeze squeeze;
+			for (size_t index = 0; index < pushers.size(); ++index)
+			{
+				const std::optional<float> depth = collector.GetDepth(index, pushers);
+				// The distance CharacterVirtual keeps (beyond its padding), less the push still to come.
+				if (!depth.has_value() || !(*depth + character.GetCharacterPadding() + pushers[index].second > CharacterSqueezeTolerance))
+					continue;
+				const BodyHandle body = Detail::ToBodyHandle(pushers[index].first);
+				if (!squeeze.IsSqueezed || body.GetValue() < squeeze.Body.GetValue())
+					squeeze = CharacterSqueeze{ .IsSqueezed = true, .Body = body };
+			}
+			return squeeze;
 		}
 
 		// Appends the recorded contacts to the world's buffer (see the file comment).
@@ -453,17 +628,37 @@ namespace Engine {
 		// a platform moving at v carries the character v * t. The platform the character stands on may have moved since the
 		// last update, so its velocity is read first; a light body's is none (M34, see the file comment), so a shard the
 		// character stands on never launches it.
+		// M36 (ADR 0053 decision 4): the surface velocity of the collider the character stands on, its part along the ground
+		// alone (AlongGround), joins the ground's velocity, its vertical part (an inclined belt's) as every ground's, and its
+		// horizontal part carries a grounded character whatever InheritGroundVelocity says (a belt). A light body gives none,
+		// as it gives no velocity of its own.
 		character.UpdateGroundVelocity();
 		const JPH::Vec3 up = character.GetUp();
 		const JPH::Vec3 desired = Detail::ToJolt(desiredVelocity);
 		const JPH::Vec3 desiredVertical = desired.Dot(up) * up;
 		const JPH::Vec3 currentVertical = character.GetLinearVelocity().Dot(up) * up;
-		const JPH::Vec3 groundVelocity = state.IsLightBody(character.GetGroundBodyID()) ? JPH::Vec3::sZero() : character.GetGroundVelocity();
+		const bool lightGround = state.IsLightBody(character.GetGroundBodyID());
+		std::optional<glm::vec3> groundSurface =
+			lightGround ? std::nullopt : state.FindGroundCollider(character.GetGroundBodyID(), character.GetGroundSubShapeID()).SurfaceVelocity;
+		if (groundSurface.has_value())
+			groundSurface = Utils::AlongGround(*groundSurface, character.GetGroundNormal(), up);
+		JPH::Vec3 groundVelocity = lightGround ? JPH::Vec3::sZero() : character.GetGroundVelocity();
+		if (groundSurface.has_value())
+			groundVelocity += Detail::ToJolt(*groundSurface);
 		const JPH::Vec3 groundVertical = groundVelocity.Dot(up) * up;
 		const bool grounded = character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround
 			&& (currentVertical - groundVertical).Dot(up) < Utils::LeavingGroundSpeed;
 		const JPH::Vec3 vertical = grounded ? groundVertical + desiredVertical : currentVertical + Detail::ToJolt(effectiveGravity) * deltaTime;
-		const JPH::Vec3 carried = grounded && state.InheritGroundVelocity ? groundVelocity - groundVertical : JPH::Vec3::sZero();
+		JPH::Vec3 carried = JPH::Vec3::sZero();
+		if (grounded && state.InheritGroundVelocity)
+		{
+			carried = groundVelocity - groundVertical;
+		}
+		else if (grounded && groundSurface.has_value())
+		{
+			const JPH::Vec3 surface = Detail::ToJolt(*groundSurface);
+			carried = surface - surface.Dot(up) * up;
+		}
 		const JPH::Vec3 stepVelocity = Utils::ClampSpeed(desired - desiredVertical + carried + vertical);
 		character.SetLinearVelocity(stepVelocity);
 
@@ -501,6 +696,22 @@ namespace Engine {
 		state.PushGround(deltaTime, effectiveGravity);
 		state.PlaceInnerBody();
 		state.AppendContacts();
+
+		// M36 W36.2: the squeeze, measured where the update left the character (see the file comment).
+		state.Squeeze = state.FindSqueeze(deltaTime, broadPhaseFilter, objectLayerFilter);
+
+		// M36: the ground this update found, for GetGroundState (see the file comment).
+		state.GroundBody = BodyHandle();
+		state.GroundCollider = 0;
+		state.GroundSurfaceVelocity.reset();
+		if (character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround && !character.GetGroundBodyID().IsInvalid())
+		{
+			const State::GroundColliderInfo ground = state.FindGroundCollider(character.GetGroundBodyID(), character.GetGroundSubShapeID());
+			state.GroundBody = Detail::ToBodyHandle(character.GetGroundBodyID());
+			state.GroundCollider = ground.Collider;
+			if (!state.IsLightBody(character.GetGroundBodyID()) && ground.SurfaceVelocity.has_value())
+				state.GroundSurfaceVelocity = Utils::AlongGround(*ground.SurfaceVelocity, character.GetGroundNormal(), character.GetUp());
+		}
 	}
 
 	PhysicsPose CharacterController::GetPose() const
@@ -543,9 +754,19 @@ namespace Engine {
 			return {};
 		const JPH::Vec3 normal = character.GetGroundNormal();
 		const bool usable = Detail::IsFinite(Detail::ToGlm(normal)) && normal.LengthSq() > 0.25f;
+		glm::vec3 groundVelocity = Detail::ToGlm(character.GetGroundVelocity());
+		if (m_State->GroundSurfaceVelocity.has_value())
+			groundVelocity += *m_State->GroundSurfaceVelocity;
 		return CharacterGroundState{ .IsGrounded = true,
 			.GroundNormal = usable ? Detail::ToGlm(normal.Normalized()) : glm::vec3(0.0f, 1.0f, 0.0f),
-			.GroundVelocity = Detail::ToGlm(character.GetGroundVelocity()) };
+			.GroundVelocity = groundVelocity,
+			.GroundBody = m_State->GroundBody,
+			.GroundCollider = m_State->GroundCollider };
+	}
+
+	CharacterSqueeze CharacterController::GetSqueeze() const
+	{
+		return m_State->Squeeze;
 	}
 
 	BodyHandle CharacterController::GetInnerBody() const

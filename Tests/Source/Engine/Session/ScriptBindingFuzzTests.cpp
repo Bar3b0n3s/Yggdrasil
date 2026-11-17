@@ -113,6 +113,9 @@ namespace Engine {
 			cases.push_back({ "dynamic kinematic movement", "dynamic:MoveKinematic(vector.zero, Quat.Identity())", "RigidBody:MoveKinematic" });
 			cases.push_back({ "stale entity bounds", "Physics.GetBodyBounds(saved.Stale)", "Physics.GetBodyBounds" });
 			cases.push_back({ "stale collider bounds", "Physics.GetColliderBounds(saved.Stale)", "Physics.GetColliderBounds" });
+			// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5).
+			cases.push_back({ "stale surface entity", "Physics.GetSurface(saved.Stale)", "Physics.GetSurface" });
+			cases.push_back({ "wrong surface entity type", "Physics.GetSurface({})", "Physics.GetSurface" });
 			cases.push_back({ "stale body proxy", "saved.StaleBody:AddForce(vector.create(1,0,0))", "RigidBody:AddForce" });
 			cases.push_back({ "stale transform proxy", "saved.StaleTransform:Teleport(vector.zero)", "Transform:Teleport" });
 			cases.push_back({ "wrong entity type", "Physics.GetBodyBounds({})", "Physics.GetBodyBounds" });

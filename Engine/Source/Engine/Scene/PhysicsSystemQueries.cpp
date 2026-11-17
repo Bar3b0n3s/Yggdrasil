@@ -2,16 +2,21 @@
 #include "Engine/Scene/PhysicsSystem.h"
 
 #include "Engine/Physics/PhysicsShape.h"
+#include "Engine/Scene/Components/ColliderSurfaceComponent.h"
+#include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Private/PhysicsBodySettings.h"
 #include "Engine/Scene/Private/PhysicsSystemState.h"
+#include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 
 #include <algorithm>
 #include <cmath>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 // The scene-level queries and bounds (Architecture §9.5; §11.5 Physics.Raycast, RaycastAll, SphereCast, OverlapSphere,
-// OverlapBox, GetBodyBounds, GetColliderBounds, LayerMask) over the session's PhysicsWorld. Hits are resolved to the
+// OverlapBox, GetBodyBounds, GetColliderBounds, LayerMask, and M36's GetSurface) over the session's PhysicsWorld. Hits are resolved to the
 // collider entity (the body's collider table indexed by the sub-shape user data, §9.2) and the body owner; a character's
 // inner body resolves to the character's entity for both (§9.6). Every query sees sensors (ADR 0014 decision 7). Hits and
 // bounds of entities pending destruction or disabled are left out, as the body functions treat those entities as having
@@ -280,6 +285,25 @@ namespace Engine {
 		if (bounds.IsEmpty())
 			return std::nullopt;
 		return bounds;
+	}
+
+	std::optional<PhysicsSurfaceInfo> PhysicsSystem::GetSurface(UUID entity) const
+	{
+		const State& state = *m_State;
+		if (state.World == nullptr || !entity.IsValid() || !state.IsPresent(entity))
+			return std::nullopt;
+		const PhysicsBodyEntry* body = state.FindColliderBody(entity);
+		if (body == nullptr || !state.IsPresent(body->Owner))
+			return std::nullopt;
+		// The component as it is now, which the world takes at the next PreStep (M36, PhysicsSystemSurfaces.cpp).
+		const ConstEntity collider = std::as_const(*state.Specification.RuntimeScene).FindEntityByID(entity);
+		if (const ColliderSurfaceComponent* surface = collider.TryGetComponent<ColliderSurfaceComponent>())
+		{
+			return PhysicsSurfaceInfo{ .Friction = surface->Friction,
+				.Restitution = surface->Restitution,
+				.SurfaceVelocity = TransformSystem::GetWorldRotation(collider) * surface->SurfaceVelocity };
+		}
+		return PhysicsSurfaceInfo{ .Friction = body->Settings.Friction, .Restitution = body->Settings.Restitution };
 	}
 
 	Result<PhysicsLayerMask> PhysicsSystem::MakeLayerMask(std::span<const std::string_view> names) const

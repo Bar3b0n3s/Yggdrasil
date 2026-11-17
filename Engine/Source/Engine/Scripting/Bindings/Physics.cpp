@@ -5,6 +5,7 @@
 #include "Engine/Scripting/ScriptEngine.h"
 
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace Engine {
@@ -144,6 +145,36 @@ namespace Engine {
 			}
 			return 2;
 		}
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5): the values contacts with a collider use, or nil; nil for
+		// nil, so Physics.GetSurface(controller:GetGroundCollider()) reads a character's footing in the air too (the W36.1
+		// review's finding 2).
+		static int PhysicsGetSurface(ScriptCall& call)
+		{
+			auto& physics = ScriptPhysics(call);
+			if (Lua::IsNoneOrNil(call, 1))
+			{
+				Lua::PushNil(call);
+				return 1;
+			}
+			const auto entity = Lua::Check<ScriptEntityIdentity>(call, 1);
+			const auto valid = ScriptProxy::ValidateEntity(call.Engine->GetHost(), entity);
+			if (!valid)
+				return Lua::RaiseError(call, valid.error());
+			const std::optional<PhysicsSurfaceInfo> surface = physics.GetSurface(entity.ID);
+			if (!surface)
+			{
+				Lua::PushNil(call);
+				return 1;
+			}
+			lua_createtable(call.State, 0, 3);
+			Lua::Push(call, surface->Friction);
+			lua_setfield(call.State, -2, "Friction");
+			Lua::Push(call, surface->Restitution);
+			lua_setfield(call.State, -2, "Restitution");
+			Lua::Push(call, surface->SurfaceVelocity);
+			lua_setfield(call.State, -2, "SurfaceVelocity");
+			return 1;
+		}
 		static int PhysicsGravity(ScriptCall& call)
 		{
 			Lua::Push(call, ScriptPhysics(call).GetGravity());
@@ -189,6 +220,9 @@ namespace Engine {
 		{
 			const ScriptMemberOptions read{ .Mutates = false };
 			ENGINE_TRY(api.RegisterAlias("RaycastHit", "{Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}", "A query hit distinguishes the collider entity from its body owner."));
+			ENGINE_TRY(api.RegisterAlias("SurfaceInfo", "{Friction: number, Restitution: number, SurfaceVelocity: vector}",
+				"The values contacts with a collider use: its ColliderSurface's friction and restitution and its surface velocity in world space (m/s), or "
+				"its body's friction and restitution with no velocity."));
 			api.Module("Physics", "Queries and gravity for the active scene's physics system.")
 				.Function("Raycast", Utils::PhysicsRaycast<false>, "(origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> RaycastHit?", "Closest hit, including sensors; normalize direction and reject invalid finite ranges.", read)
 				.Function("RaycastAll", Utils::PhysicsRaycast<true>, "(origin: vector, direction: vector, maxDistance: number, layerMask: number?) -> {RaycastHit}", "All hits sorted by distance then collider UUID.", read)
@@ -197,6 +231,13 @@ namespace Engine {
 				.Function("OverlapBox", Utils::PhysicsOverlapBox, "(center: vector, halfExtents: vector, rotation: Quat?, layerMask: number?) -> {Entity}", "Unique overlapping collider entities sorted by UUID; default identity rotation.", read)
 				.Function("GetBodyBounds", Utils::PhysicsBounds<false>, "(entity: Entity) -> (vector?, vector?)", "World AABB of the body's complete compound, or nil if no body is owned.", read)
 				.Function("GetColliderBounds", Utils::PhysicsBounds<true>, "(entity: Entity) -> (vector?, vector?)", "World AABB of this entity's collider sub-shapes, or nil if absent.", read)
+				.Function("GetSurface", Utils::PhysicsGetSurface, "(collider: Entity?) -> SurfaceInfo?",
+					"The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use (of the velocity, its "
+					"part along the surface alone), as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or "
+					"its body's material with no velocity; nil for nil, for a "
+					"disabled entity and for one without a solid collider in a body (a character's capsule, triggers alone); a destroyed entity is an "
+					"error. Physics.GetSurface(controller:GetGroundCollider()) reads what a character stands on, nil while it is in the air.",
+					read)
 				.Function("GetGravity", Utils::PhysicsGravity, "() -> vector", "Current world gravity.", read)
 				.Function("SetGravity", Utils::PhysicsSetGravity, "(gravity: vector) -> ()", "Set finite gravity within physics bounds for the session.")
 				.Function("LayerMask", Utils::PhysicsMask, "(...string) -> number", "Combine named project layers; omitted query masks include every layer.", read);

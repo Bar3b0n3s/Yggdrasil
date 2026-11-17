@@ -31,7 +31,8 @@
 
 // The state of a PhysicsSystem (Architecture §9.2 to §9.6), shared by the system's .cpp files: PhysicsSystem.cpp
 // (composition, sync, events, exits, body control, observability, and the characters' lifecycle within the step),
-// PhysicsSystemQueries.cpp (queries and bounds) and PhysicsSystemCharacters.cpp (MoveCharacter and GetCharacterState).
+// PhysicsSystemQueries.cpp (queries and bounds), PhysicsSystemCharacters.cpp (MoveCharacter and GetCharacterState) and,
+// from M36, PhysicsSystemSurfaces.cpp (the collider surfaces).
 // Private to Scene, so it changes without the contract owner's review (Docs/Decisions/0014-m11-decisions.md decision 17).
 // The entry structs are at namespace scope, not nested: Clang with libstdc++ cannot default-construct a nested struct with
 // default member initializers inside its enclosing class (ADR 0012 decision 24).
@@ -88,6 +89,8 @@ namespace Engine {
 		BodyShapeDescription ShapeDescription{};
 		std::vector<PhysicsShapeInput> ShapeInputs{};
 		std::vector<PhysicsAssetInput> AssetInputs{};
+		// M36: whether the world holds a non-empty list of collider surfaces for the body (SendSurfaces).
+		bool HasSurfaces = false;
 	};
 
 	// One created character (§9.6).
@@ -312,6 +315,9 @@ namespace Engine {
 
 		// The owner of the character whose inner body is `body` (InnerBodies); the invalid UUID when `body` is no character's.
 		[[nodiscard]] UUID FindCharacterOwner(BodyHandle body) const;
+		// The script-facing state of `controller`'s character after its last update (PhysicsSystemCharacters.cpp), its ground
+		// collider resolved through ResolveHit.
+		[[nodiscard]] PhysicsCharacterState MakeCharacterState(const CharacterController& controller) const;
 
 		// The query helpers (PhysicsSystemQueries.cpp):
 		//   - ResolveHit: the collider entity and the body owner of a world hit on collider index `collider` of `body`: the
@@ -322,6 +328,26 @@ namespace Engine {
 		//     or implicit static body, before its implicit sensor body); the invalid handle when it owns none.
 		[[nodiscard]] std::optional<PhysicsOverlapHit> ResolveHit(BodyHandle body, uint32_t collider) const;
 		[[nodiscard]] BodyHandle FindOwnedBodyHandle(UUID owner) const;
+
+		// --- Collider surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 3; PhysicsSystemSurfaces.cpp) ----
+		// The entities whose ColliderSurface was added, changed or removed since the last PreStep (the component's signals,
+		// which never set ComponentsChanged, so a surface write never recomposes the scene).
+		std::set<UUID> DirtySurfaces;
+
+		void OnSurfaceChanged(entt::registry& registry, entt::entity entity);
+		// The surfaces of `entry`'s solid colliders whose entity has a ColliderSurface, in collider order: its Friction and
+		// Restitution, and its SurfaceVelocity turned from the entity's axes into the body's (the owner's inverse world rotation
+		// times the entity's world rotation; the velocity itself for the owner's own colliders). None for a sensor body.
+		[[nodiscard]] std::vector<PhysicsColliderSurface> CollectSurfaces(const PhysicsBodyEntry& entry) const;
+		// Sends `entry`'s surfaces to the world (PhysicsWorld::SetColliderSurfaces) when it has some or had some.
+		void SendSurfaces(PhysicsBodyEntry& entry);
+		// PreStep, after its rebuilds: sends the surfaces of every body that holds a collider of a DirtySurfaces entity, in
+		// body handle order, and empties the set.
+		void RefreshSurfaces();
+		// The created solid body (a RigidBody's or an implicit static body, never a sensor's) that holds the colliders of
+		// `entity`, which is present (IsPresent): its RigidBody's or implicit static body when the entity owns one holding its
+		// own colliders, else the body they were gathered into; null when the entity has no solid collider in a created body.
+		[[nodiscard]] const PhysicsBodyEntry* FindColliderBody(UUID entity) const;
 	};
 
 }

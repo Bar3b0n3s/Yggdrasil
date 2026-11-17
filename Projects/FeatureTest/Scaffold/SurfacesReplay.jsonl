@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/Surfaces.scene"}}
+{"method": "play.step", "params": {"ticks": 256, "input": [{"tick": 16, "type": "Key", "key": "D", "state": "Down"}, {"tick": 80, "type": "Key", "key": "D", "state": "Up"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Surfaces.replay", "expect": [{"tick": 256, "luau": "local rider = Scene.FindByName(\"Rider\")\nlocal crate = Scene.FindByName(\"Crate\")\nlocal ice = Scene.FindByName(\"ShardOnIce\")\nlocal marble = Scene.FindByName(\"ShardOnMarble\")\nlocal pushed = Scene.FindByName(\"Pushed\")\nreturn rider.Transform.WorldPosition.x > 2 and crate.Transform.WorldPosition.x > -1\n\tand ice.Transform.WorldPosition.z - -5 > 3 * (marble.Transform.WorldPosition.z - -5)\n\tand pushed.Transform.WorldPosition.x > 1"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

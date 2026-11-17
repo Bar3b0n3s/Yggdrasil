@@ -4115,6 +4115,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Surfaces.scene",
+			"XXH64": "90db7d96a175a489",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Surfaces.scene.meta",
+			"XXH64": "d56d1c3d080cf591",
+			"Method": "edit.batch",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Terrain.scene",
 			"XXH64": "dbb8a592ad233abf",
 			"Method": "scene.save",
@@ -5027,6 +5043,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scripts/Surfaces/KinematicMover.luau",
+			"XXH64": "b179a1392d7a654a",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Surfaces/KinematicMover.luau.meta",
+			"XXH64": "f9afb26fb1a80e2e",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Surfaces/SurfaceWalker.luau",
+			"XXH64": "8b6b85fe2b957cd9",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Surfaces/SurfaceWalker.luau.meta",
+			"XXH64": "3d985dfddc450527",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scripts/Terrain/TerrainRoller.luau",
 			"XXH64": "aae3fc08b5b2cf3e",
 			"Method": "script.write",
@@ -5469,6 +5517,22 @@
 		{
 			"Path": "Assets/Tests/Api/CircleCollider2D.test.luau.meta",
 			"XXH64": "e9c0ce9fd4171811",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/ColliderSurface.test.luau",
+			"XXH64": "8f2e73801117ae6d",
+			"Method": "script.write",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Api/ColliderSurface.test.luau.meta",
+			"XXH64": "587f3b2269a169f5",
 			"Method": "script.write",
 			"RequestId": 8,
 			"Client": "batch",
@@ -7091,6 +7155,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/Surfaces.replay",
+			"XXH64": "f84861578444edbe",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Surfaces.replay.meta",
+			"XXH64": "c5f5c0dfe5bc4926",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/Terrain.replay",
 			"XXH64": "d2ae412022b620e9",
 			"Method": "input.record",
@@ -7247,6 +7327,22 @@
 			"XXH64": "ab8cdc21fc19a9bf",
 			"Method": "script.write",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Surfaces/Surfaces.test.luau",
+			"XXH64": "794f5c0f0f370f22",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Surfaces/Surfaces.test.luau.meta",
+			"XXH64": "8b528a864d7d1122",
+			"Method": "script.write",
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -7892,7 +7988,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "612526334b91d624",
+			"XXH64": "600b6010201d34b0",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

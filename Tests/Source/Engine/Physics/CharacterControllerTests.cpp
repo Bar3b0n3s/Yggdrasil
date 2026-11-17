@@ -117,6 +117,56 @@ namespace Engine {
 			return std::move(*character);
 		}
 
+		// M36: a static compound of two slabs 4 m wide and 20 m long side by side, their tops at y 0, of friction `friction`:
+		// the collider whose user data is `left` at x in [-4, 0] and the one whose user data is `right` at x in [0, 4].
+		BodyHandle CreateSlabs(PhysicsWorld& world, uint32_t left, uint32_t right, float friction = 0.5f)
+		{
+			const BoxShapeGeometry slab{ .HalfExtents = glm::vec3(2.0f, 0.5f, 10.0f) };
+			Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = {
+																			   ColliderShapeDescription{ .Geometry = slab, .Position = glm::vec3(-2.0f, -0.5f, 0.0f), .UserData = left },
+																			   ColliderShapeDescription{ .Geometry = slab, .Position = glm::vec3(2.0f, -0.5f, 0.0f), .UserData = right } } });
+			REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+			Result<BodyHandle> body = world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Static, .Friction = friction });
+			REQUIRE(body.has_value());
+			return *body;
+		}
+
+		// M36 W36.2: a Kinematic box moved at a constant velocity by MoveKinematic, as Scene/PhysicsSystem moves a Kinematic
+		// body in PreStep before the characters update: a piston, a press or a ram.
+		class KinematicBox
+		{
+		public:
+			KinematicBox(PhysicsWorld& world, const glm::vec3& center, const glm::vec3& halfExtents, const glm::vec3& velocity)
+				: m_World(&world), m_Velocity(velocity), m_Pose{ .Position = center }
+			{
+				Result<Ref<const PhysicsShape>> shape =
+					PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = halfExtents } } } });
+				REQUIRE(shape.has_value());
+				Result<BodyHandle> body = world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Kinematic, .Pose = m_Pose });
+				REQUIRE(body.has_value());
+				m_Body = *body;
+			}
+
+			// One step: the box starts its move, the character updates with `desired`, then the world steps.
+			void Step(CharacterController& character, const glm::vec3& desired = glm::vec3(0.0f))
+			{
+				m_Pose.Position += m_Velocity * FixedDelta;
+				m_World->MoveKinematic(m_Body, m_Pose, FixedDelta);
+				character.Update(FixedDelta, desired, Gravity);
+				REQUIRE(m_World->Step(FixedDelta, 1).has_value());
+			}
+
+			void SetVelocity(const glm::vec3& velocity) { m_Velocity = velocity; }
+			[[nodiscard]] BodyHandle GetBody() const { return m_Body; }
+			[[nodiscard]] glm::vec3 GetPosition() const { return m_World->GetPose(m_Body).Position; }
+		private:
+			// A documented back-reference: the world outlives the box (both live in one test case).
+			PhysicsWorld* m_World = nullptr;
+			glm::vec3 m_Velocity = glm::vec3(0.0f);
+			PhysicsPose m_Pose{};
+			BodyHandle m_Body{};
+		};
+
 		// A character created on a MovingPlatform that has not moved yet, standing on it after half a second at rest.
 		Scope<CharacterController> CreateCarriedCharacter(PhysicsWorld& world, bool inheritGroundVelocity)
 		{
@@ -910,6 +960,373 @@ namespace Engine {
 			// Two capsules of radius 0.3 m stop about 0.6 m apart.
 			CHECK(walker->GetPose().Position.x < 1.45f);
 			CHECK(standing->GetPose().Position.x == doctest::Approx(2.0f).epsilon(1.0e-3));
+		}
+
+		// --- Surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 4) ----------------------------------------
+
+		TEST_CASE("CharacterController: a grounded character reports the collider it stands on")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			const BodyHandle floor = CreateSlabs(*world, 3, 7);
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-2.0f, 1.0f, 0.0f));
+			// In the air: no ground.
+			CharacterGroundState ground = character->GetGroundState();
+			CHECK_FALSE(ground.IsGrounded);
+			CHECK_FALSE(ground.GroundBody.IsValid());
+			CHECK(ground.GroundCollider == 0);
+
+			// Landed on the left slab: the compound and that collider's user data, from the update itself.
+			Walk(*world, *character, glm::vec3(0.0f), 60);
+			ground = character->GetGroundState();
+			REQUIRE(ground.IsGrounded);
+			CHECK(ground.GroundBody == floor);
+			CHECK(ground.GroundCollider == 3);
+
+			// Walked onto the right one.
+			Walk(*world, *character, glm::vec3(3.0f, 0.0f, 0.0f), 60);
+			ground = character->GetGroundState();
+			REQUIRE(ground.IsGrounded);
+			CHECK(character->GetPose().Position.x > 0.5f);
+			CHECK(ground.GroundBody == floor);
+			CHECK(ground.GroundCollider == 7);
+
+			// Off the end of the floor and falling: none again.
+			Walk(*world, *character, glm::vec3(0.0f, 0.0f, 12.0f), 90);
+			ground = character->GetGroundState();
+			CHECK_FALSE(ground.IsGrounded);
+			CHECK_FALSE(ground.GroundBody.IsValid());
+		}
+
+		TEST_CASE("CharacterController: a belt carries a grounded character whatever InheritGroundVelocity says")
+		{
+			// World Tree's brief 16: the Warden carried 2.5 m in a second by a belt's surface.
+			const glm::vec3 beltVelocity(2.5f, 0.0f, 0.0f);
+			for (const bool inherit : { false, true })
+			{
+				CAPTURE(inherit);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				const BodyHandle belt = CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 2.0f));
+				Result<Scope<CharacterController>> created =
+					CharacterController::Create(*world, { .Pose = { .Position = glm::vec3(-10.0f, 0.05f, 0.0f) }, .InheritGroundVelocity = inherit });
+				REQUIRE(created.has_value());
+				CharacterController& character = **created;
+				Walk(*world, character, glm::vec3(0.0f), 30);
+				REQUIRE(character.GetGroundState().IsGrounded);
+
+				REQUIRE(world->SetColliderSurfaces(belt, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = beltVelocity } }).has_value());
+				const float start = character.GetPose().Position.x;
+				Walk(*world, character, glm::vec3(0.0f), 60);
+				CHECK(character.GetPose().Position.x - start == doctest::Approx(2.5f).epsilon(0.02));
+				CHECK(character.GetGroundState().IsGrounded);
+				CHECK(character.GetGroundState().GroundVelocity.x == doctest::Approx(2.5f).epsilon(1.0e-3));
+				CHECK(character.GetVelocity().x == doctest::Approx(2.5f).epsilon(1.0e-3));
+
+				// Walking against the belt at its speed keeps the character in place.
+				const float walking = character.GetPose().Position.x;
+				Walk(*world, character, -beltVelocity, 30);
+				CHECK(std::abs(character.GetPose().Position.x - walking) < 0.02f);
+
+				// A stopped belt carries nothing.
+				REQUIRE(world->SetColliderSurfaces(belt, {}).has_value());
+				Walk(*world, character, glm::vec3(0.0f), 2);
+				const float stopped = character.GetPose().Position.x;
+				Walk(*world, character, glm::vec3(0.0f), 30);
+				CHECK(std::abs(character.GetPose().Position.x - stopped) < 1.0e-3f);
+				CHECK(character.GetGroundState().GroundVelocity == glm::vec3(0.0f));
+			}
+		}
+
+		// M34's rule holds for surfaces: a Dynamic body lighter than the character gives it none of its ground velocity.
+		TEST_CASE("CharacterController: the surface of a Dynamic body lighter than the character never carries it")
+		{
+			for (const float mass : { 10.0f, 1000.0f })
+			{
+				CAPTURE(mass);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				// A frictionless floor, so the crate's own surface cannot drive the crate along it.
+				Result<Ref<const PhysicsShape>> floorShape =
+					PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(20.0f, 0.5f, 20.0f) } } } });
+				REQUIRE(floorShape.has_value());
+				REQUIRE(world->CreateBody({ .Shape = *floorShape, .MotionType = PhysicsMotionType::Static, .Pose = { .Position = glm::vec3(0.0f, -0.5f, 0.0f) }, .Friction = 0.0f })
+						.has_value());
+				const BodyHandle crate = CreateCrate(*world, glm::vec3(0.0f), glm::vec3(2.0f, 0.25f, 2.0f), mass);
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.55f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().IsGrounded);
+				REQUIRE(character->GetGroundState().GroundBody == crate);
+
+				REQUIRE(world->SetColliderSurfaces(crate, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(1.0f, 0.0f, 0.0f) } })
+						.has_value());
+				const float start = character->GetPose().Position.x;
+				Walk(*world, *character, glm::vec3(0.0f), 60);
+				const float moved = character->GetPose().Position.x - start;
+				if (mass < 70.0f)
+					CHECK(std::abs(moved) < 0.01f);
+				else
+					CHECK(moved == doctest::Approx(1.0f).epsilon(0.05));
+			}
+		}
+
+		// The lead's decision on the W36.2 review (Docs/Decisions/0053-m36-contact-surfaces.md, "The W36.2 review's fixes"): a
+		// character takes only the part of its ground collider's surface velocity along the ground (projected onto the ground
+		// plane by the ground normal), as a body takes it through friction, so a belt whose velocity leaves its surface neither
+		// lifts the character nor presses it in, and carries it along the surface at the tangential speed.
+		TEST_CASE("CharacterController: a belt whose surface velocity leaves its surface carries a character along it without lifting it")
+		{
+			for (const bool inherit : { false, true })
+			{
+				for (const float normal : { 1.5f, -1.5f })
+				{
+					CAPTURE(inherit);
+					CAPTURE(normal);
+					Scope<PhysicsWorld> world = CreateCharacterWorld();
+					const BodyHandle belt = CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 2.0f));
+					Result<Scope<CharacterController>> created =
+						CharacterController::Create(*world, { .Pose = { .Position = glm::vec3(-10.0f, 0.05f, 0.0f) }, .InheritGroundVelocity = inherit });
+					REQUIRE(created.has_value());
+					CharacterController& character = **created;
+					Walk(*world, character, glm::vec3(0.0f), 30);
+					REQUIRE(character.GetGroundState().IsGrounded);
+					const float height = character.GetPose().Position.y;
+
+					REQUIRE(world->SetColliderSurfaces(belt, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(2.5f, normal, 0.0f) } })
+							.has_value());
+					const float start = character.GetPose().Position.x;
+					float drift = 0.0f;
+					bool grounded = true;
+					for (uint32_t tick = 0; tick < 60; ++tick)
+					{
+						Walk(*world, character, glm::vec3(0.0f), 1);
+						drift = std::max(drift, std::abs(character.GetPose().Position.y - height));
+						grounded = grounded && character.GetGroundState().IsGrounded;
+					}
+					CHECK(drift < 1.0e-3f);
+					CHECK(grounded);
+					// Along the belt at its tangential 2.5 m/s, as a belt without the normal part carries it.
+					CHECK(character.GetPose().Position.x - start == doctest::Approx(2.5f).epsilon(0.02));
+					CHECK(character.GetGroundState().GroundVelocity.x == doctest::Approx(2.5f).epsilon(1.0e-3));
+					CHECK(std::abs(character.GetGroundState().GroundVelocity.y) < 1.0e-4f);
+				}
+			}
+		}
+
+		// --- Pushes and the squeeze (M36 W36.2, Docs/Decisions/0053-m36-contact-surfaces.md decisions 11 and 12) -------------
+
+		// World Tree's brief 16: a Kinematic piston moved into a character pushes it at the piston's velocity. Within the
+		// character's look-ahead (0.1 m a tick, 6 m/s at 60 Hz) the piston never overlaps the capsule; a faster one overlaps it
+		// for one tick, by at most its step beyond the look-ahead, and pushes it out at the next update.
+		TEST_CASE("CharacterController: a Kinematic piston pushes a character at its velocity")
+		{
+			for (const float speed : { 2.0f, 8.0f })
+			{
+				CAPTURE(speed);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().IsGrounded);
+				// The piston's face starts 0.45 m from the capsule (radius 0.3 m), moving along +X.
+				constexpr float HalfWidth = 0.25f;
+				KinematicBox piston(*world, glm::vec3(-1.0f, 0.9f, 0.0f), glm::vec3(HalfWidth, 0.85f, 1.0f), glm::vec3(speed, 0.0f, 0.0f));
+				float deepest = -1.0f;
+				uint32_t overlappingTicks = 0;
+				float lastSecondStart = 0.0f;
+				for (uint32_t tick = 0; tick < 90; ++tick)
+				{
+					if (tick == 30)
+						lastSecondStart = character->GetPose().Position.x;
+					piston.Step(*character);
+					const float overlap = (piston.GetPosition().x + HalfWidth) - (character->GetPose().Position.x - 0.3f);
+					deepest = std::max(deepest, overlap);
+					overlappingTicks += overlap > 0.005f ? 1 : 0;
+					CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+				}
+				// The last second: the character moved at the piston's speed (its own velocity stays the one it asked for).
+				CHECK(character->GetPose().Position.x - lastSecondStart == doctest::Approx(speed).epsilon(0.02));
+				CHECK(character->GetGroundState().IsGrounded);
+				if (speed < 6.0f)
+				{
+					CHECK(deepest < 0.005f);
+				}
+				else
+				{
+					CHECK(deepest < speed * FixedDelta - 0.1f + 0.005f);
+					CHECK(overlappingTicks <= 1);
+				}
+			}
+		}
+
+		// World Tree's brief 16: a press's hammer brought down onto a character standing on the floor cannot push it out of the
+		// way (the floor holds it), so the character is squeezed by the press, from the second tick of the push on; while the
+		// hammer is still above its head, the first contact within the look-ahead included, it is not.
+		TEST_CASE("CharacterController: a press brought down onto a grounded character reports it squeezed by the press")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			REQUIRE(character->GetGroundState().IsGrounded);
+			// The hammer's face 0.3 m above the 1.8 m character, coming down at 1 m/s.
+			KinematicBox press(*world, glm::vec3(0.0f, 2.35f, 0.0f), glm::vec3(1.0f, 0.25f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+			std::optional<uint32_t> squeezedAt;
+			std::optional<uint32_t> reachedAt;
+			for (uint32_t tick = 0; tick < 40; ++tick)
+			{
+				press.Step(*character);
+				// The gap between the hammer's face and the top of the capsule after the step.
+				const float gap = (press.GetPosition().y - 0.25f) - (character->GetPose().Position.y + 1.8f);
+				if (!reachedAt.has_value() && gap <= 0.005f)
+					reachedAt = tick;
+				const CharacterSqueeze squeeze = character->GetSqueeze();
+				if (!squeezedAt.has_value() && squeeze.IsSqueezed)
+				{
+					squeezedAt = tick;
+					CHECK(squeeze.Body == press.GetBody());
+				}
+				// Still above the character's padding (2 cm), the first contact within its look-ahead included: no squeeze.
+				if (gap > 0.025f)
+					CHECK_FALSE(squeeze.IsSqueezed);
+			}
+			REQUIRE(reachedAt.has_value());
+			REQUIRE(squeezedAt.has_value());
+			CHECK(*squeezedAt <= *reachedAt + 1);
+			// The floor holds the character: it stays on it and stays squeezed while the press comes on.
+			CHECK(std::abs(character->GetPose().Position.y) < 0.02f);
+			CHECK(character->GetSqueeze().IsSqueezed);
+			// A press that stops is no push any more.
+			press.SetVelocity(glm::vec3(0.0f));
+			press.Step(*character);
+			press.Step(*character);
+			CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+		}
+
+		TEST_CASE("CharacterController: a piston pressing a character against a wall reports it squeezed by the piston")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A wall whose face is at x 1.
+			static_cast<void>(CreateBlock(*world, glm::vec3(1.5f, 2.0f, 0.0f), glm::vec3(0.5f, 1.0f, 2.0f)));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			KinematicBox piston(*world, glm::vec3(-1.0f, 0.9f, 0.0f), glm::vec3(0.25f, 0.85f, 1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
+			bool squeezed = false;
+			for (uint32_t tick = 0; tick < 90 && !squeezed; ++tick)
+			{
+				piston.Step(*character);
+				squeezed = character->GetSqueeze().IsSqueezed;
+				if (squeezed)
+					CHECK(character->GetSqueeze().Body == piston.GetBody());
+			}
+			CHECK(squeezed);
+			// Pushed up to the wall, no farther.
+			CHECK(character->GetPose().Position.x < 1.0f - 0.29f);
+		}
+
+		// The W36.2 review's finding 1: a character's own ground is its most common pusher. A Kinematic lift rising under it
+		// pushes it in every tick it rises, and the character is not squeezed because its update takes the ground's vertical
+		// velocity, so it leaves a push ahead of the lift; held under a ceiling, it is squeezed by the lift.
+		TEST_CASE("CharacterController: a character a Kinematic lift carries up is never squeezed, and one it lifts into a ceiling is squeezed by the lift")
+		{
+			for (const float speed : { 1.0f, 2.0f })
+			{
+				CAPTURE(speed);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				// The lift's top at y 0; a static ceiling 0.3 m above the 1.8 m character once the lift has risen for a second.
+				const float rise = speed;
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f, rise + 1.8f + 0.3f + 1.0f, 0.0f), glm::vec3(3.0f, 0.5f, 3.0f)));
+				KinematicBox lift(*world, glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(2.0f, 0.5f, 2.0f), glm::vec3(0.0f));
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+				for (uint32_t tick = 0; tick < 30; ++tick)
+					lift.Step(*character);
+				REQUIRE(character->GetGroundState().IsGrounded);
+
+				// Up for a second, then at rest: never squeezed, its start and its stop included, and carried with the lift.
+				bool squeezed = false;
+				lift.SetVelocity(glm::vec3(0.0f, speed, 0.0f));
+				for (uint32_t tick = 0; tick < 60; ++tick)
+				{
+					lift.Step(*character);
+					squeezed = squeezed || character->GetSqueeze().IsSqueezed;
+				}
+				lift.SetVelocity(glm::vec3(0.0f));
+				for (uint32_t tick = 0; tick < 30; ++tick)
+				{
+					lift.Step(*character);
+					squeezed = squeezed || character->GetSqueeze().IsSqueezed;
+				}
+				CHECK_FALSE(squeezed);
+				CHECK(character->GetGroundState().IsGrounded);
+				CHECK(std::abs(character->GetPose().Position.y - rise) < 0.03f);
+
+				// Up again into the ceiling: the ceiling holds the character, and the lift squeezes it.
+				lift.SetVelocity(glm::vec3(0.0f, speed, 0.0f));
+				for (uint32_t tick = 0; tick < 60 && !squeezed; ++tick)
+				{
+					lift.Step(*character);
+					squeezed = character->GetSqueeze().IsSqueezed;
+					if (squeezed)
+						CHECK(character->GetSqueeze().Body == lift.GetBody());
+				}
+				CHECK(squeezed);
+			}
+		}
+
+		// World Tree's brief 16: a husk carried by a belt into a resting hammer stops against it, and a hammer at rest pushes
+		// nothing, so the character is not squeezed.
+		TEST_CASE("CharacterController: a character carried into a resting ram stops against it and is not squeezed")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			const BodyHandle belt = CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 2.0f));
+			REQUIRE(world->SetColliderSurfaces(belt, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(2.5f, 0.0f, 0.0f) } })
+					.has_value());
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-2.0f, 0.05f, 0.0f));
+			// The ram's face at x 1, its base 0.2 m above the belt, at rest.
+			KinematicBox ram(*world, glm::vec3(1.5f, 1.2f, 0.0f), glm::vec3(0.5f, 1.0f, 1.0f), glm::vec3(0.0f));
+			for (uint32_t tick = 0; tick < 120; ++tick)
+			{
+				ram.Step(*character);
+				CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+			}
+			// Against the ram's face, kept off it by the character's padding (2 cm).
+			const float stopped = character->GetPose().Position.x;
+			CHECK(stopped == doctest::Approx(1.0f - 0.3f - 0.02f).epsilon(0.02));
+			ram.Step(*character);
+			CHECK(std::abs(character->GetPose().Position.x - stopped) < 1.0e-3f);
+		}
+
+		// The squeeze's cases that are not (ADR 0052, the M36 risks): a character's own walk into a wall, into a corner and up
+		// a steep face meets only static bodies, which push nothing.
+		TEST_CASE("CharacterController: a character's own walk into a wall, a corner or a steep face is never a squeeze")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A corner of two walls whose faces are at x 2 and z 2, and a face rising at 60 degrees from x -4 towards -X.
+			static_cast<void>(CreateBlock(*world, glm::vec3(2.5f, 2.0f, 0.0f), glm::vec3(0.5f, 1.0f, 3.0f)));
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f, 2.0f, 2.5f), glm::vec3(3.0f, 1.0f, 0.5f)));
+			static_cast<void>(CreateBlock(*world, glm::vec3(-4.0f, 0.0f, 0.0f), glm::vec3(2.0f, 0.5f, 2.0f), glm::normalize(glm::quat(0.8660254f, 0.0f, 0.0f, -0.5f))));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, -1.0f));
+			struct Approach
+			{
+				glm::vec3 Start = glm::vec3(0.0f);
+				glm::vec3 Velocity = glm::vec3(0.0f);
+			};
+			for (const Approach& walk : { Approach{ glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(3.0f, 0.0f, 0.0f) }, Approach{ glm::vec3(1.0f, 0.0f, 1.0f), glm::vec3(3.0f, 0.0f, 3.0f) },
+					 Approach{ glm::vec3(-2.0f, 0.0f, 0.0f), glm::vec3(-3.0f, 0.0f, 0.0f) } })
+			{
+				CAPTURE(walk.Velocity.x);
+				CAPTURE(walk.Velocity.z);
+				character->SetPose({ .Position = walk.Start });
+				for (uint32_t tick = 0; tick < 90; ++tick)
+				{
+					character->Update(FixedDelta, walk.Velocity, Gravity);
+					REQUIRE(world->Step(FixedDelta, 1).has_value());
+					CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+				}
+				// Held back by what it walked into: never through it, never up the steep face.
+				CHECK(character->GetPose().Position.y < 0.1f);
+				CHECK(character->GetPose().Position.x < 1.75f);
+				CHECK(character->GetPose().Position.x > -4.1f);
+			}
 		}
 	}
 

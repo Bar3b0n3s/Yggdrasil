@@ -122,6 +122,59 @@ namespace Engine {
 			CHECK(JsonReader((*info)["boundsMax"][0]).ReadFloat().value_or(0.0f) == doctest::Approx(21.5f).epsilon(1.0e-3));
 		}
 
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 7): groundCollider, after groundNormal.
+		TEST_CASE("PhysicsMethods: physics.bodyInfo of a character reports the collider it stands on")
+		{
+			Test::AutomationFixture setup("PhysicsBodyInfoGround");
+			REQUIRE(setup.Call("entity.create", ParsePhysicsMethodJson(R"({"name":"Walker","components":{"Transform":{"Translation":[21,0.6,0]},
+				"CharacterController":{}}})"))
+					.has_value());
+			StartPhysicsScene(setup, 60);
+			const Result<Json> info = setup.Call("physics.bodyInfo", Json{ { "entity", "/Walker" } });
+			REQUIRE_MESSAGE(info.has_value(), info.error().ToString());
+			CHECK((*info)["origin"] == Json("Character"));
+			CHECK((*info)["grounded"] == Json(true));
+			CHECK((*info)["groundCollider"]["path"] == Json("/Level/Piece[1]"));
+			// No ground collider for a body that is no character.
+			const Result<Json> ball = setup.Call("physics.bodyInfo", Json{ { "entity", "/Ball" } });
+			REQUIRE_MESSAGE(ball.has_value(), ball.error().ToString());
+			CHECK((*ball)["groundCollider"]["id"] == Json(""));
+		}
+
+		// M36 W36.2 (Docs/Decisions/0053-m36-contact-surfaces.md decision 14): squeezed and squeezedBy, after groundCollider.
+		TEST_CASE("PhysicsMethods: physics.bodyInfo of a squeezed character reports it and the press")
+		{
+			Test::AutomationFixture setup("PhysicsBodyInfoSqueeze");
+			REQUIRE(setup.Call("edit.batch", ParsePhysicsMethodJson(R"({"label":"Squeeze","ops":[
+				{"method":"entity.create","params":{"name":"Floor","components":{"Transform":{"Translation":[0,-0.5,0]},
+					"RigidBody":{"Type":"Static"},"BoxCollider":{"HalfExtents":[10,0.5,10]}}}},
+				{"method":"entity.create","params":{"name":"Pinned","components":{"Transform":{"Translation":[0,0.02,0]},"CharacterController":{}}}},
+				{"method":"entity.create","params":{"name":"Press","components":{"Transform":{"Translation":[0,2.35,0]},
+					"RigidBody":{"Type":"Kinematic"},"BoxCollider":{"HalfExtents":[1,0.25,1]}}}}]})"))
+					.has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "seed", 3 } }).has_value());
+			StepPhysicsScene(setup, 10);
+			const Result<Json> standing = setup.Call("physics.bodyInfo", Json{ { "entity", "/Pinned" } });
+			REQUIRE_MESSAGE(standing.has_value(), standing.error().ToString());
+			CHECK((*standing)["squeezed"] == Json(false));
+			CHECK((*standing)["squeezedBy"]["id"] == Json(""));
+			// The press comes down at 1 m/s through entity.update of the play scene's Transform, one tick at a time.
+			bool squeezed = false;
+			for (uint32_t tick = 0; tick < 40 && !squeezed; ++tick)
+			{
+				const double y = 2.35 - static_cast<double>(tick + 1) / 60.0;
+				REQUIRE(setup.Call("entity.update", Json{ { "entity", "/Press" }, { "target", "play" }, { "components", Json{ { "Transform", Json{ { "Translation", Json::array({ 0.0, y, 0.0 }) } } } } } })
+						.has_value());
+				StepPhysicsScene(setup, 1);
+				const Result<Json> info = setup.Call("physics.bodyInfo", Json{ { "entity", "/Pinned" } });
+				REQUIRE_MESSAGE(info.has_value(), info.error().ToString());
+				squeezed = (*info)["squeezed"] == Json(true);
+				if (squeezed)
+					CHECK((*info)["squeezedBy"]["path"] == Json("/Press"));
+			}
+			CHECK(squeezed);
+		}
+
 		TEST_CASE("PhysicsMethods: physics.bodyInfo needs a play session and an entity with a body")
 		{
 			Test::AutomationFixture setup("PhysicsBodyInfoErrors");

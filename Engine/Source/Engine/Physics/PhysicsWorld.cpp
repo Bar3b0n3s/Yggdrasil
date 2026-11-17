@@ -24,6 +24,8 @@
 #include <Jolt/Physics/Collision/TransformedShape.h>
 #include <Jolt/Physics/EPhysicsUpdateError.h>
 
+#include <algorithm>
+#include <bit>
 #include <limits>
 
 // The world's queries are in PhysicsWorldQueries.cpp.
@@ -256,6 +258,37 @@ namespace Engine {
 				consequence);
 		}
 
+		// M36: InvalidArgument unless `surface`'s values are finite and in range (PhysicsColliderSurface).
+		[[nodiscard]] static Status CheckColliderSurface(const PhysicsColliderSurface& surface)
+		{
+			if (!std::isfinite(surface.Friction) || !std::isfinite(surface.Restitution) || !Detail::IsFinite(surface.SurfaceVelocity))
+				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {} holds a value that is not finite", surface.Collider);
+			if (surface.Friction < 0.0f || surface.Friction > MaxPhysicsFriction)
+			{
+				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {}: Friction must be in [0, {}] (got {})", surface.Collider,
+					MaxPhysicsFriction, surface.Friction);
+			}
+			if (surface.Restitution < 0.0f || surface.Restitution > 1.0f)
+				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {}: Restitution must be in [0, 1] (got {})", surface.Collider,
+					surface.Restitution);
+			if (GetLength(Detail::ToJolt(surface.SurfaceVelocity)) > static_cast<double>(MaxSurfaceSpeed))
+			{
+				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {}: SurfaceVelocity ({}, {}, {}) is longer than {} m/s", surface.Collider,
+					surface.SurfaceVelocity.x, surface.SurfaceVelocity.y, surface.SurfaceVelocity.z, MaxSurfaceSpeed);
+			}
+			return {};
+		}
+
+		// M36: whether two surfaces give contacts the same values, bit for bit.
+		[[nodiscard]] static bool SameSurface(const PhysicsColliderSurface& a, const PhysicsColliderSurface& b)
+		{
+			return std::bit_cast<uint32_t>(a.Friction) == std::bit_cast<uint32_t>(b.Friction)
+				&& std::bit_cast<uint32_t>(a.Restitution) == std::bit_cast<uint32_t>(b.Restitution)
+				&& std::bit_cast<uint32_t>(a.SurfaceVelocity.x) == std::bit_cast<uint32_t>(b.SurfaceVelocity.x)
+				&& std::bit_cast<uint32_t>(a.SurfaceVelocity.y) == std::bit_cast<uint32_t>(b.SurfaceVelocity.y)
+				&& std::bit_cast<uint32_t>(a.SurfaceVelocity.z) == std::bit_cast<uint32_t>(b.SurfaceVelocity.z);
+		}
+
 		[[nodiscard]] static std::string DescribeUpdateErrors(JPH::EPhysicsUpdateError errors)
 		{
 			std::string text;
@@ -380,8 +413,8 @@ namespace Engine {
 		}
 		if (!Detail::IsFinite(description.LinearVelocity) || !Detail::IsFinite(description.AngularVelocity))
 			return MakeError(ErrorCode::InvalidArgument, "the starting velocities are not finite");
-		if (description.Friction < 0.0f)
-			return MakeError(ErrorCode::InvalidArgument, "Friction must be >= 0 (got {})", description.Friction);
+		if (description.Friction < 0.0f || description.Friction > MaxPhysicsFriction)
+			return MakeError(ErrorCode::InvalidArgument, "Friction must be in [0, {}] (got {})", MaxPhysicsFriction, description.Friction);
 		if (description.Restitution < 0.0f || description.Restitution > 1.0f)
 			return MakeError(ErrorCode::InvalidArgument, "Restitution must be in [0, 1] (got {})", description.Restitution);
 		if (description.LinearDamping < 0.0f || description.AngularDamping < 0.0f)
@@ -597,6 +630,11 @@ namespace Engine {
 			bodyInterface.SetMotionQuality(live->ID, Utils::GetMotionQuality(record.WantsLinearCast, *newShape.Shape));
 		record.Shape = shape;
 		record.Collider = newShape.ColliderUserData.empty() ? 0 : newShape.ColliderUserData.front();
+		// M36: the surfaces of colliders the new shape no longer has go (SetColliderSurfaces).
+		std::erase_if(record.Surfaces, [&newShape](const PhysicsColliderSurface& surface)
+		{
+			return std::find(newShape.ColliderUserData.begin(), newShape.ColliderUserData.end(), surface.Collider) == newShape.ColliderUserData.end();
+		});
 
 		JPH::AABox bounds = oldBounds;
 		bounds.Encapsulate(bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds());
@@ -614,6 +652,71 @@ namespace Engine {
 		if (slot >= state.Bodies.size() || state.Bodies[slot].ID != live->ID || state.Bodies[slot].Shape == nullptr)
 			return 0;
 		return State::ResolveColliderUserData(*state.Bodies[slot].Shape, subShape);
+	}
+
+	Status PhysicsWorld::SetColliderSurfaces(BodyHandle body, std::span<const PhysicsColliderSurface> surfaces)
+	{
+		State& state = *m_State;
+		const std::optional<LiveBody> live = Utils::FindLiveBody(*state.System, body);
+		if (!live.has_value())
+			return MakeError(ErrorCode::InvalidArgument, "0x{:08x} names no live body of this world", body.GetValue());
+		// Every live body was created by CreateBody (character inner bodies included), so it has a record.
+		const uint32_t slot = live->ID.GetIndex();
+		const bool hasRecord = slot < state.Bodies.size() && state.Bodies[slot].ID == live->ID && state.Bodies[slot].Shape != nullptr;
+		ENGINE_CORE_ASSERT(hasRecord, "PhysicsWorld::SetColliderSurfaces: 0x{:08x} names no body record of this world", body.GetValue());
+		if (!hasRecord)
+			return MakeError(ErrorCode::InvalidArgument, "0x{:08x} names no body record of this world", body.GetValue());
+		Detail::PhysicsBodyRecord& record = state.Bodies[slot];
+
+		const std::vector<uint32_t>& colliders = record.Shape->m_State->ColliderUserData;
+		std::vector<PhysicsColliderSurface> sorted(surfaces.begin(), surfaces.end());
+		for (const PhysicsColliderSurface& surface : sorted)
+		{
+			ENGINE_TRY(Utils::CheckColliderSurface(surface));
+			if (std::find(colliders.begin(), colliders.end(), surface.Collider) == colliders.end())
+				return MakeError(ErrorCode::InvalidArgument, "the body 0x{:08x} has no collider {}", body.GetValue(), surface.Collider);
+		}
+		std::sort(sorted.begin(), sorted.end(), [](const PhysicsColliderSurface& a, const PhysicsColliderSurface& b)
+		{
+			return a.Collider < b.Collider;
+		});
+		const auto duplicate = std::adjacent_find(sorted.begin(), sorted.end(), [](const PhysicsColliderSurface& a, const PhysicsColliderSurface& b)
+		{
+			return a.Collider == b.Collider;
+		});
+		if (duplicate != sorted.end())
+			return MakeError(ErrorCode::InvalidArgument, "collider {} of the body 0x{:08x} is listed twice", duplicate->Collider, body.GetValue());
+
+		// The colliders whose contacts change: a collider without an entry counts as the body's material with no velocity.
+		PhysicsColliderSurface bodyMaterial;
+		{
+			const JPH::BodyLockRead lock(state.System->GetBodyLockInterface(), live->ID);
+			bodyMaterial.Friction = lock.GetBody().GetFriction();
+			bodyMaterial.Restitution = lock.GetBody().GetRestitution();
+		}
+		std::vector<uint32_t> changed;
+		for (const uint32_t collider : colliders)
+		{
+			bodyMaterial.Collider = collider;
+			const PhysicsColliderSurface* before = Detail::FindColliderSurface(record, collider);
+			const auto after = std::find_if(sorted.begin(), sorted.end(), [collider](const PhysicsColliderSurface& surface)
+			{
+				return surface.Collider == collider;
+			});
+			const PhysicsColliderSurface& was = before != nullptr ? *before : bodyMaterial;
+			const PhysicsColliderSurface& is = after != sorted.end() ? *after : bodyMaterial;
+			if (!Utils::SameSurface(was, is))
+				changed.push_back(collider);
+		}
+		record.Surfaces = std::move(sorted);
+
+		// What rests on a collider whose surface changed (debris asleep on a stopped belt) wakes, so the next step meets it.
+		for (const uint32_t collider : changed)
+		{
+			if (const std::optional<Aabb> bounds = GetSubShapeBounds(body, collider))
+				Utils::WakeBodiesIn(*state.System, JPH::AABox(Detail::ToJolt(bounds->Min), Detail::ToJolt(bounds->Max)));
+		}
+		return {};
 	}
 
 	PhysicsPose PhysicsWorld::GetPose(BodyHandle body) const

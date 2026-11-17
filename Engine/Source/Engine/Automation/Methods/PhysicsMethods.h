@@ -17,7 +17,9 @@
 // contacts, layer)", §13.7 "physics reasoning", Runtime subset). It reads the play session's PhysicsSystem
 // (PhysicsSystem::GetBodyInfo). Conventions as in MethodRegistry.h.
 //
-// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 18): the wire format below.
+// Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 18): the wire format below. M36 adds the
+// character's ground collider, its squeeze and the body that squeezes it after groundNormal
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 7 and 14), reviewed as a change to the frozen wire format.
 
 namespace Engine {
 
@@ -66,6 +68,12 @@ namespace Engine {
 		// Characters (Origin Character) only; false and (0, 1, 0) otherwise.
 		bool Grounded = false;
 		glm::vec3 GroundNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 7): a grounded character's ground collider
+		// (PhysicsCharacterState::GroundCollider); empty otherwise. M36 W36.2 (decision 14): whether the character is squeezed,
+		// and the owner of the body that squeezes it (empty otherwise).
+		EntitySummary GroundCollider{};
+		bool Squeezed = false;
+		EntitySummary SqueezedBy{};
 		uint32_t Tick = 0; // the session's tick when read
 	};
 

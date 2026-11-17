@@ -97,6 +97,17 @@ namespace Engine {
 	// decompose), and so does the weight a character puts on what it stands on.
 	inline constexpr float MaxPhysicsMass = 1.0e9f;
 
+	// The largest friction coefficient of a body or a collider surface (M36, Docs/Decisions/0053-m36-contact-surfaces.md
+	// decision 2; PhysicsWorld::CreateBody and SetColliderSurfaces refuse more, and RigidBody.Friction, RigidBody2D.Friction,
+	// TerrainCollider.Friction and ColliderSurface.Friction have the same registry maximum). Jolt's friction solve compares
+	// the squared friction impulses with the square of the combined friction times the contact's summed normal impulse
+	// (ContactConstraintManager's max_linear_lambda), which overflows a float above about 1.8e19: a floating-point exception
+	// that aborts an MSVC Debug run, an unbounded friction elsewhere. With masses of at most MaxPhysicsMass and body speeds of
+	// at most 1e6 m/s (the world's clamp), a contact's normal impulse in one step stays below about 4e15 N s (two bodies
+	// closing at 2e6 m/s and bouncing back elastically), so a combined friction of at most 1000 keeps the product below 4e18.
+	// Far beyond any real material (rubber on dry concrete is about 1).
+	inline constexpr float MaxPhysicsFriction = 1000.0f;
+
 	// The largest magnitude, in m/s^2, of a component of a world's gravity (PhysicsWorld::Create and SetGravity refuse
 	// more; the project setting PhysicsSettings.Gravity has the same bound): one step's velocity change from it, at the
 	// largest gravity factor a body gets, stays far below the velocities whose squared length overflows a float.

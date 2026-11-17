@@ -1684,6 +1684,9 @@ Reports the physics body of an entity of the play scene (the body it owns, or th
 | `contacts` | `Array<PhysicsContactSummary>` | The body's active contact pairs, sorted by the partner's id. |
 | `grounded` | `Bool` | A character standing on walkable ground; false for other bodies. |
 | `groundNormal` | `Vec3` | The normal of a grounded character's ground; (0, 1, 0) otherwise. |
+| `groundCollider` | `EntitySummary` | The collider entity a grounded character's last update stood on (another character's entity when it stood on one), as CharacterController:GetGroundCollider reads it; empty for other bodies, a character in the air, and a ground that is disabled or destroyed. |
+| `squeezed` | `Bool` | Whether a character's last update found it squeezed (a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it), as CharacterController:IsSqueezed reads it; false for other bodies. |
+| `squeezedBy` | `EntitySummary` | The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty when it is not squeezed, for other bodies, and when that entity is disabled or destroyed. |
 | `tick` | `UInt32` | The play session's tick when the body was read. |
 
 Example: Check whether the ball rests on the ground.

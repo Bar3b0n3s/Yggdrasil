@@ -2,6 +2,7 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
 #include "Engine/Core/Random.h"
+#include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/ValidationContext.h"
 #include "Engine/Scene/ComponentRegistration.h"
@@ -74,12 +75,12 @@ namespace Engine {
 				"Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a "
 				"RigidBody on or above the entity, or a collider-only ancestor's).")
 			.Field("Friction", &TerrainColliderComponent::Friction,
-				"The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses "
-				"the geometric mean of both bodies' values.",
-				{ .Min = 0.0 })
+				"The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by "
+				"a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxPhysicsFriction) })
 			.Field("Restitution", &TerrainColliderComponent::Restitution,
-				"The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact "
-				"uses the larger of both bodies' values.",
+				"The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced "
+				"by a ColliderSurface on the entity); a contact uses the larger of its two sides' values.",
 				{ .Min = 0.0, .Max = 1.0 });
 	}
 

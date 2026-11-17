@@ -42,6 +42,7 @@
 #include "Engine/Scene/LoadReport.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -1376,8 +1377,9 @@ end
 			// M19's SCRIPT_COMPUTED_ASSET_LOAD, M20's PREFAB_CYCLE, M21's three sprite codes and 2D physics codes, its
 			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, M23's
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
-			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes.
-			CHECK(codes.size() == 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size());
+			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
+			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes).
+			CHECK(codes.size() == 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1433,7 +1435,9 @@ end
 			CHECK(position("INPUT_INVALID_ACTION") + 1 == position(ParticleFrameOutOfRangeCode));
 			CHECK(position(ParticleFrameOutOfRangeCode) + 1 == position(NavMeshNotBakedCode));
 			CHECK(position(NavMeshNotBakedCode) + 1 == position(NavMeshStaleCode));
-			CHECK(codes.back() == NavMeshStaleCode);
+			// Phase 6's codes follow phase 5's in landing order (ADR 0052's phase-6 ledger, the validation row): M36's
+			// PHYSICS_SURFACE_UNUSED (Docs/Decisions/0053-m36-contact-surfaces.md decision 6) first, M37's after it.
+			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

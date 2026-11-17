@@ -73,7 +73,8 @@ PLANE_MESH = "0000000000000103"
 COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
     "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
-    "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "AudioSource", "AudioListener",
+    "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface", "AudioSource",
+    "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
@@ -1028,6 +1029,13 @@ return Script.Define("Jumper", Jumper)
     item.add_json("Project/Assets/Navigation/Main.navmesh.meta", meta("4e41000000000001", "NavMesh", "NavMesh"))
     item.entities.append(entity("e000000000000042", "Navigation", {
         "Transform": transform(), "Navigation": {"NavMesh": "4e41000000000001"}}))
+
+    # M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 6): a ColliderSurface whose entity's only collider is a
+    # trigger, which takes no surface.
+    item = fixture("PHYSICS_SURFACE_UNUSED")
+    item.entities.append(entity("e000000000000042", "Belt", {
+        "Transform": transform(0, 0, -20), "BoxCollider": {"HalfExtents": [1, 0.1, 0.5], "IsTrigger": True},
+        "ColliderSurface": {"SurfaceVelocity": [1, 0, 0]}}))
 
     return fixtures
 
