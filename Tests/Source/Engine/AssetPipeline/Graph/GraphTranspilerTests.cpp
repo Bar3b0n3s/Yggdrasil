@@ -36,8 +36,10 @@ namespace Engine {
 		// Any, a result, a Return through a merge, a void early Return, a method without an event node, an OnUiClick Return, an
 		// Any variable, Script.Get of a table) and Valve (the world-pause opt-in and the instance chain: Scene.FindByPath,
 		// Flow.IfNotNil, Entity:GetScript, Script.Set, Script.Call by name and by index, Script.Get of a call's result,
-		// Self.Instance).
-		constexpr std::string_view FixtureGraphs[] = { "Door", "Counter", "Mover", "Bumper", "Rune", "Valve" };
+		// Self.Instance) and, from the review of W39.1, Paths (every return path the transpiler writes: a returning merge that
+		// ends "return false", one returning merge called from another, a Return in a loop's body, typed and nil returns of one
+		// method, and a Return entered by several links).
+		constexpr std::string_view FixtureGraphs[] = { "Door", "Counter", "Mover", "Bumper", "Rune", "Valve", "Paths" };
 
 		// M24's fixture graphs, which hold none of M39's methods, Returns or opt-in.
 		constexpr std::string_view M24FixtureGraphs[] = { "Door", "Counter", "Mover", "Bumper" };

@@ -283,26 +283,6 @@ namespace Engine {
 			return { kind.substr(first + 1, second - first - 1), kind.substr(second + 1) };
 		}
 
-		// Luau's reserved words, which Script.Call's literal method name may not be to be written as a method call.
-		static constexpr std::array<std::string_view, 22> LuauKeywords = { "and", "break", "continue", "do", "else", "elseif", "end", "false", "for", "function",
-			"if", "in", "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while" };
-
-		// Whether `text` is a Luau name that may follow ':' in a method call: [A-Za-z_][A-Za-z0-9_]* and not a reserved word.
-		[[nodiscard]] static bool IsLuauMethodName(std::string_view text)
-		{
-			const auto letter = [](char c)
-			{
-				return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '_';
-			};
-			if (text.empty() || !letter(text.front()))
-				return false;
-			const bool characters = std::ranges::all_of(text, [&letter](char c)
-			{
-				return letter(c) || (c >= '0' && c <= '9');
-			});
-			return characters && std::ranges::find(LuauKeywords, text) == LuauKeywords.end();
-		}
-
 		// The Luau local a graph method's parameter is in its function (M39, Docs/Decisions/0056-m39-graphs-behaviours.md
 		// departure 3): "p_<Name>", so no parameter shadows a global the text uses or a generated local.
 		[[nodiscard]] static std::string GetParameterLocal(std::string_view name)
@@ -954,8 +934,9 @@ namespace Engine {
 					out.push_back(TextWork(inner, std::format("{}[{}] = {}", self, GetNamedInput(node, "Member"), GetNamedInput(node, "Value")), id));
 				else if (kind == "Script.Call")
 				{
-					// Arg1 to Arg4, trailing unset ones left out; a literal method name that is a Luau name is a method call, any
-					// other name an index of the object called with the object; the first result, cast to any.
+					// Arg1 to Arg4, trailing unset ones left out; a literal method name IsGraphIdentifier accepts (a Luau name, no
+					// reserved word, as a member's) is a method call, any other name an index of the object called with the object;
+					// the first result, cast to any.
 					std::vector<const GraphPinDescription*> arguments = GetDataPins(node, GraphPinDirection::Input);
 					std::erase_if(arguments, [](const GraphPinDescription* pin)
 					{
@@ -969,7 +950,7 @@ namespace Engine {
 					std::string call;
 					const auto literal = m_Graph.Nodes[node].Values.find("Method");
 					const bool named = !m_DataSources.contains({ node, std::string("Method") }) && literal != m_Graph.Nodes[node].Values.end()
-						&& literal->second.Get().is_string() && IsLuauMethodName(ReadText(literal->second.Get()));
+						&& literal->second.Get().is_string() && IsGraphIdentifier(ReadText(literal->second.Get()));
 					if (named)
 						call = std::format("{}:{}({})", self, ReadText(literal->second.Get()), list);
 					else

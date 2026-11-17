@@ -1082,7 +1082,7 @@ namespace Engine {
 
 		// The members' descriptions are short: graph.setMembers' MCP input schema inlines both structs (each under 4,096 bytes,
 		// §13.8), so their rules are GraphDocument.h's, Architecture §6.11's and FileFormats.md's Graph section's.
-		constexpr std::string_view NameRule = "A Luau identifier, unique across fields and variables (§6.11).";
+		constexpr std::string_view NameRule = "A Luau identifier, unique across fields, variables and methods (§6.11).";
 		constexpr std::string_view DefaultRule = "Its default, in its Kind's JSON spelling (§6.11).";
 		constexpr std::string_view ElementRule = "An Array's element kind; Number otherwise.";
 		constexpr std::string_view AssetTypeRule = "An Asset's AssetType; empty otherwise.";

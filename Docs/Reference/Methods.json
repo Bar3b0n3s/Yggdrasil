@@ -13107,7 +13107,7 @@
 						"type": "object",
 						"properties": {
 							"Name": {
-								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"description": "A Luau identifier, unique across fields, variables and methods (§6.11).",
 								"type": "string"
 							},
 							"Kind": {
@@ -13145,7 +13145,7 @@
 						"type": "object",
 						"properties": {
 							"Name": {
-								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"description": "A Luau identifier, unique across fields, variables and methods (§6.11).",
 								"type": "string"
 							},
 							"Kind": {
@@ -13550,7 +13550,7 @@
 						"type": "object",
 						"properties": {
 							"Name": {
-								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"description": "A Luau identifier, unique across fields, variables and methods (§6.11).",
 								"type": "string"
 							},
 							"Kind": {
@@ -13588,7 +13588,7 @@
 						"type": "object",
 						"properties": {
 							"Name": {
-								"description": "A Luau identifier, unique across fields and variables (§6.11).",
+								"description": "A Luau identifier, unique across fields, variables and methods (§6.11).",
 								"type": "string"
 							},
 							"Kind": {

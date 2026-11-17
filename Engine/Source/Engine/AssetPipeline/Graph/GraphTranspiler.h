@@ -45,7 +45,7 @@
 //     statement's output read later in its flow is the value of its last run. M39
 //     (Docs/Decisions/0056-m39-graphs-behaviours.md decisions 2 and 4): Script.Get is "(<object> :: any)[<member>]",
 //     Script.Set "o<Id>[<member>] = <value>", Script.Call "n<Id>_Result = (o<Id>:<Method>(<Arg1..Arg4>) :: any)" for a
-//     literal Method that is a Luau name, else "(o<Id>[<method>](o<Id>, ...) :: any)", trailing unset arguments left out,
+//     literal Method IsGraphIdentifier accepts, else "(o<Id>[<method>](o<Id>, ...) :: any)", trailing unset arguments left out,
 //     Self.Instance "self". A Return ends the function that runs it, Luau's return, always in a do ... end block of its
 //     own: "return <Value>" ("return" without a value); a merge whose flow reaches a Return is "local function
 //     flow<Id>(): boolean", in which a Return sets the function's local "result" (declared "local result: any") and

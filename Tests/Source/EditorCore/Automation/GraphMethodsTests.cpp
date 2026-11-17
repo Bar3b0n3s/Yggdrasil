@@ -447,6 +447,27 @@ namespace Engine {
 			REQUIRE(refused.contains("error"));
 			CHECK(refused["error"]["data"]["location"]["pointer"] == "/methods/0/Parameters");
 			CHECK(ReadDoorText(setup) == before);
+			// And at /methods/<i>/Results while a Return node's literal or link needs the old result (the review of W39.1): a
+			// Return.Blocks holding the literal true, another fed by a Bool output; a kind change and the result's removal.
+			const uint32_t literal = AddNode(setup, graph, "Return.Blocks", Json{ { "values", Json{ { "Value", true } } } });
+			const uint32_t fed = AddNode(setup, graph, "Return.Blocks");
+			CallOrFail(setup, "graph.connect", Json{ { "graph", graph }, { "from", Pin(equal, "Result") }, { "to", Pin(fed, "Value") } });
+			const std::string withReturns = ReadDoorText(setup);
+			for (const Json& changed : { method("Blocks", "Any", "Number"), method("Blocks", "Any", "") })
+			{
+				CAPTURE(changed.dump());
+				const Json result = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ changed }) } });
+				REQUIRE(result.contains("error"));
+				CHECK(result["error"]["data"]["location"]["pointer"] == "/methods/0/Results");
+				CHECK(ReadDoorText(setup) == withReturns);
+			}
+			// Without the literal's Return, the link alone (an issue at /Links/<i>, whose end is the Return) needs the Bool.
+			CallOrFail(setup, "graph.removeNodes", Json{ { "graph", graph }, { "nodes", Json::array({ literal }) } });
+			const std::string linkOnly = ReadDoorText(setup);
+			const Json linked = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ method("Blocks", "Any", "String") }) } });
+			REQUIRE(linked.contains("error"));
+			CHECK(linked["error"]["data"]["location"]["pointer"] == "/methods/0/Results");
+			CHECK(ReadDoorText(setup) == linkOnly);
 			// A member may not change between a field and a method but by its removal and addition.
 			const Json field = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "fields", Json::array({ Member("Blocks", "Number", 0, true) }) } });
 			REQUIRE(field.contains("error"));

@@ -307,6 +307,31 @@ return table.concat({ tostring(first), tostring(second), tostring(gate.Count), t
 			CHECK(fixture.Errors.empty());
 		}
 
+		// The review of W39.1: the Paths fixture runs every return path the transpiler writes (its committed text shows each
+		// one): a returning merge that ends "return false" (Classify), one returning merge called from another (Nest), a Return
+		// in a loop's body before the Return after the loop (Find), typed and nil returns of one method (Classify) and a Return
+		// entered by two links (Pick).
+		TEST_CASE("GraphTranspiler: every return path of a graph method gives its caller that path's result")
+		{
+			const BehaviourGraphs graphs;
+			Test::ScriptTestFixture fixture;
+			const AssetHandle paths(0x39000d);
+			static_cast<void>(graphs.Add(fixture, paths, graphs.ReadFixture("Paths"), "Assets/Scripts/Paths.graph"));
+			AttachScripts(fixture, fixture.GetScene().CreateEntity("Paths"), Slot(paths));
+			REQUIRE(fixture.Start());
+
+			CHECK(EvaluateText(fixture, R"(local paths = Scene.FindByPath("/Paths"):GetScript("Paths")
+local results = {
+	tostring(paths:Classify(-200)), tostring(paths:Classify(-5)), tostring(paths:Classify(500)), tostring(paths:Classify(5)),
+	tostring(paths:Nest(true, true)), tostring(paths:Nest(true, false)), tostring(paths:Nest(false, true)), tostring(paths:Nest(false, false)),
+	tostring(paths:Find(5)), tostring(paths:Find(2)),
+	tostring(paths:Pick(true)), tostring(paths:Pick(false)),
+}
+return table.concat(results, ","))")
+				== "extreme,nil,nil,small,1,nil,1,nil,3,0,true,false");
+			CHECK(fixture.Errors.empty());
+		}
+
 		// Decision 4 (closing Docs/Backlog.md §6's "a graph's UI event never consumes the event"): a graph's Return.OnUiClick
 		// of true stops the click after its entity, and of false (or nil) lets it bubble to the parent's behaviour.
 		TEST_CASE("GraphTranspiler: an OnUiClick Return of true consumes the click")

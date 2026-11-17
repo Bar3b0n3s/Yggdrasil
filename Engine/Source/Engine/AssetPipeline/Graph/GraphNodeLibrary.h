@@ -227,12 +227,13 @@ namespace Engine {
 	// input that needs a value (neither optional nor Any) only in nodes its Body flow alone enters, since on its Completed flow
 	// and after it they are nil when the loop ran zero times (M24's review); and (M39, not Incomplete, when the exec links form
 	// no cycle) a Return node is reached only from its own function's event nodes (Event.<Callback> for Return.<Callback>,
-	// Method.<Name> for Return.<Name>) and never through a Flow.Delay's Later flow, each issue at the Return node. When every
-	// other issue is Incomplete, no statement's code starts more than 64 blocks deep in the transpiled text (TranspileGraph's
-	// layout, where a branch, a loop's body, Flow.Delay's later flow and a statement's block of pure values each nest one
-	// level), reported at the statement that first passes the limit, and the text holds at most 8 MiB, reported at the
-	// statement whose code passes it, so a graph transpiles exactly when it validates (Docs/Decisions/0035-m24-contract.md decision 7 and risk 1).
-	// Several event nodes of one callback are valid and run in id order. The issues are in document order. Pure.
+	// Method.<Name> for Return.<Name>) and never through a Flow.Delay's Later flow, each issue at the Return node. When
+	// every other issue is Incomplete, no statement's code starts more than 64 blocks deep in the transpiled text
+	// (TranspileGraph's layout, where a branch, a loop's body, Flow.Delay's later flow and a statement's block of pure
+	// values each nest one level), reported at the statement that first passes the limit, and the text holds at most 8 MiB,
+	// reported at the statement whose code passes it, so a graph transpiles exactly when it validates
+	// (Docs/Decisions/0035-m24-contract.md decision 7 and risk 1). Several event nodes of one callback are valid and run in
+	// id order. The issues are in document order. Pure.
 	[[nodiscard]] std::vector<GraphIssue> ValidateGraph(const GraphDocument& graph, const GraphNodeLibrary& library);
 
 	// The statement nodes that no event's flow reaches (GRAPH_UNREACHABLE_NODE), sorted by id. Pure; `graph` validates.

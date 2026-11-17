@@ -286,7 +286,7 @@ A behaviour field, set per script slot (§6.11).
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields and variables (§6.11). |
+| `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields, variables and methods (§6.11). |
 | `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its Luau Field constructor; never Any. |
 | `Default` | `Variant` | `null` |  |  |  | Its default, in its Kind's JSON spelling (§6.11). |
 | `Element` | `GraphValueKind` | `"Number"` |  |  |  | An Array's element kind; Number otherwise. |
@@ -300,7 +300,7 @@ Instance state, set to its Default at OnCreate (§6.11).
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields and variables (§6.11). |
+| `Name` | `String` | `""` |  |  |  | A Luau identifier, unique across fields, variables and methods (§6.11). |
 | `Kind` | `GraphValueKind` | `"Number"` |  |  |  | Its kind, as a field's, or Any. |
 | `Default` | `Variant` | `null` |  |  |  | Its default, in its Kind's JSON spelling (§6.11). |
 | `Element` | `GraphValueKind` | `"Number"` |  |  |  | An Array's element kind; Number otherwise. |

@@ -54,20 +54,22 @@
 //     number, Integer an int32, Bool a boolean, String a string of at most MaxGraphStringBytes bytes of valid UTF-8, Vector
 //     [x, y, z], Color [r, g, b, a] (linear), Quat [x, y, z, w] (finite, nonzero), Entity, Asset and Any null, Enum one of
 //     EnumValues, Array []. A field is never of kind Any, which no Field constructor holds. Element is an Array's element kind
-//     (any kind but Array and Any) and Number for every other kind; AssetType is an Asset's (or an Array of Asset's) AssetType
-//     name, other than None, and empty otherwise; EnumValues are an Enum's (or an Array of Enum's) 1 to MaxGraphEnumValues
-//     unique choices, each 1 to MaxGraphNameBytes bytes of valid UTF-8 without NUL, and empty otherwise. A field's Options are the Luau FieldOptions it is declared with, so only a kind whose Field
-//     constructor takes FieldOptions has any (Number, Integer, Bool, String, Vector, Color, Quat; never Entity, Asset, Enum or
-//     Array): "Min", "Max" and "Step" (finite numbers, for Number, Integer and Vector only, Min <= Max, Step > 0) and "Tooltip"
-//     (a string of at most MaxGraphTooltipBytes bytes of valid UTF-8 without NUL); a variable has none. A field's Default
-//     also meets what its Field constructor requires of a default: a Number's, Integer's or Vector's (each component) within
-//     Min and Max, compared as the field's reflected type compares them (a float against the bound rounded to float), and a
-//     Quat's of unit length (within UnitQuaternionTolerance, Reflection/FieldType.h).
+//     (any kind but Array and Any) and Number for every other kind; AssetType is an Asset's (or an Array of Asset's)
+//     AssetType name, other than None, and empty otherwise; EnumValues are an Enum's (or an Array of Enum's) 1 to
+//     MaxGraphEnumValues unique choices, each 1 to MaxGraphNameBytes bytes of valid UTF-8 without NUL, and empty otherwise.
+//     A field's Options are the Luau FieldOptions it is declared with, so only a kind whose Field constructor takes
+//     FieldOptions has any (Number, Integer, Bool, String, Vector, Color, Quat; never Entity, Asset, Enum or Array): "Min",
+//     "Max" and "Step" (finite numbers, for Number, Integer and Vector only, Min <= Max, Step > 0) and "Tooltip" (a string
+//     of at most MaxGraphTooltipBytes bytes of valid UTF-8 without NUL); a variable has none. A field's Default also meets
+//     what its Field constructor requires of a default: a Number's, Integer's or Vector's (each component) within Min and
+//     Max, compared as the field's reflected type compares them (a float against the bound rounded to float), and a Quat's
+//     of unit length (within UnitQuaternionTolerance, Reflection/FieldType.h).
 //   - Methods (M39, decision 1). A method has a Name, at most MaxGraphMethodParameters Parameters (each a Name, an
 //     IsGraphIdentifier other than "self" and "Then" unique in its method, a Kind and an AssetType) and at most
-//     MaxGraphMethodResults Results (each a Kind and an AssetType; none for a method that returns nothing). A parameter's or result's Kind is one
-//     IsGraphMethodValueKind accepts (not Enum, not Array); its AssetType is empty, or for an Asset an AssetType name other
-//     than None. RunsWhileWorldPaused true makes the behaviour run while the world is paused (ADR 0050 decision 2).
+//     MaxGraphMethodResults Results (each a Kind and an AssetType; none for a method that returns nothing). A parameter's
+//     or result's Kind is one IsGraphMethodValueKind accepts (not Enum, not Array); its AssetType is empty, or for an Asset
+//     an AssetType name other than None. RunsWhileWorldPaused true makes the behaviour run while the world is paused
+//     (ADR 0050 decision 2).
 //   - Versions. A version 1 file reads as version 2 with no methods and RunsWhileWorldPaused false; in it Methods and
 //     RunsWhileWorldPaused are unknown members and a variable of kind Any is refused.
 //   - Canonical order. Fields, Variables and Methods sorted by Name, Nodes by Id, Links by (From.Node, From.Pin, To.Node,
@@ -222,11 +224,12 @@ namespace Engine {
 	};
 
 	// Registers the enum "GraphValueKind" and the structs "GraphPinRef", "GraphField", "GraphVariable", "GraphParameter",
-	// "GraphResult", "GraphMethod", "GraphNode", "GraphLink" and "Graph" (GraphDocument). ValidateGraphStructure's rules are
-	// the "Graph" struct's Validate hook (all of them but the Name's on an empty Name, the registry's default object, which
-	// GraphFromJson still refuses), so a document reports each violation once, in document order; its Generate hook keeps
-	// the registry suite's random graphs valid, and the member structs have neither. RegisterAssetPipelineTypes calls it (stream G-A), so graphs read and write wherever the
-	// importers' types are registered (the editor, the tests' built-in registry); the Runtime has none.
+	// "GraphResult", "GraphMethod", "GraphNode", "GraphLink" and "Graph" (GraphDocument). ValidateGraphStructure's rules
+	// are the "Graph" struct's Validate hook (all of them but the Name's on an empty Name, the registry's default object,
+	// which GraphFromJson still refuses), so a document reports each violation once, in document order; its Generate hook
+	// keeps the registry suite's random graphs valid, and the member structs have neither. RegisterAssetPipelineTypes calls
+	// it (stream G-A), so graphs read and write wherever the importers' types are registered (the editor, the tests'
+	// built-in registry); the Runtime has none.
 	void RegisterGraphTypes(TypeRegistry& registry);
 
 	// Whether `name` is a Luau identifier of 1 to MaxGraphNameBytes bytes that is not a Luau reserved word and does not start

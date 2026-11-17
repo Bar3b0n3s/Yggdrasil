@@ -762,7 +762,8 @@ namespace Engine {
 			* doctest::test_suite(Test::FuzzSuite))
 		{
 			// The seed corpus: the door's canonical text and (M39, Docs/Decisions/0056-m39-graphs-behaviours.md) the Rune fixture's,
-			// a graph with methods, returns through a merge, a callback's return and Script.Get, taken in turn. A mutated text goes
+			// a graph with methods, returns through a merge, a callback's return and Script.Get, and the Valve fixture's, with
+			// Script.Set, Script.Call by name and Self.Instance (the review of W39.1), taken in turn. A mutated text goes
 			// through GraphFromText (strict or not); a document it accepts is valid structurally, writes back, and goes through
 			// ValidateGraph and, when that finds nothing, through TranspileGraph and FindGraphAssetLiterals, so the library's and
 			// the transpiler's handling of every accepted document is fuzzed with the reader's.
@@ -775,7 +776,9 @@ namespace Engine {
 			REQUIRE_MESSAGE(doorText.has_value(), doorText.error().ToString());
 			const Result<std::string> runeText = Test::ReadTestDataText("Graphs/Rune.graph");
 			REQUIRE_MESSAGE(runeText.has_value(), runeText.error().ToString());
-			const std::array<const std::string*, 2> seeds = { &*doorText, &*runeText };
+			const Result<std::string> valveText = Test::ReadTestDataText("Graphs/Valve.graph");
+			REQUIRE_MESSAGE(valveText.has_value(), valveText.error().ToString());
+			const std::array<const std::string*, 3> seeds = { &*doorText, &*runeText, &*valveText };
 			const Test::FuzzRun run = Test::RunFuzzCase(0x6A7A0F24, 1000, [&registry, &library, &seeds](Random& random, uint64_t index)
 			{
 				std::string mutated = *seeds[index % seeds.size()];
