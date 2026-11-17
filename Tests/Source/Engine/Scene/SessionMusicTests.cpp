@@ -624,7 +624,7 @@ return Script.Define("Conductor", C)
 		// Phase 6's landing (M38 and M40 share PlaySession and IScriptHost in disjoint regions, the ledger): one Scene.Load keeps
 		// both the session's locale, which the new scene's VM starts in (Docs/Decisions/0055-m38-runtime-locale.md decision 1),
 		// and the session's music, whose voice plays on (Docs/Decisions/0057-m40-music.md decision 5).
-		TEST_CASE("PlaySession: a Scene.Load keeps both the session's locale and its music")
+		TEST_CASE("SessionMusic: a Scene.Load keeps both the session's locale and its music")
 		{
 			Test::ScriptTestFixture fixture;
 			const AssetHandle conductor(0x4000b4), next(0x4000b5);
