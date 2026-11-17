@@ -83,6 +83,20 @@ namespace Engine {
 			return chain;
 		}
 
+		// What `plan`'s joint on `entity` is made from now (PhysicsJointFormation).
+		static PhysicsJointFormation MakeJointFormation(ConstEntity entity, const PhysicsJointPlan& plan, const PhysicsJointFields& fields)
+		{
+			return PhysicsJointFormation{ .Type = plan.Type,
+				.Body = plan.Body,
+				.Connected = plan.Connected,
+				.ConnectedOrigin = plan.ConnectedOrigin,
+				.ConnectedBody = fields.ConnectedBody,
+				.Anchor = fields.Anchor,
+				.Axis = fields.Axis,
+				.ConnectedAnchor = fields.ConnectedAnchor,
+				.Chain = GetJointChain(entity, plan.Body) };
+		}
+
 		// §9.10: each joint in force solves at its entity's rank in UUID order among them (`joints` is ordered by UUID), so
 		// the solver's order does not depend on the order the joints were made in.
 		static void RankJoints(const std::map<UUID, PhysicsJointEntry>& joints, PhysicsWorld& world)
@@ -168,12 +182,25 @@ namespace Engine {
 		ChangedJoints.clear();
 		JointPlansStale = false;
 
+		// An entity leaving play: disabled or destroyed since the last FlushDestroyed, which removes what it held.
+		const auto isLeaving = [this](UUID entity)
+		{
+			return entity.IsValid() && FlushCandidates.contains(entity);
+		};
+
 		std::set<UUID> planned;
 		if (replan)
 		{
 			PhysicsJointComposition composition = ComposePhysicsJoints(scene, Composition);
 			for (PhysicsDiagnostic& diagnostic : composition.Diagnostics)
+			{
+				// A joint whose connected end is leaving play keeps what it has until the flush, which composes the plans again
+				// (RemoveLeavingJoints): its reason, if it still has one, is raised then.
+				const std::optional<PhysicsJointFields> diagnosed = ReadPhysicsJoint(scene.FindEntityByID(diagnostic.Entity));
+				if (diagnosed.has_value() && isLeaving(diagnosed->ConnectedBody))
+					continue;
 				RaiseDiagnostic(std::move(diagnostic));
+			}
 			for (const PhysicsJointPlan& plan : composition.Joints)
 			{
 				PhysicsJointEntry& entry = Joints[plan.Entity];
@@ -219,20 +246,19 @@ namespace Engine {
 				continue;
 			}
 
+			// A connected end leaving play keeps the joint it has until FlushDestroyed, as the joint's own entity does above and
+			// as its body steps until then.
+			if (isLeaving(fields->ConnectedBody))
+				continue;
+
 			const PhysicsJointPlan& plan = entry.Plan;
 			const ConstEntity entity = scene.FindEntityByID(id);
-			// Frames formed from what no longer holds are formed again (PhysicsJointFormation).
-			if (entry.HasFrames && plan.IsCreatable)
+			// What no longer holds is made again (PhysicsJointFormation): a hinge's, slider's or fixed joint's kept frames are
+			// formed again, and a distance joint in force is made again from both anchors as they are now.
+			if (plan.IsCreatable)
 			{
-				const PhysicsJointFormation formation{ .Type = plan.Type,
-					.Body = plan.Body,
-					.Connected = plan.Connected,
-					.ConnectedOrigin = plan.ConnectedOrigin,
-					.ConnectedBody = fields->ConnectedBody,
-					.Anchor = fields->Anchor,
-					.Axis = fields->Axis,
-					.Chain = Utils::GetJointChain(entity, plan.Body) };
-				if (formation != entry.Formation)
+				const bool formed = plan.Type == PhysicsJointType::Distance ? entry.Handle.IsValid() : entry.HasFrames;
+				if (formed && Utils::MakeJointFormation(entity, plan, *fields) != entry.Formation)
 				{
 					stop(entry);
 					entry.HasFrames = false;
@@ -308,24 +334,16 @@ namespace Engine {
 				other.Point = glm::vec3(connectedWorld * glm::vec4(fields->ConnectedAnchor, 1.0f));
 				connectedFrame = ToPhysicsJointBodyFrame(connectedPose, other);
 			}
-			else
+			else if (entry.HasFrames)
 			{
-				if (!entry.HasFrames)
-				{
-					entry.Frame = ToPhysicsJointBodyFrame(bodyPose, *world);
-					entry.ConnectedFrame = ToPhysicsJointBodyFrame(connectedPose, *world);
-					entry.Formation = PhysicsJointFormation{ .Type = plan.Type,
-						.Body = plan.Body,
-						.Connected = plan.Connected,
-						.ConnectedOrigin = plan.ConnectedOrigin,
-						.ConnectedBody = fields->ConnectedBody,
-						.Anchor = fields->Anchor,
-						.Axis = fields->Axis,
-						.Chain = Utils::GetJointChain(entity, plan.Body) };
-					entry.HasFrames = true;
-				}
 				frame = entry.Frame;
 				connectedFrame = entry.ConnectedFrame;
+			}
+			else
+			{
+				// Formed now, and kept only once the joint is made: a refused creation keeps nothing.
+				frame = ToPhysicsJointBodyFrame(bodyPose, *world);
+				connectedFrame = ToPhysicsJointBodyFrame(connectedPose, *world);
 			}
 
 			PhysicsJointDescription description;
@@ -352,11 +370,26 @@ namespace Engine {
 			entry.Body = body->Handle;
 			entry.Connected = connectedHandle;
 			entry.Settings = fields->Settings;
+			entry.Formation = Utils::MakeJointFormation(entity, plan, *fields);
+			if (plan.Type != PhysicsJointType::Distance)
+			{
+				entry.Frame = frame;
+				entry.ConnectedFrame = connectedFrame;
+				entry.HasFrames = true;
+			}
 			inForceChanged = true;
 		}
 
 		if (inForceChanged)
 			Utils::RankJoints(Joints, *World);
+	}
+
+	void PhysicsSystem::State::SynchronizeJointsAfterRebuild(const PhysicsComposition& composition)
+	{
+		Composition = composition;
+		JointPlansStale = true;
+		JointsChanged = true;
+		SynchronizeJoints();
 	}
 
 	void PhysicsSystem::State::RemoveBodyJoints(BodyHandle handle)
@@ -431,6 +464,13 @@ namespace Engine {
 	void PhysicsSystem::State::RemoveLeavingJoints(const std::set<UUID>& candidates)
 	{
 		const Scene& scene = *Specification.RuntimeScene;
+		// What left play may have been a joint's connected end, kept until now: the plans are composed again at the next
+		// synchronization, which raises a reason deferred while it was leaving.
+		if (!candidates.empty() && !Joints.empty())
+		{
+			JointPlansStale = true;
+			JointsChanged = true;
+		}
 		for (const UUID candidate : candidates)
 		{
 			const auto found = Joints.find(candidate);

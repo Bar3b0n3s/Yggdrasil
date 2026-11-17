@@ -5,6 +5,7 @@
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Random.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
+#include "Engine/Physics/PhysicsEngine.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/DistanceJointComponent.h"
 #include "Engine/Scene/Components/FixedJointComponent.h"
@@ -25,6 +26,7 @@
 #include <numbers>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -165,7 +167,7 @@ namespace Engine {
 
 	}
 
-	TEST_SUITE("Physics")
+	TEST_SUITE("Scene")
 	{
 		TEST_CASE("PhysicsSystem: joints are made after their bodies, and a hinge's authored pose is its angle 0")
 		{
@@ -584,8 +586,16 @@ namespace Engine {
 			}
 			SUBCASE("the session's end destroys the joints before the bodies")
 			{
+				// PhysicsWorld::DestroyBody destroys a body's joints first ("PhysicsWorld: destroying a body destroys its joints
+				// first, and their handles go invalid"), and the session destroys every joint before its bodies: its end leaves
+				// none of its three bodies and no world behind.
+				const uint32_t bodies = PhysicsEngine::GetLiveBodyCount();
+				const uint32_t worlds = PhysicsEngine::GetLiveWorldCount();
+				REQUIRE(bodies >= 3);
+				REQUIRE(worlds >= 1);
 				session.reset();
-				CHECK(session == nullptr);
+				CHECK(PhysicsEngine::GetLiveBodyCount() == bodies - 3);
+				CHECK(PhysicsEngine::GetLiveWorldCount() == worlds - 1);
 			}
 		}
 
@@ -838,6 +848,331 @@ namespace Engine {
 				Test::RunTicks(*session, 1);
 			}
 			CHECK(session->GetTick() == 120);
+		}
+
+		TEST_CASE("PhysicsSystem: a DistanceJoint's new Anchor or ConnectedAnchor applies at the next synchronization")
+		{
+			// The W37.1 review's finding 1: a distance joint keeps no frames, so a new anchor must make it again.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity post = Test::AddBoxBody(scene, "Post", glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.1f), BodyType::Static);
+			Entity bob = Test::AddSphereBody(scene, "Bob", glm::vec3(0.0f, 3.0f, 0.0f), 0.1f, BodyType::Dynamic);
+			bob.AddComponent<DistanceJointComponent>(DistanceJointComponent{ .ConnectedBody = post.GetUUID(), .MinDistance = 0.0f, .MaxDistance = 2.0f });
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 30);
+			CHECK(Test::GetWorldPosition(*session, "/Bob").y == doctest::Approx(3.0).epsilon(0.005));
+
+			// The rope's top 1 m lower on the post: the bob falls 1 m to the rope's end.
+			Find(*session, "/Bob").Patch<DistanceJointComponent>([](DistanceJointComponent& rope)
+			{
+				rope.ConnectedAnchor = glm::vec3(0.0f, -1.0f, 0.0f);
+			});
+			Test::RunTicks(*session, 90);
+			const PhysicsJointReport lowered = GetJoint(*session, "/Bob");
+			CHECK(lowered.Created);
+			CHECK(glm::length(lowered.ConnectedPoint - glm::vec3(0.0f, 4.0f, 0.0f)) < 1.0e-3f);
+			CHECK(Test::GetWorldPosition(*session, "/Bob").y == doctest::Approx(2.0).epsilon(0.01));
+
+			// The rope tied 0.5 m above the bob's centre: it hangs 0.5 m lower.
+			Find(*session, "/Bob").Patch<DistanceJointComponent>([](DistanceJointComponent& rope)
+			{
+				rope.Anchor = glm::vec3(0.0f, 0.5f, 0.0f);
+			});
+			Test::RunTicks(*session, 90);
+			const PhysicsJointReport tied = GetJoint(*session, "/Bob");
+			CHECK(tied.Created);
+			CHECK(Test::GetWorldPosition(*session, "/Bob").y == doctest::Approx(1.5).epsilon(0.01));
+			CHECK(glm::length(tied.Point - (Test::GetWorldPosition(*session, "/Bob") + glm::vec3(0.0f, 0.5f, 0.0f))) < 0.01f);
+		}
+
+		TEST_CASE("PhysicsSystem: a joint whose connected end leaves play keeps it until the flush, and raises its reason after it")
+		{
+			// The W37.1 review's finding 2, stepped by hand so that the joint can be read between PostStep and the flush: a
+			// box welded to a static post that is disabled during a tick, and one welded to a mast that is destroyed while
+			// another change recomposes the scene in the same tick.
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Entity post = Test::AddBoxBody(scene, "Post", glm::vec3(0.0f, 5.0f, 0.0f), glm::vec3(0.1f), BodyType::Static);
+			Entity a = Test::AddBoxBody(scene, "A", glm::vec3(1.0f, 5.0f, 0.0f), glm::vec3(0.25f), BodyType::Dynamic);
+			a.AddComponent<FixedJointComponent>(FixedJointComponent{ .ConnectedBody = post.GetUUID() });
+			Entity mast = Test::AddBoxBody(scene, "Mast", glm::vec3(10.0f, 5.0f, 0.0f), glm::vec3(0.1f), BodyType::Static);
+			Entity c = Test::AddBoxBody(scene, "C", glm::vec3(11.0f, 5.0f, 0.0f), glm::vec3(0.25f), BodyType::Dynamic);
+			c.AddComponent<FixedJointComponent>(FixedJointComponent{ .ConnectedBody = mast.GetUUID() });
+			Entity other = Test::AddBoxBody(scene, "Other", glm::vec3(20.0f, 5.0f, 0.0f), glm::vec3(0.25f), BodyType::Dynamic);
+			const UUID aId = a.GetUUID();
+			const UUID cId = c.GetUUID();
+			TransformSystem::Update(scene);
+			PhysicsSystemSpecification specification;
+			specification.RuntimeScene = &scene;
+			Result<Scope<PhysicsSystem>> created = PhysicsSystem::Create(specification);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PhysicsSystem& physics = **created;
+			uint64_t tick = 0;
+			const auto step = [&scene, &physics, &tick]()
+			{
+				const SimStep simStep = SimStep::FromTick(tick, 1.0 / 60.0);
+				TransformSystem::Update(scene);
+				physics.PreStep(simStep);
+				physics.Step(simStep);
+				physics.PostStep(simStep);
+			};
+			const auto flush = [&scene, &physics, &tick]()
+			{
+				physics.FlushDestroyed(tick);
+				scene.FlushPendingDestroys();
+				++tick;
+			};
+			const auto isInForce = [&physics](UUID joint)
+			{
+				const std::optional<PhysicsJointReport> report = physics.GetJointInfo(joint);
+				return report.has_value() && report->Created;
+			};
+			const auto countReasons = [&physics, cId]()
+			{
+				const std::span<const PhysicsDiagnostic> diagnostics = physics.GetDiagnostics();
+				return std::count_if(diagnostics.begin(), diagnostics.end(), [cId](const PhysicsDiagnostic& diagnostic)
+				{
+					return diagnostic.Code == PhysicsJointInvalidCode && diagnostic.Entity == cId;
+				});
+			};
+			for (int index = 0; index < 5; ++index)
+			{
+				step();
+				flush();
+			}
+			REQUIRE(isInForce(aId));
+			REQUIRE(isInForce(cId));
+
+			// Disabled during a tick, as a script in the fixed step would: the joint holds through that tick's step, as the
+			// post's body does, and goes at the flush.
+			scene.FindEntityByID(post.GetUUID()).SetActive(false);
+			step();
+			CHECK(isInForce(aId));
+			flush();
+			step();
+			CHECK_FALSE(isInForce(aId));
+			flush();
+
+			// Destroyed while another change recomposes the scene: the same, and its reason ("connected": it names no entity)
+			// is raised only after the flush.
+			const Test::ExpectLog dangling(LogLevel::Error, "PHYSICS_JOINT_INVALID");
+			scene.DestroyEntity(scene.FindEntityByID(mast.GetUUID()));
+			Test::PatchRigidBody(scene.FindEntityByID(other.GetUUID()), [](RigidBodyComponent& body)
+			{
+				body.Mass = 3.0f;
+			});
+			step();
+			CHECK(isInForce(cId));
+			CHECK(countReasons() == 0);
+			flush();
+			step();
+			CHECK_FALSE(isInForce(cId));
+			CHECK(countReasons() == 1);
+			flush();
+			CHECK(dangling.GetMatchCount() == 1);
+		}
+
+		TEST_CASE("PhysicsSystem: a new ConnectedBody forms a hinge's frames again from that moment's poses")
+		{
+			// The W37.1 review's finding 4 (a): the door turned to 30 degrees on the world, then hinged to a static post: its
+			// zero is the pose of that moment.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(AddDoor(scene, 30.0f));
+			static_cast<void>(Test::AddBoxBody(scene, "Post", glm::vec3(-1.0f, 1.0f, 0.0f), glm::vec3(0.1f), BodyType::Static));
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 240);
+			CHECK(GetJoint(*session, "/Door").Angle == doctest::Approx(30.0).epsilon(0.03));
+			const UUID post = Find(*session, "/Post").GetUUID();
+			Find(*session, "/Door").Patch<HingeJointComponent>([post](HingeJointComponent& hinge)
+			{
+				hinge.ConnectedBody = post;
+				hinge.MotorTargetAngle = 0.0f;
+			});
+			Test::RunTicks(*session, 120);
+			const PhysicsJointReport door = GetJoint(*session, "/Door");
+			CHECK(door.Created);
+			CHECK(door.Connected == post);
+			CHECK(std::abs(door.Angle) < 0.5f);
+			CHECK(GetYawDegrees(*session, "/Door") == doctest::Approx(30.0).epsilon(0.03));
+		}
+
+		TEST_CASE("PhysicsSystem: a joint on a child of its body keeps its frames on the body, and a reparent forms them again")
+		{
+			// The W37.1 review's finding 4 (b) and (c): the hinge on "Pivot", a child of the door's body at its left edge.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity door = Test::AddBoxBody(scene, "Door", glm::vec3(0.5f, 1.0f, 0.0f), glm::vec3(0.5f, 1.0f, 0.05f), BodyType::Dynamic);
+			Entity pivot = scene.CreateEntity("Pivot");
+			REQUIRE(scene.SetParent(pivot, door).has_value());
+			pivot.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(-0.5f, 0.0f, 0.0f);
+			});
+			pivot.AddComponent<HingeJointComponent>(HingeJointComponent{ .Axis = glm::vec3(0.0f, 1.0f, 0.0f),
+				.Motor = JointMotorMode::Position,
+				.MotorTargetAngle = 30.0f,
+				.MotorFrequency = 2.0f });
+			Entity mount = scene.CreateEntity("Mount");
+			REQUIRE(scene.SetParent(mount, door).has_value());
+			Scope<PlaySession> session = StartSession(fixture);
+			const PhysicsJointReport made = GetJoint(*session, "/Door/Pivot");
+			CHECK(made.Created);
+			CHECK(made.Body == Find(*session, "/Door").GetUUID());
+			CHECK(glm::length(made.Point - glm::vec3(0.0f, 1.0f, 0.0f)) < 1.0e-3f);
+			Test::RunTicks(*session, 240);
+			CHECK(GetJoint(*session, "/Door/Pivot").Angle == doctest::Approx(30.0).epsilon(0.03));
+
+			// The body created again (a RigidBody change) gets the joint back at its kept frames: the angle stays.
+			Test::PatchRigidBody(Find(*session, "/Door"), [](RigidBodyComponent& body)
+			{
+				body.Mass = 2.0f;
+			});
+			Test::RunTicks(*session, 30);
+			CHECK(GetJoint(*session, "/Door/Pivot").Angle == doctest::Approx(30.0).epsilon(0.03));
+
+			// Moved under "Mount", keeping its world place, the joint entity's chain to its body changed: the frames are formed
+			// again, and the pose of that moment is the new zero.
+			Find(*session, "/Door/Pivot").Patch<HingeJointComponent>([](HingeJointComponent& hinge)
+			{
+				hinge.MotorTargetAngle = 0.0f;
+			});
+			REQUIRE(session->GetScene().SetParent(Find(*session, "/Door/Pivot"), Find(*session, "/Door/Mount")).has_value());
+			Test::RunTicks(*session, 120);
+			CHECK(std::abs(GetJoint(*session, "/Door/Mount/Pivot").Angle) < 0.5f);
+			CHECK(GetYawDegrees(*session, "/Door") == doctest::Approx(30.0).epsilon(0.03));
+		}
+
+		TEST_CASE("PhysicsSystem: an axis the entity's scale makes vanish raises Subject frame, and values the world refuses Subject refused")
+		{
+			// The W37.1 review's finding 4 (d) and (e).
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			// (d) Axis (1e-5, 0, 0) on a child scaled 0.01: long enough for the composition, but 1e-7 in the world.
+			Entity body = Test::AddBoxBody(scene, "Body", glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.25f), BodyType::Dynamic);
+			Entity tiny = scene.CreateEntity("Tiny");
+			REQUIRE(scene.SetParent(tiny, body).has_value());
+			tiny.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Scale = glm::vec3(0.01f);
+			});
+			tiny.AddComponent<HingeJointComponent>(HingeJointComponent{ .Axis = glm::vec3(1.0e-5f, 0.0f, 0.0f) });
+			// (e) An anchor past MaxPhysicsCoordinate in the world, which the registry's range allows on the entity.
+			Entity far = Test::AddBoxBody(scene, "Far", glm::vec3(1000.0f, 3.0f, 0.0f), glm::vec3(0.25f), BodyType::Dynamic);
+			far.AddComponent<FixedJointComponent>(FixedJointComponent{ .Anchor = glm::vec3(MaxPhysicsCoordinate, 0.0f, 0.0f) });
+			// (e) A hinge whose settings a write past the registry's range makes the world refuse in place.
+			static_cast<void>(AddDoor(scene, 0.0f));
+			const Test::ExpectLog invalid(LogLevel::Error, "PHYSICS_JOINT_INVALID");
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 2);
+			CHECK(GetJoint(*session, "/Door").Created);
+			Find(*session, "/Door").Patch<HingeJointComponent>([](HingeJointComponent& hinge)
+			{
+				hinge.MotorFrequency = 0.0f;
+			});
+			Test::RunTicks(*session, 2);
+
+			const auto subjectsOf = [&session](std::string_view path)
+			{
+				const UUID id = Find(*session, path).GetUUID();
+				std::vector<std::string> subjects;
+				for (const PhysicsDiagnostic& diagnostic : session->GetPhysics().GetDiagnostics())
+				{
+					if (diagnostic.Code == PhysicsJointInvalidCode && diagnostic.Entity == id)
+						subjects.push_back(diagnostic.Subject);
+				}
+				return subjects;
+			};
+			CHECK(subjectsOf("/Body/Tiny") == std::vector<std::string>{ "frame" });
+			CHECK(subjectsOf("/Far") == std::vector<std::string>{ "refused" });
+			CHECK(subjectsOf("/Door") == std::vector<std::string>{ "refused" });
+			CHECK_FALSE(GetJoint(*session, "/Body/Tiny").Created);
+			CHECK_FALSE(GetJoint(*session, "/Far").Created);
+			CHECK_FALSE(GetJoint(*session, "/Door").Created);
+			CHECK(invalid.GetMatchCount() == 3);
+		}
+
+		TEST_CASE("PhysicsSystem: a joint the world refused is made from the poses of the moment it is fixed")
+		{
+			// The W37.1 review's finding 12: a refused creation keeps no frames. The door, authored broken, falls unjoined; mended
+			// with a motor frequency written past the registry's range, its creation is refused where it is then; it falls on;
+			// fixed, the joint is made where the door is at that moment and holds it there, rather than pulling it back to
+			// where the refused creation would have put it.
+			Test::SceneTestFixture fixture;
+			Entity door = AddDoor(fixture.GetScene(), 0.0f);
+			door.Patch<HingeJointComponent>([](HingeJointComponent& hinge)
+			{
+				hinge.Broken = true;
+			});
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 20);
+			const Test::ExpectLog refused(LogLevel::Error, "PHYSICS_JOINT_INVALID");
+			Find(*session, "/Door").Patch<HingeJointComponent>([](HingeJointComponent& hinge)
+			{
+				hinge.Broken = false;
+				hinge.MotorFrequency = 0.0f;
+			});
+			Test::RunTicks(*session, 20);
+			CHECK_FALSE(GetJoint(*session, "/Door").Created);
+			CHECK(refused.GetMatchCount() == 1);
+			Find(*session, "/Door").Patch<HingeJointComponent>([](HingeJointComponent& hinge)
+			{
+				hinge.MotorFrequency = 2.0f;
+			});
+			Test::RunTicks(*session, 1);
+			const float held = Test::GetWorldPosition(*session, "/Door").y;
+			Test::RunTicks(*session, 30);
+			CHECK(GetJoint(*session, "/Door").Created);
+			CHECK(Test::GetWorldPosition(*session, "/Door").y == doctest::Approx(held).epsilon(0.002));
+			CHECK(refused.GetMatchCount() == 1);
+		}
+
+		TEST_CASE("PhysicsSystem: a DistanceJoint is made whatever its entity's scale")
+		{
+			// The W37.1 review's finding 10: a distance joint has no axis, so two nested X scales of 1e-4 (1e-8 in the world)
+			// refuse nothing.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity bob = Test::AddSphereBody(scene, "Bob", glm::vec3(0.0f, 3.0f, 0.0f), 0.1f, BodyType::Dynamic);
+			Entity thin = scene.CreateEntity("Thin");
+			REQUIRE(scene.SetParent(thin, bob, {}, false).has_value());
+			Entity thinner = scene.CreateEntity("Thinner");
+			REQUIRE(scene.SetParent(thinner, thin, {}, false).has_value());
+			for (Entity scaled : { thin, thinner })
+			{
+				scaled.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Scale = glm::vec3(1.0e-4f, 1.0f, 1.0f);
+				});
+			}
+			thinner.AddComponent<DistanceJointComponent>(DistanceJointComponent{ .ConnectedAnchor = glm::vec3(0.0f, 5.0f, 0.0f), .MaxDistance = 2.0f });
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 30);
+			CHECK(GetJoint(*session, "/Bob/Thin/Thinner").Created);
+			CHECK(session->GetPhysics().GetDiagnostics().empty());
+			CHECK(Test::GetWorldPosition(*session, "/Bob").y == doctest::Approx(3.0).epsilon(0.005));
+		}
+
+		TEST_CASE("PhysicsSystem: Broken written true removes the joint without a break event")
+		{
+			// The W37.1 review's finding 4 (f).
+			Test::SceneTestFixture fixture;
+			static_cast<void>(AddWeldedLoad(fixture.GetScene(), 1000.0f));
+			JointListener listener;
+			Scope<PlaySession> session = StartSession(fixture, &listener);
+			Test::RunTicks(*session, 10);
+			REQUIRE(GetJoint(*session, "/Load").Created);
+			Find(*session, "/Load").Patch<FixedJointComponent>([](FixedJointComponent& weld)
+			{
+				weld.Broken = true;
+			});
+			Test::RunTicks(*session, 30);
+			CHECK_FALSE(GetJoint(*session, "/Load").Created);
+			CHECK(GetJoint(*session, "/Load").Broken);
+			CHECK(listener.GetBreaks().empty());
+			CHECK(session->GetPhysics().GetLastJointBreaks().empty());
+			// Unjoined, it falls.
+			CHECK(Test::GetWorldPosition(*session, "/Load").y < 2.5f);
 		}
 	}
 

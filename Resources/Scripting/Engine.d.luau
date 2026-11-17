@@ -604,11 +604,11 @@ declare extern type DistanceJoint with
 	BreakForce: number
 	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
 	Broken: boolean
-	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. [All modes; Runtime|Test; pure/read; setter mutates]
 	CollideConnected: boolean
 	-- The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedAnchor: vector
-	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedBody: Entity?
 	-- The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped. [All modes; Runtime|Test; pure/read; setter mutates]
 	Damping: number
@@ -856,9 +856,9 @@ declare extern type FixedJoint with
 	BreakTorque: number
 	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
 	Broken: boolean
-	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. [All modes; Runtime|Test; pure/read; setter mutates]
 	CollideConnected: boolean
-	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedBody: Entity?
 end
 
@@ -900,9 +900,9 @@ declare extern type HingeJoint with
 	BreakTorque: number
 	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
 	Broken: boolean
-	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. [All modes; Runtime|Test; pure/read; setter mutates]
 	CollideConnected: boolean
-	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedBody: Entity?
 	-- The smallest angle, in degrees from the authored pose, while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
 	LowerAngle: number
@@ -1406,9 +1406,9 @@ declare extern type SliderJoint with
 	BreakTorque: number
 	-- Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. [All modes; Runtime|Test; pure/read; setter mutates]
 	Broken: boolean
-	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. [All modes; Runtime|Test; pure/read; setter mutates]
 	CollideConnected: boolean
-	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedBody: Entity?
 	-- The smallest position, in metres from the authored pose, while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
 	LowerLimit: number

@@ -189,7 +189,8 @@ namespace Engine {
 		bool operator==(const PhysicsJointKey&) const = default;
 	};
 
-	// M37: what a joint's kept frames were formed from; frames are formed again when it differs.
+	// M37: what a joint in force was made from: a hinge's, slider's or fixed joint's kept frames are formed again when it
+	// differs, and a distance joint, which keeps no frames and reads both anchors at each creation, is made again.
 	struct PhysicsJointFormation
 	{
 		PhysicsJointType Type = PhysicsJointType::Hinge;
@@ -199,6 +200,7 @@ namespace Engine {
 		UUID ConnectedBody{};
 		glm::vec3 Anchor = glm::vec3(0.0f);
 		glm::vec3 Axis = glm::vec3(1.0f, 0.0f, 0.0f);
+		glm::vec3 ConnectedAnchor = glm::vec3(0.0f);
 		// The joint's entity and its ancestors up to its body's owner, inclusive.
 		std::vector<UUID> Chain{};
 
@@ -220,7 +222,7 @@ namespace Engine {
 		// The settings the live joint has.
 		PhysicsJointSettings Settings{};
 		// The kept frames (hinge, slider and fixed joints) on the joint's body and on the connected body, relative to their
-		// origins, and what they were formed from.
+		// origins, set only by a creation that succeeded; and what they (or a distance joint in force) were formed from.
 		bool HasFrames = false;
 		PhysicsJointFrame Frame{};
 		PhysicsJointFrame ConnectedFrame{};
@@ -400,6 +402,8 @@ namespace Engine {
 		// Brings the joints in step with the scene and the bodies (PhysicsSystem.h's M37 paragraph); nothing unless
 		// JointsChanged.
 		void SynchronizeJoints();
+		// Rebuild's hook: keeps `composition` (the pass's bodies) for the joints' plans and synchronizes every joint over it.
+		void SynchronizeJointsAfterRebuild(const PhysicsComposition& composition);
 		// Destroys every live joint of the body `handle` (RemoveBody, before the body) and marks the joints for the next
 		// synchronization.
 		void RemoveBodyJoints(BodyHandle handle);

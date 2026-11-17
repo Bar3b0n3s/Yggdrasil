@@ -8,7 +8,6 @@
 #include <compare>
 #include <cstdint>
 #include <numbers>
-#include <string_view>
 
 // The vocabulary of the physics world's joints (M37, Docs/Decisions/0054-m37-joints.md decision 2; Architecture §9.10):
 // Jolt's hinge, slider, distance and fixed constraints between two bodies of a PhysicsWorld, or a body and the world, in
@@ -162,18 +161,5 @@ namespace Engine {
 	// path, §9.1).
 	inline constexpr float JointDegreesToRadians = std::numbers::pi_v<float> / 180.0f;
 	inline constexpr float JointRadiansToDegrees = 180.0f / std::numbers::pi_v<float>;
-
-	// "Hinge", "Slider", "Distance" or "Fixed".
-	[[nodiscard]] constexpr std::string_view PhysicsJointTypeToString(PhysicsJointType type)
-	{
-		switch (type)
-		{
-			case PhysicsJointType::Hinge:    return "Hinge";
-			case PhysicsJointType::Slider:   return "Slider";
-			case PhysicsJointType::Distance: return "Distance";
-			case PhysicsJointType::Fixed:    return "Fixed";
-		}
-		return "Unknown";
-	}
 
 }

@@ -32,12 +32,12 @@ namespace Engine {
 
 		// The descriptions the four components share.
 		constexpr std::string_view ConnectedBodyDescription =
-			"The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders "
-			"form; null joins the body to the world.";
+			"The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own "
+			"colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.";
 		constexpr std::string_view AnchorDescription = "The joint's point in this entity's space, in metres (its scale applies).";
 		constexpr std::string_view CollideConnectedDescription =
 			"Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event "
-			"between them.";
+			"between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.";
 		constexpr std::string_view BreakForceDescription =
 			"The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never "
 			"breaks.";

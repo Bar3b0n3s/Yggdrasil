@@ -3199,7 +3199,7 @@
 			"type": "object",
 			"properties": {
 				"ConnectedBody": {
-					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.",
 					"type": ["string", "null"],
 					"pattern": "^[0-9a-fA-F]{16}$"
 				},
@@ -3299,7 +3299,7 @@
 					"maximum": 1000
 				},
 				"CollideConnected": {
-					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.",
 					"type": "boolean"
 				},
 				"BreakForce": {
@@ -3324,7 +3324,7 @@
 			"type": "object",
 			"properties": {
 				"ConnectedBody": {
-					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.",
 					"type": ["string", "null"],
 					"pattern": "^[0-9a-fA-F]{16}$"
 				},
@@ -3424,7 +3424,7 @@
 					"maximum": 1000
 				},
 				"CollideConnected": {
-					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.",
 					"type": "boolean"
 				},
 				"BreakForce": {
@@ -3449,7 +3449,7 @@
 			"type": "object",
 			"properties": {
 				"ConnectedBody": {
-					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.",
 					"type": ["string", "null"],
 					"pattern": "^[0-9a-fA-F]{16}$"
 				},
@@ -3524,7 +3524,7 @@
 					"maximum": 1000
 				},
 				"CollideConnected": {
-					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.",
 					"type": "boolean"
 				},
 				"BreakForce": {
@@ -3544,7 +3544,7 @@
 			"type": "object",
 			"properties": {
 				"ConnectedBody": {
-					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.",
+					"description": "The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.",
 					"type": ["string", "null"],
 					"pattern": "^[0-9a-fA-F]{16}$"
 				},
@@ -3572,7 +3572,7 @@
 					"maxItems": 3
 				},
 				"CollideConnected": {
-					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.",
+					"description": "Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.",
 					"type": "boolean"
 				},
 				"BreakForce": {

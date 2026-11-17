@@ -1266,7 +1266,7 @@ namespace Engine {
 	void PhysicsSystem::State::Rebuild(bool hierarchyChanged, std::set<UUID>& woken)
 	{
 		Scene& scene = *Specification.RuntimeScene;
-		PhysicsComposition composition = ComposePhysicsBodies(scene, Layers, Specification.Limits.MaxBodies);
+		const PhysicsComposition composition = ComposePhysicsBodies(scene, Layers, Specification.Limits.MaxBodies);
 		// Each entity refused by the body limit gets its diagnostic (recorded and heard by the listener), but only the first
 		// is logged: a scene far over the limit would log thousands of identical lines.
 		bool loggedBodyLimit = false;
@@ -1371,10 +1371,7 @@ namespace Engine {
 		MeshShapes.Prune();
 
 		// M37: the joints after every body of the pass, over this composition (PhysicsSystemJoints.cpp).
-		Composition = std::move(composition);
-		JointPlansStale = true;
-		JointsChanged = true;
-		SynchronizeJoints();
+		SynchronizeJointsAfterRebuild(composition);
 	}
 
 	void PhysicsSystem::State::RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken)

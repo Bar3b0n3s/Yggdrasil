@@ -1858,7 +1858,7 @@ Joins the body of the RigidBody at or above the entity to another body or the wo
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The hinge's pivot in this entity's space, in metres (its scale applies). |
 | `Axis` | `Vec3` | `[1,0,0]` |  |  |  | The axis the body turns about, in this entity's space; positive angles turn it by the right-hand rule. Normalized when used; a zero axis makes the joint invalid. |
 | `UseLimits` | `Bool` | `false` |  |  |  | Whether the angle stays between LowerAngle and UpperAngle. |
@@ -1871,7 +1871,7 @@ Joins the body of the RigidBody at or above the entity to another body or the wo
 | `MotorMaxTorque` | `Float` | `1000` | 0 to 1e+12 | N m |  | The most torque the motor applies, in newton metres. |
 | `MotorFrequency` | `Float` | `2` | 0.001 to 1000 | Hz |  | The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). |
 | `MotorDamping` | `Float` | `1` | 0 to 1000 |  |  | The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. |
-| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `BreakTorque` | `Float` | `0` | >= 0 | N m |  | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
 | `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
@@ -1885,8 +1885,8 @@ Script members of `HingeJoint`:
 | `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `BreakTorque` | proxy field | `number` | read/write | All | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
 | `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
-| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
-| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `LowerAngle` | proxy field | `number` | read/write | All | The smallest angle, in degrees from the authored pose, while UseLimits holds. |
 | `MaxFrictionTorque` | proxy field | `number` | read/write | All | The friction torque, in newton metres, that resists turning while the motor is Off. |
 | `Motor` | proxy field | `JointMotorMode` | read/write | All | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
@@ -1910,7 +1910,7 @@ Joins the body of the RigidBody at or above the entity to another body or the wo
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The joint's point in this entity's space, in metres (its scale applies). |
 | `Axis` | `Vec3` | `[1,0,0]` |  |  |  | The axis the body moves along, in this entity's space; positive positions move it along the axis. Normalized when used; a zero axis makes the joint invalid. |
 | `UseLimits` | `Bool` | `false` |  |  |  | Whether the position stays between LowerLimit and UpperLimit. |
@@ -1923,7 +1923,7 @@ Joins the body of the RigidBody at or above the entity to another body or the wo
 | `MotorMaxForce` | `Float` | `1000` | 0 to 1e+12 | N |  | The most force the motor applies, in newtons. |
 | `MotorFrequency` | `Float` | `2` | 0.001 to 1000 | Hz |  | The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default). |
 | `MotorDamping` | `Float` | `1` | 0 to 1000 |  |  | The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped. |
-| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `BreakTorque` | `Float` | `0` | >= 0 | N m |  | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
 | `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
@@ -1937,8 +1937,8 @@ Script members of `SliderJoint`:
 | `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `BreakTorque` | proxy field | `number` | read/write | All | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
 | `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
-| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
-| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `LowerLimit` | proxy field | `number` | read/write | All | The smallest position, in metres from the authored pose, while UseLimits holds. |
 | `MaxFrictionForce` | proxy field | `number` | read/write | All | The friction force, in newtons, that resists sliding while the motor is Off. |
 | `Motor` | proxy field | `JointMotorMode` | read/write | All | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
@@ -1962,14 +1962,14 @@ Keeps a point of the body of the RigidBody at or above the entity between a mini
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The joint's point in this entity's space, in metres (its scale applies). |
 | `ConnectedAnchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null. |
 | `MinDistance` | `Float` | `0` | 0 to 1e+09 | m |  | The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid. |
 | `MaxDistance` | `Float` | `1` | 0 to 1e+09 | m |  | The longest the distance between the anchors gets, in metres. |
 | `Frequency` | `Float` | `0` | 0 to 1000 | Hz |  | The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope. |
 | `Damping` | `Float` | `0` | 0 to 1000 |  |  | The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped. |
-| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
 
@@ -1980,9 +1980,9 @@ Script members of `DistanceJoint`:
 | `Anchor` | proxy field | `vector` | read/write | All | The joint's point in this entity's space, in metres (its scale applies). |
 | `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
-| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `ConnectedAnchor` | proxy field | `vector` | read/write | All | The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null. |
-| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `Damping` | proxy field | `number` | read/write | All | The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped. |
 | `Frequency` | proxy field | `number` | read/write | All | The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope. |
 | `MaxDistance` | proxy field | `number` | read/write | All | The longest the distance between the anchors gets, in metres. |
@@ -2000,9 +2000,9 @@ Welds the body of the RigidBody at or above the entity to another body or the wo
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `ConnectedBody` | `EntityRef` | `null` |  |  |  | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `Anchor` | `Vec3` | `[0,0,0]` | -1e+09 to 1e+09 | m |  | The weld's point in this entity's space, in metres (its scale applies). |
-| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
+| `CollideConnected` | `Bool` | `false` |  |  |  | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `BreakForce` | `Float` | `0` | >= 0 | N |  | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `BreakTorque` | `Float` | `0` | >= 0 | N m |  | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
 | `Broken` | `Bool` | `false` |  |  |  | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
@@ -2015,8 +2015,8 @@ Script members of `FixedJoint`:
 | `BreakForce` | proxy field | `number` | read/write | All | The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks. |
 | `BreakTorque` | proxy field | `number` | read/write | All | The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks. |
 | `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
-| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them. |
-| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world. |
+| `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
+| `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 
 ## Structs
 

@@ -29,11 +29,12 @@
 //     gathers them into); null joins the body to the world.
 //   - One joint per entity: the four components exclude each other. An entity that holds several anyway (a hand-written
 //     file) is read through the first in BuiltinComponents order.
-//   - PHYSICS_JOINT_INVALID (Error, not fixable; one per joint, the first reason in this order, each its own Subject): no
-//     RigidBody at or above the joint's entity ("body"); its RigidBody makes no body, having no collider ("body"); a
-//     ConnectedBody that names no entity or resolves to no body ("connected"); an end under a CharacterController, a
-//     character being no body ("character"), or under a RigidBody2D, which belongs to the 2D world ("2d"); both ends the same
-//     body ("same"); a zero Axis ("axis"); UseLimits with equal limits ("limits"); a MinDistance above MaxDistance
+//   - PHYSICS_JOINT_INVALID (Error, not fixable; one per joint, the first reason in this order, each its own Subject): the
+//     joint's end first: no RigidBody at or above the joint's entity, or its RigidBody makes no body, having no collider
+//     ("body"), or the end under a CharacterController, a character being no body ("character"), or under a RigidBody2D,
+//     which belongs to the 2D world ("2d"); then the connected end: a ConnectedBody that names no entity or resolves to no
+//     body ("connected"), or under a CharacterController ("character") or a RigidBody2D ("2d"); then both ends the same body
+//     ("same"); a zero Axis ("axis"); UseLimits with equal limits ("limits"); a MinDistance above MaxDistance
 //     ("distance"). Such a joint is listed not creatable, and its bodies simulate unjoined. A joint whose end a body
 //     diagnostic refused (PHYSICS_MIXED_TRIGGER and the others: the plan is not creatable while it has colliders), or
 //     whose connected entity is disabled, is listed not creatable without a second diagnostic. Neither end Dynamic is
@@ -116,7 +117,8 @@ namespace Engine {
 	// The joint's frame in world space from its entity's world matrix `entityWorld`: Anchor through the matrix (scale baked in,
 	// as for colliders), the axis through its 3x3 part and normalized (a fixed joint's: the entity's X axis), and a normal
 	// perpendicular to it built by cross products with the world axis least aligned with it (no CRT transcendental, §9.1).
-	// nullopt when the axis vanishes (a zero Axis, PHYSICS_JOINT_INVALID's "axis") or the frame is not finite.
+	// A distance joint, which has no axis, gets the world X axis and Y normal whatever the matrix. nullopt when the axis
+	// vanishes (a zero Axis, PHYSICS_JOINT_INVALID's "axis", or one a vanishing scale shrinks) or the frame is not finite.
 	[[nodiscard]] std::optional<PhysicsJointFrame> MakePhysicsJointWorldFrame(const glm::mat4& entityWorld, const PhysicsJointFields& fields);
 	// `frame` (world space) in the space of a body whose origin is at `pose`, and back. The axes are normalized, and the
 	// normal made perpendicular to the axis again, after the rotation.

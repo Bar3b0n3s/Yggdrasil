@@ -2576,7 +2576,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -2592,7 +2592,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `Entity?`
 
-The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3328,7 +3328,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3336,7 +3336,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `Entity?`
 
-The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3480,7 +3480,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -3488,7 +3488,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `Entity?`
 
-The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5252,7 +5252,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `boolean`
 
-Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them.
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5260,7 +5260,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `Entity?`
 
-The entity whose body this one is joined to: the body of the RigidBody at or above it, else the static body its own colliders form; null joins the body to the world.
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 

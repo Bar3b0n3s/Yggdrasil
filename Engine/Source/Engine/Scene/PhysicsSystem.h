@@ -124,7 +124,8 @@
 //     PhysicsJoints.h) in canonical order of their entities: a joint whose plan is creatable, whose component is not Broken
 //     and whose two bodies exist is created (PhysicsWorld::CreateJoint) or, when it lives already, has its settings applied
 //     in place (PhysicsWorld::SetJointSettings, waking its bodies); any other is not in force. A joint whose entity or end
-//     is leaving play (pending destruction or disabled) keeps what it has until FlushDestroyed. The plan is composed again
+//     is leaving play (pending destruction or disabled) keeps what it has until FlushDestroyed, and a reason its plan has
+//     then is raised after the flush, which composes the plans again. The plan is composed again
 //     only when the bodies were rebuilt, a joint component was added or removed, or a changed joint's type, ConnectedBody,
 //     Anchor, Axis, ConnectedAnchor or limits differ from what the last plan read, so a script writing a motor target every
 //     tick changes the live joint and composes nothing. Its PHYSICS_JOINT_INVALID diagnostics are raised as the body
@@ -132,11 +133,11 @@
 //     whenever the joints in force change.
 //   - Kept frames. A hinge's, slider's or fixed joint's two frames are formed when it is first created, from the poses of
 //     that moment (PhysicsJoints.h's MakePhysicsJointWorldFrame, expressed in each body's space relative to its origin),
-//     and kept: a body created again (a RigidBody change, a re-enabled entity, a refusal undone) gets its joints back at
+//     and kept once the creation succeeds: a body created again (a RigidBody change, a re-enabled entity, a refusal undone) gets its joints back at
 //     the same frames, so a door that swung keeps its zero and its limits. They are formed again when the joint's type,
 //     ConnectedBody, Anchor or Axis, the bodies its ends resolve to, or the entities between its entity and its body
-//     change. A distance joint keeps nothing: its two anchors are read from the scene at every creation. Frames are dropped
-//     with the joint component or its entity.
+//     change. A distance joint keeps nothing: its two anchors are read from the scene at every creation, and it is made
+//     again when the same fields or its ConnectedAnchor change. Frames are dropped with the joint component or its entity.
 //   - Bodies first. RemoveBody destroys the body's joints before the body (the world would too), on every removal path: a
 //     RigidBody change, a refusal, the disable and destroy flushes and the session's end.
 //   - Breaking. At the start of PostStep, every joint in force with a BreakForce or BreakTorque compares its force and

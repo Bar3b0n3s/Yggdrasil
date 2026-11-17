@@ -426,8 +426,16 @@ namespace Engine {
 	{
 		PhysicsJointFrame frame;
 		frame.Point = glm::vec3(entityWorld * glm::vec4(fields.Anchor, 1.0f));
-		const glm::vec3 axis = fields.Type == PhysicsJointType::Distance ? glm::vec3(1.0f, 0.0f, 0.0f) : fields.Axis;
-		const glm::vec3 worldAxis = glm::mat3(entityWorld) * axis;
+		if (fields.Type == PhysicsJointType::Distance)
+		{
+			// A distance joint has no axis: only its point, whatever the entity's scale.
+			if (!Utils::IsFiniteVector(frame.Point))
+				return std::nullopt;
+			frame.Axis = glm::vec3(1.0f, 0.0f, 0.0f);
+			frame.Normal = glm::vec3(0.0f, 1.0f, 0.0f);
+			return frame;
+		}
+		const glm::vec3 worldAxis = glm::mat3(entityWorld) * fields.Axis;
 		const float length = glm::length(worldAxis);
 		if (!(length >= Utils::MinJointAxisLength) || !Utils::IsFiniteVector(frame.Point) || !Utils::IsFiniteVector(worldAxis))
 			return std::nullopt;
