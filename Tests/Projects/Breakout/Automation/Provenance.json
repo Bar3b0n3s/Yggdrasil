@@ -364,11 +364,11 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay",
-			"XXH64": "fa53266916c9481c",
+			"XXH64": "d39807b6f1b38cbd",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 515
+			"TranscriptLine": 519
 		},
 		{
 			"Path": "Assets/Tests/Replays/Opening.replay.meta",
@@ -396,11 +396,11 @@
 		},
 		{
 			"Path": "Breakout.eproj",
-			"XXH64": "374da79ef0821c2b",
+			"XXH64": "72a8372f6d3e87c0",
 			"Method": "project.upgrade",
 			"RequestId": 2,
 			"Client": "cli",
-			"TranscriptLine": 511
+			"TranscriptLine": 519
 		}
 	]
 }

@@ -416,6 +416,11 @@ namespace Engine {
 				.Assets = { { .Handle = UUID(0x515), .Path = "Assets/Scripts/Board.luau", .Type = "Script", .Hash = "00000000000000d1" } },
 			};
 			seeds.push_back(makeSeed(printed));
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5): a version 5 header's start locale, so the reader and the
+			// cooked codec meet mutated locales and presence flags too.
+			ReplayDocument localized = Document();
+			localized.Header.Locale = "pt-BR";
+			seeds.push_back(makeSeed(localized));
 			const std::vector<std::string> featureTestReplays = Test::ReadFuzzSeedTexts(Test::GetRepositoryRoot() / "Projects/FeatureTest/Assets", ".replay");
 			REQUIRE(featureTestReplays.size() >= 2);
 			for (const std::string& replay : featureTestReplays)
@@ -461,26 +466,28 @@ namespace Engine {
 		// Signal event type. A version 3 file (Formats/Replay/v3, which v2's upgrade wrote before M28) migrates with an empty
 		// SaveData and writes back as the bytes project.upgrade writes (Formats/Replay/v3.upgraded); in version 3 a SaveData
 		// member is unknown and a Signal event is refused, and version 4 requires SaveData.
-		TEST_CASE("ReplayData: a version 3 replay migrates to version 4 with an empty save-data store, and refuses what version 4 adds")
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5): the migration's target is the current version, 5, whose
+		// Locale a version 3 file migrates as null (the bytes of Formats/Replay/v3.upgraded, written again at version 5).
+		TEST_CASE("ReplayData: a version 3 replay migrates to the current version with an empty save-data store, and refuses what version 4 adds")
 		{
 			const Result<std::string> v3 = Test::ReadTestDataText("Formats/Replay/v3.replay");
 			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v3.upgraded.replay");
 			REQUIRE(v3.has_value());
 			REQUIRE(upgraded.has_value());
-			CHECK(ReplayFormatVersion == 4);
 			ReplayLoadReport report;
 			const auto migrated = ReplayFromText(*v3, report, true);
 			REQUIRE_MESSAGE(migrated.has_value(), migrated.error().ToString());
 			CHECK(report.FileVersion == 3);
 			CHECK(report.Diagnostics.empty());
-			CHECK(migrated->Version == 4);
+			CHECK(migrated->Version == ReplayFormatVersion);
 			CHECK(migrated->Header.SaveData.Get() == Json::object());
+			CHECK_FALSE(migrated->Header.Locale.has_value());
 			const auto text = ReplayToText(*migrated);
 			REQUIRE(text.has_value());
 			CHECK(*text == *upgraded);
 			const auto again = ReplayFromText(*upgraded, report, true);
 			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
-			CHECK(report.FileVersion == 4);
+			CHECK(report.FileVersion == ReplayFormatVersion);
 			CHECK(ReplayToText(*again).value_or("") == *upgraded);
 
 			// Version 3 knows neither member nor event type.
@@ -499,6 +506,90 @@ namespace Engine {
 			CHECK_FALSE(ReplayFromJson(*withoutSaveData, report, true).has_value());
 			(*withoutSaveData)["SaveData"] = Json::array();
 			CHECK_FALSE(ReplayFromJson(*withoutSaveData, report, true).has_value());
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5; Roadmap M38's acceptance): version 5 adds the header's
+		// Locale after SaveData. A version 4 file (Formats/Replay/v4) migrates with a null one, which plays in the project's
+		// locale, and writes back as the bytes project.upgrade writes (Formats/Replay/v4.upgraded); in version 4 a Locale member
+		// is unknown, and version 5 requires it, a string (empty or a tag) or null.
+		TEST_CASE("ReplayData: a version 4 replay reads as version 5 with a null locale")
+		{
+			const Result<std::string> v4 = Test::ReadTestDataText("Formats/Replay/v4.replay");
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v4.upgraded.replay");
+			REQUIRE(v4.has_value());
+			REQUIRE(upgraded.has_value());
+			CHECK(ReplayFormatVersion == 5);
+			CHECK(ReplayLocaleFormatVersion == 5);
+			ReplayLoadReport report;
+			const auto migrated = ReplayFromText(*v4, report, true);
+			REQUIRE_MESSAGE(migrated.has_value(), migrated.error().ToString());
+			CHECK(report.FileVersion == 4);
+			CHECK(report.Diagnostics.empty());
+			CHECK(migrated->Version == 5);
+			CHECK_FALSE(migrated->Header.Locale.has_value());
+			const auto text = ReplayToText(*migrated);
+			REQUIRE(text.has_value());
+			CHECK(*text == *upgraded);
+			const auto again = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(report.FileVersion == 5);
+			CHECK_FALSE(again->Header.Locale.has_value());
+			CHECK(ReplayToText(*again).value_or("") == *upgraded);
+
+			// Version 4 knows no Locale member.
+			auto withLocale = JsonReader::Parse(*v4);
+			REQUIRE(withLocale.has_value());
+			(*withLocale)["Locale"] = "de";
+			CHECK_FALSE(ReplayFromJson(*withLocale, report, true).has_value());
+			// Version 5 requires it: a string that is empty or a tag, or null.
+			auto document = JsonReader::Parse(*upgraded);
+			REQUIRE(document.has_value());
+			document->erase("Locale");
+			CHECK_FALSE(ReplayFromJson(*document, report, true).has_value());
+			for (const Json& invalid : { Json(7), Json::array(), Json("de_DE"), Json("-de") })
+			{
+				CAPTURE(invalid.dump());
+				(*document)["Locale"] = invalid;
+				CHECK_FALSE(ReplayFromJson(*document, report, true).has_value());
+			}
+			for (const std::string_view valid : { "", "ar", "pt-BR" })
+			{
+				CAPTURE(valid);
+				(*document)["Locale"] = std::string(valid);
+				const auto read = ReplayFromJson(*document, report, true);
+				REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+				CHECK(read->Header.Locale == std::optional<std::string>(valid));
+			}
+		}
+
+		TEST_CASE("ReplayData: version 5 keeps the start locale, a null one included, through text and cooking")
+		{
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Replay/v4.upgraded.replay");
+			REQUIRE(upgraded.has_value());
+			ReplayLoadReport report;
+			auto document = ReplayFromText(*upgraded, report, true);
+			REQUIRE_MESSAGE(document.has_value(), document.error().ToString());
+			document->Expect.clear();
+			const std::vector<ReplayBytecodeExpectation> bytecode;
+			for (const std::optional<std::string>& locale : { std::optional<std::string>(), std::optional<std::string>(""), std::optional<std::string>("ar") })
+			{
+				CAPTURE(locale.value_or("<null>"));
+				document->Header.Locale = locale;
+				const auto text = ReplayToText(*document);
+				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				const auto read = ReplayFromText(*text, report, true);
+				REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+				CHECK(read->Header.Locale == locale);
+				const auto cooked = CookReplay(*read, bytecode, 1);
+				REQUIRE_MESSAGE(cooked.has_value(), cooked.error().ToString());
+				const auto loaded = LoadCookedReplay(*cooked);
+				REQUIRE_MESSAGE(loaded.has_value(), loaded.error().ToString());
+				CHECK((*loaded)->Header.Locale == locale);
+			}
+			// A malformed locale is refused by validation, so neither written nor cooked.
+			document->Header.Locale = "de_DE";
+			CHECK_FALSE(ReplayToText(*document).has_value());
+			CHECK_FALSE(CookReplay(*document, bytecode, 1).has_value());
 		}
 
 		TEST_CASE("ReplayData: version 4 keeps the save-data store and the signals through text and cooking")

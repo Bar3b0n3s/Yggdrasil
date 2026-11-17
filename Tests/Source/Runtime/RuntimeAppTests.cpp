@@ -292,6 +292,9 @@ namespace Engine {
 				{ { "--filter", "one" }, "--filter" },
 				{ { "--verify" }, "--verify" },
 				{ { "--replay=" }, "--replay" },
+				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 8): --locale takes a tag.
+				{ { "--locale", "de_DE" }, "--locale" },
+				{ { "--locale=" }, "--locale" },
 			};
 			for (const Case& usage : cases)
 			{
@@ -306,6 +309,65 @@ namespace Engine {
 				CHECK(result->ExitCode == ExitCode::UsageError);
 				CHECK(result->StandardError.contains(usage.Named));
 			}
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 8; Roadmap M38's acceptance): --locale starts the live session in
+		// its tag (the start line names the session's locale) and, with --feature-test, every suite whose entry names no locale,
+		// while an entry's own Locale still wins; --replay refuses it, since a replay starts in its header's locale.
+		TEST_CASE("RuntimeApp: --locale starts the sessions and the suites that name no locale in its tag, and --replay refuses it")
+		{
+			Test::TempDirectory directory("RuntimeLocale");
+			Test::TestGameSpecification specification;
+			specification.Name = "LocaleGame";
+			specification.Locale = "fr";
+			specification.Scripts = { { .Handle = AssetHandle(0x38C0001), .Path = "Assets/Tests/Locale.test.luau", .Source = R"(return Test.Suite("Locale", function()
+	Test.Case("starts in its locale", function()
+		Test.ExpectEqual(Loc.GetLocale(), Scene.GetLoadParameters().Expected)
+	end)
+end)
+)" } };
+			TestSuiteSettings inherits;
+			inherits.Script = "Assets/Tests/Locale.test.luau";
+			inherits.Parameters = VariantValue(Json{ { "Expected", "ar" } });
+			TestSuiteSettings german = inherits;
+			german.Locale = "de";
+			german.Parameters = VariantValue(Json{ { "Expected", "de" } });
+			specification.TestSuites = { inherits, german };
+			const auto manifest = Test::WriteTestGame(directory / "Game", specification);
+			REQUIRE_MESSAGE(manifest.has_value(), (manifest ? "" : manifest.error().ToString()));
+
+			// A live session.
+			const Result<ProcessResult> live = RunRuntime(directory, { "--headless", "--renderer", "none", "--frames", "2", "--locale", "ar", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(live.has_value(), live.error().ToString());
+			INFO("runtime stderr: ", live->StandardError);
+			CHECK(live->ExitCode == ExitCode::Success);
+			CHECK(live->StandardError.contains("Runtime: 'LocaleGame' started with scene 'Assets/Scenes/Main.scene' (3 entities, seed 7, locale 'ar')"));
+			const Result<ProcessResult> fallback = RunRuntime(directory, { "--headless", "--renderer", "none", "--frames", "2", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(fallback.has_value(), fallback.error().ToString());
+			CHECK(fallback->StandardError.contains("locale 'fr')"));
+
+			// The testing export's suites: the entry without a locale runs in --locale's, the German entry in its own.
+			EditFile(*manifest, "\"Testing\": false", "\"Testing\": true");
+			const Result<ProcessResult> suites = RunRuntime(directory, { "--headless", "--renderer", "none", "--feature-test", "--locale", "ar", ManifestArgument(*manifest) }, directory.GetPath());
+			REQUIRE_MESSAGE(suites.has_value(), suites.error().ToString());
+			INFO("feature-test stderr: ", suites->StandardError);
+			CHECK(suites->ExitCode == ExitCode::Success);
+			const auto json = FileSystem::ReadText(directory / "bin/TestResults/FeatureTest-Release.json");
+			REQUIRE_MESSAGE(json.has_value(), json.error().ToString());
+			const auto report = JsonReader::Parse(*json);
+			REQUIRE(report.has_value());
+			CHECK((*report)["passed"] == Json(true));
+			REQUIRE((*report)["suites"].size() == 2);
+			CHECK((*report)["suites"][0]["suite"] == Json("Locale"));
+			CHECK((*report)["suites"][0]["locale"] == Json("ar"));
+			CHECK((*report)["suites"][1]["suite"] == Json("Locale (de)"));
+			CHECK((*report)["suites"][1]["locale"] == Json("de"));
+
+			// --replay owns its locale.
+			const Result<ProcessResult> replay = RunRuntime(directory, { "--headless", "--renderer", "none", "--replay", "Recorded.replay", "--locale", "ar", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(replay.has_value(), replay.error().ToString());
+			CHECK(replay->ExitCode == ExitCode::UsageError);
+			CHECK(replay->StandardError.contains("--locale"));
 		}
 
 		TEST_CASE("RuntimeApp: feature-test stays inert for an ordinary exported game")

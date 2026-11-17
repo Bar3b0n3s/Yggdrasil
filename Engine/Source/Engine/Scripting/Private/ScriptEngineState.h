@@ -48,6 +48,12 @@ namespace Engine {
 		// A fixed-step callback an instance holds until it has started: a physics callback of either world (M21), or an
 		// animation event (M23, Docs/Decisions/0034-m23-contract.md decision 31).
 		using HeldEvent = std::variant<Detail::HeldPhysicsEvent, AnimationEventRecord>;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2): OnLocaleChanged's arguments after self.
+		struct LocaleChange
+		{
+			std::string_view Locale{};
+			std::string_view Previous{};
+		};
 
 		struct Instance
 		{
@@ -169,9 +175,10 @@ namespace Engine {
 		// Runs the deferred OnCreate callbacks in (ExecutionOrder, canonical entity, slot) order; a no-op inside a faulted
 		// slice.
 		void InvokeDeferredCreates();
-		// `event` is a physics callback's (its other entity and contact), `animation` OnAnimationEvent's (its AnimationEvent).
+		// `event` is a physics callback's (its other entity and contact), `animation` OnAnimationEvent's (its AnimationEvent),
+		// `locale` OnLocaleChanged's (the new locale and the previous one; M38).
 		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false,
-			const AnimationEventRecord* animation = nullptr);
+			const AnimationEventRecord* animation = nullptr, const LocaleChange* locale = nullptr);
 		// The 3D callbacks (OnCollisionEnter, ...), or with `is2D` the 2D ones (OnCollisionEnter2D, ...; M21).
 		void InvokePhysics(InstanceKey key, const PhysicsEvent& event, bool is2D = false);
 		void InvokeAnimation(InstanceKey key, const AnimationEventRecord& event);
@@ -258,6 +265,8 @@ namespace Engine {
 		bool Initialized = false;
 		bool Stopped = false;
 		bool Stopping = false;
+		// M38 (decision 2): an OnLocaleChanged dispatch runs (ScriptEngine::NotifyLocaleChanged), so Loc.SetLocale refuses.
+		bool LocaleDispatching = false;
 		// Stack-scoped, exception-neutral back-references restored before a protected host call returns.
 		const std::function<int(ScriptCall&)>* NativeOperation = nullptr;
 		ScriptTaskOwner CurrentOwner{};

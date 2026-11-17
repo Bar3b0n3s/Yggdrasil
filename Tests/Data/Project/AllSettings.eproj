@@ -83,7 +83,8 @@
 					"PauseOnError": "Continue"
 				},
 				"ExpectQuit": 3,
-				"Modes": ["Editor", "Release"]
+				"Modes": ["Editor", "Release"],
+				"Locale": "de"
 			}
 		],
 		"Replays": ["Assets/Tests/Replays/*.replay"],

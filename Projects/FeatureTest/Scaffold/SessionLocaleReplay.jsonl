@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/SessionLocale.scene"}}
+{"method": "play.step", "params": {"ticks": 150, "input": [{"tick": 20, "type": "Key", "key": "Down", "state": "Tap"}, {"tick": 30, "type": "Key", "key": "Enter", "state": "Tap"}, {"tick": 50, "type": "Key", "key": "Right", "state": "Tap"}, {"tick": 60, "type": "Key", "key": "Enter", "state": "Tap"}, {"tick": 90, "type": "Key", "key": "Down", "state": "Tap"}, {"tick": 100, "type": "Key", "key": "Enter", "state": "Tap"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/SessionLocale.replay", "expect": [{"tick": 45, "luau": "return Loc.GetLocale() == \"ar\" and Scene.GetName() == \"SessionLocale\""}, {"tick": 85, "luau": "return Loc.GetLocale() == \"ar\" and Scene.GetName() == \"SessionLocaleB\" and Scene.FindByName(\"Title\").UiText.Text == \"شجرة العالم\""}, {"tick": 140, "luau": "return Loc.GetLocale() == \"fr-CA\" and Scene.FindByName(\"Title\").UiText.Text == \"World Tree\""}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

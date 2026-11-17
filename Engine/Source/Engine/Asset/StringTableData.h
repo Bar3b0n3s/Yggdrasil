@@ -22,7 +22,7 @@
 // (AssetType::StringTable, format version 1), the reflected StringTableData struct behind it, its cooked payload and the
 // loaded asset. A table is data only: its locales and its entries, each a key with one string per locale. Produced by
 // StringTableImporter (.stringtable files) and asset.create; read by scripts through Loc.Get (Scripting's Loc module) in the
-// session's locale (the project's Localization.Locale).
+// session's locale (the project's Localization.Locale, or the one the session started in or a script set, M38).
 //
 // Conventions, which every reader follows:
 //   - Locales are tags such as "en", "en-US", "fr" or "ja": 1 to MaxStringTableLocaleBytes bytes of ASCII letters, digits
@@ -92,6 +92,13 @@ namespace Engine {
 	// violation, in document order (the locales, then each entry's Key and its Values by locale), each located by its JSON
 	// pointer into the .stringtable document ("/Locales/2", "/Entries/5/Key", "/Entries/5/Values/fr").
 	[[nodiscard]] Status ValidateStringTable(const StringTableData& table);
+
+	// Whether `locale` is a locale tag of the file comment's form: 1 to MaxStringTableLocaleBytes bytes of ASCII letters, digits
+	// and '-', starting with a letter. M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 1): public, the one rule of a
+	// session's locale (Loc.SetLocale, PlayStartOptions::Locale, a replay header's Locale, a suite's Locale, the Runtime's
+	// --locale), each of which also takes the empty locale; Project, which cannot include Asset, keeps its own copy for
+	// Localization.Locale and a suite's Locale, and ProjectSettingsTests checks that the two agree. Pure.
+	[[nodiscard]] bool IsLocaleTag(std::string_view locale);
 
 	// The index in table.Locales of the locale a lookup in `locale` reads (see the file comment): an exact match ignoring ASCII
 	// case, else the language's match, else 0 (the fallback; also for an empty locale). The table has at least one locale

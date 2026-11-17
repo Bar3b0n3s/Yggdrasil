@@ -508,7 +508,7 @@ All modes; Runtime|Test; pure/read.
 
 ## Loc
 
-Localized strings from string tables (.stringtable assets) in the project's locale (Localization.Locale): a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's.
+Localized strings from string tables (.stringtable assets) in the session's locale: a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's. A session starts in the project's Localization.Locale (or play.start's locale, the Runtime's --locale, a suite's Locale, a replay's header), and Loc.SetLocale changes it for the rest of the session.
 
 ### Loc.Get
 
@@ -522,7 +522,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> string`
 
-Returns the project's locale (Localization.Locale) that lookups use; empty when it is unset, so every table reads its fallback locale.
+Returns the session's locale that lookups use: the one it started in, or the last Loc.SetLocale's; empty reads every table's fallback locale.
 
 All modes; Runtime|Test; pure/read.
 
@@ -533,6 +533,14 @@ All modes; Runtime|Test; pure/read.
 Returns whether the string table has the key. An asset that is not a string table, or a table that fails to load, raises a located error naming it, as in Get.
 
 All modes; Runtime|Test; pure/read.
+
+### Loc.SetLocale
+
+`(locale: string) -> ()`
+
+Sets the session's locale, which Get and GetLocale read from the next call and which lasts through Scene.Load and Scene.Reload: empty (every table's fallback) or a tag such as de, ar or pt-BR, else a located error. Before it returns, OnLocaleChanged(locale, previous) reaches every started behaviour that defines it, in execution order; the locale in force changes nothing, and a call inside OnLocaleChanged raises. A game restores its player's saved choice with it at startup.
+
+All modes; Runtime|Test; mutates.
 
 ## Log
 
@@ -1949,6 +1957,14 @@ EditorOnly; Runtime|Test; mutates.
 `(self: ScriptInstance, dt: number) -> ()`
 
 Called for the current fixed, presentation or late presentation phase.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnLocaleChanged
+
+`(self: ScriptInstance, locale: string, previous: string) -> ()`
+
+Called when Loc.SetLocale changes the session's locale, before that call returns: on every started, enabled behaviour that defines it, the caller's own included, in execution order, whether or not the world is paused (redraw texts here). Loc.SetLocale raises inside it. A new scene's behaviours after Scene.Load or Scene.Reload start in the locale without it.
 
 All modes; Runtime|Test; mutates.
 

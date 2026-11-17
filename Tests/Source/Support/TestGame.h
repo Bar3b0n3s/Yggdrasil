@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Engine/Asset/AssetHandle.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Core/UUID.h"
+#include "Engine/Project/ProjectSettings.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -32,6 +34,18 @@ namespace Engine {
 			// The project's Testing.Suites, one entry per script path (no scene). The pak holds no script, so a --feature-test
 			// run of such a game cannot begin: its runner does not find the suites' scripts.
 			std::vector<std::string> TestSuiteScripts{};
+			// M38: Testing.Suites entries appended after TestSuiteScripts' (their scripts among Scripts), and scripts compiled
+			// (LoadTimeVm::Extract, no requires) and cooked into Game.pak at their paths with their handles.
+			std::vector<TestSuiteSettings> TestSuites{};
+			struct Script
+			{
+				AssetHandle Handle{};
+				std::string Path{};
+				std::string Source{};
+			};
+			std::vector<Script> Scripts{};
+			// Localization.Locale of the project.
+			std::string Locale{};
 		};
 
 		// The start scene of a test game: "Main", a primary perspective camera at (0, 1.5, 5), a directional light and the

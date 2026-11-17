@@ -84,6 +84,13 @@ namespace Engine {
 		// the recording with Validation located at /expect/<index>/tick, nothing written.
 		std::vector<ReplayExpectation> RecordExpect{};
 		std::vector<ReplayBytecodeExpectation> RecordExpectBytecode{};
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the run's locale (test.run's locale, the Runtime's --locale
+		// with --feature-test), a tag or empty, empty for none: the locale of every selected suite whose entry names none
+		// (TestSuiteSettings::Locale), whose sessions otherwise start in the project's Localization.Locale. The runner hands
+		// each suite to its host with its effective locale filled in, so IFeatureTestHost::CreateSuiteSession reads it from
+		// the suite. Replays never take it: each starts in its header's locale. Begin: InvalidArgument for a value that is not
+		// empty and not a tag.
+		std::string Locale{};
 	};
 
 	// Services of the owning Editor/Runtime/test harness. This host is a documented borrowed back-reference that
@@ -102,7 +109,8 @@ namespace Engine {
 		// Editor adapters delegate to AutomationMethodContext::DescribeReplayHeader; Runtime uses its asset metadata.
 		[[nodiscard]] virtual Result<ReplayHeader> DescribeReplayHeader(const PlaySession& session) const = 0;
 		// Strict scene/asset loading, fresh runtime scene and VM; omitted Scene means empty. Apply suite Parameters,
-		// exact Overrides, effective seed, test mode, and OwnsAudioTime=true BEFORE callbacks/audio setup. ManualClock
+		// exact Overrides, effective seed, test mode, the suite's Locale as the start locale when it is not empty (the
+		// project's Localization.Locale otherwise; M38), and OwnsAudioTime=true BEFORE callbacks/audio setup. ManualClock
 		// suites are lockstep; Clock suites use ScriptedClock. Install testHost before OnCreate/OnStart and retain it
 		// through replacement-VM setup and teardown. Audio decoding is Deterministic from engine construction, including
 		// windowed Editor and a Runtime launched for tests; Device is independent. The caller owns the session exclusively.
@@ -250,8 +258,11 @@ namespace Engine {
 		[[nodiscard]] std::string GetPhase() const;
 	private:
 		struct State;
-		// One suite as Discover collects it: in a scratch session of its scene, its declared name and cases.
-		[[nodiscard]] static Result<TestSuiteDescription> DiscoverSuite(IFeatureTestHost& host, const TestSuiteSettings& settings, TestSuiteSettings::Mode mode);
+		// One suite as Discover collects it: in a scratch session of its scene, its declared name and cases. M38 (decision 6):
+		// the session starts in the entry's Locale, else `runLocale`, else the project's; a suite whose entry names a locale
+		// is named "<declared name> (<Locale>)" (MakeTestSuiteName), so its rows and the filter tell its locales apart.
+		[[nodiscard]] static Result<TestSuiteDescription> DiscoverSuite(IFeatureTestHost& host, const TestSuiteSettings& settings,
+			TestSuiteSettings::Mode mode, std::string_view runLocale);
 		// The replay globs' paths, de-duplicated and sorted by canonical path.
 		[[nodiscard]] static Result<std::vector<std::string>> DiscoverReplays(IFeatureTestHost& host);
 		Scope<State> m_State{};

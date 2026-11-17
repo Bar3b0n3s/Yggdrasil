@@ -8,6 +8,7 @@
 #include "Engine/App/EngineContext.h"
 #include "Engine/Asset/AssetDiagnostic.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/AssetPipeline/AssetDependencyGraph.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Audio/AudioEngine.h"
@@ -384,6 +385,14 @@ namespace Engine {
 		}
 		if (options.PauseOnError.has_value())
 			project.Scripting.PauseOnError = *options.PauseOnError;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 3): the locale the session starts in, as a replay's FixedHz;
+		// absent: the project's.
+		if (options.Locale.has_value())
+		{
+			if (!options.Locale->empty() && !IsLocaleTag(*options.Locale))
+				return MakeError(ErrorCode::InvalidArgument, "the start locale must be empty or a locale tag (got '{}')", *options.Locale);
+			project.Localization.Locale = *options.Locale;
+		}
 		if (api == nullptr)
 		{
 			ENGINE_TRY_ASSIGN(api, GetScriptApi());
@@ -438,6 +447,8 @@ namespace Engine {
 		result.FixedView = fixedView;
 		result.Header.Parameters = options.Parameters.Get().is_null() ? VariantValue(Json::object()) : options.Parameters;
 		result.Header.SaveData = specification.SaveData.IsNull() ? VariantValue(Json::object()) : specification.SaveData;
+		// M38 (decision 5): the locale the session starts in, which every replay of a recording starts in.
+		result.Header.Locale = project.Localization.Locale;
 		result.Header.Seed = specification.Seed;
 		result.Header.FixedHz = project.Simulation.FixedHz;
 		// The running engine's version (ADR 0038, friction F10), as session.hello reports it.
@@ -475,6 +486,12 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "timeScale is outside the supported range");
 		if (!options.Parameters.IsNull() && !options.Parameters.Get().is_object())
 			return MakeError(ErrorCode::InvalidArgument, "play parameters must be an object");
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 3).
+		if (options.Locale.has_value() && !options.Locale->empty() && !IsLocaleTag(*options.Locale))
+		{
+			return std::unexpected(Error(ErrorCode::InvalidArgument, std::format("'{}' is not a locale: a session starts in the empty locale or a tag", *options.Locale))
+					.WithHint(std::format("a tag is 1 to {} ASCII letters, digits and '-' starting with a letter, such as de, ar or pt-BR", MaxStringTableLocaleBytes)));
+		}
 		// The asset gate (§12.4) has something to find only while an asset is in error; otherwise it reads nothing.
 		const bool assetErrors = editor.GetAssets().HasErrorDiagnostics();
 		if (options.ScenePath.empty())
@@ -1140,6 +1157,9 @@ namespace Engine {
 		options.Paused = true;
 		ProjectSettings project = editor.GetProject().GetSettings();
 		project.Simulation.FixedHz = header.FixedHz;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5): always the header's start locale; a header without one
+		// (versions 1 to 4) plays in the project's, given explicitly.
+		options.Locale = header.Locale.value_or(project.Localization.Locale);
 		ENGINE_TRY(ValidatePlayRequest(options));
 		ENGINE_TRY(CheckPlayScripts(project));
 		// Every RPC path into play cancels the active gestures and saves the recovery copy first (EditorApp::BeforePlay).

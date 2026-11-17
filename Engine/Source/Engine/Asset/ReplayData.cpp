@@ -2,6 +2,7 @@
 #include "Engine/Asset/ReplayData.h"
 
 #include "Engine/Asset/CookedFormat.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Core/BinaryReader.h"
 #include "Engine/Core/BinaryWriter.h"
 #include "Engine/Core/FixedStepScheduler.h"
@@ -593,6 +594,9 @@ namespace Engine {
 			ENGINE_TRY(saveData.ExpectType(JsonType::Object));
 			ENGINE_TRY(CheckTree(saveData, JsonNumbers::Double));
 		}
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5): the start locale, empty or a tag.
+		if (d.Header.Locale.has_value() && !d.Header.Locale->empty() && !IsLocaleTag(*d.Header.Locale))
+			return std::unexpected(Invalid("/Locale", std::format("the start locale must be empty or a locale tag of 1 to {} ASCII letters, digits and '-' starting with a letter", MaxStringTableLocaleBytes)));
 		ENGINE_TRY(Hash(d.FinalStateHash, "/FinalStateHash"));
 		if (d.Events.size() > std::numeric_limits<uint32_t>::max() || d.Expect.size() > std::numeric_limits<uint32_t>::max()
 			|| d.Checkpoints.size() > std::numeric_limits<uint32_t>::max())
@@ -646,14 +650,17 @@ namespace Engine {
 		const bool hasCheckpoints = fileVersion >= 2;
 		const bool hasFingerprint = fileVersion >= ReplayFingerprintFormatVersion;
 		const bool hasSaveData = fileVersion >= ReplaySaveDataFormatVersion;
-		constexpr std::array<std::string_view, 15> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
+		const bool hasLocale = fileVersion >= ReplayLocaleFormatVersion;
+		constexpr std::array<std::string_view, 16> Keys = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Locale", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
+		constexpr std::array<std::string_view, 15> KeysVersion4 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
 		constexpr std::array<std::string_view, 14> KeysVersion3 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
 		constexpr std::array<std::string_view, 13> KeysVersion2 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash" };
 		constexpr std::array<std::string_view, 12> KeysVersion1 = { "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Events", "Expect", "FinalTick", "FinalStateHash" };
-		const std::span<const std::string_view> known = hasSaveData ? std::span<const std::string_view>(Keys)
-			: hasFingerprint                                        ? std::span<const std::string_view>(KeysVersion3)
-			: hasCheckpoints                                        ? std::span<const std::string_view>(KeysVersion2)
-																	: std::span<const std::string_view>(KeysVersion1);
+		const std::span<const std::string_view> known = hasLocale ? std::span<const std::string_view>(Keys)
+			: hasSaveData                                         ? std::span<const std::string_view>(KeysVersion4)
+			: hasFingerprint                                      ? std::span<const std::string_view>(KeysVersion3)
+			: hasCheckpoints                                      ? std::span<const std::string_view>(KeysVersion2)
+																  : std::span<const std::string_view>(KeysVersion1);
 		ENGINE_TRY(Unknown(root, known, report, strictUnknowns));
 		ENGINE_TRY_ASSIGN(auto scene, root.GetMember("Scene"));
 		constexpr std::array<std::string_view, 2> SceneKeys = { "Handle", "Path" };
@@ -677,6 +684,15 @@ namespace Engine {
 		}
 		else
 			d.Header.SaveData.Set(Json::object());
+		// M38 (decision 5): version 5's start locale, a string or null; versions 1 to 4 migrate with null.
+		if (hasLocale)
+		{
+			ENGINE_TRY_ASSIGN(const JsonReader locale, root.GetMember("Locale"));
+			if (!locale.IsNull())
+			{
+				ENGINE_TRY_ASSIGN(d.Header.Locale, locale.Read<std::string>());
+			}
+		}
 		if (hasFingerprint)
 		{
 			ENGINE_TRY_ASSIGN(const JsonReader fingerprint, root.GetMember("Fingerprint"));
@@ -735,7 +751,7 @@ namespace Engine {
 	Result<Json> ReplayToJson(const ReplayDocument& d)
 	{
 		ENGINE_TRY(ValidateReplayDocument(d));
-		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "SaveData", d.Header.SaveData.IsNull() ? Json::object() : d.Header.SaveData.Get() }, { "Fingerprint", d.Fingerprint ? FingerprintJson(*d.Fingerprint) : Json(nullptr) }, { "Events", Json::array() }, { "Expect", Json::array() }, { "Checkpoints", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
+		Json j = { { "Format", ReplayFormatName }, { "Version", d.Version }, { "Scene", { { "Handle", d.Header.Scene.Handle.ToString() }, { "Path", d.Header.Scene.Path } } }, { "Parameters", d.Header.Parameters.IsNull() ? Json::object() : d.Header.Parameters.Get() }, { "Seed", d.Header.Seed }, { "FixedHz", d.Header.FixedHz }, { "EngineVersion", d.Header.EngineVersion }, { "Config", d.Header.Config }, { "SaveData", d.Header.SaveData.IsNull() ? Json::object() : d.Header.SaveData.Get() }, { "Locale", d.Header.Locale.has_value() ? Json(*d.Header.Locale) : Json(nullptr) }, { "Fingerprint", d.Fingerprint ? FingerprintJson(*d.Fingerprint) : Json(nullptr) }, { "Events", Json::array() }, { "Expect", Json::array() }, { "Checkpoints", Json::array() }, { "FinalTick", d.FinalTick }, { "FinalStateHash", d.FinalStateHash } };
 		for (const auto& e : d.Events)
 			j["Events"].push_back(EventJson(e));
 		for (const auto& e : d.Expect)
@@ -790,6 +806,9 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(auto saveData, JsonWriter::Write(d.Header.SaveData.IsNull() ? Json::object() : d.Header.SaveData.Get(), JsonStyle::Minified, JsonNumbers::Double));
 		ENGINE_TRY(Text(saveData, "/SaveData"));
 		w.WriteString(saveData);
+		w.WriteU8(static_cast<uint8_t>(d.Header.Locale.has_value() ? 1 : 0));
+		if (d.Header.Locale.has_value())
+			w.WriteString(*d.Header.Locale);
 		w.WriteU32(static_cast<uint32_t>(d.Events.size()));
 		for (const auto& e : d.Events)
 			WriteEvent(w, e);
@@ -839,6 +858,13 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(auto saveData, JsonReader::Parse(saveDataText));
 		ENGINE_TRY(JsonReader(saveData, "/SaveData").ExpectType(JsonType::Object));
 		d.Header.SaveData.Set(std::move(saveData));
+		ENGINE_TRY_ASSIGN(const uint8_t hasLocale, r.ReadU8());
+		if (hasLocale > 1)
+			return std::unexpected(Invalid("/Locale", "invalid locale presence flag"));
+		if (hasLocale == 1)
+		{
+			ENGINE_TRY_ASSIGN(d.Header.Locale, r.ReadString());
+		}
 		ENGINE_TRY_ASSIGN(uint32_t count, r.ReadU32());
 		if (count > r.GetRemaining() / 9)
 			return std::unexpected(Invalid("/Events", "event count exceeds remaining payload"));

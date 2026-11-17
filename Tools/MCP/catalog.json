@@ -1673,6 +1673,10 @@
 							"additionalProperties": false
 						}
 					},
+					"locale": {
+						"description": "Start only: the locale the recording starts in, such as de or ar (\"\" the empty locale), which its header records and every replay of it starts in; absent: the project's Localization.Locale in the editor, the launch locale (--locale) in the Runtime.",
+						"type": "string"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
@@ -2095,6 +2099,10 @@
 					"pauseOnError": {
 						"description": "Pause on a script error; absent inherits project settings.",
 						"type": "boolean"
+					},
+					"locale": {
+						"description": "The locale the session starts in, such as de or ar, which Loc.Get reads until a script calls Loc.SetLocale; \"\" the empty locale (every string table's fallback); absent: the project's Localization.Locale. Check a language's texts with ui.tree {target: \"Play\"} without editing the project.",
+						"type": "string"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -3482,6 +3490,10 @@
 							},
 							"additionalProperties": false
 						}
+					},
+					"locale": {
+						"description": "The locale, such as de or ar, every selected suite whose Testing.Suites entry names no Locale starts in; absent: the project's Localization.Locale. Replays start in their headers' locales.",
+						"type": "string"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",

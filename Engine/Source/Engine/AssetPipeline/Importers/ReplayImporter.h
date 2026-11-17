@@ -21,8 +21,9 @@ namespace Engine {
 		// 2: the cooked replay carries the state-hash checkpoints (ReplayData::FormatVersion 2); the version is part of the
 		// cache key, so artifacts cooked by an older version are rebuilt instead of failing to load. 3 (the phase 1 ledger's,
 		// Docs/Decisions/0030-m19-contract.md decision 2): the cooked replay carries the start fingerprint
-		// (ReplayData::FormatVersion 3).
-		static constexpr uint32_t Version = 4;
+		// (ReplayData::FormatVersion 3). 4 (M28): the header's SaveData. 5 (M38, Docs/Decisions/0055-m38-runtime-locale.md
+		// decision 5): the header's Locale (ReplayData::FormatVersion 5).
+		static constexpr uint32_t Version = 5;
 
 		[[nodiscard]] std::string_view GetId() const override { return Id; }
 		[[nodiscard]] uint32_t GetVersion() const override { return Version; }

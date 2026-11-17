@@ -230,6 +230,15 @@ namespace Engine {
 		// scene has none. A play session's host returns PlaySession::GetNavigation, and every other host (the edit
 		// evaluation, test fixtures without a session) keeps the default, null, for which every query finds nothing.
 		[[nodiscard]] virtual NavigationWorld* GetNavigation() { return nullptr; }
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 1): Loc.SetLocale's change of the session's locale, `locale`
+		// empty or a tag (StringTableData.h's IsLocaleTag; the binding checks it first): a play session's host records it as
+		// the session's (PlaySession::SetLocale), which a Scene.Load's and a Scene.Reload's next VM starts in, and sets its VM's
+		// copy (ScriptEngine::SetLocale); the binding then dispatches OnLocaleChanged (ScriptEngine::NotifyLocaleChanged).
+		// Every other host (the edit evaluation, test fixtures without a session) keeps the default, Unsupported.
+		[[nodiscard]] virtual Status SetLocale(std::string_view /*locale*/)
+		{
+			return MakeError(ErrorCode::Unsupported, "this host has no session locale: Loc.SetLocale works in a play session");
+		}
 	private:
 		static constexpr std::string_view NoSaveDataReason = "this host has no save data: SaveData works in a play session";
 	};

@@ -510,6 +510,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "SessionLocale.jsonl",
+			"IdSeed": 3501,
+			"Renderer": "none"
+		},
+		{
+			"File": "SessionLocaleReplay.jsonl",
+			"IdSeed": 3502,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

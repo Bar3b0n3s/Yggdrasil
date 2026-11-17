@@ -268,12 +268,50 @@ namespace Engine {
 				CAPTURE(valid);
 				CHECK(issues(std::string(valid)).empty());
 				CHECK((valid.empty() || tableAccepts(valid)));
+				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 1): the rule a session's locale follows, public in Asset.
+				CHECK((valid.empty() || IsLocaleTag(valid)));
 			}
 			for (const std::string_view invalid : { "-fr", "1en", "fr_CA", "f r", "pt-BR\n", "abcdefghijklmnopqrstuvwxyz0123456789" })
 			{
 				CAPTURE(invalid);
 				CHECK(issues(std::string(invalid)) == std::vector<std::string>{ "/Localization/Locale" });
 				CHECK_FALSE(tableAccepts(invalid));
+				CHECK_FALSE(IsLocaleTag(invalid));
+			}
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): a suite's Locale is empty (the run's locale, else the
+		// project's) or a tag, refused with a Validation error located at /Testing/Suites/<i>/Locale otherwise.
+		TEST_CASE("ProjectSettings: a suite's Locale is empty or a locale tag, located at /Testing/Suites/<i>/Locale")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const StructInfo* type = registry->FindStruct<ProjectSettings>();
+			REQUIRE(type != nullptr);
+			const auto issues = [&](std::string locale)
+			{
+				ProjectSettings settings;
+				TestSuiteSettings suite;
+				suite.Script = "Assets/Tests/Strings.test.luau";
+				settings.Testing.Suites = { suite, suite };
+				settings.Testing.Suites[1].Locale = std::move(locale);
+				ResolveContext resolve;
+				resolve.Registry = registry.get();
+				ValidationContext context;
+				type->Validate(&settings, resolve, context);
+				std::vector<std::string> pointers;
+				for (const ValidationIssue& issue : context.GetIssues())
+					pointers.push_back(issue.JsonPointer);
+				return pointers;
+			};
+			for (const std::string_view valid : { "", "de", "ar", "pt-BR" })
+			{
+				CAPTURE(valid);
+				CHECK(issues(std::string(valid)).empty());
+			}
+			for (const std::string_view invalid : { "de_DE", "-ar", "1de", "abcdefghijklmnopqrstuvwxyz0123456789" })
+			{
+				CAPTURE(invalid);
+				CHECK(issues(std::string(invalid)) == std::vector<std::string>{ "/Testing/Suites/1/Locale" });
 			}
 		}
 

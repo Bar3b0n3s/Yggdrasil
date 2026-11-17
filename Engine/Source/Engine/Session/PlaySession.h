@@ -263,6 +263,11 @@ namespace Engine {
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 8): the save data a fixed-view session starts with (a replay's
 		// header, a recording's start), an object; absent: the host's own (a live session's store, or none).
 		VariantValue SaveData{};
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 3): the locale the session starts in, empty or a tag
+		// (play.start's locale, a recording's, a suite's, a replay header's, the Runtime's --locale); absent: the project's
+		// Localization.Locale. Each host writes it into its copy of the project (PlaySessionSpecification::Project), as a
+		// replay's FixedHz, and records it in a recording's header.
+		std::optional<std::string> Locale{};
 	};
 
 	// Everything a session needs to start. The project's settings are copied in whole, so a session never reads the project
@@ -416,8 +421,14 @@ namespace Engine {
 	// its pending request and the world's clock are session state, kept across Scene.Load and Scene.Reload, and from the
 	// first request to pause they form a block of the state hash (ComputeStateHash).
 	//
+	// Locale (M38, Docs/Decisions/0055-m38-runtime-locale.md decisions 1 to 4). A session starts in its specification's
+	// Project.Localization.Locale (the host writes PlayStartOptions::Locale there), its start locale, an input like the seed.
+	// Loc.SetLocale changes the session's locale (SetLocale) and delivers OnLocaleChanged; it is session state, kept across
+	// Scene.Load and Scene.Reload (every VM the session creates starts in it), and the state hash's locale block while it
+	// differs from the start locale.
+	//
 	// Determinism (§1.3, §4.12): the scene, the state hash, the UUIDs it creates and its Random stream depend only on the
-	// document, the seed, the FixedHz and the input applied per tick, in every configuration.
+	// document, the seed, the FixedHz, the start locale and the input applied per tick, in every configuration.
 	class PlaySession
 	{
 	public:
@@ -652,6 +663,9 @@ namespace Engine {
 		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 4; phase 5's ledger: after M28's save-data block): the
 		// world-pause block, empty until the session's first request to pause (RequestWorldPause), then the pause in force,
 		// its sounds choice, the pending request and the world's clock (GetWorldTick).
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 4; phase 6's ledger: after the world-pause block): the
+		// locale block, the session's locale (GetLocale), length-prefixed, while it differs byte-wise from the start locale
+		// (GetStartLocale), and nothing otherwise, so a session that keeps its start locale hashes as before.
 		[[nodiscard]] uint64_t ComputeStateHash() const;
 
 		// The entity cap (see the class comment).
@@ -689,6 +703,17 @@ namespace Engine {
 		[[nodiscard]] WorldPauseSounds GetWorldPauseSounds() const;
 		// The world's clock: the fixed steps the world ran (GetTick less the ticks the world pause held).
 		[[nodiscard]] uint64_t GetWorldTick() const;
+
+		// --- The session's locale (M38, Docs/Decisions/0055-m38-runtime-locale.md decisions 1 and 4; see "Locale") ---
+		// GetLocale: the locale the session's VM reads string tables in (Loc.Get, Loc.GetLocale; play.state's locale);
+		// GetStartLocale: the one it started in (PlaySessionSpecification::Project's Localization.Locale), which a recording's
+		// header records. SetLocale, Loc.SetLocale's (through the session's script host): `locale` empty or a tag, else
+		// InvalidArgument; it becomes the session's and its current VM's (ScriptEngine::SetLocale) at once, and every VM a
+		// later Scene.Load or Scene.Reload creates starts in it. It dispatches nothing: the binding delivers OnLocaleChanged
+		// (ScriptEngine::NotifyLocaleChanged).
+		[[nodiscard]] std::string_view GetLocale() const;
+		[[nodiscard]] std::string_view GetStartLocale() const;
+		[[nodiscard]] Status SetLocale(std::string_view locale);
 		[[nodiscard]] bool IsLockstep() const;
 		// The client that owns lockstep; NoClient when the session is not in lockstep or an in-process driver owns it.
 		[[nodiscard]] ClientId GetLockstepOwner() const;

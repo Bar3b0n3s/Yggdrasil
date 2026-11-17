@@ -1,0 +1,208 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "d928a3819fbcc844",
+		"Path": "Assets/Scenes/SessionLocale.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.6.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "29970bbe6b24e0d5",
+				"Path": "/Banner",
+				"Hash": "e83fe03c644c64f7",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "9f95dadbeb4304d7"
+				}
+			},
+			{
+				"Id": "34c32ae867626fe1",
+				"Path": "/Menu/Title",
+				"Hash": "969623e31e122066",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "d5ff718a239e41af",
+					"UiRect": "7ff346f013e8d9d6",
+					"UiText": "f67f3cad0c7cf833"
+				}
+			},
+			{
+				"Id": "57f4a386fbb484f2",
+				"Path": "/Menu",
+				"Hash": "0974d94f8bf083be",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"UiCanvas": "29dccac125542953"
+				}
+			},
+			{
+				"Id": "6d7c0eeba9f99c45",
+				"Path": "/Menu/Play",
+				"Hash": "45e7b28a8d9b7f08",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "24494284d35e5825",
+					"UiRect": "83f31236541d2f77",
+					"UiImage": "2336d38a422cc78a",
+					"UiText": "2ee54e54f280f470",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "c2a24bada8ccaf6d",
+				"Path": "/Camera",
+				"Hash": "f9eade73bc5475bd",
+				"Components": {
+					"Transform": "251d44d32ff1d99b",
+					"Camera": "280661e01a10689e"
+				}
+			},
+			{
+				"Id": "f4ed602819840d15",
+				"Path": "/Menu/Language",
+				"Hash": "a04841e61689dfb6",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "976d184abaacc920",
+					"UiRect": "bf041347eba313f0",
+					"UiImage": "c3b1f727855571cb",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "151331c8c4f89701",
+				"Path": "Assets/Scripts/SessionLocale/Caption.luau",
+				"Type": "Script",
+				"Hash": "f6cc9aa75f78bc22"
+			},
+			{
+				"Handle": "caaf012553e47778",
+				"Path": "Assets/Scripts/SessionLocale/Banner.luau",
+				"Type": "Script",
+				"Hash": "9320fd4cfaf3a3fe"
+			},
+			{
+				"Handle": "d160cd437036b5f1",
+				"Path": "Assets/Fonts/GoldenUiScripts/Inter-Regular.otf",
+				"Type": "Font",
+				"Hash": "a1c14125a6c0a34b"
+			},
+			{
+				"Handle": "e76f5b484abf1fd5",
+				"Path": "Assets/Scripts/SessionLocale/Language.luau",
+				"Type": "Script",
+				"Hash": "b274ff9c53edded1"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 20,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Down"
+		},
+		{
+			"Tick": 21,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Down"
+		},
+		{
+			"Tick": 30,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 31,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 50,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Right"
+		},
+		{
+			"Tick": 51,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Right"
+		},
+		{
+			"Tick": 60,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 61,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 90,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Down"
+		},
+		{
+			"Tick": 91,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Down"
+		},
+		{
+			"Tick": 100,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Enter"
+		},
+		{
+			"Tick": 101,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Enter"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 45,
+			"Luau": "return Loc.GetLocale() == \"ar\" and Scene.GetName() == \"SessionLocale\""
+		},
+		{
+			"Tick": 85,
+			"Luau": "return Loc.GetLocale() == \"ar\" and Scene.GetName() == \"SessionLocaleB\" and Scene.FindByName(\"Title\").UiText.Text == \"شجرة العالم\""
+		},
+		{
+			"Tick": 140,
+			"Luau": "return Loc.GetLocale() == \"fr-CA\" and Scene.FindByName(\"Title\").UiText.Text == \"World Tree\""
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "5038b881e2885fe0"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "05ae650d5b32b894"
+		}
+	],
+	"FinalTick": 150,
+	"FinalStateHash": "b939a371aea6b9af"
+}

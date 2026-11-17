@@ -54,8 +54,10 @@ namespace Engine {
 		std::function<double()> ClockSeconds{};
 		std::function<double()> CpuClockSeconds{};
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 11): the locale Loc.Get reads string tables in and
-		// Loc.GetLocale returns, fixed for the VM's life: the project's Localization.Locale (a play session's and an edit
-		// evaluation's VM alike); empty reads every table in its fallback locale.
+		// Loc.GetLocale returns; empty reads every table in its fallback locale. M38 (Docs/Decisions/0055-m38-runtime-locale.md
+		// decision 1): the VM's starting locale: a play session's VM starts in the session's locale (its start locale, or the
+		// one a script set before a Scene.Load or Scene.Reload), the edit evaluation's in the project's Localization.Locale;
+		// the session changes it with ScriptEngine::SetLocale.
 		std::string Locale{};
 	};
 
@@ -212,6 +214,19 @@ namespace Engine {
 		// do: a started instance at once, an unstarted one holding it (with its held physics callbacks, in arrival order)
 		// until the first fixed-step start flush after its OnStart; destruction or a fault discards held events.
 		void OnAnimationEvent(const AnimationEventRecord& event) override;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2): Loc.SetLocale's checks and its OnLocaleChanged dispatch,
+		// called by the binding around the host's change (IScriptHost::SetLocale), as Scene.CreateEntity calls NotifyCreated.
+		// CheckLocaleChange: InvalidState while an OnLocaleChanged dispatch runs (no nested change) and once the engine stops
+		// (a dispatch at teardown, from an OnDestroy of Stop); OK otherwise. NotifyLocaleChanged(previous), after the change,
+		// with CheckLocaleChange's errors: delivers OnLocaleChanged(self, locale, previous) synchronously, before it returns
+		// and under the calling callback's deadline, to every started, enabled instance (not pending destruction, not
+		// fault-disabled) whose behaviour defines it, the caller's own included, in (ExecutionOrder, canonical entity, slot)
+		// order from a snapshot taken before the first call; each is still eligible when its turn comes, and an instance
+		// created during the dispatch (a new serial under its key included) receives nothing, its OnStart reading the new
+		// locale. The world pause holds none (the UI's classification, M35's rule). A fault disables only its instance
+		// (§11.7). A read-only engine dispatches nothing.
+		[[nodiscard]] Status CheckLocaleChange() const;
+		[[nodiscard]] Status NotifyLocaleChanged(std::string_view previous);
 		// Idempotent. OnDestroy for all remaining instances and cancellation while host/scene/services still exist.
 		void Stop();
 
@@ -282,8 +297,12 @@ namespace Engine {
 		[[nodiscard]] IScriptHost& GetHost() const;
 		[[nodiscard]] ScriptApiRegistry& GetApi() const;
 		[[nodiscard]] const ScriptingSettings& GetSettings() const;
-		// M22 (C22.1): ScriptEngineSpecification::Locale.
+		// M22 (C22.1): the VM's locale, what Loc.Get reads and Loc.GetLocale returns: ScriptEngineSpecification::Locale until
+		// the session sets another. M38 (decision 1): SetLocale, the session's (PlaySession::SetLocale; a test host's), takes
+		// effect at the next Loc call and dispatches nothing (NotifyLocaleChanged does); `locale` is empty or a tag, which its
+		// callers check.
 		[[nodiscard]] std::string_view GetLocale() const;
+		void SetLocale(std::string locale);
 		[[nodiscard]] RunModes GetRunMode() const;
 		[[nodiscard]] bool IsTestMode() const;
 		[[nodiscard]] bool IsReadOnly() const;
@@ -301,6 +320,8 @@ namespace Engine {
 		Scope<State> m_State{};
 		ScriptEngineSpecification m_Specification{};
 		ScriptErrorStream m_Errors{};
+		// M38 (decision 1): the VM's locale, from m_Specification.Locale until SetLocale.
+		std::string m_Locale{};
 		friend struct Detail::ScriptEngineAccess;
 	};
 

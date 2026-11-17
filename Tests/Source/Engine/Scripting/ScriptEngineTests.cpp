@@ -12,6 +12,8 @@
 #include <doctest/doctest.h>
 
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace Engine {
 
@@ -148,6 +150,71 @@ namespace Engine {
 			CHECK(result->Value.Get() == Json(true));
 			CHECK(first.Errors.empty());
 			CHECK(second.Errors.empty());
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2; Roadmap M38's acceptance): Loc.SetLocale's synchronous
+		// dispatch. Every started, enabled instance whose behaviour defines OnLocaleChanged receives it before the call returns, the
+		// caller's own included, in (ExecutionOrder, canonical entity) order and with the new locale already in force; a fault
+		// disables only its instance; an inactive entity's and a behaviour without the callback hear nothing.
+		TEST_CASE("ScriptEngine: OnLocaleChanged reaches every started behaviour in execution order before SetLocale returns")
+		{
+			Test::ScriptTestFixture fixture({ .Locale = "fr" });
+			fixture.SessionLocale = "fr";
+			const AssetHandle listener(0x38A0101), plain(0x38A0102);
+			REQUIRE(fixture.AddScript(listener, "Assets/Scripts/Listener.luau", R"(
+local L = {}
+function L:OnCreate() self.Label = self.Entity.Name end
+function L:OnLocaleChanged(locale, previous)
+	Scene.CreateEntity("Trace:" .. self.Label .. ":" .. locale .. ":" .. previous .. ":" .. Loc.GetLocale())
+	if self.Label == "Faulty" then error("the redraw failed") end
+end
+return Script.Define("Listener", L)
+)"));
+			REQUIRE(fixture.AddScript(plain, "Assets/Scripts/Plain.luau", "return Script.Define('Plain', {})"));
+			Scene& scene = fixture.GetScene();
+			const auto attach = [](Entity entity, AssetHandle script, int32_t order)
+			{
+				ScriptSlot slot{};
+				slot.Script.SetHandle(script);
+				slot.ExecutionOrder = order;
+				entity.AddComponent<ScriptComponent>(ScriptComponent{ { slot } });
+			};
+			attach(scene.CreateEntity("Late"), listener, 5);
+			attach(scene.CreateEntity("Caller"), listener, 0);
+			attach(scene.CreateEntity("Early"), listener, -5);
+			attach(scene.CreateEntity("Faulty"), listener, 0);
+			attach(scene.CreateEntity("Plain"), plain, 0);
+			const Entity off = scene.CreateEntity("Off");
+			attach(off, listener, -10);
+			off.SetActive(false);
+			attach(scene.CreateEntity("Second"), listener, 0);
+			REQUIRE(fixture.Start());
+			const auto trace = [&scene]()
+			{
+				std::vector<std::string> names;
+				for (const UUID id : scene.GetCanonicalOrder())
+				{
+					const Entity entity = scene.FindEntityByID(id);
+					if (entity && entity.GetName().starts_with("Trace:"))
+						names.push_back(entity.GetName().substr(6));
+				}
+				return names;
+			};
+			const UUID caller = scene.FindEntityByPath("/Caller").GetUUID();
+			{
+				const Test::ExpectLog fault(LogLevel::Error, "the redraw failed");
+				const auto result = fixture.Evaluate("Loc.SetLocale('de'); Scene.CreateEntity('Trace:returned:' .. Loc.GetLocale())", caller);
+				REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			}
+			CHECK(trace() == std::vector<std::string>{ "Early:de:fr:de", "Caller:de:fr:de", "Faulty:de:fr:de", "Second:de:fr:de", "Late:de:fr:de", "returned:de" });
+			REQUIRE(fixture.Errors.size() == 1);
+			CHECK(fixture.Errors.front().Callback == "OnLocaleChanged");
+			CHECK(fixture.Errors.front().Entity == scene.FindEntityByPath("/Faulty").GetUUID());
+
+			// The faulted instance is disabled; the others hear the next change.
+			REQUIRE(fixture.Evaluate("Loc.SetLocale('ar')", caller));
+			const std::vector<std::string> next = trace();
+			CHECK(std::vector<std::string>(next.begin() + 6, next.end()) == std::vector<std::string>{ "Early:ar:de:ar", "Caller:ar:de:ar", "Second:ar:de:ar", "Late:ar:de:ar" });
 		}
 	}
 

@@ -1,7 +1,8 @@
 --!strict
 -- Observes the suite settings of Tests/Data/Project/AllSettings.eproj through the runner (gate 8). Every case passes only
 -- when its setting reached the session: the Scene, the Parameters, the scripted Clock (fewer frames than ticks), case
--- Isolation, CaseTimeoutTicks and SuiteTickLimit (the long cases outlast both defaults) and ExpectQuit (the last case).
+-- Isolation, CaseTimeoutTicks and SuiteTickLimit (the long cases outlast both defaults), its Locale (M38: the suite's
+-- sessions start in it, not in the project's fr-CA) and ExpectQuit (the last case).
 local LongCases = 31
 local LongTicks = 1180
 
@@ -37,6 +38,10 @@ return Test.Suite("Main", function()
 			Test.WaitTicks(LongTicks)
 		end)
 	end
+
+	Test.Case("the suite starts in its entry's locale", function()
+		Test.ExpectEqual(Loc.GetLocale(), "de")
+	end)
 
 	Test.Case("the suite quits with its expected code", function()
 		Application.Quit(3)

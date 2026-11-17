@@ -99,7 +99,7 @@ A `UiLayout` places the elements whose parent element it is, in entity order, in
 
 A string table (`.stringtable`, `reference/FileFormats`) holds keyed strings in several locales; the first locale is the fallback. Create it with `asset_create {type: "StringTable", path: "Assets/Text/Menu.stringtable", values: {Locales: ["en", "fr"], Entries: [{Key: "Menu.Start", Values: {en: "Start", fr: "Commencer"}}]}}` and change it with `asset_set_properties`.
 - Scripts read it with `Loc.Get(table, key)` (`Loc.Has` tests a key), holding the table in a `Field.Asset("StringTable")` field or loading it by literal path (`Assets.Load("Assets/Text/Menu.stringtable")`, which a pruned export keeps).
-- The locale is the project's `Localization.Locale` (`fr`, `pt-BR`; empty reads every table's first locale): a table's locale equal to it, else its language's (`pt` for `pt-BR`), else the fallback; a key without a value in that locale reads the fallback's. It is fixed for the session: a language menu takes effect at the next session or export.
+- The locale is the session's: the project's `Localization.Locale` (`fr`, `pt-BR`; empty reads every table's first locale) unless the session started in another; a table's locale equal to it, else its language's (`pt` for `pt-BR`), else the fallback; a key without a value in that locale reads the fallback's. A language menu calls `Loc.SetLocale` and its texts redraw in `OnLocaleChanged` at once (`skills/luau-gameplay/languages`). Check each language's texts without editing the project: `play_start {locale: "de"}`, then `ui_tree {target: "Play"}` lists every text and its `overflows`.
 - A key the table lacks raises a located error naming the closest keys: test every key the game uses in a suite.
 
 ## Checking the UI

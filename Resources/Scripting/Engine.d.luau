@@ -413,6 +413,8 @@ declare extern type Behaviour with
 	OnHotReload: (self: ScriptInstance) -> ()
 	-- Called for the current fixed, presentation or late presentation phase. [All modes; Runtime|Test; mutates]
 	OnLateUpdate: (self: ScriptInstance, dt: number) -> ()
+	-- Called when Loc.SetLocale changes the session's locale, before that call returns: on every started, enabled behaviour that defines it, the caller's own included, in execution order, whether or not the world is paused (redraw texts here). Loc.SetLocale raises inside it. A new scene's behaviours after Scene.Load or Scene.Reload start in the locale without it. [All modes; Runtime|Test; mutates]
+	OnLocaleChanged: (self: ScriptInstance, locale: string, previous: string) -> ()
 	-- Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before that tick's OnFixedUpdate (or in the running start flush, when an OnStart, or an OnCreate run by a start flush or a scene's startup, creates it), never in the frame phase, so it reads the tick's input and fixed delta whatever the frame rate. Its physics bodies exist from then on. While no tick runs (time scale 0) an entity created meanwhile gets no OnStart, and so no OnUpdate, until the first tick after the scale returns. [All modes; Runtime|Test; mutates]
 	OnStart: (self: ScriptInstance) -> ()
 	-- Called when the corresponding collision or trigger transition occurs. [All modes; Runtime|Test; mutates]
@@ -1836,14 +1838,16 @@ declare Input: {
 	WasSignalled: (name: string) -> boolean,
 }
 
--- Localized strings from string tables (.stringtable assets) in the project's locale (Localization.Locale): a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's.
+-- Localized strings from string tables (.stringtable assets) in the session's locale: a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's. A session starts in the project's Localization.Locale (or play.start's locale, the Runtime's --locale, a suite's Locale, a replay's header), and Loc.SetLocale changes it for the rest of the session.
 declare Loc: {
 	-- Returns the string of key in the locale. A key the table lacks, an asset that is not a string table, or a table that fails to load raises a located error naming them (with the closest keys as a hint). [All modes; Runtime|Test; pure/read]
 	Get: (table: AssetRef, key: string) -> string,
-	-- Returns the project's locale (Localization.Locale) that lookups use; empty when it is unset, so every table reads its fallback locale. [All modes; Runtime|Test; pure/read]
+	-- Returns the session's locale that lookups use: the one it started in, or the last Loc.SetLocale's; empty reads every table's fallback locale. [All modes; Runtime|Test; pure/read]
 	GetLocale: () -> string,
 	-- Returns whether the string table has the key. An asset that is not a string table, or a table that fails to load, raises a located error naming it, as in Get. [All modes; Runtime|Test; pure/read]
 	Has: (table: AssetRef, key: string) -> boolean,
+	-- Sets the session's locale, which Get and GetLocale read from the next call and which lasts through Scene.Load and Scene.Reload: empty (every table's fallback) or a tag such as de, ar or pt-BR, else a located error. Before it returns, OnLocaleChanged(locale, previous) reaches every started behaviour that defines it, in execution order; the locale in force changes nothing, and a call inside OnLocaleChanged raises. A game restores its player's saved choice with it at startup. [All modes; Runtime|Test; mutates]
+	SetLocale: (locale: string) -> (),
 }
 
 -- Script-channel logging with authored source, line, entity and simulation tick; arguments use tostring and tab separators. An entry keeps at most 8192 bytes (longer text is truncated and marked), and one VM writes at most 1024 entries per frame, dropping and counting the rest.

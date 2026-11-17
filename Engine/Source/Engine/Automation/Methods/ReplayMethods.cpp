@@ -2,6 +2,7 @@
 #include "Engine/Automation/Methods/ReplayMethods.h"
 
 #include "Engine/Asset/ReplayData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
 #include "Engine/Automation/Methods/Private/PlayMethodSupport.h"
@@ -498,6 +499,16 @@ namespace Engine {
 				options.ScenePath = params.Scene;
 				options.Parameters = VariantValue(*parameters);
 				options.Seed = context.HasParam("seed") ? std::optional<uint64_t>(params.Seed) : std::nullopt;
+				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7).
+				if (context.HasParam("locale"))
+				{
+					if (!params.Locale.empty() && !IsLocaleTag(params.Locale))
+					{
+						return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/locale",
+							std::format("'{}' is not a locale: the empty locale or a tag of 1 to {} ASCII letters, digits and '-' starting with a letter, such as de or ar", params.Locale, MaxStringTableLocaleBytes), {}));
+					}
+					options.Locale = params.Locale;
+				}
 				ENGINE_TRY(context.StartRecordingSession(options, params.Restart));
 				ENGINE_TRY_ASSIGN(PlaySession * session, Utils::RequirePlaySession(context));
 				ENGINE_TRY_ASSIGN(const ReplayHeader header, context.DescribeReplayHeader());
@@ -509,7 +520,7 @@ namespace Engine {
 			}
 			if (params.Action != InputRecordAction::Stop)
 				return MakeError(ErrorCode::InvalidArgument, "unknown recording action");
-			for (const std::string_view field : std::array{ "restart", "scene", "parameters", "seed" })
+			for (const std::string_view field : std::array{ "restart", "scene", "parameters", "seed", "locale" })
 				if (context.HasParam(field))
 					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("/{}", field), "member is only valid for Start", {}));
 			if (!context.HasParam("path") || params.Path.empty())
@@ -599,7 +610,10 @@ namespace Engine {
 			.Field("parameters", &InputRecordParams::Parameters, "Start only: initial scene load parameters object.")
 			.Field("seed", &InputRecordParams::Seed, "Start only: initial seed; absent inherits session/project policy.")
 			.Field("path", &InputRecordParams::Path, "Stop only, required: confined replay destination (Runtime relative paths are below user://Replays).")
-			.Field("expect", &InputRecordParams::Expect, "Stop only: ordered expectations, compiled before consuming the recording.");
+			.Field("expect", &InputRecordParams::Expect, "Stop only: ordered expectations, compiled before consuming the recording.")
+			.Field("locale", &InputRecordParams::Locale,
+				"Start only: the locale the recording starts in, such as de or ar (\"\" the empty locale), which its header records and every replay "
+				"of it starts in; absent: the project's Localization.Locale in the editor, the launch locale (--locale) in the Runtime.");
 		registry.Struct<InputRecordResult>("InputRecordResult", "Recording state or saved replay.")
 			.Field("recording", &InputRecordResult::Recording, "Recording remains active.")
 			.Field("tick", &InputRecordResult::Tick, "Completed ticks.")
@@ -650,7 +664,7 @@ namespace Engine {
 		registry.Struct<InputReadReplayResult>("InputReadReplayResult", "A replay read back: its header, a page of its input events in play.step's input form, its expectations and checkpoints.")
 			.Field("path", &InputReadReplayResult::Path, "Canonical project-relative path.")
 			.Field("formatVersion", &InputReadReplayResult::FormatVersion, "The file's own format version, before migration.")
-			.Field("header", &InputReadReplayResult::Header, "The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion and Config.")
+			.Field("header", &InputReadReplayResult::Header, "The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion, Config and (version 5) Locale, the locale the recording started in (null for a replay migrated from version 1 to 4, which plays in the project's).")
 			.Field("finalTick", &InputReadReplayResult::FinalTick, "Completed ticks the replay runs.")
 			.Field("finalStateHash", &InputReadReplayResult::FinalStateHash, "The recorded state hash at finalTick.")
 			.Field("eventCount", &InputReadReplayResult::EventCount, "Every input event of the replay.")

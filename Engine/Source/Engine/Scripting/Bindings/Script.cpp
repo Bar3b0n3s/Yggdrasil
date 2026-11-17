@@ -639,6 +639,11 @@ namespace Engine {
 			behaviour.Callback("OnAnimationEvent", "(self: ScriptInstance, event: AnimationEvent) -> ()",
 				"Called in the fixed step for each event an Animator layer's time passes on this entity, after every Animator of the tick was posed, in "
 				"layer and firing order.");
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2), appended in landing order.
+			behaviour.Callback("OnLocaleChanged", "(self: ScriptInstance, locale: string, previous: string) -> ()",
+				"Called when Loc.SetLocale changes the session's locale, before that call returns: on every started, enabled behaviour that defines "
+				"it, the caller's own included, in execution order, whether or not the world is paused (redraw texts here). Loc.SetLocale raises "
+				"inside it. A new scene's behaviours after Scene.Load or Scene.Reload start in the locale without it.");
 			return {};
 		}
 

@@ -113,7 +113,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/MeshPath/MeshPath.test.luau",
@@ -127,7 +128,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Animation/Animation.test.luau",
@@ -141,7 +143,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/PostProcess/PostProcessV2.test.luau",
@@ -155,7 +158,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Physics/Physics.test.luau",
@@ -169,7 +173,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/PhysicsSemantics/PhysicsSemantics.test.luau",
@@ -183,7 +188,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Physics2D/Physics2D.test.luau",
@@ -197,7 +203,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Audio/Audio.test.luau",
@@ -211,7 +218,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Formats/Formats.test.luau",
@@ -225,7 +233,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Formats/SpriteSheets.test.luau",
@@ -239,7 +248,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Sprites2D/Sprites2D.test.luau",
@@ -253,7 +263,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Lights2D/Lights2D.test.luau",
@@ -267,7 +278,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Tilemaps/Tilemaps.test.luau",
@@ -281,7 +293,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Formats/OpusAndCompression.test.luau",
@@ -295,7 +308,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Formats/AssetFormats.test.luau",
@@ -309,7 +323,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Terrain/Terrain.test.luau",
@@ -323,7 +338,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Fog/Fog.test.luau",
@@ -337,7 +353,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Animator.test.luau",
@@ -351,7 +368,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Application.test.luau",
@@ -365,7 +383,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Assets.test.luau",
@@ -379,7 +398,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/AssetRef.test.luau",
@@ -393,7 +413,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Audio.test.luau",
@@ -407,7 +428,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/AudioListener.test.luau",
@@ -421,7 +443,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/AudioSource.test.luau",
@@ -435,7 +458,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/BoxCollider.test.luau",
@@ -449,7 +473,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/BoxCollider2D.test.luau",
@@ -463,7 +488,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Camera.test.luau",
@@ -477,7 +503,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/CapsuleCollider.test.luau",
@@ -491,7 +518,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/CharacterController.test.luau",
@@ -505,7 +533,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/CircleCollider2D.test.luau",
@@ -519,7 +548,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Color.test.luau",
@@ -533,7 +563,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Debug.test.luau",
@@ -547,7 +578,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/DirectionalLight.test.luau",
@@ -561,7 +593,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Entity.test.luau",
@@ -575,7 +608,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Environment.test.luau",
@@ -589,7 +623,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Field.test.luau",
@@ -603,7 +638,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Input.test.luau",
@@ -617,7 +653,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/IrradianceVolume.test.luau",
@@ -631,7 +668,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Light2D.test.luau",
@@ -645,7 +683,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Log.test.luau",
@@ -659,7 +698,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/MaterialParameters.test.luau",
@@ -673,7 +713,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Math.test.luau",
@@ -687,7 +728,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/MeshCollider.test.luau",
@@ -701,7 +743,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/MeshRenderer.test.luau",
@@ -715,7 +758,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/ParticleEmitter.test.luau",
@@ -729,7 +773,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/ParticleLook.test.luau",
@@ -743,7 +788,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Physics.test.luau",
@@ -757,7 +803,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Physics2D.test.luau",
@@ -771,7 +818,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/PixelPerfectCamera.test.luau",
@@ -785,7 +833,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/PointLight.test.luau",
@@ -799,7 +848,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/PolygonCollider2D.test.luau",
@@ -813,7 +863,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/PostProcess.test.luau",
@@ -827,7 +878,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Quat.test.luau",
@@ -841,7 +893,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Random.test.luau",
@@ -855,7 +908,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/RandomGenerator.test.luau",
@@ -869,7 +923,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/ReflectionProbe.test.luau",
@@ -883,7 +938,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/RigidBody.test.luau",
@@ -897,7 +953,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/RigidBody2D.test.luau",
@@ -911,7 +968,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Scene.test.luau",
@@ -925,7 +983,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Script.test.luau",
@@ -939,7 +998,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/SkinnedMesh.test.luau",
@@ -953,7 +1013,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/SphereCollider.test.luau",
@@ -967,7 +1028,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/SpotLight.test.luau",
@@ -981,7 +1043,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/SpriteAnimator.test.luau",
@@ -995,7 +1058,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/SpriteRenderer.test.luau",
@@ -1009,7 +1073,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Task.test.luau",
@@ -1023,7 +1088,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Terrain.test.luau",
@@ -1037,7 +1103,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Test.test.luau",
@@ -1051,7 +1118,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Text.test.luau",
@@ -1065,7 +1133,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/TilemapCollider.test.luau",
@@ -1079,7 +1148,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/TilemapRenderer.test.luau",
@@ -1093,7 +1163,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Time.test.luau",
@@ -1107,7 +1178,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Transform.test.luau",
@@ -1121,7 +1193,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/Ui.test.luau",
@@ -1135,7 +1208,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/UiWidgets.test.luau",
@@ -1149,7 +1223,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/UiTextInput.test.luau",
@@ -1163,7 +1238,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/UiWorld.test.luau",
@@ -1177,7 +1253,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Api/EditorOnly.test.luau",
@@ -1191,7 +1268,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor"]
+				"Modes": ["Editor"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Callbacks/Callbacks.test.luau",
@@ -1205,7 +1283,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Callbacks/HotReload.test.luau",
@@ -1219,7 +1298,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor"]
+				"Modes": ["Editor"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Prefabs/Prefabs.test.luau",
@@ -1233,7 +1313,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/NestedPrefabs/NestedPrefabs.test.luau",
@@ -1247,7 +1328,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/MultiScene/First.test.luau",
@@ -1261,7 +1343,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/MultiScene/Second.test.luau",
@@ -1275,7 +1358,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/MultiScript/MultiScript.test.luau",
@@ -1289,7 +1373,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Localization/Localization.test.luau",
@@ -1303,7 +1388,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/UiWidgets/UiWidgets.test.luau",
@@ -1317,7 +1403,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/UiTextInput/UiTextInput.test.luau",
@@ -1331,7 +1418,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/UiWorld/UiWorld.test.luau",
@@ -1345,7 +1433,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/UiFallback/UiFallback.test.luau",
@@ -1359,7 +1448,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Record/TextInput.test.luau",
@@ -1373,7 +1463,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor"]
+				"Modes": ["Editor"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Record/UiWorld.test.luau",
@@ -1387,7 +1478,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor"]
+				"Modes": ["Editor"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/SceneLoad/SceneLoad.test.luau",
@@ -1405,7 +1497,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Input/Input.test.luau",
@@ -1419,7 +1512,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Timing/Timing.test.luau",
@@ -1435,7 +1529,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Errors/Errors.test.luau",
@@ -1449,7 +1544,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/QuitApp/QuitApp.test.luau",
@@ -1463,7 +1559,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": 3,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Record/Sprites2D.test.luau",
@@ -1477,7 +1574,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor"]
+				"Modes": ["Editor"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Record/Physics2D.test.luau",
@@ -1491,7 +1589,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor"]
+				"Modes": ["Editor"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Graphs/Graphs.test.luau",
@@ -1505,7 +1604,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/WorldPause/WorldPause.test.luau",
@@ -1519,7 +1619,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/CharacterDebris/CharacterDebris.test.luau",
@@ -1533,7 +1634,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/InputAim/InputAim.test.luau",
@@ -1547,7 +1649,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/GameServices/GameServices.test.luau",
@@ -1561,7 +1664,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/SaveData/SaveData.test.luau",
@@ -1575,7 +1679,8 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
 			},
 			{
 				"Script": "Assets/Tests/Navigation/Navigation.test.luau",
@@ -1589,7 +1694,42 @@
 					"PauseOnError": "Inherit"
 				},
 				"ExpectQuit": -1,
-				"Modes": ["Editor", "Release", "Dist"]
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": ""
+			},
+			{
+				"Script": "Assets/Tests/SessionLocale/SessionLocale.test.luau",
+				"Scene": "Assets/Scenes/SessionLocale.scene",
+				"Parameters": {
+					"Locale": "de"
+				},
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": "de"
+			},
+			{
+				"Script": "Assets/Tests/SessionLocale/SessionLocale.test.luau",
+				"Scene": "Assets/Scenes/SessionLocale.scene",
+				"Parameters": {
+					"Locale": "ar"
+				},
+				"Isolation": "Suite",
+				"Clock": [],
+				"Overrides": {
+					"CallbackBudgetMs": 0,
+					"MemoryLimitMB": 0,
+					"PauseOnError": "Inherit"
+				},
+				"ExpectQuit": -1,
+				"Modes": ["Editor", "Release", "Dist"],
+				"Locale": "ar"
 			}
 		],
 		"Replays": ["Assets/Tests/Replays/*.replay"],

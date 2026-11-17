@@ -3,8 +3,11 @@
 
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/DocumentData.h"
+#include "Engine/Asset/IScriptDiagnosticsProvider.h"
 #include "Engine/Asset/PakFormat.h"
+#include "Engine/Asset/ScriptData.h"
 #include "Engine/Asset/TypedAssetHandle.h"
+#include "Engine/AssetPipeline/Importers/ScriptImporter.h"
 #include "Engine/AssetPipeline/PakWriter.h"
 #include "Engine/Automation/Protocol/JsonRpc.h"
 #include "Engine/Core/BuildId.h"
@@ -19,11 +22,14 @@
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scripting/LoadTimeVm.h"
 #include "Support/SceneTestFixture.h"
 
 #include <nlohmann/json.hpp>
 
 #include <glm/gtc/quaternion.hpp>
+
+#include <span>
 
 namespace Engine {
 
@@ -93,12 +99,31 @@ namespace Engine {
 				return writer.WriteToFile(path);
 			}
 
-			Status WriteGamePak(const std::filesystem::path& path, const ProjectSettings& project, const TypeRegistry& registry)
+			// A test game's scripts require nothing: every module read fails.
+			class NoModules final : public IScriptModuleReader
+			{
+			public:
+				[[nodiscard]] Result<std::string> ReadModule(const VfsPath& path) override
+				{
+					return MakeError(ErrorCode::NotFound, "a test game's scripts require no module ('{}')", path.GetPath());
+				}
+			};
+
+			Status WriteGamePak(const std::filesystem::path& path, const ProjectSettings& project, const TypeRegistry& registry,
+				std::span<const TestGameSpecification::Script> scripts)
 			{
 				ENGINE_TRY_ASSIGN(const Json scene, MakeStartScene());
 				ENGINE_TRY_ASSIGN(Buffer cooked, CookDocument(AssetType::Scene, scene, 1));
 				PakWriter writer;
 				ENGINE_TRY(writer.Add(PakWriterEntry{ .Handle = TestGameStartScene, .Type = "Scene", .Path = std::string(StartScenePath), .Data = std::move(cooked) }));
+				for (const TestGameSpecification::Script& script : scripts)
+				{
+					ENGINE_TRY_ASSIGN(const VfsPath modulePath, VfsPath::Create("project", script.Path));
+					NoModules modules;
+					ENGINE_TRY_ASSIGN(const Ref<const ScriptData> extracted, LoadTimeVm::Extract({ .Path = modulePath, .Source = script.Source, .Modules = &modules }));
+					ENGINE_TRY_ASSIGN(Buffer cookedScript, CookScript(*extracted, ScriptImporter::Version));
+					ENGINE_TRY(writer.Add(PakWriterEntry{ .Handle = script.Handle, .Type = "Script", .Path = script.Path, .Data = std::move(cookedScript) }));
+				}
 				ENGINE_TRY_ASSIGN(Json settings, ProjectSerializer::ToJson(project, registry));
 				Json metadata = Json::object();
 				metadata["Project"] = std::move(settings);
@@ -126,11 +151,13 @@ namespace Engine {
 				suite.Script = script;
 				project.Testing.Suites.push_back(std::move(suite));
 			}
+			project.Testing.Suites.insert(project.Testing.Suites.end(), specification.TestSuites.begin(), specification.TestSuites.end());
+			project.Localization.Locale = specification.Locale;
 
 			const std::filesystem::path data = directory / "Data";
 			ENGINE_TRY(FileSystem::CreateDirectories(data));
 			ENGINE_TRY(WriteEnginePak(data / "Engine.pak", specification.Shaders));
-			ENGINE_TRY(WriteGamePak(data / "Game.pak", project, *registry));
+			ENGINE_TRY(WriteGamePak(data / "Game.pak", project, *registry, specification.Scripts));
 
 			GameManifest manifest;
 			manifest.Name = specification.Name;

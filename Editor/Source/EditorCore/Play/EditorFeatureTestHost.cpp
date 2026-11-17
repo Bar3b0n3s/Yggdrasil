@@ -156,6 +156,10 @@ namespace Engine {
 		options.ScenePath = suite.Scene;
 		options.Parameters = suite.Parameters;
 		options.Lockstep = suite.Clock.empty();
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the suite's locale, which the runner fills with its effective
+		// one (the entry's, else the run's); empty: the project's.
+		if (!suite.Locale.empty())
+			options.Locale = suite.Locale;
 		ResetTestCursor();
 		ENGINE_TRY_ASSIGN(auto prepared, m_Editor.GetPlay().PrepareSession(options, std::move(project), suite.Scene.empty(), &hook, &testHost, true, !m_Acquired, &m_Api));
 		m_Headers[prepared.Session->GetSerial()] = std::move(prepared.Header);
@@ -178,6 +182,9 @@ namespace Engine {
 		options.Lockstep = true;
 		ProjectSettings project = m_Project;
 		project.Simulation.FixedHz = header.FixedHz;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5): the header's start locale, or the project's for a header
+		// without one.
+		options.Locale = header.Locale.value_or(project.Localization.Locale);
 		ResetTestCursor();
 		ENGINE_TRY_ASSIGN(auto prepared, m_Editor.GetPlay().PrepareSession(options, std::move(project), false, nullptr, nullptr, true, !m_Acquired, &m_Api));
 		m_Headers[prepared.Session->GetSerial()] = std::move(prepared.Header);

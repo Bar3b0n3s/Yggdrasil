@@ -172,7 +172,10 @@ namespace Engine {
 	// runs in (empty: an empty scene); Parameters the Scene.Load parameters (free-form JSON object, a resolver-less Variant,
 	// ADR 0006 decision 11); Isolation per suite or per case; Clock a list of frame deltas selecting ScriptedClock (empty:
 	// lockstep ManualClock); ExpectQuit the exit code the suite must end with through Application.Quit (-1: it must not
-	// quit); Modes the run modes the suite runs in (unique, non-empty).
+	// quit); Modes the run modes the suite runs in (unique, non-empty). M38 (Docs/Decisions/0055-m38-runtime-locale.md
+	// decision 6): Locale, the locale its sessions start in (empty or a tag, located at /Testing/Suites/<i>/Locale): empty
+	// takes the run's (FeatureTestRunOptions::Locale), else the project's Localization.Locale; a suite that names one is
+	// reported as "<Name> (<Locale>)", so one script listed once per locale gives distinct rows.
 	struct TestSuiteSettings
 	{
 		// Registry enum "TestIsolation".
@@ -198,6 +201,7 @@ namespace Engine {
 		TestSuiteOverrides Overrides;
 		int32_t ExpectQuit = -1;
 		std::vector<Mode> Modes = { Mode::Editor, Mode::Release, Mode::Dist };
+		std::string Locale;
 	};
 
 	// Registry struct "TestingSettings" (§6.1 "Testing", §11.10). Replays are project-relative globs of .replay files;
@@ -236,9 +240,12 @@ namespace Engine {
 	};
 
 	// Registry struct "LocalizationSettings" (§6.1 "Localization", §11.5; M22, Docs/Decisions/0033-m22-contract.md decision 11).
-	// Locale is the locale Loc.Get reads string tables in, fixed for each script VM's life (a play session's and an edit
-	// evaluation's): empty, or a locale tag of a string table's form (1 to 35 ASCII letters, digits and '-', starting with a
-	// letter: Asset/StringTableData.h, which Project cannot include). Empty reads every table in its fallback locale.
+	// Locale is the locale a play session starts in, which Loc.Get reads string tables in, and the edit evaluation's VM's:
+	// empty, or a locale tag of a string table's form (1 to 35 ASCII letters, digits and '-', starting with a letter:
+	// Asset/StringTableData.h's IsLocaleTag, which Project cannot include). Empty reads every table in its fallback locale.
+	// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 1 and 3): it is the default only: play.start's locale, the
+	// Runtime's --locale, a suite's Locale and a replay header's start a session in another, and Loc.SetLocale changes a
+	// running session's.
 	struct LocalizationSettings
 	{
 		std::string Locale;

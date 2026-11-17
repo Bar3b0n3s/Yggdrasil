@@ -187,28 +187,39 @@ namespace Engine {
 			});
 		}
 
+		// A locale member (Localization.Locale; a suite's Locale, M38) that is neither empty nor a tag, reported at `key`.
+		static void ValidateLocaleMember(std::string_view key, const std::string& locale, ValidationContext& context)
+		{
+			if (!locale.empty() && !IsLocaleTag(locale))
+			{
+				context.Error(std::string(key),
+					std::format("must be empty or a locale tag of 1 to {} ASCII letters, digits and '-' starting with a letter, such as fr or pt-BR (got '{}')",
+						MaxLocaleBytes, locale));
+			}
+		}
+
 		static void ValidateLocalization(const LocalizationSettings& localization, ValidationContext& context)
 		{
-			if (!localization.Locale.empty() && !IsLocaleTag(localization.Locale))
-			{
-				context.Error("Locale",
-					std::format("must be empty or a locale tag of 1 to {} ASCII letters, digits and '-' starting with a letter, such as fr or pt-BR (got '{}')",
-						MaxLocaleBytes, localization.Locale));
-			}
+			ValidateLocaleMember("Locale", localization.Locale, context);
 		}
 
 		// Random text becomes a tag: its letters, digits and '-' only, starting with a letter, cut to MaxLocaleBytes bytes; an
 		// empty result stays empty (no locale).
-		static void GenerateLocalization(LocalizationSettings& localization, Random& /*random*/)
+		static std::string MakeLocaleTag(std::string_view text)
 		{
 			std::string tag;
-			for (const char character : localization.Locale)
+			for (const char character : text)
 			{
 				if ((tag.empty() && IsAsciiLetter(character)) || (!tag.empty() && (IsAsciiLetter(character) || (character >= '0' && character <= '9') || character == '-')))
 					tag += character;
 			}
 			tag.resize(std::min(tag.size(), MaxLocaleBytes));
-			localization.Locale = std::move(tag);
+			return tag;
+		}
+
+		static void GenerateLocalization(LocalizationSettings& localization, Random& /*random*/)
+		{
+			localization.Locale = MakeLocaleTag(localization.Locale);
 		}
 
 		// The most control names one Ui command lists (§6.1 Ui; Docs/Decisions/0033-m22-contract.md decision 30).
@@ -306,6 +317,8 @@ namespace Engine {
 					context.Error(std::to_string(index), "the run mode is listed twice");
 			}
 			context.PopKey();
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): empty (the run's locale, else the project's) or a tag.
+			ValidateLocaleMember("Locale", suite.Locale, context);
 		}
 
 		// SortingLayers.Layers (M21, Docs/Decisions/0032-m21-contract.md decision 4): PhysicsSettings.Layers' rules, with
@@ -372,6 +385,7 @@ namespace Engine {
 			if (modes.empty())
 				modes.push_back(static_cast<TestSuiteSettings::Mode>(random.RangeInt(0, 2)));
 			suite.Modes = std::move(modes);
+			suite.Locale = MakeLocaleTag(suite.Locale);
 		}
 
 	}
@@ -528,6 +542,10 @@ namespace Engine {
 			.Field("ExpectQuit", &TestSuiteSettings::ExpectQuit, "Exit code the suite must end with through Application.Quit; -1: it must not quit.",
 				{ .Min = -1.0 })
 			.Field("Modes", &TestSuiteSettings::Modes, "Run modes the suite runs in, unique and non-empty.")
+			.Field("Locale", &TestSuiteSettings::Locale,
+				"The locale the suite's sessions start in, such as de or ar; empty: the run's locale (test.run's locale, the Runtime's --locale), "
+				"else Localization.Locale. A suite that names one is reported as \"<Name> (<Locale>)\", so one script listed once per locale "
+				"gives distinct rows.")
 			.Validate(&Utils::ValidateSuite)
 			.Generate(&Utils::GenerateSuite);
 
@@ -555,8 +573,9 @@ namespace Engine {
 
 		registry.Struct<LocalizationSettings>("LocalizationSettings", "The project's localization (§6.1 Localization).")
 			.Field("Locale", &LocalizationSettings::Locale,
-				"The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; "
-				"empty reads every table's first.")
+				"The locale play sessions start in, such as fr or pt-BR, which Loc.Get reads string tables in (a table's locale equal to it, else "
+				"its language's, else the table's first; empty reads every table's first) until a script calls Loc.SetLocale; play.start's "
+				"locale, the Runtime's --locale, a suite's Locale and a replay's header start a session in another.")
 			.Validate(&Utils::ValidateLocalization)
 			.Generate(&Utils::GenerateLocalization);
 

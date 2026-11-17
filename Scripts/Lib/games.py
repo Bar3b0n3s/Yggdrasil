@@ -149,6 +149,9 @@ class SuiteEntry:
     script: str  # project-relative "Assets/Tests/....test.luau"
     scene: str  # project-relative scene, "" for a suite without one
     modes: tuple[str, ...]  # of TEST_MODES, in the .eproj's order; DEFAULT_SUITE_MODES when the member is absent
+    # M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the entry's Locale, "" when it names none (the run's
+    # or the project's locale; the games suite gives no run locale).
+    locale: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -157,6 +160,12 @@ class TestingSettings:
 
     suites: tuple[SuiteEntry, ...]
     replays: tuple[str, ...]  # the Testing.Replays globs as written, "project://" prefixes included
+    # M38: Localization.Locale, the locale of every suite whose entry names none ("" when absent).
+    locale: str = ""
+
+    def effective_locale(self, entry: SuiteEntry) -> str:
+        """The locale `entry`'s sessions start in when the run names none: its own, else the project's."""
+        return entry.locale or self.locale
 
 
 def discover_projects(root: Path, files: str = "disk") -> list[GameProject]:
@@ -256,9 +265,9 @@ def _read_project(project_file: Path) -> tuple[str, dict[str, Any]]:
 
 
 def read_testing(project_file: Path) -> TestingSettings:
-    """The Testing settings of the .eproj `project_file`: each Testing.Suites entry's Script, Scene and Modes (absent
-    Modes are DEFAULT_SUITE_MODES) and Testing.Replays, absent members read as empty. Raises ValueError naming the file
-    for a document that is not a .eproj JSON object, or a member of the wrong type."""
+    """The Testing settings of the .eproj `project_file`: each Testing.Suites entry's Script, Scene, Modes (absent
+    Modes are DEFAULT_SUITE_MODES) and Locale, Testing.Replays and Localization.Locale, absent members read as empty.
+    Raises ValueError naming the file for a document that is not a .eproj JSON object, or a member of the wrong type."""
     name, document = _read_project(project_file)
     testing = document.get("Testing", {})
     if not isinstance(testing, dict):
@@ -286,11 +295,20 @@ def read_testing(project_file: Path) -> TestingSettings:
         if unknown:
             raise ValueError(f"{where}.Modes names the unknown run mode '{unknown[0]}' (expected "
                              f"{', '.join(TEST_MODES)})")
-        suites.append(SuiteEntry(script, scene, tuple(modes)))
+        locale = entry.get("Locale", "")
+        if not isinstance(locale, str):
+            raise ValueError(f"{where}.Locale must be a string")
+        suites.append(SuiteEntry(script, scene, tuple(modes), locale))
     replays = testing.get("Replays", [])
     if not isinstance(replays, list) or not all(isinstance(replay, str) for replay in replays):
         raise ValueError(f"{name}: Testing.Replays must be an array of strings")
-    return TestingSettings(tuple(suites), tuple(replays))
+    localization = document.get("Localization", {})
+    if not isinstance(localization, dict):
+        raise ValueError(f"{name}: Localization must be an object")
+    project_locale = localization.get("Locale", "")
+    if not isinstance(project_locale, str):
+        raise ValueError(f"{name}: Localization.Locale must be a string")
+    return TestingSettings(tuple(suites), tuple(replays), project_locale)
 
 
 def check_build_settings(project_file: Path) -> list[str]:
@@ -670,22 +688,26 @@ def evaluate_run(document: dict[str, Any], mode: str, testing: TestingSettings, 
     if not testing.suites:
         failures.append(f"Testing.Suites is empty: every game has at least one test suite ({DEMO_ACCEPTANCE})")
     replay_rows: dict[str, dict[str, Any]] = {}
-    suite_rows: dict[str, dict[str, Any]] = {}
+    # M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): a script listed once per locale has one row per entry,
+    # told apart by the locale its session started in.
+    suite_rows: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
         name = row.get("suite")
         if isinstance(name, str) and name.startswith(REPLAY_SUITE_PREFIX):
             replay_rows[name[len(REPLAY_SUITE_PREFIX):]] = row
         elif isinstance(row.get("script"), str):
-            suite_rows[row["script"]] = row
+            locale = row.get("locale", "")
+            suite_rows[(row["script"], locale if isinstance(locale, str) else "")] = row
     for entry in testing.suites:
         if mode not in entry.modes:
             continue
-        row = suite_rows.get(entry.script)
+        locale = testing.effective_locale(entry)
+        label = f"{entry.script} ({entry.locale})" if entry.locale else entry.script
+        row = suite_rows.get((entry.script, locale))
         if row is None:
-            failures.append(f"{entry.script}: the {mode} run has no suite row for it, although its Modes include "
-                            f"{mode}")
+            failures.append(f"{label}: the {mode} run has no suite row for it, although its Modes include {mode}")
         elif row.get("passed") is not True:
-            failures.append(f"{entry.script}: the suite failed in the {mode} run")
+            failures.append(f"{label}: the suite failed in the {mode} run")
     for replay in sorted(committed):
         row = replay_rows.get(replay)
         if row is None:

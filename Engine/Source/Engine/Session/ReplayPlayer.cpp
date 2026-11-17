@@ -20,10 +20,12 @@ namespace Engine {
 
 		// M17 friction F03 (ReplayPlayer.h): the hint contains the causes word for word.
 		constexpr std::string_view ReplayDivergenceCauses = "a serialized component of the scene (the look's included), a script, the game's native module, "
-															"an asset or the engine changed since it was recorded, or the play is not deterministic";
+															"an asset or the engine changed since it was recorded, or the play is not deterministic (a locale change "
+															"the playback did not repeat among its causes)";
 		constexpr std::string_view ReplayDivergenceHint = "the world differs from the recording: a serialized component of the scene (the look's "
 														  "included), a script, the game's native module, an asset or the engine changed since it was "
-														  "recorded, or the play is not deterministic; re-record it with test.run {record} (the "
+														  "recorded, or the play is not deterministic (a locale change the playback did not repeat "
+														  "among its causes); re-record it with test.run {record} (the "
 														  "game-building skill's page skills/game-building/replays, \"Re-recording replays\")";
 		static_assert(ReplayDivergenceHint.find(ReplayDivergenceCauses) != std::string_view::npos);
 		// What a checkpoint that differs means in a playback WithoutInput, the input check: the expected outcome of a replay
@@ -242,6 +244,15 @@ namespace Engine {
 		const auto& header = replay->Header;
 		if (header.Seed != session.GetSeed() || header.FixedHz != session.GetProjectSettings().Simulation.FixedHz || (header.Parameters.IsNull() ? Json::object() : header.Parameters.Get()) != session.GetLoadParameters())
 			return MakeError(ErrorCode::InvalidArgument, "replay header does not match session parameters, seed or fixed rate");
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 4): the start locale is an input, like the seed, so a session
+		// started in another locale than a header that names one is refused, naming both, before a tick runs.
+		if (header.Locale.has_value() && *header.Locale != session.GetStartLocale())
+		{
+			return std::unexpected(Error(ErrorCode::InvalidArgument,
+				std::format("the replay was recorded in the locale '{}', but the session started in '{}'", *header.Locale, session.GetStartLocale()))
+					.WithHint("start the playback in the header's locale (every engine verification path does); a session's locale comes from "
+							  "play.start's locale, the Runtime's --locale, a suite's Locale or the project's Localization.Locale"));
+		}
 		std::vector<StampedPlayInputEvent> events;
 		for (size_t i = 0; i < replay->Events.size(); ++i)
 		{

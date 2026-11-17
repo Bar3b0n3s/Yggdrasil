@@ -240,6 +240,9 @@ return Script.Define("Driver",Driver))");
 					spec.Project.Scripting.MemoryLimitMB = suite.Overrides.MemoryLimitMB;
 				if (suite.Overrides.PauseOnError != TestSuiteOverrides::PauseOnErrorOverride::Inherit)
 					spec.Project.Scripting.PauseOnError = suite.Overrides.PauseOnError == TestSuiteOverrides::PauseOnErrorOverride::Pause;
+				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the suite's effective locale, as the hosts apply it.
+				if (!suite.Locale.empty())
+					spec.Project.Localization.Locale = suite.Locale;
 				Created.push_back(spec);
 				return PlaySession::Create(spec, SceneDocument);
 			}
@@ -254,6 +257,7 @@ return Script.Define("Driver",Driver))");
 				spec.Serial = Serial++;
 				spec.Seed = header.Seed;
 				spec.Project.Simulation.FixedHz = header.FixedHz;
+				spec.Project.Localization.Locale = header.Locale.value_or(Settings.Localization.Locale);
 				spec.Parameters = header.Parameters;
 				spec.Audio = Audio.get();
 				spec.OwnsAudioTime = OwnAudioTime;
@@ -422,6 +426,68 @@ return Script.Define("Driver",Driver))");
 	TEST_SUITE("Testing")
 	{
 		// ADR 0022 decision 3: Testing.CoverageGates opts a project in; only an unfiltered, non-recording run evaluates.
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6; Roadmap M38's acceptance): one script listed once per locale.
+		// Each entry's sessions start in its Locale, an entry without one in the run's locale (else the project's), and an
+		// entry that names a locale reports "<Name> (<Locale>)" in every row, so the rows stay distinct and the filter selects
+		// one locale's run. A run's locale must be a tag.
+		TEST_CASE("FeatureTestRunner: a suite whose entry names a locale starts in it and is reported as its name and locale")
+		{
+			RunnerHost host;
+			host.Settings.Localization.Locale = "fr";
+			TestSuiteSettings& german = host.Suite(R"(return Test.Suite("Strings",function()
+				Test.Case("reads its locale",function() Test.ExpectEqual(Loc.GetLocale(), Scene.GetLoadParameters().Expected) end)
+			end))");
+			german.Locale = "de";
+			german.Parameters = VariantValue(Json{ { "Expected", "de" } });
+			TestSuiteSettings arabic = german;
+			arabic.Locale = "ar";
+			arabic.Parameters = VariantValue(Json{ { "Expected", "ar" } });
+			TestSuiteSettings inherited = german;
+			inherited.Locale.clear();
+			inherited.Parameters = VariantValue(Json{ { "Expected", "ja" } });
+			host.Settings.Testing.Suites.push_back(arabic);
+			host.Settings.Testing.Suites.push_back(inherited);
+
+			FeatureTestRunOptions options;
+			options.Locale = "ja";
+			const TestRunResult result = host.Run(options);
+			CHECK(result.Passed);
+			REQUIRE(result.Suites.size() == 3);
+			CHECK(result.Suites[0].Suite == "Strings (de)");
+			CHECK(result.Suites[0].Locale == "de");
+			CHECK(result.Suites[1].Suite == "Strings (ar)");
+			CHECK(result.Suites[1].Locale == "ar");
+			CHECK(result.Suites[2].Suite == "Strings");
+			CHECK(result.Suites[2].Locale == "ja");
+			REQUIRE(result.Cases.size() == 3);
+			CHECK(result.Cases[0].Suite == "Strings (de)");
+			CHECK(result.Cases[1].Suite == "Strings (ar)");
+			CHECK(result.Cases[2].Suite == "Strings");
+			for (const TestCaseResult& row : result.Cases)
+				CHECK(row.Status == "passed");
+
+			// The filter selects one locale's run; without a run locale the inherited entry starts in the project's.
+			FeatureTestRunOptions arabicOnly;
+			arabicOnly.Filter = "Strings (ar)/";
+			const TestRunResult filtered = host.Run(arabicOnly);
+			REQUIRE(filtered.Suites.size() == 1);
+			CHECK(filtered.Suites[0].Suite == "Strings (ar)");
+			CHECK(filtered.Passed);
+			host.Settings.Testing.Suites.back().Parameters = VariantValue(Json{ { "Expected", "fr" } });
+			const TestRunResult projects = host.Run();
+			REQUIRE(projects.Suites.size() == 3);
+			CHECK(projects.Suites[2].Locale == "fr");
+			CHECK(projects.Passed);
+
+			// A run's locale is a tag.
+			FeatureTestRunner runner;
+			FeatureTestRunOptions malformed;
+			malformed.Locale = "de_DE";
+			const Status begun = runner.Begin(host, malformed);
+			REQUIRE_FALSE(begun.has_value());
+			CHECK(begun.error().GetCode() == ErrorCode::InvalidArgument);
+		}
+
 		TEST_CASE("TestRunner: a coverage project evaluates every per-mode gate and a gap fails the run")
 		{
 			RunnerHost host;

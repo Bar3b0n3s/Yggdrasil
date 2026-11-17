@@ -15,6 +15,7 @@
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/RuntimeAssetManager.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/BuildId.h"
 #include "Engine/Core/EventLog.h"
@@ -98,10 +99,12 @@ namespace Engine {
 #endif
 		constexpr std::string_view FeatureTestOption = "--feature-test";
 		constexpr std::string_view FilterOption = "--filter";
+		constexpr std::string_view LocaleOption = "--locale";
 
 		constexpr std::array RuntimeCommandLineOptions = {
 			CommandLineOption{ .Name = FeatureTestOption, .Value = CommandLineValue::None, .Description = "Run the exported testing suites and cooked replays, then exit." },
 			CommandLineOption{ .Name = FilterOption, .Value = CommandLineValue::Required, .ValueName = "substring", .Description = "Select feature test suite/case names and replay paths." },
+			CommandLineOption{ .Name = LocaleOption, .Value = CommandLineValue::Required, .ValueName = "tag", .Description = "Start the game, its recordings and the feature test suites that name no locale in this locale (such as de or ar) instead of the project's." },
 #if !defined(ENGINE_DIST)
 			CommandLineOption{ .Name = ManifestOption, .Value = CommandLineValue::Required, .ValueName = "path", .Description = "Run the game of this Game.json instead of the one next to the executable." },
 			CommandLineOption{ .Name = ScreenshotAtOption, .Value = CommandLineValue::Required, .ValueName = "T:path", .Description = "Write the game view as a PNG after the frame in which tick T is reached." },
@@ -559,6 +562,13 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(const uint32_t sceneSeed, JsonReader(*document).ReadMember<uint32_t>("Seed"));
 		if (options.PauseOnError)
 			project.Scripting.PauseOnError = *options.PauseOnError;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 3): the start locale, as a replay's FixedHz; absent: the project's.
+		if (options.Locale.has_value())
+		{
+			if (!options.Locale->empty() && !IsLocaleTag(*options.Locale))
+				return MakeError(ErrorCode::InvalidArgument, "the start locale must be empty or a locale tag (got '{}')", *options.Locale);
+			project.Localization.Locale = *options.Locale;
+		}
 		PlaySessionSpecification spec;
 		spec.Registry = &App.GetContext().GetTypeRegistry();
 		spec.Assets = App.m_Assets.get();
@@ -611,6 +621,8 @@ namespace Engine {
 		header.Scene = { scene, scene.IsValid() ? App.m_Assets->GetReferencePath(scene) : "" };
 		header.Parameters.Set(session->GetLoadParameters());
 		header.SaveData.Set(session->GetSaveData().ToJson());
+		// M38 (decision 5): the locale the session starts in, which every replay of a recording starts in.
+		header.Locale = std::string(session->GetStartLocale());
 		header.Seed = spec.Seed;
 		header.FixedHz = spec.Project.Simulation.FixedHz;
 		// The running engine's version (ADR 0038, friction F10), never the build id, so a commit rewrites no replay
@@ -642,6 +654,10 @@ namespace Engine {
 		PlayStartOptions options;
 		options.Parameters = suite.Parameters;
 		options.Lockstep = suite.Clock.empty();
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the suite's effective locale (the runner fills it); empty:
+		// the project's.
+		if (!suite.Locale.empty())
+			options.Locale = suite.Locale;
 		ResetTestCursor();
 		return PrepareSession(scene, std::move(project), options, true, &hook, &testHost);
 	}
@@ -657,6 +673,9 @@ namespace Engine {
 		options.Parameters = header.Parameters;
 		options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 		options.Lockstep = true;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5): the header's start locale, or the project's for a header
+		// without one; never --locale.
+		options.Locale = header.Locale.value_or(project.Localization.Locale);
 		ResetTestCursor();
 		return PrepareSession(header.Scene.Handle, std::move(project), options, true);
 	}
@@ -795,6 +814,16 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidArgument, "--filter requires --feature-test");
 			options.Filter = *filter;
 		}
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 8): outside the non-Dist block, so Dist parses it as Release does.
+		if (const std::optional<std::string_view> locale = commandLine.GetValue(Utils::LocaleOption))
+		{
+			if (!IsLocaleTag(*locale))
+			{
+				return MakeError(ErrorCode::InvalidArgument, "option '{}' takes a locale tag of 1 to {} ASCII letters, digits and '-' starting with a letter, such as de or pt-BR; got '{}'",
+					Utils::LocaleOption, MaxStringTableLocaleBytes, *locale);
+			}
+			options.Locale = std::string(*locale);
+		}
 #if !defined(ENGINE_DIST)
 		if (auto replay = commandLine.GetValue(Utils::ReplayOption))
 		{
@@ -848,8 +877,8 @@ namespace Engine {
 #endif
 		if (options.FeatureTest && (!options.Replay.empty() || options.Automation || options.Screenshot))
 			return MakeError(ErrorCode::InvalidArgument, "--feature-test owns the run and cannot be combined with --replay, --automation or --screenshot-at");
-		if (!options.Replay.empty() && (options.Automation || options.Screenshot))
-			return MakeError(ErrorCode::InvalidArgument, "--replay owns the run and cannot be combined with --automation or --screenshot-at");
+		if (!options.Replay.empty() && (options.Automation || options.Screenshot || !options.Locale.empty()))
+			return MakeError(ErrorCode::InvalidArgument, "--replay owns the run and cannot be combined with --automation, --screenshot-at or --locale (a replay starts in its header's locale)");
 		return options;
 	}
 
@@ -957,10 +986,13 @@ namespace Engine {
 		{
 			PlayStartOptions start;
 			start.Paused = state.Options.StartPaused;
+			// M38 (decision 8): --locale starts the game in its locale.
+			if (!state.Options.Locale.empty())
+				start.Locale = state.Options.Locale;
 			ENGINE_TRY_ASSIGN(state.Session, state.PrepareSession(manifest.StartScene, state.Project, start));
 			state.BeginSessionTiming();
-			ENGINE_INFO("Runtime: '{}' started with scene '{}' ({} entities, seed {}){}", manifest.Name, m_Assets->GetReferencePath(manifest.StartScene),
-				state.Session->GetScene().GetEntityCount(), state.Session->GetSeed(), state.Options.StartPaused ? ", paused at tick 0" : "");
+			ENGINE_INFO("Runtime: '{}' started with scene '{}' ({} entities, seed {}, locale '{}'){}", manifest.Name, m_Assets->GetReferencePath(manifest.StartScene),
+				state.Session->GetScene().GetEntityCount(), state.Session->GetSeed(), state.Session->GetLocale(), state.Options.StartPaused ? ", paused at tick 0" : "");
 		}
 
 		if (context.GetGraphicsDevice() != nullptr)
@@ -971,7 +1003,7 @@ namespace Engine {
 			{
 				// The script API baseline immediately before Begin, whose suite collection counts (ADR 0022 decision 4).
 				ENGINE_TRY_ASSIGN(state.CoverageStart, context.GetScriptApiRegistry().GetCoverage(RuntimeScriptMode));
-				return state.Runner.Begin(state, { .Mode = RuntimeTestMode, .Filter = state.Options.Filter });
+				return state.Runner.Begin(state, { .Mode = RuntimeTestMode, .Filter = state.Options.Filter, .Locale = state.Options.Locale });
 			}();
 			if (!begun)
 			{
@@ -1032,6 +1064,11 @@ namespace Engine {
 				if (m_State->Session && !restart)
 					return MakeError(ErrorCode::InvalidState, "recording needs restart:true");
 				ENGINE_TRY_ASSIGN(auto header, m_State->DescribeReplayHeader(*m_State->Session));
+				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 3): input.record's locale, else the launch locale
+				// (--locale), else the project's.
+				PlayStartOptions recording = options;
+				if (!recording.Locale.has_value() && !m_State->Options.Locale.empty())
+					recording.Locale = m_State->Options.Locale;
 				if (!options.ScenePath.empty())
 				{
 					ENGINE_TRY_ASSIGN(auto path, ProjectAssetPath(options.ScenePath));
@@ -1040,7 +1077,7 @@ namespace Engine {
 						return MakeError(ErrorCode::NotFound, "recording scene '{}' is missing", options.ScenePath);
 					header.Scene.Handle = *handle;
 				}
-				return m_State->Restart(header, options, false);
+				return m_State->Restart(header, recording, false);
 			};
 			server.RestartForReplay = [this](const ReplayHeader& header) -> Result<PlaySession*>
 			{
@@ -1050,6 +1087,8 @@ namespace Engine {
 				options.SaveData = header.SaveData.IsNull() ? VariantValue(Json::object()) : header.SaveData;
 				options.Lockstep = true;
 				options.Paused = true;
+				// M38 (decision 5): the header's start locale, or the project's for a header without one.
+				options.Locale = header.Locale.value_or(m_State->Project.Localization.Locale);
 				return m_State->Restart(header, options, true);
 			};
 			server.ScenePath = m_Assets->GetReferencePath(manifest.StartScene);

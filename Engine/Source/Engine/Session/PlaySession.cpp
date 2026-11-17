@@ -4,6 +4,7 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Asset/NavMeshData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/FixedStepScheduler.h"
@@ -130,6 +131,9 @@ namespace Engine {
 				return MakeSpecificationError("Project.Simulation.MaxStepsPerFrame", "a frame must be allowed at least 1 step (got 0)");
 			if (simulation.MaxEntities < 1)
 				return MakeSpecificationError("Project.Simulation.MaxEntities", "a play session must hold at least 1 entity (got 0)");
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 3): the locale the session starts in.
+			if (const std::string& locale = specification.Project.Localization.Locale; !locale.empty() && !IsLocaleTag(locale))
+				return MakeSpecificationError("Project.Localization.Locale", std::format("the start locale must be empty or a locale tag (got '{}')", locale));
 			if (specification.ViewWidth < 1 || specification.ViewHeight < 1)
 			{
 				return MakeSpecificationError("ViewWidth, ViewHeight",
@@ -520,6 +524,12 @@ namespace Engine {
 		std::optional<WorldPauseRequest> PendingWorldPause{};
 		uint64_t WorldTick = 0;
 		bool WorldPauseUsed = false;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 1 and 4): the session's locale, which every VM it creates
+		// starts in (PrepareScripts) and Loc.SetLocale changes, and the locale it started in (the specification's
+		// Project.Localization.Locale), an input that a replay's header records. Session state that a scene transition keeps;
+		// the state hash carries the locale while it differs from the start locale.
+		std::string Locale{};
+		std::string StartLocale{};
 
 		[[nodiscard]] Scene& GetScene() override { return *RuntimeScene; }
 		[[nodiscard]] const TypeRegistry& GetTypes() const override { return *Registry; }
@@ -574,6 +584,8 @@ namespace Engine {
 		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
 		// M30 (decision 11): the scene's navigation, which the Navigation script module queries.
 		[[nodiscard]] NavigationWorld* GetNavigation() override { return Navigation.get(); }
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 1): Loc.SetLocale's change of the session's locale.
+		[[nodiscard]] Status SetLocale(std::string_view locale) override { return Session.SetLocale(locale); }
 		// M22 (C22.3, decision 46): the text latch, which Input.GetText reads.
 		[[nodiscard]] std::string_view GetText(InputPhase phase) const override { return Input.GetText(phase); }
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): Application.GetStats: the host's frame and render
@@ -965,9 +977,9 @@ namespace Engine {
 			ENGINE_TRY(RegisterBindings(*OwnedApi, *Registry));
 			Api = OwnedApi.get();
 		}
-		// M22 (Docs/Decisions/0033-m22-contract.md decision 11): every VM of the session, a Scene.Load's next one included, reads
-		// string tables in the project's locale.
-		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = this, .Api = Api, .Settings = Project.Scripting, .Mode = ScriptRunMode, .TestMode = TestMode, .TestHost = TestHost, .ReadOnly = false, .ClockSeconds = {}, .Locale = Project.Localization.Locale }));
+		// M22 (Docs/Decisions/0033-m22-contract.md decision 11) and M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 1):
+		// every VM of the session, a Scene.Load's or Scene.Reload's next one included, starts in the session's locale.
+		ENGINE_TRY_ASSIGN(auto engine, ScriptEngine::Create({ .Host = this, .Api = Api, .Settings = Project.Scripting, .Mode = ScriptRunMode, .TestMode = TestMode, .TestHost = TestHost, .ReadOnly = false, .ClockSeconds = {}, .Locale = Locale }));
 		Scripts = std::move(engine);
 		Physics->SetEventListener(Scripts.get());
 		Physics2D->SetEventListener(Scripts.get());
@@ -1676,6 +1688,8 @@ namespace Engine {
 		state.Api = specification.ScriptApi;
 		state.Schemas = specification.ScriptSchemas;
 		state.Parameters = specification.Parameters.IsNull() ? Json::object() : specification.Parameters.Get();
+		state.Locale = specification.Project.Localization.Locale;
+		state.StartLocale = state.Locale;
 		if (!specification.SaveData.IsNull())
 			ENGINE_TRY(WithContext(state.SaveData.Replace(specification.SaveData.Get()), "while seeding the session's save data"));
 		state.SaveDataLoadError = specification.SaveDataLoadError;
@@ -2197,6 +2211,16 @@ namespace Engine {
 			hasher.UpdateU64(state.PendingWorldPause.has_value() ? std::to_underlying(state.PendingWorldPause->Sounds) : 0U);
 			hasher.UpdateU64(state.WorldTick);
 		}
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 4; phase 6's ledger: after M35's world-pause block): the
+		// locale block, the session's locale, length-prefixed, while it differs byte-wise from the locale the session started
+		// in, and nothing otherwise (not sticky: a change back to the start locale empties it), so a session that keeps its
+		// start locale hashes as before. The start locale itself is an input, which a replay's header records and
+		// ReplayPlayer::Begin enforces.
+		if (state.Locale != state.StartLocale)
+		{
+			hasher.UpdateU64(state.Locale.size());
+			hasher.Update(state.Locale);
+		}
 		return hasher.Digest();
 	}
 
@@ -2290,6 +2314,27 @@ namespace Engine {
 		else
 			state.PendingWorldPause = State::WorldPauseRequest{ .Paused = paused, .Sounds = sounds };
 		state.WorldPauseUsed = state.WorldPauseUsed || paused;
+		return {};
+	}
+
+	std::string_view PlaySession::GetLocale() const
+	{
+		return m_State->Locale;
+	}
+
+	std::string_view PlaySession::GetStartLocale() const
+	{
+		return m_State->StartLocale;
+	}
+
+	Status PlaySession::SetLocale(std::string_view locale)
+	{
+		if (!locale.empty() && !IsLocaleTag(locale))
+			return MakeError(ErrorCode::InvalidArgument, "the session's locale must be empty or a locale tag (got '{}')", locale);
+		State& state = *m_State;
+		state.Locale = std::string(locale);
+		if (state.Scripts != nullptr)
+			state.Scripts->SetLocale(state.Locale);
 		return {};
 	}
 
