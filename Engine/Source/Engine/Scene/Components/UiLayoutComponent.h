@@ -12,7 +12,7 @@ namespace Engine {
 	enum class UiLayoutKind : uint8_t
 	{
 		Stack, // one after another along Direction, each at its own size
-		Grid,  // in cells of CellSize, filling a row (Horizontal) or a column (Vertical) of Columns cells before the next
+		Grid,  // in cells of CellSize, filling a row (Horizontal, HorizontalReverse) or a column (Vertical) of Columns cells before the next
 		Flex   // a stack whose children grow into free space and shrink when they overflow (UiLayoutElement), wrapping with Wrap
 	};
 
@@ -67,8 +67,8 @@ namespace Engine {
 		glm::vec2 Spacing = glm::vec2(0.0f); // the gaps between children (and between Flex lines or Grid cells), x and y, 0 to 1,000,000
 		UiMainAlignment MainAlignment = UiMainAlignment::Start;
 		UiCrossAlignment CrossAlignment = UiCrossAlignment::Start;
-		// Grid: cells per row (Horizontal) or per column (Vertical), 1 to 1024; 0 fits as many as the inner size holds (1 to
-		// 1024).
+		// Grid: cells per row (Horizontal, HorizontalReverse) or per column (Vertical), 1 to 1024; 0 fits as many as the inner
+		// size holds (1 to 1024).
 		uint32_t Columns = 0;
 		glm::vec2 CellSize = glm::vec2(100.0f); // Grid: each cell's size, 0 to 1,000,000
 		bool Wrap = false;                      // Flex: a child that does not fit the line's remaining space starts a new line

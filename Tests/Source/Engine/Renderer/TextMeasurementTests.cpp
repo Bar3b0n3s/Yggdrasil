@@ -560,6 +560,37 @@ namespace Engine {
 			CHECK(FindTextCaret(empty, 0).Top.x == 0.0f);
 			const TextMeasurement emptyEnd = MeasureText(chain, "", { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = RenderTextAlignment::End });
 			CHECK(FindTextCaret(emptyEnd, 0).Top.x == 400.0f);
+
+			// The W38.2 review's finding 2: every line a paragraph wraps into takes the paragraph's direction (each line its own
+			// flag), so a wrapped Arabic paragraph's lines all end at the right edge at Start, and the Latin paragraph after it
+			// starts at the left.
+			const std::string word = "\xD8\xA8\xD9\x8A\xD8\xAA";
+			const std::string wrapped = word + " " + word + " " + word + " " + word + "\nhome";
+			const TextMeasurement wrappedStart =
+				MeasureText(chain, wrapped, { .Size = 24.0f, .Wrap = TextWrap::Word, .MaxWidth = 80.0f, .Alignment = RenderTextAlignment::Start });
+			REQUIRE(wrappedStart.Lines.size() >= 3);
+			for (size_t line = 0; line + 1 < wrappedStart.Lines.size(); ++line)
+			{
+				CAPTURE(line);
+				CHECK(wrappedStart.Lines[line].Left + wrappedStart.Lines[line].Width == doctest::Approx(80.0f));
+			}
+			CHECK(wrappedStart.Lines.back().Left == 0.0f);
+			// A paragraph's direction is its first strong character's, whatever runs its line holds: an Arabic word then a Latin
+			// one starts at the right edge, a Latin word then an Arabic one at the left; an empty paragraph, without a strong
+			// character, reads left to right.
+			const std::string mixed = word + " home\nhome " + word + "\n\n" + word;
+			const TextMeasurement mixedStart = MeasureText(chain, mixed, { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = RenderTextAlignment::Start });
+			REQUIRE(mixedStart.Lines.size() == 4);
+			CHECK(mixedStart.Lines[0].Left + mixedStart.Lines[0].Width == doctest::Approx(400.0f));
+			CHECK(mixedStart.Lines[1].Left == 0.0f);
+			CHECK(mixedStart.Lines[2].Left == 0.0f);
+			CHECK(mixedStart.Lines[3].Left + mixedStart.Lines[3].Width == doctest::Approx(400.0f));
+			const TextMeasurement mixedEnd = MeasureText(chain, mixed, { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = RenderTextAlignment::End });
+			REQUIRE(mixedEnd.Lines.size() == 4);
+			CHECK(mixedEnd.Lines[0].Left == 0.0f);
+			CHECK(mixedEnd.Lines[1].Left + mixedEnd.Lines[1].Width == doctest::Approx(400.0f));
+			CHECK(mixedEnd.Lines[2].Left == 400.0f);
+			CHECK(mixedEnd.Lines[3].Left == 0.0f);
 		}
 
 		TEST_CASE("TextMeasurement: a mixed-direction line is reordered by the bidirectional algorithm in either base direction, and Alignment places it")

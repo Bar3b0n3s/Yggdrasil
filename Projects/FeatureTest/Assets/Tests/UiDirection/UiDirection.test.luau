@@ -73,7 +73,7 @@ return Test.Suite("UiDirection", function()
 		Test.ExpectNear(slider.Value, 75, 1e-3, "a press three quarters of the way from the right edge")
 	end)
 
-	Test.Case("the labels align to their paragraphs' start and end and render", function()
+	Test.Case("the labels keep Start and End through the load, and the scene renders", function()
 		Test.ExpectEqual((Find("/Canvas/ArabicStart").UiText :: UiText).Alignment, "Start")
 		Test.ExpectEqual((Find("/Canvas/ArabicEnd").UiText :: UiText).Alignment, "End")
 		Test.ExpectEqual((Find("/Canvas/LatinEnd").UiText :: UiText).Alignment, "End")

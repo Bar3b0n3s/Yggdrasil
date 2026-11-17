@@ -31,7 +31,7 @@ return Script.Define("Caption", Caption)
 - The engine stores no language choice: keep the player's in save data (`SaveData.Set("Language", Loc.GetLocale())`, `SaveData.Commit()`) and restore it at startup with `Loc.SetLocale` (a title that does so overrides the Runtime's `--locale`, so film or check an export with a store that holds no other choice).
 - The engine knows no language's direction: keep a direction key in your string table (`meta.direction = "rtl"`) and mirror your rows from it in `OnLocaleChanged` (below).
 
-**Right-to-left layouts.** Labels need no code: a `UiText` whose `Alignment` is `"Start"` or `"End"` aligns each paragraph by its own direction (an Arabic paragraph's start is the right edge, a Latin one's the left; a paragraph of digits alone reads left to right, so give a number `"Right"` if it must hug the right edge). Rows are yours to mirror: a `UiLayout` whose `Direction` is `"HorizontalReverse"` places its first child at the right, and a `UiSlider` with that `Direction` puts its Min at the right edge, so Left steps it toward Max. Rows are component data, so the change is hashed and replayed like any other:
+**Right-to-left layouts.** Labels need no code: a `UiText` whose `Alignment` is `"Start"` or `"End"` aligns each paragraph by its own direction (an Arabic paragraph's start is the right edge, a Latin one's the left; a paragraph of digits alone reads left to right, so give a number `"Right"` if it must hug the right edge). Rows are yours to mirror: a `UiLayout` whose `Direction` is `"HorizontalReverse"` places its first child at the right, and a `UiSlider` with that `Direction` puts its Min at the right edge, so Left steps it toward Max. Rows are component data, so the change is hashed and replayed like any other. Set them in `OnStart` as well as in `OnLocaleChanged`, as `Caption` draws: a session that starts in Arabic (`--locale ar`, a suite's `Locale`, a replay recorded in `ar`) and every scene loaded after the switch get no `OnLocaleChanged`.
 
 ```luau
 --!strict
@@ -42,7 +42,8 @@ Options.Fields = {
 	Rows = Field.Array(Field.Entity()),
 }
 
-function Options.OnLocaleChanged(self: any, locale: string, previous: string)
+-- Mirrors every row, and the sliders in it, for the locale in force.
+function Options.Apply(self: any)
 	local direction: UiLayoutDirection = if Loc.Get(self.Table, "meta.direction") == "rtl" then "HorizontalReverse" else "Horizontal"
 	for _, row in self.Rows do
 		(row.UiLayout :: UiLayout).Direction = direction
@@ -54,6 +55,9 @@ function Options.OnLocaleChanged(self: any, locale: string, previous: string)
 		end
 	end
 end
+
+function Options.OnStart(self: any) Options.Apply(self) end
+function Options.OnLocaleChanged(self: any, locale: string, previous: string) Options.Apply(self) end
 
 return Script.Define("Options", Options)
 ```

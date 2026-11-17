@@ -228,22 +228,23 @@ namespace Engine {
 				const ConstEntity entity = canvas.Elements[index].Entity;
 				if (const UiSliderComponent* slider = entity.TryGetComponent<UiSliderComponent>())
 				{
-					// Horizontal: Min at the left edge; Vertical: Min at the bottom edge, so the anchors count from 1 down; M38's
-					// HorizontalReverse (decision 12): Min at the right edge, counting from 1 down along X.
+					// Horizontal: Min at the left edge, the axis's low edge, so the anchors count up from 0; Vertical: Min at the
+					// bottom edge and M38's HorizontalReverse (decision 12): Min at the right edge, each its axis's high edge, so
+					// the anchors count down from 1.
 					const float t = GetUiSliderPosition(*slider);
-					const bool horizontal = slider->Direction == UiLayoutDirection::Horizontal;
+					const bool minAtLowEdge = slider->Direction == UiLayoutDirection::Horizontal;
 					const glm::length_t axis = slider->Direction == UiLayoutDirection::Vertical ? 1 : 0;
 					if (UiWidgetPartRule* fill = findPart(index, slider->Fill))
 						*fill = UiWidgetPartRule{ .Anchored = true,
 							.Axis = axis,
-							.AnchorMin = horizontal ? 0.0f : 1.0f - t,
-							.AnchorMax = horizontal ? t : 1.0f,
+							.AnchorMin = minAtLowEdge ? 0.0f : 1.0f - t,
+							.AnchorMax = minAtLowEdge ? t : 1.0f,
 							.Hides = fill->Hides };
 					if (UiWidgetPartRule* handle = findPart(index, slider->Handle))
 						*handle = UiWidgetPartRule{ .Anchored = true,
 							.Axis = axis,
-							.AnchorMin = horizontal ? t : 1.0f - t,
-							.AnchorMax = horizontal ? t : 1.0f - t,
+							.AnchorMin = minAtLowEdge ? t : 1.0f - t,
+							.AnchorMax = minAtLowEdge ? t : 1.0f - t,
 							.Hides = handle->Hides };
 				}
 				else if (const UiToggleComponent* toggle = entity.TryGetComponent<UiToggleComponent>(); toggle != nullptr && !toggle->IsOn)
