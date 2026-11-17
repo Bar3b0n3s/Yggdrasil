@@ -1,14 +1,13 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/AudioSystem.h"
 
-#include "Engine/Asset/AssetManager.h"
-#include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/Private/AudioClipRegistry.h"
 #include "Engine/Scene/Private/AudioSourceRuntime.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
@@ -17,8 +16,6 @@
 #include <array>
 #include <cmath>
 #include <format>
-#include <map>
-#include <set>
 #include <utility>
 
 // Scene is a simulation-path module (§4.12): nothing here uses a CRT transcendental function. Audio is not simulated
@@ -27,15 +24,6 @@
 namespace Engine {
 
 	namespace {
-
-		// The clip a voice plays: the handle and version it is registered under (the placeholder's when the requested clip is
-		// unavailable) and its data.
-		struct ResolvedAudioClip
-		{
-			AssetHandle Handle{};
-			uint64_t Version = 1;
-			AssetRef<AudioClipData> Data{};
-		};
 
 		constexpr std::array<AudioGroup, AudioGroupCount> AllAudioGroups = { AudioGroup::Music, AudioGroup::Sfx, AudioGroup::Ui };
 
@@ -165,9 +153,13 @@ namespace Engine {
 
 	struct AudioSystem::State
 	{
-		Scene* TargetScene = nullptr;   // documented back-reference
-		AudioEngine* Audio = nullptr;   // documented back-reference
-		AssetManager* Assets = nullptr; // documented back-reference, may be null
+		State(AudioEngine& audio, AssetManager* assets)
+			: Audio(&audio), Clips(&audio, assets, "AudioSystem")
+		{
+		}
+
+		Scene* TargetScene = nullptr; // documented back-reference
+		AudioEngine* Audio = nullptr; // documented back-reference
 		AudioListenerSelection Listener{};
 		// The listener entity of the last Start or Update, its rendered world position and whether that pose was reset
 		// (Utils::ContinuesPose), for the listener's velocity.
@@ -175,25 +167,22 @@ namespace Engine {
 		glm::vec3 ListenerPosition{ 0.0f };
 		bool HasListenerPosition = false;
 		bool ListenerPoseReset = false;
-		// The clips this system registered with the engine, by (handle, version); each holds one registration reference,
-		// dropped when the system is destroyed.
-		std::map<std::pair<AssetHandle, uint64_t>, AudioClipHandle> Clips;
+		// The clips this system registered with the engine (Scene/Private/AudioClipRegistry.h), dropped when the system is
+		// destroyed.
+		AudioClipRegistry Clips;
 		// The one-shot voices started and not yet seen to end (at most MaxAudioVoices: PruneOneShots runs before each one is
 		// added), and the one-shot requests admitted since the last Update (MaxAudioOneShotsPerFrame).
 		std::vector<AudioVoiceHandle> OneShots;
 		uint32_t OneShotRequests = 0;
 		// SetPaused (play-mode pause).
 		bool Paused = false;
-		// SetWorldPaused (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world's voices, every group's but
-		// Ui, are held.
+		// SetWorldPaused (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world's voices are held, every
+		// group's but Music and Ui since M40 (Docs/Decisions/0057-m40-music.md decision 14).
 		bool WorldPaused = false;
 		// Mix initialization can precede voice startup; either path restores the captured host mix on destruction.
 		bool MixInitialized = false;
 		bool Started = false;
 		std::array<float, AudioGroupCount> RecordedGroupVolumes{ 1.0f, 1.0f, 1.0f };
-		// Without an asset manager: the silent clip every source plays, and the clips already warned about (one warning each).
-		AssetRef<AudioClipData> Silence{};
-		std::set<AssetHandle> WarnedClips;
 
 		// The registry signals of AudioSystem.h (connected by the constructor, disconnected by the destructor). A source
 		// created after Start gets a runtime that the next Update starts when it is PlayOnStart (AudioSourceRuntime::Enabled);
@@ -207,14 +196,14 @@ namespace Engine {
 		void ReleaseVoice(AudioVoiceHandle& voice);
 		// Drops the handles of one-shot voices that ended or were stolen, keeping the others in start order.
 		void PruneOneShots();
-		// Whether a voice of `group` is held by the system's pauses: the play-mode pause, or the world pause outside the Ui group.
-		[[nodiscard]] bool IsHeld(AudioGroup group) const { return Paused || (WorldPaused && group != AudioGroup::Ui); }
+		// Whether a voice of `group` is held by the system's pauses: the play-mode pause, or the world pause in every group
+		// but the two that play on under it (Music and Ui: today's Sfx only, and any group added later).
+		[[nodiscard]] bool IsHeld(AudioGroup group) const
+		{
+			return Paused || (WorldPaused && group != AudioGroup::Music && group != AudioGroup::Ui);
+		}
 		// Pauses or resumes every voice of the system by IsHeld and the sources' own Pause (SetPaused, SetWorldPaused).
 		void ApplyPauses();
-		// The clip `handle` as the voice plays it (see AudioSystemSpecification::Assets).
-		[[nodiscard]] ResolvedAudioClip ResolveClip(AssetHandle handle);
-		// The engine registration of `handle`'s current version, registered on first use.
-		[[nodiscard]] Result<AudioClipHandle> AcquireClip(AssetHandle handle);
 		// The runtime of `entity`'s source, added when missing.
 		[[nodiscard]] AudioSourceRuntime& GetRuntime(Entity entity);
 		// Starts the voice of the source on `entity` from the beginning of its clip, at `transform`; nothing for a null Clip
@@ -271,38 +260,6 @@ namespace Engine {
 		});
 	}
 
-	ResolvedAudioClip AudioSystem::State::ResolveClip(AssetHandle handle)
-	{
-		const AssetHandle placeholder = GetPlaceholderHandle(AssetType::AudioClip);
-		if (Assets == nullptr)
-		{
-			if (handle != placeholder && WarnedClips.insert(handle).second)
-				ENGINE_CORE_WARN("AudioSystem: the play session has no asset manager, so audio clip {} plays silence", handle.ToString());
-			if (Silence == nullptr)
-				Silence = CreateRef<AudioClipData>(CreateSilentAudioClip());
-			return ResolvedAudioClip{ .Handle = placeholder, .Version = 1, .Data = Silence };
-		}
-
-		// GetOrPlaceholder serves the silent clip for a missing, failed or mistyped clip and records its diagnostic once
-		// (§7.2, §10.4); the voice is then registered as the placeholder, which is what plays.
-		AssetRef<AudioClipData> data = Assets->GetOrPlaceholder<AudioClipData>(handle);
-		AssetHandle effective = handle;
-		if (handle != placeholder && static_cast<const Asset*>(data.get()) == Assets->GetPlaceholder(AssetType::AudioClip).get())
-			effective = placeholder;
-		return ResolvedAudioClip{ .Handle = effective, .Version = std::max<uint64_t>(1, Assets->GetVersion(effective)), .Data = std::move(data) };
-	}
-
-	Result<AudioClipHandle> AudioSystem::State::AcquireClip(AssetHandle handle)
-	{
-		const ResolvedAudioClip clip = ResolveClip(handle);
-		const std::pair<AssetHandle, uint64_t> key{ clip.Handle, clip.Version };
-		if (const auto found = Clips.find(key); found != Clips.end())
-			return found->second;
-		ENGINE_TRY_ASSIGN(const AudioClipHandle registered, WithContext(Audio->RegisterClip(MakeAudioClipSource(clip.Handle, clip.Version, clip.Data)), std::format("registering audio clip {}", clip.Handle.ToString())));
-		Clips.emplace(key, registered);
-		return registered;
-	}
-
 	AudioSourceRuntime& AudioSystem::State::GetRuntime(Entity entity)
 	{
 		return TargetScene->GetRegistry().get_or_emplace<AudioSourceRuntime>(entity.GetHandle());
@@ -321,7 +278,7 @@ namespace Engine {
 		if (!runtime.Clip.IsValid())
 			return {};
 
-		ENGINE_TRY_ASSIGN(const AudioClipHandle clip, AcquireClip(runtime.Clip));
+		ENGINE_TRY_ASSIGN(const AudioClipHandle clip, Clips.Acquire(runtime.Clip));
 		AudioVoiceDescription description;
 		description.Clip = clip;
 		description.Settings = Utils::MakeVoiceSettings(source);
@@ -430,7 +387,8 @@ namespace Engine {
 				ENGINE_CORE_WARN("AudioSystem: updating the AudioSource of '{}' failed: {}", TargetScene->GetEntityPath(entity), applied.error().ToString());
 			else
 				runtime.Settings = settings;
-			// A source that moved into or out of the Ui group while the world is paused follows the world pause's rule.
+			// A source that moved between a held group and one that plays on while the world is paused follows the world
+			// pause's rule.
 			if (groupChanged && WorldPaused && runtime.Settings.Group == settings.Group)
 			{
 				if (const Status held = Audio->SetVoicePaused(runtime.Voice, IsHeld(settings.Group) || runtime.Paused); !held)
@@ -543,13 +501,11 @@ namespace Engine {
 	}
 
 	AudioSystem::AudioSystem(Scene& scene, const AudioSystemSpecification& specification)
-		: m_State(CreateScope<State>())
 	{
-		ENGINE_CORE_ASSERT(specification.Audio != nullptr, "AudioSystem needs the context's audio engine");
+		ENGINE_CORE_VERIFY(specification.Audio != nullptr, "AudioSystem needs the context's audio engine");
+		m_State = CreateScope<State>(*specification.Audio, specification.Assets);
 		State& state = *m_State;
 		state.TargetScene = &scene;
-		state.Audio = specification.Audio;
-		state.Assets = specification.Assets;
 		entt::registry& registry = scene.GetRegistry();
 		// Connecting the runtime's destroy signal also creates its pool, so the AudioSource handlers never create a pool
 		// while EnTT iterates the pools of an entity it destroys.
@@ -572,11 +528,7 @@ namespace Engine {
 		registry.clear<AudioSourceRuntime>();
 		for (AudioVoiceHandle& voice : state.OneShots)
 			state.ReleaseVoice(voice);
-		for (const auto& [key, clip] : state.Clips)
-		{
-			if (const Status unregistered = state.Audio->UnregisterClip(clip); !unregistered)
-				ENGINE_CORE_WARN("AudioSystem: unregistering audio clip {} failed: {}", key.first.ToString(), unregistered.error().ToString());
-		}
+		state.Clips.Clear();
 		if (state.MixInitialized)
 		{
 			for (const AudioGroup group : AllAudioGroups)
@@ -791,7 +743,7 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidState, "at most {} one-shots start per frame; this frame's further requests are refused", MaxAudioOneShotsPerFrame);
 		++state.OneShotRequests;
 
-		ENGINE_TRY_ASSIGN(const AudioClipHandle registered, state.AcquireClip(clip));
+		ENGINE_TRY_ASSIGN(const AudioClipHandle registered, state.Clips.Acquire(clip));
 		AudioVoiceDescription description;
 		description.Clip = registered;
 		description.Settings.Group = group;
@@ -799,7 +751,8 @@ namespace Engine {
 		description.Settings.Spatial = position.has_value();
 		if (position.has_value())
 			description.Transform.Position = *position;
-		description.Priority = AudioSystemEffectPriority;
+		// M40 (decision 13): a one-shot's priority follows its group, as a source's does.
+		description.Priority = Utils::GetSourcePriority(group);
 		description.StartPaused = state.IsHeld(group);
 		ENGINE_TRY_ASSIGN(const AudioVoiceHandle voice, state.Audio->PlayVoice(description));
 		// The new voice may have stolen a tracked one-shot; ended and stolen voices leave the list before it grows.

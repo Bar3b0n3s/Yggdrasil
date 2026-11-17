@@ -20,6 +20,7 @@
 #include <initializer_list>
 #include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1398,6 +1399,473 @@ namespace Engine {
 			CHECK(inRange(MeasureDopplerAdvance(still, glm::vec3(0.0f, 0.0f, 6000.0f)), 0.5));
 			// A source receding at any speed stays at or above a third.
 			CHECK(inRange(MeasureDopplerAdvance(glm::vec3(0.0f, 0.0f, -6000.0f), still), 2.0 / 3.0));
+		}
+
+		// M40 (Docs/Decisions/0057-m40-music.md decision 3): fades count the frames the engine mixes of their voice, so a
+		// voice held at its start, and a paused one, hold theirs.
+		TEST_CASE("AudioEngine: a fade advances only while its voice plays")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone(2.0));
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .StartPaused = true, .Fade = { .From = 0.0f, .To = 1.0f, .Frames = 4800 } });
+			PullFrames(*engine, 2400);
+			const AudioVoiceInfo held = GetInfo(*engine, voice);
+			CHECK(held.FadeVolume == 0.0f);
+			CHECK(held.FadeTarget == 1.0f);
+			CHECK(held.FadeEnd == AudioFadeEnd::Hold);
+			CHECK(held.CursorFrames == 0);
+
+			REQUIRE(engine->SetVoicePaused(voice, false).has_value());
+			PullFrames(*engine, 2400);
+			const float halfway = GetInfo(*engine, voice).FadeVolume;
+			CHECK(halfway == 0.5f);
+			REQUIRE(engine->SetVoicePaused(voice, true).has_value());
+			PullFrames(*engine, 4800);
+			const float paused = GetInfo(*engine, voice).FadeVolume;
+			CHECK(paused == 0.5f);
+			REQUIRE(engine->SetVoicePaused(voice, false).has_value());
+			PullFrames(*engine, 2400);
+			const AudioVoiceInfo done = GetInfo(*engine, voice);
+			CHECK(done.FadeVolume == 1.0f);
+			CHECK(done.FadeTarget == 1.0f);
+			CHECK(done.CursorFrames == 4800);
+		}
+
+		TEST_CASE("AudioEngine: a fade scales its voice's frames linearly from its start level to its target")
+		{
+			// The same clip with and without a fade from 0 to 1 over 4,800 frames: frame i of the faded voice is the plain
+			// voice's frame i times i / 4800, miniaudio's fader exactly.
+			constexpr uint64_t FadeFrames = 4800;
+			std::vector<float> plain;
+			std::vector<float> faded;
+			for (const bool fade : { false, true })
+			{
+				VirtualFileSystem vfs;
+				const TestEngine engine = CreateTestEngine(vfs);
+				const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone(2.0));
+				AudioVoiceDescription description{ .Clip = clip };
+				if (fade)
+					description.Fade = { .From = 0.0f, .To = 1.0f, .Frames = FadeFrames };
+				PlayTestVoice(*engine, description);
+				(fade ? faded : plain) = PullFrames(*engine, FadeFrames + 480);
+			}
+			REQUIRE(plain.size() == faded.size());
+			size_t mismatches = 0;
+			for (size_t frame = 0; frame < FadeFrames; ++frame)
+			{
+				const float level = static_cast<float>(static_cast<uint32_t>(frame)) / static_cast<float>(FadeFrames);
+				for (uint32_t channel = 0; channel < AudioChannelCount; ++channel)
+				{
+					const size_t sample = frame * AudioChannelCount + channel;
+					if (faded[sample] != plain[sample] * level)
+						++mismatches;
+				}
+			}
+			CHECK(mismatches == 0);
+			// After the fade the voice plays at its target, 1: as the plain voice does.
+			const auto fadeEnd = static_cast<std::ptrdiff_t>(FadeFrames * AudioChannelCount);
+			const bool after = std::equal(faded.begin() + fadeEnd, faded.end(), plain.begin() + fadeEnd);
+			CHECK(after);
+			const AudioLevels rising = MeasureAudioLevels(std::span<const float>(faded).first(FadeFrames * AudioChannelCount));
+			const AudioLevels full = MeasureAudioLevels(std::span<const float>(plain).first(FadeFrames * AudioChannelCount));
+			CHECK(rising.RmsLeft < full.RmsLeft);
+		}
+
+		TEST_CASE("AudioEngine: a releasing fade ends its voice at the end of the pull that completes it")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone());
+			const AudioVoiceSettings looping{ .Loop = true };
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = looping });
+			PullFrames(*engine, 480);
+			REQUIRE(engine->FadeVoice(voice, 0.0f, 1000, AudioFadeEnd::Release).has_value());
+			const AudioVoiceInfo fading = GetInfo(*engine, voice);
+			CHECK(fading.FadeVolume == 1.0f);
+			CHECK(fading.FadeTarget == 0.0f);
+			CHECK(fading.FadeEnd == AudioFadeEnd::Release);
+			PullFrames(*engine, 999);
+			CHECK(engine->IsVoiceAlive(voice));
+			PullFrames(*engine, 1);
+			CHECK_FALSE(engine->IsVoiceAlive(voice));
+
+			// A pull that completes the fade partway plays the rest of it at the fade's end level, silence, and releases the voice
+			// at its end.
+			const AudioVoiceHandle partway = PlayTestVoice(*engine, { .Clip = clip, .Settings = looping });
+			PullFrames(*engine, 480);
+			REQUIRE(engine->FadeVoice(partway, 0.0f, 100, AudioFadeEnd::Release).has_value());
+			const std::vector<float> samples = PullFrames(*engine, 480);
+			CHECK_FALSE(engine->IsVoiceAlive(partway));
+			const bool silentAfter = std::all_of(samples.begin() + 100 * AudioChannelCount, samples.end(), [](float sample)
+			{
+				return sample == 0.0f;
+			});
+			CHECK(silentAfter);
+			const AudioLevels before = MeasureAudioLevels(std::span<const float>(samples).first(100 * AudioChannelCount));
+			CHECK(before.Peak > 0.0f);
+
+			// A paused voice's fade, and so its release, holds.
+			const AudioVoiceHandle held = PlayTestVoice(*engine, { .Clip = clip, .Settings = looping });
+			REQUIRE(engine->FadeVoice(held, 0.0f, 480, AudioFadeEnd::Release).has_value());
+			PullFrames(*engine, 240);
+			REQUIRE(engine->SetVoicePaused(held, true).has_value());
+			PullFrames(*engine, 4800);
+			CHECK(engine->IsVoiceAlive(held));
+			const float heldLevel = GetInfo(*engine, held).FadeVolume;
+			CHECK(heldLevel == 0.5f);
+			REQUIRE(engine->SetVoicePaused(held, false).has_value());
+			PullFrames(*engine, 240);
+			CHECK_FALSE(engine->IsVoiceAlive(held));
+
+			// A releasing fade of 0 frames releases its voice at once.
+			const AudioVoiceHandle atOnce = PlayTestVoice(*engine, { .Clip = clip, .Settings = looping });
+			REQUIRE(engine->FadeVoice(atOnce, 0.5f, 0, AudioFadeEnd::Release).has_value());
+			CHECK_FALSE(engine->IsVoiceAlive(atOnce));
+		}
+
+		TEST_CASE("AudioEngine: a fade moves the level from where it is, and a completed fade plays on at its target")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone(2.0));
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Fade = { .From = 0.0f, .To = 1.0f, .Frames = 4800 } });
+			PullFrames(*engine, 2400);
+			// Ducked from halfway, 0.5, to 0.25 over 2,400 frames: 0.375 halfway, then 0.25, held.
+			REQUIRE(engine->FadeVoice(voice, 0.25f, 2400).has_value());
+			const AudioVoiceInfo ducking = GetInfo(*engine, voice);
+			CHECK(ducking.FadeVolume == 0.5f);
+			CHECK(ducking.FadeTarget == 0.25f);
+			CHECK(ducking.FadeEnd == AudioFadeEnd::Hold);
+			PullFrames(*engine, 1200);
+			const float halfway = GetInfo(*engine, voice).FadeVolume;
+			CHECK(halfway == 0.375f);
+			PullFrames(*engine, 1200);
+			const AudioVoiceInfo ducked = GetInfo(*engine, voice);
+			CHECK(ducked.FadeVolume == 0.25f);
+			CHECK(ducked.FadeTarget == 0.25f);
+			// A fade of 0 frames sets the level at once.
+			REQUIRE(engine->FadeVoice(voice, 0.75f, 0).has_value());
+			const float atOnce = GetInfo(*engine, voice).FadeVolume;
+			CHECK(atOnce == 0.75f);
+			REQUIRE(engine->StopVoice(voice).has_value());
+
+			// A completed fade plays on at its target, a multiplier of the voice's volume: as a voice of that volume does, and
+			// so does a later volume.
+			std::vector<float> faded;
+			std::vector<float> plain;
+			for (const bool fade : { true, false })
+			{
+				VirtualFileSystem own;
+				const TestEngine other = CreateTestEngine(own);
+				const AudioClipHandle otherClip = RegisterToneClip(*other, "0000000000000001", MakeTone(2.0));
+				AudioVoiceDescription description{ .Clip = otherClip };
+				if (fade)
+					description.Fade = { .From = 1.0f, .To = 0.5f, .Frames = 480 };
+				else
+					description.Settings.Volume = 0.5f;
+				const AudioVoiceHandle played = PlayTestVoice(*other, description);
+				PullFrames(*other, 480);
+				if (fade)
+				{
+					const AudioVoiceInfo folded = GetInfo(*other, played);
+					CHECK(folded.FadeVolume == 0.5f);
+					CHECK(folded.FadeTarget == 0.5f);
+					CHECK(folded.Settings.Volume == 1.0f);
+				}
+				std::vector<float> samples = PullFrames(*other, 4800);
+				REQUIRE(other->SetVoiceSettings(played, { .Volume = fade ? 0.5f : 0.25f }).has_value());
+				const std::vector<float> quieter = PullFrames(*other, 4800);
+				samples.insert(samples.end(), quieter.begin(), quieter.end());
+				(fade ? faded : plain) = std::move(samples);
+			}
+			CHECK(faded == plain);
+		}
+
+		TEST_CASE("AudioEngine: invalid fades are InvalidArgument and a stale voice's fade is NotFound")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle clip = RegisterToneClip(*engine, "0000000000000001", MakeTone());
+			const float nan = std::numeric_limits<float>::quiet_NaN();
+			const float infinity = std::numeric_limits<float>::infinity();
+			for (const AudioVoiceFade& fade : { AudioVoiceFade{ .From = -0.5f }, AudioVoiceFade{ .To = nan }, AudioVoiceFade{ .From = infinity },
+					 AudioVoiceFade{ .Frames = AudioEngine::MaxFadeFrames + 1 } })
+			{
+				CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = clip, .Fade = fade })) == ErrorCode::InvalidArgument);
+			}
+			CHECK(engine->GetVoices().empty());
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Fade = { .From = 0.0f, .To = 1.0f, .Frames = AudioEngine::MaxFadeFrames } });
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, -1.0f, 10)) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, nan, 10)) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, infinity, 10)) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, AudioEngine::MaxFadeFrames + 1)) == ErrorCode::InvalidArgument);
+			// The W40.1 review's finding 2: the longest fade ends well before miniaudio's fader cursor (32 bits) runs out, so
+			// its end is held before the fader would stop applying it.
+			CHECK(AudioEngine::MaxFadeFrames <= 0x7FFFFFFFull);
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, 0xFFFFFFFFull)) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, 10, static_cast<AudioFadeEnd>(7))) == ErrorCode::InvalidArgument);
+			REQUIRE(engine->StopVoice(voice).has_value());
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, 10)) == ErrorCode::NotFound);
+			CHECK(ErrorCodeOf(engine->FadeVoice(AudioVoiceHandle(), 1.0f, 10)) == ErrorCode::NotFound);
+		}
+
+		// M40 (the W40.1 review's finding 1): a level lives on the fader alone, so a device reading a voice while the main thread
+		// moves it, as fast as it can, between a held level and a fade at that level never mixes a frame above it. A constant
+		// clip at half scale held at 0.25 mixes 0.125; W40.1 held a level on the volume, and a fade from it set the volume to 1
+		// before the fader, so a device read between the two mixed frames at 0.5.
+		TEST_CASE("AudioEngine: a fade from a held level never mixes a frame above its levels on a device-read voice")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
+			REQUIRE(engine->GetTimeSource() == AudioTimeSource::Device);
+			Buffer bytes(static_cast<size_t>(4800) * sizeof(int16_t));
+			for (size_t frame = 0; frame < 4800; ++frame)
+			{
+				bytes[2 * frame] = std::byte{ 0x00 };
+				bytes[2 * frame + 1] = std::byte{ 0x40 }; // 16384, 0.5 of full scale (little-endian)
+			}
+			const Result<AudioClipHandle> clip = engine->RegisterClip(
+				{ .Name = "00000000000000f1", .Format = AudioClipFormat::Pcm16, .Bytes = CreateRef<const Buffer>(std::move(bytes)), .SampleRate = 48000, .ChannelCount = 1 });
+			REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = *clip, .Settings = { .Loop = true }, .Fade = { .From = 0.25f, .To = 0.25f } });
+			engine->StartCapture();
+			const uint64_t readBefore = GetDeviceReadFrames(*engine);
+			bool moved = true;
+			const bool read = Test::WaitUntil([&engine, voice, readBefore, &moved]()
+			{
+				for (int pass = 0; pass < 2000; ++pass)
+				{
+					moved = moved && engine->FadeVoice(voice, 0.25f, 4800).has_value();
+					moved = moved && engine->FadeVoice(voice, 0.25f, 0).has_value();
+				}
+				return GetDeviceReadFrames(*engine) > readBefore + 50 * 480;
+			});
+			const AudioCapture capture = engine->StopCapture();
+			CHECK(read);
+			CHECK(moved);
+			CHECK(capture.DevicePeak > 0.1f);
+			CHECK(capture.DevicePeak <= 0.125f * 1.001f);
+			REQUIRE(engine->StopVoice(voice).has_value());
+		}
+
+		// M40 (Docs/Decisions/0057-m40-music.md decision 11): an intro, then its loop, decoded and streamed. The reference is one
+		// clip of the intro's samples followed by the loop's three times; the chained voice mixes exactly its frames. The loop
+		// is a second long, a stream's page, so a stream wraps it inside its decoder.
+		TEST_CASE("AudioEngine: a chained voice plays its loop from the first frame after its intro")
+		{
+			const Test::TestToneSpecification introTone{ .FrameCount = 2400, .Frequency = 440.0, .Amplitude = 0.5 };
+			const Test::TestToneSpecification loopTone{ .FrameCount = 48000, .Frequency = 660.0, .Amplitude = 0.25 };
+			constexpr uint64_t Frames = 2400 + 2 * 48000 + 100;
+			std::vector<float> reference;
+			{
+				VirtualFileSystem vfs;
+				const TestEngine engine = CreateTestEngine(vfs);
+				Buffer bytes = Test::MakeTonePcm16Bytes(introTone);
+				const Buffer loopBytes = Test::MakeTonePcm16Bytes(loopTone);
+				for (int pass = 0; pass < 4; ++pass)
+					bytes.insert(bytes.end(), loopBytes.begin(), loopBytes.end());
+				const Result<AudioClipHandle> clip = engine->RegisterClip(
+					{ .Name = "00000000000000c1", .Format = AudioClipFormat::Pcm16, .Bytes = CreateRef<const Buffer>(std::move(bytes)), .SampleRate = 48000, .ChannelCount = 1 });
+				REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+				PlayTestVoice(*engine, { .Clip = *clip });
+				reference = PullFrames(*engine, Frames);
+			}
+			for (const bool stream : { false, true })
+			{
+				CAPTURE(stream);
+				VirtualFileSystem vfs;
+				const TestEngine engine = CreateTestEngine(vfs);
+				const AudioClipHandle intro = RegisterToneClip(*engine, "00000000000000c2", introTone, stream);
+				const AudioClipHandle loop = RegisterToneClip(*engine, "00000000000000c3", loopTone, stream);
+				const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = intro, .Settings = { .Loop = true }, .Next = loop });
+				// One frame before the intro's end: the frames the voice read ahead past the boundary still belong to the intro.
+				std::vector<float> chained = PullFrames(*engine, 2399);
+				const AudioVoiceInfo before = GetInfo(*engine, voice);
+				CHECK_FALSE(before.InNext);
+				CHECK(before.CursorFrames == 2399);
+				CHECK(before.LengthFrames == 2400);
+				CHECK(before.Clip == intro);
+				CHECK(before.NextClip == loop);
+				CHECK(before.NextClipName == "00000000000000c3");
+				CHECK(before.Streamed == stream);
+				CHECK(before.Settings.Loop);
+				// One frame into the loop.
+				const std::vector<float> boundary = PullFrames(*engine, 2);
+				chained.insert(chained.end(), boundary.begin(), boundary.end());
+				const AudioVoiceInfo after = GetInfo(*engine, voice);
+				CHECK(after.InNext);
+				CHECK(after.CursorFrames == 1);
+				CHECK(after.LengthFrames == 48000);
+				// The loop wraps on its own, seamlessly.
+				const std::vector<float> rest = PullFrames(*engine, Frames - 2401);
+				chained.insert(chained.end(), rest.begin(), rest.end());
+				const AudioVoiceInfo wrapped = GetInfo(*engine, voice);
+				CHECK(wrapped.InNext);
+				CHECK(wrapped.CursorFrames == 100);
+				REQUIRE(chained.size() == reference.size());
+				size_t mismatches = 0;
+				for (size_t sample = 0; sample < chained.size(); ++sample)
+				{
+					if (chained[sample] != reference[sample])
+						++mismatches;
+				}
+				CHECK(mismatches == 0);
+			}
+		}
+
+		// M40 (decision 11; the W40.2 review): a looping voice of one streamed clip is created looping, so its first wrap is as
+		// seamless as a decoded clip's, whatever its length against the 480-frame pulls (created without looping, its second
+		// page held its end and the wrap fell silent while the stream sought back).
+		TEST_CASE("AudioEngine: a looping streamed clip wraps its first pass seamlessly")
+		{
+			for (const uint64_t length : { uint64_t{ 48300 }, uint64_t{ 4700 } })
+			{
+				CAPTURE(length);
+				const uint64_t frames = length + length / 2;
+				std::vector<std::vector<float>> mixed;
+				for (const bool stream : { false, true })
+				{
+					VirtualFileSystem vfs;
+					const TestEngine engine = CreateTestEngine(vfs);
+					const AudioClipHandle clip = RegisterToneClip(*engine, "00000000000000e1", { .FrameCount = length }, stream);
+					const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Loop = true } });
+					mixed.push_back(PullFrames(*engine, frames));
+					REQUIRE(engine->IsVoiceAlive(voice));
+					CHECK(GetCursor(*engine, voice) == length / 2);
+				}
+				REQUIRE(mixed[0].size() == mixed[1].size());
+				size_t mismatches = 0;
+				for (size_t sample = 0; sample < mixed[0].size(); ++sample)
+				{
+					if (mixed[0][sample] != mixed[1][sample])
+						++mismatches;
+				}
+				CHECK(mismatches == 0);
+			}
+		}
+
+		// M40 (the W40.2 review): a voice's fader settings reach miniaudio at most once per pull, the last one winning, so a
+		// device never takes two settings of one voice in one of its periods; a device-less engine plays exactly the last.
+		TEST_CASE("AudioEngine: two fader settings before a pull leave exactly the last")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle clip = RegisterToneClip(*engine, "00000000000000e4", MakeTone(1.0));
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Loop = true } });
+			REQUIRE(engine->FadeVoice(voice, 1.0f, 48000ull * 60).has_value());
+			REQUIRE(engine->FadeVoice(voice, 0.25f, 0).has_value());
+			const AudioLevels levels = PullLevels(*engine, 4800);
+			CHECK(levels.Peak <= 0.5f * 0.25f * 1.001f);
+			CHECK(levels.Peak > 0.5f * 0.25f * 0.9f);
+			CHECK(GetInfo(*engine, voice).FadeVolume == 0.25f);
+		}
+
+		// The W40.2 review's confirming case: a device-read voice switched as fast as the main thread can between a long fade to
+		// 1 and a hold at 0.25, ending on the hold, never mixes above 0.25 (a mixture of the two settings would apply 1).
+		TEST_CASE("AudioEngine: a device-read voice settles at the level of its last fader setting")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
+			REQUIRE(engine->GetTimeSource() == AudioTimeSource::Device);
+			Buffer bytes(static_cast<size_t>(4800) * sizeof(int16_t));
+			for (size_t frame = 0; frame < 4800; ++frame)
+			{
+				bytes[2 * frame] = std::byte{ 0x00 };
+				bytes[2 * frame + 1] = std::byte{ 0x40 }; // 16384, 0.5 of full scale (little-endian)
+			}
+			const Result<AudioClipHandle> clip = engine->RegisterClip(
+				{ .Name = "00000000000000f2", .Format = AudioClipFormat::Pcm16, .Bytes = CreateRef<const Buffer>(std::move(bytes)), .SampleRate = 48000, .ChannelCount = 1 });
+			REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = *clip, .Settings = { .Loop = true }, .Fade = { .From = 0.25f, .To = 0.25f } });
+			engine->StartCapture();
+			const uint64_t readBefore = GetDeviceReadFrames(*engine);
+			bool moved = true;
+			double now = 0.0;
+			const bool read = Test::WaitUntil([&engine, voice, readBefore, &moved, &now]()
+			{
+				for (int pass = 0; pass < 2000; ++pass)
+				{
+					moved = moved && engine->FadeVoice(voice, 1.0f, 48000ull * 60).has_value();
+					moved = moved && engine->FadeVoice(voice, 0.25f, 0).has_value();
+					if (pass % 100 == 0)
+					{
+						now += 0.001;
+						engine->Update(now, 0.001);
+					}
+				}
+				return GetDeviceReadFrames(*engine) > readBefore + 50 * 480;
+			});
+			const AudioCapture capture = engine->StopCapture();
+			CHECK(read);
+			CHECK(moved);
+			CHECK(capture.DevicePeak > 0.1f);
+			CHECK(capture.DevicePeak <= 0.125f * 1.001f);
+			REQUIRE(engine->StopVoice(voice).has_value());
+		}
+
+		// M40 (decision 11): a looping stream shorter than a page holds about two passes in its pages (miniaudio's page fill
+		// stops at a clip's second end); a chained voice's loop then starts again through the chain, as a voice of the loop
+		// alone does, rather than ending the voice.
+		TEST_CASE("AudioEngine: a chained voice keeps looping a streamed loop shorter than a page")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle intro = RegisterToneClip(*engine, "00000000000000e2", { .FrameCount = 2400 }, true);
+			const AudioClipHandle loop = RegisterToneClip(*engine, "00000000000000e3", MakeTone(0.1), true);
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = intro, .Settings = { .Loop = true }, .Next = loop });
+			PullFrames(*engine, 2400 + 5 * 4800);
+			REQUIRE(engine->IsVoiceAlive(voice));
+			CHECK(GetInfo(*engine, voice).InNext);
+			const AudioLevels levels = PullLevels(*engine, 4800);
+			CHECK(levels.Peak > 0.4f);
+			REQUIRE(engine->IsVoiceAlive(voice));
+		}
+
+		TEST_CASE("AudioEngine: a chained voice's clips share one format, its Next is registered and its Loop loops its Next")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle intro = RegisterToneClip(*engine, "00000000000000d1", { .FrameCount = 2400 });
+			const AudioClipHandle loop = RegisterToneClip(*engine, "00000000000000d2", { .FrameCount = 4800 });
+			const AudioClipHandle otherRate = RegisterToneClip(*engine, "00000000000000d3", { .SampleRate = 44100, .FrameCount = 4410 });
+			const AudioClipHandle stereo = RegisterToneClip(*engine, "00000000000000d4", { .ChannelCount = 2 });
+			const AudioClipHandle stale = RegisterToneClip(*engine, "00000000000000d5", {});
+			REQUIRE(engine->UnregisterClip(stale).has_value());
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = intro, .Next = otherRate })) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = intro, .Next = stereo })) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = intro, .Next = stale })) == ErrorCode::NotFound);
+			// The W40.2 review: a 16-bit PCM clip and a decoded file (32-bit float) never chain, either way round.
+			const Result<AudioClipHandle> pcm = engine->RegisterClip({ .Name = "00000000000000d6",
+				.Format = AudioClipFormat::Pcm16,
+				.Bytes = CreateRef<const Buffer>(Test::MakeTonePcm16Bytes({ .FrameCount = 2400 })),
+				.SampleRate = 48000,
+				.ChannelCount = 1 });
+			REQUIRE(pcm.has_value());
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = *pcm, .Next = loop })) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = intro, .Next = *pcm })) == ErrorCode::InvalidArgument);
+			CHECK(engine->GetVoices().empty());
+
+			// Played once: the intro, the loop once, then the end of the chain releases the voice.
+			const AudioVoiceHandle once = PlayTestVoice(*engine, { .Clip = intro, .Next = loop });
+			PullFrames(*engine, 2400 + 4700);
+			CHECK(engine->IsVoiceAlive(once));
+			const bool inLoop = GetInfo(*engine, once).InNext;
+			CHECK(inLoop);
+			PullFrames(*engine, 600);
+			CHECK_FALSE(engine->IsVoiceAlive(once));
+
+			// Looping: the head never loops but moves on to its Next, which loops until Loop is turned off.
+			const AudioVoiceHandle looping = PlayTestVoice(*engine, { .Clip = intro, .Settings = { .Loop = true }, .Next = loop });
+			PullFrames(*engine, 2400 + 3 * 4800 + 100);
+			const AudioVoiceInfo wrapped = GetInfo(*engine, looping);
+			CHECK(wrapped.InNext);
+			CHECK(wrapped.CursorFrames == 100);
+			REQUIRE(engine->SetVoiceSettings(looping, { .Loop = false }).has_value());
+			const AudioVoiceInfo once2 = GetInfo(*engine, looping);
+			CHECK_FALSE(once2.Settings.Loop);
+			PullFrames(*engine, 4800 + 480);
+			CHECK_FALSE(engine->IsVoiceAlive(looping));
 		}
 	}
 

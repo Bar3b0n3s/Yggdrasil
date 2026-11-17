@@ -1,0 +1,124 @@
+{
+	"Format": "Replay",
+	"Version": 4,
+	"Scene": {
+		"Handle": "93723fab79cf2242",
+		"Path": "Assets/Scenes/MusicA.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.6.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "2b5ee245f9ba82ac",
+				"Path": "/Listener",
+				"Hash": "650852f328c1df46",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Camera": "3cabece8bc28385f",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "9b5e6808650c74ef",
+				"Path": "/Door",
+				"Hash": "dde34e32a8f3b2cb",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "e843d7b852d82214"
+				}
+			},
+			{
+				"Id": "dabd61bbff2afdc7",
+				"Path": "/Conductor",
+				"Hash": "925133622a9f2ce9",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "ed56fd658a80944b"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "2042b3d68e4e129f",
+				"Path": "Assets/Scripts/Music/MusicDoor.luau",
+				"Type": "Script",
+				"Hash": "14a1f47ae83be03d"
+			},
+			{
+				"Handle": "5aa5c4d4fb459e6d",
+				"Path": "Assets/Scenes/MusicB.scene",
+				"Type": "Scene",
+				"Hash": "72b8223ae1a22076"
+			},
+			{
+				"Handle": "c0ad8c02802bdc7c",
+				"Path": "Assets/Audio/Music/LoopA.sfx",
+				"Type": "AudioClip",
+				"Hash": "526bcb1e9d834e67"
+			},
+			{
+				"Handle": "e4132d626a50d6f2",
+				"Path": "Assets/Scripts/Music/MusicConductor.luau",
+				"Type": "Script",
+				"Hash": "b910a05cd00e0af1"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 30,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Space"
+		},
+		{
+			"Tick": 31,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Space"
+		},
+		{
+			"Tick": 90,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "C"
+		},
+		{
+			"Tick": 91,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "C"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 20,
+			"Luau": "local music = Audio.GetMusic()\nreturn Scene.GetName() == \"MusicA\" and music ~= nil and music.Clip == Assets.Load(\"Assets/Audio/Music/LoopA.sfx\")"
+		},
+		{
+			"Tick": 60,
+			"Luau": "local music = Audio.GetMusic()\nreturn Scene.GetName() == \"MusicB\" and music ~= nil and music.Clip == Assets.Load(\"Assets/Audio/Music/LoopA.sfx\")"
+		},
+		{
+			"Tick": 150,
+			"Luau": "local music = Audio.GetMusic()\nreturn Scene.GetName() == \"MusicB\" and music ~= nil and music.Clip == Assets.Load(\"Assets/Audio/Music/LoopB.sfx\")"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "1841aa143956dace"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "1838a19db27fe20d"
+		}
+	],
+	"FinalTick": 160,
+	"FinalStateHash": "77580915e6cd8a44"
+}

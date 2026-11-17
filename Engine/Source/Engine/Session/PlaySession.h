@@ -41,6 +41,7 @@ namespace Engine {
 	class AssetManager;
 	class AudioEngine;
 	class AudioSystem;
+	class SessionMusic;
 	class Entity;
 	class Physics2DSystem;
 	class PhysicsSystem;
@@ -399,6 +400,15 @@ namespace Engine {
 	//     that pause a lockstep session and leave lockstep (play.pause, a lockstep owner's disconnect) call SetPaused(true)
 	//     first. Destroying the session is Stop: the AudioSystem releases every voice and restores the group volumes, and
 	//     only then does time go back.
+	//   - The session's music (M40, Docs/Decisions/0057-m40-music.md decision 5; Scene/SessionMusic.h). Activate makes it
+	//     in Play mode (GetMusic; none in Simulate mode, which runs no scripts), after the first AudioSystem, before the
+	//     startup callbacks; without an engine it records the scripts' requests and starts no voice (SessionMusic.h
+	//     "Without audio"). The session keeps it to its end: a Scene.Load or Scene.Reload replaces the AudioSystem but never
+	//     the music, so a track plays on across scenes (Audio.PlayMusic). Its voices are held from Activate to the first
+	//     AudioUpdate phase and while the session is paused and not in lockstep, in the order above, but never at a scene
+	//     transition (whose new AudioSystem is held to the next AudioUpdate) and never by the world pause. Each AudioUpdate
+	//     phase ends with its snapshot (SessionMusic::Update, after the pulls). Destroying the session releases the music's
+	//     voices first, then the AudioSystem's.
 	// Audio is not simulated state: it never reaches the state hash.
 	//
 	// World pause (M35, Docs/Decisions/0050-m35-pause-entity-state.md decisions 1 to 4). Distinct from the run state's
@@ -414,7 +424,8 @@ namespace Engine {
 	//     behaviour's tasks count the world's clock (ScriptFrameState::WorldHeldTicks);
 	//   - the world's presentation holds with its clock: render extraction's SimulationTime, the time of a MaterialParameters
 	//     scroll, is the rendered time of the world's clock (batch 1's landing of M31 with M35; ADR 0042's execution order);
-	//   - the AudioSystem holds the voices outside the Ui group when the pause's sounds choice is Pause (SetWorldPaused);
+	//   - the AudioSystem holds the voices of every group but Music and Ui (today the Sfx group's) when the pause's sounds
+	//     choice is Pause (SetWorldPaused; M40 decision 14: the Music and Ui groups and the session's music play on);
 	// and every other phase runs as before: the input, text, UI input, start flush, UI events, transform updates, destroy
 	// flushes and layouts, so a menu works, deterministically from latched input. The world's systems step on the world's
 	// clock (SimStep::FromTick(GetWorldTick(), ...)), which is the session's in every session that never paused. The pause,
@@ -566,6 +577,11 @@ namespace Engine {
 		[[nodiscard]] const AudioSystem* GetAudioSystem() const;
 		// M12: true while the session holds the audio engine's simulation time (see "Audio" above).
 		[[nodiscard]] bool IsAudioTimeOwned() const;
+		// M40 (Docs/Decisions/0057-m40-music.md decision 5): the session's music (see "Audio" above): null in Simulate mode and
+		// before Activate; a session without PlaySessionSpecification::Audio has one that records requests only. Valid for
+		// the session's lifetime once made.
+		[[nodiscard]] SessionMusic* GetMusic();
+		[[nodiscard]] const SessionMusic* GetMusic() const;
 
 		// --- Physics (M11; added by the M11 contract, Docs/Decisions/0014-m11-decisions.md decision 14) ------------------
 		// The session's PhysicsSystem (§9.2 to §9.6). Create makes it right after the scene loaded, from Project.Physics

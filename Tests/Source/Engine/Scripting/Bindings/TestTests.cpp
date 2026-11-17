@@ -897,7 +897,7 @@ return Test.GetStateHash()=="0000000000001234"
 		{
 			Test::ScriptTestFixture fixture;
 			REQUIRE(fixture.Start());
-			const std::array<std::string_view, 29> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "InjectMouseMove", "InjectScroll", "InjectText", "InjectSignal", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest", "GetPoseDigest", "GetParticleDigest", "SetSaveData" };
+			const std::array<std::string_view, 30> names{ "Suite", "Case", "Expect", "ExpectEqual", "ExpectNear", "Fail", "Skip", "WaitTicks", "WaitUntil", "ExpectScriptError", "CaptureAudio", "InjectAction", "InjectKey", "InjectMouse", "InjectGamepad", "InjectMouseMove", "InjectScroll", "InjectText", "InjectSignal", "Screenshot", "ReloadScript", "GetStateHash", "GetLastExtraction", "GetExtractedPosition", "GetScriptErrors", "GetAudioClipDigest", "GetPoseDigest", "GetParticleDigest", "SetSaveData", "GetMusic" };
 			const auto modules = fixture.GetApi().GetModules();
 			const auto found = std::find_if(modules.begin(), modules.end(), [](const auto& group)
 			{

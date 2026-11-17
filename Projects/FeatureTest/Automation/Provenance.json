@@ -19,6 +19,70 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Audio/Music/IntroA.sfx",
+			"XXH64": "c09669ec3249b131",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Audio/Music/IntroA.sfx.meta",
+			"XXH64": "f10d6614cfd38557",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Audio/Music/LoopA.sfx",
+			"XXH64": "6eb3d02de9c45f31",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Audio/Music/LoopA.sfx.meta",
+			"XXH64": "ee73256d2ebdfd2f",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Audio/Music/LoopB.sfx",
+			"XXH64": "34ca3af475248e61",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Audio/Music/LoopB.sfx.meta",
+			"XXH64": "8da00b1d7762566f",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Audio/Music/Tone.flac",
+			"XXH64": "11942a8e44a1fda5",
+			"Method": "asset.import",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Audio/Music/Tone.flac.meta",
+			"XXH64": "c9015ebef7d08bdc",
+			"Method": "asset.import",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Environments/Uncompressed/Gradient.exr",
 			"XXH64": "628d1e477b8ad8d2",
 			"Method": "asset.import",
@@ -3827,6 +3891,38 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/MusicA.scene",
+			"XXH64": "8a72e99c7439476c",
+			"Method": "scene.save",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/MusicA.scene.meta",
+			"XXH64": "7251be1986c4e3d1",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/MusicB.scene",
+			"XXH64": "ec1351b3a50c2e33",
+			"Method": "scene.save",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/MusicB.scene.meta",
+			"XXH64": "69b5f0ab2ec99cf1",
+			"Method": "edit.batch",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Navigation.scene",
 			"XXH64": "6b47e7087f6688a8",
 			"Method": "scene.save",
@@ -4797,6 +4893,38 @@
 		{
 			"Path": "Assets/Scripts/MultiScript/Trail.luau.meta",
 			"XXH64": "292f9416f0e3024e",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Music/MusicConductor.luau",
+			"XXH64": "fb728314dce1ad6b",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Music/MusicConductor.luau.meta",
+			"XXH64": "feecf3e5e4252278",
+			"Method": "script.write",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Music/MusicDoor.luau",
+			"XXH64": "fe946484585e60fb",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Music/MusicDoor.luau.meta",
+			"XXH64": "63ebfac094b94eaf",
 			"Method": "script.write",
 			"RequestId": 6,
 			"Client": "batch",
@@ -6755,6 +6883,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Music/Music.test.luau",
+			"XXH64": "f3cff6e84b1c4d67",
+			"Method": "script.write",
+			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Music/Music.test.luau.meta",
+			"XXH64": "93ee6d8830d13307",
+			"Method": "script.write",
+			"RequestId": 14,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Navigation/Navigation.test.luau",
 			"XXH64": "5df07e565594649d",
 			"Method": "script.write",
@@ -7135,6 +7279,22 @@
 			"XXH64": "92ad845eeabeac46",
 			"Method": "input.record",
 			"RequestId": 19,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Music.replay",
+			"XXH64": "86a1c32aea3a3332",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Music.replay.meta",
+			"XXH64": "15b0438c1aa06a9f",
+			"Method": "input.record",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -8068,7 +8228,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "f65587b93eee71c1",
+			"XXH64": "705563c4c9f63368",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

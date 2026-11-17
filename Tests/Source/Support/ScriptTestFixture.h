@@ -124,6 +124,8 @@ namespace Engine {
 					m_Engine->SetLocale(std::string(locale));
 				return {};
 			}
+			// M40 (Docs/Decisions/0057-m40-music.md decision 5): the music the Audio module's music calls drive.
+			[[nodiscard]] SessionMusic* GetMusic() override { return Music; }
 
 			ScriptFrameState Frame{};
 			std::optional<bool> WorldPaused{};          // M35: the recorded world pause; nullopt for a host without a world
@@ -143,6 +145,9 @@ namespace Engine {
 			// M30 (decision 11): the navigation the Navigation module queries (IScriptHost::GetNavigation); null as in an edit
 			// evaluation, where every query finds nothing.
 			NavigationWorld* Navigation = nullptr;
+			// M40 (decision 5): the music Audio.PlayMusic, StopMusic, GetMusic and Test.GetMusic drive
+			// (IScriptHost::GetMusic); null as in an edit evaluation, where they raise "audio is unavailable".
+			SessionMusic* Music = nullptr;
 			Json Parameters = Json::object();
 			std::map<std::string, ScriptActionState> Actions{};
 			CursorMode Cursor = CursorMode::Normal;

@@ -563,6 +563,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Music.jsonl",
+			"IdSeed": 3701,
+			"Renderer": "none"
+		},
+		{
+			"File": "MusicReplay.jsonl",
+			"IdSeed": 3702,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

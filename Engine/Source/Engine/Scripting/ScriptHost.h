@@ -30,12 +30,15 @@ namespace Engine {
 	class PhysicsSystem;
 	class Random;
 	class Scene;
+	class SessionMusic;
 	class TypeRegistry;
 	class UiSystem;
 
 	// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): what a world pause does to the world's playing voices
-	// (Time.PauseWorld's `sounds`, play.setWorldPaused's): Pause holds every voice outside the Ui group until the world
-	// resumes, Finish lets them play on to their end; the Ui group's voices play on either way.
+	// (Time.PauseWorld's `sounds`, play.setWorldPaused's): Pause holds the voices of every group but Music and Ui (with
+	// today's groups, the Sfx group's) until the world resumes, Finish lets them play on to their end; the Music and Ui
+	// groups' voices play on either way (M40, Docs/Decisions/0057-m40-music.md decision 14, amending ADR 0050 decision 3:
+	// music and stingers sound under a pause menu).
 	enum class WorldPauseSounds : uint8_t
 	{
 		Pause,
@@ -239,6 +242,12 @@ namespace Engine {
 		{
 			return MakeError(ErrorCode::Unsupported, "this host has no session locale: Loc.SetLocale works in a play session");
 		}
+		// M40 (Docs/Decisions/0057-m40-music.md decision 5): the play session's music (Scene/SessionMusic.h), which
+		// Audio.PlayMusic, Audio.StopMusic, Audio.GetMusic and Test.GetMusic drive. A play session's host returns
+		// PlaySession::GetMusic (null in Simulate, which runs no scripts; a session without an audio engine has one that
+		// records requests only), and every other host (the edit evaluation, test fixtures without a session) keeps the
+		// default, null, for which those calls raise "audio is unavailable".
+		[[nodiscard]] virtual SessionMusic* GetMusic() { return nullptr; }
 	private:
 		static constexpr std::string_view NoSaveDataReason = "this host has no save data: SaveData works in a play session";
 	};

@@ -1,0 +1,93 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "MusicB",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"AudioListener": 1,
+		"Script": 2
+	},
+	"Entities": [
+		{
+			"ID": "f6d6c1d2cb595900",
+			"Name": "Listener",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "c58e3529b7bbe768",
+			"Name": "Conductor",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "e4132d626a50d6f2",
+							"Fields": {
+								"FadeSeconds": 0.5,
+								"Track": "c0ad8c02802bdc7c"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "b036ff12894bdc7c",
+			"Name": "Door",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "2042b3d68e4e129f",
+							"Fields": {
+								"Key": "C",
+								"Track": "bbe0e95273ff95f7"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		}
+	]
+}

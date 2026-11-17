@@ -99,6 +99,18 @@ namespace Engine {
 				return node;
 			}
 
+			// M40: a chained voice reading `head`, which links to the section that follows (AudioEngine.h "Chained voices").
+			[[nodiscard]] static Result<SoundNode> CreateChainedSound(ma_engine& engine, ma_resource_manager_data_source& head, const std::string& name,
+				ma_uint32 flags, ma_sound_group& group)
+			{
+				Scope<ma_sound> sound = CreateScope<ma_sound>();
+				if (const ma_result result = ma_sound_init_from_data_source(&engine, &head, flags, &group, sound.get()); result != MA_SUCCESS)
+					return std::unexpected(MakeMiniaudioError(result, std::format("cannot start a chained voice of the audio clip '{}'", name)));
+				SoundNode node;
+				node.m_Sound = std::move(sound);
+				return node;
+			}
+
 			// A group under `parent` (the engine's endpoint when null): never spatialized or pitched, since the voices are.
 			[[nodiscard]] static Result<SoundNode> CreateGroup(ma_engine& engine, ma_sound_group* parent, std::string_view name)
 			{
@@ -123,6 +135,60 @@ namespace Engine {
 			Scope<ma_sound> m_Sound;
 		};
 
+		// A resource-manager data source of a registered clip: one section of a chained voice (AudioEngine.h "Chained
+		// voices"), uninitialized on destruction. The miniaudio object lives on the heap, so the chain's link and the sound's
+		// reference to it survive moves of the owner. Movable, not copyable.
+		class SectionSource
+		{
+		public:
+			SectionSource() = default;
+			~SectionSource() { Reset(); }
+
+			SectionSource(SectionSource&& other) noexcept = default;
+			SectionSource& operator=(SectionSource&& other) noexcept
+			{
+				if (this != &other)
+				{
+					Reset();
+					m_Source = std::move(other.m_Source);
+				}
+				return *this;
+			}
+			SectionSource(const SectionSource&) = delete;
+			SectionSource& operator=(const SectionSource&) = delete;
+
+			// The registered resource `name`: its decoded data, or its stream through the AudioVfs, initialized before this
+			// returns (MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_WAIT_INIT, which ma_sound_init_from_file forces too), looping from
+			// its start when `looping` (a stream decodes its first pages at its initialization, with the looping it has then).
+			[[nodiscard]] static Result<SectionSource> Create(ma_resource_manager& resources, const std::string& name, bool streamed, bool looping)
+			{
+				Scope<ma_resource_manager_data_source> source = CreateScope<ma_resource_manager_data_source>();
+				ma_uint32 flags = (streamed ? MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_STREAM : MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_DECODE)
+					| MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_WAIT_INIT;
+				if (looping)
+					flags |= MA_RESOURCE_MANAGER_DATA_SOURCE_FLAG_LOOPING;
+				if (const ma_result result = ma_resource_manager_data_source_init(&resources, name.c_str(), flags, nullptr, source.get()); result != MA_SUCCESS)
+					return std::unexpected(MakeMiniaudioError(result, std::format("cannot open the audio clip '{}'", name)));
+				SectionSource section;
+				section.m_Source = std::move(source);
+				return section;
+			}
+
+			void Reset()
+			{
+				if (m_Source != nullptr)
+				{
+					if (const ma_result result = ma_resource_manager_data_source_uninit(m_Source.get()); result != MA_SUCCESS)
+						ENGINE_CORE_WARN("Closing a section of a chained audio voice failed: {}", DescribeMiniaudioResult(result));
+				}
+				m_Source.reset();
+			}
+
+			[[nodiscard]] ma_resource_manager_data_source* Get() const { return m_Source.get(); }
+		private:
+			Scope<ma_resource_manager_data_source> m_Source;
+		};
+
 		// A device notification waiting for Update.
 		struct QueuedNotification
 		{
@@ -142,6 +208,9 @@ namespace Engine {
 			std::atomic<bool> ExpectingStop{ false };
 			std::atomic<uint64_t> ReadFrames{ 0 };
 			std::atomic<uint64_t> SilentFrames{ 0 };
+			// M40: while capturing, the largest absolute sample the callback read from the engine (AudioCapture::DevicePeak).
+			std::atomic<bool> MeasuringPeak{ false };
+			std::atomic<float> DevicePeak{ 0.0f };
 			std::mutex QueueMutex; // guards Queue
 			std::vector<QueuedNotification> Queue;
 		};
@@ -173,7 +242,17 @@ namespace Engine {
 				// The node graph silences whatever it does not fill; a failed read is played as silence.
 				if (ma_engine_read_pcm_frames(shared.Mixer, frames, frameCount, nullptr) == MA_SUCCESS)
 				{
-					ReplaceNonFiniteSamples(std::span<float>(frames, static_cast<size_t>(frameCount) * AudioChannelCount));
+					const std::span<float> samples(frames, static_cast<size_t>(frameCount) * AudioChannelCount);
+					ReplaceNonFiniteSamples(samples);
+					if (shared.MeasuringPeak.load(std::memory_order_relaxed))
+					{
+						float peak = 0.0f;
+						for (const float sample : samples)
+							peak = std::max(peak, std::abs(sample));
+						// The main thread resets and reads the peak only while it holds ReadMutex, as this read does.
+						if (peak > shared.DevicePeak.load(std::memory_order_relaxed))
+							shared.DevicePeak.store(peak, std::memory_order_relaxed);
+					}
 					shared.ReadFrames.fetch_add(frameCount, std::memory_order_relaxed);
 					return;
 				}
@@ -278,6 +357,90 @@ namespace Engine {
 			return {};
 		}
 
+		// M40 (AudioEngine.h "Fades"): a fade's frames fit miniaudio's 32-bit fader length.
+		static Status ValidateFadeFrames(uint64_t frames)
+		{
+			if (frames > AudioEngine::MaxFadeFrames)
+				return MakeError(ErrorCode::InvalidArgument, "a fade lasts at most {} frames (got {})", AudioEngine::MaxFadeFrames, frames);
+			return {};
+		}
+
+		static Status ValidateFade(const AudioVoiceFade& fade)
+		{
+			ENGINE_TRY(ValidateVolume(fade.From, "fade's starting level"));
+			ENGINE_TRY(ValidateVolume(fade.To, "fade's target level"));
+			return ValidateFadeFrames(fade.Frames);
+		}
+
+		// M40: a chained voice's sections share one sample rate and channel count (AudioEngine.h "Chained voices").
+		static Status CheckChainFormats(ma_resource_manager_data_source& head, const std::string& headName, ma_resource_manager_data_source& next,
+			const std::string& nextName)
+		{
+			ma_format headFormat = ma_format_unknown;
+			ma_format nextFormat = ma_format_unknown;
+			ma_uint32 headChannels = 0;
+			ma_uint32 headRate = 0;
+			ma_uint32 nextChannels = 0;
+			ma_uint32 nextRate = 0;
+			if (const ma_result result = ma_resource_manager_data_source_get_data_format(&head, &headFormat, &headChannels, &headRate, nullptr, 0); result != MA_SUCCESS)
+				return std::unexpected(MakeMiniaudioError(result, std::format("cannot read the format of the audio clip '{}'", headName)));
+			if (const ma_result result = ma_resource_manager_data_source_get_data_format(&next, &nextFormat, &nextChannels, &nextRate, nullptr, 0); result != MA_SUCCESS)
+				return std::unexpected(MakeMiniaudioError(result, std::format("cannot read the format of the audio clip '{}'", nextName)));
+			// miniaudio reads a chain in its head's format and frame size, so the sections share all three (the W40.2 review).
+			if (headChannels != nextChannels || headRate != nextRate || headFormat != nextFormat)
+			{
+				return std::unexpected(Error(ErrorCode::InvalidArgument,
+					std::format("the audio clip '{}' ({} Hz, {} channel(s), {}) cannot be followed by '{}' ({} Hz, {} channel(s), {}): a chained voice's "
+								"clips share one sample rate, channel count and sample format",
+						headName, headRate, headChannels, ma_get_format_name(headFormat), nextName, nextRate, nextChannels, ma_get_format_name(nextFormat)))
+						.WithHint("chain two sound effects (16-bit PCM) or two imported files (decoded to 32-bit float), never one of each"));
+			}
+			return {};
+		}
+
+		// M40: what a chained voice's Next section reads after its own end (ma_data_source_set_next_callback; on the thread that
+		// mixes, inside the read): itself while it loops, which the chain then seeks to its first frame, so a looping stream
+		// whose decoded pages run out starts again as a looping voice of one clip does (AudioEngine.h "Voices"). Null, which
+		// ends the chain, when it does not loop or read nothing since its start (an empty section, a stream whose decoding
+		// fails), so the chain never spins on a section that yields no frames.
+		static ma_data_source* GetLoopingSection(ma_data_source* section)
+		{
+			if (!ma_data_source_is_looping(section))
+				return nullptr;
+			ma_uint64 cursor = 0;
+			if (ma_data_source_get_cursor_in_pcm_frames(section, &cursor) != MA_SUCCESS || cursor == 0)
+				return nullptr;
+			return section;
+		}
+
+		// A data source's cursor and length in its own frames; 0 when miniaudio cannot tell.
+		static uint64_t GetSourceCursor(ma_resource_manager_data_source* source)
+		{
+			ma_uint64 cursor = 0;
+			if (ma_resource_manager_data_source_get_cursor_in_pcm_frames(source, &cursor) != MA_SUCCESS)
+				return 0;
+			return cursor;
+		}
+
+		static uint64_t GetSourceLength(ma_resource_manager_data_source* source)
+		{
+			ma_uint64 length = 0;
+			if (ma_resource_manager_data_source_get_length_in_pcm_frames(source, &length) != MA_SUCCESS)
+				return 0;
+			return length;
+		}
+
+		// A position `cursor` frames into a source of `length` frames, less the `cached` frames read ahead and not mixed yet,
+		// modulo the length when the read-ahead crossed a loop's wrap (0 for an unknown length).
+		static uint64_t UnwindReadAhead(uint64_t cursor, uint64_t cached, uint64_t length)
+		{
+			if (cached <= cursor)
+				return cursor - cached;
+			if (length == 0)
+				return 0;
+			return (cursor + length - cached % length) % length;
+		}
+
 		static Status ValidateTransform(const AudioVoiceTransform& transform)
 		{
 			if (!IsFinite(transform.Position) || !IsFinite(transform.Direction) || !IsFinite(transform.Velocity))
@@ -353,6 +516,11 @@ namespace Engine {
 	{
 		// Declared before Sound, so the sound is uninitialized (and stops reading) before its data can go.
 		Ref<const AudioClipPayload> Payload{};
+		// M40 (AudioEngine.h "Chained voices"): a chained voice's Next clip data and its two sections, read by Sound (empty for
+		// a voice without Next), declared before Sound for the same reason.
+		Ref<const AudioClipPayload> NextPayload{};
+		SectionSource HeadSection{};
+		SectionSource NextSection{};
 		SoundNode Sound{};
 		AudioClipHandle Clip{};
 		std::string ClipName{};
@@ -364,6 +532,30 @@ namespace Engine {
 		uint64_t StartSequence = 0;
 		bool Paused = false;
 		bool Streamed = false;
+		// M40 (AudioEngine.h "Fades"): the voice's level while no fade is in progress, held by the fader (off for 1), and
+		// where that hold was armed on the voice's clock (State::GetMixedFrames; re-armed before the fader's cursor runs out);
+		// and the fade in progress (Fading): its levels and length, where it began and what its end does.
+		float Level = 1.0f;
+		uint64_t HeldSince = 0;
+		// M40 (the W40.2 review): the fader setting the voice's record wants and has not yet handed to miniaudio. It is handed
+		// over at most once per Pull and per Update (State::FlushFaders), the last setting winning, so the mixing thread never
+		// takes two settings of one voice within one of its periods (miniaudio's hand-off is four separate atomics).
+		bool FaderPending = false;
+		float PendingFrom = 1.0f;
+		float PendingTo = 1.0f;
+		uint64_t PendingFrames = 0;
+		bool Fading = false;
+		float FadeFrom = 1.0f;
+		float FadeTo = 1.0f;
+		uint64_t FadeFrames = 0;
+		uint64_t FadeStart = 0;
+		AudioFadeEnd FadeEnd = AudioFadeEnd::Hold;
+		// M40 (AudioEngine.h "Chained voices"): the clip that follows, and whether the mixer has played past the head (seen at
+		// the end of a pull: the head's tail no longer in the read-ahead), after which read-ahead frames that wrap belong to the
+		// Next section's loop.
+		AudioClipHandle NextClip{};
+		std::string NextClipName{};
+		bool NextReached = false;
 	};
 
 	struct AudioEngine::State
@@ -446,10 +638,30 @@ namespace Engine {
 		void ProcessJobs();
 		void Pull(uint64_t frames, std::span<float> destination);
 		void AppendCapture(std::span<const float> samples);
+		// M40: ends the fades that completed (AudioEngine.h "Fades"): a Hold fade holds its target on the fader, a Release fade's
+		// voice is released.
+		void CompleteFades();
+		// M40: marks the chained voices whose mixer has played past their head (AudioVoice::NextReached); only while nothing
+		// else mixes, after the engine's own pulls.
+		void TrackSections();
 		void ReleaseFinishedVoices();
 		[[nodiscard]] Ref<const AudioClipPayload> FindResidentPayload(std::string_view resourceName);
 		[[nodiscard]] Status ApplyGroup(ma_sound& sound, AudioGroup group);
-		static void ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings);
+		// The voice's settings (its level is the fader's, never its volume's: AudioEngine.h "Fades"), its Loop on
+		// `nextSection` for a chained voice.
+		static void ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, ma_resource_manager_data_source* nextSection);
+		// M40: the frames the mixer has output of the voice (its node's clock, which a paused voice holds), and the level its
+		// fade has reached after `mixed` of them, computed as miniaudio's fader computes it (ma_fader_get_current_volume).
+		[[nodiscard]] static uint64_t GetMixedFrames(const AudioVoice& voice);
+		[[nodiscard]] static float GetLevel(const AudioVoice& voice, uint64_t mixed);
+		// M40: starts the fade of `voice` from `from` to `to` over `frames` (0: holds `to` at once).
+		static void BeginFade(AudioVoice& voice, float from, float to, uint64_t frames, AudioFadeEnd end);
+		// M40: holds `voice` at `level` on its fader (the fader off for 1), from the voice's next mixed frame.
+		static void HoldLevel(AudioVoice& voice, float level);
+		// M40: hands the voice's pending fader setting to miniaudio (applied at its next mixed frame), and the start of what it
+		// sets (FadeStart or HeldSince) to that frame; FlushFaders does so for every voice.
+		static void FlushFader(AudioVoice& voice);
+		void FlushFaders();
 		static void ApplyTransform(ma_sound& sound, const AudioVoiceTransform& transform);
 		// The voice's effective Doppler factor (GetEffectiveDopplerFactor) for its settings, its velocity and the listener's.
 		void ApplyDoppler(ma_sound& sound, const AudioVoiceSettings& settings, const AudioVoiceTransform& transform);
@@ -457,6 +669,14 @@ namespace Engine {
 		[[nodiscard]] AudioTimeSource GetTimeSource() const;
 		[[nodiscard]] uint64_t GetCursor(const AudioVoice& voice) const;
 		[[nodiscard]] static uint64_t GetLength(const AudioVoice& voice);
+		// M40: the section a chained voice plays (AudioEngine.h "Chained voices"), its cursor and its length.
+		struct Section
+		{
+			bool InNext = false;
+			uint64_t Cursor = 0;
+			uint64_t Length = 0;
+		};
+		[[nodiscard]] Section GetSection(const AudioVoice& voice) const;
 	};
 
 	AudioEngine::State::~State()
@@ -720,6 +940,7 @@ namespace Engine {
 	void AudioEngine::State::Pull(uint64_t frames, std::span<float> destination)
 	{
 		ENGINE_CORE_ASSERT(destination.empty() || destination.size() == frames * AudioChannelCount, "Pull destination of the wrong size");
+		FlushFaders();
 		{
 			const std::lock_guard lock(Shared.ReadMutex);
 			uint64_t done = 0;
@@ -757,6 +978,8 @@ namespace Engine {
 				done += chunk;
 			}
 		}
+		TrackSections();
+		CompleteFades();
 		ReleaseFinishedVoices();
 	}
 
@@ -769,6 +992,49 @@ namespace Engine {
 		Capture.Samples.insert(Capture.Samples.end(), samples.begin(), samples.begin() + static_cast<std::ptrdiff_t>(kept * AudioChannelCount));
 		if (kept < frames)
 			Capture.Truncated = true;
+	}
+
+	void AudioEngine::State::TrackSections()
+	{
+		Voices.ForEach([](AudioVoiceHandle /*handle*/, AudioVoice& voice)
+		{
+			ma_resource_manager_data_source* next = voice.NextSection.Get();
+			if (next == nullptr || voice.NextReached)
+				return;
+			if (ma_data_source_get_current(voice.HeadSection.Get()) == next && Utils::GetSourceCursor(next) >= voice.Sound.Get()->processingCacheFramesRemaining)
+				voice.NextReached = true;
+		});
+	}
+
+	void AudioEngine::State::CompleteFades()
+	{
+		std::vector<AudioVoiceHandle> released;
+		Voices.ForEach([&released](AudioVoiceHandle handle, AudioVoice& voice)
+		{
+			const uint64_t mixed = GetMixedFrames(voice);
+			if (!voice.Fading)
+			{
+				// A held level stays on the fader, whose 32-bit cursor would end its hold after 2^32 frames: re-armed at the
+				// same level well before (glitch-free, the level unchanged).
+				if (voice.Level != 1.0f && mixed - voice.HeldSince >= AudioEngine::MaxFadeFrames)
+					HoldLevel(voice, voice.Level);
+				return;
+			}
+			if (mixed < voice.FadeStart || mixed - voice.FadeStart < voice.FadeFrames)
+				return;
+			if (voice.FadeEnd == AudioFadeEnd::Release)
+			{
+				released.push_back(handle);
+				return;
+			}
+			// Held at the target, on the fader re-armed from its start, so the level never moves to the volume.
+			HoldLevel(voice, voice.FadeTo);
+		});
+		for (const AudioVoiceHandle handle : released)
+		{
+			[[maybe_unused]] const Status destroyed = Voices.Destroy(handle);
+			ENGINE_CORE_ASSERT(destroyed.has_value(), "A faded audio voice was not alive");
+		}
 	}
 
 	void AudioEngine::State::ReleaseFinishedVoices()
@@ -806,12 +1072,19 @@ namespace Engine {
 		return {};
 	}
 
-	void AudioEngine::State::ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings)
+	void AudioEngine::State::ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, ma_resource_manager_data_source* nextSection)
 	{
+		// A chained voice reads its sections in turn only while its head does not loop: Loop belongs to the section that
+		// follows (AudioEngine.h "Chained voices"). Setting a data source's looping fails only for a null source.
+		if (nextSection != nullptr)
+		{
+			[[maybe_unused]] const ma_result looped = ma_resource_manager_data_source_set_looping(nextSection, settings.Loop ? MA_TRUE : MA_FALSE);
+			ENGINE_CORE_VERIFY(looped == MA_SUCCESS, "Setting the looping of a chained voice's section failed");
+		}
 		const AudioSpatialization& spatialization = settings.Spatialization;
 		ma_sound_set_volume(&sound, settings.Volume);
 		ma_sound_set_pitch(&sound, std::min(settings.Pitch, MaxEffectivePitch));
-		ma_sound_set_looping(&sound, settings.Loop ? MA_TRUE : MA_FALSE);
+		ma_sound_set_looping(&sound, settings.Loop && nextSection == nullptr ? MA_TRUE : MA_FALSE);
 		ma_sound_set_spatialization_enabled(&sound, settings.Spatial ? MA_TRUE : MA_FALSE);
 		// Attenuation::None keeps a spatial voice positioned (panned and Doppler-shifted) without a distance falloff: the
 		// inverse model (ToMiniaudioAttenuation) with no rolloff, whose gain is 1 at every distance.
@@ -898,6 +1171,110 @@ namespace Engine {
 		if (ma_sound_get_length_in_pcm_frames(voice.Sound.Get(), &length) != MA_SUCCESS)
 			return 0;
 		return length;
+	}
+
+	AudioEngine::State::Section AudioEngine::State::GetSection(const AudioVoice& voice) const
+	{
+		ma_resource_manager_data_source* head = voice.HeadSection.Get();
+		ma_resource_manager_data_source* next = voice.NextSection.Get();
+		const bool nextPlays = ma_data_source_get_current(head) == next;
+		const uint64_t headLength = Utils::GetSourceLength(head);
+		const uint64_t nextLength = Utils::GetSourceLength(next);
+		const uint64_t headCursor = Utils::GetSourceCursor(head);
+		const uint64_t nextCursor = Utils::GetSourceCursor(next);
+		// As GetCursor: the read-ahead count is a plain field the mixing thread writes, read only while nothing else mixes.
+		const bool deviceMayRead = DeviceInitialized && !Shared.SimulationOwned.load();
+		if (deviceMayRead)
+			return nextPlays ? Section{ .InNext = true, .Cursor = nextCursor, .Length = nextLength } : Section{ .InNext = false, .Cursor = headCursor, .Length = headLength };
+		const uint64_t cached = voice.Sound.Get()->processingCacheFramesRemaining;
+		if (!nextPlays)
+			return Section{ .InNext = false, .Cursor = headCursor >= cached ? headCursor - cached : 0, .Length = headLength };
+		if (voice.NextReached || nextCursor >= cached)
+			return Section{ .InNext = true, .Cursor = Utils::UnwindReadAhead(nextCursor, cached, nextLength), .Length = nextLength };
+		// The read-ahead holds the head's last frames, which the mixer has still to play.
+		const uint64_t tail = cached - nextCursor;
+		return Section{ .InNext = false, .Cursor = headLength >= tail ? headLength - tail : 0, .Length = headLength };
+	}
+
+	uint64_t AudioEngine::State::GetMixedFrames(const AudioVoice& voice)
+	{
+		// An atomic counter the mixing thread advances by the frames it outputs of the node, so it is read from the main
+		// thread whoever mixes (AudioEngine.h "Fades").
+		return ma_node_get_time(voice.Sound.Get());
+	}
+
+	float AudioEngine::State::GetLevel(const AudioVoice& voice, uint64_t mixed)
+	{
+		if (!voice.Fading)
+			return voice.Level;
+		const uint64_t progress = mixed > voice.FadeStart ? mixed - voice.FadeStart : 0;
+		if (progress == 0)
+			return voice.FadeFrom;
+		if (progress >= voice.FadeFrames)
+			return voice.FadeTo;
+		// ma_fader_get_current_volume's interpolation: both counts fit 32 bits (MaxFadeFrames), and the mix is x + (y - x) * a.
+		const float fraction = static_cast<float>(static_cast<uint32_t>(progress)) / static_cast<float>(static_cast<uint32_t>(voice.FadeFrames));
+		const float span = voice.FadeTo - voice.FadeFrom;
+		const float step = span * fraction;
+		return voice.FadeFrom + step;
+	}
+
+	void AudioEngine::State::BeginFade(AudioVoice& voice, float from, float to, uint64_t frames, AudioFadeEnd end)
+	{
+		if (frames == 0)
+		{
+			HoldLevel(voice, to);
+			return;
+		}
+		// Only the fader changes, in one setting handed over at the next flush and applied at the voice's next mixed frame, so
+		// its first frame is the fade's frame 0 on the voice's clock (GetMixedFrames; AudioEngine.h "Fades").
+		voice.Fading = true;
+		voice.FadeFrom = from;
+		voice.FadeTo = to;
+		voice.FadeFrames = frames;
+		voice.FadeStart = GetMixedFrames(voice);
+		voice.FadeEnd = end;
+		voice.FaderPending = true;
+		voice.PendingFrom = from;
+		voice.PendingTo = to;
+		voice.PendingFrames = frames;
+	}
+
+	void AudioEngine::State::FlushFader(AudioVoice& voice)
+	{
+		if (!voice.FaderPending)
+			return;
+		voice.FaderPending = false;
+		ma_sound_set_fade_in_pcm_frames(voice.Sound.Get(), voice.PendingFrom, voice.PendingTo, voice.PendingFrames);
+		const uint64_t mixed = GetMixedFrames(voice);
+		if (voice.Fading)
+			voice.FadeStart = mixed;
+		else
+			voice.HeldSince = mixed;
+	}
+
+	void AudioEngine::State::FlushFaders()
+	{
+		Voices.ForEach([](AudioVoiceHandle /*handle*/, AudioVoice& voice)
+		{
+			FlushFader(voice);
+		});
+	}
+
+	void AudioEngine::State::HoldLevel(AudioVoice& voice, float level)
+	{
+		// A fader from 1 to 1 is off (the voice mixes as one that never faded); any other level is a fader from the level to
+		// itself, whose cursor starts again here.
+		const bool touched = voice.Fading || voice.Level != 1.0f || level != 1.0f;
+		voice.Fading = false;
+		voice.Level = level;
+		voice.HeldSince = GetMixedFrames(voice);
+		if (!touched)
+			return;
+		voice.FaderPending = true;
+		voice.PendingFrom = level;
+		voice.PendingTo = level;
+		voice.PendingFrames = 0;
 	}
 
 	AudioEngine::AudioEngine(ConstructionKey /*key*/)
@@ -1044,8 +1421,16 @@ namespace Engine {
 		const AudioClipRecord* clip = state.Clips.TryGet(description.Clip);
 		if (clip == nullptr)
 			return MakeError(ErrorCode::NotFound, "the audio clip {:#x} is not registered", description.Clip.GetValue());
+		const AudioClipRecord* next = nullptr;
+		if (!description.Next.IsNull())
+		{
+			next = state.Clips.TryGet(description.Next);
+			if (next == nullptr)
+				return MakeError(ErrorCode::NotFound, "the audio clip {:#x} that follows is not registered", description.Next.GetValue());
+		}
 		ENGINE_TRY(Utils::ValidateSettings(description.Settings));
 		ENGINE_TRY(Utils::ValidateTransform(description.Transform));
+		ENGINE_TRY(Utils::ValidateFade(description.Fade));
 
 		std::optional<AudioVoiceHandle> victim;
 		if (state.Voices.GetSize() >= MaxAudioVoices)
@@ -1058,17 +1443,63 @@ namespace Engine {
 					description.Priority, lowest);
 		}
 
-		ma_uint32 flags = clip->Streamed ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
-		if (!description.Settings.Spatial)
-			flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
+		const ma_uint32 spatialFlags = description.Settings.Spatial ? 0 : MA_SOUND_FLAG_NO_SPATIALIZATION;
 		ma_sound_group& group = *state.Groups[std::to_underlying(description.Settings.Group)].Get();
-		ENGINE_TRY_ASSIGN(SoundNode sound, SoundNode::CreateSound(state.Mixer, clip->ResourceName, flags, group));
-		State::ApplySettings(*sound.Get(), description.Settings);
-		State::ApplyTransform(*sound.Get(), description.Transform);
-		state.ApplyDoppler(*sound.Get(), description.Settings, description.Transform);
+		SectionSource headSection;
+		SectionSource nextSection;
+		SoundNode sound;
+		if (next == nullptr)
+		{
+			// A looping voice is created looping: a stream decodes its first two pages when it opens, with the looping it has
+			// then, so its second page holds its wrap instead of its end (the W40.2 review: without, the first wrap seeks).
+			const ma_uint32 loopFlag = description.Settings.Loop ? MA_SOUND_FLAG_LOOPING : 0;
+			const ma_uint32 flags = (clip->Streamed ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE) | spatialFlags | loopFlag;
+			ENGINE_TRY_ASSIGN(sound, SoundNode::CreateSound(state.Mixer, clip->ResourceName, flags, group));
+		}
+		else
+		{
+			// M40 (AudioEngine.h "Chained voices"): the head's data source links to the next one's, and the sound reads the head.
+			ENGINE_TRY_ASSIGN(headSection, SectionSource::Create(state.Resources, clip->ResourceName, clip->Streamed, false));
+			ENGINE_TRY_ASSIGN(nextSection, SectionSource::Create(state.Resources, next->ResourceName, next->Streamed, description.Settings.Loop));
+			ENGINE_TRY(Utils::CheckChainFormats(*headSection.Get(), clip->ResourceName, *nextSection.Get(), next->ResourceName));
+			if (const ma_result result = ma_data_source_set_next(headSection.Get(), nextSection.Get()); result != MA_SUCCESS)
+				return std::unexpected(MakeMiniaudioError(result, std::format("cannot chain the audio clip '{}' to '{}'", next->ResourceName, clip->ResourceName)));
+			if (const ma_result result = ma_data_source_set_next_callback(nextSection.Get(), &Utils::GetLoopingSection); result != MA_SUCCESS)
+				return std::unexpected(MakeMiniaudioError(result, std::format("cannot loop the audio clip '{}' after '{}'", next->ResourceName, clip->ResourceName)));
+			ENGINE_TRY_ASSIGN(sound, SoundNode::CreateChainedSound(state.Mixer, *headSection.Get(), clip->ResourceName, spatialFlags, group));
+		}
+		AudioVoice voice{ .Payload = clip->Payload,
+			.NextPayload = next != nullptr ? next->Payload : nullptr,
+			.HeadSection = std::move(headSection),
+			.NextSection = std::move(nextSection),
+			.Sound = std::move(sound),
+			.Clip = description.Clip,
+			.ClipName = clip->Name,
+			.ClipVersion = clip->Version,
+			.Settings = description.Settings,
+			.Transform = description.Transform,
+			.Priority = description.Priority,
+			.Owner = description.Owner,
+			.StartSequence = 0,
+			.Paused = description.StartPaused,
+			.Streamed = clip->Streamed,
+			.NextClip = description.Next,
+			.NextClipName = next != nullptr ? next->Name : std::string() };
+		ma_sound* started = voice.Sound.Get();
+		State::ApplySettings(*started, description.Settings, voice.NextSection.Get());
+		State::ApplyTransform(*started, description.Transform);
+		state.ApplyDoppler(*started, description.Settings, description.Transform);
+		// M40: the voice's fade, set before it starts, so its first mixed frame is the fade's first (no fade, the default,
+		// leaves the voice exactly as before fades existed).
+		if (description.Fade != AudioVoiceFade{})
+		{
+			State::BeginFade(voice, description.Fade.From, description.Fade.To, description.Fade.Frames, AudioFadeEnd::Hold);
+			// Before the voice starts, so nothing mixes it yet.
+			State::FlushFader(voice);
+		}
 		if (!description.StartPaused)
 		{
-			if (const ma_result result = ma_sound_start(sound.Get()); result != MA_SUCCESS)
+			if (const ma_result result = ma_sound_start(started); result != MA_SUCCESS)
 				return std::unexpected(MakeMiniaudioError(result, std::format("cannot start a voice of the audio clip '{}'", clip->ResourceName)));
 		}
 
@@ -1078,18 +1509,7 @@ namespace Engine {
 			++state.StolenVoices;
 		}
 
-		AudioVoice voice{ .Payload = clip->Payload,
-			.Sound = std::move(sound),
-			.Clip = description.Clip,
-			.ClipName = clip->Name,
-			.ClipVersion = clip->Version,
-			.Settings = description.Settings,
-			.Transform = description.Transform,
-			.Priority = description.Priority,
-			.Owner = description.Owner,
-			.StartSequence = state.NextStartSequence++,
-			.Paused = description.StartPaused,
-			.Streamed = clip->Streamed };
+		voice.StartSequence = state.NextStartSequence++;
 		ENGINE_TRY_ASSIGN(const AudioVoiceHandle handle, state.Voices.Create(std::move(voice)));
 		++state.StartedVoices;
 		return handle;
@@ -1124,7 +1544,7 @@ namespace Engine {
 		ENGINE_TRY(Utils::ValidateSettings(settings));
 		if (settings.Group != target->Settings.Group)
 			ENGINE_TRY(m_State->ApplyGroup(*target->Sound.Get(), settings.Group));
-		State::ApplySettings(*target->Sound.Get(), settings);
+		State::ApplySettings(*target->Sound.Get(), settings, target->NextSection.Get());
 		m_State->ApplyDoppler(*target->Sound.Get(), settings, target->Transform);
 		target->Settings = settings;
 		return {};
@@ -1143,6 +1563,21 @@ namespace Engine {
 		return {};
 	}
 
+	Status AudioEngine::FadeVoice(AudioVoiceHandle voice, float target, uint64_t frames, AudioFadeEnd end)
+	{
+		AudioVoice* fading = m_State->Voices.TryGet(voice);
+		if (fading == nullptr)
+			return MakeError(ErrorCode::NotFound, "the audio voice {:#x} is not alive", voice.GetValue());
+		ENGINE_TRY(Utils::ValidateVolume(target, "fade's target level"));
+		ENGINE_TRY(Utils::ValidateFadeFrames(frames));
+		if (end != AudioFadeEnd::Hold && end != AudioFadeEnd::Release)
+			return MakeError(ErrorCode::InvalidArgument, "unknown fade end {}", std::to_underlying(end));
+		if (frames == 0 && end == AudioFadeEnd::Release)
+			return m_State->Voices.Destroy(voice);
+		State::BeginFade(*fading, State::GetLevel(*fading, State::GetMixedFrames(*fading)), target, frames, end);
+		return {};
+	}
+
 	bool AudioEngine::IsVoiceAlive(AudioVoiceHandle voice) const
 	{
 		return m_State->Voices.IsAlive(voice);
@@ -1153,6 +1588,10 @@ namespace Engine {
 		const AudioVoice* target = m_State->Voices.TryGet(voice);
 		if (target == nullptr)
 			return MakeError(ErrorCode::NotFound, "the audio voice {:#x} is not alive", voice.GetValue());
+		const uint64_t mixed = State::GetMixedFrames(*target);
+		const bool chained = target->NextSection.Get() != nullptr;
+		const State::Section section = chained ? m_State->GetSection(*target)
+											   : State::Section{ .InNext = false, .Cursor = m_State->GetCursor(*target), .Length = State::GetLength(*target) };
 		return AudioVoiceInfo{ .Voice = voice,
 			.Clip = target->Clip,
 			.ClipName = target->ClipName,
@@ -1163,9 +1602,15 @@ namespace Engine {
 			.Transform = target->Transform,
 			.Paused = target->Paused,
 			.Streamed = target->Streamed,
-			.CursorFrames = m_State->GetCursor(*target),
-			.LengthFrames = State::GetLength(*target),
-			.StartSequence = target->StartSequence };
+			.CursorFrames = section.Cursor,
+			.LengthFrames = section.Length,
+			.StartSequence = target->StartSequence,
+			.FadeVolume = State::GetLevel(*target, mixed),
+			.FadeTarget = target->Fading ? target->FadeTo : target->Level,
+			.FadeEnd = target->Fading ? target->FadeEnd : AudioFadeEnd::Hold,
+			.NextClip = target->NextClip,
+			.NextClipName = target->NextClipName,
+			.InNext = section.InNext };
 	}
 
 	std::vector<AudioVoiceInfo> AudioEngine::GetVoices() const
@@ -1248,6 +1693,8 @@ namespace Engine {
 		state.HandleNotifications(nowSeconds);
 		state.HandlePendingStop(nowSeconds);
 		state.HandleRecreation(nowSeconds);
+		// M40: the fader settings since the last Update, one per voice, for the device's reads (a pull flushes them too).
+		state.FlushFaders();
 		// Streams the device reads still decode on this thread (deterministic decoding has no job thread).
 		if (state.Specification.Decoding == AudioDecoding::Deterministic)
 			state.ProcessJobs();
@@ -1263,6 +1710,7 @@ namespace Engine {
 			if (frames > 0)
 				state.Pull(frames, {});
 		}
+		state.CompleteFades();
 		state.ReleaseFinishedVoices();
 	}
 
@@ -1328,6 +1776,9 @@ namespace Engine {
 	{
 		m_State->Capture = AudioCapture{};
 		m_State->Capturing = true;
+		const std::lock_guard lock(m_State->Shared.ReadMutex);
+		m_State->Shared.DevicePeak.store(0.0f, std::memory_order_relaxed);
+		m_State->Shared.MeasuringPeak.store(true, std::memory_order_relaxed);
 	}
 
 	AudioCapture AudioEngine::StopCapture()
@@ -1335,7 +1786,12 @@ namespace Engine {
 		if (!m_State->Capturing)
 			return {};
 		m_State->Capturing = false;
-		return std::exchange(m_State->Capture, AudioCapture{});
+		AudioCapture capture = std::exchange(m_State->Capture, AudioCapture{});
+		// The device callback reads under ReadMutex, so holding it waits out a read in progress.
+		const std::lock_guard lock(m_State->Shared.ReadMutex);
+		m_State->Shared.MeasuringPeak.store(false, std::memory_order_relaxed);
+		capture.DevicePeak = m_State->Shared.DevicePeak.load(std::memory_order_relaxed);
+		return capture;
 	}
 
 	bool AudioEngine::IsCapturing() const
