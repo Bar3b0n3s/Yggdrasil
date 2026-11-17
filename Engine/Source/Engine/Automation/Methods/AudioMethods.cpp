@@ -98,6 +98,9 @@ namespace Engine {
 				summary.CursorFrames = ToAutomationCounter(voice.CursorFrames);
 				summary.LengthFrames = ToAutomationCounter(voice.LengthFrames);
 				summary.FadeVolume = voice.FadeVolume;
+				if (!voice.NextClip.IsNull())
+					summary.Next = Utils::SummarizeAudioClip(assets, voice.NextClipName);
+				summary.InNext = voice.InNext;
 				result.Voices.push_back(std::move(summary));
 			}
 
@@ -108,6 +111,8 @@ namespace Engine {
 				if (const std::optional<MusicState>& request = music->GetState(); request.has_value())
 				{
 					result.Music.Clip = Utils::SummarizeAudioClip(assets, request->Clip.ToString());
+					if (request->Intro.IsValid())
+						result.Music.Intro = Utils::SummarizeAudioClip(assets, request->Intro.ToString());
 					result.Music.Volume = request->Volume;
 					result.Music.Loop = request->Loop;
 				}
@@ -152,10 +157,15 @@ namespace Engine {
 			.Field("lengthFrames", &AudioVoiceSummary::LengthFrames, "The clip's length in its own frames; 0 while not known yet.")
 			.Field("fadeVolume", &AudioVoiceSummary::FadeVolume,
 				"Its level now, a multiplier of its volume that a fade moves (the session's music fades in, out and between tracks); 1 "
-				"for a voice that never faded.");
+				"for a voice that never faded.")
+			.Field("next", &AudioVoiceSummary::Next,
+				"The clip that follows the voice's clip, sample-accurately (the loop of the session's music after its intro); empty for a "
+				"voice without one.")
+			.Field("inNext", &AudioVoiceSummary::InNext, "Whether the voice plays the clip that follows (its cursor and length are then that clip's).");
 
 		registry.Struct<AudioMusicSummary>("AudioMusicSummary", "The play session's music (Audio.PlayMusic).")
 			.Field("clip", &AudioMusicSummary::Clip, "The clip of the current request; empty without music and outside a Play session.")
+			.Field("intro", &AudioMusicSummary::Intro, "The intro of the current request, played once before its clip; empty for none.")
 			.Field("volume", &AudioMusicSummary::Volume, "The current request's linear volume; 0 without music.")
 			.Field("loop", &AudioMusicSummary::Loop, "Whether the current request loops; false without music.")
 			.Field("voice", &AudioMusicSummary::Voice,

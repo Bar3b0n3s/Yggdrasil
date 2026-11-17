@@ -176,8 +176,8 @@ namespace Engine {
 		uint32_t OneShotRequests = 0;
 		// SetPaused (play-mode pause).
 		bool Paused = false;
-		// SetWorldPaused (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world's voices, every group's but
-		// Ui, are held.
+		// SetWorldPaused (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world's voices are held, every
+		// group's but Music and Ui since M40 (Docs/Decisions/0057-m40-music.md decision 14).
 		bool WorldPaused = false;
 		// Mix initialization can precede voice startup; either path restores the captured host mix on destruction.
 		bool MixInitialized = false;
@@ -196,8 +196,12 @@ namespace Engine {
 		void ReleaseVoice(AudioVoiceHandle& voice);
 		// Drops the handles of one-shot voices that ended or were stolen, keeping the others in start order.
 		void PruneOneShots();
-		// Whether a voice of `group` is held by the system's pauses: the play-mode pause, or the world pause outside the Ui group.
-		[[nodiscard]] bool IsHeld(AudioGroup group) const { return Paused || (WorldPaused && group != AudioGroup::Ui); }
+		// Whether a voice of `group` is held by the system's pauses: the play-mode pause, or the world pause in every group
+		// but the two that play on under it (Music and Ui: today's Sfx only, and any group added later).
+		[[nodiscard]] bool IsHeld(AudioGroup group) const
+		{
+			return Paused || (WorldPaused && group != AudioGroup::Music && group != AudioGroup::Ui);
+		}
 		// Pauses or resumes every voice of the system by IsHeld and the sources' own Pause (SetPaused, SetWorldPaused).
 		void ApplyPauses();
 		// The runtime of `entity`'s source, added when missing.
@@ -383,7 +387,8 @@ namespace Engine {
 				ENGINE_CORE_WARN("AudioSystem: updating the AudioSource of '{}' failed: {}", TargetScene->GetEntityPath(entity), applied.error().ToString());
 			else
 				runtime.Settings = settings;
-			// A source that moved into or out of the Ui group while the world is paused follows the world pause's rule.
+			// A source that moved between a held group and one that plays on while the world is paused follows the world
+			// pause's rule.
 			if (groupChanged && WorldPaused && runtime.Settings.Group == settings.Group)
 			{
 				if (const Status held = Audio->SetVoicePaused(runtime.Voice, IsHeld(settings.Group) || runtime.Paused); !held)
@@ -746,7 +751,8 @@ namespace Engine {
 		description.Settings.Spatial = position.has_value();
 		if (position.has_value())
 			description.Transform.Position = *position;
-		description.Priority = AudioSystemEffectPriority;
+		// M40 (decision 13): a one-shot's priority follows its group, as a source's does.
+		description.Priority = Utils::GetSourcePriority(group);
 		description.StartPaused = state.IsHeld(group);
 		ENGINE_TRY_ASSIGN(const AudioVoiceHandle voice, state.Audio->PlayVoice(description));
 		// The new voice may have stolen a tracked one-shot; ended and stolen voices leave the list before it grows.

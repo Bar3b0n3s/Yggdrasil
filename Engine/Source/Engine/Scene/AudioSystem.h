@@ -32,8 +32,8 @@ namespace Engine {
 
 	// The voice priorities AudioSystem starts voices with (AudioVoiceDescription::Priority; the stealing rule of
 	// AudioEngine.h): Sfx and Ui voices are stolen before music, so a burst of effects never silences the soundtrack.
-	inline constexpr int32_t AudioSystemEffectPriority = 0; // Sfx and Ui sources, and every one-shot
-	inline constexpr int32_t AudioSystemMusicPriority = 1;  // sources in the Music group
+	inline constexpr int32_t AudioSystemEffectPriority = 0; // Sfx and Ui sources and one-shots
+	inline constexpr int32_t AudioSystemMusicPriority = 1;  // Music sources and one-shots (M40), and the session's music
 
 	// One-shot requests (AudioSystem::PlayOneShot) one system admits between two Updates, that is in one frame (§5.7: the
 	// frame's fixed steps, Update and LateUpdate all run before its AudioUpdate phase; requests made while no frame runs,
@@ -127,15 +127,20 @@ namespace Engine {
 	// (-Z) and up (+Y) axes and velocity, by the rules of the sources, or the origin pose for AudioListenerSource::None.
 	//
 	// One-shots (§11.5 Audio.PlayOneShot). Non-spatial without a position, spatial at the position (default
-	// AudioSpatialization) otherwise; group Sfx unless one is given; priority AudioSystemEffectPriority; released when they end.
+	// AudioSpatialization) otherwise; group Sfx unless one is given; the priority of their group, as a source's (M40,
+	// Docs/Decisions/0057-m40-music.md decision 13: AudioSystemMusicPriority in the Music group, so a stinger is never stolen
+	// by effects, AudioSystemEffectPriority otherwise); released when they end.
 	// At most MaxAudioOneShotsPerFrame requests per frame. The handles of one-shot voices that ended or were stolen are
 	// dropped at every request and every Update, so the system tracks at most MaxAudioVoices of them.
 	//
 	// Pause and stop (§10.2). SetPaused(true) pauses every voice of the system (sources and one-shots; new voices start
 	// paused) and SetPaused(false) resumes them where they were; both are idempotent. M35's SetWorldPaused(true) does the
-	// same for the voices outside the Ui group, whose group (a source's Group field as last applied, a one-shot's group)
-	// decides, and SetWorldPaused(false) resumes them; a voice is paused while either pause or its source's own Pause holds it. Destroying the system is Stop: every
-	// voice it started is released, its clips unregistered and the engine's group volumes restored (see "Mixer").
+	// same for the world's voices, those of every group but Music and Ui (with today's groups, the Sfx group's; M40,
+	// Docs/Decisions/0057-m40-music.md decision 14, amending ADR 0050 decision 3: music and stingers sound under a pause
+	// menu, and a group added later is held unless it is listed as playing on), whose group (a source's Group field as last
+	// applied, a one-shot's group) decides, and SetWorldPaused(false) resumes them; a voice is paused while either pause or
+	// its source's own Pause holds it. Destroying the system is Stop: every voice it started is released, its clips
+	// unregistered and the engine's group volumes restored (see "Mixer").
 	//
 	// Mixer (§11.5 Audio.SetGroupVolume and GetGroupVolume, bound to scripts in M13). The group volumes a game sets belong to
 	// its session: InitializeMix records the engine's Music, Sfx and Ui volumes and sets all three to 1, so every session (and every
@@ -180,8 +185,9 @@ namespace Engine {
 		// Play-mode pause (§10.2; PlaySession::SetPaused).
 		void SetPaused(bool paused);
 		[[nodiscard]] bool IsPaused() const;
-		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world pause's hold on the world's voices
-		// (PlaySession while its world is paused with the sounds choice Pause; see "Pause and stop").
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world pause's hold on the world's voices, the Sfx
+		// group's since M40 (decision 14) (PlaySession while its world is paused with the sounds choice Pause; see "Pause and
+		// stop").
 		void SetWorldPaused(bool paused);
 		[[nodiscard]] bool IsWorldPaused() const;
 

@@ -57,6 +57,16 @@ namespace Engine {
 				clip->FrameCount = 4800;
 				clip->Bytes = Test::MakeTonePcm16Bytes({});
 				Script.GetAssetManager().Publish(AssetHandle(51), clip, "Assets/Tone.wav");
+				// M40: an intro of the tone's format, and one of another rate.
+				auto intro = CreateRef<AudioClipData>();
+				intro->FrameCount = 2400;
+				intro->Bytes = Test::MakeTonePcm16Bytes({ .FrameCount = 2400 });
+				Script.GetAssetManager().Publish(AssetHandle(52), intro, "Assets/Intro.sfx");
+				auto other = CreateRef<AudioClipData>();
+				other->SampleRate = 44100;
+				other->FrameCount = 4410;
+				other->Bytes = Test::MakeTonePcm16Bytes({ .SampleRate = 44100, .FrameCount = 4410 });
+				Script.GetAssetManager().Publish(AssetHandle(53), other, "Assets/Other.sfx");
 				const auto entity = Script.GetScene().CreateEntity("Source");
 				AudioSourceComponent source;
 				source.Clip.SetHandle(AssetHandle(51));
@@ -271,6 +281,45 @@ return true
 			AudioMusicCoverage(RunModes::Editor, snapshots);
 		}
 
+		// M40 (Docs/Decisions/0057-m40-music.md decision 12): PlayMusic's Intro plays before its clip, GetMusic reports it as
+		// asked, and Test.GetMusic reports the voice's intro and whether it still plays it.
+		TEST_CASE("AudioBindings: PlayMusic's intro plays before its clip and GetMusic and Test.GetMusic report it")
+		{
+			AudioBindingFixture fixture;
+			REQUIRE(fixture.Start());
+			CheckAudioBinding(fixture.Script, R"(
+local clip = Assets.Load("Assets/Tone.wav")
+local intro = Assets.Load("Assets/Intro.sfx")
+Audio.PlayMusic(clip, { Intro = intro })
+local music = Audio.GetMusic()
+assert(music.Clip == clip and music.Intro == intro)
+return true
+)");
+			const std::vector<AudioVoiceInfo> voices = fixture.Audio->GetVoices();
+			REQUIRE(voices.size() == 1);
+			CHECK(voices.front().ClipName == AssetHandle(52).ToString());
+			CHECK(voices.front().NextClipName == AssetHandle(51).ToString());
+			fixture.Music->Update();
+			CheckAudioBinding(fixture.Script, R"(
+local voice = Test.GetMusic()
+assert(voice.Clip == Assets.Load("Assets/Tone.wav") and voice.Intro == Assets.Load("Assets/Intro.sfx"))
+assert(voice.InIntro and voice.LengthFrames == 2400)
+return true
+)");
+			// Past the intro the voice plays its clip.
+			std::vector<float> frames(2 * 2600);
+			REQUIRE(fixture.Audio->ReadFrames(frames));
+			fixture.Music->Update();
+			CheckAudioBinding(fixture.Script, R"(
+local voice = Test.GetMusic()
+assert(not voice.InIntro and voice.LengthFrames == 4800 and voice.CursorFrames == 200, voice.CursorFrames)
+-- Without an intro, GetMusic's Intro is nil.
+Audio.StopMusic()
+Audio.PlayMusic(Assets.Load("Assets/Intro.sfx"))
+return Audio.GetMusic().Intro == nil
+)");
+		}
+
 		TEST_CASE("AudioBindings: the music calls refuse a nil clip, unknown or out-of-range options and a host without music")
 		{
 			AudioBindingFixture fixture;
@@ -285,7 +334,10 @@ refused(function() Audio.PlayMusic(nil) end, "expected AssetRef")
 refused(function() Audio.PlayMusic("Assets/Tone.wav") end, "expected AssetRef")
 refused(function() Audio.PlayMusic(clip, 1) end, "expected MusicOptions table")
 refused(function() Audio.PlayMusic(clip, { Volum = 1 }) end, "unknown MusicOptions key 'Volum'")
-refused(function() Audio.PlayMusic(clip, { [1] = 1 }) end, "MusicOptions keys are Volume, FadeSeconds and Loop")
+refused(function() Audio.PlayMusic(clip, { [1] = 1 }) end, "MusicOptions keys are Volume, FadeSeconds, Loop and Intro")
+refused(function() Audio.PlayMusic(clip, { Intro = 1 }) end, "options.Intro expected AssetRef")
+refused(function() Audio.PlayMusic(clip, { Intro = Scene.FindByName("Source") }) end, "options.Intro expected AssetRef, got another engine value")
+refused(function() Audio.PlayMusic(clip, { Intro = Assets.Load("Assets/Other.sfx") }) end, "differ")
 refused(function() Audio.PlayMusic(clip, { Volume = "loud" }) end, "options.Volume expected number")
 refused(function() Audio.PlayMusic(clip, { FadeSeconds = true }) end, "options.FadeSeconds expected number")
 refused(function() Audio.PlayMusic(clip, { Loop = 1 }) end, "options.Loop expected boolean")

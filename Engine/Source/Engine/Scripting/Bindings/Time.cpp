@@ -136,8 +136,8 @@ namespace Engine {
 			// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the automation registry reflects the same
 			// vocabulary for play.setWorldPaused (Automation/Methods/PlayMethods.cpp), which ScriptApiRegistry::Freeze accepts
 			// as one enum while the names and values agree.
-			EnumInfo sounds("WorldPauseSounds", "What a world pause does to the world's playing voices; the Ui group's play on either way.");
-			sounds.AddEntry({ "Pause", std::to_underlying(WorldPauseSounds::Pause), "The voices outside the Ui group pause until the world resumes." });
+			EnumInfo sounds("WorldPauseSounds", "What a world pause does to the world's playing voices, those of every group but Music and Ui (today the Sfx group's); the Music and Ui groups' play on either way.");
+			sounds.AddEntry({ "Pause", std::to_underlying(WorldPauseSounds::Pause), "The world's voices (every group's but Music and Ui) pause until the world resumes." });
 			sounds.AddEntry({ "Finish", std::to_underlying(WorldPauseSounds::Finish), "The voices play on to their end." });
 			ENGINE_TRY(api.RegisterEnum(sounds));
 			const ScriptMemberOptions read{ .Mutates = false };
@@ -153,7 +153,7 @@ namespace Engine {
 				.Function("GetRealTime", &Utils::TimeReal, "() -> number", "Returns monotonic wall-clock seconds from an unspecified epoch. Nondeterministic; never use for gameplay.", read)
 				// M35 (decisions 1 and 2): the world pause and the session's clock, appended in landing order.
 				.Function("PauseWorld", &Utils::TimePauseWorld, "(sounds: WorldPauseSounds?) -> ()",
-					"Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices outside the Ui group, Finish lets them play on. Not the host's session pause (play.pause), which stops every tick. It is session state, like the time scale: it lasts across Scene.Load and Scene.Reload, so call Time.ResumeWorld before loading or restarting a scene (a level's restart), or the new scene starts with its world paused. Refused during read-only evaluation.",
+					"Pauses the world from the next fixed step on: physics and 2D physics, sprite and skeletal animation, particles and the native module's systems hold, and only behaviours whose class sets RunsWhileWorldPaused run OnFixedUpdate, OnUpdate, OnLateUpdate and tasks, while input, the UI, its OnUi callbacks, the start and destroy flushes and the transform updates run on. The world's clock (Time.GetTick, Time.GetTime) holds. sounds: Pause (the default) holds the world's voices, those of every group but Music and Ui (today the Sfx group's), Finish lets them play on; the Music and Ui groups play on either way, so music and stingers sound under a pause menu. Not the host's session pause (play.pause), which stops every tick. It is session state, like the time scale: it lasts across Scene.Load and Scene.Reload, so call Time.ResumeWorld before loading or restarting a scene (a level's restart), or the new scene starts with its world paused. Refused during read-only evaluation.",
 					{ .EnumParameters = { { 1, "WorldPauseSounds", true, "Pause" } } })
 				.Function("ResumeWorld", &Utils::TimeResumeWorld, "() -> ()", "Resumes the world from the next fixed step on, its bodies with the velocities they had, its held voices playing again. Refused during read-only evaluation.")
 				.Function("IsWorldPaused", &Utils::TimeIsWorldPaused, "() -> boolean", "Returns whether the world is paused for the next fixed step: the latest Time.PauseWorld or Time.ResumeWorld, which takes effect then.", read)

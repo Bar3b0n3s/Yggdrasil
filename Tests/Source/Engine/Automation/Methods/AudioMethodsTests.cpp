@@ -126,6 +126,9 @@ namespace Engine {
 			CHECK(voice["entity"]["id"] == "");
 			CHECK(voice["volume"] == 1.0);
 			CHECK(voice["fadeVolume"] == 0.25);
+			CHECK(voice["next"]["id"] == "");
+			CHECK(voice["inNext"] == false);
+			CHECK(music["intro"]["id"] == "");
 
 			const Json stop = { { "context", "play" }, { "code", "Audio.StopMusic(0.1)" } };
 			REQUIRE(fixture.Call("script.eval", stop).has_value());

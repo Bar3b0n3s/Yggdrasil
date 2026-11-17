@@ -53,6 +53,10 @@ namespace Engine {
 		[[nodiscard]] Result<AudioClipHandle> Acquire(AssetHandle handle);
 		// Drops every registration this registry made; their voices keep their data until they end (AudioEngine.h).
 		void Clear();
+		// Whether `clip` is the placeholder a missing, failed or mistyped clip resolves to (Resolve).
+		[[nodiscard]] static bool IsPlaceholder(const ResolvedAudioClip& clip);
+		// `handle`'s reference path for messages (its asset manager's, or its 16 hex digits without one).
+		[[nodiscard]] std::string GetName(AssetHandle handle) const;
 	private:
 		AudioEngine* m_Audio = nullptr;   // documented back-reference, may be null
 		AssetManager* m_Assets = nullptr; // documented back-reference, may be null

@@ -1908,7 +1908,7 @@ Pauses or resumes the play session's world from its next tick on, as Time.PauseW
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `paused` | `Bool` | yes | `false` | Pause (true) or resume (false) the world from the next tick on (required). |
-| `sounds` | `WorldPauseSounds` |  | `"Pause"` | A pause's choice for the world's voices: Pause (the default) or Finish; the Ui group's play on either way. |
+| `sounds` | `WorldPauseSounds` |  | `"Pause"` | A pause's choice for the world's voices, those of every group but Music and Ui (today the Sfx group's): Pause (the default) or Finish; the Music and Ui groups' play on either way. |
 
 | Result | Type | Description |
 |---|---|---|

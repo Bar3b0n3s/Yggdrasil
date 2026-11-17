@@ -39,13 +39,15 @@ namespace Engine {
 		constexpr AssetHandle TrackD(0x4000a4);
 		constexpr AssetHandle TrackE(0x4000a5);
 		constexpr AssetHandle Jingle(0x4000a6);
+		constexpr AssetHandle Opening(0x4000a7);
+		constexpr AssetHandle Odd(0x4000a8);
 
-		// A mono 48 kHz Pcm16 tone of `seconds`, as a synthesized sound effect is.
-		AssetRef<AudioClipData> MakeToneClip(double seconds, double amplitude)
+		// A mono Pcm16 tone of `seconds` at `sampleRate`, as a synthesized sound effect is (at 48 kHz).
+		AssetRef<AudioClipData> MakeToneClip(double seconds, double amplitude, uint32_t sampleRate = 48000)
 		{
-			const Test::TestToneSpecification tone{ .SampleRate = 48000,
+			const Test::TestToneSpecification tone{ .SampleRate = sampleRate,
 				.ChannelCount = 1,
-				.FrameCount = static_cast<uint64_t>(seconds * 48000.0),
+				.FrameCount = static_cast<uint64_t>(seconds * static_cast<double>(sampleRate)),
 				.Frequency = 440.0,
 				.Amplitude = amplitude };
 			auto clip = CreateRef<AudioClipData>();
@@ -412,10 +414,15 @@ namespace Engine {
 		{
 			Test::InMemoryAssetManager assets;
 			assets.Publish(TrackA, MakeToneClip(1.0, 0.5), "Assets/Audio/A.sfx");
+			assets.Publish(Odd, MakeToneClip(0.05, 0.75, 44100), "Assets/Audio/Odd.sfx");
 			SessionMusic music(SessionMusicSpecification{ .Audio = nullptr, .Assets = &assets });
 			const Status refused = music.Play({ .Clip = TrackA, .Volume = -1.0f });
 			REQUIRE_FALSE(refused.has_value());
 			CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			// An intro of another format is refused as with audio (W40.2).
+			const Status odd = music.Play({ .Clip = TrackA, .Intro = Odd });
+			REQUIRE_FALSE(odd.has_value());
+			CHECK(odd.error().GetCode() == ErrorCode::InvalidArgument);
 			CHECK_FALSE(music.GetState().has_value());
 			REQUIRE(music.Play({ .Clip = TrackA, .Volume = 0.5f, .FadeSeconds = 1.0, .Loop = false }).has_value());
 			REQUIRE(music.GetState().has_value());
@@ -443,6 +450,52 @@ namespace Engine {
 			fixture.Music.reset();
 			CHECK(fixture.Audio->GetVoices().empty());
 			CHECK(fixture.Audio->GetStats().RegisteredClips == 0);
+		}
+
+		// M40 (decision 11): an intro then its clip, chained by the engine; a missing intro plays the clip alone, and an intro of
+		// another format is refused on every call.
+		TEST_CASE("SessionMusic: an intro plays once, then its clip loops from the first frame after it")
+		{
+			MusicFixture fixture;
+			fixture.Assets.Publish(Opening, MakeToneClip(0.05, 0.75), "Assets/Audio/Opening.sfx");
+			fixture.Assets.Publish(Odd, MakeToneClip(0.05, 0.75, 44100), "Assets/Audio/Odd.sfx");
+			REQUIRE(fixture.Music->Play({ .Clip = TrackA, .Intro = Opening }).has_value());
+			CHECK(fixture.Music->GetState() == MusicState{ .Clip = TrackA, .Volume = 1.0f, .Loop = true, .Intro = Opening });
+			const AudioVoiceHandle voice = fixture.Current();
+			CHECK(fixture.Music->GetVoices().Current == MusicVoice{ .Voice = voice, .Clip = TrackA, .Intro = Opening });
+			const AudioVoiceInfo opening = fixture.Info(voice);
+			CHECK_FALSE(opening.InNext);
+			CHECK_FALSE(opening.NextClip.IsNull());
+			CHECK(opening.Settings.Loop);
+			fixture.Pull(2400 + 100);
+			const AudioVoiceInfo looping = fixture.Info(voice);
+			CHECK(looping.InNext);
+			CHECK(looping.CursorFrames == 100);
+
+			// Kept: an intro matters only when a voice starts; the request reports it as asked.
+			REQUIRE(fixture.Music->Play({ .Clip = TrackA, .Volume = 0.5f, .Intro = Opening }).has_value());
+			CHECK(fixture.Current() == voice);
+			const bool stillLooping = fixture.Info(voice).InNext;
+			CHECK(stillLooping);
+
+			// An intro of another format is refused, whether or not a voice would start, and changes nothing.
+			for (const AssetHandle clip : { TrackA, TrackB })
+			{
+				const Status refused = fixture.Music->Play({ .Clip = clip, .Intro = Odd });
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			CHECK(fixture.Music->GetState()->Volume == 0.5f);
+			CHECK(fixture.Current() == voice);
+
+			// A missing intro plays the clip alone.
+			const AssetHandle missing(0x4000ff);
+			const Test::ExpectLog logged(LogLevel::Error, missing.ToString());
+			REQUIRE(fixture.Music->Play({ .Clip = TrackB, .Intro = missing }).has_value());
+			const AudioVoiceHandle alone = fixture.Current();
+			CHECK(fixture.Info(alone).NextClip.IsNull());
+			CHECK(fixture.Music->GetVoices().Current.Intro == AssetHandle());
+			CHECK(fixture.Music->GetState()->Intro == missing);
 		}
 
 		// The brief's check: walking a doorway (Scene.Load) and retrying (Scene.Reload) keep the track playing, the same

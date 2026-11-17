@@ -24,13 +24,15 @@ namespace Engine {
 	inline constexpr uint32_t MaxMusicVoices = 4;
 
 	// Audio.PlayMusic's request: `Clip` (valid) at `Volume` (linear, finite, >= 0), reached over `FadeSeconds` (finite, 0 to
-	// MaxMusicFadeSeconds; 0 at once), looping or played once.
+	// MaxMusicFadeSeconds; 0 at once), looping or played once, after `Intro`, a clip played once before it (null for none;
+	// see "Voices").
 	struct MusicRequest
 	{
 		AssetHandle Clip{};
 		float Volume = 1.0f;
 		double FadeSeconds = 0.0;
 		bool Loop = true;
+		AssetHandle Intro{};
 	};
 
 	// Audio.GetMusic: the session's current request, as scripts asked for it (never the voice's progress).
@@ -39,16 +41,18 @@ namespace Engine {
 		AssetHandle Clip{};
 		float Volume = 1.0f;
 		bool Loop = true;
+		AssetHandle Intro{};
 
 		bool operator==(const MusicState&) const = default;
 	};
 
-	// One voice of the music: its engine handle and the clip it was started for (the request's, even when a missing clip
-	// plays the silent placeholder).
+	// One voice of the music: its engine handle, the clip it was started for (the request's, even when a missing clip plays
+	// the silent placeholder) and the intro it played before it (null for none).
 	struct MusicVoice
 	{
 		AudioVoiceHandle Voice{};
 		AssetHandle Clip{};
+		AssetHandle Intro{};
 
 		bool operator==(const MusicVoice&) const = default;
 	};
@@ -84,9 +88,12 @@ namespace Engine {
 	// crossfades: the current voice fades from its level to 0 over FadeSeconds and is released at the fade's end (at once for
 	// 0), while the new clip's voice fades in; a voice of the new clip that is still fading out is reclaimed and fades back up
 	// to Volume instead of a new one starting. Play of the current request's clip whose voice ended (a clip played once) or
-	// could not start starts it again. Stop fades the current voice out the same way and ends the request. The voices the
-	// engine fails to start (a pool of higher-priority voices, a clip that cannot be registered) are logged, never returned,
-	// so no script's flow depends on which voices the device has finished; the request stands all the same.
+	// could not start starts it again. A voice that starts with an Intro plays the intro once, then the clip from the first
+	// frame after the intro's last (an engine chained voice, AudioEngine.h "Chained voices"), Loop looping the clip; the
+	// intro matters only when a voice starts, and a missing intro or clip (a placeholder) plays the clip, or its placeholder,
+	// alone. Stop fades the current voice out the same way and ends the request. The voices the engine fails to start (a
+	// pool of higher-priority voices, a clip that cannot be registered) are logged, never returned, so no script's flow
+	// depends on which voices the device has finished; the request stands all the same.
 	//
 	// Holds. SetPaused pauses every voice of the music (and makes new ones start paused) or resumes them; a paused voice's
 	// fade, and so its release, holds. The play session pauses it from its activation to its first AudioUpdate phase and
@@ -94,8 +101,8 @@ namespace Engine {
 	//
 	// Without audio. A play session without an audio engine (the feature host's scratch sessions, which discover test
 	// suites by starting each suite's scene, and engine contexts without one) still has its music, so a scene's startup
-	// callbacks ask for their track there as anywhere: Play and Stop validate and record the request (GetState), and no
-	// voice starts, so GetVoices and Inspect stay empty.
+	// callbacks ask for their track there as anywhere: Play and Stop check and record the request (GetState; an Intro's
+	// format included), and no voice starts, so GetVoices and Inspect stay empty.
 	//
 	// Clips load and register through the music's own registrations (Scene/Private/AudioClipRegistry.h), so a scene's
 	// AudioSystem going never drops them. Destroying the music releases every voice it started, then its registrations.
@@ -108,8 +115,12 @@ namespace Engine {
 		SessionMusic(const SessionMusic&) = delete;
 		SessionMusic& operator=(const SessionMusic&) = delete;
 
-		// The request's checks (ValidateMusicRequest), then the voices of "Voices". Errors: InvalidArgument from
-		// ValidateMusicRequest.
+		// The request's checks without acting on them: ValidateMusicRequest, then an Intro's format (see Play), which loads both
+		// clips. Errors: those of Play.
+		[[nodiscard]] Status Check(const MusicRequest& request);
+		// The request's checks (Check), then the voices of "Voices". Errors: InvalidArgument from
+		// ValidateMusicRequest, and for an Intro whose sample rate or channel count differs from the Clip's (naming both; both
+		// loaded, neither missing), whether or not a voice starts.
 		[[nodiscard]] Status Play(const MusicRequest& request);
 		// Fades the current voice out over `fadeSeconds` (finite, 0 to MaxMusicFadeSeconds; 0 releases it at once) and ends the
 		// request; nothing without one. Errors: InvalidArgument for `fadeSeconds` out of range.

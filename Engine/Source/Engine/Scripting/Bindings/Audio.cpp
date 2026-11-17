@@ -17,6 +17,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace Engine {
 
@@ -80,7 +81,7 @@ namespace Engine {
 		}
 
 		// The keys of a MusicOptions table, and the longest key an error names in full.
-		constexpr std::array<std::string_view, 3> MusicOptionKeys = { "Volume", "FadeSeconds", "Loop" };
+		constexpr std::array<std::string_view, 4> MusicOptionKeys = { "Volume", "FadeSeconds", "Loop", "Intro" };
 		constexpr size_t MaxShownMusicOptionKeyBytes = 32;
 
 		// The MusicOptions member `name` of the table at `index`, read raw: nil leaves the request's default; a value of
@@ -110,14 +111,14 @@ namespace Engine {
 			while (lua_next(call.State, index) != 0)
 			{
 				if (lua_type(call.State, -2) != LUA_TSTRING)
-					Lua::RaiseError(call, std::format("options has a {} key; MusicOptions keys are Volume, FadeSeconds and Loop", luaL_typename(call.State, -2)));
+					Lua::RaiseError(call, std::format("options has a {} key; MusicOptions keys are Volume, FadeSeconds, Loop and Intro", luaL_typename(call.State, -2)));
 				size_t length = 0;
 				const char* text = lua_tolstring(call.State, -2, &length);
 				const std::string_view key(text, length);
 				if (std::ranges::find(MusicOptionKeys, key) == MusicOptionKeys.end())
 				{
 					const std::string shown = length <= MaxShownMusicOptionKeyBytes ? std::string(key) : std::format("a key of {} bytes", length);
-					Lua::RaiseError(call, std::format("unknown MusicOptions key '{}': expected Volume, FadeSeconds or Loop", shown));
+					Lua::RaiseError(call, std::format("unknown MusicOptions key '{}': expected Volume, FadeSeconds, Loop or Intro", shown));
 				}
 				lua_pop(call.State, 1);
 			}
@@ -140,6 +141,14 @@ namespace Engine {
 				request.Loop = lua_toboolean(call.State, -1) != 0;
 				lua_pop(call.State, 1);
 			}
+			if (PushMusicOption(call, index, "Intro", LUA_TUSERDATA, "AssetRef"))
+			{
+				// Another engine value (an Entity, a Color) is a userdata too: only an AssetRef is an intro.
+				if (lua_userdatatag(call.State, -1) != std::to_underlying(Detail::ScriptValueTag::AssetRef))
+					Lua::RaiseError(call, "options.Intro expected AssetRef, got another engine value");
+				request.Intro = Lua::Check<AssetHandle>(call, lua_gettop(call.State));
+				lua_pop(call.State, 1);
+			}
 		}
 
 		static int AudioPlayMusic(ScriptCall& call)
@@ -148,7 +157,8 @@ namespace Engine {
 			MusicRequest request;
 			request.Clip = Lua::Check<AssetHandle>(call, 1);
 			ReadMusicOptions(call, 2, request);
-			if (const Status valid = ValidateMusicRequest(request); !valid)
+			// Every check, the intro's format included, before the host mutation, so a refused call changes nothing.
+			if (const Status valid = music.Check(request); !valid)
 				return Lua::RaiseError(call, valid.error());
 			const auto permission = call.PrepareHostMutation();
 			if (!permission)
@@ -180,9 +190,12 @@ namespace Engine {
 				Lua::PushNil(call);
 				return 1;
 			}
-			lua_createtable(call.State, 0, 3);
+			lua_createtable(call.State, 0, 4);
 			Lua::Push(call, state->Clip);
 			lua_setfield(call.State, -2, "Clip");
+			// nil for a request without an intro (an invalid handle pushes nil).
+			Lua::Push(call, state->Intro);
+			lua_setfield(call.State, -2, "Intro");
 			Lua::Push(call, state->Volume);
 			lua_setfield(call.State, -2, "Volume");
 			Lua::Push(call, state->Loop);
@@ -197,12 +210,14 @@ namespace Engine {
 		Status RegisterAudio(ScriptApiRegistry& api)
 		{
 			// M40 (Docs/Decisions/0057-m40-music.md decision 6): the session's music.
-			ENGINE_TRY(api.RegisterAlias("MusicOptions", "{Volume: number?, FadeSeconds: number?, Loop: boolean?}",
+			ENGINE_TRY(api.RegisterAlias("MusicOptions", "{Volume: number?, FadeSeconds: number?, Loop: boolean?, Intro: AssetRef?}",
 				std::format("Audio.PlayMusic's options: Volume, the music's linear level (finite, at least 0; default 1); FadeSeconds, the "
-							"fade to it (0 to {}; default 0, at once); Loop (default true). No other key is accepted.",
+							"fade to it (0 to {}; default 0, at once); Loop (default true), which loops the clip after its intro; Intro, a "
+							"clip played once before the clip, which follows it from the first frame after its last (both of one sample rate "
+							"and channel count). No other key is accepted.",
 					MaxMusicFadeSeconds)));
-			ENGINE_TRY(api.RegisterAlias("MusicState", "{Clip: AssetRef, Volume: number, Loop: boolean}",
-				"The session's music as scripts last asked for it with Audio.PlayMusic: its clip, Volume and Loop."));
+			ENGINE_TRY(api.RegisterAlias("MusicState", "{Clip: AssetRef, Intro: AssetRef?, Volume: number, Loop: boolean}",
+				"The session's music as scripts last asked for it with Audio.PlayMusic: its clip, intro, Volume and Loop."));
 			const ScriptMemberOptions read{ .Mutates = false };
 			api.Module("Audio", "Session-scoped mixing, one-shot playback and the session's music.")
 				.Function("PlayOneShot", Utils::AudioPlayOneShot, "(clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> ()",
@@ -219,12 +234,16 @@ namespace Engine {
 								"doorway. Another clip crossfades over FadeSeconds: the playing voice fades out and stops while clip fades "
 								"in, and a clip still fading out is taken back and fades up again. At most {} music voices play at once (the "
 								"current one and those still fading out; the oldest fading one stops first). A clip played once (Loop false) stays the "
-								"session's music until StopMusic or another PlayMusic, and starts again when asked for after it ended. Fades "
+								"session's music until StopMusic or another PlayMusic, and starts again when asked for after it ended. With "
+								"Intro, a voice that starts plays the intro once, then the clip from the first frame after the intro's last, "
+								"sample-accurate, Loop looping the clip (an opening and its loop as two files); the intro matters only when a "
+								"voice starts, and a missing one plays the clip alone. Fades "
 								"follow the voice's mixed frames: simulation time in lockstep, test runs and replays. Callable in every "
 								"callback, phase and test case; the engine's own failures (a voice pool full of higher-priority voices) are "
 								"logged, not raised; a session without audio (a test run's discovery of its suites) records the request and "
-								"plays nothing. Raises for a nil clip, an unknown option or one out of range, and \"audio is unavailable\" "
-								"outside a play session (edit evaluations).",
+								"plays nothing. Raises for a nil clip, an unknown option or one out of range, an intro whose sample rate or "
+								"channel count differs from the clip's, and \"audio is unavailable\" outside a play session (edit "
+								"evaluations).",
 						MaxMusicVoices))
 				.Function("StopMusic", Utils::AudioStopMusic, "(fadeSeconds: number?) -> ()",
 					std::format("Fades the session's music out over fadeSeconds (0 to {}; default 0, at once) and stops it; Audio.GetMusic returns "
@@ -232,7 +251,7 @@ namespace Engine {
 								"outside a play session.",
 						MaxMusicFadeSeconds))
 				.Function("GetMusic", Utils::AudioGetMusic, "() -> MusicState?",
-					"Returns the session's music as scripts last asked for it with Audio.PlayMusic (its clip, Volume and Loop), or nil before "
+					"Returns the session's music as scripts last asked for it with Audio.PlayMusic (its clip, intro, Volume and Loop), or nil before "
 					"the first PlayMusic and after StopMusic. It never reports the voice's progress, so it reads the same in live play, "
 					"lockstep, test runs and replays, with or without audio. Raises \"audio is unavailable\" outside a play session.",
 					read);

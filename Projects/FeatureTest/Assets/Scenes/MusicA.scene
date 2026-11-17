@@ -11,7 +11,7 @@
 	},
 	"Entities": [
 		{
-			"ID": "7cf90b5e3184e102",
+			"ID": "2b5ee245f9ba82ac",
 			"Name": "Listener",
 			"Parent": null,
 			"Active": true,
@@ -38,7 +38,7 @@
 			}
 		},
 		{
-			"ID": "2042b3d68e4e129f",
+			"ID": "dabd61bbff2afdc7",
 			"Name": "Conductor",
 			"Parent": null,
 			"Active": true,
@@ -52,10 +52,36 @@
 				"Script": {
 					"Scripts": [
 						{
-							"Script": "594694f539028f3a",
+							"Script": "e4132d626a50d6f2",
 							"Fields": {
 								"FadeSeconds": 0.5,
 								"Track": "c0ad8c02802bdc7c"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "9b5e6808650c74ef",
+			"Name": "Door",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "2042b3d68e4e129f",
+							"Fields": {
+								"Key": "Space",
+								"Target": "5aa5c4d4fb459e6d"
 							},
 							"ExecutionOrder": 0
 						}

@@ -1605,6 +1605,153 @@ namespace Engine {
 			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, 10)) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(engine->FadeVoice(AudioVoiceHandle(), 1.0f, 10)) == ErrorCode::NotFound);
 		}
+
+		// M40 (Docs/Decisions/0057-m40-music.md decision 11): an intro, then its loop, decoded and streamed. The reference is one
+		// clip of the intro's samples followed by the loop's three times; the chained voice mixes exactly its frames. The loop
+		// is a second long, a stream's page, so a stream wraps it inside its decoder.
+		TEST_CASE("AudioEngine: a chained voice plays its loop from the first frame after its intro")
+		{
+			const Test::TestToneSpecification introTone{ .FrameCount = 2400, .Frequency = 440.0, .Amplitude = 0.5 };
+			const Test::TestToneSpecification loopTone{ .FrameCount = 48000, .Frequency = 660.0, .Amplitude = 0.25 };
+			constexpr uint64_t Frames = 2400 + 2 * 48000 + 100;
+			std::vector<float> reference;
+			{
+				VirtualFileSystem vfs;
+				const TestEngine engine = CreateTestEngine(vfs);
+				Buffer bytes = Test::MakeTonePcm16Bytes(introTone);
+				const Buffer loopBytes = Test::MakeTonePcm16Bytes(loopTone);
+				for (int pass = 0; pass < 4; ++pass)
+					bytes.insert(bytes.end(), loopBytes.begin(), loopBytes.end());
+				const Result<AudioClipHandle> clip = engine->RegisterClip(
+					{ .Name = "00000000000000c1", .Format = AudioClipFormat::Pcm16, .Bytes = CreateRef<const Buffer>(std::move(bytes)), .SampleRate = 48000, .ChannelCount = 1 });
+				REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+				PlayTestVoice(*engine, { .Clip = *clip });
+				reference = PullFrames(*engine, Frames);
+			}
+			for (const bool stream : { false, true })
+			{
+				CAPTURE(stream);
+				VirtualFileSystem vfs;
+				const TestEngine engine = CreateTestEngine(vfs);
+				const AudioClipHandle intro = RegisterToneClip(*engine, "00000000000000c2", introTone, stream);
+				const AudioClipHandle loop = RegisterToneClip(*engine, "00000000000000c3", loopTone, stream);
+				const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = intro, .Settings = { .Loop = true }, .Next = loop });
+				// One frame before the intro's end: the frames the voice read ahead past the boundary still belong to the intro.
+				std::vector<float> chained = PullFrames(*engine, 2399);
+				const AudioVoiceInfo before = GetInfo(*engine, voice);
+				CHECK_FALSE(before.InNext);
+				CHECK(before.CursorFrames == 2399);
+				CHECK(before.LengthFrames == 2400);
+				CHECK(before.Clip == intro);
+				CHECK(before.NextClip == loop);
+				CHECK(before.NextClipName == "00000000000000c3");
+				CHECK(before.Streamed == stream);
+				CHECK(before.Settings.Loop);
+				// One frame into the loop.
+				const std::vector<float> boundary = PullFrames(*engine, 2);
+				chained.insert(chained.end(), boundary.begin(), boundary.end());
+				const AudioVoiceInfo after = GetInfo(*engine, voice);
+				CHECK(after.InNext);
+				CHECK(after.CursorFrames == 1);
+				CHECK(after.LengthFrames == 48000);
+				// The loop wraps on its own, seamlessly.
+				const std::vector<float> rest = PullFrames(*engine, Frames - 2401);
+				chained.insert(chained.end(), rest.begin(), rest.end());
+				const AudioVoiceInfo wrapped = GetInfo(*engine, voice);
+				CHECK(wrapped.InNext);
+				CHECK(wrapped.CursorFrames == 100);
+				REQUIRE(chained.size() == reference.size());
+				size_t mismatches = 0;
+				for (size_t sample = 0; sample < chained.size(); ++sample)
+				{
+					if (chained[sample] != reference[sample])
+						++mismatches;
+				}
+				CHECK(mismatches == 0);
+			}
+		}
+
+		// M40 (decision 11): a voice that loops is created looping, so a stream shorter than a page decodes its repeats into the
+		// pages it fills when it opens, and its first wrap is as seamless as a decoded clip's (created without looping, its
+		// pages held one pass, and the voice was silent while it sought back to its start).
+		TEST_CASE("AudioEngine: a looping streamed clip shorter than a page wraps its first pass seamlessly")
+		{
+			constexpr uint64_t Frames = 4800 + 4700;
+			std::vector<std::vector<float>> mixed;
+			for (const bool stream : { false, true })
+			{
+				VirtualFileSystem vfs;
+				const TestEngine engine = CreateTestEngine(vfs);
+				const AudioClipHandle clip = RegisterToneClip(*engine, "00000000000000e1", MakeTone(0.1), stream);
+				const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Loop = true } });
+				mixed.push_back(PullFrames(*engine, Frames));
+				REQUIRE(engine->IsVoiceAlive(voice));
+				CHECK(GetCursor(*engine, voice) == 4700);
+			}
+			REQUIRE(mixed[0].size() == mixed[1].size());
+			size_t mismatches = 0;
+			for (size_t sample = 0; sample < mixed[0].size(); ++sample)
+			{
+				if (mixed[0][sample] != mixed[1][sample])
+					++mismatches;
+			}
+			CHECK(mismatches == 0);
+		}
+
+		// M40 (decision 11): a looping stream shorter than a page holds about two passes in its pages (miniaudio's page fill
+		// stops at a clip's second end); a chained voice's loop then starts again through the chain, as a voice of the loop
+		// alone does, rather than ending the voice.
+		TEST_CASE("AudioEngine: a chained voice keeps looping a streamed loop shorter than a page")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle intro = RegisterToneClip(*engine, "00000000000000e2", { .FrameCount = 2400 }, true);
+			const AudioClipHandle loop = RegisterToneClip(*engine, "00000000000000e3", MakeTone(0.1), true);
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = intro, .Settings = { .Loop = true }, .Next = loop });
+			PullFrames(*engine, 2400 + 5 * 4800);
+			REQUIRE(engine->IsVoiceAlive(voice));
+			CHECK(GetInfo(*engine, voice).InNext);
+			const AudioLevels levels = PullLevels(*engine, 4800);
+			CHECK(levels.Peak > 0.4f);
+			REQUIRE(engine->IsVoiceAlive(voice));
+		}
+
+		TEST_CASE("AudioEngine: a chained voice's clips share one format, its Next is registered and its Loop loops its Next")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs);
+			const AudioClipHandle intro = RegisterToneClip(*engine, "00000000000000d1", { .FrameCount = 2400 });
+			const AudioClipHandle loop = RegisterToneClip(*engine, "00000000000000d2", { .FrameCount = 4800 });
+			const AudioClipHandle otherRate = RegisterToneClip(*engine, "00000000000000d3", { .SampleRate = 44100, .FrameCount = 4410 });
+			const AudioClipHandle stereo = RegisterToneClip(*engine, "00000000000000d4", { .ChannelCount = 2 });
+			const AudioClipHandle stale = RegisterToneClip(*engine, "00000000000000d5", {});
+			REQUIRE(engine->UnregisterClip(stale).has_value());
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = intro, .Next = otherRate })) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = intro, .Next = stereo })) == ErrorCode::InvalidArgument);
+			CHECK(ErrorCodeOf(engine->PlayVoice({ .Clip = intro, .Next = stale })) == ErrorCode::NotFound);
+			CHECK(engine->GetVoices().empty());
+
+			// Played once: the intro, the loop once, then the end of the chain releases the voice.
+			const AudioVoiceHandle once = PlayTestVoice(*engine, { .Clip = intro, .Next = loop });
+			PullFrames(*engine, 2400 + 4700);
+			CHECK(engine->IsVoiceAlive(once));
+			const bool inLoop = GetInfo(*engine, once).InNext;
+			CHECK(inLoop);
+			PullFrames(*engine, 600);
+			CHECK_FALSE(engine->IsVoiceAlive(once));
+
+			// Looping: the head never loops but moves on to its Next, which loops until Loop is turned off.
+			const AudioVoiceHandle looping = PlayTestVoice(*engine, { .Clip = intro, .Settings = { .Loop = true }, .Next = loop });
+			PullFrames(*engine, 2400 + 3 * 4800 + 100);
+			const AudioVoiceInfo wrapped = GetInfo(*engine, looping);
+			CHECK(wrapped.InNext);
+			CHECK(wrapped.CursorFrames == 100);
+			REQUIRE(engine->SetVoiceSettings(looping, { .Loop = false }).has_value());
+			const AudioVoiceInfo once2 = GetInfo(*engine, looping);
+			CHECK_FALSE(once2.Settings.Loop);
+			PullFrames(*engine, 4800 + 480);
+			CHECK_FALSE(engine->IsVoiceAlive(looping));
+		}
 	}
 
 }

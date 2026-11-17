@@ -1287,8 +1287,9 @@ namespace Engine {
 
 	void PlaySession::State::ApplyWorldPauseToAudio()
 	{
-		// M35 (decision 3): Pause holds the world's voices (every group but Ui) while the world is paused; Finish lets them
-		// play on, as a world that is not paused does.
+		// M35 (decision 3): Pause holds the world's voices (every group's but Music and Ui since M40,
+		// Docs/Decisions/0057-m40-music.md decision 14) while the world is paused; Finish lets them play on, as a world that
+		// is not paused does.
 		if (SceneAudio != nullptr)
 			SceneAudio->SetWorldPaused(WorldPaused && WorldPauseSoundsInForce == WorldPauseSounds::Pause);
 	}

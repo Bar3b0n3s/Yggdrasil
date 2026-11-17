@@ -97,7 +97,13 @@
 // Voices (§10.1). A HandlePool of MaxAudioVoices voices, each one ma_sound in its group (Master -> Music, Sfx, Ui). When the
 // pool is full, PlayVoice steals the voice with the lowest priority, among those the one farthest from the listener (a
 // non-spatial voice counts as distance 0), among those the oldest (the smallest start sequence); a voice is stolen only
-// when its priority is not above the new voice's, else PlayVoice fails. A stolen voice's handle becomes stale.
+// when its priority is not above the new voice's, else PlayVoice fails. A stolen voice's handle becomes stale. A voice
+// that starts looping is created looping (M40), since a stream decodes its first two pages (a second each) when it opens,
+// with the looping it has then, and a looping clip shorter than a page fills them with its repeats. A looping stream whose
+// decoded pages run out seeks back to its start, which a stream does through a resource-manager job, so the voice is
+// silent from that read until the job runs (the next pull under deterministic decoding): with Loop turned on later, a
+// short stream does so after its first pass, and a looping stream shorter than a page does so whenever its pages run out,
+// since miniaudio's page fill stops at a clip's second end within one page (an accepted limit, Docs/Backlog.md §6).
 //
 // Fades (§10.1; M40, Docs/Decisions/0057-m40-music.md decision 3). A voice's level is a multiplier of its Volume that a fade
 // moves linearly from one value to another over a number of the voice's own mixed frames (48 kHz), on miniaudio's per-voice
@@ -110,6 +116,19 @@
 // end of the pull that completes it, like a voice at the end of its clip (exact while the engine pulls its own frames;
 // within a device period, at a level near the target, at the Update after it while the device reads). A voice without a
 // fade never touches the fader, so it mixes exactly as before fades existed.
+//
+// Chained voices (§10.1; M40, Docs/Decisions/0057-m40-music.md decision 11): a voice whose description names a Next clip
+// plays its Clip once, then Next from the first frame after Clip's last, sample-accurate, decoded or streamed (an opening
+// and its loop shipped as two files). The voice owns one resource-manager data source per section, linked Clip -> Next
+// (ma_data_source_set_next) and played by one ma_sound (ma_sound_init_from_data_source); its Settings.Loop belongs to the
+// Next section, whose own looping flag wraps it seamlessly (in its decoder for a stream, in its buffer's connector
+// otherwise), never to the head, whose looping would stop the chain from advancing; when a looping stream's decoded pages
+// run out (see "Voices"), the section re-enters itself through the chain and seeks to its start, as a looping voice of one
+// clip does, and a section that read nothing since its start ends the chain. Both sections must share one sample
+// rate and channel count, since the voice's resampler follows its head. AudioVoiceInfo describes the section playing: its
+// cursor and length, InNext, and Next's clip; frames the voice has read ahead across the boundary but not mixed are the
+// head's tail (as GetVoiceInfo's cursor attributes read-ahead frames across a loop's wrap to its end), exact while the
+// engine pulls its own frames, the section miniaudio reads while the device does.
 //
 // Teardown (§4.1): destroying the engine with voices alive is a programmer error (asserted); their owners (play sessions,
 // the editor's preview) release them first. Registered clips are released with the engine.
@@ -273,6 +292,8 @@ namespace Engine {
 		uint64_t Owner = 0;
 		// M40: the fade the voice starts with (see "Fades"); none by default. A voice that starts paused holds it.
 		AudioVoiceFade Fade{};
+		// M40 (see "Chained voices"): the clip that follows Clip, null for none. Settings.Loop then loops this clip.
+		AudioClipHandle Next{};
 	};
 
 	// A snapshot of one live voice (GetVoiceInfo, GetVoices; audio.stats).
@@ -288,8 +309,9 @@ namespace Engine {
 		AudioVoiceTransform Transform{};
 		bool Paused = false;
 		bool Streamed = false;
-		// The voice's playback position and its clip's length in the clip's own frames; LengthFrames is 0 when the decoder
-		// cannot tell yet (a stream before its first page). CursorFrames is the frames the engine has mixed of the voice:
+		// The voice's playback position and its clip's length in the clip's own frames (a chained voice's: the section's it
+		// plays, see "Chained voices"); LengthFrames is 0 when the decoder cannot tell yet (a stream before its first page).
+		// CursorFrames is the frames the engine has mixed of the voice:
 		// ma_sound_get_cursor_in_pcm_frames minus the frames the voice has read ahead but the mixer has not output yet
 		// (modulo the length for a looping voice). It is exact while the engine pulls its own frames (time sources
 		// Simulation and Host) or has no device; while the device may read the engine it is miniaudio's cursor alone, a
@@ -304,6 +326,11 @@ namespace Engine {
 		float FadeVolume = 1.0f;
 		float FadeTarget = 1.0f;
 		AudioFadeEnd FadeEnd = AudioFadeEnd::Hold;
+		// M40 (see "Chained voices"): the clip that follows Clip (null and empty for a voice without one), and whether the
+		// voice plays it now.
+		AudioClipHandle NextClip{};
+		std::string NextClipName{};
+		bool InNext = false;
 	};
 
 	// Counters and state for audio.stats and the tests (GetStats).
@@ -401,8 +428,9 @@ namespace Engine {
 
 		// --- Voices (§10.1, §10.2) ---------------------------------------------------------------------------------------
 
-		// Starts a voice (see "Voices" for a full pool). Errors: NotFound for a stale clip handle; InvalidArgument for
-		// settings, a transform or a fade outside their documented ranges; InvalidState "all 64 voices have a higher priority"
+		// Starts a voice (see "Voices" for a full pool; "Chained voices" for a Next clip). Errors: NotFound for a stale clip or
+		// Next handle; InvalidArgument for settings, a transform or a fade outside their documented ranges, and for a Next whose
+		// sample rate or channel count differs from Clip's (naming both); InvalidState "all 64 voices have a higher priority"
 		// (with the counts) when nothing may be stolen; Io or Unsupported when miniaudio cannot start the sound (a stream
 		// whose data cannot be decoded).
 		[[nodiscard]] Result<AudioVoiceHandle> PlayVoice(const AudioVoiceDescription& description);
@@ -411,7 +439,8 @@ namespace Engine {
 		[[nodiscard]] Status StopVoice(AudioVoiceHandle voice);
 		// Pauses (ma_sound_stop, which keeps the cursor) or resumes the voice. Errors: NotFound.
 		[[nodiscard]] Status SetVoicePaused(AudioVoiceHandle voice, bool paused);
-		// Applies `settings` to a playing voice. Errors: NotFound; InvalidArgument as PlayVoice.
+		// Applies `settings` to a playing voice (a chained voice's Loop to its Next section). Errors: NotFound; InvalidArgument
+		// as PlayVoice.
 		[[nodiscard]] Status SetVoiceSettings(AudioVoiceHandle voice, const AudioVoiceSettings& settings);
 		// Moves a spatial voice (ignored, yet validated, for a non-spatial one). Errors: NotFound; InvalidArgument for a
 		// non-finite component.

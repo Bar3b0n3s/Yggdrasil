@@ -248,6 +248,43 @@ class AudioTests(AutomationTestCase):
         self.assertEqual(client.call("audio.stats")["voiceCount"], 0)
         client.call("play.stop")
 
+    def test_audio_stats_reports_a_music_intro_and_the_section_its_voice_plays(self) -> None:
+        # M40 (Docs/Decisions/0057-m40-music.md decision 12): PlayMusic's Intro plays once before its clip, as one
+        # chained voice; audio.stats names the intro the music asked for, the clip that follows the voice's and whether
+        # the voice plays it.
+        client, _ = self.open_editor_with_scene()
+        ids = {}
+        for name in ("Opening", "Loop"):
+            params = {"type": "SoundEffect", "path": f"Assets/Audio/{name}.sfx", "values": MUSIC_SOUND}
+            ids[name] = client.call("asset.create", params)["asset"]["id"]
+
+        def evaluate(code: str) -> object:
+            return client.call("script.eval", {"context": "play", "code": code})["value"]
+
+        client.call("play.start", {"lockstep": True})
+        intro = 'Assets.Load("Assets/Audio/Opening.sfx")'
+        evaluate(f'Audio.PlayMusic(Assets.Load("Assets/Audio/Loop.sfx"), {{ Intro = {intro} }})')
+        client.call("play.step", {"ticks": 2})
+        stats = client.call("audio.stats")
+        music = stats["music"]
+        self.assertEqual(music["clip"]["id"], ids["Loop"])
+        self.assertEqual(music["intro"]["id"], ids["Opening"])
+        self.assertEqual(music["intro"]["path"], "Assets/Audio/Opening.sfx")
+        voices = {voice["voice"]: voice for voice in stats["voices"]}
+        opening = voices[music["voice"]]
+        self.assertEqual(opening["clip"]["id"], ids["Opening"])
+        self.assertEqual(opening["next"]["id"], ids["Loop"])
+        self.assertFalse(opening["inNext"])
+
+        # Past the intro the same voice plays its loop, which loops on.
+        client.call("play.step", {"ticks": 3 * 64})
+        later = client.call("audio.stats")
+        self.assertEqual(later["music"]["voice"], music["voice"])
+        looping = {voice["voice"]: voice for voice in later["voices"]}[music["voice"]]
+        self.assertTrue(looping["inNext"])
+        self.assertEqual(looping["next"]["id"], ids["Loop"])
+        client.call("play.stop")
+
 
 if __name__ == "__main__":
     unittest.main()

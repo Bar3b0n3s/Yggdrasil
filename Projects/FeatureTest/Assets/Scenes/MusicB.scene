@@ -52,10 +52,36 @@
 				"Script": {
 					"Scripts": [
 						{
-							"Script": "594694f539028f3a",
+							"Script": "e4132d626a50d6f2",
 							"Fields": {
 								"FadeSeconds": 0.5,
 								"Track": "c0ad8c02802bdc7c"
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "b036ff12894bdc7c",
+			"Name": "Door",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "2042b3d68e4e129f",
+							"Fields": {
+								"Key": "C",
+								"Track": "bbe0e95273ff95f7"
 							},
 							"ExecutionOrder": 0
 						}

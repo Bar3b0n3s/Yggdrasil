@@ -35,8 +35,10 @@ namespace Engine {
 	class UiSystem;
 
 	// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): what a world pause does to the world's playing voices
-	// (Time.PauseWorld's `sounds`, play.setWorldPaused's): Pause holds every voice outside the Ui group until the world
-	// resumes, Finish lets them play on to their end; the Ui group's voices play on either way.
+	// (Time.PauseWorld's `sounds`, play.setWorldPaused's): Pause holds the voices of every group but Music and Ui (with
+	// today's groups, the Sfx group's) until the world resumes, Finish lets them play on to their end; the Music and Ui
+	// groups' voices play on either way (M40, Docs/Decisions/0057-m40-music.md decision 14, amending ADR 0050 decision 3:
+	// music and stingers sound under a pause menu).
 	enum class WorldPauseSounds : uint8_t
 	{
 		Pause,

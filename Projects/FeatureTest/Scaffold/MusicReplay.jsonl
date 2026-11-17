@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/MusicA.scene"}}
+{"method": "play.step", "params": {"ticks": 160, "input": [{"tick": 30, "type": "Key", "key": "Space", "state": "Tap"}, {"tick": 90, "type": "Key", "key": "C", "state": "Tap"}]}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/Music.replay", "expect": [{"tick": 20, "luau": "local music = Audio.GetMusic()\nreturn Scene.GetName() == \"MusicA\" and music ~= nil and music.Clip == Assets.Load(\"Assets/Audio/Music/LoopA.sfx\")"}, {"tick": 60, "luau": "local music = Audio.GetMusic()\nreturn Scene.GetName() == \"MusicB\" and music ~= nil and music.Clip == Assets.Load(\"Assets/Audio/Music/LoopA.sfx\")"}, {"tick": 150, "luau": "local music = Audio.GetMusic()\nreturn Scene.GetName() == \"MusicB\" and music ~= nil and music.Clip == Assets.Load(\"Assets/Audio/Music/LoopB.sfx\")"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

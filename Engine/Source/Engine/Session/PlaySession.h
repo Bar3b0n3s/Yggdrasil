@@ -419,7 +419,8 @@ namespace Engine {
 	//     behaviour's tasks count the world's clock (ScriptFrameState::WorldHeldTicks);
 	//   - the world's presentation holds with its clock: render extraction's SimulationTime, the time of a MaterialParameters
 	//     scroll, is the rendered time of the world's clock (batch 1's landing of M31 with M35; ADR 0042's execution order);
-	//   - the AudioSystem holds the voices outside the Ui group when the pause's sounds choice is Pause (SetWorldPaused);
+	//   - the AudioSystem holds the voices of every group but Music and Ui (today the Sfx group's) when the pause's sounds
+	//     choice is Pause (SetWorldPaused; M40 decision 14: the Music and Ui groups and the session's music play on);
 	// and every other phase runs as before: the input, text, UI input, start flush, UI events, transform updates, destroy
 	// flushes and layouts, so a menu works, deterministically from latched input. The world's systems step on the world's
 	// clock (SimStep::FromTick(GetWorldTick(), ...)), which is the session's in every session that never paused. The pause,

@@ -552,9 +552,11 @@ namespace Engine {
 			CHECK(system.IsPlaying(source));
 		}
 
-		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world pause holds the world's voices, every group's
-		// but Ui, so a menu still sounds; a voice is paused while either pause or its own Pause holds it.
-		TEST_CASE("AudioSystem: a world pause holds the voices outside the Ui group and resume continues them")
+		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 3), amended by M40 (Docs/Decisions/0057-m40-music.md
+		// decision 14, the owner's answer 4 of ADR 0052): the world pause holds the world's voices, every group's but Music and
+		// Ui (today the Sfx group's), so a menu, its music and a stinger still sound; a voice is paused while either pause or
+		// its own Pause holds it.
+		TEST_CASE("AudioSystem: the world pause holds the Sfx group only")
 		{
 			AudioSceneFixture fixture;
 			const AssetHandle clip = fixture.AddToneClip(0xa001);
@@ -565,8 +567,10 @@ namespace Engine {
 			system.Start();
 			const Result<AudioVoiceHandle> effect = system.PlayOneShot(clip, std::nullopt);
 			const Result<AudioVoiceHandle> click = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Ui);
+			const Result<AudioVoiceHandle> stinger = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Music);
 			REQUIRE(effect.has_value());
 			REQUIRE(click.has_value());
+			REQUIRE(stinger.has_value());
 			fixture.Frame(system);
 			const auto isPaused = [&fixture](AudioVoiceHandle voice)
 			{
@@ -592,19 +596,38 @@ namespace Engine {
 			CHECK(sourceVoice().Paused);
 			CHECK(isPaused(*effect));
 			CHECK_FALSE(isPaused(*click));
+			CHECK_FALSE(isPaused(*stinger));
 			const uint64_t heldCursor = sourceVoice().CursorFrames;
 			const uint64_t clickCursor = fixture.GetEngine().GetVoiceInfo(*click)->CursorFrames;
+			const uint64_t stingerCursor = fixture.GetEngine().GetVoiceInfo(*stinger)->CursorFrames;
 			fixture.Frame(system);
 			CHECK(sourceVoice().CursorFrames == heldCursor);
 			CHECK(fixture.GetEngine().GetVoiceInfo(*click)->CursorFrames == clickCursor + 800);
-			// Voices started while the world is paused: the world's start held, the Ui group's play.
-			const Result<AudioVoiceHandle> lateEffect = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Music);
+			CHECK(fixture.GetEngine().GetVoiceInfo(*stinger)->CursorFrames == stingerCursor + 800);
+			// Voices started while the world is paused: the Sfx group's start held, the Music and Ui groups' play.
+			const Result<AudioVoiceHandle> lateEffect = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Sfx);
+			const Result<AudioVoiceHandle> lateStinger = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Music);
 			const Result<AudioVoiceHandle> lateClick = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Ui);
 			REQUIRE(lateEffect.has_value());
+			REQUIRE(lateStinger.has_value());
 			REQUIRE(lateClick.has_value());
 			CHECK(isPaused(*lateEffect));
+			CHECK_FALSE(isPaused(*lateStinger));
 			CHECK_FALSE(isPaused(*lateClick));
-			// A source moved into the Ui group plays on at the next update; its own Pause still holds it after the resume.
+			// A source moved into the Music or the Ui group plays on at the next update, and moved back into Sfx it holds
+			// again; its own Pause still holds it after the resume.
+			source.Patch<AudioSourceComponent>([](AudioSourceComponent& component)
+			{
+				component.Group = AudioGroup::Music;
+			});
+			fixture.Frame(system);
+			CHECK_FALSE(sourceVoice().Paused);
+			source.Patch<AudioSourceComponent>([](AudioSourceComponent& component)
+			{
+				component.Group = AudioGroup::Sfx;
+			});
+			fixture.Frame(system);
+			CHECK(sourceVoice().Paused);
 			source.Patch<AudioSourceComponent>([](AudioSourceComponent& component)
 			{
 				component.Group = AudioGroup::Ui;
@@ -673,6 +696,40 @@ namespace Engine {
 			fixture.Frame(system, 4800);
 			fixture.Frame(system);
 			CHECK_FALSE(fixture.GetEngine().IsVoiceAlive(*flat));
+		}
+
+		// M40 (Docs/Decisions/0057-m40-music.md decision 13; World Tree's brief 20): a stinger played as a Music one-shot is
+		// never stolen by the effects of a full pool, as a Music source is not.
+		TEST_CASE("AudioSystem: a Music one-shot starts at music priority")
+		{
+			AudioSceneFixture fixture;
+			const AssetHandle clip = fixture.AddToneClip(0xa001);
+			fixture.AddListener();
+			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
+			system.Start();
+			const Result<AudioVoiceHandle> effect = system.PlayOneShot(clip, std::nullopt);
+			const Result<AudioVoiceHandle> stinger = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Music);
+			const Result<AudioVoiceHandle> click = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Ui);
+			REQUIRE(effect.has_value());
+			REQUIRE(stinger.has_value());
+			REQUIRE(click.has_value());
+			const auto priorityOf = [&fixture](AudioVoiceHandle voice)
+			{
+				const Result<AudioVoiceInfo> info = fixture.GetEngine().GetVoiceInfo(voice);
+				REQUIRE(info.has_value());
+				return info->Priority;
+			};
+			CHECK(priorityOf(*stinger) == AudioSystemMusicPriority);
+			CHECK(priorityOf(*effect) == AudioSystemEffectPriority);
+			CHECK(priorityOf(*click) == AudioSystemEffectPriority);
+			// A full pool: a new effect steals the oldest effect, never the stinger.
+			while (fixture.GetEngine().GetVoices().size() < MaxAudioVoices)
+				REQUIRE(system.PlayOneShot(clip, std::nullopt).has_value());
+			const uint64_t stolen = fixture.GetEngine().GetStats().StolenVoices;
+			REQUIRE(system.PlayOneShot(clip, std::nullopt).has_value());
+			CHECK(fixture.GetEngine().GetStats().StolenVoices == stolen + 1);
+			CHECK_FALSE(fixture.GetEngine().IsVoiceAlive(*effect));
+			CHECK(fixture.GetEngine().IsVoiceAlive(*stinger));
 		}
 
 		TEST_CASE("AudioSystem: one-shot requests are bounded per frame and the next frame admits them again")

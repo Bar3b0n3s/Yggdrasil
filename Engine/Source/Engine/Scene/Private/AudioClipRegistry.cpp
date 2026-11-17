@@ -56,6 +56,16 @@ namespace Engine {
 		return registered;
 	}
 
+	bool AudioClipRegistry::IsPlaceholder(const ResolvedAudioClip& clip)
+	{
+		return clip.Handle == GetPlaceholderHandle(AssetType::AudioClip);
+	}
+
+	std::string AudioClipRegistry::GetName(AssetHandle handle) const
+	{
+		return m_Assets != nullptr ? m_Assets->GetReferencePath(handle) : handle.ToString();
+	}
+
 	void AudioClipRegistry::Clear()
 	{
 		// Without an engine nothing was registered.

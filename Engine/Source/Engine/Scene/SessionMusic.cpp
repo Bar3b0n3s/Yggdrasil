@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/SessionMusic.h"
 
+#include "Engine/Asset/AudioClipData.h"
 #include "Engine/Audio/AudioTypes.h"
 #include "Engine/Core/Log.h"
 #include "Engine/Scene/AudioSystem.h"
@@ -42,9 +43,12 @@ namespace Engine {
 		void MakeRoom(uint32_t added);
 		// Fades the playing `voice` from its level to `volume` over `frames` and applies `loop`.
 		void Adjust(const MusicVoice& voice, float volume, uint64_t frames, bool loop);
-		// Starts the voice of `request` as the current one, its level rising from 0 over `frames` (at the request's Volume at
-		// once for 0); a failure is logged and leaves no current voice.
-		void Start(const MusicRequest& request, uint64_t frames);
+		// Whether the voice of `request` starts with its Intro: both clips loaded, neither a placeholder. Errors:
+		// InvalidArgument for clips of different sample rates or channel counts.
+		[[nodiscard]] Result<bool> PrepareIntro(const MusicRequest& request);
+		// Starts the voice of `request` as the current one, after its intro when `intro`, its level rising from 0 over
+		// `frames` (at the request's Volume at once for 0); a failure is logged and leaves no current voice.
+		void Start(const MusicRequest& request, bool intro, uint64_t frames);
 	};
 
 	void SessionMusic::State::Prune()
@@ -109,7 +113,26 @@ namespace Engine {
 			ENGINE_CORE_WARN("SessionMusic: applying Loop to the music failed: {}", applied.error().ToString());
 	}
 
-	void SessionMusic::State::Start(const MusicRequest& request, uint64_t frames)
+	Result<bool> SessionMusic::State::PrepareIntro(const MusicRequest& request)
+	{
+		if (!request.Intro.IsValid())
+			return false;
+		const ResolvedAudioClip intro = Clips.Resolve(request.Intro);
+		const ResolvedAudioClip clip = Clips.Resolve(request.Clip);
+		if (AudioClipRegistry::IsPlaceholder(intro) || AudioClipRegistry::IsPlaceholder(clip))
+			return false;
+		if (intro.Data->SampleRate != clip.Data->SampleRate || intro.Data->ChannelCount != clip.Data->ChannelCount)
+		{
+			return MakeError(ErrorCode::InvalidArgument,
+				"the music's intro {} ({} Hz, {} channel(s)) and its clip {} ({} Hz, {} channel(s)) differ: the clip follows its intro "
+				"seamlessly, so both share one sample rate and channel count",
+				Clips.GetName(request.Intro), intro.Data->SampleRate, intro.Data->ChannelCount, Clips.GetName(request.Clip), clip.Data->SampleRate,
+				clip.Data->ChannelCount);
+		}
+		return true;
+	}
+
+	void SessionMusic::State::Start(const MusicRequest& request, bool intro, uint64_t frames)
 	{
 		MakeRoom(1);
 		const Result<AudioClipHandle> clip = Clips.Acquire(request.Clip);
@@ -120,6 +143,18 @@ namespace Engine {
 		}
 		AudioVoiceDescription description;
 		description.Clip = *clip;
+		if (intro)
+		{
+			// The intro is the voice's head and the clip follows it (AudioEngine.h "Chained voices").
+			const Result<AudioClipHandle> opening = Clips.Acquire(request.Intro);
+			if (!opening)
+			{
+				ENGINE_CORE_WARN("SessionMusic: the intro {} cannot play: {}", request.Intro.ToString(), opening.error().ToString());
+				return;
+			}
+			description.Clip = *opening;
+			description.Next = *clip;
+		}
 		description.Settings.Group = AudioGroup::Music;
 		description.Settings.Loop = request.Loop;
 		description.Priority = AudioSystemMusicPriority;
@@ -132,7 +167,7 @@ namespace Engine {
 			ENGINE_CORE_WARN("SessionMusic: the music {} cannot play: {}", request.Clip.ToString(), voice.error().ToString());
 			return;
 		}
-		Current = MusicVoice{ .Voice = *voice, .Clip = request.Clip };
+		Current = MusicVoice{ .Voice = *voice, .Clip = request.Clip, .Intro = intro ? request.Intro : AssetHandle() };
 	}
 
 	SessionMusic::SessionMusic(const SessionMusicSpecification& specification)
@@ -150,11 +185,21 @@ namespace Engine {
 		state.Clips.Clear();
 	}
 
+	Status SessionMusic::Check(const MusicRequest& request)
+	{
+		ENGINE_TRY(ValidateMusicRequest(request));
+		ENGINE_TRY(m_State->PrepareIntro(request));
+		return {};
+	}
+
 	Status SessionMusic::Play(const MusicRequest& request)
 	{
 		ENGINE_TRY(ValidateMusicRequest(request));
 		State& state = *m_State;
-		state.Request = MusicState{ .Clip = request.Clip, .Volume = request.Volume, .Loop = request.Loop };
+		// The intro's format is checked on every call, so a call's error never depends on whether its voice still plays or on
+		// whether the session has audio.
+		ENGINE_TRY_ASSIGN(const bool intro, state.PrepareIntro(request));
+		state.Request = MusicState{ .Clip = request.Clip, .Volume = request.Volume, .Loop = request.Loop, .Intro = request.Intro };
 		// Without audio the request is all (SessionMusic.h, "Without audio").
 		if (state.Audio == nullptr)
 			return {};
@@ -187,7 +232,7 @@ namespace Engine {
 			}
 			else
 			{
-				state.Start(request, frames);
+				state.Start(request, intro, frames);
 			}
 		}
 		return {};

@@ -44,14 +44,19 @@ namespace Engine {
 		// M40 (Docs/Decisions/0057-m40-music.md decision 7): the voice's level now, a multiplier of its volume
 		// (AudioVoiceInfo::FadeVolume; 1 for a voice that never faded).
 		float FadeVolume = 1.0f;
+		// M40 (decision 12): the clip that follows the voice's clip (AudioVoiceInfo::NextClip, an intro's loop; empty for a
+		// voice without one), and whether the voice plays it now (cursorFrames and lengthFrames are then its).
+		AssetSummary Next{};
+		bool InNext = false;
 	};
 
 	// Registry struct "AudioMusicSummary" (M40, decision 7): the play session's music (Scene/SessionMusic.h). Empty (no clip,
 	// volume 0, loop false, no voices) without a request and outside a Play session.
 	struct AudioMusicSummary
 	{
-		// The current request (Audio.GetMusic): its clip, volume and loop.
+		// The current request (Audio.GetMusic): its clip, intro (empty for none), volume and loop.
 		AssetSummary Clip{};
+		AssetSummary Intro{};
 		float Volume = 0.0f;
 		bool Loop = false;
 		// The current request's voice handle as 16 lowercase hex digits (AudioVoiceSummary::Voice); empty when it ended or

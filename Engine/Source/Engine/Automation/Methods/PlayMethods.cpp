@@ -468,8 +468,8 @@ namespace Engine {
 			.Entry(PlayRunState::Paused, "Paused", "A paused session of either mode.");
 
 		// M35 (decision 5). The script API registers the same vocabulary for Time.PauseWorld (Scripting/Bindings/Time.cpp).
-		registry.Enum<WorldPauseSounds>("WorldPauseSounds", "What a world pause does to the world's playing voices; the Ui group's play on either way.")
-			.Entry(WorldPauseSounds::Pause, "Pause", "The voices outside the Ui group pause until the world resumes.")
+		registry.Enum<WorldPauseSounds>("WorldPauseSounds", "What a world pause does to the world's playing voices, those of every group but Music and Ui (today the Sfx group's); the Music and Ui groups' play on either way.")
+			.Entry(WorldPauseSounds::Pause, "Pause", "The world's voices (every group's but Music and Ui) pause until the world resumes.")
 			.Entry(WorldPauseSounds::Finish, "Finish", "The voices play on to their end.");
 
 		registry.Enum<PlayStepRender>("PlayStepRender", "Which ticks of a play.step extract the play scene's game view (its primary camera) for rendering.")
@@ -530,7 +530,7 @@ namespace Engine {
 			.Field("scale", &PlaySetTimeScaleParams::Scale, "The time scale, 0 to 100 (required; 1 is real time).", timeScaleMeta);
 		registry.Struct<PlaySetWorldPausedParams>("PlaySetWorldPausedParams", "The params of play.setWorldPaused.")
 			.Field("paused", &PlaySetWorldPausedParams::Paused, "Pause (true) or resume (false) the world from the next tick on (required).")
-			.Field("sounds", &PlaySetWorldPausedParams::Sounds, "A pause's choice for the world's voices: Pause (the default) or Finish; the Ui group's play on either way.");
+			.Field("sounds", &PlaySetWorldPausedParams::Sounds, "A pause's choice for the world's voices, those of every group but Music and Ui (today the Sfx group's): Pause (the default) or Finish; the Music and Ui groups' play on either way.");
 		registry.Struct<PlayWaitForParams>("PlayWaitForParams", "Advance until a Luau predicate becomes truthy.")
 			.Field("until", &PlayWaitForParams::Until, "Expression or chunk evaluated after every tick in the live VM. Its value must be JSON: one that is not, a vector, Color or Quat included (only script.eval returns those as arrays), ends the wait with its Script error.")
 			.Field("timeoutTicks", &PlayWaitForParams::TimeoutTicks, "Maximum ticks to advance.", { .Min = 1.0, .Max = static_cast<double>(MaxPlayStepTicks) });

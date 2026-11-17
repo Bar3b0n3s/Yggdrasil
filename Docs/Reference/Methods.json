@@ -1856,6 +1856,14 @@
 							"fadeVolume": {
 								"description": "Its level now, a multiplier of its volume that a fade moves (the session's music fades in, out and between tracks); 1 for a voice that never faded.",
 								"type": "number"
+							},
+							"next": {
+								"description": "The clip that follows the voice's clip, sample-accurately (the loop of the session's music after its intro); empty for a voice without one.",
+								"$ref": "#/$defs/AssetSummary"
+							},
+							"inNext": {
+								"description": "Whether the voice plays the clip that follows (its cursor and length are then that clip's).",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false
@@ -1866,6 +1874,10 @@
 						"properties": {
 							"clip": {
 								"description": "The clip of the current request; empty without music and outside a Play session.",
+								"$ref": "#/$defs/AssetSummary"
+							},
+							"intro": {
+								"description": "The intro of the current request, played once before its clip; empty for none.",
 								"$ref": "#/$defs/AssetSummary"
 							},
 							"volume": {
@@ -17165,7 +17177,7 @@
 						"type": "boolean"
 					},
 					"sounds": {
-						"description": "A pause's choice for the world's voices: Pause (the default) or Finish; the Ui group's play on either way.",
+						"description": "A pause's choice for the world's voices, those of every group but Music and Ui (today the Sfx group's): Pause (the default) or Finish; the Music and Ui groups' play on either way.",
 						"enum": ["Pause", "Finish"]
 					},
 					"ifRevision": {
