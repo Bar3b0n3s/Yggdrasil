@@ -504,7 +504,7 @@ Simulates the entity with Jolt physics.
 |---|---|---|---|---|---|---|
 | `Type` | `BodyType` | `"Dynamic"` |  |  |  | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
 | `Mass` | `Float` | `1` | 0.001 to 1e+09 | kg |  | Mass in kilograms (Dynamic only). |
-| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders. |
+| `Friction` | `Float` | `0.5` | 0 to 1000 |  |  | The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders. |
 | `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface. |
 | `LinearDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly linear velocity decays, per second. |
 | `AngularDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly angular velocity decays, per second. |
@@ -710,7 +710,7 @@ The surface of the solid colliders on this entity: their own friction and restit
 
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
-| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
+| `Friction` | `Float` | `0.5` | 0 to 1000 |  |  | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
 | `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. |
 | `SurfaceVelocity` | `Vec3` | `[0,0,0]` | -500 to 500 | m/s |  | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
 
@@ -978,7 +978,7 @@ Simulates the entity in the 2D world: moves along world X and Y and rotates abou
 |---|---|---|---|---|---|---|
 | `Type` | `BodyType` | `"Dynamic"` |  |  |  | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
 | `Mass` | `Float` | `1` | 0.001 to 1e+09 | kg |  | Mass in kilograms (Dynamic only). |
-| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
+| `Friction` | `Float` | `0.5` | 0 to 1000 |  |  | The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values. |
 | `Restitution` | `Float` | `0` | 0 to 1 |  |  | Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values. |
 | `LinearDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly linear velocity decays, per second. |
 | `AngularDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly angular velocity decays, per second. |
@@ -1744,7 +1744,7 @@ The entity's Terrain as a static height field in the physics world, colliding wi
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). |
-| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values. |
+| `Friction` | `Float` | `0.5` | 0 to 1000 |  |  | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values. |
 | `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values. |
 
 Script members of `TerrainCollider`:

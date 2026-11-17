@@ -45,8 +45,9 @@
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 3). M20, which owns the contact path in phase 1,
 // adds GetSubShapeCollider and the touching test of speculative contacts (Physics/ContactBuffer.h,
 // Docs/Decisions/0031-m20-contract.md decisions 2 and 3). M36, which owns the contact path in phase 6, appends the collider
-// surfaces (PhysicsColliderSurface, SetColliderSurfaces; Docs/Decisions/0053-m36-contact-surfaces.md decision 2), reviewed as
-// a change to a frozen interface.
+// surfaces (PhysicsColliderSurface, SetColliderSurfaces; Docs/Decisions/0053-m36-contact-surfaces.md decision 2) and
+// bounds BodyDescription::Friction by MaxPhysicsFriction (the W36.1 review's finding 1), reviewed as a change to a frozen
+// interface.
 
 namespace Engine {
 
@@ -97,7 +98,7 @@ namespace Engine {
 		// (EOverrideMassProperties::MassAndInertiaProvided, 1 kg with a unit sphere's inertia; Jolt never uses a kinematic
 		// body's mass in contacts), so a triangle mesh, whose MeshShape has no mass, is valid on it; a Static body has none.
 		float Mass = 1.0f;
-		float Friction = 0.5f;       // >= 0
+		float Friction = 0.5f;       // [0, MaxPhysicsFriction]
 		float Restitution = 0.0f;    // [0, 1]
 		float LinearDamping = 0.05f; // >= 0
 		float AngularDamping = 0.05f;
@@ -142,7 +143,7 @@ namespace Engine {
 	{
 		// The collider (ColliderShapeDescription::UserData of a collider of the body's shape, as contacts name it).
 		uint32_t Collider = 0;
-		float Friction = 0.5f;    // >= 0
+		float Friction = 0.5f;    // [0, MaxPhysicsFriction]
 		float Restitution = 0.0f; // [0, 1]
 		// m/s in the body's axes (each contact turns it by the body's rotation at that moment), at most MaxSurfaceSpeed long.
 		glm::vec3 SurfaceVelocity = glm::vec3(0.0f);
@@ -234,8 +235,8 @@ namespace Engine {
 		// velocity) wakes the bodies around it (its sub-shape bounds), so what sleeps on a stopped belt rides it once it
 		// starts; a list that changes nothing wakes nothing. The list stays until the next call or DestroyBody; SetShape keeps
 		// the entries whose collider the new shape still has. Errors, with nothing changed: InvalidArgument for a handle of no
-		// live body, a non-finite value, a Friction below 0, a Restitution outside [0, 1], a SurfaceVelocity longer than
-		// MaxSurfaceSpeed, a Collider the body's shape does not have, or a Collider listed twice.
+		// live body, a non-finite value, a Friction outside [0, MaxPhysicsFriction], a Restitution outside [0, 1], a
+		// SurfaceVelocity longer than MaxSurfaceSpeed, a Collider the body's shape does not have, or a Collider listed twice.
 		[[nodiscard]] Status SetColliderSurfaces(BodyHandle body, std::span<const PhysicsColliderSurface> surfaces);
 
 		// --- Poses and motion (§9.3) ----------------------------------------------------------------------------------

@@ -19,8 +19,10 @@ namespace Engine {
 	class Scene;
 
 	// Warning, not fixable: a ColliderSurface whose entity holds no solid collider of a creatable 3D body (no collider
-	// component, triggers only, a character's capsule, 2D colliders only, or colliders of a body an Error diagnostic refuses):
-	// it changes no contact.
+	// component, triggers only, a character's capsule, 2D colliders only, or colliders of a body a composition error refuses:
+	// PHYSICS_MIXED_TRIGGER, PHYSICS_DYNAMIC_TRIGGER, PHYSICS_NONCONVEX_DYNAMIC, PHYSICS_ALL_DOFS_LOCKED,
+	// PHYSICS_LIMIT_EXCEEDED): it changes no contact. A body whose built shape is refused (PHYSICS_INVALID_SHAPE) still
+	// counts, as the composition alone decides.
 	inline constexpr std::string_view PhysicsSurfaceUnusedCode = "PHYSICS_SURFACE_UNUSED";
 
 	// M36's codes, in the validator's order.

@@ -145,10 +145,17 @@ namespace Engine {
 			}
 			return 2;
 		}
-		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5): the values contacts with a collider use, or nil.
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5): the values contacts with a collider use, or nil; nil for
+		// nil, so Physics.GetSurface(controller:GetGroundCollider()) reads a character's footing in the air too (the W36.1
+		// review's finding 2).
 		static int PhysicsGetSurface(ScriptCall& call)
 		{
 			auto& physics = ScriptPhysics(call);
+			if (Lua::IsNoneOrNil(call, 1))
+			{
+				Lua::PushNil(call);
+				return 1;
+			}
 			const auto entity = Lua::Check<ScriptEntityIdentity>(call, 1);
 			const auto valid = ScriptProxy::ValidateEntity(call.Engine->GetHost(), entity);
 			if (!valid)
@@ -224,11 +231,11 @@ namespace Engine {
 				.Function("OverlapBox", Utils::PhysicsOverlapBox, "(center: vector, halfExtents: vector, rotation: Quat?, layerMask: number?) -> {Entity}", "Unique overlapping collider entities sorted by UUID; default identity rotation.", read)
 				.Function("GetBodyBounds", Utils::PhysicsBounds<false>, "(entity: Entity) -> (vector?, vector?)", "World AABB of the body's complete compound, or nil if no body is owned.", read)
 				.Function("GetColliderBounds", Utils::PhysicsBounds<true>, "(entity: Entity) -> (vector?, vector?)", "World AABB of this entity's collider sub-shapes, or nil if absent.", read)
-				.Function("GetSurface", Utils::PhysicsGetSurface, "(collider: Entity) -> SurfaceInfo?",
+				.Function("GetSurface", Utils::PhysicsGetSurface, "(collider: Entity?) -> SurfaceInfo?",
 					"The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use, as its ColliderSurface "
-					"holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for an entity "
-					"without a solid collider in a body (a character's capsule, triggers alone), disabled or destroyed. Pair it with "
-					"CharacterController:GetGroundCollider to read what a character stands on.",
+					"holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for nil, for a "
+					"disabled entity and for one without a solid collider in a body (a character's capsule, triggers alone); a destroyed entity is an "
+					"error. Physics.GetSurface(controller:GetGroundCollider()) reads what a character stands on, nil while it is in the air.",
 					read)
 				.Function("GetGravity", Utils::PhysicsGravity, "() -> vector", "Current world gravity.", read)
 				.Function("SetGravity", Utils::PhysicsSetGravity, "(gravity: vector) -> ()", "Set finite gravity within physics bounds for the session.")

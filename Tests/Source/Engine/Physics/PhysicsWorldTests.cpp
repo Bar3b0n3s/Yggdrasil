@@ -1269,24 +1269,43 @@ namespace Engine {
 			CHECK(world->GetPose(*belt).Position == glm::vec3(0.0f, 0.25f, 0.0f));
 		}
 
-		// Frictions have no maximum (RigidBody's and ColliderSurface's alike), so the listener takes the geometric mean in double
-		// precision: a float product of two such frictions would overflow, which Jolt's floating-point exceptions turn into an
-		// abort in MSVC Debug. (A combined friction near 1e19 still overflows Jolt's own friction clamp: Docs/Backlog.md §3.)
-		TEST_CASE("PhysicsWorld: two surfaces whose frictions' product overflows combine to a finite friction")
+		// The W36.1 review's finding 1: Jolt's friction solve squares the combined friction times the summed normal impulse,
+		// so every friction is at most MaxPhysicsFriction (PhysicsTypes.h). At the bound, the heaviest body landing and sliding
+		// on a surface of the largest friction steps (in Debug too, whose floating-point exceptions abort on an overflow); one
+		// past it is refused by CreateBody and SetColliderSurfaces alike, with nothing changed.
+		TEST_CASE("PhysicsWorld: a friction above MaxPhysicsFriction is refused, and the heaviest body steps on the largest")
 		{
 			Scope<PhysicsWorld> world = CreateWorld();
 			const BodyHandle ground = CreateGround(*world);
-			REQUIRE(world->SetColliderSurfaces(ground, std::array{ PhysicsColliderSurface{ .Collider = 0, .Friction = 1.0e20f } }).has_value());
-			const BodyHandle box = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }, glm::vec3(0.0f, 0.5f, 0.0f),
-				{ .Mass = 0.1f, .LinearVelocity = glm::vec3(3.0f, 0.0f, 0.0f) });
-			REQUIRE(world->SetColliderSurfaces(box, std::array{ PhysicsColliderSurface{ .Collider = 0, .Friction = 1.0e20f } }).has_value());
+			const std::array largest{ PhysicsColliderSurface{ .Collider = 0, .Friction = MaxPhysicsFriction } };
+			REQUIRE(world->SetColliderSurfaces(ground, largest).has_value());
+			const BodyHandle box = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }, glm::vec3(0.0f, 2.0f, 0.0f),
+				{ .Mass = MaxPhysicsMass, .Friction = MaxPhysicsFriction, .LinearVelocity = glm::vec3(5.0f, -10.0f, 0.0f) });
 			StepWorld(*world, 60);
 			const PhysicsPose pose = world->GetPose(box);
 			const glm::vec3 velocity = world->GetLinearVelocity(box);
 			CHECK((std::isfinite(pose.Position.x) && std::isfinite(pose.Position.y) && std::isfinite(pose.Position.z)));
 			CHECK((std::isfinite(velocity.x) && std::isfinite(velocity.y) && std::isfinite(velocity.z)));
-			// Gripped at once: it never slides the 3 m a frictionless floor would let it.
+			// Gripped where it lands (about 0.7 m along), never sliding the 5 m a second on a frictionless floor would take it.
 			CHECK(pose.Position.x < 1.5f);
+			CHECK(glm::length(velocity) < 0.05f);
+			StepWorld(*world, 60);
+			REQUIRE(world->IsSleeping(box));
+
+			const float above = std::nextafter(MaxPhysicsFriction, std::numeric_limits<float>::infinity());
+			const Result<BodyHandle> body = world->CreateBody({ .Shape = CreateShape(BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) }),
+				.MotionType = PhysicsMotionType::Dynamic,
+				.Pose = { .Position = glm::vec3(5.0f, 0.5f, 0.0f) },
+				.Friction = above });
+			REQUIRE_FALSE(body.has_value());
+			CHECK(body.error().GetCode() == ErrorCode::InvalidArgument);
+			const Status surface = world->SetColliderSurfaces(ground, std::array{ PhysicsColliderSurface{ .Collider = 0, .Friction = above } });
+			REQUIRE_FALSE(surface.has_value());
+			CHECK(surface.error().GetCode() == ErrorCode::InvalidArgument);
+			// Nothing changed: the ground's list is still the largest friction, so sending it again changes nothing and wakes
+			// nothing.
+			REQUIRE(world->SetColliderSurfaces(ground, largest).has_value());
+			CHECK(world->IsSleeping(box));
 		}
 
 		TEST_CASE("PhysicsWorld: SetColliderSurfaces refuses a bad list and wakes only what rests on a collider whose surface changed")
@@ -1294,8 +1313,15 @@ namespace Engine {
 			Scope<PhysicsWorld> world = CreateWorld();
 			const BodyHandle floor = CreateSlabs(*world);
 			const BodyHandle crate = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.25f) }, glm::vec3(2.0f, 0.25f, 0.0f));
+			// A rider on the marble, carried by a belt there while the refusals run (the W36.1 review's finding 4).
+			const BodyHandle rider = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.25f) }, glm::vec3(-2.0f, 0.25f, -8.0f));
 			StepWorld(*world, 120);
 			REQUIRE(world->IsSleeping(crate));
+			REQUIRE(world->SetColliderSurfaces(floor, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(0.0f, 0.0f, 3.0f) } })
+					.has_value());
+			CHECK(world->IsSleeping(crate));
+			StepWorld(*world, 60);
+			REQUIRE(world->GetLinearVelocity(rider).z == doctest::Approx(3.0f).epsilon(0.02));
 
 			const auto refused = [&world](BodyHandle body, const PhysicsColliderSurface& first, std::optional<PhysicsColliderSurface> second = std::nullopt)
 			{
@@ -1314,9 +1340,10 @@ namespace Engine {
 			CHECK(refused(floor, { .Collider = 1, .SurfaceVelocity = glm::vec3(MaxSurfaceSpeed, 1.0f, 0.0f) }));
 			CHECK(refused(floor, { .Collider = 2 }));
 			CHECK(refused(floor, { .Collider = 1 }, PhysicsColliderSurface{ .Collider = 1, .Friction = 0.02f }));
-			// A refusal changes nothing: the crate sleeps on.
-			StepWorld(*world, 2);
+			// A refusal changes nothing: the crate sleeps on, and the belt under the rider still carries it.
+			StepWorld(*world, 30);
 			CHECK(world->IsSleeping(crate));
+			CHECK(world->GetLinearVelocity(rider).z == doctest::Approx(3.0f).epsilon(0.02));
 
 			// A list that changes no value wakes nothing (the body's own material, and nothing listed), and a surface changed
 			// on the other collider wakes only what rests there.
@@ -1333,14 +1360,26 @@ namespace Engine {
 			StepWorld(*world, 60);
 			CHECK(world->GetLinearVelocity(crate).z == doctest::Approx(1.0f).epsilon(0.02));
 
-			// A shape without collider 1 drops its surface; collider 0 keeps its own.
+			// A shape without collider 1 drops its surface; collider 0 keeps its own (the W36.1 review's finding 4): a box asleep
+			// on the marble's surface of friction 0.02 stays asleep when that same list comes again, which changes nothing.
+			REQUIRE(world->SetColliderSurfaces(floor, std::array{ PhysicsColliderSurface{ .Collider = 0, .Friction = 0.02f }, PhysicsColliderSurface{ .Collider = 1, .SurfaceVelocity = glm::vec3(0.0f, 0.0f, 1.0f) } })
+					.has_value());
+			const BodyHandle sleeper = CreateDynamic(*world, BoxShapeGeometry{ .HalfExtents = glm::vec3(0.25f) }, glm::vec3(-3.0f, 0.25f, 0.0f));
 			Result<Ref<const PhysicsShape>> marbleOnly = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{
 																					.Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(2.0f, 0.5f, 10.0f) }, .Position = glm::vec3(-2.0f, -0.5f, 0.0f), .UserData = 0 } } });
 			REQUIRE(marbleOnly.has_value());
 			REQUIRE(world->SetShape(floor, *marbleOnly).has_value());
 			CHECK(refused(floor, { .Collider = 1 }));
+			StepWorld(*world, 120);
+			REQUIRE(world->IsSleeping(sleeper));
+			REQUIRE(world->SetColliderSurfaces(floor, std::array{ PhysicsColliderSurface{ .Collider = 0, .Friction = 0.02f } }).has_value());
+			CHECK(world->IsSleeping(sleeper));
+			// A belt on the marble wakes it, and it rides at the belt's speed.
 			REQUIRE(world->SetColliderSurfaces(floor, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(0.0f, 0.0f, 3.0f) } })
 					.has_value());
+			CHECK_FALSE(world->IsSleeping(sleeper));
+			StepWorld(*world, 60);
+			CHECK(world->GetLinearVelocity(sleeper).z == doctest::Approx(3.0f).epsilon(0.02));
 		}
 	}
 

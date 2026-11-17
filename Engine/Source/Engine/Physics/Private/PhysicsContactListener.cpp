@@ -148,10 +148,9 @@ namespace Engine {
 			if (surface1 == nullptr && surface2 == nullptr)
 				return;
 			// Jolt's own rules (ContactConstraintManager's default CombineFunctions) over each side's value, the geometric mean in
-			// double precision: frictions have no maximum (as RigidBody's), and a float product that overflows would raise the
-			// floating-point exception Jolt enables during a step in MSVC Debug. The product of two floats is exact in double,
-			// and the square root then rounded to float is the correctly rounded one, so the result is still a function of the
-			// two values alone.
+			// double precision: the product of two floats is exact in double, and the square root then rounded to float is the
+			// correctly rounded one, so the result is a function of the two values alone (each at most MaxPhysicsFriction, so
+			// no product overflows either way).
 			const float friction1 = surface1 != nullptr ? surface1->Friction : body1.GetFriction();
 			const float friction2 = surface2 != nullptr ? surface2->Friction : body2.GetFriction();
 			const float restitution1 = surface1 != nullptr ? surface1->Restitution : body1.GetRestitution();

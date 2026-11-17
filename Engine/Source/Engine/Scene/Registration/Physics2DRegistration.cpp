@@ -67,7 +67,8 @@ namespace Engine {
 			.Field("Mass", &RigidBody2DComponent::Mass, "Mass in kilograms (Dynamic only).",
 				{ .Min = Utils::MinBody2DMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
 			.Field("Friction", &RigidBody2DComponent::Friction,
-				"The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.", { .Min = 0.0 })
+				"The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
+				{ .Min = 0.0, .Max = static_cast<double>(MaxPhysicsFriction) })
 			.Field("Restitution", &RigidBody2DComponent::Restitution,
 				"Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
 				{ .Min = 0.0, .Max = 1.0 })

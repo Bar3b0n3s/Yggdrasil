@@ -776,9 +776,9 @@ All modes; Runtime|Test; pure/read.
 
 ### Physics.GetSurface
 
-`(collider: Entity) -> SurfaceInfo?`
+`(collider: Entity?) -> SurfaceInfo?`
 
-The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use, as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for an entity without a solid collider in a body (a character's capsule, triggers alone), disabled or destroyed. Pair it with CharacterController:GetGroundCollider to read what a character stands on.
+The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use, as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for nil, for a disabled entity and for one without a solid collider in a body (a character's capsule, triggers alone); a destroyed entity is an error. Physics.GetSurface(controller:GetGroundCollider()) reads what a character stands on, nil while it is in the air.
 
 All modes; Runtime|Test; pure/read.
 

@@ -8,8 +8,8 @@
 
 // The Physics category (Docs/Decisions/0006-m3-decisions.md, decision 9; Architecture §5.3, §9). Field bounds keep every
 // value Jolt receives valid (§9.1 "nothing invalid reaches Jolt"): masses above 0 and at most MaxPhysicsMass (the most the
-// physics world accepts, Docs/Decisions/0014-m11-decisions.md decision 34), non-negative friction, damping and velocity
-// limits, restitution in [0, 1] and collider dimensions of at least MinColliderDimension. The composition rules
+// physics world accepts, Docs/Decisions/0014-m11-decisions.md decision 34), friction from 0 to MaxPhysicsFriction (M36,
+// Docs/Decisions/0053-m36-contact-surfaces.md decision 2), non-negative damping and velocity limits, restitution in [0, 1] and collider dimensions of at least MinColliderDimension. The composition rules
 // that span several components or entities (a non-convex MeshCollider on a Dynamic body, Dynamic triggers, all six
 // degrees of freedom locked, mixed triggers, unknown layers) are diagnostics of the physics validator (M11,
 // PHYSICS_* codes of §13.7), not rules of a single component.
@@ -48,7 +48,7 @@ namespace Engine {
 			.Field("Friction", &RigidBodyComponent::Friction,
 				"The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the "
 				"geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders.",
-				{ .Min = 0.0 })
+				{ .Min = 0.0, .Max = static_cast<double>(MaxPhysicsFriction) })
 			.Field("Restitution", &RigidBodyComponent::Restitution,
 				"The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the "
 				"colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every "
@@ -149,7 +149,7 @@ namespace Engine {
 			.Field("Friction", &ColliderSurfaceComponent::Friction,
 				"The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of "
 				"its two sides' values (0.02 is polished ice).",
-				{ .Min = 0.0 })
+				{ .Min = 0.0, .Max = static_cast<double>(MaxPhysicsFriction) })
 			.Field("Restitution", &ColliderSurfaceComponent::Restitution,
 				"The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact "
 				"uses the larger of its two sides' values.",

@@ -286,6 +286,75 @@ namespace Engine {
 			CHECK_FALSE(physics.GetCharacterState(character)->GroundCollider.IsValid());
 		}
 
+		// The W36.1 review's finding 3: a ColliderSurface added to or removed from a collider during play reaches the world
+		// through the component's construct and destroy signals; a removal sends the body's list empty.
+		TEST_CASE("PhysicsSystem: a ColliderSurface added in play carries what rests on its collider, and its removal stops it")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddBoxBody(scene, "Belt", glm::vec3(0.0f, -0.25f, 0.0f), glm::vec3(10.0f, 0.25f, 1.0f), std::nullopt));
+			static_cast<void>(Test::AddBoxBody(scene, "Crate", glm::vec3(0.0f, 0.25f, 0.0f), glm::vec3(0.25f), BodyType::Dynamic));
+			Scope<PlaySession> session = StartSurfaceSession(fixture);
+			PhysicsSystem& physics = session->GetPhysics();
+			const UUID crate = Test::GetEntityId(session->GetScene(), "/Crate");
+			const UUID belt = Test::GetEntityId(session->GetScene(), "/Belt");
+			Test::RunTicks(*session, 120);
+			REQUIRE(physics.IsSleeping(crate).value_or(false));
+
+			// A surface added to the plain collider wakes the crate asleep on it, which rides it.
+			session->GetScene().FindEntityByPath("/Belt").AddComponent<ColliderSurfaceComponent>(
+				ColliderSurfaceComponent{ .SurfaceVelocity = glm::vec3(2.0f, 0.0f, 0.0f) });
+			session->Tick();
+			CHECK_FALSE(physics.IsSleeping(crate).value_or(true));
+			Test::RunTicks(*session, 60);
+			CHECK(physics.GetLinearVelocity(crate).value_or(glm::vec3(0.0f)).x == doctest::Approx(2.0f).epsilon(0.02));
+
+			// Removed, the belt is a plain collider again: the crate stops and stays where it stopped.
+			session->GetScene().FindEntityByPath("/Belt").RemoveComponent<ColliderSurfaceComponent>();
+			Test::RunTicks(*session, 30);
+			CHECK(std::abs(physics.GetLinearVelocity(crate).value_or(glm::vec3(1.0f)).x) < 0.01f);
+			const float stopped = Test::GetWorldPosition(*session, "/Crate").x;
+			Test::RunTicks(*session, 60);
+			CHECK(std::abs(Test::GetWorldPosition(*session, "/Crate").x - stopped) < 1.0e-3f);
+			const std::optional<PhysicsSurfaceInfo> plain = physics.GetSurface(belt);
+			REQUIRE(plain.has_value());
+			CHECK(plain->SurfaceVelocity == glm::vec3(0.0f));
+		}
+
+		// The W36.1 review's finding 3: a character standing on another one stands on that character's inner body, whose
+		// ground collider is the other character's entity (ResolveHit through FindCharacterOwner).
+		TEST_CASE("PhysicsSystem: a character standing on another character reports that character as its ground collider")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddGround(scene));
+			Entity lower = scene.CreateEntity("Lower");
+			lower.AddComponent<CharacterControllerComponent>(CharacterControllerComponent{});
+			// Right above the lower character's 1.8 m capsule.
+			Entity upper = scene.CreateEntity("Upper");
+			upper.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 1.9f, 0.0f);
+			});
+			upper.AddComponent<CharacterControllerComponent>(CharacterControllerComponent{});
+			Scope<PlaySession> session = StartSurfaceSession(fixture);
+			PhysicsSystem& physics = session->GetPhysics();
+			const UUID lowerId = Test::GetEntityId(session->GetScene(), "/Lower");
+			const UUID upperId = Test::GetEntityId(session->GetScene(), "/Upper");
+			Test::RunTicks(*session, 30);
+
+			const Result<PhysicsCharacterState> top = physics.GetCharacterState(upperId);
+			REQUIRE(top.has_value());
+			REQUIRE(top->IsGrounded);
+			CHECK(top->GroundCollider == lowerId);
+			CHECK(Test::GetWorldPosition(*session, "/Upper").y > 1.7f);
+			const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(upperId);
+			REQUIRE(report.has_value());
+			REQUIRE(report->Character.has_value());
+			CHECK(report->Character->GroundCollider == lowerId);
+			CHECK(physics.GetCharacterState(lowerId)->GroundCollider == Test::GetEntityId(session->GetScene(), "/Ground"));
+		}
+
 		// M36 W36.2 (Docs/Decisions/0053-m36-contact-surfaces.md decision 12): the session names the press's entity, in Play and
 		// in Simulate, and physics.bodyInfo's report the same.
 		TEST_CASE("PhysicsSystem: a squeezed character reports the press's entity, and a Simulate session's press too")

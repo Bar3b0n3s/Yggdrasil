@@ -100,7 +100,7 @@ namespace Engine {
 		// M19 (Docs/Decisions/0030-m19-contract.md decision 36, P-CARRY; CharacterControllerComponent::InheritGroundVelocity):
 		// while grounded, the character also moves with the horizontal velocity of what it stands on (see Update), so a
 		// platform moving at v carries it v * t in t seconds. Off by default: the character then keeps only the ground's
-		// vertical velocity, as before.
+		// vertical velocity, as before, and, from M36, a collider surface's horizontal velocity (see Update).
 		bool InheritGroundVelocity = false;
 	};
 

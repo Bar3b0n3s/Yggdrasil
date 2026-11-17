@@ -263,8 +263,11 @@ namespace Engine {
 		{
 			if (!std::isfinite(surface.Friction) || !std::isfinite(surface.Restitution) || !Detail::IsFinite(surface.SurfaceVelocity))
 				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {} holds a value that is not finite", surface.Collider);
-			if (surface.Friction < 0.0f)
-				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {}: Friction must be >= 0 (got {})", surface.Collider, surface.Friction);
+			if (surface.Friction < 0.0f || surface.Friction > MaxPhysicsFriction)
+			{
+				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {}: Friction must be in [0, {}] (got {})", surface.Collider,
+					MaxPhysicsFriction, surface.Friction);
+			}
 			if (surface.Restitution < 0.0f || surface.Restitution > 1.0f)
 				return MakeError(ErrorCode::InvalidArgument, "the surface of collider {}: Restitution must be in [0, 1] (got {})", surface.Collider,
 					surface.Restitution);
@@ -410,8 +413,8 @@ namespace Engine {
 		}
 		if (!Detail::IsFinite(description.LinearVelocity) || !Detail::IsFinite(description.AngularVelocity))
 			return MakeError(ErrorCode::InvalidArgument, "the starting velocities are not finite");
-		if (description.Friction < 0.0f)
-			return MakeError(ErrorCode::InvalidArgument, "Friction must be >= 0 (got {})", description.Friction);
+		if (description.Friction < 0.0f || description.Friction > MaxPhysicsFriction)
+			return MakeError(ErrorCode::InvalidArgument, "Friction must be in [0, {}] (got {})", MaxPhysicsFriction, description.Friction);
 		if (description.Restitution < 0.0f || description.Restitution > 1.0f)
 			return MakeError(ErrorCode::InvalidArgument, "Restitution must be in [0, 1] (got {})", description.Restitution);
 		if (description.LinearDamping < 0.0f || description.AngularDamping < 0.0f)

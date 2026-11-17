@@ -14,10 +14,10 @@ namespace Engine {
 	// the frictions, the larger restitution), and SurfaceVelocity, the velocity the surface moves at while the body stays
 	// where it is (a conveyor belt): a body resting on it is carried by friction, and a character standing on it is carried
 	// whatever its InheritGroundVelocity says. Requires Transform. Not descendants' colliders, triggers, a character's capsule
-	// or 2D colliders (PHYSICS_SURFACE_UNUSED). Friction >= 0 and Restitution in [0, 1], as RigidBody's, whose defaults these
-	// are, so a component added for its velocity alone changes nothing else. SurfaceVelocity in m/s in the entity's own axes
-	// (its world rotation, never its scale), each component within MaxCharacterSpeed. A write takes effect at the next physics
-	// pre-step without recomposing the scene.
+	// or 2D colliders (PHYSICS_SURFACE_UNUSED). Friction in [0, MaxPhysicsFriction] and Restitution in [0, 1], as RigidBody's,
+	// whose defaults these are, so a component added for its velocity alone changes nothing else. SurfaceVelocity in m/s in
+	// the entity's own axes (its world rotation, never its scale), each component within MaxCharacterSpeed. A write takes
+	// effect at the next physics pre-step without recomposing the scene.
 	struct ColliderSurfaceComponent
 	{
 		float Friction = 0.5f;

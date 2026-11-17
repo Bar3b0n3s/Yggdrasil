@@ -4430,7 +4430,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface.",
@@ -4782,7 +4783,8 @@
 							"Friction": {
 								"description": "The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice).",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values.",
@@ -5202,7 +5204,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
@@ -6548,7 +6551,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values.",
@@ -8874,7 +8878,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface.",
@@ -9226,7 +9231,8 @@
 							"Friction": {
 								"description": "The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice).",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values.",
@@ -9646,7 +9652,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
@@ -10992,7 +10999,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values.",
@@ -19435,7 +19443,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface.",
@@ -19787,7 +19796,8 @@
 							"Friction": {
 								"description": "The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice).",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values.",
@@ -20207,7 +20217,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the body's surfaces; a contact uses the geometric mean of both bodies' values.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1); a contact uses the larger of both bodies' values.",
@@ -21553,7 +21564,8 @@
 							"Friction": {
 								"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values.",
 								"type": "number",
-								"minimum": 0
+								"minimum": 0,
+								"maximum": 1000
 							},
 							"Restitution": {
 								"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values.",

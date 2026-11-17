@@ -26,7 +26,7 @@ namespace Engine {
 	struct TerrainColliderComponent
 	{
 		std::string Layer = "Default"; // a project physics layer (PhysicsSettings.Layers)
-		float Friction = 0.5f;         // >= 0, as RigidBody's
+		float Friction = 0.5f;         // [0, MaxPhysicsFriction], as RigidBody's
 		float Restitution = 0.0f;      // [0, 1]
 	};
 

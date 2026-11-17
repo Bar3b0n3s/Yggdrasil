@@ -456,8 +456,9 @@ namespace Engine {
 				"Bake the scene's navigation again with navigation.bake (the editor's Bake Navigation) and save the scene." },
 			ValidationCodeInfo{ PhysicsSurfaceUnusedCode, "Warning", false,
 				"A ColliderSurface applies to no collider: its entity holds no solid collider of a body the scene creates (no collider "
-				"component, triggers only, a CharacterController's capsule, 2D colliders only, or the colliders of a body a physics error "
-				"refuses), so its friction, restitution and surface velocity change no contact.",
+				"component, triggers only, a CharacterController's capsule, 2D colliders only, or the colliders of a body a composition error "
+				"refuses: PHYSICS_MIXED_TRIGGER, PHYSICS_DYNAMIC_TRIGGER, PHYSICS_NONCONVEX_DYNAMIC, PHYSICS_ALL_DOFS_LOCKED, "
+				"PHYSICS_LIMIT_EXCEEDED), so its friction, restitution and surface velocity change no contact.",
 				"Give the entity a BoxCollider, SphereCollider, CapsuleCollider, MeshCollider or TerrainCollider that is not a trigger (a "
 				"ColliderSurface applies to the colliders on its own entity only, never to its descendants'), or remove the ColliderSurface." },
 		};
