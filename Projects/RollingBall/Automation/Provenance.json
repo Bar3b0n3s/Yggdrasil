@@ -508,11 +508,11 @@
 		},
 		{
 			"Path": "Assets/Scripts/Checkpoint.graph",
-			"XXH64": "5db1ac842fe78771",
-			"Method": "edit.batch",
-			"RequestId": 31,
-			"Client": "engine-mcp",
-			"TranscriptLine": 59
+			"XXH64": "6a444b7de92c9211",
+			"Method": "project.upgrade",
+			"RequestId": 2,
+			"Client": "cli",
+			"TranscriptLine": 1227
 		},
 		{
 			"Path": "Assets/Scripts/Checkpoint.graph.meta",
