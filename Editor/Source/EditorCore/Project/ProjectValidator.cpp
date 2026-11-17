@@ -59,6 +59,7 @@
 #include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -204,6 +205,9 @@ namespace Engine {
 			// after main's (ADR 0042's phase-5 ledger: after every other lander's, M34's and M33's codes among them).
 			NavMeshNotBakedCode,
 			NavMeshStaleCode,
+			// M36 (Scene/PhysicsSurfaceValidation.h, Docs/Decisions/0053-m36-contact-surfaces.md decision 6), appended in landing
+			// order after main's (ADR 0052's phase-6 ledger: M36 before M37).
+			PhysicsSurfaceUnusedCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -450,6 +454,12 @@ namespace Engine {
 				"A scene's static colliders, NavModifiers or Navigation settings changed after its navigation mesh was baked, or its bake "
 				"input can no longer be read (an unknown layer, a setting out of range); queries follow the old mesh.",
 				"Bake the scene's navigation again with navigation.bake (the editor's Bake Navigation) and save the scene." },
+			ValidationCodeInfo{ PhysicsSurfaceUnusedCode, "Warning", false,
+				"A ColliderSurface applies to no collider: its entity holds no solid collider of a body the scene creates (no collider "
+				"component, triggers only, a CharacterController's capsule, 2D colliders only, or the colliders of a body a physics error "
+				"refuses), so its friction, restitution and surface velocity change no contact.",
+				"Give the entity a BoxCollider, SphereCollider, CapsuleCollider, MeshCollider or TerrainCollider that is not a trigger (a "
+				"ColliderSurface applies to the colliders on its own entity only, never to its descendants'), or remove the ColliderSurface." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1201,10 +1211,13 @@ namespace Engine {
 		{
 			if (checked.Layers == nullptr)
 				return;
-			// M21 (Docs/Decisions/0032-m21-contract.md decision 12): the 2D world's diagnostics follow the 3D world's.
+			// M21 (Docs/Decisions/0032-m21-contract.md decision 12): the 2D world's diagnostics follow the 3D world's. M36
+			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 6): the collider surfaces' follow both.
 			std::vector<PhysicsDiagnostic> found = ValidateScenePhysics(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager());
 			std::vector<PhysicsDiagnostic> found2D = ValidateScenePhysics2D(*checked.Target, *checked.Layers, editor.GetEngine().GetAssetManager());
 			found.insert(found.end(), std::make_move_iterator(found2D.begin()), std::make_move_iterator(found2D.end()));
+			std::vector<PhysicsDiagnostic> surfaces = ValidateSceneSurfaces(*checked.Target, *checked.Layers);
+			found.insert(found.end(), std::make_move_iterator(surfaces.begin()), std::make_move_iterator(surfaces.end()));
 			for (const PhysicsDiagnostic& physics : found)
 			{
 				DiagnosticSite site;

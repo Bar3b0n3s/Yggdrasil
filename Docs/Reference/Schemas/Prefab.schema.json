@@ -785,12 +785,12 @@
 					"maximum": 1000000000
 				},
 				"Friction": {
-					"description": "The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts.",
+					"description": "The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders.",
 					"type": "number",
 					"minimum": 0
 				},
 				"Restitution": {
-					"description": "Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface.",
+					"description": "The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface.",
 					"type": "number",
 					"minimum": 0,
 					"maximum": 1
@@ -1126,8 +1126,49 @@
 					"type": "string"
 				},
 				"InheritGroundVelocity": {
-					"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does.",
+					"description": "While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way.",
 					"type": "boolean"
+				}
+			},
+			"additionalProperties": false
+		},
+		"ColliderSurface": {
+			"description": "The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them (a conveyor belt).",
+			"type": "object",
+			"properties": {
+				"Friction": {
+					"description": "The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice).",
+					"type": "number",
+					"minimum": 0
+				},
+				"Restitution": {
+					"description": "The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"SurfaceVelocity": {
+					"description": "The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -500,
+							"maximum": 500
+						},
+						{
+							"type": "number",
+							"minimum": -500,
+							"maximum": 500
+						},
+						{
+							"type": "number",
+							"minimum": -500,
+							"maximum": 500
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
 				}
 			},
 			"additionalProperties": false
@@ -2862,12 +2903,12 @@
 					"type": "string"
 				},
 				"Friction": {
-					"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values.",
+					"description": "The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values.",
 					"type": "number",
 					"minimum": 0
 				},
 				"Restitution": {
-					"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values.",
+					"description": "The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values.",
 					"type": "number",
 					"minimum": 0,
 					"maximum": 1
@@ -3699,6 +3740,9 @@
 						},
 						"CharacterController": {
 							"$ref": "#/$defs/CharacterController"
+						},
+						"ColliderSurface": {
+							"$ref": "#/$defs/ColliderSurface"
 						},
 						"AudioSource": {
 							"$ref": "#/$defs/AudioSource"

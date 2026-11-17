@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 // The character controller (Architecture §9.6) over a JPH::CharacterVirtual.
@@ -54,6 +55,12 @@
 // versus sensor, SubShapeA the capsule's empty sub-shape ID, all bits set), which the character's recorder refuses; the
 // two sources never share a sub-shape key, and each reports every removal of what it added, so the session's per-pair
 // reference count stays exact.
+//
+// Surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 4). The collider a character stands on is Jolt's
+// ground body and sub-shape of the update (resolved as a contact's, ResolvePhysicsCollider), and its surface velocity
+// (PhysicsBodyRecord::Surfaces) joins the ground's velocity, turned by the body's rotation when it is read: at the start of
+// Update for the step's velocity (the ground of the last update, where it is now), at its end for the ground state it
+// reports (the new ground). Without a surface the update computes exactly what it did before M36.
 //
 // Range. A character never leaves the range physics places bodies in (IsPlaceablePhysicsPose): an update that would
 // carry it beyond MaxPhysicsCoordinate leaves it where it was, with no velocity, and logs a warning once per controller.
@@ -209,6 +216,19 @@ namespace Engine {
 		Scope<JPH::CharacterVirtual> Character;
 		// Whether Update logged that it kept the character in range (once per controller).
 		bool HasWarnedRange = false;
+		// M36: the ground of the last update (CharacterGroundState::GroundBody, GroundCollider) and its collider's surface
+		// velocity in world space as the update ended, when it has a surface (none on a light body).
+		BodyHandle GroundBody{};
+		uint32_t GroundCollider = 0;
+		std::optional<glm::vec3> GroundSurfaceVelocity{};
+
+		// M36: a collider a character stands on (FindGroundCollider).
+		struct GroundColliderInfo
+		{
+			uint32_t Collider = 0;
+			// Its surface velocity in world space, when it has a surface.
+			std::optional<glm::vec3> SurfaceVelocity{};
+		};
 
 		// Where the inner body goes: the character's base raised by its padding, as CharacterVirtual places an inner body.
 		[[nodiscard]] PhysicsPose GetInnerBodyPose() const
@@ -232,6 +252,26 @@ namespace Engine {
 		[[nodiscard]] bool IsLightBody(const JPH::BodyID& body) const
 		{
 			return IsLighterThanCharacter(World->m_State->System->GetBodyLockInterfaceNoLock(), body, Character->GetMass());
+		}
+
+		// M36: the collider behind `subShape` of `body` (ColliderShapeDescription::UserData) and its surface velocity turned
+		// by the body's rotation now, when it has a surface; nothing for an invalid body or one that no longer exists. Main
+		// thread, between steps.
+		[[nodiscard]] GroundColliderInfo FindGroundCollider(const JPH::BodyID& body, const JPH::SubShapeID& subShape) const
+		{
+			if (body.IsInvalid())
+				return {};
+			const std::vector<Detail::PhysicsBodyRecord>& records = World->m_State->Bodies;
+			const JPH::BodyLockRead lock(World->m_State->System->GetBodyLockInterfaceNoLock(), body);
+			if (!lock.SucceededAndIsInBroadPhase())
+				return {};
+			const JPH::Body& ground = lock.GetBody();
+			GroundColliderInfo found{ .Collider = Detail::ResolvePhysicsCollider(records, ground, subShape) };
+			const Detail::PhysicsBodyRecord* record = Detail::FindPhysicsBodyRecord(records, body);
+			const PhysicsColliderSurface* surface = record != nullptr ? Detail::FindColliderSurface(*record, found.Collider) : nullptr;
+			if (surface != nullptr)
+				found.SurfaceVelocity = Detail::ToGlm(ground.GetRotation() * Detail::ToJolt(surface->SurfaceVelocity));
+			return found;
 		}
 
 		// Whether `contact` of the last update is a stair against a movement at `velocity`: CharacterVirtual::CanWalkStairs's
@@ -453,17 +493,34 @@ namespace Engine {
 		// a platform moving at v carries the character v * t. The platform the character stands on may have moved since the
 		// last update, so its velocity is read first; a light body's is none (M34, see the file comment), so a shard the
 		// character stands on never launches it.
+		// M36 (ADR 0053 decision 4): the surface velocity of the collider the character stands on joins the ground's velocity,
+		// its vertical part as every ground's, and its horizontal part carries a grounded character whatever
+		// InheritGroundVelocity says (a belt). A light body gives none, as it gives no velocity of its own.
 		character.UpdateGroundVelocity();
 		const JPH::Vec3 up = character.GetUp();
 		const JPH::Vec3 desired = Detail::ToJolt(desiredVelocity);
 		const JPH::Vec3 desiredVertical = desired.Dot(up) * up;
 		const JPH::Vec3 currentVertical = character.GetLinearVelocity().Dot(up) * up;
-		const JPH::Vec3 groundVelocity = state.IsLightBody(character.GetGroundBodyID()) ? JPH::Vec3::sZero() : character.GetGroundVelocity();
+		const bool lightGround = state.IsLightBody(character.GetGroundBodyID());
+		const std::optional<glm::vec3> groundSurface =
+			lightGround ? std::nullopt : state.FindGroundCollider(character.GetGroundBodyID(), character.GetGroundSubShapeID()).SurfaceVelocity;
+		JPH::Vec3 groundVelocity = lightGround ? JPH::Vec3::sZero() : character.GetGroundVelocity();
+		if (groundSurface.has_value())
+			groundVelocity += Detail::ToJolt(*groundSurface);
 		const JPH::Vec3 groundVertical = groundVelocity.Dot(up) * up;
 		const bool grounded = character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround
 			&& (currentVertical - groundVertical).Dot(up) < Utils::LeavingGroundSpeed;
 		const JPH::Vec3 vertical = grounded ? groundVertical + desiredVertical : currentVertical + Detail::ToJolt(effectiveGravity) * deltaTime;
-		const JPH::Vec3 carried = grounded && state.InheritGroundVelocity ? groundVelocity - groundVertical : JPH::Vec3::sZero();
+		JPH::Vec3 carried = JPH::Vec3::sZero();
+		if (grounded && state.InheritGroundVelocity)
+		{
+			carried = groundVelocity - groundVertical;
+		}
+		else if (grounded && groundSurface.has_value())
+		{
+			const JPH::Vec3 surface = Detail::ToJolt(*groundSurface);
+			carried = surface - surface.Dot(up) * up;
+		}
 		const JPH::Vec3 stepVelocity = Utils::ClampSpeed(desired - desiredVertical + carried + vertical);
 		character.SetLinearVelocity(stepVelocity);
 
@@ -501,6 +558,19 @@ namespace Engine {
 		state.PushGround(deltaTime, effectiveGravity);
 		state.PlaceInnerBody();
 		state.AppendContacts();
+
+		// M36: the ground this update found, for GetGroundState (see the file comment).
+		state.GroundBody = BodyHandle();
+		state.GroundCollider = 0;
+		state.GroundSurfaceVelocity.reset();
+		if (character.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround && !character.GetGroundBodyID().IsInvalid())
+		{
+			const State::GroundColliderInfo ground = state.FindGroundCollider(character.GetGroundBodyID(), character.GetGroundSubShapeID());
+			state.GroundBody = Detail::ToBodyHandle(character.GetGroundBodyID());
+			state.GroundCollider = ground.Collider;
+			if (!state.IsLightBody(character.GetGroundBodyID()))
+				state.GroundSurfaceVelocity = ground.SurfaceVelocity;
+		}
 	}
 
 	PhysicsPose CharacterController::GetPose() const
@@ -543,9 +613,14 @@ namespace Engine {
 			return {};
 		const JPH::Vec3 normal = character.GetGroundNormal();
 		const bool usable = Detail::IsFinite(Detail::ToGlm(normal)) && normal.LengthSq() > 0.25f;
+		glm::vec3 groundVelocity = Detail::ToGlm(character.GetGroundVelocity());
+		if (m_State->GroundSurfaceVelocity.has_value())
+			groundVelocity += *m_State->GroundSurfaceVelocity;
 		return CharacterGroundState{ .IsGrounded = true,
 			.GroundNormal = usable ? Detail::ToGlm(normal.Normalized()) : glm::vec3(0.0f, 1.0f, 0.0f),
-			.GroundVelocity = Detail::ToGlm(character.GetGroundVelocity()) };
+			.GroundVelocity = groundVelocity,
+			.GroundBody = m_State->GroundBody,
+			.GroundCollider = m_State->GroundCollider };
 	}
 
 	BodyHandle CharacterController::GetInnerBody() const

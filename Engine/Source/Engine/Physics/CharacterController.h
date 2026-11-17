@@ -35,8 +35,14 @@
 // created as the world's next body at Create, so a caller that creates characters and bodies in canonical order (§5.1)
 // gets the same inner body handle every run (§9.6: the inner body ID comes from the canonical body-ID sequence).
 //
+// Surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 4; World Tree's briefs 15 and 16). The ground state
+// names the body and the collider the character stands on (Jolt's ground body and sub-shape of the update, no query), and a
+// collider surface's velocity (PhysicsWorld::SetColliderSurfaces) carries a grounded character: a conveyor belt moves it
+// whatever InheritGroundVelocity says, which stays about ground that really moves.
+//
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8); M34 changes what it documents of Mass,
-// Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1).
+// Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1); M36 adds the ground's body,
+// collider and surface velocity, reviewed as such a change too (ADR 0053 decision 4).
 
 namespace Engine {
 
@@ -88,7 +94,15 @@ namespace Engine {
 	{
 		bool IsGrounded = false;                              // standing on walkable ground (Jolt's EGroundState::OnGround)
 		glm::vec3 GroundNormal = glm::vec3(0.0f, 1.0f, 0.0f); // unit; (0, 1, 0) when not grounded
-		glm::vec3 GroundVelocity = glm::vec3(0.0f);           // the velocity of what the character stands on (a moving platform)
+		// The velocity of what the character stands on (a moving platform), M36: with the surface velocity of the collider it
+		// stands on (PhysicsWorld::SetColliderSurfaces, in world space at the update), which a Dynamic body lighter than the
+		// character never gives.
+		glm::vec3 GroundVelocity = glm::vec3(0.0f);
+		// M36: the body the character stands on (Jolt's ground body of the update: another character's inner body when it stands
+		// on one) and the collider of it (ColliderShapeDescription::UserData, as a contact on that sub-shape names it); the
+		// invalid handle and 0 when not grounded. The body may have been destroyed since the update.
+		BodyHandle GroundBody{};
+		uint32_t GroundCollider = 0;
 	};
 
 	class CharacterController
@@ -122,7 +136,10 @@ namespace Engine {
 		// `gravity` * `deltaTime` (the desired vertical part is ignored); M19 (Docs/Decisions/0030-m19-contract.md decision
 		// 36): with CharacterControllerDescription::InheritGroundVelocity and while grounded, plus the horizontal part of the
 		// ground's velocity (Jolt's ground velocity, updated first: a kinematic platform's velocity, a rotating body's surface
-		// velocity at the contact); that velocity is clamped to MaxCharacterSpeed.
+		// velocity at the contact); M36 (ADR 0053 decision 4): the ground's velocity includes the surface velocity of the collider
+		// the character stands on (turned by its body's current rotation; none on a light body), and while grounded its
+		// horizontal part is added whatever InheritGroundVelocity says, so a conveyor belt carries the character; that velocity
+		// is clamped to MaxCharacterSpeed.
 		// "Grounded" is Jolt's OnGround while the character does not move away from the ground faster than 0.1 m/s (else
 		// the step after a jump would cancel it); the ground's velocity is none when the ground is a Dynamic body lighter than
 		// the character (M34). Then ExtendedUpdate with stick-to-floor (down to StepHeight) and ExtendedUpdate's walk-stairs
@@ -145,7 +162,7 @@ namespace Engine {
 		[[nodiscard]] glm::vec3 GetVelocity() const;
 		// Sets the velocity the next Update starts from (Scene/PhysicsSystem uses it for teleports that zero it).
 		void SetVelocity(const glm::vec3& velocity);
-		// The ground state of the last Update.
+		// The ground state of the last Update (its ground's surface velocity as that update turned it).
 		[[nodiscard]] CharacterGroundState GetGroundState() const;
 		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see; its object layer has the Character kind
 		// (M34), so no other body meets it in the solver.

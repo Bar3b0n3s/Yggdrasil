@@ -117,6 +117,20 @@ namespace Engine {
 			return std::move(*character);
 		}
 
+		// M36: a static compound of two slabs 4 m wide and 20 m long side by side, their tops at y 0, of friction `friction`:
+		// the collider whose user data is `left` at x in [-4, 0] and the one whose user data is `right` at x in [0, 4].
+		BodyHandle CreateSlabs(PhysicsWorld& world, uint32_t left, uint32_t right, float friction = 0.5f)
+		{
+			const BoxShapeGeometry slab{ .HalfExtents = glm::vec3(2.0f, 0.5f, 10.0f) };
+			Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = {
+																			   ColliderShapeDescription{ .Geometry = slab, .Position = glm::vec3(-2.0f, -0.5f, 0.0f), .UserData = left },
+																			   ColliderShapeDescription{ .Geometry = slab, .Position = glm::vec3(2.0f, -0.5f, 0.0f), .UserData = right } } });
+			REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+			Result<BodyHandle> body = world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Static, .Friction = friction });
+			REQUIRE(body.has_value());
+			return *body;
+		}
+
 		// A character created on a MovingPlatform that has not moved yet, standing on it after half a second at rest.
 		Scope<CharacterController> CreateCarriedCharacter(PhysicsWorld& world, bool inheritGroundVelocity)
 		{
@@ -910,6 +924,111 @@ namespace Engine {
 			// Two capsules of radius 0.3 m stop about 0.6 m apart.
 			CHECK(walker->GetPose().Position.x < 1.45f);
 			CHECK(standing->GetPose().Position.x == doctest::Approx(2.0f).epsilon(1.0e-3));
+		}
+
+		// --- Surfaces (M36, Docs/Decisions/0053-m36-contact-surfaces.md decision 4) ----------------------------------------
+
+		TEST_CASE("CharacterController: a grounded character reports the collider it stands on")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			const BodyHandle floor = CreateSlabs(*world, 3, 7);
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-2.0f, 1.0f, 0.0f));
+			// In the air: no ground.
+			CharacterGroundState ground = character->GetGroundState();
+			CHECK_FALSE(ground.IsGrounded);
+			CHECK_FALSE(ground.GroundBody.IsValid());
+			CHECK(ground.GroundCollider == 0);
+
+			// Landed on the left slab: the compound and that collider's user data, from the update itself.
+			Walk(*world, *character, glm::vec3(0.0f), 60);
+			ground = character->GetGroundState();
+			REQUIRE(ground.IsGrounded);
+			CHECK(ground.GroundBody == floor);
+			CHECK(ground.GroundCollider == 3);
+
+			// Walked onto the right one.
+			Walk(*world, *character, glm::vec3(3.0f, 0.0f, 0.0f), 60);
+			ground = character->GetGroundState();
+			REQUIRE(ground.IsGrounded);
+			CHECK(character->GetPose().Position.x > 0.5f);
+			CHECK(ground.GroundBody == floor);
+			CHECK(ground.GroundCollider == 7);
+
+			// Off the end of the floor and falling: none again.
+			Walk(*world, *character, glm::vec3(0.0f, 0.0f, 12.0f), 90);
+			ground = character->GetGroundState();
+			CHECK_FALSE(ground.IsGrounded);
+			CHECK_FALSE(ground.GroundBody.IsValid());
+		}
+
+		TEST_CASE("CharacterController: a belt carries a grounded character whatever InheritGroundVelocity says")
+		{
+			// World Tree's brief 16: the Warden carried 2.5 m in a second by a belt's surface.
+			const glm::vec3 beltVelocity(2.5f, 0.0f, 0.0f);
+			for (const bool inherit : { false, true })
+			{
+				CAPTURE(inherit);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				const BodyHandle belt = CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 2.0f));
+				Result<Scope<CharacterController>> created =
+					CharacterController::Create(*world, { .Pose = { .Position = glm::vec3(-10.0f, 0.05f, 0.0f) }, .InheritGroundVelocity = inherit });
+				REQUIRE(created.has_value());
+				CharacterController& character = **created;
+				Walk(*world, character, glm::vec3(0.0f), 30);
+				REQUIRE(character.GetGroundState().IsGrounded);
+
+				REQUIRE(world->SetColliderSurfaces(belt, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = beltVelocity } }).has_value());
+				const float start = character.GetPose().Position.x;
+				Walk(*world, character, glm::vec3(0.0f), 60);
+				CHECK(character.GetPose().Position.x - start == doctest::Approx(2.5f).epsilon(0.02));
+				CHECK(character.GetGroundState().IsGrounded);
+				CHECK(character.GetGroundState().GroundVelocity.x == doctest::Approx(2.5f).epsilon(1.0e-3));
+				CHECK(character.GetVelocity().x == doctest::Approx(2.5f).epsilon(1.0e-3));
+
+				// Walking against the belt at its speed keeps the character in place.
+				const float walking = character.GetPose().Position.x;
+				Walk(*world, character, -beltVelocity, 30);
+				CHECK(std::abs(character.GetPose().Position.x - walking) < 0.02f);
+
+				// A stopped belt carries nothing.
+				REQUIRE(world->SetColliderSurfaces(belt, {}).has_value());
+				Walk(*world, character, glm::vec3(0.0f), 2);
+				const float stopped = character.GetPose().Position.x;
+				Walk(*world, character, glm::vec3(0.0f), 30);
+				CHECK(std::abs(character.GetPose().Position.x - stopped) < 1.0e-3f);
+				CHECK(character.GetGroundState().GroundVelocity == glm::vec3(0.0f));
+			}
+		}
+
+		// M34's rule holds for surfaces: a Dynamic body lighter than the character gives it none of its ground velocity.
+		TEST_CASE("CharacterController: the surface of a Dynamic body lighter than the character never carries it")
+		{
+			for (const float mass : { 10.0f, 1000.0f })
+			{
+				CAPTURE(mass);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				// A frictionless floor, so the crate's own surface cannot drive the crate along it.
+				Result<Ref<const PhysicsShape>> floorShape =
+					PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(20.0f, 0.5f, 20.0f) } } } });
+				REQUIRE(floorShape.has_value());
+				REQUIRE(world->CreateBody({ .Shape = *floorShape, .MotionType = PhysicsMotionType::Static, .Pose = { .Position = glm::vec3(0.0f, -0.5f, 0.0f) }, .Friction = 0.0f })
+						.has_value());
+				const BodyHandle crate = CreateCrate(*world, glm::vec3(0.0f), glm::vec3(2.0f, 0.25f, 2.0f), mass);
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.55f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().IsGrounded);
+				REQUIRE(character->GetGroundState().GroundBody == crate);
+
+				REQUIRE(world->SetColliderSurfaces(crate, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(1.0f, 0.0f, 0.0f) } })
+						.has_value());
+				const float start = character->GetPose().Position.x;
+				Walk(*world, *character, glm::vec3(0.0f), 60);
+				const float moved = character->GetPose().Position.x - start;
+				if (mass < 70.0f)
+					CHECK(std::abs(moved) < 0.01f);
+				else
+					CHECK(moved == doctest::Approx(1.0f).epsilon(0.05));
+			}
 		}
 	}
 

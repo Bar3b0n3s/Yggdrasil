@@ -37,8 +37,9 @@ namespace Engine {
 	{
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
-			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) make 57.
-			static_assert(BuiltinComponents::Size == 57);
+			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
+			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58.
+			static_assert(BuiltinComponents::Size == 58);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -661,6 +662,8 @@ namespace Engine {
 				"CapsuleCollider",
 				"MeshCollider",
 				"CharacterController",
+				// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 1): in Physics, after CharacterController.
+				"ColliderSurface",
 				"AudioSource",
 				"AudioListener",
 				"Script",

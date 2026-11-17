@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 // The physics world (Architecture §9.1): one Jolt PhysicsSystem with its temporary allocator, layer filters and contact
@@ -43,7 +44,9 @@
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 3). M20, which owns the contact path in phase 1,
 // adds GetSubShapeCollider and the touching test of speculative contacts (Physics/ContactBuffer.h,
-// Docs/Decisions/0031-m20-contract.md decisions 2 and 3).
+// Docs/Decisions/0031-m20-contract.md decisions 2 and 3). M36, which owns the contact path in phase 6, appends the collider
+// surfaces (PhysicsColliderSurface, SetColliderSurfaces; Docs/Decisions/0053-m36-contact-surfaces.md decision 2), reviewed as
+// a change to a frozen interface.
 
 namespace Engine {
 
@@ -127,6 +130,24 @@ namespace Engine {
 		uint64_t CollisionGroup = 0;
 	};
 
+	// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 2): the longest surface velocity a collider may have, in m/s
+	// (PhysicsColliderSurface::SurfaceVelocity's length). A ColliderSurface bounds each component of its velocity by
+	// MaxCharacterSpeed (500 m/s) in its entity's axes, which turned into its body's axes is at most 866 m/s long.
+	inline constexpr float MaxSurfaceSpeed = 1000.0f;
+
+	// M36: the surface of one collider of a body (§9.2 "Collider surfaces", Scene's ColliderSurfaceComponent): what contacts
+	// with that collider use instead of the body's friction and restitution, and the velocity its surface moves at while the
+	// body does not (a conveyor belt). Every float finite.
+	struct PhysicsColliderSurface
+	{
+		// The collider (ColliderShapeDescription::UserData of a collider of the body's shape, as contacts name it).
+		uint32_t Collider = 0;
+		float Friction = 0.5f;    // >= 0
+		float Restitution = 0.0f; // [0, 1]
+		// m/s in the body's axes (each contact turns it by the body's rotation at that moment), at most MaxSurfaceSpeed long.
+		glm::vec3 SurfaceVelocity = glm::vec3(0.0f);
+	};
+
 	// Counts of a world, for stats.get (§13.7) and the limit diagnostics.
 	struct PhysicsWorldStats
 	{
@@ -199,6 +220,23 @@ namespace Engine {
 		// SetShape, since Jolt keeps reporting a contact that persists under its sub-shape ID while the collider behind that ID
 		// may have changed (M20, Docs/Decisions/0031-m20-contract.md decision 2). `body` live (asserted; 0 otherwise).
 		[[nodiscard]] uint32_t GetSubShapeCollider(BodyHandle body, uint32_t subShape) const;
+
+		// --- Collider surfaces (M36, §9.2 "Collider surfaces"; Docs/Decisions/0053-m36-contact-surfaces.md decision 2) -----
+		// Replaces the surfaces of `body`'s colliders with `surfaces` (in any order). A contact combines its two sides as Jolt
+		// combines bodies, each side's value its collider's surface or else its body's: friction as the geometric mean
+		// sqrt(f1 f2), restitution as the larger value, and the relative surface velocity R2 v2 - R1 v1 (each body's rotation
+		// at that moment times its side's SurfaceVelocity, none for a side without a surface), which Jolt applies through the
+		// contact's friction (so a surface whose combined friction is 0 carries nothing). The contact listener sets them in
+		// every contact it is told of (added or persisted, the continuous collision pass's included); a contact neither of
+		// whose colliders has a surface keeps exactly what Jolt combined, so bodies without surfaces simulate bit for bit as
+		// before. A sensor's contacts never act, so its surfaces change nothing. Each collider whose surface changed (its
+		// values against the previous list, a collider not listed counting as the body's friction and restitution with no
+		// velocity) wakes the bodies around it (its sub-shape bounds), so what sleeps on a stopped belt rides it once it
+		// starts; a list that changes nothing wakes nothing. The list stays until the next call or DestroyBody; SetShape keeps
+		// the entries whose collider the new shape still has. Errors, with nothing changed: InvalidArgument for a handle of no
+		// live body, a non-finite value, a Friction below 0, a Restitution outside [0, 1], a SurfaceVelocity longer than
+		// MaxSurfaceSpeed, a Collider the body's shape does not have, or a Collider listed twice.
+		[[nodiscard]] Status SetColliderSurfaces(BodyHandle body, std::span<const PhysicsColliderSurface> surfaces);
 
 		// --- Poses and motion (§9.3) ----------------------------------------------------------------------------------
 		// The body origin's world pose (Jolt's position and rotation; the centre of mass is internal).

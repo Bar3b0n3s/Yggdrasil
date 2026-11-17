@@ -269,6 +269,8 @@ return true
 				{ "CharacterController.IsGrounded", "holders.CharacterController.CharacterController:IsGrounded()" },
 				{ "CharacterController.GetGroundNormal", "holders.CharacterController.CharacterController:GetGroundNormal()" },
 				{ "CharacterController.GetVelocity", "holders.CharacterController.CharacterController:GetVelocity()" },
+				// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5).
+				{ "CharacterController.GetGroundCollider", "holders.CharacterController.CharacterController:GetGroundCollider()" },
 				{ "AudioSource.IsPlaying", "holders.AudioSource.AudioSource:IsPlaying()" },
 			};
 			// Mutating members, and the setters of the properties that have one.

@@ -2,6 +2,7 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/ColliderSurfaceComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Support/PhysicsTestScene.h"
@@ -20,7 +21,13 @@ namespace Engine {
 				: Script({ .Mode = mode, .TestMode = true, .ReadOnly = readOnly })
 			{
 				Test::AddBoxBody(Script.GetScene(), "Near", glm::vec3(0, 0, 0), glm::vec3(0.5f), BodyType::Static);
-				Test::AddBoxBody(Script.GetScene(), "Far", glm::vec3(0, 0, -4), glm::vec3(0.5f), BodyType::Static);
+				Entity far = Test::AddBoxBody(Script.GetScene(), "Far", glm::vec3(0, 0, -4), glm::vec3(0.5f), BodyType::Static);
+				// M36: a turned belt, its surface velocity along its own +X, so world -Z.
+				far.Patch<TransformComponent>([](auto& transform)
+				{
+					transform.Rotation = glm::normalize(glm::quat(0.70710678f, 0.0f, 0.70710678f, 0.0f));
+				});
+				far.AddComponent<ColliderSurfaceComponent>(ColliderSurfaceComponent{ .Friction = 0.02f, .Restitution = 0.25f, .SurfaceVelocity = glm::vec3(2, 0, 0) });
 				Test::AddBoxBody(Script.GetScene(), "Dynamic", glm::vec3(10, 0, 0), glm::vec3(0.5f), BodyType::Dynamic);
 				Test::AddBoxBody(Script.GetScene(), "Kinematic", glm::vec3(20, 0, 0), glm::vec3(0.5f), BodyType::Kinematic);
 				const auto character = Script.GetScene().CreateEntity("Character");
@@ -88,6 +95,12 @@ assert(lo == vector.create(-0.5,-0.5,-0.5) and hi == vector.create(0.5,0.5,0.5))
 assert(clo == lo and chi == hi)
 local empty = Scene.CreateEntity("Empty")
 assert(Physics.GetBodyBounds(empty) == nil and Physics.GetColliderBounds(empty) == nil)
+local belt = Physics.GetSurface(far)
+assert(belt and math.abs(belt.Friction - 0.02) < 1e-6 and belt.Restitution == 0.25)
+assert(vector.magnitude(belt.SurfaceVelocity - vector.create(0,0,-2)) < 1e-5)
+local stone = Physics.GetSurface(near)
+assert(stone and stone.Friction == 0.5 and stone.Restitution == 0 and stone.SurfaceVelocity == vector.zero)
+assert(Physics.GetSurface(empty) == nil and Physics.GetSurface(Scene.FindByName("Character")) == nil)
 assert(Physics.GetGravity() == vector.zero)
 Physics.SetGravity(vector.create(0,-2,0))
 assert(Physics.GetGravity() == vector.create(0,-2,0))
@@ -129,6 +142,7 @@ Scene.FindByName("Kinematic").RigidBody:MoveKinematic(vector.create(21,0,0), Qua
 local character = Scene.FindByName("Character").CharacterController
 assert(type(character:IsGrounded()) == "boolean")
 assert(typeof(character:GetGroundNormal()) == "vector" and typeof(character:GetVelocity()) == "vector")
+assert(character:GetGroundCollider() == nil)
 character:Move(vector.create(1,0,0))
 return true
 )");

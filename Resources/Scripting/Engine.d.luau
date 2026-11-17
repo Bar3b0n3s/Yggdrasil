@@ -299,6 +299,9 @@ export type ScriptError = {id: number, kind: string, script: string, line: numbe
 -- Every behaviour instance owns an Entity identity and copies its declared field defaults.
 export type ScriptInstance = {Entity: Entity}
 
+-- The values contacts with a collider use: its ColliderSurface's friction and restitution and its surface velocity in world space (m/s), or its body's friction and restitution with no velocity.
+export type SurfaceInfo = {Friction: number, Restitution: number, SurfaceVelocity: vector}
+
 -- Stereo RMS and absolute peak of the requested simulation sample interval.
 export type TestAudioLevels = {RmsLeft: number, RmsRight: number, Peak: number}
 
@@ -509,6 +512,8 @@ end
 
 -- Moves the entity as a walking character that climbs steps and slopes and collides with the world.
 declare extern type CharacterController with
+	-- The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity. [All modes; Runtime|Test; pure/read]
+	GetGroundCollider: (self: CharacterController) -> Entity?
 	-- Ground normal from the last update. [All modes; Runtime|Test; pure/read]
 	GetGroundNormal: (self: CharacterController) -> vector
 	-- Velocity after the last update. [All modes; Runtime|Test; pure/read]
@@ -517,7 +522,7 @@ declare extern type CharacterController with
 	GravityFactor: number
 	-- The character's total height, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	Height: number
-	-- While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way. [All modes; Runtime|Test; pure/read; setter mutates]
 	InheritGroundVelocity: boolean
 	-- Whether the last character update found supporting ground. [All modes; Runtime|Test; pure/read]
 	IsGrounded: (self: CharacterController) -> boolean
@@ -543,6 +548,16 @@ declare extern type CircleCollider2D with
 	Offset: vector
 	-- The circle's radius; at least 1 mm. [All modes; Runtime|Test; pure/read; setter mutates]
 	Radius: number
+end
+
+-- The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them (a conveyor belt).
+declare extern type ColliderSurface with
+	-- The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). [All modes; Runtime|Test; pure/read; setter mutates]
+	Friction: number
+	-- The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	Restitution: number
+	-- The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. [All modes; Runtime|Test; pure/read; setter mutates]
+	SurfaceVelocity: vector
 end
 
 -- A local linear RGBA float value. Channels are finite and unclamped, allowing HDR values.
@@ -614,6 +629,8 @@ declare extern type Entity with
 	CharacterController: CharacterController?
 	-- The entity's CircleCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	CircleCollider2D: CircleCollider2D?
+	-- The entity's ColliderSurface component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	ColliderSurface: ColliderSurface?
 	-- Mark this subtree for the normal destruction flush. [All modes; Runtime|Test; mutates]
 	Destroy: (self: Entity) -> ()
 	-- The entity's DirectionalLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -642,6 +659,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "CapsuleCollider"): CapsuleCollider?
 	function GetComponent(self, name: "MeshCollider"): MeshCollider?
 	function GetComponent(self, name: "CharacterController"): CharacterController?
+	function GetComponent(self, name: "ColliderSurface"): ColliderSurface?
 	function GetComponent(self, name: "AudioSource"): AudioSource?
 	function GetComponent(self, name: "AudioListener"): AudioListener?
 	function GetComponent(self, name: "Script"): Script?
@@ -1176,7 +1194,7 @@ declare extern type RigidBody with
 	AngularDamping: number
 	-- Removes ghost collisions with internal edges of compound shapes; set it on rolling bodies. [All modes; Runtime|Test; pure/read; setter mutates]
 	EnhancedInternalEdgeRemoval: boolean
-	-- The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders. [All modes; Runtime|Test; pure/read; setter mutates]
 	Friction: number
 	-- Read the body's current angular velocity in radians per second: a Dynamic body's as the last physics step left it, or as SetAngularVelocity or AddAngularImpulse has changed it since, at once; a Kinematic body's that of its last sweep, following a MoveKinematic as GetLinearVelocity's does. [All modes; Runtime|Test; pure/read]
 	GetAngularVelocity: (self: RigidBody) -> vector
@@ -1208,7 +1226,7 @@ declare extern type RigidBody with
 	MotionQuality: MotionQuality
 	-- Set a Kinematic target: the entity's world pose changes at once, and the next physics pre-step (the same tick's when called from OnFixedUpdate, a task or a test case) sweeps the body there in one fixed step, with the velocities that take it there. [All modes; Runtime|Test; mutates]
 	MoveKinematic: (self: RigidBody, position: vector, rotation: Quat) -> ()
-	-- Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface. [All modes; Runtime|Test; pure/read; setter mutates]
 	Restitution: number
 	-- Set a Dynamic body's angular velocity. [All modes; Runtime|Test; mutates]
 	SetAngularVelocity: (self: RigidBody, velocity: vector) -> ()
@@ -1398,11 +1416,11 @@ end
 
 -- The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn.
 declare extern type TerrainCollider with
-	-- The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values. [All modes; Runtime|Test; pure/read; setter mutates]
 	Friction: number
 	-- Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layer: string
-	-- The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values. [All modes; Runtime|Test; pure/read; setter mutates]
 	Restitution: number
 end
 
@@ -1916,6 +1934,8 @@ declare Physics: {
 	GetColliderBounds: (entity: Entity) -> (vector?, vector?),
 	-- Current world gravity. [All modes; Runtime|Test; pure/read]
 	GetGravity: () -> vector,
+	-- The friction, restitution and world-space surface velocity contacts with the entity's solid colliders use, as its ColliderSurface holds them now (a write reaches contacts at the next physics step), or its body's material with no velocity; nil for an entity without a solid collider in a body (a character's capsule, triggers alone), disabled or destroyed. Pair it with CharacterController:GetGroundCollider to read what a character stands on. [All modes; Runtime|Test; pure/read]
+	GetSurface: (collider: Entity) -> SurfaceInfo?,
 	-- Combine named project layers; omitted query masks include every layer. [All modes; Runtime|Test; pure/read]
 	LayerMask: (...string) -> number,
 	-- Unique overlapping collider entities sorted by UUID; default identity rotation. [All modes; Runtime|Test; pure/read]

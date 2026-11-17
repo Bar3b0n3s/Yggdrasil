@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
+#include "Engine/Physics/CharacterController.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentRegistration.h"
@@ -45,12 +46,13 @@ namespace Engine {
 			.Field("Mass", &RigidBodyComponent::Mass, "Mass in kilograms (Dynamic only).",
 				{ .Min = Utils::MinPhysicsMass, .Max = static_cast<double>(MaxPhysicsMass), .Unit = "kg" })
 			.Field("Friction", &RigidBodyComponent::Friction,
-				"The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes "
-				"friction from all its contacts.",
+				"The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the "
+				"geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders.",
 				{ .Min = 0.0 })
 			.Field("Restitution", &RigidBodyComponent::Restitution,
-				"Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball "
-				"makes it bounce elastically off every surface.",
+				"The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the "
+				"colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every "
+				"surface.",
 				{ .Min = 0.0, .Max = 1.0 })
 			.Field("LinearDamping", &RigidBodyComponent::LinearDamping, "How quickly linear velocity decays, per second.", { .Min = 0.0 })
 			.Field("AngularDamping", &RigidBodyComponent::AngularDamping, "How quickly angular velocity decays, per second.", { .Min = 0.0 })
@@ -135,7 +137,29 @@ namespace Engine {
 			.Field("Layer", &CharacterControllerComponent::Layer, "Physics layer name from project settings.")
 			.Field("InheritGroundVelocity", &CharacterControllerComponent::InheritGroundVelocity,
 				"While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; "
-				"a Dynamic platform lighter than the character never does.");
+				"a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way.");
+
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 1): appended after CharacterController.
+		RegisterComponent<ColliderSurfaceComponent>(registry, "ColliderSurface",
+			"The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them "
+			"(a conveyor belt).")
+			.Category("Physics")
+			.Version(1)
+			.Requires<TransformComponent>()
+			.Field("Friction", &ColliderSurfaceComponent::Friction,
+				"The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of "
+				"its two sides' values (0.02 is polished ice).",
+				{ .Min = 0.0 })
+			.Field("Restitution", &ColliderSurfaceComponent::Restitution,
+				"The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact "
+				"uses the larger of its two sides' values.",
+				{ .Min = 0.0, .Max = 1.0 })
+			.Field("SurfaceVelocity", &ColliderSurfaceComponent::SurfaceVelocity,
+				"The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own "
+				"axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its "
+				"InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse "
+				"or speed up at any tick.",
+				{ .Min = -static_cast<double>(MaxCharacterSpeed), .Max = static_cast<double>(MaxCharacterSpeed), .Unit = "m/s" });
 	}
 
 }

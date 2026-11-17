@@ -27,6 +27,7 @@ Every component of the type registry, in canonical component order: the order of
 | `CapsuleCollider` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | A capsule-shaped collider along the local Y axis. |
 | `MeshCollider` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | A collider shaped like a mesh: its convex hull, or the exact triangles for Static and Kinematic bodies. |
 | `CharacterController` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | Moves the entity as a walking character that climbs steps and slopes and collides with the world. |
+| `ColliderSurface` | Physics | Serializable, ScriptVisible, EditorVisible, Removable | The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them (a conveyor belt). |
 | `AudioSource` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Plays an audio clip, optionally positioned at the entity. |
 | `AudioListener` | Audio | Serializable, ScriptVisible, EditorVisible, Removable | Hears the scene from the entity's position and orientation. |
 | `Script` | Scripting | Serializable, ScriptVisible, EditorVisible, Removable, NoShortcut | Attaches Behaviour scripts to the entity, an ordered list of slots. |
@@ -503,8 +504,8 @@ Simulates the entity with Jolt physics.
 |---|---|---|---|---|---|---|
 | `Type` | `BodyType` | `"Dynamic"` |  |  |  | Static never moves; Kinematic is moved by script; Dynamic is simulated. |
 | `Mass` | `Float` | `1` | 0.001 to 1e+09 | kg |  | Mass in kilograms (Dynamic only). |
-| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. |
-| `Restitution` | `Float` | `0` | 0 to 1 |  |  | Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. |
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders. |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface. |
 | `LinearDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly linear velocity decays, per second. |
 | `AngularDamping` | `Float` | `0.05` | >= 0 |  |  | How quickly angular velocity decays, per second. |
 | `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's gravity for this body (0 floats). |
@@ -531,7 +532,7 @@ Script members of `RigidBody`:
 | `AllowSleeping` | proxy field | `boolean` | read/write | All | Whether the body may sleep when it comes to rest. |
 | `AngularDamping` | proxy field | `number` | read/write | All | How quickly angular velocity decays, per second. |
 | `EnhancedInternalEdgeRemoval` | proxy field | `boolean` | read/write | All | Removes ghost collisions with internal edges of compound shapes; set it on rolling bodies. |
-| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's surfaces. A contact uses the geometric mean of both bodies' values, so 0 on one body removes friction from all its contacts. |
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the body's colliders; a ColliderSurface replaces it for the colliders on its entity. A contact uses the geometric mean of its two sides' values, so 0 removes friction from every contact of those colliders. |
 | `GetAngularVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read the body's current angular velocity in radians per second: a Dynamic body's as the last physics step left it, or as SetAngularVelocity or AddAngularImpulse has changed it since, at once; a Kinematic body's that of its last sweep, following a MoveKinematic as GetLinearVelocity's does. |
 | `GetLinearVelocity` | method | `(self: RigidBody) -> vector` |  | All | Read the body's current linear velocity. A Dynamic body's is the one the last physics step left, or the one SetLinearVelocity or AddImpulse has given it since, at once. A Kinematic body's is that of its last sweep to its Transform's pose, so a MoveKinematic shows here only once the next physics pre-step has swept the body: the fixed step that called it (OnFixedUpdate, tasks, test cases) still reads the previous sweep's. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for this body (0 floats). |
@@ -547,7 +548,7 @@ Script members of `RigidBody`:
 | `MaxLinearVelocity` | proxy field | `number` | read/write | All | The speed the body is clamped to, in metres per second. |
 | `MotionQuality` | proxy field | `MotionQuality` | read/write | All | Discrete or continuous (LinearCast) collision detection. |
 | `MoveKinematic` | method | `(self: RigidBody, position: vector, rotation: Quat) -> ()` |  | All | Set a Kinematic target: the entity's world pose changes at once, and the next physics pre-step (the same tick's when called from OnFixedUpdate, a task or a test case) sweeps the body there in one fixed step, with the velocities that take it there. |
-| `Restitution` | proxy field | `number` | read/write | All | Bounciness, from no bounce (0) to a perfectly elastic bounce (1). A contact uses the larger of both bodies' values, so 1 on a ball makes it bounce elastically off every surface. |
+| `Restitution` | proxy field | `number` | read/write | All | The bounciness of the body's colliders, from no bounce (0) to a perfectly elastic bounce (1); a ColliderSurface replaces it for the colliders on its entity. A contact uses the larger of its two sides' values, so 1 on a ball makes it bounce elastically off every surface. |
 | `SetAngularVelocity` | method | `(self: RigidBody, velocity: vector) -> ()` |  | All | Set a Dynamic body's angular velocity. |
 | `SetLinearVelocity` | method | `(self: RigidBody, velocity: vector) -> ()` |  | All | Set a Dynamic body's linear velocity. |
 | `Teleport` | method | `(self: RigidBody, position: vector, rotation: Quat?) -> ()` |  | All | Place a body immediately, preserving velocity and resetting interpolation. |
@@ -675,17 +676,18 @@ Moves the entity as a walking character that climbs steps and slopes and collide
 | `Mass` | `Float` | `70` | 0.001 to 1e+09 | kg |  | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
 | `GravityFactor` | `Float` | `1` |  |  |  | The multiplier of the project's gravity for the character. |
 | `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings. |
-| `InheritGroundVelocity` | `Bool` | `false` |  |  |  | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. |
+| `InheritGroundVelocity` | `Bool` | `false` |  |  |  | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way. |
 
 Script members of `CharacterController`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
+| `GetGroundCollider` | method | `(self: CharacterController) -> Entity?` |  | All | The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity. |
 | `GetGroundNormal` | method | `(self: CharacterController) -> vector` |  | All | Ground normal from the last update. |
 | `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | Velocity after the last update. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for the character. |
 | `Height` | proxy field | `number` | read/write | All | The character's total height, in metres. |
-| `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. |
+| `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way. |
 | `IsGrounded` | method | `(self: CharacterController) -> boolean` |  | All | Whether the last character update found supporting ground. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. |
 | `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
@@ -693,6 +695,30 @@ Script members of `CharacterController`:
 | `Move` | method | `(self: CharacterController, velocity: vector) -> ()` |  | All | Supply desired velocity for the next fixed character update. |
 | `Radius` | proxy field | `number` | read/write | All | The radius of the character's capsule, in metres. |
 | `StepHeight` | proxy field | `number` | read/write | All | The highest step the character climbs without jumping, in metres. |
+
+## ColliderSurface
+
+The surface of the solid colliders on this entity: their own friction and restitution, and a velocity that carries what touches them (a conveyor belt).
+
+- Category: Physics
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. |
+| `SurfaceVelocity` | `Vec3` | `[0,0,0]` | -500 to 500 | m/s |  | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
+
+Script members of `ColliderSurface`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of contacts with this entity's colliders, used instead of their body's; a contact uses the geometric mean of its two sides' values (0.02 is polished ice). |
+| `Restitution` | proxy field | `number` | read/write | All | The bounciness of contacts with this entity's colliders, used instead of their body's, from no bounce (0) to elastic (1); a contact uses the larger of its two sides' values. |
+| `SurfaceVelocity` | proxy field | `vector` | read/write | All | The velocity this entity's colliders' surface moves at while the body stays still, in metres per second along the entity's own axes (its rotation, never its scale): a body resting on it is carried by friction, and a grounded character whatever its InheritGroundVelocity. A write takes effect at the next physics step without rebuilding the body, so a belt can stop, reverse or speed up at any tick. |
 
 ## AudioSource
 
@@ -1716,16 +1742,16 @@ The entity's Terrain as a static height field in the physics world, colliding wi
 | Field | Type | Default | Range | Unit | Notes | Description |
 |---|---|---|---|---|---|---|
 | `Layer` | `String` | `"Default"` |  |  |  | Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). |
-| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values. |
-| `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values. |
+| `Friction` | `Float` | `0.5` | >= 0 |  |  | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values. |
+| `Restitution` | `Float` | `0` | 0 to 1 |  |  | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values. |
 
 Script members of `TerrainCollider`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer); a contact uses the geometric mean of both bodies' values. |
+| `Friction` | proxy field | `number` | read/write | All | The friction coefficient of the terrain's own static body (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the geometric mean of its two sides' values. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings, of the terrain's own static body (unused when the terrain joins another body: a RigidBody on or above the entity, or a collider-only ancestor's). A value a script writes holds at most 4096 bytes of text. |
-| `Restitution` | proxy field | `number` | read/write | All | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer); a contact uses the larger of both bodies' values. |
+| `Restitution` | proxy field | `number` | read/write | All | The bounciness of the terrain's own static body, from 0 to 1 (unused when the terrain joins another body, as Layer, and replaced by a ColliderSurface on the entity); a contact uses the larger of its two sides' values. |
 
 ## MaterialParameters
 

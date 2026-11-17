@@ -69,6 +69,11 @@
 //          the entity's local Translation and Rotation go back to the body's (the values PostStep last wrote, or those
 //          the body was placed from; a Kinematic body's current pose, where it then stops).
 //       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes.
+//     M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 3): between items 1-2 and 3, the collider surfaces. A
+//     ColliderSurface's signals mark its entity (never ComponentsChanged, so a surface write never recomposes the scene), and
+//     PreStep sends the surfaces of every body holding a marked collider (PhysicsWorld::SetColliderSurfaces, the velocity
+//     turned into the body's axes); a body created or whose shape is replaced gets its surfaces at once. A write in the fixed
+//     step is in force at that tick's PreStep, one in the frame phase at the next tick's (§9.2).
 //   - Step (step 6): PhysicsWorld::Step(fixedDelta, max(1, ceil(60 / FixedHz))).
 //   - PostStep (step 7): Dynamic bodies that are active or have a parent write their world pose back as their entity's
 //     local Transform (through the parent's current inverse, so the entity stays where the body is even when the parent
@@ -124,7 +129,9 @@
 // system, §5.1), so its writes do not count in the scene's revision.
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decisions 11 to 13); M20, which owns the contact path in
-// phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md).
+// phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md); M36 adds the collider surfaces (the
+// step's M36 paragraph), PhysicsCharacterState::GroundCollider, PhysicsSurfaceInfo and GetSurface
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5), reviewed as a change to a frozen interface.
 
 namespace Engine {
 
@@ -276,12 +283,25 @@ namespace Engine {
 		bool operator==(const PhysicsOverlapHit&) const = default;
 	};
 
-	// A character's state (§9.6 CharacterController:IsGrounded, GetGroundNormal, GetVelocity).
+	// A character's state (§9.6 CharacterController:IsGrounded, GetGroundNormal, GetVelocity; M36's GetGroundCollider).
 	struct PhysicsCharacterState
 	{
 		bool IsGrounded = false;
 		glm::vec3 GroundNormal = glm::vec3(0.0f, 1.0f, 0.0f);
 		glm::vec3 Velocity = glm::vec3(0.0f);
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 4): the collider entity the last update stood on (another
+		// character's entity when it stood on one); the null UUID when it was not grounded, or when that entity or its body's
+		// owner is disabled or pending destruction now.
+		UUID GroundCollider{};
+	};
+
+	// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5; §11.5 Physics.GetSurface's SurfaceInfo): what contacts
+	// with a collider use.
+	struct PhysicsSurfaceInfo
+	{
+		float Friction = 0.5f;
+		float Restitution = 0.0f;
+		glm::vec3 SurfaceVelocity = glm::vec3(0.0f); // world space, m/s
 	};
 
 	// One active contact pair of a body (physics.bodyInfo "contacts", §13.5).
@@ -436,6 +456,13 @@ namespace Engine {
 		// ancestor's compound (§9.5 GetColliderBounds); nullopt when the entity has no collider in a created body, or is
 		// pending destruction or disabled.
 		[[nodiscard]] std::optional<Aabb> GetColliderBounds(UUID entity) const;
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5; §11.5 Physics.GetSurface): the values contacts with
+		// `entity`'s solid colliders use: its ColliderSurface's Friction and Restitution and its SurfaceVelocity turned into
+		// world space by the entity's world rotation, as the component holds them now (the world takes a write at the next
+		// PreStep), or else its body's friction and restitution with no velocity; nullopt when the entity has no solid
+		// collider in a created body (a character's capsule, triggers alone, 2D colliders) or is pending destruction or
+		// disabled.
+		[[nodiscard]] std::optional<PhysicsSurfaceInfo> GetSurface(UUID entity) const;
 		// Physics.LayerMask(...names) (§11.5): PhysicsLayerTable::MakeMask over the session's layers.
 		[[nodiscard]] Result<PhysicsLayerMask> MakeLayerMask(std::span<const std::string_view> names) const;
 		[[nodiscard]] const PhysicsLayerTable& GetLayers() const;

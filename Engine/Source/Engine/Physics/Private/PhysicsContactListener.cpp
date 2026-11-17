@@ -6,6 +6,9 @@
 #include <Jolt/Physics/Collision/Shape/CompoundShape.h>
 #include <Jolt/Physics/Collision/Shape/SubShapeIDPair.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace Engine {
 
 	namespace Detail {
@@ -28,9 +31,23 @@ namespace Engine {
 
 		uint32_t ResolvePhysicsCollider(const std::vector<PhysicsBodyRecord>& bodies, const JPH::Body& body, const JPH::SubShapeID& subShape)
 		{
-			const uint32_t slot = body.GetID().GetIndex();
-			const bool hasRecord = slot < bodies.size() && bodies[slot].ID == body.GetID();
-			return ResolveColliderIndex(*body.GetShape(), subShape, hasRecord ? bodies[slot].Collider : 0);
+			const PhysicsBodyRecord* record = FindPhysicsBodyRecord(bodies, body.GetID());
+			return ResolveColliderIndex(*body.GetShape(), subShape, record != nullptr ? record->Collider : 0);
+		}
+
+		const PhysicsBodyRecord* FindPhysicsBodyRecord(const std::vector<PhysicsBodyRecord>& bodies, const JPH::BodyID& body)
+		{
+			const uint32_t slot = body.GetIndex();
+			return slot < bodies.size() && bodies[slot].ID == body ? &bodies[slot] : nullptr;
+		}
+
+		const PhysicsColliderSurface* FindColliderSurface(const PhysicsBodyRecord& record, uint32_t collider)
+		{
+			const auto found = std::lower_bound(record.Surfaces.begin(), record.Surfaces.end(), collider, [](const PhysicsColliderSurface& surface, uint32_t value)
+			{
+				return surface.Collider < value;
+			});
+			return found != record.Surfaces.end() && found->Collider == collider ? &*found : nullptr;
 		}
 
 		void PhysicsStepContacts::Reset()
@@ -115,9 +132,45 @@ namespace Engine {
 			return event;
 		}
 
-		void PhysicsContactListener::OnContactAdded(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold,
-			JPH::ContactSettings& /*settings*/)
+		void PhysicsContactListener::ApplySurfaces(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold,
+			JPH::ContactSettings& settings) const
 		{
+			if (settings.mIsSensor)
+				return;
+			const PhysicsBodyRecord* record1 = FindPhysicsBodyRecord(*m_Bodies, body1.GetID());
+			const PhysicsBodyRecord* record2 = FindPhysicsBodyRecord(*m_Bodies, body2.GetID());
+			const bool listed1 = record1 != nullptr && !record1->Surfaces.empty();
+			const bool listed2 = record2 != nullptr && !record2->Surfaces.empty();
+			if (!listed1 && !listed2)
+				return;
+			const PhysicsColliderSurface* surface1 = listed1 ? FindColliderSurface(*record1, ResolvePhysicsCollider(*m_Bodies, body1, manifold.mSubShapeID1)) : nullptr;
+			const PhysicsColliderSurface* surface2 = listed2 ? FindColliderSurface(*record2, ResolvePhysicsCollider(*m_Bodies, body2, manifold.mSubShapeID2)) : nullptr;
+			if (surface1 == nullptr && surface2 == nullptr)
+				return;
+			// Jolt's own rules (ContactConstraintManager's default CombineFunctions) over each side's value, the geometric mean in
+			// double precision: frictions have no maximum (as RigidBody's), and a float product that overflows would raise the
+			// floating-point exception Jolt enables during a step in MSVC Debug. The product of two floats is exact in double,
+			// and the square root then rounded to float is the correctly rounded one, so the result is still a function of the
+			// two values alone.
+			const float friction1 = surface1 != nullptr ? surface1->Friction : body1.GetFriction();
+			const float friction2 = surface2 != nullptr ? surface2->Friction : body2.GetFriction();
+			const float restitution1 = surface1 != nullptr ? surface1->Restitution : body1.GetRestitution();
+			const float restitution2 = surface2 != nullptr ? surface2->Restitution : body2.GetRestitution();
+			settings.mCombinedFriction = static_cast<float>(std::sqrt(static_cast<double>(friction1) * static_cast<double>(friction2)));
+			settings.mCombinedRestitution = std::max(restitution1, restitution2);
+			// World space, body 2's surface velocity minus body 1's (ContactSettings::mRelativeLinearSurfaceVelocity).
+			JPH::Vec3 velocity = JPH::Vec3::sZero();
+			if (surface2 != nullptr)
+				velocity += body2.GetRotation() * ToJolt(surface2->SurfaceVelocity);
+			if (surface1 != nullptr)
+				velocity -= body1.GetRotation() * ToJolt(surface1->SurfaceVelocity);
+			settings.mRelativeLinearSurfaceVelocity = velocity;
+		}
+
+		void PhysicsContactListener::OnContactAdded(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold,
+			JPH::ContactSettings& settings)
+		{
+			ApplySurfaces(body1, body2, manifold, settings);
 			m_StepContacts->Record(body1.GetID(), manifold.mSubShapeID1, body2.GetID(), manifold.mSubShapeID2);
 			const ContactEvent event = MakeRecord(ContactEventKind::Added, body1, body2, manifold);
 			{
@@ -135,8 +188,9 @@ namespace Engine {
 		}
 
 		void PhysicsContactListener::OnContactPersisted(const JPH::Body& body1, const JPH::Body& body2, const JPH::ContactManifold& manifold,
-			JPH::ContactSettings& /*settings*/)
+			JPH::ContactSettings& settings)
 		{
+			ApplySurfaces(body1, body2, manifold, settings);
 			m_StepContacts->Record(body1.GetID(), manifold.mSubShapeID1, body2.GetID(), manifold.mSubShapeID2);
 			if (m_SpeculativeCount.load(std::memory_order_acquire) == 0)
 				return;
@@ -181,8 +235,8 @@ namespace Engine {
 
 		bool PhysicsContactListener::IsRecordedSensor(const JPH::BodyID& body) const
 		{
-			const uint32_t slot = body.GetIndex();
-			return slot < m_Bodies->size() && (*m_Bodies)[slot].ID == body && (*m_Bodies)[slot].IsSensor;
+			const PhysicsBodyRecord* record = FindPhysicsBodyRecord(*m_Bodies, body);
+			return record != nullptr && record->IsSensor;
 		}
 
 	}

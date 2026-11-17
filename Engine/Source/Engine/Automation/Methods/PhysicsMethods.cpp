@@ -106,6 +106,8 @@ namespace Engine {
 			{
 				result.Grounded = report->Character->IsGrounded;
 				result.GroundNormal = report->Character->GroundNormal;
+				if (report->Character->GroundCollider.IsValid())
+					result.GroundCollider = Utils::SummarizeEntityId(context, scene, report->Character->GroundCollider);
 			}
 			result.Tick = ToAutomationCounter(session->GetTick());
 			return result;
@@ -150,6 +152,10 @@ namespace Engine {
 			.Field("contacts", &PhysicsBodyInfoResult::Contacts, "The body's active contact pairs, sorted by the partner's id.")
 			.Field("grounded", &PhysicsBodyInfoResult::Grounded, "A character standing on walkable ground; false for other bodies.")
 			.Field("groundNormal", &PhysicsBodyInfoResult::GroundNormal, "The normal of a grounded character's ground; (0, 1, 0) otherwise.")
+			.Field("groundCollider", &PhysicsBodyInfoResult::GroundCollider,
+				"The collider entity a grounded character's last update stood on (another character's entity when it stood on one), as "
+				"CharacterController:GetGroundCollider reads it; empty for other bodies, a character in the air, and a ground that is disabled or "
+				"destroyed.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 	}
 

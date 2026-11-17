@@ -8,8 +8,8 @@
 #include <cmath>
 
 // The script-facing character functions of the play session (Architecture §9.6; §11.5 CharacterController:Move,
-// IsGrounded, GetGroundNormal, GetVelocity). The characters' lifecycle (creation in canonical order among the bodies,
-// rebuilds, teleports, updates and write-back) belongs to the step phases in PhysicsSystem.cpp.
+// IsGrounded, GetGroundNormal, GetVelocity, and M36's GetGroundCollider). The characters' lifecycle (creation in canonical
+// order among the bodies, rebuilds, teleports, updates and write-back) belongs to the step phases in PhysicsSystem.cpp.
 
 namespace Engine {
 
@@ -35,14 +35,26 @@ namespace Engine {
 		return {};
 	}
 
+	PhysicsCharacterState PhysicsSystem::State::MakeCharacterState(const CharacterController& controller) const
+	{
+		const CharacterGroundState ground = controller.GetGroundState();
+		PhysicsCharacterState state{ .IsGrounded = ground.IsGrounded, .GroundNormal = ground.GroundNormal, .Velocity = controller.GetVelocity() };
+		// M36: the collider entity of the ground, resolved as a query hit on it is (a character's inner body names the
+		// character; a disabled or destroyed ground names none).
+		if (ground.IsGrounded && ground.GroundBody.IsValid())
+		{
+			if (const std::optional<PhysicsOverlapHit> hit = ResolveHit(ground.GroundBody, ground.GroundCollider))
+				state.GroundCollider = hit->Entity;
+		}
+		return state;
+	}
+
 	Result<PhysicsCharacterState> PhysicsSystem::GetCharacterState(UUID entity) const
 	{
 		const auto found = m_State->Characters.find(entity);
 		if (found == m_State->Characters.end() || !m_State->IsPresent(entity))
 			return MakeError(ErrorCode::NotFound, "entity {} has no character", entity);
-		const CharacterController& controller = *found->second.Controller;
-		const CharacterGroundState ground = controller.GetGroundState();
-		return PhysicsCharacterState{ .IsGrounded = ground.IsGrounded, .GroundNormal = ground.GroundNormal, .Velocity = controller.GetVelocity() };
+		return m_State->MakeCharacterState(*found->second.Controller);
 	}
 
 }

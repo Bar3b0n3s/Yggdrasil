@@ -266,6 +266,19 @@ namespace Engine {
 				Lua::Push(call, state->Velocity);
 			return 1;
 		}
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5): the collider entity the last update stood on, or nil.
+		static int CharacterGroundCollider(ScriptCall& call)
+		{
+			const Entity entity = ComponentSelf(call, "CharacterController");
+			auto state = ComponentPhysics(call).GetCharacterState(entity.GetUUID());
+			if (!state)
+				return Lua::RaiseError(call, state.error());
+			if (!state->GroundCollider.IsValid())
+				Lua::PushNil(call);
+			else
+				Lua::Push(call, ScriptEntityIdentity{ state->GroundCollider, call.Engine->GetHost().GetSceneGeneration() });
+			return 1;
+		}
 		static AudioSystem& ComponentAudio(ScriptCall& call)
 		{
 			auto* audio = call.Engine->GetHost().GetAudio();
@@ -506,7 +519,11 @@ namespace Engine {
 				.Method("Move", Utils::CharacterMove, "(self: CharacterController, velocity: vector) -> ()", "Supply desired velocity for the next fixed character update.", write)
 				.Method("IsGrounded", Utils::CharacterRead<0>, "(self: CharacterController) -> boolean", "Whether the last character update found supporting ground.", read)
 				.Method("GetGroundNormal", Utils::CharacterRead<1>, "(self: CharacterController) -> vector", "Ground normal from the last update.", read)
-				.Method("GetVelocity", Utils::CharacterRead<2>, "(self: CharacterController) -> vector", "Velocity after the last update.", read);
+				.Method("GetVelocity", Utils::CharacterRead<2>, "(self: CharacterController) -> vector", "Velocity after the last update.", read)
+				.Method("GetGroundCollider", Utils::CharacterGroundCollider, "(self: CharacterController) -> Entity?",
+					"The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when "
+					"that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity.",
+					read);
 			api.Type("AudioSource")
 				.Method("Play", Utils::SourceWrite<&AudioSystem::Play, true>, "(self: AudioSource) -> ()", "Start or restart this active source.", write)
 				.Method("Stop", Utils::SourceWrite<&AudioSystem::Stop, false>, "(self: AudioSource) -> ()", "Release this source's voice.", write)

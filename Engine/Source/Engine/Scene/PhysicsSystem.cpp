@@ -9,6 +9,7 @@
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CapsuleColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/ColliderSurfaceComponent.h"
 #include "Engine/Scene/Components/DisabledTag.h"
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/MeshColliderComponent.h"
@@ -513,6 +514,8 @@ namespace Engine {
 		Utils::ConnectComponentSignals<MeshRendererComponent, &State::OnComponentChanged>(registry, *this);
 		Utils::ConnectComponentSignals<TerrainColliderComponent, &State::OnComponentChanged>(registry, *this);
 		Utils::ConnectComponentSignals<TerrainComponent, &State::OnComponentChanged>(registry, *this);
+		// M36: a surface never recomposes the scene (PhysicsSystemSurfaces.cpp).
+		Utils::ConnectComponentSignals<ColliderSurfaceComponent, &State::OnSurfaceChanged>(registry, *this);
 		registry.on_construct<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_destroy<DisabledTag>().connect<&State::OnComponentChanged>(*this);
 		registry.on_construct<PendingDestroyTag>().connect<&State::OnEntityLeavingPlay>(*this);
@@ -531,6 +534,7 @@ namespace Engine {
 		Utils::DisconnectComponentSignals<MeshRendererComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<TerrainColliderComponent>(registry, *this);
 		Utils::DisconnectComponentSignals<TerrainComponent>(registry, *this);
+		Utils::DisconnectComponentSignals<ColliderSurfaceComponent>(registry, *this);
 		registry.on_construct<DisabledTag>().disconnect(this);
 		registry.on_destroy<DisabledTag>().disconnect(this);
 		registry.on_construct<PendingDestroyTag>().disconnect(this);
@@ -1052,7 +1056,10 @@ namespace Engine {
 		entry.ShapeDescription = std::move(*description);
 		const uint32_t value = handle->GetValue();
 		BodiesByOwner[{ plan.Owner, plan.Origin }] = value;
-		AssignPlan(Bodies.emplace(value, std::move(entry)).first->second, plan);
+		PhysicsBodyEntry& created = Bodies.emplace(value, std::move(entry)).first->second;
+		AssignPlan(created, plan);
+		// M36: the new body's collider surfaces (PhysicsSystemSurfaces.cpp).
+		SendSurfaces(created);
 		return true;
 	}
 
@@ -1204,6 +1211,8 @@ namespace Engine {
 		AssignPlan(entry, plan);
 		// The collider behind a sub-shape ID of the body may be another one now (M20, PhysicsSystemState.h).
 		ReattributedBodies.insert(handle);
+		// M36: the colliders behind the indices, and their rotations relative to the body, may have changed.
+		SendSurfaces(entry);
 		return true;
 	}
 
@@ -1444,6 +1453,7 @@ namespace Engine {
 		state.ComponentsChanged = false;
 		state.ChangedEntities.clear();
 		state.FlushCandidates.clear();
+		state.DirtySurfaces.clear();              // every created body sent its surfaces
 		state.PendingListenerDiagnostics.clear(); // no listener yet: GetDiagnostics holds them
 		return system;
 	}
@@ -1465,6 +1475,8 @@ namespace Engine {
 			state.RefreshShapes(changed, woken);
 		state.ComponentsChanged = false;
 		state.ChangedEntities.clear();
+		// M36: the collider surfaces written since the last PreStep (PhysicsSystemSurfaces.cpp).
+		state.RefreshSurfaces();
 
 		// 3-4. Kinematic moves and teleports, in canonical order of the owners; entities pending destruction or disabled keep
 		// their bodies as they are until FlushDestroyed.
@@ -2437,14 +2449,13 @@ namespace Engine {
 		}
 		else
 		{
-			const CharacterGroundState ground = character->Controller->GetGroundState();
 			report.Origin = PhysicsBodyOrigin::Character;
 			report.MotionType = PhysicsMotionType::Kinematic;
 			report.Layer = character->Description.Layer;
 			report.Pose = character->Controller->GetPose();
 			report.LinearVelocity = character->Controller->GetVelocity();
 			report.Bounds = state.World->GetBodyBounds(character->Controller->GetInnerBody()).value_or(Aabb{});
-			report.Character = PhysicsCharacterState{ .IsGrounded = ground.IsGrounded, .GroundNormal = ground.GroundNormal, .Velocity = report.LinearVelocity };
+			report.Character = state.MakeCharacterState(*character->Controller);
 		}
 		report.LayerName = report.Layer < state.Layers.GetLayerCount() ? state.Layers.GetName(report.Layer) : std::string();
 		if (const auto owned = state.PairsByOwner.find(report.Owner); owned != state.PairsByOwner.end())

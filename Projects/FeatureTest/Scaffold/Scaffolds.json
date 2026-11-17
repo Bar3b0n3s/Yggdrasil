@@ -510,6 +510,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Surfaces.jsonl",
+			"IdSeed": 3301,
+			"Renderer": "none"
+		},
+		{
+			"File": "SurfacesReplay.jsonl",
+			"IdSeed": 3302,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

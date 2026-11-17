@@ -4,6 +4,9 @@ velocity, sleeping state and contacts, and project.validate reports adjacent imp
 a Static RigidBody on their common parent. test_simulate_mode_ball_falls, test_body_info_reports_contacts and
 test_validate_reports_adjacent_static_bodies_and_fix_adds_parent_body are the Roadmap acceptance tests;
 test_body_info_needs_a_play_session_and_a_body covers physics.bodyInfo's errors.
+test_belt_carries_a_character_that_reports_its_ground_collider covers M36's ColliderSurface (Docs/Decisions/
+0053-m36-contact-surfaces.md): physics.bodyInfo's groundCollider, a surface velocity written through entity.update, and
+PHYSICS_SURFACE_UNUSED.
 """
 
 from __future__ import annotations
@@ -154,6 +157,46 @@ class PhysicsTests(AutomationTestCase):
         with self.assertRaises(engine_client.EngineError) as no_entity:
             client.call("physics.bodyInfo", {})
         self.assert_engine_error(no_entity.exception, engine_client.INVALID_PARAMS)
+        client.call("play.stop")
+
+    def test_belt_carries_a_character_that_reports_its_ground_collider(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        # One static compound: a marble slab and a belt beside it, the belt's surface moving along +X.
+        client.call("entity.create", {"name": "Level", "components": {"RigidBody": {"Type": "Static"}}})
+        client.call("entity.create", {"name": "Marble", "parent": "/Level", "components": {
+            "Transform": {"Translation": [0, -0.5, -3]}, "BoxCollider": {"HalfExtents": [10, 0.5, 1.5]}}})
+        client.call("entity.create", {"name": "Belt", "parent": "/Level", "components": {
+            "Transform": {"Translation": [0, -0.5, 0]}, "BoxCollider": {"HalfExtents": [10, 0.5, 1.5]},
+            "ColliderSurface": {"Friction": 0.8, "SurfaceVelocity": [2, 0, 0]}}})
+        client.call("entity.create", {"name": "Walker", "components": {
+            "Transform": {"Translation": [-5, 0.05, 0]}, "CharacterController": {}}})
+
+        # A surface on an entity without a collider applies to nothing.
+        client.call("entity.create", {"name": "Loose", "components": {"ColliderSurface": {}}})
+        report = client.call("project.validate", {"scope": "scene"})
+        unused = [item for item in report["diagnostics"] if item["code"] == "PHYSICS_SURFACE_UNUSED"]
+        self.assertEqual(len(unused), 1, report["diagnostics"])
+        self.assertEqual(unused[0]["severity"], "Warning")
+        self.assertFalse(unused[0]["autoFixable"])
+
+        # Simulate: no script moves the character, and the belt carries it about 2 m in a second.
+        client.call("play.start", {"mode": "simulate", "lockstep": True})
+        client.call("play.step", {"ticks": 70, "render": "none"})
+        walker = client.call("physics.bodyInfo", {"entity": "/Walker"})
+        self.assertTrue(walker["grounded"])
+        self.assertEqual(walker["groundCollider"]["path"], "/Level/Belt")
+        self.assertGreater(walker["position"][0], -3.5)
+        level = client.call("physics.bodyInfo", {"entity": "/Level/Belt"})
+        self.assertEqual(level["groundCollider"]["id"], "")
+
+        # The belt stops through entity.update in the play scene: the character stops with it, still on the belt.
+        client.call("entity.update", {"entity": "/Level/Belt", "target": "play", "components": {
+            "ColliderSurface": {"SurfaceVelocity": [0, 0, 0]}}})
+        client.call("play.step", {"ticks": 2, "render": "none"})
+        stopped = client.call("physics.bodyInfo", {"entity": "/Walker"})["position"][0]
+        client.call("play.step", {"ticks": 30, "render": "none"})
+        still = client.call("physics.bodyInfo", {"entity": "/Walker"})["position"][0]
+        self.assertAlmostEqual(still, stopped, delta=0.01)
         client.call("play.stop")
 
 

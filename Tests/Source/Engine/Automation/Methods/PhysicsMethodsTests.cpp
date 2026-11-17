@@ -122,6 +122,25 @@ namespace Engine {
 			CHECK(JsonReader((*info)["boundsMax"][0]).ReadFloat().value_or(0.0f) == doctest::Approx(21.5f).epsilon(1.0e-3));
 		}
 
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 7): groundCollider, after groundNormal.
+		TEST_CASE("PhysicsMethods: physics.bodyInfo of a character reports the collider it stands on")
+		{
+			Test::AutomationFixture setup("PhysicsBodyInfoGround");
+			REQUIRE(setup.Call("entity.create", ParsePhysicsMethodJson(R"({"name":"Walker","components":{"Transform":{"Translation":[21,0.6,0]},
+				"CharacterController":{}}})"))
+					.has_value());
+			StartPhysicsScene(setup, 60);
+			const Result<Json> info = setup.Call("physics.bodyInfo", Json{ { "entity", "/Walker" } });
+			REQUIRE_MESSAGE(info.has_value(), info.error().ToString());
+			CHECK((*info)["origin"] == Json("Character"));
+			CHECK((*info)["grounded"] == Json(true));
+			CHECK((*info)["groundCollider"]["path"] == Json("/Level/Piece[1]"));
+			// No ground collider for a body that is no character.
+			const Result<Json> ball = setup.Call("physics.bodyInfo", Json{ { "entity", "/Ball" } });
+			REQUIRE_MESSAGE(ball.has_value(), ball.error().ToString());
+			CHECK((*ball)["groundCollider"]["id"] == Json(""));
+		}
+
 		TEST_CASE("PhysicsMethods: physics.bodyInfo needs a play session and an entity with a body")
 		{
 			Test::AutomationFixture setup("PhysicsBodyInfoErrors");
