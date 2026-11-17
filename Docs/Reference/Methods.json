@@ -29405,7 +29405,7 @@
 								"maximum": 4294967295
 							},
 							"locale": {
-								"description": "The locale the suite's sessions started in: its Testing.Suites entry's Locale, else the run's (test.run's locale, the Runtime's --locale), else the project's Localization.Locale; a replay suite's, its header's. Empty for the empty locale and for a suite whose session never started.",
+								"description": "The locale the suite's sessions started in: its Testing.Suites entry's Locale, else the run's (test.run's locale, the Runtime's --locale), else the project's Localization.Locale; a replay suite's, its header's. A suite whose session never started reports the one it would have started in; empty is the empty locale.",
 								"type": "string"
 							}
 						},

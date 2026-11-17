@@ -425,7 +425,6 @@ return Script.Define("Driver",Driver))");
 
 	TEST_SUITE("Testing")
 	{
-		// ADR 0022 decision 3: Testing.CoverageGates opts a project in; only an unfiltered, non-recording run evaluates.
 		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6; Roadmap M38's acceptance): one script listed once per locale.
 		// Each entry's sessions start in its Locale, an entry without one in the run's locale (else the project's), and an
 		// entry that names a locale reports "<Name> (<Locale>)" in every row, so the rows stay distinct and the filter selects
@@ -488,6 +487,41 @@ return Script.Define("Driver",Driver))");
 			CHECK(begun.error().GetCode() == ErrorCode::InvalidArgument);
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6; the W38.1 review's finding 3): a suite whose session never
+		// starts reports the locale it would have started in (its entry's, else the run's, else the project's), so a reader that
+		// keys rows by script and effective locale (Scripts/Lib/games.py) finds its failed row.
+		TEST_CASE("FeatureTestRunner: a suite whose session never starts reports the locale it would have started in")
+		{
+			RunnerHost host;
+			host.EnableAudio();
+			// A ScriptedClock suite on a host whose sessions do not own audio time fails its setup after discovery.
+			host.OwnAudioTime = false;
+			host.Settings.Localization.Locale = "en";
+			TestSuiteSettings& german = host.Suite(R"(return Test.Suite("Strings",function() Test.Case("runs",function() end) end))");
+			german.Clock = { 5.0f / 60.0f };
+			german.Locale = "de";
+			TestSuiteSettings inherited = german;
+			inherited.Locale.clear();
+			host.Settings.Testing.Suites.push_back(inherited);
+
+			const TestRunResult refused = host.Run();
+			CHECK_FALSE(refused.Passed);
+			REQUIRE(refused.Suites.size() == 2);
+			CHECK(refused.Suites[0].Suite == "Strings (de)");
+			CHECK(refused.Suites[0].Locale == "de");
+			CHECK(refused.Suites[1].Suite == "Strings");
+			CHECK(refused.Suites[1].Locale == "en");
+			REQUIRE_FALSE(refused.Cases.empty());
+			CHECK(refused.Cases[0].Case == "<setup>");
+			FeatureTestRunOptions inRunLocale;
+			inRunLocale.Locale = "ja";
+			const TestRunResult japanese = host.Run(inRunLocale);
+			REQUIRE(japanese.Suites.size() == 2);
+			CHECK(japanese.Suites[0].Locale == "de");
+			CHECK(japanese.Suites[1].Locale == "ja");
+		}
+
+		// ADR 0022 decision 3: Testing.CoverageGates opts a project in; only an unfiltered, non-recording run evaluates.
 		TEST_CASE("TestRunner: a coverage project evaluates every per-mode gate and a gap fails the run")
 		{
 			RunnerHost host;

@@ -11,11 +11,51 @@
 
 #include <doctest/doctest.h>
 
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Engine {
+
+	// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2; the W38.1 review's finding 1): the dispatch's three rules
+	// for a scene that changes under it, each in a case of its own. A Listener traces each callback it hears as an entity
+	// named "<callback>:<entity>:<locale>"; a Meddler, first in execution order, changes the scene inside its own
+	// OnLocaleChanged.
+	namespace {
+
+		constexpr std::string_view LocaleListener = R"(
+local L = {}
+function L:OnCreate() self.Label = self.Entity.Name end
+function L:OnStart() Scene.CreateEntity("Start:" .. self.Label .. ":" .. Loc.GetLocale()) end
+function L:OnUpdate() Scene.CreateEntity("Update:" .. self.Label .. ":" .. Loc.GetLocale()) end
+function L:OnLocaleChanged(locale, previous) Scene.CreateEntity("Trace:" .. self.Label .. ":" .. locale) end
+return Script.Define("Listener", L)
+)";
+
+		void AttachLocaleScript(Entity entity, AssetHandle script, int32_t order)
+		{
+			ScriptSlot slot{};
+			slot.Script.SetHandle(script);
+			slot.ExecutionOrder = order;
+			entity.AddComponent<ScriptComponent>(ScriptComponent{ { slot } });
+		}
+
+		// The names of the entities whose name starts with `prefix`, without it, in canonical order.
+		std::vector<std::string> TraceLocaleCallbacks(Scene& scene, std::string_view prefix)
+		{
+			std::vector<std::string> names;
+			for (const UUID id : scene.GetCanonicalOrder())
+			{
+				const Entity entity = scene.FindEntityByID(id);
+				if (entity && entity.GetName().starts_with(prefix))
+					names.push_back(entity.GetName().substr(prefix.size()));
+			}
+			return names;
+		}
+
+	}
 
 	TEST_SUITE("Scripting")
 	{
@@ -215,6 +255,92 @@ return Script.Define("Listener", L)
 			REQUIRE(fixture.Evaluate("Loc.SetLocale('ar')", caller));
 			const std::vector<std::string> next = trace();
 			CHECK(std::vector<std::string>(next.begin() + 6, next.end()) == std::vector<std::string>{ "Early:ar:de:ar", "Caller:ar:de:ar", "Second:ar:de:ar", "Late:ar:de:ar" });
+		}
+
+		TEST_CASE("ScriptEngine: OnLocaleChanged passes over a behaviour an earlier callback destroyed or deactivated")
+		{
+			Test::ScriptTestFixture fixture({ .Locale = "fr" });
+			fixture.SessionLocale = "fr";
+			const AssetHandle listener(0x38A0201), meddler(0x38A0202);
+			REQUIRE(fixture.AddScript(listener, "Assets/Scripts/Listener.luau", std::string(LocaleListener)));
+			REQUIRE(fixture.AddScript(meddler, "Assets/Scripts/Meddler.luau", R"(
+local M = {}
+function M:OnLocaleChanged(locale, previous)
+	Scene.CreateEntity("Trace:Meddler:" .. locale)
+	local victim = Scene.FindByName("Victim")
+	victim:Destroy()
+	local sleeper = Scene.FindByName("Sleeper")
+	sleeper:SetActive(false)
+end
+return Script.Define("Meddler", M)
+)"));
+			Scene& scene = fixture.GetScene();
+			AttachLocaleScript(scene.CreateEntity("Meddler"), meddler, -5);
+			AttachLocaleScript(scene.CreateEntity("Victim"), listener, 0);
+			AttachLocaleScript(scene.CreateEntity("Sleeper"), listener, 0);
+			AttachLocaleScript(scene.CreateEntity("Late"), listener, 5);
+			REQUIRE(fixture.Start());
+			const auto result = fixture.Evaluate("Loc.SetLocale('de')");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			// Victim and Sleeper were in the snapshot, but the Meddler destroyed one and deactivated the other before their turn.
+			CHECK(TraceLocaleCallbacks(scene, "Trace:") == std::vector<std::string>{ "Meddler:de", "Late:de" });
+			CHECK(fixture.Errors.empty());
+		}
+
+		TEST_CASE("ScriptEngine: OnLocaleChanged reaches no behaviour created during its dispatch, whose OnStart reads the new locale")
+		{
+			Test::ScriptTestFixture fixture({ .Locale = "fr" });
+			fixture.SessionLocale = "fr";
+			const AssetHandle listener(0x38A0301), meddler(0x38A0302);
+			REQUIRE(fixture.AddScript(listener, "Assets/Scripts/Listener.luau", std::string(LocaleListener)));
+			REQUIRE(fixture.AddScript(meddler, "Assets/Scripts/Meddler.luau", R"(
+local M = {}
+function M:OnLocaleChanged(locale, previous)
+	Scene.CreateEntity("Trace:Meddler:" .. locale)
+	local born = Scene.CreateEntity("Born")
+	born:AddComponent("Script", {Scripts = {{Script = Assets.Load("Assets/Scripts/Listener.luau"), Fields = {}, ExecutionOrder = 0}}})
+end
+return Script.Define("Meddler", M)
+)"));
+			Scene& scene = fixture.GetScene();
+			AttachLocaleScript(scene.CreateEntity("Meddler"), meddler, -5);
+			AttachLocaleScript(scene.CreateEntity("Late"), listener, 5);
+			REQUIRE(fixture.Start());
+			const auto result = fixture.Evaluate("Loc.SetLocale('de')");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			// Born was created (and its OnCreate ran) inside the dispatch, after the snapshot: it hears nothing.
+			REQUIRE(scene.FindEntityByPath("/Born"));
+			CHECK(TraceLocaleCallbacks(scene, "Trace:") == std::vector<std::string>{ "Meddler:de", "Late:de" });
+			fixture.GetEngine()->StartPending();
+			CHECK(TraceLocaleCallbacks(scene, "Start:") == std::vector<std::string>{ "Late:fr", "Born:de" });
+			CHECK(fixture.Errors.empty());
+		}
+
+		TEST_CASE("ScriptEngine: OnLocaleChanged reaches a behaviour that does not run while the world is paused")
+		{
+			Test::ScriptTestFixture fixture({ .Locale = "fr" });
+			fixture.SessionLocale = "fr";
+			const AssetHandle listener(0x38A0401), menu(0x38A0402);
+			REQUIRE(fixture.AddScript(listener, "Assets/Scripts/Listener.luau", std::string(LocaleListener)));
+			// The same listener, as a behaviour that runs while the world is paused.
+			std::string menuSource(LocaleListener);
+			menuSource.replace(menuSource.find("local L = {}"), std::string_view("local L = {}").size(), "local L = { RunsWhileWorldPaused = true }");
+			menuSource.replace(menuSource.find("\"Listener\""), std::string_view("\"Listener\"").size(), "\"Menu\"");
+			REQUIRE(fixture.AddScript(menu, "Assets/Scripts/Menu.luau", menuSource));
+			Scene& scene = fixture.GetScene();
+			AttachLocaleScript(scene.CreateEntity("World"), listener, 0);
+			AttachLocaleScript(scene.CreateEntity("Menu"), menu, 0);
+			REQUIRE(fixture.Start());
+			fixture.WorldPaused = true;
+			fixture.Frame.WorldPaused = true;
+			// The pause is in force: a frame's OnUpdate reaches only the behaviour that runs while the world is paused.
+			fixture.GetEngine()->Update();
+			REQUIRE(TraceLocaleCallbacks(scene, "Update:") == std::vector<std::string>{ "Menu:fr" });
+			const auto result = fixture.Evaluate("Loc.SetLocale('de')");
+			REQUIRE_MESSAGE(result.has_value(), (result ? "" : result.error().ToString()));
+			// OnLocaleChanged is the UI's: the pause holds none of it back.
+			CHECK(TraceLocaleCallbacks(scene, "Trace:") == std::vector<std::string>{ "World:de", "Menu:de" });
+			CHECK(fixture.Errors.empty());
 		}
 	}
 

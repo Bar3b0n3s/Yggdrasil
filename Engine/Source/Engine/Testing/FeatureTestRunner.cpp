@@ -1363,9 +1363,14 @@ namespace Engine {
 					suite.Script = Selected[SuiteIndex].Settings.Script;
 					suite.Scene = Selected[SuiteIndex].Settings.Scene;
 					suite.Mode = Options.Mode;
+					// M38 (decision 6): the locale the suite's session starts in, its effective one (the entry's, else the
+					// run's) or the project's, before the session opens, so a suite whose session never starts names it too
+					// (the W38.1 review's finding 3: Scripts/Lib/games.py keys rows by script and effective locale).
+					suite.Locale = Selected[SuiteIndex].Settings.Locale.empty() ? Host->GetProjectSettings().Localization.Locale
+																				: Selected[SuiteIndex].Settings.Locale;
 					ReportData.Suites.push_back(std::move(suite));
 					const auto opened = OpenSession();
-					// M38 (decision 6): the locale the suite's session started in.
+					// The locale the session started in.
 					if (opened && Session != nullptr)
 						ReportData.Suites[SuiteResultIndex].Locale = std::string(Session->GetStartLocale());
 					if (!opened)
