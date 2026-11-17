@@ -2,7 +2,12 @@
 #include "Engine/Scene/JointDebugDraw.h"
 
 #include "Engine/Core/Assert.h"
+#include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Renderer/DebugDrawList.h"
+#include "Engine/Scene/Components/DistanceJointComponent.h"
+#include "Engine/Scene/Components/FixedJointComponent.h"
+#include "Engine/Scene/Components/HingeJointComponent.h"
+#include "Engine/Scene/Components/SliderJointComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsComposition.h"
 #include "Engine/Scene/PhysicsJoints.h"
@@ -60,9 +65,9 @@ namespace Engine {
 	{
 		switch (state)
 		{
-			case JointDebugState::InForce: return glm::vec4(0.3f, 1.0f, 0.4f, 1.0f);
-			case JointDebugState::Broken:  return glm::vec4(1.0f, 0.6f, 0.1f, 1.0f);
-			case JointDebugState::Refused: return glm::vec4(1.0f, 0.2f, 0.2f, 1.0f);
+			case JointDebugState::InForce: return glm::vec4(0.0f, 0.75f, 0.8f, 1.0f);
+			case JointDebugState::Broken:  return glm::vec4(1.0f, 0.45f, 0.0f, 1.0f);
+			case JointDebugState::Refused: return glm::vec4(0.85f, 0.0f, 0.35f, 1.0f);
 		}
 		ENGINE_CORE_ASSERT(false, "Unknown JointDebugState {}", std::to_underlying(state));
 		return glm::vec4(1.0f);
@@ -72,6 +77,12 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(alpha >= 0.0f && alpha <= 1.0f, "BuildJointDebugDraw: the alpha {} is outside [0, 1]", alpha);
 		std::vector<JointDebugShape> shapes;
+		const entt::registry& registry = scene.GetRegistry();
+		if (registry.view<HingeJointComponent>().empty() && registry.view<SliderJointComponent>().empty() && registry.view<DistanceJointComponent>().empty()
+			&& registry.view<FixedJointComponent>().empty())
+		{
+			return shapes;
+		}
 		const PhysicsJointComposition joints = ComposePhysicsJoints(scene, ComposePhysicsBodies(scene, layers));
 		for (const PhysicsJointPlan& plan : joints.Joints)
 		{
@@ -103,10 +114,16 @@ namespace Engine {
 					shape.Point = frame->Point;
 					if (plan.Type == PhysicsJointType::Hinge || plan.Type == PhysicsJointType::Slider)
 						shape.Axis = frame->Axis;
+					// The world refuses a frame beyond its range (PhysicsWorld::CreateJoint), as the session would.
+					if (!IsWithinPhysicsRange(frame->Point) && shape.State == JointDebugState::InForce)
+						shape.State = JointDebugState::Refused;
 				}
 				else
 				{
+					// An axis the entity's transform makes vanish: the session's "frame" refusal.
 					shape.Point = glm::vec3(world[3]);
+					if (shape.State == JointDebugState::InForce)
+						shape.State = JointDebugState::Refused;
 				}
 				shape.ConnectedPoint = shape.Point;
 				if (plan.Type == PhysicsJointType::Distance)

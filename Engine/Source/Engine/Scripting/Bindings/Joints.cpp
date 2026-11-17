@@ -2,6 +2,7 @@
 #include "Engine/Scripting/Private/BindingRegistration.h"
 
 #include "Engine/Reflection/TypeRegistry.h"
+#include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSystem.h"
 #include "Engine/Scripting/LuaHelpers.h"
 #include "Engine/Scripting/ScriptEngine.h"
@@ -31,19 +32,6 @@ namespace Engine {
 			Torque
 		};
 
-		// The registry name of the component of `type` (the proxy a method receives).
-		constexpr std::string_view GetJointProxyName(PhysicsJointType type)
-		{
-			switch (type)
-			{
-				case PhysicsJointType::Hinge:    return "HingeJoint";
-				case PhysicsJointType::Slider:   return "SliderJoint";
-				case PhysicsJointType::Distance: return "DistanceJoint";
-				case PhysicsJointType::Fixed:    return "FixedJoint";
-			}
-			return "";
-		}
-
 		// The reading `Reading` of the receiver's joint in force: a joint component of `Type` of a live entity (a read of the
 		// physics system's state, refused for an entity pending destruction as RigidBody's are). Errors: the receiver's;
 		// "physics is unavailable" without the session's physics
@@ -55,7 +43,7 @@ namespace Engine {
 			IScriptHost& host = call.Engine->GetHost();
 			if (const Status valid = ScriptProxy::ValidateComponent(host, proxy); !valid)
 				Lua::RaiseError(call, valid.error());
-			if (host.GetTypes().GetComponents()[proxy.ComponentTypeIndex]->GetName() != GetJointProxyName(Type))
+			if (host.GetTypes().GetComponents()[proxy.ComponentTypeIndex]->GetName() != GetPhysicsJointComponentName(Type))
 				Lua::RaiseError(call, "wrong component receiver");
 			const PhysicsSystem* physics = host.GetPhysics();
 			if (physics == nullptr)

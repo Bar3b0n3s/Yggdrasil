@@ -30,9 +30,9 @@ namespace Engine {
 	// A joint's state as the view colours it.
 	enum class JointDebugState : uint8_t
 	{
-		InForce, // green: made (play), or one the session would make (edit)
+		InForce, // teal: made (play), or one the session would make (edit)
 		Broken,  // orange: Broken
-		Refused  // red: PHYSICS_JOINT_INVALID, or an end without a body
+		Refused  // crimson: PHYSICS_JOINT_INVALID, an end without a body, or a frame the world would refuse
 	};
 
 	// One joint's record, in world space.
@@ -51,14 +51,17 @@ namespace Engine {
 	inline constexpr float JointDebugCrossSize = 0.1f;
 	inline constexpr float JointDebugAxisLength = 0.5f;
 
-	// The colour of a joint of `state` (linear RGBA).
+	// The colour of a joint of `state` (linear RGBA): none of ColliderDebugCategory's, so a joint on its body's outline stands
+	// out from the collider lines, and mid-tone and saturated, so it reads over a light scene and a dark one.
 	[[nodiscard]] glm::vec4 GetJointDebugColor(JointDebugState state);
 
 	// The records of `scene`'s joints, in canonical order of their entities (ComposePhysicsJoints over ComposePhysicsBodies(scene,
 	// layers)), at the rendered pose of interpolation alpha `alpha` in [0, 1] (asserted) as BuildColliderDebugDraw's: with
 	// `physics` (the session's), a joint in force is drawn where the bodies hold it and any other at its components' places;
-	// without it (an edit scene), every joint at its components' places. A joint whose frame cannot be made (a zero axis) is
-	// drawn at its entity's position. Main thread.
+	// without it (an edit scene), every joint at its components' places, Refused when the session would refuse it (the
+	// composition's reasons, a frame its entity's transform makes vanish, a point beyond MaxPhysicsCoordinate). A joint
+	// whose frame cannot be made is drawn at its entity's position. An empty list, composing nothing, for a scene without a
+	// joint component. Main thread.
 	[[nodiscard]] std::vector<JointDebugShape> BuildJointDebugDraw(const Scene& scene, const PhysicsLayerTable& layers, const PhysicsSystem* physics,
 		float alpha = 1.0f);
 

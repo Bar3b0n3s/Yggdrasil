@@ -6,6 +6,7 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Support/AutomationTestClient.h"
+#include "Support/ExpectLog.h"
 #include "Support/EditorTestFixture.h"
 
 #include <nlohmann/json.hpp>
@@ -200,8 +201,11 @@ namespace Engine {
 					"RigidBody":{"Type":"Dynamic"},"BoxCollider":{"HalfExtents":[0.5,1,0.05]},
 					"HingeJoint":{"Anchor":[-0.5,0,0],"Axis":[0,1,0],"Motor":"Velocity","MotorTargetVelocity":90}}}},
 				{"method":"entity.create","params":{"name":"Loose","components":{"Transform":{"Translation":[10,2,0]},
-					"RigidBody":{"Type":"Dynamic"},"BoxCollider":{},"FixedJoint":{"Broken":true}}}}]})"))
+					"RigidBody":{"Type":"Dynamic"},"BoxCollider":{},"FixedJoint":{"Broken":true}}}},
+				{"method":"entity.create","params":{"name":"Floating","components":{"Transform":{"Translation":[15,2,0]},"HingeJoint":{}}}}]})"))
 					.has_value());
+			// The hinge on an entity without a RigidBody at or above it has no body: PHYSICS_JOINT_INVALID "body".
+			const Test::ExpectLog invalid(LogLevel::Error, "PHYSICS_JOINT_INVALID");
 			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "seed", 3 } }).has_value());
 			StepPhysicsScene(setup, 30);
 
@@ -239,6 +243,15 @@ namespace Engine {
 			CHECK((*loose)["broken"] == Json(true));
 			CHECK((*loose)["force"] == Json(0.0));
 			CHECK((*loose)["torque"] == Json(0.0));
+
+			// A joint without a body: body is null, and it is not in force.
+			const Result<Json> floating = setup.Call("physics.jointInfo", Json{ { "entity", "/Floating" } });
+			REQUIRE_MESSAGE(floating.has_value(), floating.error().ToString());
+			CHECK((*floating)["type"] == Json("Hinge"));
+			CHECK((*floating)["body"].is_null());
+			CHECK((*floating)["connectedBody"].is_null());
+			CHECK((*floating)["created"] == Json(false));
+			CHECK(invalid.GetMatchCount() >= 1);
 		}
 
 		TEST_CASE("PhysicsMethods: physics.jointInfo needs a play session and an entity with a joint")
