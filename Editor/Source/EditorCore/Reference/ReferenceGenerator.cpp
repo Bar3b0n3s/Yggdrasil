@@ -143,7 +143,7 @@ namespace Engine {
 {"From": {"Node": 4, "Pin": "True"}, "To": {"Node": 5, "Pin": "In"}}, {"From": {"Node": 5, "Pin": "Then"}, "To": {"Node": 6, "Pin": "In"}}]})";
 
 		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 5, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
-"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.6.0", "Config": "Editor", "SaveData": {"BestWave": 12, "Realms": ["Fire"]}, "Locale": "de",
+"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.7.0", "Config": "Editor", "SaveData": {"BestWave": 12, "Realms": ["Fire"]}, "Locale": "de",
 "Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
 "Components": {"Transform": "a3c94e0f12b7d685", "Camera": "0c7e2a91f4d3b658"}},
 {"Id": "0000000000000022", "Path": "/Player", "Hash": "91d4c07a3e5b2f86", "Components": {"Transform": "47b0e9d2c61a5f38", "Script": "d8263f5a0b9c4e17"}}],

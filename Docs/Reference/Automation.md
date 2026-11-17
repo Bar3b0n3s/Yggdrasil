@@ -3161,7 +3161,7 @@ Opens the session: the first request of every connection, with the token from th
 |---|---|---|
 | `protocolVersion` | `String` | The protocol version the server speaks. |
 | `engineVersion` | `String` | The engine's version. |
-| `build` | `String` | The server's build id, semantic-versioning build metadata: the engine's version, then "+\<commit>" (12 lowercase hex digits of the commit it was built from) and ".dirty" when its working tree had uncommitted changes, such as "0.6.0+3f2a9c1d4e5b.dirty"; the version alone for a build without a commit. |
+| `build` | `String` | The server's build id, semantic-versioning build metadata: the engine's version, then "+\<commit>" (12 lowercase hex digits of the commit it was built from) and ".dirty" when its working tree had uncommitted changes, such as "0.7.0+3f2a9c1d4e5b.dirty"; the version alone for a build without a commit. |
 | `clientId` | `UInt32` | This connection's client id, unique for the server's lifetime. |
 | `capabilities` | `Array<String>` | The optional protocol features the server offers: dryRun, ifRevision, batch, pendingOperations, offload, and testHooks. |
 | `project` | `SessionProjectSummary` | The open project. |

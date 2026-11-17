@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 4,
+	"Version": 5,
 	"Scene": {
 		"Handle": "93723fab79cf2242",
 		"Path": "Assets/Scenes/MusicA.scene"
@@ -8,9 +8,10 @@
 	"Parameters": {},
 	"Seed": 1414,
 	"FixedHz": 64,
-	"EngineVersion": "0.6.0",
+	"EngineVersion": "0.7.0",
 	"Config": "Editor",
 	"SaveData": {},
+	"Locale": "fr-CA",
 	"Fingerprint": {
 		"Entities": [
 			{
