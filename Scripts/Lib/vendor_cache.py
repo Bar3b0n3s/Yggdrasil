@@ -294,6 +294,34 @@ def project_properties(project: ProjectFile, config: str, platform: str,
     return dict(sorted(properties.items()))
 
 
+def output_file(project: ProjectFile, config: str, platform: str) -> Path | None:
+    """The file `project` builds in `config`|`platform`: its OutDir, with $(ProjectDir) (the only macro premake writes
+    there) as the project file's directory, then TargetName (the project's name by default) and TargetExt. None when it
+    has no OutDir or the OutDir names another macro."""
+    directory: str | None = None
+    name = project.name
+    extension = ""
+    for group in project.root.iter(f"{_NAMESPACE}PropertyGroup"):
+        if not _applies(group, config, platform):
+            continue
+        for child in group:
+            if not _applies(child, config, platform):
+                continue
+            value = (child.text or "").strip()
+            if _tag(child) == "OutDir":
+                directory = value
+            elif _tag(child) == "TargetName":
+                name = value
+            elif _tag(child) == "TargetExt":
+                extension = value
+    if directory is None:
+        return None
+    directory = directory.replace("$(ProjectDir)", str(project.path.parent) + os.sep)
+    if "$(" in directory:
+        return None
+    return Path(os.path.normpath(directory.replace("\\", "/"))) / f"{name}{extension}"
+
+
 def project_settings(project: ProjectFile, config: str, platform: str,
                      repository_root: Path = paths.REPOSITORY_ROOT) -> dict[str, Any]:
     """The project's build settings for `config`|`platform`, as the key records them: "properties"

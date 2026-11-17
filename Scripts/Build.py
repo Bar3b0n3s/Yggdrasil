@@ -37,6 +37,14 @@ ForceImportAfterCppTargets, bin-int/VendorCache/). The warnings a library's comp
 links it. --no-vendor-cache compiles the vendored libraries in the workspace; --vendor-cache-dir uses another cache
 directory. make, ninja and xcodebuild builds do not use the cache.
 
+After an MSBuild build that succeeded, every output it built that links (an executable or shared library) is compared
+with the first-party static libraries it links (its ProjectReferences outside Vendor/; stale_links): one older than such
+a library is a link MSBuild skipped although the library changed, so it would still run the code the library replaced
+(phase 5's stale Tests.exe as its builder reported it, which the setup of phase 6 could not reproduce). Build.py then
+removes it and runs the build once more, a full link, and the step ends as a warning naming it; it fails when the output
+cannot be removed (a running Tests.exe), the build fails, or the output is still older (relink). The step's --json
+result lists them ("staleLinks").
+
 After a build that builds the Runtime (every project, Runtime itself, or a project that depends on it, such as Tests),
 on every generator (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8):
   - the notices file bin/<OutputDir>/Runtime/THIRD_PARTY_NOTICES.txt is generated from Vendor/*/VENDOR.md and
@@ -59,6 +67,17 @@ bin-int/<OutputDir>/Engine/BuildStamp.h, which Engine/Source/Engine/Core/BuildId
 changes, so a commit recompiles that one translation unit; the first stamp of a configuration also removes the BuildId
 objects a build without one compiled. The step's detail ends with "; build stamp <commit>[.dirty]" and its --json result
 holds "buildStamp" (path, written, commit, dirty, description, removedObjects).
+
+Before the first configuration's build, once the build lock is held, on every generator, the source stamps
+(refresh_source_stamps): the builds decide what to recompile by modification times, so a first-party source or header
+put back with an older modification time than the objects compiled since (mv, cp -p, shutil.copy2 or an archive
+restoring a kept copy, as a proof that a regression test fails without its fix does) would never be recompiled, and the
+build would report its projects built while they still run the code it replaced. Build.py keeps the size, modification
+time and SHA-256 of every C and C++ file below Engine/Source, Engine/Config, Editor/Source, Runtime/Source, Tests/Source
+and Resources/Shaders in <workspace>/bin-int/SourceStamps.json, taken when each build begins; a file whose content
+differs from the previous build's record while its modification time is not newer than that build's start gets the
+current time as its modification time, so every configuration and project that compiles it, or includes it, compiles
+it again. Only a changed size or time is hashed. The --json document's "sourceStamps" lists the files it touched.
 
 The machine-wide build lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16) is taken after the
 workspace is read and held across every requested configuration: one uncapped build or two capped builds at a time,
@@ -98,11 +117,13 @@ if sys.version_info < (3, 10):
 import argparse
 import dataclasses
 import hashlib
+import json
 import os
 import re
 import shutil
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from Lib import locks, notices, paths, premake, toolchain, vendor_cache, workspace
@@ -141,6 +162,14 @@ BUILD_STAMP_GIT_TIMEOUT_SECONDS = 120.0
 # The objects of Engine/Source/Engine/Core/BuildId.cpp in the Engine project's intermediate directory: MSVC's and the
 # GCC/Clang generators' names.
 BUILD_STAMP_OBJECTS = ("BuildId.obj", "BuildId.o")
+# The source stamps (refresh_source_stamps): the record below the workspace's bin-int/, its format version, and the
+# first-party C and C++ files it covers, the ones the generated projects compile or include (the headers that
+# Resources/Shaders shares with the shaders among them).
+SOURCE_STAMPS_FILE_NAME = "SourceStamps.json"
+SOURCE_STAMPS_VERSION = 1
+SOURCE_STAMP_DIRECTORIES = ("Engine/Source", "Engine/Config", "Editor/Source", "Runtime/Source", "Tests/Source",
+                            "Resources/Shaders")
+SOURCE_STAMP_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".inl"})
 
 # Diagnostics in GCC/Clang/ld/xcodebuild output ("file:line:col: warning: ...", "ld: warning: ...").
 POSIX_WARNING_PATTERN = re.compile(r"(^|: )warning: ", re.IGNORECASE)
@@ -385,6 +414,78 @@ def link_vendor_cache(solution: workspace.Solution, config: str, project: str | 
     return VendorCacheUse(plan, override)
 
 
+@dataclasses.dataclass(frozen=True)
+class StaleLink:
+    """A linked output (an executable or shared library) older than a first-party static library it links."""
+
+    output: Path
+    library: Path
+
+    def describe(self) -> str:
+        return f"{paths.display_path(self.output)} is older than {paths.display_path(self.library)}"
+
+
+def stale_links(solution: workspace.Solution, config: str, project: str | None) -> list[StaleLink]:
+    """The outputs of the projects this build built that link (ConfigurationType Application or DynamicLibrary) and are
+    older than a first-party static library they link (a ProjectReference outside the workspace's Vendor/, whose
+    libraries come from the vendor cache or never change between first-party builds): after a build that succeeded,
+    such an output is one whose link MSBuild skipped although the library changed, so it still runs the code the library
+    replaced. An output or library that does not exist is not compared."""
+    built = solution.builds_with(project) if project else set(solution.projects_in(config))
+    files = [solution.project_files[name] for name in sorted(built)
+             if name in solution.project_files and name in solution.projects_in(config)]
+    references, linking = vendor_cache.consumers(files, config, solution.platform)
+    vendor = (solution.path.parent / "Vendor").resolve()
+    stale: list[StaleLink] = []
+    for consumer in sorted(linking):
+        output = vendor_cache.output_file(vendor_cache.read_project_file(consumer), config, solution.platform)
+        if output is None or not output.is_file():
+            continue
+        linked = output.stat().st_mtime_ns
+        for reference in references.get(consumer, []):
+            if reference.is_relative_to(vendor):
+                continue
+            library_project = vendor_cache.read_project_file(reference)
+            properties = vendor_cache.project_properties(library_project, config, solution.platform)
+            if properties.get("ConfigurationType") != "StaticLibrary":
+                continue
+            library = vendor_cache.output_file(library_project, config, solution.platform)
+            if library is not None and library.is_file() and library.stat().st_mtime_ns > linked:
+                stale.append(StaleLink(output, library))
+    return stale
+
+
+def relink(step: Step, stale: list[StaleLink], build: Callable[[], tuple[ProcessResult, list[str], list[str]]],
+           check: Callable[[], list[StaleLink]], root: Path, arguments: argparse.Namespace, console: Console) -> None:
+    """After `step`, a build that succeeded, found the `stale` links: removes their outputs and runs `build` once more,
+    so MSBuild links them again (a full link, as an incremental link needs its output), then `check`s them. The step
+    ends with a warning naming them when the relink leaves no stale output, and fails otherwise: an output that cannot
+    be removed (a running Tests.exe), a build that fails, or an output still older than a library it links. Its --json
+    result lists them ("staleLinks")."""
+    described = "; ".join(link.describe() for link in stale)
+    step.data["staleLinks"] = [{"output": str(link.output), "library": str(link.library)} for link in stale]
+    console.print(f"Stale links: {described}: MSBuild skipped their link although the library changed; relinking")
+    try:
+        for output in sorted({link.output for link in stale}):
+            output.unlink(missing_ok=True)
+    except OSError as error:
+        step.status = Status.FAILED
+        step.detail += f"; stale links ({described}) not relinked: {error}"
+        return
+    result, warnings, errors = build()
+    warnings, tolerated = split_vendor_warnings(warnings, arguments, root)
+    again = finish_step(step.name, result, warnings, errors, not arguments.allow_warnings, "relinked", tolerated)
+    remaining = check() if not again.failed else stale
+    if again.failed or remaining:
+        step.status = Status.FAILED
+        left = "; ".join(link.describe() for link in remaining)
+        step.detail += f"; relinking the stale links ({described}) failed: {again.detail if again.failed else left}"
+        return
+    step.status = Status.WARNING
+    step.detail += (f"; relinked the stale links, whose link MSBuild had skipped although the library changed: "
+                    f"{described}")
+
+
 def build_msbuild(solution: workspace.Solution, config: str, project: str | None, arguments: argparse.Namespace,
                   console: Console) -> Step:
     started = time.monotonic()
@@ -418,6 +519,18 @@ def build_msbuild(solution: workspace.Solution, config: str, project: str | None
     built = [project] if project else solution.projects_in(config)
     step = finish_step(name, result, warnings, errors, not arguments.allow_warnings,
                        f"{len(built)} project(s) built" if not project else f"{project} built", tolerated)
+    stale: list[StaleLink] = []
+    if not step.failed:
+        try:
+            stale = stale_links(solution, config, project)
+        except (vendor_cache.VendorCacheError, OSError) as error:
+            step.status = Status.FAILED
+            step.detail += f"; the links of the outputs cannot be checked: {error}"
+        if stale:
+            relink(step, stale, lambda: run_msbuild(visual_studio, solution.path, options,
+                                                    log_stem.with_name(log_stem.name + ".relink"), arguments, console,
+                                                    max(1.0, deadline - time.monotonic())),
+                   lambda: stale_links(solution, config, project), solution.path.parent, arguments, console)
     step.duration = time.monotonic() - started  # the vendor cache's verification and compiles included
     step.data["vendorCache"] = cache.to_json()
     if cache.plan is not None and (cache.plan.linked or cache.plan.compiled_in_workspace):
@@ -655,6 +768,101 @@ def write_build_stamp(root: Path, config: str, repository: Path) -> dict[str, ob
                 removed.append(str(target.parent / stale))
     return {"path": str(target), "written": written, "commit": stamp.commit, "dirty": stamp.dirty,
             "description": stamp.describe(), "removedObjects": removed}
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# The source stamps: a source restored with an older modification time is compiled again
+# --------------------------------------------------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class SourceStamp:
+    """What a build saw of one source file: its size, modification time (ns) and SHA-256."""
+
+    size: int
+    modified: int
+    sha256: str
+
+
+@dataclasses.dataclass
+class SourceStamps:
+    """What refresh_source_stamps did: its record, how many sources it covers, how many it read (the ones whose size or
+    time changed) and the ones it touched (repository-relative)."""
+
+    path: Path
+    files: int
+    hashed: int
+    touched: list[str]
+
+    def to_json(self) -> dict[str, object]:
+        return {"path": str(self.path), "files": self.files, "hashed": self.hashed, "touched": self.touched}
+
+
+def stamped_sources(repository: Path) -> list[Path]:
+    """The first-party C and C++ files the builds compile or include (SOURCE_STAMP_DIRECTORIES of `repository`,
+    SOURCE_STAMP_SUFFIXES), sorted."""
+    found: list[Path] = []
+    for directory in SOURCE_STAMP_DIRECTORIES:
+        root = repository / directory
+        for current, _, names in os.walk(root):
+            found.extend(Path(current) / name for name in names if Path(name).suffix.lower() in SOURCE_STAMP_SUFFIXES)
+    return sorted(found)
+
+
+def read_source_stamps(path: Path) -> tuple[int, dict[str, SourceStamp]]:
+    """(when the record was taken in ns, each repository-relative path's stamp) of the record at `path`; (0, {}) when
+    there is none or it cannot be read, so the build records the sources as they are and touches nothing."""
+    try:
+        document = json.loads(path.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return 0, {}
+    if not isinstance(document, dict) or document.get("version") != SOURCE_STAMPS_VERSION:
+        return 0, {}
+    taken, files = document.get("taken"), document.get("files")
+    if not isinstance(taken, int) or not isinstance(files, dict):
+        return 0, {}
+    stamps: dict[str, SourceStamp] = {}
+    for name, value in files.items():
+        if (isinstance(value, list) and len(value) == 3 and all(isinstance(part, int) for part in value[:2])
+                and isinstance(value[2], str)):
+            stamps[name] = SourceStamp(value[0], value[1], value[2])
+    return taken, stamps
+
+
+def refresh_source_stamps(root: Path, repository: Path) -> SourceStamps:
+    """Records the stamps of the sources of `repository` in the workspace at `root` (bin-int/SOURCE_STAMPS_FILE_NAME)
+    as a build begins, after giving the current time as modification time to each source whose content differs from
+    the previous record while its modification time is not newer than when that record was taken: a copy put back with
+    its older time, which a build that compares modification times would never compile again. A file whose size and
+    time match its record is not read. Raises OSError when a source cannot be read or touched, or the record cannot be
+    written."""
+    record = root / "bin-int" / SOURCE_STAMPS_FILE_NAME
+    taken, previous = read_source_stamps(record)
+    now = time.time_ns()
+    stamps: dict[str, SourceStamp] = {}
+    touched: list[str] = []
+    hashed = 0
+    for path in stamped_sources(repository):
+        name = path.relative_to(repository).as_posix()
+        try:
+            status = path.stat()
+            before = previous.get(name)
+            if before is not None and (status.st_size, status.st_mtime_ns) == (before.size, before.modified):
+                stamps[name] = before
+                continue
+            digest = file_sha256(path)
+        except FileNotFoundError:
+            continue  # removed since the listing (an editor saving through a rename): the next build records it
+        hashed += 1
+        if before is not None and digest != before.sha256 and status.st_mtime_ns <= taken:
+            os.utime(path, ns=(status.st_atime_ns, now))
+            status = path.stat()
+            touched.append(name)
+        stamps[name] = SourceStamp(status.st_size, status.st_mtime_ns, digest)
+    document = {"version": SOURCE_STAMPS_VERSION, "taken": now,
+                "files": {name: [stamp.size, stamp.modified, stamp.sha256] for name, stamp in stamps.items()}}
+    write_if_changed(record, (json.dumps(document, sort_keys=True) + "\n").encode("utf-8"))
+    return SourceStamps(record, len(stamps), hashed, touched)
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -922,6 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
     steps: list[Step] = []
     action = None
     hold: locks.Hold | None = None
+    source_stamps: SourceStamps | None = None
     exit_code = EXIT_SUCCESS
     try:
         host = paths.host()
@@ -930,6 +1139,14 @@ def main(argv: list[str] | None = None) -> int:
         projects = {config: (generated.require_project(arguments.project, config) if arguments.project else None)
                     for config in arguments.configs}
         hold = take_build_lock(arguments, console)
+        try:
+            source_stamps = refresh_source_stamps(generated.path.parent, paths.REPOSITORY_ROOT)
+        except OSError as error:
+            raise BuildSetupError(f"cannot check the sources' modification times: {error}") from error
+        if source_stamps.touched:
+            console.print(f"Source stamps: {len(source_stamps.touched)} source(s) put back with a modification time "
+                          f"older than the last build's start, given the current one so they compile again: "
+                          f"{', '.join(source_stamps.touched)}")
         for config in arguments.configs:
             console.heading(f"Build {config} ({action})" + (f": {projects[config]}" if projects[config] else ""))
             try:
@@ -977,6 +1194,7 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.json:
         build_lock = None if hold is None else {"mode": hold.mode, "jobs": arguments.jobs, "inherited": hold.inherited}
         emit_json({"success": exit_code == EXIT_SUCCESS, "action": action, "buildLock": build_lock,
+                   "sourceStamps": None if source_stamps is None else source_stamps.to_json(),
                    "steps": [s.to_json() for s in steps]})
     return exit_code
 
