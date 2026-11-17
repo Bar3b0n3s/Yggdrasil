@@ -107,6 +107,9 @@ namespace Engine {
 				case RenderTextAlignment::Left:   return 0.0f;
 				case RenderTextAlignment::Center: return 0.5f;
 				case RenderTextAlignment::Right:  return 1.0f;
+				// M38 (decision 11): unshaped text is left to right.
+				case RenderTextAlignment::Start: return 0.0f;
+				case RenderTextAlignment::End:   return 1.0f;
 			}
 			return 0.0f;
 		}

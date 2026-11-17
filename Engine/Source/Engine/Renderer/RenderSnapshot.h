@@ -247,7 +247,12 @@ namespace Engine {
 	{
 		Left,
 		Center,
-		Right
+		Right,
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 11): MeasureText aligns each line by its paragraph's resolved
+		// base direction (Start: Left for left to right, Right for right to left; End the opposite); TextLayout, which lays
+		// out unshaped left-to-right text, reads them as Left and Right.
+		Start,
+		End
 	};
 
 	// The view's camera (§8.2 "view, projection (reverse-Z), position, viewport, exposure").

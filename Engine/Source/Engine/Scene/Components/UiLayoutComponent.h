@@ -19,8 +19,9 @@ namespace Engine {
 	// Registry enum "UiLayoutDirection": the container's main axis.
 	enum class UiLayoutDirection : uint8_t
 	{
-		Horizontal, // left to right
-		Vertical    // top to bottom
+		Horizontal,       // left to right
+		Vertical,         // top to bottom
+		HorizontalReverse // M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 12): right to left, Horizontal mirrored
 	};
 
 	// Registry enum "UiMainAlignment": where the children sit along the main axis when they do not fill it.

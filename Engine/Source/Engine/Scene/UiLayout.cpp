@@ -228,10 +228,11 @@ namespace Engine {
 				const ConstEntity entity = canvas.Elements[index].Entity;
 				if (const UiSliderComponent* slider = entity.TryGetComponent<UiSliderComponent>())
 				{
-					// Horizontal: Min at the left edge; Vertical: Min at the bottom edge, so the anchors count from 1 down.
+					// Horizontal: Min at the left edge; Vertical: Min at the bottom edge, so the anchors count from 1 down; M38's
+					// HorizontalReverse (decision 12): Min at the right edge, counting from 1 down along X.
 					const float t = GetUiSliderPosition(*slider);
 					const bool horizontal = slider->Direction == UiLayoutDirection::Horizontal;
-					const glm::length_t axis = horizontal ? 0 : 1;
+					const glm::length_t axis = slider->Direction == UiLayoutDirection::Vertical ? 1 : 0;
 					if (UiWidgetPartRule* fill = findPart(index, slider->Fill))
 						*fill = UiWidgetPartRule{ .Anchored = true,
 							.Axis = axis,

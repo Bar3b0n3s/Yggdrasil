@@ -178,6 +178,33 @@ namespace Engine {
 			CHECK(whole.GetComponent<UiSliderComponent>().Value == 4.0f);
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 12): a HorizontalReverse slider's Min is at its right edge: the
+		// pointer reads t from the right and Left steps toward Max, Up and Down across it doing nothing.
+		TEST_CASE("UiWidgets: a HorizontalReverse slider follows the pointer from its right edge and steps toward Max with Left")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddWidgetCanvas(scene);
+			Entity slider = AddWidgetElement(scene, "Reverse", canvas, glm::vec2(0.0f), glm::vec2(100.0f, 20.0f));
+			slider.AddComponent<UiSliderComponent>(UiSliderComponent{ .Max = 10.0f, .Direction = UiLayoutDirection::HorizontalReverse });
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(400, 200));
+			std::vector<UiEvent> events;
+			SetUiSliderFromPointer(scene, table, slider.GetUUID(), glm::vec2(75.0f, 10.0f), events);
+			CHECK(slider.GetComponent<UiSliderComponent>().Value == 2.5f);
+			SetUiSliderFromPointer(scene, table, slider.GetUUID(), glm::vec2(-50.0f, 10.0f), events);
+			CHECK(slider.GetComponent<UiSliderComponent>().Value == 10.0f);
+			SetUiSliderFromPointer(scene, table, slider.GetUUID(), glm::vec2(100.0f, 10.0f), events);
+			CHECK(slider.GetComponent<UiSliderComponent>().Value == 0.0f);
+			events.clear();
+			CHECK(StepUiSlider(scene, slider.GetUUID(), UiDirection::Left, events));
+			CHECK(slider.GetComponent<UiSliderComponent>().Value == 1.0f);
+			CHECK(StepUiSlider(scene, slider.GetUUID(), UiDirection::Right, events));
+			CHECK(slider.GetComponent<UiSliderComponent>().Value == 0.0f);
+			CHECK(events.size() == 2);
+			CHECK_FALSE(StepUiSlider(scene, slider.GetUUID(), UiDirection::Up, events));
+			CHECK_FALSE(StepUiSlider(scene, slider.GetUUID(), UiDirection::Down, events));
+		}
+
 		// UiSliderComponent.h: the slide rectangle is the Handle's parent element's, else the Fill's parent's, else the slider's
 		// own, and a part that is not an element below the slider is no part; a slider that is not interactable, an element
 		// without a slider and a direction across a slider leave the value alone; an inverted range reads its Min.

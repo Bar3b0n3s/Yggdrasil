@@ -90,6 +90,11 @@ namespace Engine {
 
 	TextBidiParagraph::~TextBidiParagraph() = default;
 
+	uint8_t TextBidiParagraph::GetBaseLevel() const
+	{
+		return m_State->BaseLevel;
+	}
+
 	uint8_t TextBidiParagraph::GetLevel(size_t index) const
 	{
 		ENGINE_CORE_ASSERT(index < m_State->Codepoints.size(), "codepoint {} of a paragraph of {}", index, m_State->Codepoints.size());

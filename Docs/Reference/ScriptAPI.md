@@ -5772,7 +5772,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.
+Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5988,7 +5988,7 @@ A UI slider: the pointer drags its value between Min and Max and the directions 
 
 `UiLayoutDirection`
 
-Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.
+Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -6028,7 +6028,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The value at the end edge (right, or top when Vertical).
+The value at the end edge (right; top when Vertical, left when HorizontalReverse).
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -6036,7 +6036,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The value at the start edge (left, or bottom when Vertical); below Max.
+The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -7406,6 +7406,10 @@ How the lines of a text element are aligned to each other.
 
 - `Right`: Lines end at the right edge of the text block.
 
+- `Start`: Each line starts where its paragraph's direction starts: at the left edge for a left-to-right paragraph, at the right edge for a right-to-left one (Arabic, Hebrew); a paragraph without a strong character reads left to right. The Text component reads it as Left.
+
+- `End`: Each line ends where its paragraph's direction ends: at the right edge for a left-to-right paragraph, at the left edge for a right-to-left one. The Text component reads it as Right.
+
 ## TextSpace (enum)
 
 Where a text element is placed.
@@ -7464,11 +7468,11 @@ Where a UI canvas is drawn: over the scene image, or in the world.
 
 Where each child of a container sits across its main axis.
 
-- `Start`: At the start of its line: the top (Horizontal) or the left edge (Vertical).
+- `Start`: At the start of its line: the top (Horizontal, HorizontalReverse) or the left edge (Vertical).
 
 - `Center`: Centred across the main axis.
 
-- `End`: At the end of its line: the bottom (Horizontal) or the right edge (Vertical).
+- `End`: At the end of its line: the bottom (Horizontal, HorizontalReverse) or the right edge (Vertical).
 
 - `Stretch`: Stretched to fill its line's cross size (a Grid child: its cell's).
 
@@ -7496,13 +7500,15 @@ The main axis of a UI layout container.
 
 - `Vertical`: Children follow each other from top to bottom.
 
+- `HorizontalReverse`: Children follow each other from right to left, Horizontal mirrored inside the padding (a right-to-left row; MainAlignment Start at the right edge); a slider's Min is at the right edge.
+
 ## UiLayoutKind (enum)
 
 How a UI layout container places its children.
 
 - `Stack`: One after another along Direction, each at its own size.
 
-- `Grid`: In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical).
+- `Grid`: In cells of CellSize, Columns cells per row (Horizontal, HorizontalReverse) or per column (Vertical).
 
 - `Flex`: A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap.
 
@@ -7510,11 +7516,11 @@ How a UI layout container places its children.
 
 Where a container's children sit along its main axis when they do not fill it.
 
-- `Start`: At the start: the left edge (Horizontal) or the top (Vertical).
+- `Start`: At the start: the left edge (Horizontal), the right edge (HorizontalReverse) or the top (Vertical).
 
 - `Center`: Centred along the main axis.
 
-- `End`: At the end: the right edge (Horizontal) or the bottom (Vertical).
+- `End`: At the end: the right edge (Horizontal), the left edge (HorizontalReverse) or the bottom (Vertical).
 
 ## UiScaleMode
 

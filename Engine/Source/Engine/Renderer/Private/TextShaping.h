@@ -51,6 +51,10 @@ namespace Engine {
 
 		// The resolved embedding level (rules X1 to I2) of the codepoint at `index`, below the paragraph's size.
 		[[nodiscard]] uint8_t GetLevel(size_t index) const;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 11): the paragraph's base level (rules P2 and P3 for Auto, the
+		// first strong character's; 0 without one), odd for a right-to-left paragraph; the direction's level when SheenBidi
+		// could not allocate its objects or the paragraph is empty.
+		[[nodiscard]] uint8_t GetBaseLevel() const;
 		// The runs of the line [offset, offset + length) of the paragraph (length > 0) in visual order, left to right, after
 		// rules L1 (trailing whitespace and segment separators reset to the paragraph's level) and L2.
 		[[nodiscard]] std::vector<TextBidiRun> GetLineRuns(uint32_t offset, uint32_t length) const;

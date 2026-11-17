@@ -345,6 +345,9 @@ namespace Engine {
 				case TextAlignment::Left:   return RenderTextAlignment::Left;
 				case TextAlignment::Center: return RenderTextAlignment::Center;
 				case TextAlignment::Right:  return RenderTextAlignment::Right;
+				// M38 (decision 11): the Text component's frozen, unshaped TextLayout lays out left to right.
+				case TextAlignment::Start: return RenderTextAlignment::Left;
+				case TextAlignment::End:   return RenderTextAlignment::Right;
 			}
 			return RenderTextAlignment::Center;
 		}

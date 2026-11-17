@@ -67,7 +67,11 @@ namespace Engine {
 	{
 		Start,
 		Center,
-		End
+		End,
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 11), horizontal only: each line at its own paragraph's start or
+		// end (TextAlignment::Start and End, RenderTextAlignment::Start and End).
+		ParagraphStart,
+		ParagraphEnd
 	};
 
 	// UiImageType, without including Scene.

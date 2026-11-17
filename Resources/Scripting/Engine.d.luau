@@ -210,7 +210,7 @@ export type TestMode = "Editor" | "Release" | "Dist"
 export type TestPauseOnError = "Inherit" | "Pause" | "Continue"
 
 -- How the lines of a text element are aligned to each other.
-export type TextAlignment = "Left" | "Center" | "Right"
+export type TextAlignment = "Left" | "Center" | "Right" | "Start" | "End"
 
 -- Where a text element is placed.
 export type TextSpace = "Screen" | "World"
@@ -240,7 +240,7 @@ export type UiImageFilter = "Point" | "Linear"
 export type UiImageType = "Simple" | "Sliced"
 
 -- The main axis of a UI layout container.
-export type UiLayoutDirection = "Horizontal" | "Vertical"
+export type UiLayoutDirection = "Horizontal" | "Vertical" | "HorizontalReverse"
 
 -- How a UI layout container places its children.
 export type UiLayoutKind = "Stack" | "Grid" | "Flex"
@@ -1556,7 +1556,7 @@ end
 declare extern type UiLayout with
 	-- Grid: the size of each cell in canvas units. [All modes; Runtime|Test; pure/read; setter mutates]
 	CellSize: vector
-	-- Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds. [All modes; Runtime|Test; pure/read; setter mutates]
 	Columns: number
 	-- Where each child sits across the main axis. [All modes; Runtime|Test; pure/read; setter mutates]
 	CrossAlignment: UiCrossAlignment
@@ -1622,7 +1622,7 @@ end
 
 -- A UI slider: the pointer drags its value between Min and Max and the directions along it step it, raising OnUiValueChanged.
 declare extern type UiSlider with
-	-- Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge. [All modes; Runtime|Test; pure/read; setter mutates]
 	Direction: UiLayoutDirection
 	-- A UI element below the slider stretched from the Min edge to the value; null for none. [All modes; Runtime|Test; pure/read; setter mutates]
 	Fill: Entity?
@@ -1632,9 +1632,9 @@ declare extern type UiSlider with
 	Handle: Entity?
 	-- Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. [All modes; Runtime|Test; pure/read; setter mutates]
 	Interactable: boolean
-	-- The value at the end edge (right, or top when Vertical). [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The value at the end edge (right; top when Vertical, left when HorizontalReverse). [All modes; Runtime|Test; pure/read; setter mutates]
 	Max: number
-	-- The value at the start edge (left, or bottom when Vertical); below Max. [All modes; Runtime|Test; pure/read; setter mutates]
+	-- The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max. [All modes; Runtime|Test; pure/read; setter mutates]
 	Min: number
 	-- The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. [All modes; Runtime|Test; pure/read; setter mutates]
 	Step: number

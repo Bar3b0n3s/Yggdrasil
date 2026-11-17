@@ -85,14 +85,17 @@ namespace Engine {
 			return lines;
 		}
 
-		// The Ui pass's text alignment of a draw item's horizontal alignment (the Ui pass's own mapping: start, centre, end).
+		// The Ui pass's text alignment of a draw item's horizontal alignment (the Ui pass's own mapping: start, centre, end, and
+		// M38's paragraph start and end).
 		RenderTextAlignment ToUiPassTextAlignment(UiDrawAlignment alignment)
 		{
 			switch (alignment)
 			{
-				case UiDrawAlignment::Start:  return RenderTextAlignment::Left;
-				case UiDrawAlignment::Center: return RenderTextAlignment::Center;
-				case UiDrawAlignment::End:    return RenderTextAlignment::Right;
+				case UiDrawAlignment::Start:          return RenderTextAlignment::Left;
+				case UiDrawAlignment::Center:         return RenderTextAlignment::Center;
+				case UiDrawAlignment::End:            return RenderTextAlignment::Right;
+				case UiDrawAlignment::ParagraphStart: return RenderTextAlignment::Start;
+				case UiDrawAlignment::ParagraphEnd:   return RenderTextAlignment::End;
 			}
 			return RenderTextAlignment::Left;
 		}
@@ -386,6 +389,30 @@ namespace Engine {
 			CHECK(lines[8] == "└─ Offscreen  " + ids[7] + "  (300,0 10x10)  hidden");
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 12): a HorizontalReverse row places its first child at its
+		// right edge, and the text outline names its direction.
+		TEST_CASE("UiMethods: ui.tree lays a HorizontalReverse row out from the right and names its direction in the outline")
+		{
+			Test::AutomationFixture setup("UiTreeReverseRow");
+			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Ui","ops":[
+				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{}}}},
+				{"method":"entity.create","params":{"name":"Row","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[10,20],"Size":[100,20]},
+					"UiLayout":{"Kind":"Stack","Direction":"HorizontalReverse","Spacing":[5,0]}}}},
+				{"method":"entity.create","params":{"name":"First","parent":{"$ref":"1.entity.id"},"components":{"UiRect":{"Size":[30,20]}}}},
+				{"method":"entity.create","params":{"name":"Second","parent":{"$ref":"1.entity.id"},"components":{"UiRect":{"Size":[20,20]}}}}]})"))
+					.has_value());
+			Result<Json> listed = setup.Call("ui.tree", Json{ { "format", "Json" }, { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(listed.has_value(), listed.error().ToString());
+			CHECK(FindUiTreeRect((*listed)["elements"], "First") == Json{ { "x", 80 }, { "y", 20 }, { "width", 30 }, { "height", 20 } });
+			CHECK(FindUiTreeRect((*listed)["elements"], "Second") == Json{ { "x", 55 }, { "y", 20 }, { "width", 20 }, { "height", 20 } });
+			Result<Json> text = setup.Call("ui.tree", Json{ { "width", 200 }, { "height", 100 } });
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			const std::vector<std::string> lines = SplitUiOutline(JsonReader((*text)["text"]).ReadString().value_or(std::string()));
+			REQUIRE(lines.size() == 5);
+			CHECK(lines[2].contains("UiLayout(Stack HorizontalReverse)  (10,20 100x20)"));
+		}
+
 		TEST_CASE("UiMethods: ui.tree refuses a canvas reference without a UiCanvas, and one of width and height alone")
 		{
 			Test::AutomationFixture setup("UiTreeErrors");
@@ -600,7 +627,9 @@ namespace Engine {
 		// pass lays it out with a copy of its placement and font chain (UiPass.cpp's PlanGlyphs and BuildUiFontChain, the font
 		// and text pipeline, which phase 3's ledger gives M25 only for its named text fixes), so this ties the copy to what the Ui
 		// pass draws: left-, centre- and right-aligned texts at the top, middle and bottom of their rectangles, a wrapped text, a
-		// text partly drawn by its font's fallback, and a focused text input whose caret moves its long text inside its field.
+		// text partly drawn by its font's fallback, and a focused text input whose caret moves its long text inside its field;
+		// and M38's Start and End (Docs/Decisions/0055-m38-runtime-locale.md decision 11) on a Latin and an Arabic text, which
+		// sit at their paragraph's start and end: the Arabic one's start is its rectangle's right edge.
 		TEST_CASE("UiMethods: ui.tree's text boxes are where the Ui pass lays the texts out")
 		{
 			// The Default font measures the texts: the fixture mounts the engine's resources.
@@ -614,6 +643,9 @@ namespace Engine {
 			REQUIRE_MESSAGE(fallback.has_value(), fallback.error().ToString());
 			Result<Json> reimported = setup.Call("asset.reimport", Json{ { "asset", "Assets/Fonts/Glyphs.ttf" } });
 			REQUIRE_MESSAGE(reimported.has_value(), reimported.error().ToString());
+			const std::string arabic = (Test::GetTestDataPath("Assets/Fonts") / "NotoSansArabic-Regular.ttf").generic_string();
+			Result<Json> arabicImported = setup.Call("asset.import", Json{ { "source", arabic }, { "destDir", "Assets/Fonts" }, { "settings", Json{ { "Ranges", Json::array({ Json{ { "First", 0x0600 }, { "Last", 0x06FF } } }) } } } });
+			REQUIRE_MESSAGE(arabicImported.has_value(), arabicImported.error().ToString());
 			REQUIRE(setup.Call("edit.batch", ParseUiMethodJson(R"({"label":"Texts","ops":[
 				{"method":"entity.create","params":{"name":"Hud","components":{"UiCanvas":{}}}},
 				{"method":"entity.create","params":{"name":"Left","parent":{"$ref":"0.entity.id"},"components":{
@@ -636,7 +668,19 @@ namespace Engine {
 					"UiTextInput":{"Text":"a name far longer than its field","Caret":32}}}},
 				{"method":"entity.create","params":{"name":"Value","parent":{"$ref":"6.entity.id"},"components":{
 					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[1,1],"Size":[0,0]},"UiText":{"Size":10,"Wrap":false}}}},
-				{"method":"entity.update","params":{"entity":"/Hud/Name","components":{"UiTextInput":{"TextElement":"/Hud/Name/Value"}}}}]})"))
+				{"method":"entity.update","params":{"entity":"/Hud/Name","components":{"UiTextInput":{"TextElement":"/Hud/Name/Value"}}}},
+				{"method":"entity.create","params":{"name":"LatinStart","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[80,122],"Size":[60,12]},
+					"UiText":{"Text":"Start","Size":10,"Alignment":"Start","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"LatinEnd","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[80,140],"Size":[60,12]},
+					"UiText":{"Text":"End","Size":10,"Alignment":"End","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"ArabicStart","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[150,122],"Size":[80,12]},
+					"UiText":{"Text":"\u0634\u062c\u0631\u0629","Font":"Assets/Fonts/NotoSansArabic-Regular.ttf","Size":10,"Alignment":"Start","Wrap":false}}}},
+				{"method":"entity.create","params":{"name":"ArabicEnd","parent":{"$ref":"0.entity.id"},"components":{
+					"UiRect":{"AnchorMin":[0,0],"AnchorMax":[0,0],"Pivot":[0,0],"Position":[150,140],"Size":[80,12]},
+					"UiText":{"Text":"\u0634\u062c\u0631\u0629","Font":"Assets/Fonts/NotoSansArabic-Regular.ttf","Size":10,"Alignment":"End","Wrap":false}}}}]})"))
 					.has_value());
 			AssetManager& assets = setup.GetEditor().GetAssets();
 
@@ -647,7 +691,13 @@ namespace Engine {
 			UiDrawList list;
 			AppendUiDrawItems(scene, ComputeUiLayout(scene, glm::uvec2(240, 160)), list);
 			std::map<std::string, UiPassTextBox> boxes = CheckUiTreeTextBoxes((*listed)["elements"], list, assets);
-			CHECK(boxes.size() == 6);
+			CHECK(boxes.size() == 10);
+			// Start and End: the Latin texts at their rectangles' left and right edges, the Arabic ones the other way round.
+			CHECK(boxes["LatinStart"].Min.x == doctest::Approx(80.0f));
+			CHECK(boxes["LatinEnd"].Max.x == doctest::Approx(140.0f));
+			CHECK(boxes["ArabicStart"].Max.x == doctest::Approx(230.0f));
+			CHECK(boxes["ArabicEnd"].Min.x == doctest::Approx(150.0f));
+			CHECK(boxes["ArabicStart"].Min.x > 150.0f);
 			// The wrapped text takes several lines, the fallback draws part of "AVOID", and no caret is drawn outside play.
 			CHECK(boxes["Wrapped"].Max.y - boxes["Wrapped"].Min.y > 20.0f);
 			CHECK(boxes["Fallback"].FallbackGlyph);

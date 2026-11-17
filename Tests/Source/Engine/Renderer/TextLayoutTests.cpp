@@ -72,6 +72,14 @@ namespace Engine {
 			CHECK(right.Quads[2].PositionMin.y == doctest::Approx(1.2f)); // its baseline at 0.8 + 1.1, box top 0.7 above it
 			const TextLayoutResult centred = LayoutText(font, "AB\nA", RenderTextAlignment::Center);
 			CHECK(centred.Quads[2].PositionMin.x == doctest::Approx(0.25f));
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 11): unshaped text is left to right, so Start is Left and End
+			// is Right.
+			const TextLayoutResult start = LayoutText(font, "AB\nA", RenderTextAlignment::Start);
+			REQUIRE(start.Quads.size() == 3);
+			CHECK(start.Quads[2].PositionMin.x == LayoutText(font, "AB\nA", RenderTextAlignment::Left).Quads[2].PositionMin.x);
+			const TextLayoutResult end = LayoutText(font, "AB\nA", RenderTextAlignment::End);
+			REQUIRE(end.Quads.size() == 3);
+			CHECK(end.Quads[2].PositionMin.x == right.Quads[2].PositionMin.x);
 		}
 
 		TEST_CASE("TextLayout: unknown codepoints and invalid UTF-8 are skipped and counted")

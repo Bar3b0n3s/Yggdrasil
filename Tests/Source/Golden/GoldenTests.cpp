@@ -34,8 +34,9 @@
 // capture (viewport.screenshot's path); and the M8 goldens of Roadmap M8 (MaterialGrid, IblOnly, Tonemappers, Bloom,
 // AlphaModes, DebugDraw, Text, GltfFixture), each a scene of Projects/FeatureTest/Assets/Scenes/Golden rendered through
 // Test::RenderGoldenScene (§15.4; Docs/Decisions/0013-m8-decisions.md decision 14), and M22's Ui, UiWidgets, UiCjk,
-// UiArabic, UiHebrew and UiWorld, the scenes of golden scaffolds of their own, rendered the same way. They run in the
-// golden stage (Release) on this machine's device class; Test.py --update-golden writes candidates for review.
+// UiArabic, UiHebrew and UiWorld and M38's UiDirection, the scenes of golden scaffolds of their own, rendered the same way.
+// They run in the golden stage (Release) on this machine's device class; Test.py --update-golden writes candidates for
+// review.
 
 namespace Engine {
 
@@ -301,6 +302,18 @@ namespace Engine {
 			// parentheses are mirrored, a left-to-right line holding Hebrew and digits, and a centred line of Latin, Hebrew,
 			// Arabic and Japanese through one chain.
 			CheckGoldenScene("UiHebrew");
+		}
+
+		TEST_CASE("Golden: UiDirection")
+		{
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 11 to 13): the scene of the golden scaffold
+			// Scaffold/GoldenUiDirection.jsonl (IdSeed 3504) in UiScriptsGolden.jsonl's copy of Inter and its Arabic fallback:
+			// an Arabic and a Latin label at Start and at End (the Arabic at Start and the Latin at End against their panels' right
+			// edges, the other two against their left), a block of an Arabic paragraph and a Latin one at Start (each line at its
+			// own paragraph's start), and an options row of a caption, a slider at a quarter and its value laid out
+			// HorizontalReverse (the caption at the right, the fill running from the slider's right edge) above the same row laid
+			// out Horizontal.
+			CheckGoldenScene("UiDirection");
 		}
 
 		TEST_CASE("Golden: UiWorld")

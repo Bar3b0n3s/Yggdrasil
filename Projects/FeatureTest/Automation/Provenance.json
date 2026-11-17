@@ -3539,6 +3539,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/GoldenUiDirection/UiDirection.scene",
+			"XXH64": "1304c21a52bd9d02",
+			"Method": "scene.save",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenUiDirection/UiDirection.scene.meta",
+			"XXH64": "f9b7005a77d8633f",
+			"Method": "edit.batch",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/GoldenUiScripts/UiArabic.scene",
 			"XXH64": "58000e34b24b34ea",
 			"Method": "scene.save",
@@ -4127,6 +4143,22 @@
 			"XXH64": "293d6a49df7565d4",
 			"Method": "edit.batch",
 			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/UiDirectionRows.scene",
+			"XXH64": "d804c8813d99d02f",
+			"Method": "scene.save",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/UiDirectionRows.scene.meta",
+			"XXH64": "5a637288ae6b3170",
+			"Method": "edit.batch",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -7059,6 +7091,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/UiDirection/UiDirection.test.luau",
+			"XXH64": "ca3f75065d05e7d5",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/UiDirection/UiDirection.test.luau.meta",
+			"XXH64": "ce4b719336595261",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/UiFallback/UiFallback.test.luau",
 			"XXH64": "31382f53a22b42f3",
 			"Method": "script.write",
@@ -7636,7 +7684,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "593d3cad841a8cdc",
+			"XXH64": "ce56b4c9982b0ab1",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

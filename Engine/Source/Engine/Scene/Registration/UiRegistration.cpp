@@ -116,22 +116,25 @@ namespace Engine {
 
 		registry.Enum<UiLayoutKind>("UiLayoutKind", "How a UI layout container places its children.")
 			.Entry(UiLayoutKind::Stack, "Stack", "One after another along Direction, each at its own size.")
-			.Entry(UiLayoutKind::Grid, "Grid", "In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical).")
+			.Entry(UiLayoutKind::Grid, "Grid", "In cells of CellSize, Columns cells per row (Horizontal, HorizontalReverse) or per column (Vertical).")
 			.Entry(UiLayoutKind::Flex, "Flex", "A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap.");
 
 		registry.Enum<UiLayoutDirection>("UiLayoutDirection", "The main axis of a UI layout container.")
 			.Entry(UiLayoutDirection::Horizontal, "Horizontal", "Children follow each other from left to right.")
-			.Entry(UiLayoutDirection::Vertical, "Vertical", "Children follow each other from top to bottom.");
+			.Entry(UiLayoutDirection::Vertical, "Vertical", "Children follow each other from top to bottom.")
+			.Entry(UiLayoutDirection::HorizontalReverse, "HorizontalReverse",
+				"Children follow each other from right to left, Horizontal mirrored inside the padding (a right-to-left row; MainAlignment Start "
+				"at the right edge); a slider's Min is at the right edge.");
 
 		registry.Enum<UiMainAlignment>("UiMainAlignment", "Where a container's children sit along its main axis when they do not fill it.")
-			.Entry(UiMainAlignment::Start, "Start", "At the start: the left edge (Horizontal) or the top (Vertical).")
+			.Entry(UiMainAlignment::Start, "Start", "At the start: the left edge (Horizontal), the right edge (HorizontalReverse) or the top (Vertical).")
 			.Entry(UiMainAlignment::Center, "Center", "Centred along the main axis.")
-			.Entry(UiMainAlignment::End, "End", "At the end: the right edge (Horizontal) or the bottom (Vertical).");
+			.Entry(UiMainAlignment::End, "End", "At the end: the right edge (Horizontal), the left edge (HorizontalReverse) or the bottom (Vertical).");
 
 		registry.Enum<UiCrossAlignment>("UiCrossAlignment", "Where each child of a container sits across its main axis.")
-			.Entry(UiCrossAlignment::Start, "Start", "At the start of its line: the top (Horizontal) or the left edge (Vertical).")
+			.Entry(UiCrossAlignment::Start, "Start", "At the start of its line: the top (Horizontal, HorizontalReverse) or the left edge (Vertical).")
 			.Entry(UiCrossAlignment::Center, "Center", "Centred across the main axis.")
-			.Entry(UiCrossAlignment::End, "End", "At the end of its line: the bottom (Horizontal) or the right edge (Vertical).")
+			.Entry(UiCrossAlignment::End, "End", "At the end of its line: the bottom (Horizontal, HorizontalReverse) or the right edge (Vertical).")
 			.Entry(UiCrossAlignment::Stretch, "Stretch", "Stretched to fill its line's cross size (a Grid child: its cell's).");
 
 		registry.Struct<UiPadding>("UiPadding", "Insets of a UI layout container's rectangle, in canvas units.")
@@ -260,7 +263,7 @@ namespace Engine {
 			.Field("MainAlignment", &UiLayoutComponent::MainAlignment, "Where the children sit along the main axis when they do not fill it.")
 			.Field("CrossAlignment", &UiLayoutComponent::CrossAlignment, "Where each child sits across the main axis.")
 			.Field("Columns", &UiLayoutComponent::Columns,
-				"Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+				"Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds.",
 				{ .Min = 0.0, .Max = Utils::MaxUiGridColumns })
 			.Field("CellSize", &UiLayoutComponent::CellSize, "Grid: the size of each cell in canvas units.",
 				{ .Min = 0.0, .Max = Utils::MaxUiLength, .Unit = "units" })
@@ -324,14 +327,14 @@ namespace Engine {
 			.Field("Focusable", &UiSliderComponent::Focusable, FocusableDescription)
 			.Field("Value", &UiSliderComponent::Value, "The value, read clamped to Min and Max (and rounded with WholeNumbers).",
 				{ .Min = -Utils::MaxUiLength, .Max = Utils::MaxUiLength })
-			.Field("Min", &UiSliderComponent::Min, "The value at the start edge (left, or bottom when Vertical); below Max.",
+			.Field("Min", &UiSliderComponent::Min, "The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max.",
 				{ .Min = -Utils::MaxUiLength, .Max = Utils::MaxUiLength })
-			.Field("Max", &UiSliderComponent::Max, "The value at the end edge (right, or top when Vertical).", { .Min = -Utils::MaxUiLength, .Max = Utils::MaxUiLength })
+			.Field("Max", &UiSliderComponent::Max, "The value at the end edge (right; top when Vertical, left when HorizontalReverse).", { .Min = -Utils::MaxUiLength, .Max = Utils::MaxUiLength })
 			.Field("WholeNumbers", &UiSliderComponent::WholeNumbers, "Whether the value is rounded to whole numbers.")
 			.Field("Step", &UiSliderComponent::Step,
 				"The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1.",
 				{ .Min = 0.0, .Max = Utils::MaxUiLength })
-			.Field("Direction", &UiSliderComponent::Direction, "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.")
+			.Field("Direction", &UiSliderComponent::Direction, "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge.")
 			.Field("Fill", &UiSliderComponent::Fill, "A UI element below the slider stretched from the Min edge to the value; null for none.")
 			.Field("Handle", &UiSliderComponent::Handle, "A UI element below the slider placed at the value; null for none.")
 			.Validate(&Utils::ValidateUiSlider)

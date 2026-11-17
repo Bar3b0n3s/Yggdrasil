@@ -39,6 +39,8 @@ namespace Engine {
 				case TextAlignment::Left:   return UiDrawAlignment::Start;
 				case TextAlignment::Center: return UiDrawAlignment::Center;
 				case TextAlignment::Right:  return UiDrawAlignment::End;
+				case TextAlignment::Start:  return UiDrawAlignment::ParagraphStart;
+				case TextAlignment::End:    return UiDrawAlignment::ParagraphEnd;
 			}
 			return UiDrawAlignment::Start;
 		}

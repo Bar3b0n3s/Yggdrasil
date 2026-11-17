@@ -49,7 +49,9 @@
 //      whose font has none is laid out codepoint by codepoint with the font's kerning pairs, as W22.1 lays out every
 //      text;
 //   5. breaks lines as W22.1 does, in logical order, at the spaces between clusters, with the shaped advances;
-//   6. reorders each line into visual order (UAX #9 rules L1 and L2) and aligns it by Alignment within the block.
+//   6. reorders each line into visual order (UAX #9 rules L1 and L2) and aligns it by Alignment within the block (M38's
+//      Start and End, Docs/Decisions/0055-m38-runtime-locale.md decision 11, by the base level step 2 resolved for the
+//      line's paragraph: Start is Left for a left-to-right paragraph and Right for a right-to-left one, End the opposite).
 // Kerning in a shaped run is the font's own (GPOS or kern, through HarfBuzz; FontKerningPair is not read). Left-to-right
 // text in fonts without shaping data (a FontData built by hand, every test of W22.1) measures exactly as before: its
 // bidirectional runs are one left-to-right run per line, and its runs are not shaped. Every font FontImporter version 5
@@ -159,7 +161,7 @@ namespace Engine {
 		// pitch adds its gap and multiplies by LineSpacing); a caret spans it from its line's Top. Set for an empty text too.
 		float LineHeight = 0.0f;
 		// C22.3 (stream S): the options' Alignment, which places an empty text's caret (FindTextCaret): an empty text keeps
-		// no line whose Left would.
+		// no line whose Left would (and no paragraph, so M38's Start reads as Left and End as Right).
 		RenderTextAlignment Alignment = RenderTextAlignment::Left;
 
 		bool operator==(const TextMeasurement&) const = default;
@@ -189,7 +191,8 @@ namespace Engine {
 	// cluster begins at, ends at or holds (a skipped ill-formed byte or a carriage return) gives the trailing edge of that
 	// line's cluster that ends last before it in logical order, or, when none does, that line's start (the leading edge of
 	// its first cluster in logical order); a text without lines (empty) gives line 0 at Top 0 and the alignment's start of
-	// the block (0 for Left, half its width for Center, its width for Right). A byte past the text is its end. Pure.
+	// the block (0 for Left and Start, half its width for Center, its width for Right and End). A byte past the text is its
+	// end. Pure.
 	[[nodiscard]] TextCaret FindTextCaret(const TextMeasurement& measurement, uint32_t byteOffset);
 
 }

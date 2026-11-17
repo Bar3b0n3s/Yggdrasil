@@ -520,6 +520,19 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "UiDirection.jsonl",
+			"IdSeed": 3503,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenUiDirection.jsonl",
+			"IdSeed": 3504,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/GoldenUiDirection"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

@@ -408,6 +408,25 @@ namespace Engine {
 			CHECK(RequireNode(table, mark).Visible);
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 12): a HorizontalReverse slider's Min is at its right edge: its
+		// Fill runs from the right edge to the value, and its Handle sits at 1 - t, as a Vertical slider counts from its far edge.
+		TEST_CASE("UiLayout: a HorizontalReverse slider fills from its right edge and places its Handle at 1 - t")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity canvas = AddCanvas(scene, "Canvas", UiCanvasComponent{});
+			Entity slider = AddElement(scene, "Slider", canvas, MakeTopLeftRect(glm::vec2(0.0f), glm::vec2(100.0f, 20.0f)));
+			Entity fill = AddElement(scene, "Fill", slider, UiRectComponent{ .AnchorMin = glm::vec2(0.0f), .AnchorMax = glm::vec2(0.0f, 1.0f), .Size = glm::vec2(0.0f) });
+			Entity handle = AddElement(scene, "Handle", slider, UiRectComponent{ .AnchorMin = glm::vec2(0.0f, 0.5f), .AnchorMax = glm::vec2(0.0f, 0.5f), .Size = glm::vec2(10.0f, 20.0f) });
+			// Value 3 of [1, 9]: a quarter along from the right.
+			slider.AddComponent<UiSliderComponent>(UiSliderComponent{ .Value = 3.0f, .Min = 1.0f, .Max = 9.0f, .Direction = UiLayoutDirection::HorizontalReverse, .Fill = fill.GetUUID(), .Handle = handle.GetUUID() });
+			const UiLayoutTable table = ComputeUiLayout(scene, glm::uvec2(320, 180));
+			CHECK(RequireNode(table, fill).Min == glm::vec2(75.0f, 0.0f));
+			CHECK(RequireNode(table, fill).Max == glm::vec2(100.0f, 20.0f));
+			CHECK(RequireNode(table, handle).Min == glm::vec2(70.0f, 0.0f));
+			CHECK(RequireNode(table, handle).Max == glm::vec2(80.0f, 20.0f));
+		}
+
 		// C22.2 (decision 26; stream C): a scroll view clips its descendants whatever ClipChildren says, and its content moves
 		// by the scroll position clamped to the content's overflow, along the axes it scrolls.
 		TEST_CASE("UiLayout: a scroll view clips its descendants and moves its content by the clamped scroll position")

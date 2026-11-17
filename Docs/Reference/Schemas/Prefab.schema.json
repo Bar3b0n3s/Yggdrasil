@@ -761,7 +761,7 @@
 				},
 				"Alignment": {
 					"description": "How the lines are aligned to each other.",
-					"enum": ["Left", "Center", "Right"]
+					"enum": ["Left", "Center", "Right", "Start", "End"]
 				},
 				"Billboard": {
 					"description": "Whether world-space text always faces the camera.",
@@ -2015,7 +2015,7 @@
 				},
 				"Alignment": {
 					"description": "How each line is aligned within the rectangle's width.",
-					"enum": ["Left", "Center", "Right"]
+					"enum": ["Left", "Center", "Right", "Start", "End"]
 				},
 				"VerticalAlignment": {
 					"description": "Where the text block sits in the rectangle's height.",
@@ -2048,7 +2048,7 @@
 				},
 				"Direction": {
 					"description": "The main axis the children follow.",
-					"enum": ["Horizontal", "Vertical"]
+					"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 				},
 				"Padding": {
 					"description": "Insets of the container's rectangle that the children are placed in.",
@@ -2081,7 +2081,7 @@
 					"enum": ["Start", "Center", "End", "Stretch"]
 				},
 				"Columns": {
-					"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+					"description": "Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds.",
 					"type": "integer",
 					"minimum": 0,
 					"maximum": 1024
@@ -2210,13 +2210,13 @@
 					"maximum": 1000000
 				},
 				"Min": {
-					"description": "The value at the start edge (left, or bottom when Vertical); below Max.",
+					"description": "The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max.",
 					"type": "number",
 					"minimum": -1000000,
 					"maximum": 1000000
 				},
 				"Max": {
-					"description": "The value at the end edge (right, or top when Vertical).",
+					"description": "The value at the end edge (right; top when Vertical, left when HorizontalReverse).",
 					"type": "number",
 					"minimum": -1000000,
 					"maximum": 1000000
@@ -2232,8 +2232,8 @@
 					"maximum": 1000000
 				},
 				"Direction": {
-					"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.",
-					"enum": ["Horizontal", "Vertical"]
+					"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge.",
+					"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 				},
 				"Fill": {
 					"description": "A UI element below the slider stretched from the Min edge to the value; null for none.",
