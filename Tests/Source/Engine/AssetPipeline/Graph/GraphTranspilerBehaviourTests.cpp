@@ -5,6 +5,7 @@
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentAccess.h"
+#include "Engine/Scene/Components/FixedJointComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiInteraction.h"
@@ -13,6 +14,7 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/ExpectLog.h"
+#include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 #include "Support/ScriptTestFixture.h"
 #include "Support/TestData.h"
@@ -461,6 +463,49 @@ return Script.Define("Menu", M)
 return watcher.Locale .. "," .. watcher.Previous)")
 				== "ar,fr");
 			CHECK(fixture.Errors.empty());
+		}
+
+		// Phase 6's landing (the merge notes: each phase-6 callback through a graph, against the transpiler's locals): M37's
+		// OnJointBreak (Docs/Decisions/0054-m37-joints.md decision 8), dispatched in a play session's PostStep when a weld its
+		// plank's weight overloads breaks, reaches a graph's Event.OnJointBreak with its force and torque parameters under their
+		// own names, which the graph stores.
+		TEST_CASE("GraphTranspiler: a graph's OnJointBreak receives the force and torque that broke the joint")
+		{
+			const BehaviourGraphs graphs;
+			Test::ScriptTestFixture fixture;
+			const AssetHandle watcher(0x390102);
+			const GraphDocument graph = MakeGraph("BreakWatcher",
+				{ MakeNode(1, "Event.OnJointBreak"), MakeNode(2, "Self.Set.Force"), MakeNode(3, "Self.Set.Torque"), MakeNode(4, "Self.Set.Breaks"),
+					MakeNode(5, "Number.Add", { { "B", Literal(1) } }), MakeNode(6, "Self.Get.Breaks") },
+				{ MakeLink(1, "Then", 2, "In"), MakeLink(1, "force", 2, "Value"), MakeLink(2, "Then", 3, "In"), MakeLink(1, "torque", 3, "Value"),
+					MakeLink(3, "Then", 4, "In"), MakeLink(6, "Value", 5, "A"), MakeLink(5, "Result", 4, "Value") },
+				{ MakeVariable("Breaks", GraphValueKind::Number, Json(0)), MakeVariable("Force", GraphValueKind::Number, Json(-1)),
+					MakeVariable("Torque", GraphValueKind::Number, Json(-1)) });
+			const GraphTranspileResult text = graphs.Add(fixture, watcher, graph, "Assets/Scripts/BreakWatcher.graph");
+			CHECK(text.Luau.find("function Graph.OnJointBreak(self: any, force: number, torque: number)") != std::string::npos);
+			// A plank welded to the world that its own weight breaks at tick 0's PostStep.
+			Scene& editScene = fixture.GetScene();
+			Entity plank = Test::AddBoxBody(editScene, "Plank", glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.5f, 0.05f, 0.25f), BodyType::Dynamic);
+			plank.AddComponent<FixedJointComponent>(FixedJointComponent{ .BreakForce = 1.0f });
+			AttachScripts(fixture, plank, Slot(watcher));
+
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 37;
+			specification.Serial = 37;
+			Result<Scope<PlaySession>> started = PlaySession::CreateFromScene(specification, editScene);
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			PlaySession& session = **started;
+			session.SetExtractionEnabled(false);
+			Test::RunTicks(session, 3);
+			CHECK(session.GetScriptErrors().GetErrors().empty());
+			CHECK(session.GetScene().FindEntityByPath("/Plank").GetComponent<FixedJointComponent>().Broken);
+			CHECK(EvaluateNumber(session, R"(return Scene.FindByPath("/Plank"):GetScript("BreakWatcher").Breaks)") == 1.0);
+			// The weld broke on a force above its BreakForce of 1 N, which the graph stored; the torque is never negative.
+			CHECK(EvaluateNumber(session, R"(return Scene.FindByPath("/Plank"):GetScript("BreakWatcher").Force)") > 1.0);
+			CHECK(EvaluateNumber(session, R"(return Scene.FindByPath("/Plank"):GetScript("BreakWatcher").Torque)") >= 0.0);
 		}
 	}
 
