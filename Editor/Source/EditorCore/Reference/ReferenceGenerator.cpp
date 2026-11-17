@@ -129,10 +129,11 @@ namespace Engine {
 		constexpr std::string_view StringTableExample = R"({"Format": "StringTable", "Version": 1, "Locales": ["en", "fr", "pt-BR"],
 "Entries": [{"Key": "Menu.Start", "Values": {"en": "Start", "fr": "Commencer", "pt-BR": "Iniciar"}}, {"Key": "Menu.Quit", "Values": {"en": "Quit"}}]})";
 
-		constexpr std::string_view GraphExample = R"({"Format": "Graph", "Version": 1, "Name": "Door",
+		constexpr std::string_view GraphExample = R"({"Format": "Graph", "Version": 2, "Name": "Door", "RunsWhileWorldPaused": false,
 "Fields": [{"Name": "Player", "Kind": "Entity", "Default": null, "Element": "Number", "AssetType": "", "EnumValues": [], "Options": {}},
 {"Name": "Speed", "Kind": "Number", "Default": 2, "Element": "Number", "AssetType": "", "EnumValues": [], "Options": {"Max": 10, "Min": 0}}],
 "Variables": [{"Name": "Opened", "Kind": "Bool", "Default": false, "Element": "Number", "AssetType": "", "EnumValues": []}],
+"Methods": [{"Name": "IsOpen", "Parameters": [{"Name": "by", "Kind": "Entity", "AssetType": ""}], "Results": [{"Kind": "Bool", "AssetType": ""}]}],
 "Nodes": [{"Id": 1, "Kind": "Event.OnTriggerEnter", "Position": [0, 0], "Values": {}}, {"Id": 2, "Kind": "Compare.Equal", "Position": [240, 120], "Values": {}},
 {"Id": 3, "Kind": "Self.Get.Player", "Position": [0, 160], "Values": {}}, {"Id": 4, "Kind": "Flow.Branch", "Position": [480, 0], "Values": {}},
 {"Id": 5, "Kind": "Self.Set.Opened", "Position": [720, 0], "Values": {"Value": true}},
@@ -175,19 +176,24 @@ namespace Engine {
 				"The exported game's manifest next to its executable (§14.1): name, engine version, build id, start scene, paks, window and simulation settings.",
 				GameManifestExample },
 			AuthoredFormat{ "Graph", ".graph", GraphFormatVersion,
-				"A visual-scripting graph (§6.11): one behaviour, whose fields, variables, nodes and links GraphImporter transpiles to Luau and "
-				"compiles into a Script asset, so a graph fills a script slot as a `.luau` behaviour does. A node is a node kind of the library "
-				"(`graph.nodes` lists them) with literals of its input pins; a link joins an output pin to an input pin of another node. Every "
-				"list is in its canonical order (fields and variables by Name, nodes by Id, links by From and To), so each write of a graph is "
-				"byte-identical; the `graph.*` methods edit it. A field's or variable's `Name` is a Luau identifier of 1 to 64 bytes, not a "
-				"reserved word, not starting with `__` and not a reserved script field name (`Entity`, `Fields`, the callbacks), unique across "
-				"both lists; its `Default` has its `Kind`'s spelling (a Number a finite number, an Integer an int32, a Bool a boolean, a String "
-				"a string of at most 4,096 bytes, a Vector `[x, y, z]`, a Color `[r, g, b, a]`, a Quat `[x, y, z, w]`, nonzero and, for a "
-				"field, of unit length, an Entity or Asset null, an Enum one of `EnumValues`, an Array `[]`); `Element` is an Array's element "
-				"kind (not Array; Number for other kinds), `AssetType` an Asset's type, `EnumValues` an Enum's 1 to 64 unique choices of 1 to "
-				"64 bytes (an Array of Asset or of Enum has them too); a field's `Options` are its Luau `FieldOptions` (Number, Integer, Bool, "
-				"String, Vector, Color and Quat only): `Min`, `Max` and `Step` for Number, Integer and Vector (`Min <= Max`, `Step > 0`, the "
-				"default within them) and a `Tooltip` of at most 256 bytes. The tables below list every field and the limits.",
+				"A visual-scripting graph (§6.11): one behaviour, whose fields, variables, methods, nodes and links GraphImporter transpiles to "
+				"Luau and compiles into a Script asset, so a graph fills a script slot as a `.luau` behaviour does. A node is a node kind of the "
+				"library (`graph.nodes` lists them) with literals of its input pins; a link joins an output pin to an input pin of another node. "
+				"Every list is in its canonical order (fields, variables and methods by Name, nodes by Id, links by From and To), so each write "
+				"of a graph is byte-identical; the `graph.*` methods edit it. A field's, variable's or method's `Name` is a Luau identifier of 1 "
+				"to 64 bytes, not a reserved word, not starting with `__` and not a reserved script field name (`Entity`, `Fields`, the "
+				"callbacks; for a method also not `RunsWhileWorldPaused`), unique across the three lists; a field's or variable's `Default` has "
+				"its `Kind`'s spelling (a Number a finite number, an Integer an int32, a Bool a boolean, a String a string of at most 4,096 "
+				"bytes, a Vector `[x, y, z]`, a Color `[r, g, b, a]`, a Quat `[x, y, z, w]`, nonzero and, for a field, of unit length, an "
+				"Entity, Asset or Any null, an Enum one of `EnumValues`, an Array `[]`; a field is never Any); `Element` is an Array's element "
+				"kind (not Array or Any; Number for other kinds), `AssetType` an Asset's type, `EnumValues` an Enum's 1 to 64 unique choices of "
+				"1 to 64 bytes (an Array of Asset or of Enum has them too); a field's `Options` are its Luau `FieldOptions` (Number, Integer, "
+				"Bool, String, Vector, Color and Quat only): `Min`, `Max` and `Step` for Number, Integer and Vector (`Min <= Max`, `Step > 0`, "
+				"the default within them) and a `Tooltip` of at most 256 bytes. A method (version 2) has at most 4 `Parameters` (a `Name` other "
+				"than `self` and `Then`, unique in the method, a `Kind` but Enum and Array, and an Asset's optional `AssetType`) and at most one "
+				"of `Results`; its `Method.<Name>` nodes run it and its `Return.<Name>` nodes end it. `RunsWhileWorldPaused` true lets the "
+				"behaviour update while the world is paused. A version 1 file reads as version 2 without methods. The tables below list every "
+				"field and the limits.",
 				GraphExample, "Graph" },
 			AuthoredFormat{ "Material", ".material", MaterialData::CurrentVersion,
 				"A PBR metallic-roughness material (§6.5).", MaterialExample },

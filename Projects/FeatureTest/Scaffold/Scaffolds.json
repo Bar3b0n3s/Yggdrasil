@@ -510,6 +510,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "GraphMembers.jsonl",
+			"IdSeed": 3600,
+			"Renderer": "none"
+		},
+		{
+			"File": "GraphMembersReplay.jsonl",
+			"IdSeed": 3601,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

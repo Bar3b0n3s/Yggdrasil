@@ -31,6 +31,9 @@ namespace Engine {
 
 	namespace Utils {
 
+		// Script.Call's arguments, Arg1 to Arg4: as many as a graph method takes parameters (M39, decision 2).
+		static constexpr size_t ScriptCallArguments = MaxGraphMethodParameters;
+
 		// --- Names ----------------------------------------------------------------------------------------------------
 
 		[[nodiscard]] static bool IsAsciiLetter(char c)
@@ -610,6 +613,29 @@ namespace Engine {
 			return node;
 		}
 
+		// Return.<Callback> of a callback with one modelled result (M39, decision 4: the OnUi* callbacks' boolean?): In, no exec
+		// output, and Value of the result's type; nullopt for a callback without a result.
+		[[nodiscard]] static std::optional<GraphNodeDescription> MakeCallbackReturnNode(const ScriptApiMember& member, const LuauTypeNames& names)
+		{
+			const std::optional<LuauFunction> function = ParseLuauFunction(member.Signature);
+			if (!function.has_value() || function->Results.size() != 1)
+				return std::nullopt;
+			const ModelledType type = ClassifyLuauType(function->Results.front(), names);
+			if (!type.Modelled)
+				return std::nullopt;
+			const bool consumes = type.Type == GraphPinType::Bool && type.Optional;
+			GraphNodeDescription node;
+			node.Kind = std::format("{}{}", GraphReturnKindPrefix, member.Name);
+			node.Title = std::format("Return {}", SplitWords(member.Name));
+			node.Category = GraphNodeCategory::Flow;
+			node.Description = consumes ? std::format("Ends the {} callback with Value as its result: true consumes the UI event, nil (unset) lets it bubble on.", member.Name)
+										: std::format("Ends the {} callback with Value as its result.", member.Name);
+			node.Pure = false;
+			node.Pins.push_back(MakeExecPin("In", GraphPinDirection::Input));
+			node.Pins.push_back(MakeInputPin("Value", type, names));
+			return node;
+		}
+
 		// The record fields of an alias ("{Point: vector, Normal: vector}") as (name, type); empty for any other alias.
 		[[nodiscard]] static std::vector<std::pair<std::string_view, std::string_view>> GetRecordFields(std::string_view definition)
 		{
@@ -680,6 +706,25 @@ namespace Engine {
 				{ in(), data("Value", Any), out("True"), out("False"), result("Result", Any) }));
 			nodes.push_back(MakeBuiltin("Self.Entity", "Self Entity", GraphNodeCategory::Member, "The entity this behaviour instance is on.", true,
 				{ result("Value", Entity) }));
+			// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 2): this and another behaviour's members, and any table's.
+			nodes.push_back(MakeBuiltin("Self.Instance", "Self Instance", GraphNodeCategory::Member,
+				"This behaviour instance (self): pass it to a method, or call its own methods with Script.Call.", true, { result("Value", Any) }));
+			nodes.push_back(MakeBuiltin("Script.Get", "Get Member", GraphNodeCategory::Member,
+				"The member Member of Object (a behaviour instance or a table): nil when a table lacks it; an engine value without it raises an error.", true,
+				{ data("Object", Any), data("Member", String), result("Value", Any) }));
+			nodes.push_back(MakeBuiltin("Script.Set", "Set Member", GraphNodeCategory::Member, "Sets the member Member of Object (a behaviour instance or a table) to Value.",
+				false, { in(), data("Object", Any), data("Member", String), data("Value", Any), out("Then") }));
+			{
+				std::vector<GraphPinDescription> pins{ in(), data("Object", Any), data("Method", String) };
+				for (size_t argument = 1; argument <= ScriptCallArguments; ++argument)
+					pins.push_back(MakeInputPin(std::format("Arg{}", argument), Any, {}, true, names));
+				pins.push_back(out("Then"));
+				pins.push_back(result("Result", Any));
+				nodes.push_back(MakeBuiltin("Script.Call", "Call Method", GraphNodeCategory::Member,
+					"Calls the method Method of Object (a behaviour instance or a table) with Arg1 to Arg4, and gives its first result; calling a method Object "
+					"lacks raises an error.",
+					false, std::move(pins)));
+			}
 			for (const auto& [name, title, description] : std::initializer_list<std::tuple<std::string_view, std::string_view, std::string_view>>{
 					 { "Add", "Add", "A + B." },
 					 { "Subtract", "Subtract", "A - B." },
@@ -746,7 +791,8 @@ namespace Engine {
 				case GraphValueKind::Quat:    return { GraphPinType::Quat, {} };
 				case GraphValueKind::Entity:  return { GraphPinType::Entity, {} };
 				case GraphValueKind::Asset:   return { GraphPinType::Asset, std::string(assetType) };
-				case GraphValueKind::Array:   return { GraphPinType::Any, {} };
+				case GraphValueKind::Array:
+				case GraphValueKind::Any:     return { GraphPinType::Any, {} };
 			}
 			return { GraphPinType::Any, {} };
 		}
@@ -771,6 +817,40 @@ namespace Engine {
 				.Pure = false,
 				.Pins = { MakeExecPin("In", GraphPinDirection::Input), MakeInputPin("Value", type, typeName, false, none), MakeExecPin("Then", GraphPinDirection::Output) } };
 			return { std::move(get), std::move(set) };
+		}
+
+		// Method.<Name> and Return.<Name> of one graph method (M39, decision 3): the event with Then and the parameters, typed by
+		// their kinds (never optional), and the statement with In and, for a method with a result, Value (optional for Any).
+		[[nodiscard]] static std::pair<GraphNodeDescription, GraphNodeDescription> MakeMethodNodes(const GraphMethod& method)
+		{
+			const LuauTypeNames none;
+			std::string parameters;
+			GraphNodeDescription event{ .Kind = std::format("{}{}", GraphMethodKindPrefix, method.Name),
+				.Title = std::format("Method {}", method.Name),
+				.Category = GraphNodeCategory::Event,
+				.Description = {},
+				.Pure = false,
+				.Pins = { MakeExecPin("Then", GraphPinDirection::Output) } };
+			for (const GraphParameter& parameter : method.Parameters)
+			{
+				const auto [type, typeName] = GetMemberPinType(parameter.Kind, parameter.AssetType);
+				event.Pins.push_back(MakeOutputPin(parameter.Name, type, typeName, false));
+				parameters += std::format("{}{}", parameters.empty() ? "" : ", ", parameter.Name);
+			}
+			event.Description = std::format("Runs when a script calls the behaviour's method {}({}); its outputs are the call's arguments.", method.Name, parameters);
+			GraphNodeDescription result{ .Kind = std::format("{}{}", GraphReturnKindPrefix, method.Name),
+				.Title = std::format("Return {}", method.Name),
+				.Category = GraphNodeCategory::Flow,
+				.Description = method.Results.empty() ? std::format("Ends the method {}.", method.Name) : std::format("Ends the method {} with Value as its result.", method.Name),
+				.Pure = false,
+				.Pins = { MakeExecPin("In", GraphPinDirection::Input) } };
+			if (!method.Results.empty())
+			{
+				const GraphResult& returned = method.Results.front();
+				const auto [type, typeName] = GetMemberPinType(returned.Kind, returned.AssetType);
+				result.Pins.push_back(MakeInputPin("Value", type, typeName, returned.Kind == GraphValueKind::Any, none));
+			}
+			return { std::move(event), std::move(result) };
 		}
 
 		// The canonical listing of a kind, which GetFingerprint hashes.
@@ -900,7 +980,10 @@ namespace Engine {
 					case ScriptApiMemberKind::Constant: add(Utils::MakeConstNode(group, member, names)); break;
 					case ScriptApiMemberKind::Callback:
 						if (type && group.Name == "Behaviour")
+						{
 							add(Utils::MakeEventNode(member, names));
+							add(Utils::MakeCallbackReturnNode(member, names));
+						}
 						break;
 					case ScriptApiMemberKind::Operator: break;
 				}
@@ -971,7 +1054,7 @@ namespace Engine {
 	std::vector<GraphNodeDescription> GraphNodeLibrary::GetMemberNodes(const GraphDocument& graph) const
 	{
 		std::vector<GraphNodeDescription> nodes;
-		nodes.reserve(2 * (graph.Fields.size() + graph.Variables.size()));
+		nodes.reserve(2 * (graph.Fields.size() + graph.Variables.size() + graph.Methods.size()));
 		for (const GraphField& field : graph.Fields)
 		{
 			auto [get, set] = Utils::MakeMemberNodes(field.Name, field.Kind, field.AssetType, true);
@@ -983,6 +1066,12 @@ namespace Engine {
 			auto [get, set] = Utils::MakeMemberNodes(variable.Name, variable.Kind, variable.AssetType, false);
 			nodes.push_back(std::move(get));
 			nodes.push_back(std::move(set));
+		}
+		for (const GraphMethod& method : graph.Methods)
+		{
+			auto [event, result] = Utils::MakeMethodNodes(method);
+			nodes.push_back(std::move(event));
+			nodes.push_back(std::move(result));
 		}
 		std::ranges::stable_sort(nodes, {}, &GraphNodeDescription::Kind);
 		return nodes;
@@ -1108,7 +1197,7 @@ namespace Engine {
 				return reached;
 			}
 
-			// The cycle rules and the completeness rules (decision 5).
+			// The cycle rules and the completeness rules (decision 5), and where a Return may be reached (M39).
 			void CheckCyclesAndCompleteness()
 			{
 				const bool dataCycle = CheckCycles(false);
@@ -1116,6 +1205,8 @@ namespace Engine {
 				CheckRequiredInputs();
 				if (!dataCycle && !execCycle)
 					CheckDominance();
+				if (!execCycle)
+					CheckReturns();
 			}
 
 			// No statement's code starts deeper than MaxGraphTextDepth blocks in the transpiled text, and the text holds at most
@@ -1651,6 +1742,124 @@ namespace Engine {
 									"enters may read it into an input that needs a value; elsewhere link it to an optional or Any input)",
 							link.From.Pin, link.From.Node, loop != nullptr ? loop->Kind : std::string()),
 						true);
+				}
+			}
+
+			// The function an event or a Return node belongs to (M39): the callback of Event.<Callback> and Return.<Callback>,
+			// the method of Method.<Name> and Return.<Name> (a method never takes a callback's name, so the name tells them
+			// apart); empty for any other node.
+			[[nodiscard]] std::string_view GetFunctionName(size_t node) const
+			{
+				if (!m_Descriptions[node].has_value())
+					return {};
+				const std::string_view kind = m_Descriptions[node]->Kind;
+				for (const std::string_view prefix : { std::string_view("Event."), GraphMethodKindPrefix, GraphReturnKindPrefix })
+				{
+					if (kind.starts_with(prefix))
+						return kind.substr(prefix.size());
+				}
+				return {};
+			}
+
+			[[nodiscard]] bool IsReturn(size_t node) const
+			{
+				return m_Descriptions[node].has_value() && m_Descriptions[node]->Kind.starts_with(GraphReturnKindPrefix);
+			}
+
+			// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 5): a Return ends the function that runs it, so it is
+			// reached only from its own function's event nodes, and never through a Flow.Delay's Later flow, which runs after
+			// that function has returned. One walk per function among the events, of the valid exec links, each node reached
+			// directly or through a Later flow (the first such Delay kept for the message); only in a graph with a Return.
+			void CheckReturns()
+			{
+				const size_t count = m_Graph.Nodes.size();
+				bool anyReturn = false;
+				for (size_t node = 0; node < count && !anyReturn; ++node)
+					anyReturn = IsReturn(node);
+				if (!anyReturn)
+					return;
+				struct Successor
+				{
+					size_t Node = 0;
+					bool Later = false;
+				};
+				std::vector<std::vector<Successor>> successors(count);
+				for (const Link& link : m_Links)
+				{
+					if (link.FromPin->Type != GraphPinType::Exec)
+						continue;
+					const bool later = m_Descriptions[link.From].has_value() && m_Descriptions[link.From]->Kind == "Flow.Delay" && link.FromPin->Name == "Later";
+					successors[link.From].push_back({ .Node = link.To, .Later = later });
+				}
+				// The events of each function, in id order.
+				std::map<std::string_view, std::vector<size_t>> functions;
+				for (const auto& [id, node] : m_Ids)
+				{
+					if (IsEvent(node))
+						functions[GetFunctionName(node)].push_back(node);
+				}
+				std::set<size_t> foreign;
+				std::set<size_t> late;
+				constexpr size_t None = std::numeric_limits<size_t>::max();
+				for (const auto& [function, events] : functions)
+				{
+					// Per node: the event that first reached it directly, and the Delay whose Later flow first reached it.
+					std::vector<size_t> origin(count, None);
+					std::vector<size_t> delay(count, None);
+					std::vector<std::pair<size_t, size_t>> pending; // (node, the Delay it was reached through or None)
+					for (const size_t event : events)
+					{
+						if (origin[event] == None)
+						{
+							origin[event] = event;
+							pending.emplace_back(event, None);
+						}
+					}
+					while (!pending.empty())
+					{
+						const auto [node, through] = pending.back();
+						pending.pop_back();
+						for (const Successor& next : successors[node])
+						{
+							const size_t reachedThrough = through != None ? through : (next.Later ? node : None);
+							if (reachedThrough == None)
+							{
+								if (origin[next.Node] == None)
+								{
+									origin[next.Node] = origin[node];
+									pending.emplace_back(next.Node, None);
+								}
+							}
+							else if (delay[next.Node] == None)
+							{
+								delay[next.Node] = reachedThrough;
+								pending.emplace_back(next.Node, reachedThrough);
+							}
+						}
+					}
+					for (size_t node = 0; node < count; ++node)
+					{
+						if (!IsReturn(node))
+							continue;
+						const uint32_t id = m_Graph.Nodes[node].Id;
+						const std::string& kind = m_Descriptions[node]->Kind;
+						const size_t from = origin[node] != None ? origin[node] : (delay[node] != None ? events.front() : None);
+						if (from != None && GetFunctionName(node) != function && foreign.insert(node).second)
+						{
+							AddNodeIssue(node, 0, {}, {},
+								std::format("node {} ({}) is reached from node {} ({}), another function's event, but a Return ends only its own function ({})", id, kind,
+									m_Graph.Nodes[from].Id, m_Descriptions[from]->Kind, GetFunctionName(node)),
+								false);
+						}
+						if (delay[node] != None && late.insert(node).second)
+						{
+							AddNodeIssue(node, 0, {}, {},
+								std::format("node {} ({}) is reached through the Later flow of node {} (Flow.Delay), which runs after its function has returned, so it "
+											"cannot end it; reach it from the Then flow instead",
+									id, kind, m_Graph.Nodes[delay[node]].Id),
+								false);
+						}
+					}
 				}
 			}
 

@@ -616,7 +616,7 @@ namespace Engine {
 			const auto files = GenerateReferences(registries.GetSources());
 			REQUIRE_MESSAGE(files.has_value(), files.error().ToString());
 			const std::string& formats = FindFile(*files, "FileFormats.md")->Content;
-			CHECK(formats.find("| Graph | `.graph` | 1 | [Schemas/Graph.schema.json](Schemas/Graph.schema.json) |") != std::string::npos);
+			CHECK(formats.find(std::format("| Graph | `.graph` | {} | [Schemas/Graph.schema.json](Schemas/Graph.schema.json) |", GraphFormatVersion)) != std::string::npos);
 			CHECK(formats.find("| Graph | `.graph` | Script | 1 | none | yes |") != std::string::npos);
 			const size_t begin = formats.find("### Graph (`.graph`)");
 			const size_t end = formats.find("### Material (`.material`)");
@@ -685,9 +685,9 @@ namespace Engine {
 			rejects(ParseSchema(*files, "Replay"), R"({"Format":"Replay","Version":1})");
 			rejects(ParseSchema(*files, "Project"), R"({"Format":"Project","Version":1,"Window":{"Width":"wide"}})");
 			const Json graph = ParseSchema(*files, "Graph");
-			rejects(graph, R"({"Format":"Graph","Version":2})");
-			rejects(graph, R"({"Format":"Graph","Version":1,"Name":"Door","Nodes":[{"Id":1,"Kind":"Flow.Branch","Colour":"red"}]})");
-			rejects(graph, R"({"Format":"Graph","Version":1,"Name":"Door","Fields":[{"Name":"Speed","Kind":"Float"}]})");
+			rejects(graph, std::format(R"({{"Format":"Graph","Version":{}}})", GraphFormatVersion + 1));
+			rejects(graph, std::format(R"({{"Format":"Graph","Version":{},"Name":"Door","Nodes":[{{"Id":1,"Kind":"Flow.Branch","Colour":"red"}}]}})", GraphFormatVersion));
+			rejects(graph, std::format(R"({{"Format":"Graph","Version":{},"Name":"Door","Fields":[{{"Name":"Speed","Kind":"Float"}}]}})", GraphFormatVersion));
 			const Json batch = ParseSchema(*files, "BatchRequest");
 			rejects(batch, R"({"method":"no.such","params":{}})");
 			rejects(batch, R"({"method":"scene.tree","params":{},"id":1})");

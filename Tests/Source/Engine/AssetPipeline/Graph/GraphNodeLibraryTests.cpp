@@ -291,6 +291,176 @@ namespace Engine {
 			CHECK(setup.Library->Find("Self.Get.Speed") == nullptr);
 		}
 
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decisions 2 and 4): the members of any value, the graph's own
+		// instance, and a Return for each callback with a result.
+		TEST_CASE("GraphNodeLibrary: Script.Get, Script.Set, Script.Call and Self.Instance reach any value's members, and each callback with a result has its Return")
+		{
+			const LibrarySetup setup;
+			const GraphNodeLibrary& library = *setup.Library;
+			const auto names = [](const GraphNodeDescription& node)
+			{
+				std::vector<std::string> pins;
+				for (const GraphPinDescription& pin : node.Pins)
+					pins.push_back(pin.Name);
+				return pins;
+			};
+
+			const GraphNodeDescription* get = library.Find("Script.Get");
+			REQUIRE(get != nullptr);
+			CHECK(get->Pure);
+			CHECK(get->Category == GraphNodeCategory::Member);
+			CHECK(names(*get) == std::vector<std::string>{ "Object", "Member", "Value" });
+			CHECK(FindPin(*get, "Object")->Type == GraphPinType::Any);
+			CHECK_FALSE(FindPin(*get, "Object")->Optional);
+			CHECK(FindPin(*get, "Member")->Type == GraphPinType::String);
+			CHECK(FindPin(*get, "Value")->Type == GraphPinType::Any);
+
+			const GraphNodeDescription* set = library.Find("Script.Set");
+			REQUIRE(set != nullptr);
+			CHECK_FALSE(set->Pure);
+			CHECK(names(*set) == std::vector<std::string>{ "In", "Object", "Member", "Value", "Then" });
+			CHECK_FALSE(FindPin(*set, "Value")->Optional);
+
+			const GraphNodeDescription* call = library.Find("Script.Call");
+			REQUIRE(call != nullptr);
+			CHECK_FALSE(call->Pure);
+			CHECK(names(*call) == std::vector<std::string>{ "In", "Object", "Method", "Arg1", "Arg2", "Arg3", "Arg4", "Then", "Result" });
+			for (const std::string_view argument : { "Arg1", "Arg2", "Arg3", "Arg4" })
+			{
+				CHECK(FindPin(*call, argument)->Type == GraphPinType::Any);
+				CHECK(FindPin(*call, argument)->Optional);
+			}
+			CHECK(FindPin(*call, "Result")->Type == GraphPinType::Any);
+
+			const GraphNodeDescription* instance = library.Find("Self.Instance");
+			REQUIRE(instance != nullptr);
+			CHECK(instance->Pure);
+			CHECK(names(*instance) == std::vector<std::string>{ "Value" });
+			CHECK(FindPin(*instance, "Value")->Type == GraphPinType::Any);
+
+			// Every OnUi* callback (boolean?) has its Return, In and an optional Bool Value and no exec output; a callback without
+			// a result has none.
+			for (const std::string_view callback : { "OnUiClick", "OnUiValueChanged", "OnUiFocus", "OnUiHover", "OnUiCancel", "OnUiScroll", "OnUiTextChanged", "OnUiSubmit" })
+			{
+				CAPTURE(callback);
+				const GraphNodeDescription* result = library.Find(std::format("Return.{}", callback));
+				REQUIRE(result != nullptr);
+				CHECK(result->Category == GraphNodeCategory::Flow);
+				CHECK_FALSE(result->Pure);
+				CHECK(names(*result) == std::vector<std::string>{ "In", "Value" });
+				CHECK(FindPin(*result, "Value")->Type == GraphPinType::Bool);
+				CHECK(FindPin(*result, "Value")->Optional);
+			}
+			CHECK(library.Find("Return.OnStart") == nullptr);
+			CHECK(library.Find("Return.OnFixedUpdate") == nullptr);
+		}
+
+		// M39 (decision 3): a method's kinds are graph-dependent, typed by its declaration.
+		TEST_CASE("GraphNodeLibrary: a graph's methods resolve as Method and Return kinds of their signatures")
+		{
+			const LibrarySetup setup;
+			GraphDocument graph;
+			graph.Name = "Rune";
+			graph.Methods = { GraphMethod{ .Name = "Blocks",
+								  .Parameters = { GraphParameter{ .Name = "hit", .Kind = GraphValueKind::Any, .AssetType = {} },
+									  GraphParameter{ .Name = "clip", .Kind = GraphValueKind::Asset, .AssetType = "AudioClip" },
+									  GraphParameter{ .Name = "count", .Kind = GraphValueKind::Integer, .AssetType = {} } },
+								  .Results = { GraphResult{ .Kind = GraphValueKind::Bool, .AssetType = {} } } },
+				GraphMethod{ .Name = "Pull", .Parameters = {}, .Results = {} },
+				GraphMethod{ .Name = "Read", .Parameters = {}, .Results = { GraphResult{ .Kind = GraphValueKind::Any, .AssetType = {} } } } };
+			const GraphNodeLibrary& library = *setup.Library;
+
+			const Result<GraphNodeDescription> blocks = library.Resolve("Method.Blocks", graph);
+			REQUIRE_MESSAGE(blocks.has_value(), blocks.error().ToString());
+			CHECK(blocks->Category == GraphNodeCategory::Event);
+			CHECK_FALSE(blocks->Pure);
+			REQUIRE(blocks->Pins.size() == 4);
+			CHECK(blocks->Pins[0].Name == "Then");
+			CHECK(blocks->Pins[0].Type == GraphPinType::Exec);
+			CHECK(FindPin(*blocks, "hit")->Type == GraphPinType::Any);
+			CHECK(FindPin(*blocks, "clip")->Type == GraphPinType::Asset);
+			CHECK(FindPin(*blocks, "clip")->TypeName == "AudioClip");
+			CHECK(FindPin(*blocks, "count")->Type == GraphPinType::Number);
+			CHECK_FALSE(FindPin(*blocks, "hit")->Optional);
+
+			const Result<GraphNodeDescription> returned = library.Resolve("Return.Blocks", graph);
+			REQUIRE_MESSAGE(returned.has_value(), returned.error().ToString());
+			CHECK(returned->Category == GraphNodeCategory::Flow);
+			REQUIRE(returned->Pins.size() == 2);
+			CHECK(FindPin(*returned, "In")->Type == GraphPinType::Exec);
+			CHECK(FindPin(*returned, "Value")->Type == GraphPinType::Bool);
+			CHECK_FALSE(FindPin(*returned, "Value")->Optional);
+			CHECK(FindPin(*returned, "Value")->Default == VariantValue(Json(false)));
+
+			// A method without a result returns without a Value; an Any result's Value is optional (unset, it returns nil).
+			const Result<GraphNodeDescription> pull = library.Resolve("Return.Pull", graph);
+			REQUIRE_MESSAGE(pull.has_value(), pull.error().ToString());
+			REQUIRE(pull->Pins.size() == 1);
+			CHECK(FindPin(*pull, "Value") == nullptr);
+			const Result<GraphNodeDescription> read = library.Resolve("Return.Read", graph);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(FindPin(*read, "Value")->Type == GraphPinType::Any);
+			CHECK(FindPin(*read, "Value")->Optional);
+
+			CHECK(library.Resolve("Method.Nope", graph).error().GetCode() == ErrorCode::NotFound);
+			CHECK(library.Find("Method.Blocks") == nullptr);
+			// Self.Get and Self.Set of no member, and Method and Return of three methods, sorted by kind.
+			const std::vector<GraphNodeDescription> members = library.GetMemberNodes(graph);
+			CHECK(members.size() == 6);
+			CHECK(std::ranges::is_sorted(members, {}, &GraphNodeDescription::Kind));
+
+			// A node of a declared method validates; the event's outputs are the parameters.
+			graph.Nodes = { GraphNode{ .Id = 1, .Kind = "Method.Blocks" }, GraphNode{ .Id = 2, .Kind = "Return.Blocks" } };
+			graph.Links = { GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } } };
+			CHECK(ValidateGraph(graph, library).empty());
+		}
+
+		// M39 (decision 5): a Return ends the function that runs it, so a Flow.Delay's Later flow, which runs after that function
+		// returned, never reaches one, and nor does another function's event.
+		TEST_CASE("GraphValidation: a Return reached through Flow.Delay's Later is refused")
+		{
+			const LibrarySetup setup;
+			GraphDocument graph;
+			graph.Name = "Rune";
+			graph.Methods = { GraphMethod{ .Name = "Pull", .Parameters = {}, .Results = {} } };
+			graph.Nodes = { GraphNode{ .Id = 1, .Kind = "Method.Pull" }, GraphNode{ .Id = 2, .Kind = "Flow.Delay", .Values = { { "Seconds", VariantValue(Json(1)) } } },
+				GraphNode{ .Id = 3, .Kind = "Return.Pull" } };
+			graph.Links = { GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } }, GraphLink{ .From = { 2, "Then" }, .To = { 3, "In" } } };
+			// From Then, the Return runs in the method's own flow.
+			CHECK(ValidateGraph(graph, *setup.Library).empty());
+
+			GraphDocument later = graph;
+			later.Links[1].From.Pin = "Later";
+			const std::vector<GraphIssue> issues = ValidateGraph(later, *setup.Library);
+			CHECK(Describe(issues) == std::vector<std::string>{ "!/Nodes/2" });
+			REQUIRE(issues.size() == 1);
+			CHECK(issues.front().Node == 3);
+			CHECK(issues.front().Message.find("Later") != std::string::npos);
+			CHECK_FALSE(TranspileGraph(later, *setup.Library, "Assets/Scripts/Rune.graph").has_value());
+
+			// Through a merge the Later flow enters, too.
+			GraphDocument merged = graph;
+			merged.Nodes.push_back(GraphNode{ .Id = 4, .Kind = "Call.Log.Info" });
+			merged.Links = { GraphLink{ .From = { 1, "Then" }, .To = { 2, "In" } }, GraphLink{ .From = { 2, "Later" }, .To = { 4, "In" } },
+				GraphLink{ .From = { 2, "Then" }, .To = { 4, "In" } }, GraphLink{ .From = { 4, "Then" }, .To = { 3, "In" } } };
+			CanonicalizeGraph(merged);
+			CHECK(Describe(ValidateGraph(merged, *setup.Library)) == std::vector<std::string>{ "!/Nodes/2" });
+
+			// Another function's event: OnStart reaching the method's Return, and a callback's Return from another callback.
+			GraphDocument foreign = graph;
+			foreign.Nodes.push_back(GraphNode{ .Id = 5, .Kind = "Event.OnStart" });
+			foreign.Nodes.push_back(GraphNode{ .Id = 6, .Kind = "Return.OnUiClick" });
+			foreign.Nodes.push_back(GraphNode{ .Id = 7, .Kind = "Event.OnUiHover" });
+			foreign.Links.push_back(GraphLink{ .From = { 5, "Then" }, .To = { 3, "In" } });
+			foreign.Links.push_back(GraphLink{ .From = { 7, "Then" }, .To = { 6, "In" } });
+			CanonicalizeGraph(foreign);
+			const std::vector<GraphIssue> foreignIssues = ValidateGraph(foreign, *setup.Library);
+			CHECK(Describe(foreignIssues) == std::vector<std::string>{ "!/Nodes/2", "!/Nodes/4" });
+			REQUIRE(foreignIssues.size() == 2);
+			CHECK(foreignIssues[0].Message.find("node 5 (Event.OnStart)") != std::string::npos);
+			CHECK(foreignIssues[1].Message.find("node 7 (Event.OnUiHover)") != std::string::npos);
+		}
+
 		TEST_CASE("GraphNodeLibrary: validation refuses unknown kinds and pins, incompatible links, a second link into a data input and cycles, and reports unfinished inputs as incomplete")
 		{
 			const LibrarySetup setup;

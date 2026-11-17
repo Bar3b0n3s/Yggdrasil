@@ -20,8 +20,10 @@
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Buffer.h"
 #include "Engine/Core/Hash.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/VirtualFileSystem.h"
 #include "Engine/Reflection/FuzzySuggest.h"
+#include "Engine/Reflection/StructInfo.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -33,6 +35,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -55,9 +58,11 @@ namespace Engine {
 		// How far right of the rightmost node graph.addNode places a node given no position: one node width of the canvas.
 		constexpr float GraphNodeSpacing = 240.0f;
 
-		// The prefixes of a graph's member kinds (GraphNodeLibrary::Resolve's Self.Get.<Name> and Self.Set.<Name>).
+		// The prefixes of a graph's member kinds (GraphNodeLibrary::Resolve's Self.Get.<Name> and Self.Set.<Name>, and M39's
+		// Method.<Name> and Return.<Name>).
 		constexpr std::string_view SelfGetPrefix = "Self.Get.";
 		constexpr std::string_view SelfSetPrefix = "Self.Set.";
+		constexpr std::array<std::string_view, 4> MemberKindPrefixes = { SelfGetPrefix, SelfSetPrefix, GraphMethodKindPrefix, GraphReturnKindPrefix };
 
 		constexpr std::string_view ListKindsHint = "graph.nodes lists the node kinds and their pins";
 
@@ -148,15 +153,32 @@ namespace Engine {
 			return found != graph.Nodes.end() && found->Id == id ? &*found : nullptr;
 		}
 
-		// The member a Self.Get or Self.Set kind names, or empty for any other kind.
-		std::string_view GetMemberOfKind(std::string_view kind)
+		// The prefix of a graph-dependent kind (Self.Get, Self.Set, Method, Return), or empty for any other kind.
+		std::string_view GetMemberKindPrefix(std::string_view kind)
 		{
-			for (const std::string_view prefix : { SelfGetPrefix, SelfSetPrefix })
+			for (const std::string_view prefix : MemberKindPrefixes)
 				if (kind.starts_with(prefix))
-					return kind.substr(prefix.size());
+					return prefix;
 			return {};
 		}
 
+		// The member a graph-dependent kind names (a field or variable for Self.Get and Self.Set, a method for Method and
+		// Return; a Return.<Callback>'s callback, which is no member), or empty for any other kind.
+		std::string_view GetMemberOfKind(std::string_view kind)
+		{
+			const std::string_view prefix = GetMemberKindPrefix(kind);
+			return prefix.empty() ? std::string_view() : kind.substr(prefix.size());
+		}
+
+		bool HasMethod(const GraphDocument& graph, std::string_view name)
+		{
+			return std::ranges::any_of(graph.Methods, [name](const GraphMethod& method)
+			{
+				return method.Name == name;
+			});
+		}
+
+		// Whether `graph` has a field, a variable or (M39) a method named `name`.
 		bool HasMember(const GraphDocument& graph, std::string_view name)
 		{
 			return std::ranges::any_of(graph.Fields, [name](const GraphField& field)
@@ -165,7 +187,7 @@ namespace Engine {
 			}) || std::ranges::any_of(graph.Variables, [name](const GraphVariable& variable)
 			{
 				return variable.Name == name;
-			});
+			}) || HasMethod(graph, name);
 		}
 
 		std::vector<std::string> GetMemberNames(const GraphDocument& graph)
@@ -175,10 +197,13 @@ namespace Engine {
 				names.push_back(field.Name);
 			for (const GraphVariable& variable : graph.Variables)
 				names.push_back(variable.Name);
+			for (const GraphMethod& method : graph.Methods)
+				names.push_back(method.Name);
 			return names;
 		}
 
-		// The ids of the nodes of `graph` whose kind is Self.Get.<name> or Self.Set.<name>.
+		// The ids of the nodes of `graph` whose kind names the member `name`: Self.Get.<name> or Self.Set.<name> of a field or
+		// variable, Method.<name> or Return.<name> of a method.
 		std::vector<uint32_t> FindMemberNodes(const GraphDocument& graph, std::string_view name)
 		{
 			std::vector<uint32_t> nodes;
@@ -437,6 +462,33 @@ namespace Engine {
 			std::string message = issues.front().Message;
 			std::string hint = issues.front().Hint;
 			return Utils::ReplaceIssues(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, std::move(message), std::move(hint)), std::move(issues));
+		}
+
+		// One item of graph.setMembers' methods (M39, Docs/Decisions/0056-m39-graphs-behaviours.md departure 1: free-form values,
+		// so the tool's compact schema stays small), read strictly through the registry's "GraphMethod" struct. Errors:
+		// InvalidArgument for a value that is not one, every problem located below `pointer` ("/methods/2/Parameters/0/Kind").
+		Result<GraphMethod> ReadMethodParam(const TypeRegistry& registry, const VariantValue& value, const std::string& pointer)
+		{
+			const StructInfo* type = registry.FindStruct<GraphMethod>();
+			if (type == nullptr)
+				return MakeError(ErrorCode::InvalidState, "the type registry has no GraphMethod struct (RegisterGraphTypes was not called)");
+			GraphMethod method;
+			ReadContext context;
+			context.Strict = true;
+			const Status read = type->FromJson(&method, JsonReader(value.Get()), context);
+			if (read)
+				return method;
+			std::vector<ErrorIssue> issues;
+			for (const ErrorIssue& issue : read.error().GetIssues())
+				issues.push_back({ .JsonPointer = pointer + issue.JsonPointer, .Message = issue.Message, .Hint = issue.Hint, .Suggestions = issue.Suggestions });
+			if (issues.empty())
+			{
+				issues.push_back({ .JsonPointer = pointer,
+					.Message = read.error().GetMessageText(),
+					.Hint = "a method is {Name, Parameters: [{Name, Kind, AssetType}], Results: [{Kind, AssetType}]}, as graph.read's document holds it",
+					.Suggestions = {} });
+			}
+			return std::unexpected(RefuseEdit(std::move(issues)));
 		}
 
 		// Refuses an edit of `before` whose result `after` (canonical) breaks a ValidateGraphStructure rule or, with
@@ -1010,10 +1062,19 @@ namespace Engine {
 			ENGINE_TRY(CheckItemCount(params.Remove.size(), "/remove", true));
 			ENGINE_TRY(CheckItemCount(params.Fields.size(), "/fields", true));
 			ENGINE_TRY(CheckItemCount(params.Variables.size(), "/variables", true));
+			ENGINE_TRY(CheckItemCount(params.Methods.size(), "/methods", true));
 			if (!params.Name.empty() && !IsGraphIdentifier(params.Name))
 			{
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/name",
 					std::format("'{}' is not a graph's name: a Luau identifier of at most {} bytes that is not a reserved word and does not start with \"__\"", params.Name, MaxGraphNameBytes)));
+			}
+			// M39 (departure 1): each method given is a free-form value, read strictly as a GraphMethod before anything else.
+			std::vector<GraphMethod> methods;
+			methods.reserve(params.Methods.size());
+			for (size_t index = 0; index < params.Methods.size(); ++index)
+			{
+				ENGINE_TRY_ASSIGN(GraphMethod method, ReadMethodParam(editor.GetTypeRegistry(), params.Methods[index], std::format("/methods/{}", index)));
+				methods.push_back(std::move(method));
 			}
 			ENGINE_TRY_ASSIGN(const LoadedGraph graph, LoadGraph(context, params.Graph));
 			GraphDocument after = graph.Document;
@@ -1026,33 +1087,38 @@ namespace Engine {
 				const GraphMemberRename& rename = params.Rename[index];
 				if (!HasMember(after, rename.From))
 				{
-					return std::unexpected(MakeUnknownNameError(std::format("/rename/{}/from", index), std::format("'{}' has no field or variable '{}'", graph.Path, rename.From),
-						rename.From, GetMemberNames(after), "graph.read lists the fields and variables"));
+					return std::unexpected(MakeUnknownNameError(std::format("/rename/{}/from", index), std::format("'{}' has no field, variable or method '{}'", graph.Path, rename.From),
+						rename.From, GetMemberNames(after), "graph.read lists the fields, variables and methods"));
 				}
 				if (rename.To == rename.From)
 					continue;
 				const std::string pointer = std::format("/rename/{}/to", index);
-				if (!IsGraphIdentifier(rename.To) || IsReservedScriptFieldName(rename.To))
+				const bool method = HasMethod(after, rename.From);
+				if (method ? !IsGraphMethodName(rename.To) : (!IsGraphIdentifier(rename.To) || IsReservedScriptFieldName(rename.To)))
 				{
 					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer,
-						std::format("'{}' is not a member's name: a Luau identifier of at most {} bytes that is not a reserved word, a reserved script field name or a name "
-									"starting with \"__\"",
-							rename.To, MaxGraphNameBytes)));
+						std::format("'{}' is not a member's name: a Luau identifier of at most {} bytes that is not a reserved word, a reserved script field name{} or a "
+									"name starting with \"__\"",
+							rename.To, MaxGraphNameBytes, method ? ", RunsWhileWorldPaused" : "")));
 				}
 				if (HasMember(after, rename.To))
-					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' already has a field or variable '{}'", graph.Path, rename.To)));
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer, std::format("'{}' already has a field, variable or method '{}'", graph.Path, rename.To)));
 				for (GraphField& field : after.Fields)
 					if (field.Name == rename.From)
 						field.Name = rename.To;
 				for (GraphVariable& variable : after.Variables)
 					if (variable.Name == rename.From)
 						variable.Name = rename.To;
-				// Its Self.Get and Self.Set nodes follow, keeping their ids, values and links.
+				for (GraphMethod& declared : after.Methods)
+					if (declared.Name == rename.From)
+						declared.Name = rename.To;
+				// Its nodes follow (Self.Get and Self.Set of a field or variable, Method and Return of a method), keeping their
+				// ids, values and links. A method's callers name it by a string, which no rename rewrites.
 				for (GraphNode& node : after.Nodes)
 				{
 					if (GetMemberOfKind(node.Kind) != rename.From)
 						continue;
-					node.Kind = std::format("{}{}", node.Kind.starts_with(SelfGetPrefix) ? SelfGetPrefix : SelfSetPrefix, rename.To);
+					node.Kind = std::format("{}{}", GetMemberKindPrefix(node.Kind), rename.To);
 					++result.RenamedNodes;
 				}
 			}
@@ -1063,8 +1129,8 @@ namespace Engine {
 				const std::string pointer = std::format("/remove/{}", index);
 				if (!HasMember(after, name))
 				{
-					return std::unexpected(MakeUnknownNameError(pointer, std::format("'{}' has no field or variable '{}'", graph.Path, name), name, GetMemberNames(after),
-						"graph.read lists the fields and variables"));
+					return std::unexpected(MakeUnknownNameError(pointer, std::format("'{}' has no field, variable or method '{}'", graph.Path, name), name, GetMemberNames(after),
+						"graph.read lists the fields, variables and methods"));
 				}
 				if (const std::vector<uint32_t> users = FindMemberNodes(after, name); !users.empty())
 				{
@@ -1080,21 +1146,39 @@ namespace Engine {
 				{
 					return variable.Name == name;
 				});
+				std::erase_if(after.Methods, [&name](const GraphMethod& method)
+				{
+					return method.Name == name;
+				});
 			}
 
 			// Each member given is checked alone (decision 4's member rules, located in the params), then added or replaces
-			// the member of its name; a kind change is refused below when a node's link or literal needs the old kind.
-			std::map<std::string, std::string> kindChanges; // member name -> the param pointer of its new Kind
+			// the member of its name; a kind or signature change is refused below when a node's link or literal needs the old one.
+			std::map<std::string, std::string> kindChanges;   // member name -> the param pointer of its new Kind
+			std::map<std::string, std::string> methodChanges; // M39: method name -> the param pointer of its new declaration
+			const auto otherKind = [&after](std::string_view name, std::string_view kind) -> std::string_view
+			{
+				if (kind != "field" && std::ranges::find(after.Fields, name, &GraphField::Name) != after.Fields.end())
+					return "a field";
+				if (kind != "variable" && std::ranges::find(after.Variables, name, &GraphVariable::Name) != after.Variables.end())
+					return "a variable";
+				if (kind != "method" && HasMethod(after, name))
+					return "a method";
+				return {};
+			};
+			const auto refuseOtherKind = [](std::string pointer, std::string_view name, std::string_view other, std::string_view kind)
+			{
+				return Utils::MakeParamError(ErrorCode::InvalidArgument, std::move(pointer), std::format("'{}' is {}, not a {}", name, other, kind),
+					std::format("a member becomes a {} by its removal and addition: remove it and give the {} in one graph.setMembers call", kind, kind));
+			};
 			for (size_t index = 0; index < params.Fields.size(); ++index)
 			{
 				const GraphField& field = params.Fields[index];
 				const std::string pointer = std::format("/fields/{}", index);
-				ENGINE_TRY(CheckMemberAlone(GraphDocument{ .Name = "Graph", .Fields = { field }, .Variables = {}, .Nodes = {}, .Links = {} }, "/Fields/0", pointer));
-				if (std::ranges::find(after.Variables, field.Name, &GraphVariable::Name) != after.Variables.end())
-				{
-					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer + "/Name", std::format("'{}' is a variable, not a field", field.Name),
-						"a member becomes a field by its removal and addition: remove it and give the field in one graph.setMembers call"));
-				}
+				ENGINE_TRY(CheckMemberAlone(GraphDocument{ .Name = "Graph", .RunsWhileWorldPaused = false, .Fields = { field }, .Variables = {}, .Methods = {}, .Nodes = {}, .Links = {} },
+					"/Fields/0", pointer));
+				if (const std::string_view other = otherKind(field.Name, "field"); !other.empty())
+					return std::unexpected(refuseOtherKind(pointer + "/Name", field.Name, other, "field"));
 				if (const auto existing = std::ranges::find(after.Fields, field.Name, &GraphField::Name); existing != after.Fields.end())
 				{
 					if (ChangesKind(*existing, field))
@@ -1110,12 +1194,10 @@ namespace Engine {
 			{
 				const GraphVariable& variable = params.Variables[index];
 				const std::string pointer = std::format("/variables/{}", index);
-				ENGINE_TRY(CheckMemberAlone(GraphDocument{ .Name = "Graph", .Fields = {}, .Variables = { variable }, .Nodes = {}, .Links = {} }, "/Variables/0", pointer));
-				if (std::ranges::find(after.Fields, variable.Name, &GraphField::Name) != after.Fields.end())
-				{
-					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, pointer + "/Name", std::format("'{}' is a field, not a variable", variable.Name),
-						"a member becomes a variable by its removal and addition: remove it and give the variable in one graph.setMembers call"));
-				}
+				ENGINE_TRY(CheckMemberAlone(GraphDocument{ .Name = "Graph", .RunsWhileWorldPaused = false, .Fields = {}, .Variables = { variable }, .Methods = {}, .Nodes = {}, .Links = {} },
+					"/Variables/0", pointer));
+				if (const std::string_view other = otherKind(variable.Name, "variable"); !other.empty())
+					return std::unexpected(refuseOtherKind(pointer + "/Name", variable.Name, other, "variable"));
 				if (const auto existing = std::ranges::find(after.Variables, variable.Name, &GraphVariable::Name); existing != after.Variables.end())
 				{
 					if (ChangesKind(*existing, variable))
@@ -1127,6 +1209,27 @@ namespace Engine {
 					after.Variables.push_back(variable);
 				}
 			}
+			for (size_t index = 0; index < methods.size(); ++index)
+			{
+				const GraphMethod& method = methods[index];
+				const std::string pointer = std::format("/methods/{}", index);
+				ENGINE_TRY(CheckMemberAlone(GraphDocument{ .Name = "Graph", .RunsWhileWorldPaused = false, .Fields = {}, .Variables = {}, .Methods = { method }, .Nodes = {}, .Links = {} },
+					"/Methods/0", pointer));
+				if (const std::string_view other = otherKind(method.Name, "method"); !other.empty())
+					return std::unexpected(refuseOtherKind(pointer + "/Name", method.Name, other, "method"));
+				if (const auto existing = std::ranges::find(after.Methods, method.Name, &GraphMethod::Name); existing != after.Methods.end())
+				{
+					if (*existing != method)
+						methodChanges[method.Name] = pointer;
+					*existing = method;
+				}
+				else
+				{
+					after.Methods.push_back(method);
+				}
+			}
+			if (context.HasParam("runsWhileWorldPaused"))
+				after.RunsWhileWorldPaused = params.RunsWhileWorldPaused;
 			CanonicalizeGraph(after);
 			if (after == graph.Document)
 			{
@@ -1135,25 +1238,47 @@ namespace Engine {
 			}
 
 			ENGINE_TRY_ASSIGN(const GraphNodeLibrary* library, GetLibrary(editor));
-			ENGINE_TRY(CheckEdit(graph.Document, after, library, [&params, &after, &kindChanges](std::string_view pointer, uint32_t issueNode)
+			ENGINE_TRY(CheckEdit(graph.Document, after, library, [&params, &methods, &after, &kindChanges, &methodChanges](std::string_view pointer, uint32_t issueNode)
 			{
 				const DocumentPointer split = SplitDocumentPointer(pointer);
 				if (split.Section == "Name")
 					return std::string("/name");
-				if (split.Section == "Fields" || split.Section == "Variables")
+				if (split.Section == "Fields" || split.Section == "Variables" || split.Section == "Methods")
 				{
 					// The member the issue concerns, located at the param that gave or renamed it.
-					const bool isField = split.Section == "Fields";
-					const std::string_view list = isField ? "/fields" : "/variables";
-					const size_t count = isField ? after.Fields.size() : after.Variables.size();
-					if (!split.Index.has_value() || *split.Index >= count)
-						return std::string(list);
-					const std::string& name = isField ? after.Fields[*split.Index].Name : after.Variables[*split.Index].Name;
-					const size_t given = isField ? params.Fields.size() : params.Variables.size();
-					for (size_t index = given; index-- > 0;)
+					std::vector<std::string_view> names;
+					std::vector<std::string_view> given;
+					std::string_view list;
+					if (split.Section == "Fields")
 					{
-						const std::string& candidate = isField ? params.Fields[index].Name : params.Variables[index].Name;
-						if (candidate == name)
+						list = "/fields";
+						for (const GraphField& field : after.Fields)
+							names.push_back(field.Name);
+						for (const GraphField& field : params.Fields)
+							given.push_back(field.Name);
+					}
+					else if (split.Section == "Variables")
+					{
+						list = "/variables";
+						for (const GraphVariable& variable : after.Variables)
+							names.push_back(variable.Name);
+						for (const GraphVariable& variable : params.Variables)
+							given.push_back(variable.Name);
+					}
+					else
+					{
+						list = "/methods";
+						for (const GraphMethod& method : after.Methods)
+							names.push_back(method.Name);
+						for (const GraphMethod& method : methods)
+							given.push_back(method.Name);
+					}
+					if (!split.Index.has_value() || *split.Index >= names.size())
+						return std::string(list);
+					const std::string_view name = names[*split.Index];
+					for (size_t index = given.size(); index-- > 0;)
+					{
+						if (given[index] == name)
 							return std::format("{}/{}{}", list, index, split.Rest);
 					}
 					for (size_t index = params.Rename.size(); index-- > 0;)
@@ -1161,12 +1286,29 @@ namespace Engine {
 							return std::format("/rename/{}/to", index);
 					return std::string(list);
 				}
-				// A ValidateGraph issue: at the Kind of the member whose node it concerns, else of the first member whose kind
-				// changed, since only a kind change makes a link or a literal of the graph's nodes wrong here.
-				if (const GraphNode* node = FindGraphNode(after, issueNode); node != nullptr)
-					if (const auto change = kindChanges.find(std::string(GetMemberOfKind(node->Kind))); change != kindChanges.end())
+				// A ValidateGraph issue: at the Kind of the member whose node it concerns, or (M39) at the declaration of the method
+				// whose Method or Return node it concerns (a link's issue concerns both its ends), else at the first member whose
+				// kind changed, since only a kind or signature change makes a link or a literal of the graph's nodes wrong here.
+				std::vector<const GraphNode*> nodes;
+				if (split.Section == "Links" && split.Index.has_value() && *split.Index < after.Links.size())
+				{
+					nodes.push_back(FindGraphNode(after, after.Links[*split.Index].From.Node));
+					nodes.push_back(FindGraphNode(after, after.Links[*split.Index].To.Node));
+				}
+				nodes.push_back(FindGraphNode(after, issueNode));
+				for (const GraphNode* node : nodes)
+				{
+					if (node == nullptr)
+						continue;
+					const std::string member(GetMemberOfKind(node->Kind));
+					if (const auto change = kindChanges.find(member); change != kindChanges.end())
 						return change->second;
-				return kindChanges.empty() ? std::string() : kindChanges.begin()->second;
+					if (const auto change = methodChanges.find(member); change != methodChanges.end())
+						return change->second + (node->Kind.starts_with(GraphMethodKindPrefix) ? "/Parameters" : "/Results");
+				}
+				if (!kindChanges.empty())
+					return kindChanges.begin()->second;
+				return methodChanges.empty() ? std::string() : methodChanges.begin()->second;
 			}));
 			ENGINE_TRY_ASSIGN(result.UndoIndex, WriteGraph(editor, graph, after, "Set Graph Members"));
 			result.Graph = Utils::MakeAssetSummary(editor.GetAssets(), graph.Handle);
@@ -1265,9 +1407,10 @@ namespace Engine {
 			.Entry(GraphPinDirection::Input, "Input", "The pin takes a value (or, for Exec, is where the flow enters).")
 			.Entry(GraphPinDirection::Output, "Output", "The pin gives a value (or, for Exec, is where the flow continues).");
 		registry.Enum<GraphNodeCategory>("GraphNodeCategory", "Where the graph editor's node menu lists a node kind.")
-			.Entry(GraphNodeCategory::Event, "Event", "A behaviour callback: where a flow starts (Event.*).")
-			.Entry(GraphNodeCategory::Flow, "Flow", "Branches, sequences, loops and delays (Flow.*).")
-			.Entry(GraphNodeCategory::Member, "Member", "The behaviour's own entity, fields and variables (Self.*).")
+			.Entry(GraphNodeCategory::Event, "Event", "A behaviour callback or a graph method: where a flow starts (Event.*, Method.*).")
+			.Entry(GraphNodeCategory::Flow, "Flow", "Branches, sequences, loops, delays and returns (Flow.*, Return.*).")
+			.Entry(GraphNodeCategory::Member, "Member",
+				"This or another behaviour's members: the entity, fields, variables and instance (Self.*), and any value's (Script.*).")
 			.Entry(GraphNodeCategory::Operator, "Operator", "Arithmetic, comparison, logic, vector and text operators.")
 			.Entry(GraphNodeCategory::Call, "Call", "A script API function, method or constructor (Call.*).")
 			.Entry(GraphNodeCategory::Property, "Property", "A script API property or component field (Get.*, Set.*).")
@@ -1312,7 +1455,7 @@ namespace Engine {
 			.Field("luau", &GraphReadResult::Luau, "With luau: the transpiled text; empty while the graph does not transpile.")
 			.Field("lineNodes", &GraphReadResult::LineNodes, "With luau: the node of each line of the text (0 for none).");
 		registry.Struct<GraphNodesParams>("GraphNodesParams", "The params of graph.nodes.")
-			.Field("graph", &GraphNodesParams::Graph, "A graph whose Self.Get and Self.Set kinds to add; empty for none.")
+			.Field("graph", &GraphNodesParams::Graph, "A graph whose own kinds (Self.Get, Self.Set, Method, Return) to add; empty for none.")
 			.Field("prefix", &GraphNodesParams::Prefix, "Only the kinds that start with it (\"Call.Input.\", \"Flow.\").")
 			.Field("kinds", &GraphNodesParams::Kinds, "Only these kinds.");
 		registry.Struct<GraphNodesResult>("GraphNodesResult", "Node kinds of the node library.")
@@ -1361,19 +1504,22 @@ namespace Engine {
 		registry.Struct<GraphSetValuesParams>("GraphSetValuesParams", "The params of graph.setValues.")
 			.Field("graph", &GraphSetValuesParams::Graph, "The graph.")
 			.Field("values", &GraphSetValuesParams::Values, "The literals, in order.");
-		registry.Struct<GraphMemberRename>("GraphMemberRename", "One field or variable to rename.")
+		registry.Struct<GraphMemberRename>("GraphMemberRename", "One field, variable or method to rename.")
 			.Field("from", &GraphMemberRename::From, "Its name.")
 			.Field("to", &GraphMemberRename::To, "Its new name.");
 		registry.Struct<GraphSetMembersParams>("GraphSetMembersParams", "The params of graph.setMembers.")
 			.Field("graph", &GraphSetMembersParams::Graph, "The graph.")
 			.Field("name", &GraphSetMembersParams::Name, "The behaviour's new name; empty keeps it.")
-			.Field("rename", &GraphSetMembersParams::Rename, "Fields and variables to rename, with their Self nodes.")
-			.Field("remove", &GraphSetMembersParams::Remove, "Fields and variables to remove; refused while a node uses one.")
+			.Field("rename", &GraphSetMembersParams::Rename, "Fields, variables and methods to rename, with their nodes.")
+			.Field("remove", &GraphSetMembersParams::Remove, "Fields, variables and methods to remove; refused while a node uses one.")
 			.Field("fields", &GraphSetMembersParams::Fields, "Fields to add or replace, by name.")
-			.Field("variables", &GraphSetMembersParams::Variables, "Variables to add or replace, by name.");
+			.Field("variables", &GraphSetMembersParams::Variables, "Variables to add or replace, by name.")
+			.Field("methods", &GraphSetMembersParams::Methods,
+				"Methods to add or replace, by name: GraphMethod objects {Name, Parameters: [{Name, Kind, AssetType}], Results: [] or [{Kind, AssetType}]}.")
+			.Field("runsWhileWorldPaused", &GraphSetMembersParams::RunsWhileWorldPaused, "Whether the behaviour updates while the world is paused; absent keeps it.");
 		registry.Struct<GraphSetMembersResult>("GraphSetMembersResult", "The outcome of a graph.setMembers.")
 			.Field("graph", &GraphSetMembersResult::Graph, "The graph.")
-			.Field("renamedNodes", &GraphSetMembersResult::RenamedNodes, "The Self.Get and Self.Set nodes the renames rewrote.")
+			.Field("renamedNodes", &GraphSetMembersResult::RenamedNodes, "The Self.Get, Self.Set, Method and Return nodes the renames rewrote.")
 			.Field("undoIndex", &GraphSetMembersResult::UndoIndex, "The edit's undo step; 0 in a dry run, in a batch or when nothing changed.");
 
 		registry.Struct<GraphLiveValuesParams>("GraphLiveValuesParams", "The params of graph.liveValues.")
@@ -1439,7 +1585,7 @@ namespace Engine {
 			{
 				.Name = "graph.nodes",
 				.Description = "Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own "
-							   "Self.Get and Self.Set kinds.",
+							   "Self.Get, Self.Set, Method and Return kinds.",
 				.ExposeAsTool = true,
 				.AllowedInBatch = true,
 				.Examples = { { .Description = "List the flow nodes.", .Params = Json{ { "prefix", "Flow." } } } },
@@ -1524,7 +1670,8 @@ namespace Engine {
 		methods.Add(
 			{
 				.Name = "graph.setMembers",
-				.Description = "Renames the behaviour and renames, removes, adds or replaces its fields and variables as one undoable edit.",
+				.Description = "Renames the behaviour, sets its world-pause opt-in, and renames, removes, adds or replaces its fields, variables and "
+							   "methods as one undoable edit; a method's callers name it by a string, which no rename rewrites.",
 				.RequiredParams = { "graph" },
 				.ExposeAsTool = true,
 				.Mutates = true,

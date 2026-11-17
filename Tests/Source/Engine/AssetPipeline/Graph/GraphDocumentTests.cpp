@@ -13,11 +13,13 @@
 #include "Engine/Scripting/ScriptApiRegistry.h"
 #include "Support/Fuzz.h"
 #include "Support/SceneTestFixture.h"
+#include "Support/TestData.h"
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <format>
 #include <string>
 #include <string_view>
@@ -31,10 +33,11 @@ namespace Engine {
 
 	namespace {
 
-		// The door of the ADR's example: opens once when its Player enters its trigger, logging it.
+		// The door of the ADR's example: opens once when its Player enters its trigger, logging it. Version 2 (M39), without the
+		// members version 2 added, which a reader leaves at their defaults.
 		constexpr std::string_view DoorGraph = R"({
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Door",
 	"Fields": [
 		{ "Name": "Player", "Kind": "Entity", "Default": null, "Element": "Number", "AssetType": "", "EnumValues": [], "Options": {} },
@@ -242,8 +245,9 @@ namespace Engine {
 		{
 			constexpr std::string_view Expected = R"({
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Counter",
+	"RunsWhileWorldPaused": false,
 	"Fields": [
 		{
 			"Name": "Step",
@@ -268,6 +272,7 @@ namespace Engine {
 			"EnumValues": []
 		}
 	],
+	"Methods": [],
 	"Nodes": [
 		{
 			"Id": 1,
@@ -608,23 +613,175 @@ namespace Engine {
 			CHECK(links > 0);
 		}
 
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 1): graph format 2 reads every version 1 file as version 2
+		// with no methods and the opt-in false, the members version 2 added being unknown in a version 1 file and its Any kind
+		// refused; project.upgrade writes v1.upgraded.graph's bytes (ProjectMethodsTests.cpp).
+		TEST_CASE("GraphDocument: a version 1 graph reads as version 2 without methods")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const Result<std::string> v1 = Test::ReadTestDataText("Formats/Graph/v1.graph");
+			const Result<std::string> upgraded = Test::ReadTestDataText("Formats/Graph/v1.upgraded.graph");
+			REQUIRE_MESSAGE(v1.has_value(), v1.error().ToString());
+			REQUIRE_MESSAGE(upgraded.has_value(), upgraded.error().ToString());
+			GraphLoadReport report;
+			const Result<GraphDocument> graph = GraphFromText(*v1, *registry, report, true);
+			REQUIRE_MESSAGE(graph.has_value(), graph.error().ToString());
+			CHECK(report.FileVersion == 1);
+			CHECK(report.Diagnostics.empty());
+			CHECK(graph->Methods.empty());
+			CHECK_FALSE(graph->RunsWhileWorldPaused);
+			CHECK(GraphToText(*graph, *registry).value_or(std::string()) == *upgraded);
+			// The upgraded text reads as the same document, at the current version.
+			const Result<GraphDocument> again = GraphFromText(*upgraded, *registry, report, true);
+			REQUIRE_MESSAGE(again.has_value(), again.error().ToString());
+			CHECK(report.FileVersion == GraphFormatVersion);
+			CHECK(*again == *graph);
+
+			// In a version 1 file the members version 2 added are unknown: warned of and dropped, or refused strictly.
+			Json withMembers = JsonReader::Parse(*v1).value_or(Json());
+			withMembers["RunsWhileWorldPaused"] = true;
+			withMembers["Methods"] = Json::array({ Json{ { "Name", "Pull" }, { "Parameters", Json::array() }, { "Results", Json::array() } } });
+			GraphLoadReport warned;
+			const Result<GraphDocument> dropped = GraphFromJson(withMembers, *registry, warned);
+			REQUIRE_MESSAGE(dropped.has_value(), dropped.error().ToString());
+			CHECK(dropped->Methods.empty());
+			CHECK_FALSE(dropped->RunsWhileWorldPaused);
+			REQUIRE(warned.Diagnostics.size() == 2);
+			CHECK(warned.Diagnostics[0].JsonPointer == "/RunsWhileWorldPaused");
+			CHECK(warned.Diagnostics[1].JsonPointer == "/Methods");
+			const Result<GraphDocument> strict = GraphFromJson(withMembers, *registry, warned, true);
+			REQUIRE_FALSE(strict.has_value());
+			CHECK(IssuePointers(std::unexpected(strict.error())) == std::vector<std::string>{ "/RunsWhileWorldPaused", "/Methods" });
+
+			// A version 1 variable of kind Any is refused at its Kind; the same variable reads at version 2.
+			Json withAny = JsonReader::Parse(*v1).value_or(Json());
+			withAny["Variables"][0]["Kind"] = "Any";
+			withAny["Variables"][0]["Default"] = nullptr;
+			const Result<GraphDocument> refused = GraphFromJson(withAny, *registry, warned);
+			REQUIRE_FALSE(refused.has_value());
+			CHECK(IssuePointers(std::unexpected(refused.error())) == std::vector<std::string>{ "/Variables/0/Kind" });
+			withAny["Version"] = GraphFormatVersion;
+			const Result<GraphDocument> current = GraphFromJson(withAny, *registry, warned, true);
+			REQUIRE_MESSAGE(current.has_value(), current.error().ToString());
+			CHECK(current->Variables[0].Kind == GraphValueKind::Any);
+		}
+
+		// M39 (decision 1 and departures 2 and 4): a method's name, parameters and result follow their rules, each violation
+		// located; the Any kind is a variable's, a parameter's or a result's, never a field's or an element's.
+		TEST_CASE("GraphDocument: a method's declaration follows the method rules, each violation at its pointer")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const GraphDocument door = ReadDoor(*registry);
+			const auto method = [](std::string name, std::vector<GraphParameter> parameters, std::vector<GraphResult> results)
+			{
+				return GraphMethod{ .Name = std::move(name), .Parameters = std::move(parameters), .Results = std::move(results) };
+			};
+			const auto parameter = [](std::string name, GraphValueKind kind, std::string assetType = {})
+			{
+				return GraphParameter{ .Name = std::move(name), .Kind = kind, .AssetType = std::move(assetType) };
+			};
+			const auto result = [](GraphValueKind kind, std::string assetType = {})
+			{
+				return GraphResult{ .Kind = kind, .AssetType = std::move(assetType) };
+			};
+
+			// A valid declaration: parameters of several kinds, an Asset of any type and of one type, a result.
+			GraphDocument graph = door;
+			graph.Methods = { method("Blocks", { parameter("hit", GraphValueKind::Any), parameter("clip", GraphValueKind::Asset), parameter("icon", GraphValueKind::Asset, "Texture") },
+								  { result(GraphValueKind::Bool) }),
+				method("Pull", {}, {}) };
+			CHECK(ValidateGraphStructure(graph).has_value());
+			CHECK(IsGraphMethodName("Pull"));
+			CHECK_FALSE(IsGraphMethodName("RunsWhileWorldPaused"));
+			CHECK_FALSE(IsGraphMethodName("OnUiClick"));
+			CHECK(IsGraphMethodValueKind(GraphValueKind::Any));
+			CHECK_FALSE(IsGraphMethodValueKind(GraphValueKind::Enum));
+			CHECK_FALSE(IsGraphMethodValueKind(GraphValueKind::Array));
+
+			// Names: not an identifier, reserved, the class key, a field's name, out of order.
+			graph.Methods = { method("2nd", {}, {}) };
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/0/Name" });
+			graph.Methods = { method("OnStart", {}, {}), method("RunsWhileWorldPaused", {}, {}) };
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/0/Name", "/Methods/1/Name" });
+			graph.Methods = { method("Speed", {}, {}) }; // a field's name
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/0/Name" });
+			graph.Methods = { method("Pull", {}, {}), method("Open", {}, {}) };
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/1/Name" });
+
+			// Parameters: at most four, named neither self nor Then, unique, of a method's kinds, an AssetType for an Asset only.
+			graph.Methods = { method("Pull",
+				{ parameter("a", GraphValueKind::Number), parameter("b", GraphValueKind::Number), parameter("c", GraphValueKind::Number), parameter("d", GraphValueKind::Number),
+					parameter("e", GraphValueKind::Number) },
+				{}) };
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/0/Parameters" });
+			graph.Methods = { method("Pull", { parameter("self", GraphValueKind::Any), parameter("Then", GraphValueKind::Any), parameter("x", GraphValueKind::Any) }, {}) };
+			graph.Methods[0].Parameters.push_back(parameter("x", GraphValueKind::Any));
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/0/Parameters/0/Name", "/Methods/0/Parameters/1/Name", "/Methods/0/Parameters/3/Name" });
+			graph.Methods = { method("Pull", { parameter("mode", GraphValueKind::Enum), parameter("list", GraphValueKind::Array), parameter("speed", GraphValueKind::Number, "Texture"), parameter("clip", GraphValueKind::Asset, "Nope") },
+				{}) };
+			CHECK(IssuePointers(ValidateGraphStructure(graph))
+				== std::vector<std::string>{ "/Methods/0/Parameters/0/Kind", "/Methods/0/Parameters/1/Kind", "/Methods/0/Parameters/2/AssetType", "/Methods/0/Parameters/3/AssetType" });
+
+			// Results: at most one (departure 2: a second is refused at its pointer), of a method's kinds.
+			graph.Methods = { method("Pull", {}, { result(GraphValueKind::Bool), result(GraphValueKind::Number) }) };
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/0/Results/1" });
+			graph.Methods = { method("Pull", {}, { result(GraphValueKind::Array) }) };
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods/0/Results/0/Kind" });
+
+			// At most MaxGraphMethods methods.
+			graph.Methods.clear();
+			for (size_t index = 0; index <= MaxGraphMethods; ++index)
+				graph.Methods.push_back(method(std::format("M{:03}", index), {}, {}));
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Methods" });
+
+			// Any: never a field's kind or an element; a variable's Default is null.
+			graph = door;
+			graph.Fields[1].Kind = GraphValueKind::Any;
+			graph.Variables[0].Kind = GraphValueKind::Array;
+			graph.Variables[0].Element = GraphValueKind::Any;
+			graph.Variables[0].Default = VariantValue(Json::array());
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Fields/1/Kind", "/Variables/0/Element" });
+			graph = door;
+			graph.Variables[0].Kind = GraphValueKind::Any;
+			CHECK(IssuePointers(ValidateGraphStructure(graph)) == std::vector<std::string>{ "/Variables/0/Default" });
+			graph.Variables[0].Default = VariantValue(Json(nullptr));
+			CHECK(ValidateGraphStructure(graph).has_value());
+
+			// A graph's methods and opt-in write back through the canonical text.
+			graph.RunsWhileWorldPaused = true;
+			graph.Methods = { method("Pull", { parameter("by", GraphValueKind::Entity) }, { result(GraphValueKind::Any) }) };
+			const Result<std::string> text = GraphToText(graph, *registry);
+			REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+			GraphLoadReport report;
+			const Result<GraphDocument> read = GraphFromText(*text, *registry, report, true);
+			REQUIRE_MESSAGE(read.has_value(), read.error().ToString());
+			CHECK(*read == graph);
+		}
+
 		TEST_CASE("GraphDocument: 1,000 seeded mutations of a graph file never crash the reader, the validation or the transpiler"
 			* doctest::test_suite(Test::FuzzSuite))
 		{
-			// The seed corpus: the door's canonical text. A mutated text goes through GraphFromText (strict or not); a document it
-			// accepts is valid structurally, writes back, and goes through ValidateGraph and, when that finds nothing, through
-			// TranspileGraph and FindGraphAssetLiterals, so the library's and the transpiler's handling of every accepted document
-			// is fuzzed with the reader's.
+			// The seed corpus: the door's canonical text and (M39, Docs/Decisions/0056-m39-graphs-behaviours.md) the Rune fixture's,
+			// a graph with methods, returns through a merge, a callback's return and Script.Get, and the Valve fixture's, with
+			// Script.Set, Script.Call by name and Self.Instance (the review of W39.1), taken in turn. A mutated text goes
+			// through GraphFromText (strict or not); a document it accepts is valid structurally, writes back, and goes through
+			// ValidateGraph and, when that finds nothing, through TranspileGraph and FindGraphAssetLiterals, so the library's and
+			// the transpiler's handling of every accepted document is fuzzed with the reader's.
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			ScriptApiRegistry api;
 			REQUIRE(RegisterBindings(api, *registry).has_value());
 			const Result<Scope<GraphNodeLibrary>> library = GraphNodeLibrary::Create(api);
 			REQUIRE_MESSAGE(library.has_value(), library.error().ToString());
-			const Result<std::string> seedText = GraphToText(ReadDoor(*registry), *registry);
-			REQUIRE_MESSAGE(seedText.has_value(), seedText.error().ToString());
-			const Test::FuzzRun run = Test::RunFuzzCase(0x6A7A0F24, 1000, [&registry, &library, &seedText](Random& random, uint64_t /*index*/)
+			const Result<std::string> doorText = GraphToText(ReadDoor(*registry), *registry);
+			REQUIRE_MESSAGE(doorText.has_value(), doorText.error().ToString());
+			const Result<std::string> runeText = Test::ReadTestDataText("Graphs/Rune.graph");
+			REQUIRE_MESSAGE(runeText.has_value(), runeText.error().ToString());
+			const Result<std::string> valveText = Test::ReadTestDataText("Graphs/Valve.graph");
+			REQUIRE_MESSAGE(valveText.has_value(), valveText.error().ToString());
+			const std::array<const std::string*, 3> seeds = { &*doorText, &*runeText, &*valveText };
+			const Test::FuzzRun run = Test::RunFuzzCase(0x6A7A0F24, 1000, [&registry, &library, &seeds](Random& random, uint64_t index)
 			{
-				std::string mutated = *seedText;
+				std::string mutated = *seeds[index % seeds.size()];
 				Test::MutateText(mutated, random);
 				GraphLoadReport report;
 				const Result<GraphDocument> graph = GraphFromText(mutated, *registry, report, random.NextBool());

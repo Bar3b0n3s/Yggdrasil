@@ -52,8 +52,17 @@ namespace Engine {
 			Any
 		};
 
-		constexpr std::array<std::string_view, 11> GraphValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity",
-			"Asset", "Enum", "Array" };
+		// GraphValueKind's names in value order: a field takes the first 11, a variable every one (M39's Any last), an Array's
+		// element the first 10 (GraphDocument.h).
+		constexpr std::array<std::string_view, 12> GraphValueKindNames = { "Number", "Integer", "Bool", "String", "Vector", "Color", "Quat",
+			"Entity", "Asset", "Enum", "Array", "Any" };
+		constexpr int FieldKindCount = 11;
+		constexpr int ElementKindCount = 10;
+
+		// The kinds a method's parameter or result may have (M39, IsGraphMethodValueKind), in GraphValueKind's order.
+		constexpr std::array<GraphValueKind, 10> MethodValueKinds = { GraphValueKind::Number, GraphValueKind::Integer, GraphValueKind::Bool,
+			GraphValueKind::String, GraphValueKind::Vector, GraphValueKind::Color, GraphValueKind::Quat, GraphValueKind::Entity, GraphValueKind::Asset,
+			GraphValueKind::Any };
 
 		// A pin the node's kind no longer has, and its label (M24's review): the error outline's colour.
 		constexpr ImU32 StalePinColor = IM_COL32(236, 86, 86, 255);
@@ -107,7 +116,8 @@ namespace Engine {
 			return IM_COL32(86, 88, 100, 255);
 		}
 
-		// The members a graph's Self kinds are listed for: each field's and variable's name and kind.
+		// The members a graph's own kinds are listed for: each field's and variable's name and kind, and (M39) each method's
+		// name and signature, whose Method and Return kinds' pins follow it.
 		static std::string DescribeGraphMembers(const GraphDocument& graph)
 		{
 			std::string members;
@@ -115,7 +125,47 @@ namespace Engine {
 				members += std::format("{}:{};", field.Name, std::to_underlying(field.Kind));
 			for (const GraphVariable& variable : graph.Variables)
 				members += std::format("{}:{};", variable.Name, std::to_underlying(variable.Kind));
+			for (const GraphMethod& method : graph.Methods)
+			{
+				members += std::format("{}(", method.Name);
+				for (const GraphParameter& parameter : method.Parameters)
+					members += std::format("{}:{}:{},", parameter.Name, std::to_underlying(parameter.Kind), parameter.AssetType);
+				for (const GraphResult& result : method.Results)
+					members += std::format(")->{}:{}", std::to_underlying(result.Kind), result.AssetType);
+				members += ";";
+			}
 			return members;
+		}
+
+		// A method's signature as the side panel shows it (M39): "(hit: Any, amount: Number) -> Bool".
+		static std::string DescribeMethodSignature(const GraphMethod& method)
+		{
+			// A kind's name; a value past the enum's (never in a valid graph) as the last one's.
+			const auto kindName = [](GraphValueKind kind)
+			{
+				return GraphValueKindNames[std::min<size_t>(std::to_underlying(kind), GraphValueKindNames.size() - 1)];
+			};
+			std::string signature = "(";
+			for (size_t index = 0; index < method.Parameters.size(); ++index)
+			{
+				const GraphParameter& parameter = method.Parameters[index];
+				signature += std::format("{}{}: {}", index == 0 ? "" : ", ", parameter.Name, kindName(parameter.Kind));
+			}
+			signature += ")";
+			if (!method.Results.empty())
+				signature += std::format(" -> {}", kindName(method.Results.front().Kind));
+			return signature;
+		}
+
+		// The first name "arg<n>" (n from 1) that `method` has no parameter of: a new parameter's.
+		static std::string MakeParameterName(const GraphMethod& method)
+		{
+			for (size_t number = 1;; ++number)
+			{
+				std::string name = std::format("arg{}", number);
+				if (std::ranges::find(method.Parameters, name, &GraphParameter::Name) == method.Parameters.end())
+					return name;
+			}
 		}
 
 		// The JSON number a .graph file holds for `value` (GraphDocument.h's number rule): the float's shortest spelling read
@@ -193,7 +243,8 @@ namespace Engine {
 				case GraphValueKind::Enum:    return GraphValueWidget::Choice;
 				case GraphValueKind::Entity:
 				case GraphValueKind::Asset:
-				case GraphValueKind::Array:   return GraphValueWidget::None; // nil and [] by default (GraphDocument.h)
+				case GraphValueKind::Array:
+				case GraphValueKind::Any:     return GraphValueWidget::None; // nil and [] by default (GraphDocument.h)
 			}
 			return GraphValueWidget::None;
 		}
@@ -219,7 +270,8 @@ namespace Engine {
 				case GraphValueKind::Enum:    return choices.empty() ? Json("") : Json(choices.front());
 				case GraphValueKind::Array:   return Json::array();
 				case GraphValueKind::Entity:
-				case GraphValueKind::Asset:   return Json();
+				case GraphValueKind::Asset:
+				case GraphValueKind::Any:     return Json();
 			}
 			return Json();
 		}
@@ -1669,6 +1721,11 @@ namespace Engine {
 		if (ImGui::InputText("##BehaviourName", &name, ImGuiInputTextFlags_EnterReturnsTrue) && name != graph.Name)
 			Submit(context, MakeGraphEditorRequest(types, GraphSetMembersParams{ .Graph = m_Reference, .Name = name, .Rename = {}, .Remove = {}, .Fields = {}, .Variables = {} }));
 		ImGui::SetItemTooltip("The behaviour's name (Script.Define), a Luau identifier. Press Enter to rename it.");
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 13): the world-pause opt-in.
+		bool runs = graph.RunsWhileWorldPaused;
+		if (ImGui::Checkbox("Runs while the world is paused", &runs))
+			Submit(context, MakeGraphWorldPauseRequest(m_Reference, runs));
+		ImGui::SetItemTooltip("Whether this behaviour updates while the world is paused (Time.PauseWorld), as a pause menu's does.");
 
 		// One row per member: its name (Enter renames it, with its Self nodes), its kind, its default and its removal.
 		const auto drawMember = [this, &context, &types](const std::string& memberName, GraphValueKind kind, const Json& stored, std::span<const std::string> choices,
@@ -1734,20 +1791,23 @@ namespace Engine {
 		std::array<const char*, GraphValueKindNames.size()> kindLabels{};
 		for (size_t index = 0; index < kindLabels.size(); ++index)
 			kindLabels[index] = GraphValueKindNames[index].data();
+		// A field's kinds, and a variable's, Any (M39) included.
+		const int kindCount = m_NewMemberVariable ? static_cast<int>(kindLabels.size()) : FieldKindCount;
+		m_NewMemberKind = std::clamp(m_NewMemberKind, 0, kindCount - 1);
 		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
-		ImGui::Combo("##NewMemberKind", &m_NewMemberKind, kindLabels.data(), static_cast<int>(kindLabels.size()));
+		ImGui::Combo("##NewMemberKind", &m_NewMemberKind, kindLabels.data(), kindCount);
 		ImGui::SameLine();
 		ImGui::Checkbox("Variable", &m_NewMemberVariable);
 		ImGui::SetItemTooltip("A variable is instance state OnCreate sets; a field is set per script slot in the inspector.");
-		const auto kind = static_cast<GraphValueKind>(m_NewMemberKind);
+		const auto kind = static_cast<GraphValueKind>(std::clamp(m_NewMemberKind, 0, kindCount - 1));
 		const std::vector<std::string_view> assetTypes = Utils::GetGraphAssetTypeNames();
 		GraphValueKind element = GraphValueKind::Number;
 		if (kind == GraphValueKind::Array)
 		{
-			// Any kind but Array (GraphDocument.h).
+			// Any kind but Array and Any (GraphDocument.h).
 			ImGui::SetNextItemWidth(-1.0f);
-			ImGui::Combo("##NewMemberElement", &m_NewMemberElement, kindLabels.data(), static_cast<int>(kindLabels.size()) - 1);
-			element = static_cast<GraphValueKind>(m_NewMemberElement);
+			ImGui::Combo("##NewMemberElement", &m_NewMemberElement, kindLabels.data(), ElementKindCount);
+			element = static_cast<GraphValueKind>(std::clamp(m_NewMemberElement, 0, ElementKindCount - 1));
 		}
 		const GraphValueKind typed = kind == GraphValueKind::Array ? element : kind;
 		if (typed == GraphValueKind::Asset)
@@ -1782,7 +1842,198 @@ namespace Engine {
 			m_NewMemberName.clear();
 		}
 		ImGui::EndDisabled();
+
+		// M39 (decision 13): the methods, each with its parameters and result, and a new method's name.
+		Utils::EditorSectionHeading("Methods");
+		for (const GraphMethod& method : graph.Methods)
+			DrawMethod(context, method);
+		if (graph.Methods.empty())
+			ImGui::TextDisabled("No methods: scripts call them on the instance.");
+		ImGui::SetNextItemWidth(-1.0f);
+		ImGui::InputTextWithHint("##NewMethodName", "New method name", &m_NewMethodName);
+		// A name the graph already holds adds nothing: the new method would replace that method (or be refused as a field's or
+		// variable's name), so it is renamed or edited in its own row instead.
+		const bool taken = std::ranges::find(graph.Methods, m_NewMethodName, &GraphMethod::Name) != graph.Methods.end()
+			|| std::ranges::find(graph.Fields, m_NewMethodName, &GraphField::Name) != graph.Fields.end()
+			|| std::ranges::find(graph.Variables, m_NewMethodName, &GraphVariable::Name) != graph.Variables.end();
+		ImGui::BeginDisabled(!IsGraphMethodName(m_NewMethodName) || taken);
+		if (ImGui::Button("Add method", ImVec2(-1.0f, 0.0f)))
+		{
+			Submit(context, MakeGraphMethodRequest(types, m_Reference, GraphMethod{ .Name = m_NewMethodName, .Parameters = {}, .Results = {} }));
+			m_NewMethodName.clear();
+		}
 		ImGui::EndDisabled();
+		ImGui::SetItemTooltip(taken ? "A field, variable or method of the graph has this name: edit that one in its row."
+									: "Adds a method without parameters or a result; scripts call it on the instance.");
+		ImGui::EndDisabled();
+	}
+
+	void GraphEditorPanel::DrawMethod(EditorPanelContext& context, const GraphMethod& method)
+	{
+		// One method (M39, decision 13): its name (Enter renames it with its Method and Return nodes), its signature and its
+		// removal; then each parameter's name (Enter renames it), kind, an Asset's type and removal, Add parameter, and the
+		// result. Every change but a rename or removal submits the method's new declaration through graph.setMembers.
+		const TypeRegistry& types = context.Editor.GetTypeRegistry();
+		const auto replace = [this, &context, &types](const GraphMethod& replaced)
+		{
+			Submit(context, MakeGraphMethodRequest(types, m_Reference, replaced));
+		};
+		const std::vector<std::string_view> assetTypes = Utils::GetGraphAssetTypeNames();
+		std::array<const char*, MethodValueKinds.size()> kindLabels{};
+		for (size_t index = 0; index < kindLabels.size(); ++index)
+			kindLabels[index] = GraphValueKindNames[std::to_underlying(MethodValueKinds[index])].data();
+		const auto kindIndex = [](GraphValueKind kind)
+		{
+			const auto found = std::ranges::find(MethodValueKinds, kind);
+			return static_cast<int>(found != MethodValueKinds.end() ? found - MethodValueKinds.begin() : MethodValueKinds.size() - 1);
+		};
+		// An Asset's type, "(any)" first; true when it changed `assetType`.
+		const auto drawAssetType = [&assetTypes](std::string& assetType)
+		{
+			bool changed = false;
+			ImGui::SetNextItemWidth(-1.0f);
+			if (ImGui::BeginCombo("##AssetType", assetType.empty() ? "(any asset)" : assetType.c_str()))
+			{
+				if (ImGui::Selectable("(any asset)", assetType.empty()))
+				{
+					changed = !assetType.empty();
+					assetType.clear();
+				}
+				for (const std::string_view type : assetTypes)
+				{
+					if (ImGui::Selectable(std::string(type).c_str(), assetType == type))
+					{
+						changed = changed || assetType != type;
+						assetType = std::string(type);
+					}
+				}
+				ImGui::EndCombo();
+			}
+			return changed;
+		};
+
+		ImGui::PushID(method.Name.c_str());
+		std::string renamed = method.Name;
+		ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.45f);
+		if (ImGui::InputText("##Name", &renamed, ImGuiInputTextFlags_EnterReturnsTrue) && renamed != method.Name)
+		{
+			Submit(context,
+				MakeGraphEditorRequest(types,
+					GraphSetMembersParams{ .Graph = m_Reference,
+						.Name = {},
+						.Rename = { GraphMemberRename{ .From = method.Name, .To = renamed } },
+						.Remove = {},
+						.Fields = {},
+						.Variables = {},
+						.Methods = {},
+						.RunsWhileWorldPaused = false }));
+		}
+		ImGui::SetItemTooltip(
+			"The method's name. Press Enter to rename it with its Method and Return nodes; its callers name it by a string, which no rename "
+			"rewrites.");
+		ImGui::SameLine();
+		ImGui::TextDisabled("%s", Utils::DescribeMethodSignature(method).c_str());
+		ImGui::SameLine();
+		if (ImGui::Button("x", ImVec2(ImGui::GetFrameHeight(), 0.0f)))
+		{
+			Submit(context,
+				MakeGraphEditorRequest(types,
+					GraphSetMembersParams{ .Graph = m_Reference,
+						.Name = {},
+						.Rename = {},
+						.Remove = { method.Name },
+						.Fields = {},
+						.Variables = {},
+						.Methods = {},
+						.RunsWhileWorldPaused = false }));
+		}
+		ImGui::SetItemTooltip("Remove this method (refused while a node uses it).");
+
+		ImGui::Indent();
+		for (size_t index = 0; index < method.Parameters.size(); ++index)
+		{
+			const GraphParameter& parameter = method.Parameters[index];
+			ImGui::PushID(static_cast<int>(index));
+			std::string parameterName = parameter.Name;
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.4f);
+			if (ImGui::InputText("##Parameter", &parameterName, ImGuiInputTextFlags_EnterReturnsTrue) && parameterName != parameter.Name)
+			{
+				GraphMethod replaced = method;
+				replaced.Parameters[index].Name = parameterName;
+				replace(replaced);
+			}
+			ImGui::SetItemTooltip("The parameter's name; press Enter to rename it.");
+			ImGui::SameLine();
+			int selected = kindIndex(parameter.Kind);
+			ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
+			if (ImGui::Combo("##Kind", &selected, kindLabels.data(), static_cast<int>(kindLabels.size())))
+			{
+				GraphMethod replaced = method;
+				replaced.Parameters[index].Kind = MethodValueKinds[static_cast<size_t>(selected)];
+				replaced.Parameters[index].AssetType.clear();
+				replace(replaced);
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("x", ImVec2(ImGui::GetFrameHeight(), 0.0f)))
+			{
+				GraphMethod replaced = method;
+				replaced.Parameters.erase(replaced.Parameters.begin() + static_cast<std::ptrdiff_t>(index));
+				replace(replaced);
+			}
+			ImGui::SetItemTooltip("Remove this parameter (refused while a link of the Method node's output needs it).");
+			if (parameter.Kind == GraphValueKind::Asset)
+			{
+				std::string assetType = parameter.AssetType;
+				if (drawAssetType(assetType))
+				{
+					GraphMethod replaced = method;
+					replaced.Parameters[index].AssetType = assetType;
+					replace(replaced);
+				}
+			}
+			ImGui::PopID();
+		}
+		ImGui::BeginDisabled(method.Parameters.size() >= MaxGraphMethodParameters);
+		if (ImGui::Button("Add parameter"))
+		{
+			GraphMethod replaced = method;
+			replaced.Parameters.push_back(
+				GraphParameter{ .Name = Utils::MakeParameterName(method), .Kind = GraphValueKind::Any, .AssetType = {} });
+			replace(replaced);
+		}
+		ImGui::EndDisabled();
+		ImGui::SetItemTooltip("A method takes at most 4 parameters, as Script.Call passes at most 4 arguments.");
+
+		// The result: none, or one of a method's kinds.
+		std::array<const char*, MethodValueKinds.size() + 1> resultLabels{};
+		resultLabels[0] = "No result";
+		for (size_t index = 0; index < kindLabels.size(); ++index)
+			resultLabels[index + 1] = kindLabels[index];
+		int result = method.Results.empty() ? 0 : kindIndex(method.Results.front().Kind) + 1;
+		ImGui::SetNextItemWidth(-1.0f);
+		if (ImGui::Combo("##Result", &result, resultLabels.data(), static_cast<int>(resultLabels.size())))
+		{
+			GraphMethod replaced = method;
+			replaced.Results.clear();
+			if (result > 0)
+				replaced.Results.push_back(GraphResult{ .Kind = MethodValueKinds[static_cast<size_t>(result - 1)], .AssetType = {} });
+			replace(replaced);
+		}
+		ImGui::SetItemTooltip("What its Return nodes give back: none, or a value of this kind.");
+		if (!method.Results.empty() && method.Results.front().Kind == GraphValueKind::Asset)
+		{
+			ImGui::PushID("Result");
+			std::string assetType = method.Results.front().AssetType;
+			if (drawAssetType(assetType))
+			{
+				GraphMethod replaced = method;
+				replaced.Results.front().AssetType = assetType;
+				replace(replaced);
+			}
+			ImGui::PopID();
+		}
+		ImGui::Unindent();
+		ImGui::PopID();
 	}
 
 	void GraphEditorPanel::DrawFieldOptions(EditorPanelContext& context, const GraphField& field)

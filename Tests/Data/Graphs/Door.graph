@@ -1,7 +1,8 @@
 {
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Door",
+	"RunsWhileWorldPaused": false,
 	"Fields": [
 		{
 			"Name": "Player",
@@ -35,6 +36,7 @@
 			"EnumValues": []
 		}
 	],
+	"Methods": [],
 	"Nodes": [
 		{
 			"Id": 1,

@@ -1,7 +1,8 @@
 {
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Bumper",
+	"RunsWhileWorldPaused": false,
 	"Fields": [
 		{
 			"Name": "Strength",
@@ -23,6 +24,7 @@
 		}
 	],
 	"Variables": [],
+	"Methods": [],
 	"Nodes": [
 		{
 			"Id": 1,

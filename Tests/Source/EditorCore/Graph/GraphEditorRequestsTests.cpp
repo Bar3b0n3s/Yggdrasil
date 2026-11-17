@@ -132,6 +132,45 @@ namespace Engine {
 			CHECK(unregistered.error().GetCode() == ErrorCode::InvalidState);
 		}
 
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 13): the side panel's members edit is the whole param struct,
+		// whose opt-in is false by default, so the request leaves it out and the graph keeps its opt-in; the checkbox's own
+		// request sets it.
+		TEST_CASE("GraphEditorRequests: a members edit keeps the graph's world-pause opt-in, which the checkbox's request sets, and a method's request writes it whole")
+		{
+			Test::AutomationFixture setup("GraphEditorRequestsWorldPause");
+			const TypeRegistry& types = setup.GetEditor().GetTypeRegistry();
+			const std::string graph(DoorPath);
+			Run(setup, MakeGraphEditorRequest(types, GraphCreateParams{ .Path = graph, .Name = "Door" }), GraphEditorAction::CreateGraph);
+			const GraphEditorRequest opt = MakeGraphWorldPauseRequest(graph, true);
+			Run(setup, opt, GraphEditorAction::SetMembers);
+			CHECK(opt.Params == Json{ { "graph", graph }, { "runsWhileWorldPaused", true } });
+			CHECK(ReadDocument(setup)["RunsWhileWorldPaused"] == true);
+
+			const GraphVariable opened{ .Name = "Opened", .Kind = GraphValueKind::Bool, .Default = VariantValue(Json(false)), .Element = GraphValueKind::Number, .AssetType = {}, .EnumValues = {} };
+			const Result<GraphEditorRequest> members = MakeGraphEditorRequest(types,
+				GraphSetMembersParams{ .Graph = graph, .Name = {}, .Rename = {}, .Remove = {}, .Fields = {}, .Variables = { opened }, .Methods = {}, .RunsWhileWorldPaused = false });
+			REQUIRE(members.has_value());
+			CHECK_FALSE(members->Params.contains("runsWhileWorldPaused"));
+			Run(setup, members, GraphEditorAction::SetMembers);
+			const Json document = ReadDocument(setup);
+			CHECK(document["RunsWhileWorldPaused"] == true);
+			CHECK(document["Variables"].size() == 1);
+
+			Run(setup, MakeGraphWorldPauseRequest(graph, false), GraphEditorAction::SetMembers);
+			CHECK(ReadDocument(setup)["RunsWhileWorldPaused"] == false);
+
+			// The Methods section's request: the method written whole, added or replacing the one of its name.
+			const GraphMethod pull{ .Name = "Pull", .Parameters = { GraphParameter{ .Name = "by", .Kind = GraphValueKind::Entity, .AssetType = {} } }, .Results = {} };
+			Run(setup, MakeGraphMethodRequest(types, graph, pull), GraphEditorAction::SetMembers);
+			GraphMethod returning = pull;
+			returning.Results = { GraphResult{ .Kind = GraphValueKind::Bool, .AssetType = {} } };
+			Run(setup, MakeGraphMethodRequest(types, graph, returning), GraphEditorAction::SetMembers);
+			const Json methods = ReadDocument(setup)["Methods"];
+			REQUIRE(methods.size() == 1);
+			CHECK(methods[0]["Parameters"][0]["Kind"] == "Entity");
+			CHECK(methods[0]["Results"] == Json::array({ Json{ { "Kind", "Bool" }, { "AssetType", "" } } }));
+		}
+
 		TEST_CASE("GraphEditorRequests: a link dropped on empty canvas adds the chosen node linked to it in one undo step")
 		{
 			Test::AutomationFixture setup("GraphEditorRequestsLinked");

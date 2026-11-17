@@ -1102,14 +1102,14 @@ Example: Move node 3.
 
 ### graph.nodes
 
-Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own Self.Get and Self.Set kinds.
+Lists the node library's kinds with their pins and types, optionally filtered by a kind prefix, with a graph's own Self.Get, Self.Set, Method and Return kinds.
 
 - Flags: tool `graph_nodes`, batch
 - Timeout: 60 s
 
 | Param | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `graph` | `String` |  | `""` | A graph whose Self.Get and Self.Set kinds to add; empty for none. |
+| `graph` | `String` |  | `""` | A graph whose own kinds (Self.Get, Self.Set, Method, Return) to add; empty for none. |
 | `prefix` | `String` |  | `""` | Only the kinds that start with it ("Call.Input.", "Flow."). |
 | `kinds` | `Array<String>` |  | `[]` | Only these kinds. |
 
@@ -1177,7 +1177,7 @@ Example: Remove node 3.
 
 ### graph.setMembers
 
-Renames the behaviour and renames, removes, adds or replaces its fields and variables as one undoable edit.
+Renames the behaviour, sets its world-pause opt-in, and renames, removes, adds or replaces its fields, variables and methods as one undoable edit; a method's callers name it by a string, which no rename rewrites.
 
 - Flags: tool `graph_set_members`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1187,15 +1187,17 @@ Renames the behaviour and renames, removes, adds or replaces its fields and vari
 |---|---|---|---|---|
 | `graph` | `String` | yes | `""` | The graph. |
 | `name` | `String` |  | `""` | The behaviour's new name; empty keeps it. |
-| `rename` | `Array<GraphMemberRename>` |  | `[]` | Fields and variables to rename, with their Self nodes. |
-| `remove` | `Array<String>` |  | `[]` | Fields and variables to remove; refused while a node uses one. |
+| `rename` | `Array<GraphMemberRename>` |  | `[]` | Fields, variables and methods to rename, with their nodes. |
+| `remove` | `Array<String>` |  | `[]` | Fields, variables and methods to remove; refused while a node uses one. |
 | `fields` | `Array<GraphField>` |  | `[]` | Fields to add or replace, by name. |
 | `variables` | `Array<GraphVariable>` |  | `[]` | Variables to add or replace, by name. |
+| `methods` | `Array<Variant>` |  | `[]` | Methods to add or replace, by name: GraphMethod objects {Name, Parameters: [{Name, Kind, AssetType}], Results: [] or [{Kind, AssetType}]}. |
+| `runsWhileWorldPaused` | `Bool` |  | `false` | Whether the behaviour updates while the world is paused; absent keeps it. |
 
 | Result | Type | Description |
 |---|---|---|
 | `graph` | `AssetSummary` | The graph. |
-| `renamedNodes` | `UInt32` | The Self.Get and Self.Set nodes the renames rewrote. |
+| `renamedNodes` | `UInt32` | The Self.Get, Self.Set, Method and Return nodes the renames rewrote. |
 | `undoIndex` | `UInt32` | The edit's undo step; 0 in a dry run, in a batch or when nothing changed. |
 
 Example: Add a Speed field.

@@ -1,7 +1,8 @@
 {
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Checkpoint",
+	"RunsWhileWorldPaused": false,
 	"Fields": [
 		{
 			"Name": "ActiveMaterial",
@@ -43,6 +44,7 @@
 			"EnumValues": []
 		}
 	],
+	"Methods": [],
 	"Nodes": [
 		{
 			"Id": 1,

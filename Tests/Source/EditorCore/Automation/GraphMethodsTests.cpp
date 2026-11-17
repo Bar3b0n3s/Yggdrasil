@@ -268,7 +268,7 @@ namespace Engine {
 			const Json flow = CallOrFail(setup, "graph.nodes", Json{ { "prefix", "Flow." } });
 			CHECK(flow["nodes"].size() == 6); // Flow.Branch, Delay, ForEach, ForRange, IfNotNil and Sequence
 			const Json members = CallOrFail(setup, "graph.nodes", Json{ { "graph", graph }, { "prefix", "Self." } });
-			CHECK(members["nodes"].size() == 3); // Self.Entity, Self.Get.Speed, Self.Set.Speed
+			CHECK(members["nodes"].size() == 4); // Self.Entity, Self.Get.Speed, Self.Instance (M39), Self.Set.Speed
 			CHECK_FALSE(setup.Call("graph.nodes", Json{ { "kinds", Json::array({ "Flow.Nope" }) } }).has_value());
 		}
 
@@ -357,6 +357,160 @@ namespace Engine {
 			CHECK(removed["removedLinks"][0]["From"] == Pin(start, "Then"));
 			CHECK(removed["removedLinks"][1]["From"] == Pin(speedB, "Value"));
 			CHECK(CallOrFail(setup, "graph.read", Json{ { "graph", graph } })["document"]["Links"].empty());
+		}
+
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 8): a method's rename rewrites its Method and Return nodes,
+		// keeping their ids, values and links, as a member's rename rewrites its Self nodes; removing a method in use is
+		// refused with its nodes.
+		TEST_CASE("GraphMethods: renaming a method rewrites its Method and Return nodes")
+		{
+			Test::AutomationFixture setup("GraphMethodRename");
+			CallOrFail(setup, "graph.create", Json{ { "path", std::string(DoorPath) } });
+			const Json graph = std::string(DoorPath);
+			const Json blocks{ { "Name", "Blocks" }, { "Parameters", Json::array({ Json{ { "Name", "hit" }, { "Kind", "Any" }, { "AssetType", "" } } }) },
+				{ "Results", Json::array({ Json{ { "Kind", "Bool" }, { "AssetType", "" } } }) } };
+			CallOrFail(setup, "graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ blocks }) } });
+			const uint32_t event = AddNode(setup, graph, "Method.Blocks");
+			const uint32_t returned = AddNode(setup, graph, "Return.Blocks", Json{ { "values", Json{ { "Value", true } } } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", graph }, { "from", Pin(event, "Then") }, { "to", Pin(returned, "In") } });
+
+			const Json removal = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "remove", Json::array({ "Blocks" }) } });
+			REQUIRE(removal.contains("error"));
+			CHECK(removal["error"]["data"]["location"]["pointer"] == "/remove/0");
+
+			const Json renamed = CallOrFail(setup, "graph.setMembers", Json{ { "graph", graph }, { "rename", Json::array({ { { "from", "Blocks" }, { "to", "Wards" } } }) } });
+			CHECK(renamed["renamedNodes"] == 2);
+			const Json read = CallOrFail(setup, "graph.read", Json{ { "graph", graph }, { "luau", true } });
+			const Json& document = read["document"];
+			CHECK(document["Methods"][0]["Name"] == "Wards");
+			CHECK(FindNode(document, event)["Kind"] == "Method.Wards");
+			CHECK(FindNode(document, returned)["Kind"] == "Return.Wards");
+			CHECK(FindNode(document, returned)["Values"]["Value"] == true);
+			CHECK(document["Links"].size() == 1);
+			CHECK(read["diagnostics"].empty());
+			CHECK(JsonReader(read["luau"]).ReadString().value_or(std::string()).find("function Graph.Wards(self: any, p_hit: any)") != std::string::npos);
+
+			// A method's new name follows the method rules: not the class key, not another member's.
+			for (const std::string_view to : { "RunsWhileWorldPaused", "OnStart" })
+			{
+				const Json refused = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "rename", Json::array({ { { "from", "Wards" }, { "to", std::string(to) } } }) } });
+				REQUIRE(refused.contains("error"));
+				CHECK(refused["error"]["data"]["location"]["pointer"] == "/rename/0/to");
+			}
+		}
+
+		// M39 (decision 8): graph.setMembers adds and replaces methods and sets the opt-in; a signature change a node still needs
+		// is refused at the method; graph.nodes lists the new built-ins, the callbacks' Returns and a graph's own method kinds.
+		TEST_CASE("GraphMethods: graph.setMembers sets methods and the world-pause opt-in, and graph.nodes lists the member and method kinds")
+		{
+			Test::AutomationFixture setup("GraphMethodMembers");
+			CallOrFail(setup, "graph.create", Json{ { "path", std::string(DoorPath) } });
+			const Json graph = std::string(DoorPath);
+			const auto method = [](std::string_view name, std::string_view parameterKind, std::string_view resultKind)
+			{
+				Json results = Json::array();
+				if (!resultKind.empty())
+					results.push_back(Json{ { "Kind", std::string(resultKind) }, { "AssetType", "" } });
+				return Json{ { "Name", std::string(name) }, { "Parameters", Json::array({ Json{ { "Name", "amount" }, { "Kind", std::string(parameterKind) }, { "AssetType", "" } } }) },
+					{ "Results", results } };
+			};
+			const Json set = CallOrFail(setup, "graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ method("Damaged", "Number", ""), method("Blocks", "Any", "Bool") }) }, { "runsWhileWorldPaused", true } });
+			CHECK(JsonReader(set["undoIndex"]).ReadUInt32().value_or(0) > 0);
+			Json document = CallOrFail(setup, "graph.read", Json{ { "graph", graph } })["document"];
+			CHECK(document["RunsWhileWorldPaused"] == true);
+			REQUIRE(document["Methods"].size() == 2);
+			CHECK(document["Methods"][0]["Name"] == "Blocks"); // sorted by name
+			CHECK(document["Methods"][1]["Results"].empty());
+			// Absent, the opt-in stays; the same members again change nothing.
+			const Json same = CallOrFail(setup, "graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ method("Blocks", "Any", "Bool") }) } });
+			CHECK(same["undoIndex"] == 0);
+
+			// graph.nodes: the built-ins and the callbacks' Returns always; the graph's Method and Return kinds with the graph.
+			const Json nodes = CallOrFail(setup, "graph.nodes", Json{ { "kinds", Json::array({ "Return.OnUiClick", "Script.Call", "Script.Get", "Script.Set", "Self.Instance" }) } });
+			CHECK(nodes["nodes"].size() == 5);
+			CHECK_FALSE(setup.Call("graph.nodes", Json{ { "kinds", Json::array({ "Method.Blocks" }) } }).has_value());
+			const Json own = CallOrFail(setup, "graph.nodes", Json{ { "graph", graph }, { "prefix", "Method." } });
+			REQUIRE(own["nodes"].size() == 2);
+			CHECK(own["nodes"][0]["kind"] == "Method.Blocks");
+			CHECK(own["nodes"][0]["category"] == "Event");
+			CHECK(CallOrFail(setup, "graph.nodes", Json{ { "graph", graph }, { "prefix", "Return.Damaged" } })["nodes"].size() == 1);
+
+			// A signature change is refused while a link needs the old one: the Blocks result feeds a Bool input.
+			const uint32_t event = AddNode(setup, graph, "Method.Blocks");
+			const uint32_t branch = AddNode(setup, graph, "Flow.Branch");
+			const uint32_t equal = AddNode(setup, graph, "Compare.Less", Json{ { "values", Json{ { "B", 1 } } } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", graph }, { "from", Pin(event, "Then") }, { "to", Pin(branch, "In") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", graph }, { "from", Pin(event, "amount") }, { "to", Pin(equal, "A") } });
+			CallOrFail(setup, "graph.connect", Json{ { "graph", graph }, { "from", Pin(equal, "Result") }, { "to", Pin(branch, "Condition") } });
+			const std::string before = ReadDoorText(setup);
+			const Json refused = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ method("Blocks", "String", "Bool") }) } });
+			REQUIRE(refused.contains("error"));
+			CHECK(refused["error"]["data"]["location"]["pointer"] == "/methods/0/Parameters");
+			CHECK(ReadDoorText(setup) == before);
+			// And at /methods/<i>/Results while a Return node's literal or link needs the old result (the review of W39.1): a
+			// Return.Blocks holding the literal true, another fed by a Bool output; a kind change and the result's removal.
+			const uint32_t literal = AddNode(setup, graph, "Return.Blocks", Json{ { "values", Json{ { "Value", true } } } });
+			const uint32_t fed = AddNode(setup, graph, "Return.Blocks");
+			CallOrFail(setup, "graph.connect", Json{ { "graph", graph }, { "from", Pin(equal, "Result") }, { "to", Pin(fed, "Value") } });
+			const std::string withReturns = ReadDoorText(setup);
+			for (const Json& changed : { method("Blocks", "Any", "Number"), method("Blocks", "Any", "") })
+			{
+				CAPTURE(changed.dump());
+				const Json result = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ changed }) } });
+				REQUIRE(result.contains("error"));
+				CHECK(result["error"]["data"]["location"]["pointer"] == "/methods/0/Results");
+				CHECK(ReadDoorText(setup) == withReturns);
+			}
+			// Without the literal's Return, the link alone (an issue at /Links/<i>, whose end is the Return) needs the Bool.
+			CallOrFail(setup, "graph.removeNodes", Json{ { "graph", graph }, { "nodes", Json::array({ literal }) } });
+			const std::string linkOnly = ReadDoorText(setup);
+			const Json linked = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "methods", Json::array({ method("Blocks", "Any", "String") }) } });
+			REQUIRE(linked.contains("error"));
+			CHECK(linked["error"]["data"]["location"]["pointer"] == "/methods/0/Results");
+			CHECK(ReadDoorText(setup) == linkOnly);
+			// A member may not change between a field and a method but by its removal and addition.
+			const Json field = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "fields", Json::array({ Member("Blocks", "Number", 0, true) }) } });
+			REQUIRE(field.contains("error"));
+			CHECK(field["error"]["data"]["location"]["pointer"] == "/fields/0/Name");
+			// runsWhileWorldPaused false clears the opt-in.
+			CallOrFail(setup, "graph.setMembers", Json{ { "graph", graph }, { "runsWhileWorldPaused", false } });
+			CHECK(CallOrFail(setup, "graph.read", Json{ { "graph", graph } })["document"]["RunsWhileWorldPaused"] == false);
+		}
+
+		// M39 (departure 1, the lead's approval): each method is a free-form value read strictly as a GraphMethod, refused at its
+		// pointer when it is not one or breaks a method rule, a second result at its own pointer (departure 2); nothing is written.
+		TEST_CASE("GraphMethods: graph.setMembers refuses a malformed method at its pointer")
+		{
+			Test::AutomationFixture setup("GraphMethodRefusals");
+			CallOrFail(setup, "graph.create", Json{ { "path", std::string(DoorPath) } });
+			const Json graph = std::string(DoorPath);
+			const std::string before = ReadDoorText(setup);
+			const Json valid{ { "Name", "Pull" }, { "Parameters", Json::array() }, { "Results", Json::array() } };
+			const auto refuse = [&setup, &graph](const Json& methods, std::string_view pointer)
+			{
+				CAPTURE(methods.dump());
+				const Json response = setup.Request("graph.setMembers", Json{ { "graph", graph }, { "methods", methods } });
+				REQUIRE(response.contains("error"));
+				CHECK(response["error"]["data"]["errorCode"] == "InvalidArgument");
+				CHECK(response["error"]["data"]["location"]["pointer"] == Json(std::string(pointer)));
+			};
+			refuse(Json::array({ valid, "Pull" }), "/methods/1");
+			Json unknown = valid;
+			unknown["Returns"] = true;
+			refuse(Json::array({ unknown }), "/methods/0/Returns");
+			Json kind = valid;
+			kind["Parameters"] = Json::array({ Json{ { "Name", "hit" }, { "Kind", "Thing" }, { "AssetType", "" } } });
+			refuse(Json::array({ kind }), "/methods/0/Parameters/0/Kind");
+			Json results = valid;
+			results["Results"] = Json::array({ Json{ { "Kind", "Bool" }, { "AssetType", "" } }, Json{ { "Kind", "Number" }, { "AssetType", "" } } });
+			refuse(Json::array({ results }), "/methods/0/Results/1");
+			Json named = valid;
+			named["Name"] = "RunsWhileWorldPaused";
+			refuse(Json::array({ named }), "/methods/0/Name");
+			Json enumeration = valid;
+			enumeration["Parameters"] = Json::array({ Json{ { "Name", "mode" }, { "Kind", "Enum" }, { "AssetType", "" } } });
+			refuse(Json::array({ enumeration }), "/methods/0/Parameters/0/Kind");
+			CHECK(ReadDoorText(setup) == before);
 		}
 
 		TEST_CASE("GraphMethods: every graph method refuses bad params at their pointers and writes nothing")

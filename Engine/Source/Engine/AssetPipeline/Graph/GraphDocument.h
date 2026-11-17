@@ -17,7 +17,8 @@
 #include <vector>
 
 // The visual-scripting graph (M24, C24.1, C-VS; Docs/Decisions/0035-m24-contract.md decisions 2 to 5): the .graph file, format
-// version 1, and the document behind it. A graph is one behaviour. GraphImporter (AssetPipeline/Importers/GraphImporter.h)
+// version 2 (M39, Docs/Decisions/0056-m39-graphs-behaviours.md decision 1: methods, the world-pause opt-in and the Any kind),
+// and the document behind it. A graph is one behaviour. GraphImporter (AssetPipeline/Importers/GraphImporter.h)
 // transpiles it to Luau (AssetPipeline/Graph/GraphTranspiler.h) and compiles that text through the script pipeline, so a
 // graph is a Script asset whose importer is "Graph" (decision 2), never an AssetType of its own: the Script component's
 // slots, the script engine, hot reload, the export's paks and Dist see only its compiled behaviour. This header holds the
@@ -30,9 +31,10 @@
 //     ([A-Za-z_][A-Za-z0-9_]*) of 1 to MaxGraphNameBytes bytes that is not one of Luau's reserved words ("and", "break", "do",
 //     "else", "elseif", "end", "false", "for", "function", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then",
 //     "true", "until", "while"; the transpiler writes "<Name> = Field..." and "self.<Name>") and does not start with "__"
-//     (IsGraphIdentifier). A field's or variable's name is also not a reserved script field name (IsReservedScriptFieldName,
-//     Asset/ScriptData.h: Entity, Fields and the callbacks), since it becomes an instance member, and is unique across both
-//     lists.
+//     (IsGraphIdentifier). A field's, variable's or method's name is also not a reserved script field name
+//     (IsReservedScriptFieldName, Asset/ScriptData.h: Entity, Fields and the callbacks), since it becomes an instance or class
+//     member, and is unique across the three lists; a method's is also not RunsWhileWorldPaused, the class key Script.Define
+//     reads as a boolean.
 //   - Nodes. Each has an Id in [1, MaxGraphNodeId], unique in the graph and stable for the node's life (graph.addNode gives
 //     GetNextGraphNodeId's), and a Kind of 1 to MaxGraphKindBytes bytes: dot-separated non-empty parts of [A-Za-z0-9_]
 //     ("Flow.Branch", "Call.Input.GetAxis", "Self.Get.Speed"). Position is the canvas place of the node's top-left corner,
@@ -50,19 +52,29 @@
 //   - Members. A field (a behaviour field: serialized, set per script slot in the inspector) or a variable (instance state,
 //     created at OnCreate) has a Kind (GraphValueKind) and a Default in the JSON spelling of that kind: Number a finite
 //     number, Integer an int32, Bool a boolean, String a string of at most MaxGraphStringBytes bytes of valid UTF-8, Vector
-//     [x, y, z], Color [r, g, b, a] (linear), Quat [x, y, z, w] (finite, nonzero), Entity and Asset null, Enum one of
-//     EnumValues, Array []. Element is an Array's element kind (any kind but Array) and Number for every other kind; AssetType
-//     is an Asset's (or an Array of Asset's) AssetType name, other than None, and empty otherwise; EnumValues are an Enum's (or
-//     an Array of Enum's) 1 to MaxGraphEnumValues unique choices, each 1 to MaxGraphNameBytes bytes of valid UTF-8 without NUL,
-//     and empty otherwise. A field's Options are the Luau FieldOptions it is declared with, so only a kind whose Field
-//     constructor takes FieldOptions has any (Number, Integer, Bool, String, Vector, Color, Quat; never Entity, Asset, Enum or
-//     Array): "Min", "Max" and "Step" (finite numbers, for Number, Integer and Vector only, Min <= Max, Step > 0) and "Tooltip"
-//     (a string of at most MaxGraphTooltipBytes bytes of valid UTF-8 without NUL); a variable has none. A field's Default
-//     also meets what its Field constructor requires of a default: a Number's, Integer's or Vector's (each component) within
-//     Min and Max, compared as the field's reflected type compares them (a float against the bound rounded to float), and a
-//     Quat's of unit length (within UnitQuaternionTolerance, Reflection/FieldType.h).
-//   - Canonical order. Fields and Variables sorted by Name, Nodes by Id, Links by (From.Node, From.Pin, To.Node, To.Pin), all
-//     byte-wise, so the file and its edits are canonical (CanonicalizeGraph) and every write of one graph is byte-identical.
+//     [x, y, z], Color [r, g, b, a] (linear), Quat [x, y, z, w] (finite, nonzero), Entity, Asset and Any null, Enum one of
+//     EnumValues, Array []. A field is never of kind Any, which no Field constructor holds. Element is an Array's element kind
+//     (any kind but Array and Any) and Number for every other kind; AssetType is an Asset's (or an Array of Asset's)
+//     AssetType name, other than None, and empty otherwise; EnumValues are an Enum's (or an Array of Enum's) 1 to
+//     MaxGraphEnumValues unique choices, each 1 to MaxGraphNameBytes bytes of valid UTF-8 without NUL, and empty otherwise.
+//     A field's Options are the Luau FieldOptions it is declared with, so only a kind whose Field constructor takes
+//     FieldOptions has any (Number, Integer, Bool, String, Vector, Color, Quat; never Entity, Asset, Enum or Array): "Min",
+//     "Max" and "Step" (finite numbers, for Number, Integer and Vector only, Min <= Max, Step > 0) and "Tooltip" (a string
+//     of at most MaxGraphTooltipBytes bytes of valid UTF-8 without NUL); a variable has none. A field's Default also meets
+//     what its Field constructor requires of a default: a Number's, Integer's or Vector's (each component) within Min and
+//     Max, compared as the field's reflected type compares them (a float against the bound rounded to float), and a Quat's
+//     of unit length (within UnitQuaternionTolerance, Reflection/FieldType.h).
+//   - Methods (M39, decision 1). A method has a Name, at most MaxGraphMethodParameters Parameters (each a Name, an
+//     IsGraphIdentifier other than "self" and "Then" unique in its method, a Kind and an AssetType) and at most
+//     MaxGraphMethodResults Results (each a Kind and an AssetType; none for a method that returns nothing). A parameter's
+//     or result's Kind is one IsGraphMethodValueKind accepts (not Enum, not Array); its AssetType is empty, or for an Asset
+//     an AssetType name other than None. RunsWhileWorldPaused true makes the behaviour run while the world is paused
+//     (ADR 0050 decision 2).
+//   - Versions. A version 1 file reads as version 2 with no methods and RunsWhileWorldPaused false; in it Methods and
+//     RunsWhileWorldPaused are unknown members and a variable of kind Any is refused.
+//   - Canonical order. Fields, Variables and Methods sorted by Name, Nodes by Id, Links by (From.Node, From.Pin, To.Node,
+//     To.Pin), all byte-wise, so the file and its edits are canonical (CanonicalizeGraph) and every write of one graph is
+//     byte-identical.
 //   - Limits. The counts and sizes below bound what external input controls, so a hostile file cannot exhaust memory.
 
 namespace Engine {
@@ -71,7 +83,7 @@ namespace Engine {
 
 	// The .graph document header (decision 4).
 	inline constexpr std::string_view GraphFormatName = "Graph";
-	inline constexpr uint32_t GraphFormatVersion = 1;
+	inline constexpr uint32_t GraphFormatVersion = 2;
 	// The extension GraphImporter claims (Asset/SourceFormats.h's row: importer "Graph", ".graph", main type Script).
 	inline constexpr std::string_view GraphFileExtension = ".graph";
 
@@ -80,6 +92,9 @@ namespace Engine {
 	inline constexpr size_t MaxGraphLinks = 16384;
 	inline constexpr size_t MaxGraphFields = 128;
 	inline constexpr size_t MaxGraphVariables = 128;
+	inline constexpr size_t MaxGraphMethods = 64;         // M39
+	inline constexpr size_t MaxGraphMethodParameters = 4; // M39: Script.Call's Arg1 to Arg4
+	inline constexpr size_t MaxGraphMethodResults = 1;    // M39
 	inline constexpr size_t MaxGraphNodeValues = 64;
 	inline constexpr size_t MaxGraphEnumValues = 64;
 	inline constexpr size_t MaxGraphNameBytes = 64;
@@ -89,7 +104,8 @@ namespace Engine {
 	inline constexpr uint32_t MaxGraphNodeId = 0x7fffffffu;
 	inline constexpr float MaxGraphPosition = 1.0e6f;
 
-	// Registry enum "GraphValueKind": the kind of a field or a variable, one per Luau Field constructor (Architecture §11.2).
+	// Registry enum "GraphValueKind": the kind of a field, a variable or a method's parameter or result, one per Luau Field
+	// constructor (Architecture §11.2), and Any (M39), which no field has.
 	enum class GraphValueKind : uint8_t
 	{
 		Number,  // Field.Number: a finite f32
@@ -102,7 +118,8 @@ namespace Engine {
 		Entity,  // Field.Entity: an Entity reference (a field) or an Entity value (a variable), nil by default
 		Asset,   // Field.Asset(AssetType): an AssetRef of one type, nil by default
 		Enum,    // Field.Enum(EnumValues): one of the choices, a string
-		Array    // Field.Array(Element): an array of Element values, empty by default
+		Array,   // Field.Array(Element): an array of Element values, empty by default
+		Any      // M39: any value, nil by default; a variable's, a parameter's or a result's, never a field's
 	};
 
 	// Registry struct "GraphField": one behaviour field.
@@ -130,6 +147,36 @@ namespace Engine {
 		std::vector<std::string> EnumValues{};
 
 		bool operator==(const GraphVariable&) const = default;
+	};
+
+	// Registry struct "GraphParameter": one parameter of a graph method (M39).
+	struct GraphParameter
+	{
+		std::string Name{};
+		GraphValueKind Kind = GraphValueKind::Any;
+		std::string AssetType{};
+
+		bool operator==(const GraphParameter&) const = default;
+	};
+
+	// Registry struct "GraphResult": the result of a graph method (M39).
+	struct GraphResult
+	{
+		GraphValueKind Kind = GraphValueKind::Any;
+		std::string AssetType{};
+
+		bool operator==(const GraphResult&) const = default;
+	};
+
+	// Registry struct "GraphMethod": a method of the behaviour (M39), which a script calls on its instance and whose
+	// Method.<Name> event nodes run.
+	struct GraphMethod
+	{
+		std::string Name{};
+		std::vector<GraphParameter> Parameters{};
+		std::vector<GraphResult> Results{}; // empty: the method returns nothing; at most MaxGraphMethodResults
+
+		bool operator==(const GraphMethod&) const = default;
 	};
 
 	// Registry struct "GraphPinRef": one pin of one node.
@@ -162,34 +209,46 @@ namespace Engine {
 	};
 
 	// A graph: registry struct "Graph". Every field is serialized under its member name, in member order, after "Format":
-	// "Graph" and "Version": 1. Plain data.
+	// "Graph" and "Version": 2. Plain data.
 	struct GraphDocument
 	{
-		std::string Name{}; // the behaviour's Script.Define name
+		std::string Name{};                // the behaviour's Script.Define name
+		bool RunsWhileWorldPaused = false; // M39: the class's world-pause opt-in
 		std::vector<GraphField> Fields{};
 		std::vector<GraphVariable> Variables{};
+		std::vector<GraphMethod> Methods{}; // M39
 		std::vector<GraphNode> Nodes{};
 		std::vector<GraphLink> Links{};
 
 		bool operator==(const GraphDocument&) const = default;
 	};
 
-	// Registers the enum "GraphValueKind" and the structs "GraphPinRef", "GraphField", "GraphVariable", "GraphNode",
-	// "GraphLink" and "Graph" (GraphDocument). ValidateGraphStructure's rules are the "Graph" struct's Validate hook (all of
-	// them but the Name's on an empty Name, the registry's default object, which GraphFromJson still refuses), so a document
-	// reports each violation once, in document order; its Generate hook keeps the registry suite's random graphs valid, and
-	// the member structs have neither. RegisterAssetPipelineTypes calls it (stream G-A), so graphs read and write wherever the
-	// importers' types are registered (the editor, the tests' built-in registry); the Runtime has none.
+	// Registers the enum "GraphValueKind" and the structs "GraphPinRef", "GraphField", "GraphVariable", "GraphParameter",
+	// "GraphResult", "GraphMethod", "GraphNode", "GraphLink" and "Graph" (GraphDocument). ValidateGraphStructure's rules
+	// are the "Graph" struct's Validate hook (all of them but the Name's on an empty Name, the registry's default object,
+	// which GraphFromJson still refuses), so a document reports each violation once, in document order; its Generate hook
+	// keeps the registry suite's random graphs valid, and the member structs have neither. RegisterAssetPipelineTypes calls
+	// it (stream G-A), so graphs read and write wherever the importers' types are registered (the editor, the tests'
+	// built-in registry); the Runtime has none.
 	void RegisterGraphTypes(TypeRegistry& registry);
 
 	// Whether `name` is a Luau identifier of 1 to MaxGraphNameBytes bytes that is not a Luau reserved word and does not start
 	// with "__" (the file comment). Pure.
 	[[nodiscard]] bool IsGraphIdentifier(std::string_view name);
 
+	// Whether a method's parameter or result may be of kind `kind` (M39): every GraphValueKind but Enum, whose choices a
+	// declaration does not carry, and Array, which an Any carries. Pure.
+	[[nodiscard]] bool IsGraphMethodValueKind(GraphValueKind kind);
+
+	// Whether `name` may name a method (M39): an IsGraphIdentifier that is not a reserved script field name and not
+	// RunsWhileWorldPaused. Uniqueness is the document's rule. Pure.
+	[[nodiscard]] bool IsGraphMethodName(std::string_view name);
+
 	// Checks every rule of the file comment that needs no node library: the names, the ids, the kinds' spelling, the
 	// positions, the values' shapes, the links' nodes, the members' defaults, elements, asset types, enum values and options,
-	// the canonical order and the limits. Pure. Errors: Validation with one issue per violation, each located by its JSON
-	// pointer into the .graph document ("/Name", "/Fields/2/Default", "/Nodes/5/Kind", "/Nodes/5/Values/speed", "/Links/3").
+	// the methods' declarations, the canonical order and the limits. Pure. Errors: Validation with one issue per violation,
+	// each located by its JSON pointer into the .graph document ("/Name", "/Fields/2/Default", "/Nodes/5/Kind",
+	// "/Nodes/5/Values/speed", "/Links/3").
 	[[nodiscard]] Status ValidateGraphStructure(const GraphDocument& graph);
 
 	// Sorts `graph`'s lists into the canonical order of the file comment and drops a link repeated with the same (From, To).
@@ -221,8 +280,10 @@ namespace Engine {
 	// Reads a .graph document strictly through the registry (StructInfo::FromJson of "Graph": missing keys keep their defaults,
 	// unknown keys warn into `report`, or fail with `strictUnknowns`), then ValidateGraphStructure. A document of an older
 	// version is migrated to GraphFormatVersion here, so every reader sees the current form and project.upgrade rewrites it
-	// (decision 10; version 1 has no older version). Errors: Validation (located, every bad field an issue) for a wrong
-	// "Format", a version below 1, a wrong JSON type, an out-of-range value or a ValidateGraphStructure violation;
+	// (decision 10): version 1 reads as version 2 with no methods and RunsWhileWorldPaused false, its Methods and
+	// RunsWhileWorldPaused unknown members (a REFLECTION_UNKNOWN_FIELD warning that drops them, an error with
+	// `strictUnknowns`) and a variable of kind Any refused (M39). Errors: Validation (located, every bad field an issue) for a
+	// wrong "Format", a version below 1, a wrong JSON type, an out-of-range value or a ValidateGraphStructure violation;
 	// UnsupportedVersion naming both versions for a newer file.
 	[[nodiscard]] Result<GraphDocument> GraphFromJson(const Json& document, const TypeRegistry& registry, GraphLoadReport& report,
 		bool strictUnknowns = false);

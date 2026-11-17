@@ -1,7 +1,8 @@
 {
 	"Format": "Graph",
-	"Version": 1,
+	"Version": 2,
 	"Name": "Steering",
+	"RunsWhileWorldPaused": false,
 	"Fields": [
 		{
 			"Name": "Speed",
@@ -26,6 +27,7 @@
 			"EnumValues": []
 		}
 	],
+	"Methods": [],
 	"Nodes": [
 		{
 			"Id": 1,

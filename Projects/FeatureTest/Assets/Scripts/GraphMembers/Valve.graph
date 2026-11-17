@@ -1,0 +1,319 @@
+{
+	"Format": "Graph",
+	"Version": 2,
+	"Name": "Valve",
+	"RunsWhileWorldPaused": false,
+	"Fields": [
+		{
+			"Name": "Press",
+			"Kind": "String",
+			"Default": "/Press",
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {
+				"Tooltip": "The press's path"
+			}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Pressure",
+			"Kind": "Any",
+			"Default": null,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		},
+		{
+			"Name": "SawNil",
+			"Kind": "Bool",
+			"Default": false,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Methods": [],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnStart",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Flow.IfNotNil",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Call.Scene.FindByPath",
+			"Position": [480, 0],
+			"Values": {}
+		},
+		{
+			"Id": 4,
+			"Kind": "Self.Get.Press",
+			"Position": [720, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Flow.IfNotNil",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Call.Entity.GetScript",
+			"Position": [1200, 0],
+			"Values": {
+				"name": "Press"
+			}
+		},
+		{
+			"Id": 7,
+			"Kind": "Script.Set",
+			"Position": [0, 160],
+			"Values": {
+				"Member": "Running",
+				"Value": false
+			}
+		},
+		{
+			"Id": 8,
+			"Kind": "Script.Call",
+			"Position": [240, 160],
+			"Values": {
+				"Method": "Toggle"
+			}
+		},
+		{
+			"Id": 9,
+			"Kind": "Self.Instance",
+			"Position": [480, 160],
+			"Values": {}
+		},
+		{
+			"Id": 10,
+			"Kind": "Self.Set.Pressure",
+			"Position": [720, 160],
+			"Values": {}
+		},
+		{
+			"Id": 11,
+			"Kind": "Script.Get",
+			"Position": [960, 160],
+			"Values": {
+				"Member": "Pressure"
+			}
+		},
+		{
+			"Id": 12,
+			"Kind": "Flow.IfNotNil",
+			"Position": [1200, 160],
+			"Values": {}
+		},
+		{
+			"Id": 13,
+			"Kind": "Script.Get",
+			"Position": [0, 320],
+			"Values": {
+				"Member": "Missing"
+			}
+		},
+		{
+			"Id": 14,
+			"Kind": "Self.Set.SawNil",
+			"Position": [240, 320],
+			"Values": {
+				"Value": true
+			}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 6,
+				"Pin": "self"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "path"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "Object"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "Object"
+			}
+		},
+		{
+			"From": {
+				"Node": 5,
+				"Pin": "True"
+			},
+			"To": {
+				"Node": 7,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 7,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 11,
+				"Pin": "Object"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 13,
+				"Pin": "Object"
+			}
+		},
+		{
+			"From": {
+				"Node": 8,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 9,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 8,
+				"Pin": "Arg1"
+			}
+		},
+		{
+			"From": {
+				"Node": 10,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 11,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 10,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 12,
+				"Pin": "False"
+			},
+			"To": {
+				"Node": 14,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 13,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 12,
+				"Pin": "Value"
+			}
+		}
+	]
+}

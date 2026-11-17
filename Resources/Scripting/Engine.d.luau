@@ -80,8 +80,8 @@ export type GraphPinDirection = "Input" | "Output"
 -- What a graph pin carries.
 export type GraphPinType = "Exec" | "Any" | "Bool" | "Number" | "String" | "Vector" | "Color" | "Quat" | "Entity" | "Asset" | "Enum" | "Object"
 
--- The kind of a graph field or variable: its Luau Field constructor.
-export type GraphValueKind = "Number" | "Integer" | "Bool" | "String" | "Vector" | "Color" | "Quat" | "Entity" | "Asset" | "Enum" | "Array"
+-- The kind of a graph field, variable or method parameter or result: its Luau Field constructor, or Any.
+export type GraphValueKind = "Number" | "Integer" | "Bool" | "String" | "Vector" | "Color" | "Quat" | "Entity" | "Asset" | "Enum" | "Array" | "Any"
 
 -- How an input action reads its controls.
 export type InputActionType = "Button" | "Axis"

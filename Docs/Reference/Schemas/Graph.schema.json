@@ -10,11 +10,15 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [1]
+			"enum": [2]
 		},
 		"Name": {
 			"description": "The behaviour's Script.Define name: a Luau identifier of 1 to 64 bytes that is not a reserved word and does not start with \"__\".",
 			"type": "string"
+		},
+		"RunsWhileWorldPaused": {
+			"description": "Whether the behaviour updates while the world is paused (Time.PauseWorld), as a Luau class that sets RunsWhileWorldPaused.",
+			"type": "boolean"
 		},
 		"Fields": {
 			"description": "At most 128 fields, sorted by Name.",
@@ -28,6 +32,13 @@
 			"type": "array",
 			"items": {
 				"$ref": "#/$defs/GraphVariable"
+			}
+		},
+		"Methods": {
+			"description": "At most 64 methods, sorted by Name.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/GraphMethod"
 			}
 		},
 		"Nodes": {
@@ -53,19 +64,19 @@
 			"type": "object",
 			"properties": {
 				"Name": {
-					"description": "A Luau identifier, unique across fields and variables (§6.11).",
+					"description": "A Luau identifier, unique across fields, variables and methods (§6.11).",
 					"type": "string"
 				},
 				"Kind": {
-					"description": "Its Luau Field constructor.",
-					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+					"description": "Its Luau Field constructor; never Any.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 				},
 				"Default": {
 					"description": "Its default, in its Kind's JSON spelling (§6.11)."
 				},
 				"Element": {
 					"description": "An Array's element kind; Number otherwise.",
-					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 				},
 				"AssetType": {
 					"description": "An Asset's AssetType; empty otherwise.",
@@ -91,19 +102,19 @@
 			"type": "object",
 			"properties": {
 				"Name": {
-					"description": "A Luau identifier, unique across fields and variables (§6.11).",
+					"description": "A Luau identifier, unique across fields, variables and methods (§6.11).",
 					"type": "string"
 				},
 				"Kind": {
-					"description": "Its kind, as a field's.",
-					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+					"description": "Its kind, as a field's, or Any.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 				},
 				"Default": {
 					"description": "Its default, in its Kind's JSON spelling (§6.11)."
 				},
 				"Element": {
 					"description": "An Array's element kind; Number otherwise.",
-					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array"]
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
 				},
 				"AssetType": {
 					"description": "An Asset's AssetType; empty otherwise.",
@@ -114,6 +125,31 @@
 					"type": "array",
 					"items": {
 						"type": "string"
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"GraphMethod": {
+			"description": "A method of the behaviour, which scripts call on its instance and its Method.<Name> nodes run (§6.11).",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "A Luau identifier, not a reserved name, unique across fields, variables and methods.",
+					"type": "string"
+				},
+				"Parameters": {
+					"description": "At most 4 parameters, in call order.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/GraphParameter"
+					}
+				},
+				"Results": {
+					"description": "At most 1 result; empty when the method returns nothing.",
+					"type": "array",
+					"items": {
+						"$ref": "#/$defs/GraphResult"
 					}
 				}
 			},
@@ -166,6 +202,40 @@
 				"To": {
 					"description": "The input pin.",
 					"$ref": "#/$defs/GraphPinRef"
+				}
+			},
+			"additionalProperties": false
+		},
+		"GraphParameter": {
+			"description": "A parameter of a graph method.",
+			"type": "object",
+			"properties": {
+				"Name": {
+					"description": "A Luau identifier other than self and Then, unique in its method.",
+					"type": "string"
+				},
+				"Kind": {
+					"description": "Its kind: any but Enum and Array.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
+				},
+				"AssetType": {
+					"description": "An Asset's AssetType, or empty for any asset; empty otherwise.",
+					"type": "string"
+				}
+			},
+			"additionalProperties": false
+		},
+		"GraphResult": {
+			"description": "The result of a graph method.",
+			"type": "object",
+			"properties": {
+				"Kind": {
+					"description": "Its kind: any but Enum and Array.",
+					"enum": ["Number", "Integer", "Bool", "String", "Vector", "Color", "Quat", "Entity", "Asset", "Enum", "Array", "Any"]
+				},
+				"AssetType": {
+					"description": "An Asset's AssetType, or empty for any asset; empty otherwise.",
+					"type": "string"
 				}
 			},
 			"additionalProperties": false
