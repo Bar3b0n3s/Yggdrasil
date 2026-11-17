@@ -1784,6 +1784,16 @@ namespace Engine {
 		if (graph.Variables.empty())
 			ImGui::TextDisabled("No variables: instance state OnCreate sets.");
 
+		// A name the graph already holds adds nothing: graph.setMembers would replace that member (or refuse the name as another
+		// member's), so a member is renamed or edited in its own row instead (phase 6's landing, as Add method's guard).
+		const auto holds = [&graph](const std::string& memberName)
+		{
+			return std::ranges::find(graph.Fields, memberName, &GraphField::Name) != graph.Fields.end()
+				|| std::ranges::find(graph.Variables, memberName, &GraphVariable::Name) != graph.Variables.end()
+				|| std::ranges::find(graph.Methods, memberName, &GraphMethod::Name) != graph.Methods.end();
+		};
+		constexpr const char* HeldNameTooltip = "A field, variable or method of the graph has this name: edit that one in its row.";
+
 		// A new member: its name, kind (an Asset's type, an Enum's choices, an Array's element) and whether it is a field.
 		ImGui::Separator();
 		ImGui::SetNextItemWidth(-1.0f);
@@ -1828,7 +1838,8 @@ namespace Engine {
 			ImGui::InputTextWithHint("##NewMemberChoices", "Choices: A, B, C", &m_NewMemberChoices);
 		}
 		const std::vector<std::string> choices = typed == GraphValueKind::Enum ? Utils::SplitGraphChoices(m_NewMemberChoices) : std::vector<std::string>{};
-		ImGui::BeginDisabled(!IsGraphIdentifier(m_NewMemberName) || (typed == GraphValueKind::Enum && choices.empty()));
+		const bool memberTaken = holds(m_NewMemberName);
+		ImGui::BeginDisabled(!IsGraphIdentifier(m_NewMemberName) || memberTaken || (typed == GraphValueKind::Enum && choices.empty()));
 		if (ImGui::Button(m_NewMemberVariable ? "Add variable" : "Add field", ImVec2(-1.0f, 0.0f)))
 		{
 			const std::string assetType = typed == GraphValueKind::Asset ? std::string(assetTypes[static_cast<size_t>(m_NewMemberAssetType)]) : std::string();
@@ -1842,6 +1853,8 @@ namespace Engine {
 			m_NewMemberName.clear();
 		}
 		ImGui::EndDisabled();
+		if (memberTaken)
+			ImGui::SetItemTooltip("%s", HeldNameTooltip);
 
 		// M39 (decision 13): the methods, each with its parameters and result, and a new method's name.
 		Utils::EditorSectionHeading("Methods");
@@ -1851,11 +1864,7 @@ namespace Engine {
 			ImGui::TextDisabled("No methods: scripts call them on the instance.");
 		ImGui::SetNextItemWidth(-1.0f);
 		ImGui::InputTextWithHint("##NewMethodName", "New method name", &m_NewMethodName);
-		// A name the graph already holds adds nothing: the new method would replace that method (or be refused as a field's or
-		// variable's name), so it is renamed or edited in its own row instead.
-		const bool taken = std::ranges::find(graph.Methods, m_NewMethodName, &GraphMethod::Name) != graph.Methods.end()
-			|| std::ranges::find(graph.Fields, m_NewMethodName, &GraphField::Name) != graph.Fields.end()
-			|| std::ranges::find(graph.Variables, m_NewMethodName, &GraphVariable::Name) != graph.Variables.end();
+		const bool taken = holds(m_NewMethodName);
 		ImGui::BeginDisabled(!IsGraphMethodName(m_NewMethodName) || taken);
 		if (ImGui::Button("Add method", ImVec2(-1.0f, 0.0f)))
 		{
@@ -1863,8 +1872,7 @@ namespace Engine {
 			m_NewMethodName.clear();
 		}
 		ImGui::EndDisabled();
-		ImGui::SetItemTooltip(taken ? "A field, variable or method of the graph has this name: edit that one in its row."
-									: "Adds a method without parameters or a result; scripts call it on the instance.");
+		ImGui::SetItemTooltip("%s", taken ? HeldNameTooltip : "Adds a method without parameters or a result; scripts call it on the instance.");
 		ImGui::EndDisabled();
 	}
 

@@ -512,6 +512,60 @@ namespace Engine {
 			CHECK(document["Nodes"][1]["Kind"] == "Method.Pull");
 		}
 
+		// Phase 6's landing (M39's merge adaptation, Add method's guard of decision 13): graph.setMembers adds or replaces a
+		// member by name, so Add field and Add variable stay disabled for a name a field, variable or method of the graph holds,
+		// and a member is edited in its own row instead.
+		TEST_CASE("GraphEditorPanel: Add field and Add variable add nothing for a name the graph already holds")
+		{
+			Test::UtilityPanelFixture fixture;
+			GraphEditorPanel panel;
+			static_cast<void>(OpenDoor(fixture, panel));
+			const Json speed{ { "Name", "Speed" }, { "Kind", "Number" }, { "Default", 2 }, { "Element", "Number" }, { "AssetType", "" }, { "EnumValues", Json::array() },
+				{ "Options", Json{ { "Max", 10 } } } };
+			const Json opened{ { "Name", "Opened" }, { "Kind", "Bool" }, { "Default", true }, { "Element", "Number" }, { "AssetType", "" }, { "EnumValues", Json::array() } };
+			CallOrFail(fixture, "graph.setMembers", Json{ { "graph", std::string(DoorPath) }, { "fields", Json::array({ speed }) }, { "variables", Json::array({ opened }) } });
+			static_cast<void>(Settle(fixture, panel));
+			EnlargeGraphWindow(fixture, panel);
+			const Json before = ReadDocument(fixture);
+			// The new member's name field, found by the text it shows (the member's own row draws the same name first), retyped.
+			const auto retype = [&fixture, &panel](std::string_view shown, size_t occurrence, std::string_view name)
+			{
+				static_cast<void>(Settle(fixture, panel));
+				Test::SupportingPanelTestUi::ClickText(fixture, panel, shown, occurrence);
+				PressChord(fixture, panel, ImGuiMod_Ctrl, ImGuiKey_A);
+				TypeText(fixture, panel, name);
+			};
+
+			// A field's name: Add field adds nothing, so Speed keeps its default and its bound.
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "New member name");
+			TypeText(fixture, panel, "Speed");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add field");
+			fixture.Pump();
+			CHECK(ReadDocument(fixture) == before);
+
+			// A variable's name, with Variable checked (the Variables heading draws its text first): Opened keeps its kind.
+			static_cast<void>(Settle(fixture, panel));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Variable", 1);
+			REQUIRE(Test::SupportingPanelTestUi::FindText(fixture, panel, "Add variable").has_value());
+			retype("Speed", 1, "Opened");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add variable");
+			fixture.Pump();
+			CHECK(ReadDocument(fixture) == before);
+
+			// A name the graph does not hold still adds its member.
+			retype("Opened", 1, "Shut");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add variable");
+			fixture.Pump();
+			const Json after = ReadDocument(fixture);
+			CHECK(after["Fields"] == before["Fields"]);
+			REQUIRE(after["Variables"].size() == 2);
+			CHECK(std::ranges::count(after["Variables"], before["Variables"][0]) == 1);
+			CHECK(std::ranges::count_if(after["Variables"], [](const Json& variable)
+			{
+				return variable["Name"] == "Shut";
+			}) == 1);
+		}
+
 		TEST_CASE("GraphEditorPanel: Undo and Redo submit edit.undo and edit.redo")
 		{
 			Test::UtilityPanelFixture fixture;

@@ -16,6 +16,8 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <format>
 #include <set>
 #include <string>
 #include <string_view>
@@ -210,6 +212,81 @@ namespace Engine {
 					CHECK_MESSAGE(diagnostic.Severity != DiagnosticSeverity::Warning, diagnostic.Line, ": ", diagnostic.Message);
 				}
 			}
+		}
+
+		// Phase 6's landing (the merge notes: every new callback's parameters against M39's transpiler locals): an event's
+		// parameters are its function's parameters under their binding names, so none may be a name the text declares itself
+		// (Graph, self, result, v<Id>_<Pin>, n<Id>_<Pin>, o<Id>, flow<Id>, p_<Name>). Every event of the script API, each of
+		// its parameters stored in an Any variable, transpiles to a text the strict checker accepts without a warning, Luau's
+		// shadowing lints included, so a callback added later with such a parameter fails here.
+		TEST_CASE("GraphTranspiler: every event's parameters reach its flow under their own names, shadowing nothing")
+		{
+			const TranspileSetup setup;
+			const Result<Scope<ScriptTypeChecker>> checker = ScriptTypeChecker::Create(setup.Api, {});
+			REQUIRE_MESSAGE(checker.has_value(), checker.error().ToString());
+			const auto isNumberedLocal = [](std::string_view name, std::string_view prefix, bool pinFollows)
+			{
+				if (!name.starts_with(prefix) || name.size() == prefix.size())
+					return false;
+				const std::string_view rest = name.substr(prefix.size());
+				const size_t digits = rest.find_first_not_of("0123456789");
+				if (digits == 0)
+					return false;
+				return pinFollows ? digits != std::string_view::npos && rest[digits] == '_' : digits == std::string_view::npos;
+			};
+			size_t events = 0;
+			for (const GraphNodeDescription& event : setup.Library->GetNodes())
+			{
+				if (event.Category != GraphNodeCategory::Event)
+					continue;
+				CAPTURE(event.Kind);
+				++events;
+				GraphDocument graph;
+				graph.Name = "Events";
+				graph.Nodes.push_back(GraphNode{ .Id = 1, .Kind = event.Kind, .Position = glm::vec2(0.0f), .Values = {} });
+				uint32_t previous = 1;
+				std::vector<std::string> parameters;
+				for (const GraphPinDescription& pin : event.Pins)
+				{
+					if (pin.Direction != GraphPinDirection::Output || pin.Type == GraphPinType::Exec)
+						continue;
+					const std::string_view name = pin.Name;
+					CHECK_MESSAGE(name != "Graph", name);
+					CHECK_MESSAGE(name != "self", name);
+					CHECK_MESSAGE(name != "result", name);
+					CHECK_MESSAGE(!name.starts_with("p_"), name);
+					for (const std::string_view prefix : { "v", "n" })
+						CHECK_MESSAGE(!isNumberedLocal(name, prefix, true), name);
+					for (const std::string_view prefix : { "o", "flow" })
+						CHECK_MESSAGE(!isNumberedLocal(name, prefix, false), name);
+					parameters.push_back(pin.Name);
+					const std::string variable = "Got" + pin.Name;
+					graph.Variables.push_back(GraphVariable{ .Name = variable, .Kind = GraphValueKind::Any, .Default = VariantValue(Json(nullptr)), .Element = GraphValueKind::Number, .AssetType = {}, .EnumValues = {} });
+					const uint32_t store = static_cast<uint32_t>(graph.Nodes.size()) + 1;
+					graph.Nodes.push_back(GraphNode{ .Id = store, .Kind = "Self.Set." + variable, .Position = glm::vec2(0.0f), .Values = {} });
+					graph.Links.push_back(GraphLink{ .From = { .Node = previous, .Pin = "Then" }, .To = { .Node = store, .Pin = "In" } });
+					graph.Links.push_back(GraphLink{ .From = { .Node = 1, .Pin = pin.Name }, .To = { .Node = store, .Pin = "Value" } });
+					previous = store;
+				}
+				CanonicalizeGraph(graph);
+				const std::string path = "Assets/Scripts/Events.graph";
+				const Result<GraphTranspileResult> result = TranspileGraph(graph, *setup.Library, path);
+				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+				// The function takes the callback's parameters by their own names, after the instance.
+				const std::string opening = std::format("function Graph.{}(self: any", std::string_view(event.Kind).substr(std::string_view("Event.").size()));
+				const size_t start = result->Luau.find(opening);
+				REQUIRE_MESSAGE(start != std::string::npos, result->Luau);
+				const std::string_view line = std::string_view(result->Luau).substr(start, result->Luau.find('\n', start) - start);
+				for (const std::string& parameter : parameters)
+					CHECK_MESSAGE(line.find(std::format(", {}: ", parameter)) != std::string_view::npos, line);
+				NoModules modules;
+				const Result<VfsPath> vfsPath = VfsPath::Create("project", path);
+				REQUIRE(vfsPath.has_value());
+				for (const ScriptDiagnostic& diagnostic : (*checker)->CheckScript({ .Path = *vfsPath, .Source = result->Luau, .Modules = &modules }))
+					FAIL_CHECK(std::format("line {}: {}", diagnostic.Line, diagnostic.Message));
+			}
+			// Every Behaviour callback the node library models.
+			CHECK(events >= 20);
 		}
 
 		// Docs/Decisions/0035-m24-contract.md risk 1: the transpiler builds a graph at MaxGraphNodes' scale without recursing per
