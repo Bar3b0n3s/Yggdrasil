@@ -35,6 +35,10 @@ namespace Engine {
 		// replay and verified with its input before it is written (FeatureTestRunOptions::RecordExpect). InvalidArgument at
 		// /expect without record.
 		std::vector<InputRecordExpectation> Expect{};
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): the run's locale, a tag, the locale of every selected suite
+		// whose Testing.Suites entry names none (FeatureTestRunOptions::Locale); replays keep their headers'. Absent: each such
+		// suite starts in the project's Localization.Locale. "" is refused at /locale (empty means inherit: name the tag).
+		std::string Locale{};
 	};
 
 	// The RPC returns the runner's exact schema (§11.10), without nesting it in a second result envelope. The alias

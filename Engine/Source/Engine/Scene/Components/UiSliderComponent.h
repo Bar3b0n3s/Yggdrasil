@@ -14,17 +14,20 @@ namespace Engine {
 	//     always lies in [Min, Max], and its normalized position t = (value - Min) / (Max - Min) in [0, 1]. Writes from
 	//     scripts and automation keep what they write (the registry checks Min < Max only); interaction writes the value as
 	//     read.
-	//   - Layout (Scene/UiLayout.h): Direction Horizontal puts Min at the left edge, Vertical at the bottom edge. Fill, an
-	//     element below the slider, spans its parent element's rectangle from the Min edge to t (Horizontal: its AnchorMin.x
-	//     is 0 and its AnchorMax.x is t; Vertical: AnchorMin.y is 1 - t and AnchorMax.y 1); Handle, an element below the
-	//     slider, sits at t (Horizontal: both x anchors are t; Vertical: both y anchors are 1 - t). The other axis's anchors
+	//   - Layout (Scene/UiLayout.h): Direction Horizontal puts Min at the left edge, Vertical at the bottom edge and M38's
+	//     HorizontalReverse (Docs/Decisions/0055-m38-runtime-locale.md decision 12) at the right edge. Fill, an element below
+	//     the slider, spans its parent element's rectangle from the Min edge to t (Horizontal: its AnchorMin.x is 0 and its
+	//     AnchorMax.x is t; Vertical: AnchorMin.y is 1 - t and AnchorMax.y 1; HorizontalReverse: AnchorMin.x is 1 - t and
+	//     AnchorMax.x 1); Handle, an element below the slider, sits at t (Horizontal: both x anchors are t; Vertical: both y
+	//     anchors are 1 - t; HorizontalReverse: both x anchors are 1 - t). The other axis's anchors
 	//     and every other UiRect field are the element's own. A Fill or Handle that is null or not an element below the
 	//     slider is ignored (project.validate's UI_WIDGET_PART_INVALID).
 	//   - Pointer: a press on the slider (or on any element whose nearest widget it is) sets the value at the pointer and
 	//     drags it until the release: t is the pointer's position along the slide rectangle (the Handle's parent element's
-	//     rectangle, else the Fill's parent's, else the slider's own), clamped to [0, 1].
+	//     rectangle, else the Fill's parent's, else the slider's own) from its Min edge, clamped to [0, 1].
 	//   - Keyboard and gamepad: while focused, the directions along Direction (Left and Right, or Down and Up) change the
-	//     value as read by the step toward Max (Right, Up) or Min (Left, Down), and the result is read as above; the other two
+	//     value as read by the step toward Max (Right, Up; Left when HorizontalReverse) or Min (Left, Down; Right when
+	//     HorizontalReverse), and the result is read as above; the other two
 	//     directions move focus as usual. The step is Step (0: a tenth of Max - Min); with WholeNumbers it is rounded to a
 	//     whole number, floor(step + 0.5), and at least 1, whatever Step says, so every press moves a whole-number slider
 	//     that is not at its end.

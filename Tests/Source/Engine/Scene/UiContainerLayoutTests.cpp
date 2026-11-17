@@ -53,6 +53,50 @@ namespace Engine {
 			CHECK(placements[1] == UiContainerPlacement{ .Position = glm::vec2(44.0f, 5.0f), .Size = glm::vec2(40.0f, 10.0f) });
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 12; Roadmap M38's acceptance): HorizontalReverse is Horizontal
+		// mirrored inside the padded rectangle: the first child at the right edge, MainAlignment Start at the right, a Grid's
+		// rows and Flex's lines from the right; Horizontal itself is unchanged.
+		TEST_CASE("UiContainerLayout: a HorizontalReverse row lays its children out from the right")
+		{
+			UiLayoutComponent layout{ .Kind = UiLayoutKind::Stack,
+				.Direction = UiLayoutDirection::HorizontalReverse,
+				.Padding = UiPadding{ .Left = 10.0f, .Top = 5.0f, .Right = 20.0f, .Bottom = 5.0f },
+				.Spacing = glm::vec2(4.0f, 0.0f) };
+			const std::vector<UiContainerChild> children = { MakeChild(glm::vec2(30.0f, 20.0f)), MakeChild(glm::vec2(40.0f, 10.0f)) };
+			// The padded rectangle is [10, 180] along X: the first child ends at 180, the second 4 units before it.
+			std::vector<UiContainerPlacement> placements = LayoutUiContainer(layout, glm::vec2(200.0f, 50.0f), children);
+			REQUIRE(placements.size() == 2);
+			CHECK(placements[0] == UiContainerPlacement{ .Position = glm::vec2(150.0f, 5.0f), .Size = glm::vec2(30.0f, 20.0f) });
+			CHECK(placements[1] == UiContainerPlacement{ .Position = glm::vec2(106.0f, 5.0f), .Size = glm::vec2(40.0f, 10.0f) });
+			// MainAlignment Start sits at the right edge, End at the left.
+			layout.MainAlignment = UiMainAlignment::End;
+			placements = LayoutUiContainer(layout, glm::vec2(200.0f, 50.0f), children);
+			CHECK(placements[1].Position.x == 10.0f);
+			// Every kind is the Horizontal placement mirrored.
+			for (const UiLayoutKind kind : { UiLayoutKind::Stack, UiLayoutKind::Grid, UiLayoutKind::Flex })
+			{
+				CAPTURE(static_cast<int>(kind));
+				UiLayoutComponent forward = layout;
+				forward.Kind = kind;
+				forward.Direction = UiLayoutDirection::Horizontal;
+				forward.Columns = 2;
+				forward.CellSize = glm::vec2(50.0f, 20.0f);
+				UiLayoutComponent reverse = forward;
+				reverse.Direction = UiLayoutDirection::HorizontalReverse;
+				const std::vector<UiContainerChild> three = { MakeChild(glm::vec2(30.0f, 20.0f)), MakeChild(glm::vec2(40.0f, 10.0f)), MakeChild(glm::vec2(20.0f, 10.0f)) };
+				const std::vector<UiContainerPlacement> ahead = LayoutUiContainer(forward, glm::vec2(200.0f, 50.0f), three);
+				const std::vector<UiContainerPlacement> mirrored = LayoutUiContainer(reverse, glm::vec2(200.0f, 50.0f), three);
+				REQUIRE(ahead.size() == mirrored.size());
+				for (size_t index = 0; index < ahead.size(); ++index)
+				{
+					CAPTURE(index);
+					CHECK(mirrored[index].Size == ahead[index].Size);
+					CHECK(mirrored[index].Position.y == ahead[index].Position.y);
+					CHECK(mirrored[index].Position.x == 10.0f + (170.0f - ((ahead[index].Position.x - 10.0f) + ahead[index].Size.x)));
+				}
+			}
+		}
+
 		TEST_CASE("UiContainerLayout: MainAlignment places a Stack's run, and an overflowing run starts at the inner start")
 		{
 			UiLayoutComponent layout{ .Kind = UiLayoutKind::Stack, .Direction = UiLayoutDirection::Horizontal, .Spacing = glm::vec2(10.0f, 0.0f) };

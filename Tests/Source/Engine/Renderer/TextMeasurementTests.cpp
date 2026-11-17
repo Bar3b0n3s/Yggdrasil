@@ -502,6 +502,97 @@ namespace Engine {
 			CHECK(FindTextCaret(measured, 6).Top.x == measured.Lines[0].Left);
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 11; Roadmap M38's acceptance): Start and End follow each line's
+		// own paragraph's resolved base direction (Auto: its first strong character's), so an Arabic paragraph and a Latin one
+		// of one block align to opposite edges; a paragraph without a strong character reads left to right; Left and Right are
+		// unchanged; an empty text's caret takes Start as Left and End as Right.
+		TEST_CASE("TextMeasurement: Start and End align each paragraph by its own direction")
+		{
+			Result<Buffer> arabicSource = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Fonts") / "NotoSansArabic-Regular.ttf");
+			REQUIRE_MESSAGE(arabicSource.has_value(), arabicSource.error().ToString());
+			Result<Buffer> latinSource = FileSystem::ReadFile(Test::GetRepositoryRoot() / "Resources/Fonts/Inter-Regular.ttf");
+			REQUIRE_MESSAGE(latinSource.has_value(), latinSource.error().ToString());
+			FontImportSettings arabicSettings;
+			arabicSettings.Ranges = { FontCharacterRange{ .First = 0x0627, .Last = 0x064A } };
+			FontBakeReport report;
+			const Result<FontData> arabic = FontImporter::Bake(*arabicSource, arabicSettings, "NotoSansArabic-Regular.ttf", report);
+			const Result<FontData> latin = FontImporter::Bake(*latinSource, {}, "Inter-Regular.ttf", report);
+			REQUIRE(arabic.has_value());
+			REQUIRE(latin.has_value());
+			const std::array<const FontData*, 2> chain = { &*latin, &*arabic };
+
+			// Line 0: Beh, Yeh, Teh (right to left); line 1: "home" (left to right); line 2: "123" (no strong character).
+			const std::string text = "\xD8\xA8\xD9\x8A\xD8\xAA\nhome\n123";
+			const auto measure = [&](RenderTextAlignment alignment)
+			{
+				const TextMeasurement measured = MeasureText(chain, text, { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = alignment });
+				REQUIRE(measured.Lines.size() == 3);
+				return measured;
+			};
+			const TextMeasurement start = measure(RenderTextAlignment::Start);
+			CHECK(start.Lines[0].Left + start.Lines[0].Width == doctest::Approx(400.0f));
+			CHECK(start.Lines[1].Left == 0.0f);
+			CHECK(start.Lines[2].Left == 0.0f);
+			const TextMeasurement end = measure(RenderTextAlignment::End);
+			CHECK(end.Lines[0].Left == 0.0f);
+			CHECK(end.Lines[1].Left + end.Lines[1].Width == doctest::Approx(400.0f));
+			CHECK(end.Lines[2].Left + end.Lines[2].Width == doctest::Approx(400.0f));
+			// Start is Left for a left-to-right line and Right for a right-to-left one, exactly.
+			const TextMeasurement left = measure(RenderTextAlignment::Left);
+			const TextMeasurement right = measure(RenderTextAlignment::Right);
+			CHECK(start.Lines[0].Left == right.Lines[0].Left);
+			CHECK(start.Lines[1].Left == left.Lines[1].Left);
+			CHECK(end.Lines[0].Left == left.Lines[0].Left);
+			CHECK(end.Lines[1].Left == right.Lines[1].Left);
+			// Only the lines' placement differs: the glyphs move with their line.
+			REQUIRE(start.Glyphs.size() == left.Glyphs.size());
+			for (size_t line = 0; line < start.Lines.size(); ++line)
+			{
+				const float shift = start.Lines[line].Left - left.Lines[line].Left;
+				for (uint32_t index = start.Lines[line].FirstGlyph; index < start.Lines[line].FirstGlyph + start.Lines[line].GlyphCount; ++index)
+				{
+					CAPTURE(index);
+					CHECK(start.Glyphs[index].Min.x == doctest::Approx(left.Glyphs[index].Min.x + shift));
+				}
+			}
+			// An empty text's caret: Start at the left edge, End at the right.
+			const TextMeasurement empty = MeasureText(chain, "", { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = RenderTextAlignment::Start });
+			CHECK(FindTextCaret(empty, 0).Top.x == 0.0f);
+			const TextMeasurement emptyEnd = MeasureText(chain, "", { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = RenderTextAlignment::End });
+			CHECK(FindTextCaret(emptyEnd, 0).Top.x == 400.0f);
+
+			// The W38.2 review's finding 2: every line a paragraph wraps into takes the paragraph's direction (each line its own
+			// flag), so a wrapped Arabic paragraph's lines all end at the right edge at Start, and the Latin paragraph after it
+			// starts at the left.
+			const std::string word = "\xD8\xA8\xD9\x8A\xD8\xAA";
+			const std::string wrapped = word + " " + word + " " + word + " " + word + "\nhome";
+			const TextMeasurement wrappedStart =
+				MeasureText(chain, wrapped, { .Size = 24.0f, .Wrap = TextWrap::Word, .MaxWidth = 80.0f, .Alignment = RenderTextAlignment::Start });
+			REQUIRE(wrappedStart.Lines.size() >= 3);
+			for (size_t line = 0; line + 1 < wrappedStart.Lines.size(); ++line)
+			{
+				CAPTURE(line);
+				CHECK(wrappedStart.Lines[line].Left + wrappedStart.Lines[line].Width == doctest::Approx(80.0f));
+			}
+			CHECK(wrappedStart.Lines.back().Left == 0.0f);
+			// A paragraph's direction is its first strong character's, whatever runs its line holds: an Arabic word then a Latin
+			// one starts at the right edge, a Latin word then an Arabic one at the left; an empty paragraph, without a strong
+			// character, reads left to right.
+			const std::string mixed = word + " home\nhome " + word + "\n\n" + word;
+			const TextMeasurement mixedStart = MeasureText(chain, mixed, { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = RenderTextAlignment::Start });
+			REQUIRE(mixedStart.Lines.size() == 4);
+			CHECK(mixedStart.Lines[0].Left + mixedStart.Lines[0].Width == doctest::Approx(400.0f));
+			CHECK(mixedStart.Lines[1].Left == 0.0f);
+			CHECK(mixedStart.Lines[2].Left == 0.0f);
+			CHECK(mixedStart.Lines[3].Left + mixedStart.Lines[3].Width == doctest::Approx(400.0f));
+			const TextMeasurement mixedEnd = MeasureText(chain, mixed, { .Size = 24.0f, .MaxWidth = 400.0f, .Alignment = RenderTextAlignment::End });
+			REQUIRE(mixedEnd.Lines.size() == 4);
+			CHECK(mixedEnd.Lines[0].Left == 0.0f);
+			CHECK(mixedEnd.Lines[1].Left + mixedEnd.Lines[1].Width == doctest::Approx(400.0f));
+			CHECK(mixedEnd.Lines[2].Left == 400.0f);
+			CHECK(mixedEnd.Lines[3].Left == 0.0f);
+		}
+
 		TEST_CASE("TextMeasurement: a mixed-direction line is reordered by the bidirectional algorithm in either base direction, and Alignment places it")
 		{
 			Result<Buffer> hebrewSource = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Fonts") / "NotoSansHebrew-Regular.ttf");

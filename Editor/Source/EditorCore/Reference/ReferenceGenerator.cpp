@@ -142,8 +142,8 @@ namespace Engine {
 {"From": {"Node": 2, "Pin": "Result"}, "To": {"Node": 4, "Pin": "Condition"}}, {"From": {"Node": 3, "Pin": "Value"}, "To": {"Node": 2, "Pin": "B"}},
 {"From": {"Node": 4, "Pin": "True"}, "To": {"Node": 5, "Pin": "In"}}, {"From": {"Node": 5, "Pin": "Then"}, "To": {"Node": 6, "Pin": "In"}}]})";
 
-		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 4, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
-"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.6.0", "Config": "Editor", "SaveData": {"BestWave": 12, "Realms": ["Fire"]},
+		constexpr std::string_view ReplayExample = R"({"Format": "Replay", "Version": 5, "Scene": {"Handle": "8a61c0d2e4f31b77", "Path": "Assets/Scenes/Level2.scene"},
+"Parameters": {"Time": 61.25}, "Seed": 7, "FixedHz": 60, "EngineVersion": "0.6.0", "Config": "Editor", "SaveData": {"BestWave": 12, "Realms": ["Fire"]}, "Locale": "de",
 "Fingerprint": {"Entities": [{"Id": "0000000000000011", "Path": "/Camera", "Hash": "5e1f0c2b9a7d3e48",
 "Components": {"Transform": "a3c94e0f12b7d685", "Camera": "0c7e2a91f4d3b658"}},
 {"Id": "0000000000000022", "Path": "/Player", "Hash": "91d4c07a3e5b2f86", "Components": {"Transform": "47b0e9d2c61a5f38", "Script": "d8263f5a0b9c4e17"}}],
@@ -211,8 +211,9 @@ namespace Engine {
 				"strictHash compares each checkpoint as playback reaches it and stops at the first that differs. A recording with input events is refused "
 				"when a run without them reproduces every checkpoint, the final hash and every expectation. Every recording also keeps its start "
 				"fingerprint, what its session held at tick 0 (each entity and component, and each asset they reference), so a replay whose hash differs "
-				"names what changed since it was recorded. Version 1 files (no checkpoints) and version 2 files are read as version 3 with no fingerprint, "
-				"and project.upgrade rewrites them.",
+				"names what changed since it was recorded, and the locale its session started in, which every playback starts in. Older files are read as "
+				"the current version (version 1 without checkpoints, versions 1 and 2 without a fingerprint, versions 1 to 3 with an empty SaveData, "
+				"versions 1 to 4 with a null Locale), and project.upgrade rewrites them.",
 				ReplayExample },
 			AuthoredFormat{ "Scene", ".scene", Migrations::CurrentVersion,
 				"A scene (§6.2): entities in canonical order with their components keyed by registry name.", SceneExample },
@@ -1135,6 +1136,10 @@ namespace Engine {
 				"Version 4: the session's save-data store at the recording's start (SaveData's values by key), which seeds every playback's store, so "
 				"the replay verifies whatever the machine's store holds; its numbers are the store's doubles, written exactly (unlike Parameters, "
 				"whose numbers are floats); empty for a replay upgraded from an earlier version.");
+			properties["Locale"] = Described(Json{ { "type", Json::array({ "string", "null" }) } },
+				"Version 5 (M38): the locale the recorded session started in, empty or a locale tag such as de or ar, which every playback starts in "
+				"(a session started in another is refused, naming both); null for a replay upgraded from an earlier version, which plays in the "
+				"project's Localization.Locale.");
 			properties["Fingerprint"] = fingerprint;
 			properties["Events"] = Described(Json{ { "type", "array" }, { "items", ObjectSchema("One input event.", std::move(event), { "Tick", "Type" }) } },
 				"The applied input events, ordered by tick.");
@@ -1151,8 +1156,8 @@ namespace Engine {
 				"The state hash at FinalTick: 16 lowercase hex digits. It covers the simulated world (every entity with its serialized components, the tick, "
 				"the session's Random state, the id draws and every body's physics state), never script tables, audio or input.");
 			return DocumentSchema(ReplayFormatName, "An input replay (§6.7).", std::move(properties),
-				{ "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Fingerprint", "Events", "Expect", "Checkpoints",
-					"FinalTick", "FinalStateHash" });
+				{ "Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Locale", "Fingerprint", "Events", "Expect",
+					"Checkpoints", "FinalTick", "FinalStateHash" });
 		}
 
 		static Json ProvenanceSchema()

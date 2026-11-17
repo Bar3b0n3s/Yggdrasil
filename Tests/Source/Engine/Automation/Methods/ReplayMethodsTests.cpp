@@ -620,6 +620,37 @@ namespace Engine {
 			CHECK(replayed["withoutInput"] == Json(false));
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 5 and 7): input.record's locale is the recording's start locale,
+		// which its version 5 header records and input.readReplay reports, and input.replay starts its playback in it whatever the
+		// project's; Stop refuses the member, and Start a bad tag at /locale.
+		TEST_CASE("ReplayMethods: input.record's locale starts the recording in it, its header records it and input.replay plays in it")
+		{
+			Test::AutomationFixture fixture("RecordLocale");
+			SaveInputScene(fixture);
+			const Result<Json> malformed = fixture.Call("input.record", Json{ { "action", "start" }, { "locale", "de_DE" } });
+			REQUIRE_FALSE(malformed.has_value());
+			REQUIRE_FALSE(malformed.error().GetIssues().empty());
+			CHECK(malformed.error().GetIssues().front().JsonPointer == "/locale");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "start" }, { "locale", "de" } });
+			CHECK(CallReplayMethod(fixture, "play.state")["locale"] == Json("de"));
+			CallReplayMethod(fixture, "play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 100 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			const Result<Json> stopLocale = fixture.Call("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/German.replay" }, { "locale", "de" } });
+			REQUIRE_FALSE(stopLocale.has_value());
+			REQUIRE_FALSE(stopLocale.error().GetIssues().empty());
+			CHECK(stopLocale.error().GetIssues().front().JsonPointer == "/locale");
+			CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/German.replay" } });
+			const ReplayDocument replay = ReadRecordedReplay(fixture.GetEditor(), "Assets/Tests/German.replay");
+			CHECK(replay.Header.Locale == std::optional<std::string>("de"));
+			const Json read = CallReplayMethod(fixture, "input.readReplay", Json{ { "path", "Assets/Tests/German.replay" } });
+			CHECK(read["header"]["Locale"] == Json("de"));
+			CHECK(read["formatVersion"] == Json(ReplayFormatVersion));
+
+			const Json replayed = CallReplayMethod(fixture, "input.replay", Json{ { "path", "Assets/Tests/German.replay" }, { "verify", true }, { "strictHash", true } });
+			CHECK(replayed["passed"] == Json(true));
+			CHECK(CallReplayMethod(fixture, "play.state")["locale"] == Json("de"));
+			CHECK(fixture.GetEditor().GetProject().GetSettings().Localization.Locale != "de");
+		}
+
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 6): a recording takes a live frame-time signal, which its tick
 		// latches and the recording records as an input event; the replay plays it back and verifies, and its input check
 		// (the replay without its input) diverges, since the signal decided the run.
@@ -644,7 +675,7 @@ namespace Engine {
 			const Json saved = CallReplayMethod(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Signal.replay" } });
 			CHECK(saved["events"] == Json(1));
 			const ReplayDocument replay = ReadRecordedReplay(fixture.GetEditor(), "Assets/Tests/Signal.replay");
-			CHECK(replay.Version == 4);
+			CHECK(replay.Version == ReplayFormatVersion);
 			REQUIRE(replay.Events.size() == 1);
 			CHECK(replay.Events[0].Tick == 10);
 			CHECK(replay.Events[0].Type == "Signal");

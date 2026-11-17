@@ -18,7 +18,10 @@ namespace Engine {
 	class RuntimeAssetManager;
 
 	// The Runtime executable's own options, next to the engine's (GetEngineCommandLineOptions; §13.9).
-	// Dist retains --feature-test and --filter; the development options below are absent from Dist:
+	// Dist retains --feature-test, --filter and --locale (M38, Docs/Decisions/0055-m38-runtime-locale.md decision 8:
+	// --locale <tag> starts the game's sessions, its recordings and, with --feature-test, the suites whose entry names no
+	// locale in that locale instead of the project's Localization.Locale; --replay refuses it, since a replay starts in its
+	// header's locale); the development options below are absent from Dist:
 	//   --manifest <path>          read this Game.json (and the paks it names, relative to its directory) instead of the
 	//                              one next to the executable: the C++ tests run the built Runtime against test games
 	//                              without copying it (Docs/Decisions/0012-m7-decisions.md decision 10)
@@ -54,6 +57,9 @@ namespace Engine {
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 3): why user://Display.json could not be restored, read by
 		// the factory before logging exists; OnInitialize logs it as a warning. Empty when it was restored or absent.
 		std::string DisplaySettingsProblem{};
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 8): --locale, a tag; empty without the option (the project's
+		// Localization.Locale). The start locale of live sessions and recordings, and with --feature-test the run's locale.
+		std::string Locale{};
 	};
 
 	// The options above, for CommandLine::Parse next to GetEngineCommandLineOptions. Static storage.

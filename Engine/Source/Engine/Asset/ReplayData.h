@@ -24,11 +24,12 @@ namespace Engine {
 
 	inline constexpr std::string_view ReplayFormatName = "Replay";
 	// Version 2 adds Checkpoints, version 3 the start fingerprint (Fingerprint, below), version 4 (M28,
-	// Docs/Decisions/0043-m28-game-services.md decision 7) the header's SaveData and the Signal event type. A version 1 file
-	// migrates with no checkpoints (only its FinalStateHash is compared, as before), a version 1 or 2 file with a null
-	// Fingerprint, and a version 1 to 3 file with an empty SaveData (and holds no Signal event: one is refused there);
-	// project.upgrade rewrites them canonically.
-	inline constexpr uint32_t ReplayFormatVersion = 4;
+	// Docs/Decisions/0043-m28-game-services.md decision 7) the header's SaveData and the Signal event type, version 5 (M38,
+	// Docs/Decisions/0055-m38-runtime-locale.md decision 5) the header's Locale. A version 1 file migrates with no
+	// checkpoints (only its FinalStateHash is compared, as before), a version 1 or 2 file with a null Fingerprint, a version 1
+	// to 3 file with an empty SaveData (and holds no Signal event: one is refused there), and a version 1 to 4 file with a
+	// null Locale; project.upgrade rewrites them canonically.
+	inline constexpr uint32_t ReplayFormatVersion = 5;
 	// The first version with the start fingerprint (Docs/Decisions/0030-m19-contract.md decision 2, A-FPRINT), reserved for
 	// M19 by the phase 1 ledger: ReplayFormatVersion, ReplayData::FormatVersion and ReplayImporter::Version are 3. A version 1
 	// or 2 file migrates to version 3 with a null Fingerprint (nothing recorded, so nothing can be named), which
@@ -39,6 +40,8 @@ namespace Engine {
 	// checks equal).
 	inline constexpr uint32_t ReplaySaveDataFormatVersion = 4;
 	inline constexpr size_t MaxReplaySignalNameBytes = 64;
+	// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5; phase 6's ledger): the first version with the header's Locale.
+	inline constexpr uint32_t ReplayLocaleFormatVersion = 5;
 	// A replay header's EngineVersion: every recorder (input.record, test.run's record, the Runtime's recordings) writes the
 	// running engine's version, EngineVersionString (Core/BuildId.h; session.hello's engineVersion), never the build id, so
 	// a commit rewrites no replay (Docs/Decisions/0030-m19-contract.md decision 13). Before ADR 0038 (friction F10) they
@@ -78,6 +81,11 @@ namespace Engine {
 		// cooked payload) and read back exactly, so a recording starts from the store as it is; the session canonicalizes
 		// them as it seeds its store (SaveDataStore).
 		VariantValue SaveData{};
+		// Version 5 (M38, Docs/Decisions/0055-m38-runtime-locale.md decision 5): the locale the recorded session started in
+		// (PlaySession::GetStartLocale), empty or a tag (StringTableData.h's IsLocaleTag), written after SaveData as a string;
+		// every recorder writes it, and every playback starts in it, which ReplayPlayer::Begin enforces. nullopt (null in the
+		// file) only for a replay migrated from version 1 to 4, which plays in the project's Localization.Locale.
+		std::optional<std::string> Locale{};
 	};
 
 	// Asset-owned wire vocabulary, not Session's PlayInputEvent (§3). Type/State/control names use canonical file
@@ -212,7 +220,7 @@ namespace Engine {
 	struct ReplayData : Asset
 	{
 		static constexpr AssetType StaticType = AssetType::Replay;
-		static constexpr uint16_t FormatVersion = 4;
+		static constexpr uint16_t FormatVersion = 5;
 
 		ReplayData();
 
@@ -241,12 +249,13 @@ namespace Engine {
 	// Version must be ReplayFormatVersion (readers migrate older files first); newer is UnsupportedVersion. No compiler
 	// runs here.
 	[[nodiscard]] Status ValidateReplayDocument(const ReplayDocument& document);
-	// The readers accept versions 1 to 4. Version 1 has no Checkpoints member (one is an unknown member there) and
+	// The readers accept versions 1 to 5. Version 1 has no Checkpoints member (one is an unknown member there) and
 	// migrates with none; the document returned is always ReplayFormatVersion, and report.FileVersion keeps the file's own
-	// version. Versions 2 to 4 require Checkpoints. Versions 3 and 4 (decision 2) require Fingerprint (an object or null); in
-	// versions 1 and 2 a Fingerprint member is unknown, and both migrate with a null one. Version 4 (M28) requires SaveData
-	// (an object whose numbers are finite doubles); in versions 1 to 3 a SaveData member is unknown, and they migrate with
-	// an empty one.
+	// version. Versions 2 to 5 require Checkpoints. Versions 3 to 5 (decision 2) require Fingerprint (an object or null); in
+	// versions 1 and 2 a Fingerprint member is unknown, and both migrate with a null one. Versions 4 and 5 (M28) require
+	// SaveData (an object whose numbers are finite doubles); in versions 1 to 3 a SaveData member is unknown, and they
+	// migrate with an empty one. Version 5 (M38) requires Locale (a string, empty or a tag, or null); in versions 1 to 4 a
+	// Locale member is unknown, and they migrate with a null one.
 	[[nodiscard]] Result<ReplayDocument> ReplayFromJson(const Json& document, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<ReplayDocument> ReplayFromText(std::string_view text, ReplayLoadReport& report, bool strictUnknowns = false);
 	[[nodiscard]] Result<Json> ReplayToJson(const ReplayDocument& document);
@@ -258,14 +267,15 @@ namespace Engine {
 	// non-object, a float outside the float range, invalid UTF-8 or nesting deeper than MaxJsonDepth.
 	[[nodiscard]] Result<Json> CanonicalizeReplayParameters(const Json& parameters, std::string_view pointer = "/Parameters");
 
-	// Cooked FormatVersion 4 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
+	// Cooked FormatVersion 5 uses the standard ECKD header. Payload, little-endian: u32 source version; scene UUID
 	// u64; length-prefixed UTF-8 scene path and canonical Parameters JSON; seed u64; FixedHz u32; length-prefixed
-	// EngineVersion and Config; length-prefixed SaveData JSON (M28: minified, its numbers as doubles); event count u32; events in array order; expectation count u32; expectations;
+	// EngineVersion and Config; length-prefixed SaveData JSON (M28: minified, its numbers as doubles); the Locale (M38): u8
+	// present (0 or 1) and, when present, the length-prefixed locale; event count u32; events in array order; expectation count u32; expectations;
 	// checkpoint count u32; checkpoints (Tick u64, state hash u64); FinalTick u64; state hash u64; then the fingerprint
 	// (decision 2): u8 present (0 or 1); when present, entity count u32 and per entity its id u64, length-prefixed path,
 	// hash u64, component count u32 and per component its length-prefixed name and hash u64; then asset count u32 and per
-	// asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 to 3 artifacts (no checkpoints, no
-	// fingerprint or no SaveData) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache key) and
+	// asset its handle u64, length-prefixed path and type name, and hash u64. Version 1 to 4 artifacts (no checkpoints, no
+	// fingerprint, no SaveData or no Locale) are UnsupportedVersion: the cache rebuilds them (ReplayImporter's version is part of the cache key) and
 	// exports are made again. A string/buffer length is u32. Event records: Tick u64, kind u8 (the ten kinds
 	// above in that order, Signal's tag 9), then type-specific fields: strings, state u8 (Down=0, Up=1, Tap=2), f32 value or vec2;
 	// Action has a u8 State/Value discriminant; MouseButton has a u8 HasPosition; gamepad index is u32. Expectations:

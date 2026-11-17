@@ -99,7 +99,8 @@ class SaveDataTests(AutomationTestCase):
                                      "expect": [{"tick": 4, "luau": exact}]})
         client.call("play.stop")
         replay = json.loads((root / "Assets" / "Tests" / "Replays" / "Saved.replay").read_text(encoding="utf-8"))
-        self.assertEqual(replay["Version"], 4)
+        # Version 5 since M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5), which keeps version 4's SaveData.
+        self.assertEqual(replay["Version"], 5)
         self.assertEqual(replay["SaveData"], store)
         self.assertEqual(math.copysign(1.0, replay["SaveData"]["Zero"]), -1.0)
         # The machine's store holds something else now: the replay starts with its own and verifies at its hash.

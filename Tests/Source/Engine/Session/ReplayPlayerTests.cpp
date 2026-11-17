@@ -37,13 +37,14 @@ namespace Engine {
 				Header.EngineVersion = "1";
 				Header.Config = "Debug";
 			}
-			Scope<PlaySession> Create(uint64_t serial = 17)
+			Scope<PlaySession> Create(uint64_t serial = 17, std::string locale = {})
 			{
 				PlaySessionSpecification spec;
 				spec.Registry = &Scene.GetRegistry();
 				spec.Assets = &Assets;
 				spec.Serial = serial;
 				spec.Seed = Header.Seed;
+				spec.Project.Localization.Locale = std::move(locale);
 				auto session = PlaySession::CreateFromScene(spec, Scene.GetScene());
 				REQUIRE(session);
 				return std::move(*session);
@@ -116,6 +117,45 @@ namespace Engine {
 			CHECK(result.Passed);
 			CHECK(result.Expect.size() == 2);
 			CHECK(result.FinalTick == 3);
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 4; Roadmap M38's acceptance): the start locale is an input that
+		// the header records, so a playback in another locale is refused before a tick runs, naming both locales; a header
+		// without one (a migrated version 1 to 4 replay) plays in whatever locale its host started the session in.
+		TEST_CASE("ReplayPlayer: a session started in another locale than its header's is refused, naming both")
+		{
+			PlaybackFixture f;
+			auto replay = f.Data();
+			replay->Header.Locale = "ar";
+			{
+				auto session = f.Create(17, "de");
+				ReplayPlayer player;
+				const Status begun = player.Begin(replay, *session, { true, true });
+				REQUIRE_FALSE(begun.has_value());
+				CHECK(begun.error().GetCode() == ErrorCode::InvalidArgument);
+				CHECK(begun.error().ToString().contains("'ar'"));
+				CHECK(begun.error().ToString().contains("'de'"));
+				CHECK(session->GetTick() == 0);
+			}
+			{
+				// The empty locale is a locale too: a header naming it refuses a session started in another.
+				auto empty = f.Data();
+				empty->Header.Locale = "";
+				auto session = f.Create(17, "fr");
+				ReplayPlayer player;
+				CHECK_FALSE(player.Begin(empty, *session, { true, true }).has_value());
+			}
+			{
+				auto session = f.Create(17, "ar");
+				ReplayPlayer player;
+				CHECK(player.Begin(replay, *session, { true, true }).has_value());
+			}
+			// No locale in the header: whatever the session's.
+			auto migrated = f.Data();
+			REQUIRE_FALSE(migrated->Header.Locale.has_value());
+			auto session = f.Create(17, "de");
+			ReplayPlayer player;
+			CHECK(player.Begin(migrated, *session, { true, true }).has_value());
 		}
 
 		TEST_CASE("ReplayPlayer: tick zero and final tick expectations run at completed boundaries")

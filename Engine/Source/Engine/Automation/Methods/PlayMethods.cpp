@@ -1,6 +1,7 @@
 #include "EnginePCH.h"
 #include "Engine/Automation/Methods/PlayMethods.h"
 
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Automation/Methods/AutomationMethodContext.h"
 #include "Engine/Automation/Methods/Private/PlayMethodSupport.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
@@ -287,6 +288,7 @@ namespace Engine {
 			result.WorldPaused = session->IsWorldPaused();
 			result.WorldSounds = session->GetWorldPauseSounds();
 			result.WorldTick = ToAutomationCounter(session->GetWorldTick());
+			result.Locale = std::string(session->GetLocale());
 			return result;
 		}
 
@@ -305,6 +307,16 @@ namespace Engine {
 			options.TimeScale = params.TimeScale;
 			options.Parameters = params.Parameters;
 			options.PauseOnError = context.HasParam("pauseOnError") ? std::optional<bool>(params.PauseOnError) : std::nullopt;
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): absent, the project's; "" the empty locale.
+			if (context.HasParam("locale"))
+			{
+				if (!params.Locale.empty() && !IsLocaleTag(params.Locale))
+				{
+					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/locale",
+						std::format("'{}' is not a locale: the empty locale or a tag of 1 to {} ASCII letters, digits and '-' starting with a letter, such as de or ar", params.Locale, MaxStringTableLocaleBytes), {}));
+				}
+				options.Locale = params.Locale;
+			}
 			ENGINE_TRY(context.StartPlay(options));
 			return MakePlayStateResult(context);
 		}
@@ -485,7 +497,11 @@ namespace Engine {
 			.Field("parameters", &PlayStartParams::Parameters, "Object returned by Scene.GetLoadParameters; absent means an empty object.")
 			.Field("paused", &PlayStartParams::Paused, "Start paused at tick 0.")
 			.Field("timeScale", &PlayStartParams::TimeScale, "The time scale, 0 to 100 (1 is real time).", timeScaleMeta)
-			.Field("pauseOnError", &PlayStartParams::PauseOnError, "Pause on a script error; absent inherits project settings.");
+			.Field("pauseOnError", &PlayStartParams::PauseOnError, "Pause on a script error; absent inherits project settings.")
+			.Field("locale", &PlayStartParams::Locale,
+				"The locale the session starts in, such as de or ar, which Loc.Get reads until a script calls Loc.SetLocale; \"\" the empty locale "
+				"(every string table's fallback); absent: the project's Localization.Locale. Check a language's texts with ui.tree {target: \"Play\"} "
+				"without editing the project.");
 
 		registry.Struct<PlayStateResult>("PlayStateResult", "A play session's state (play.state, and the result of play.start, pause, resume and setTimeScale).")
 			.Field("state", &PlayStateResult::State, "Edit, Play, Simulate or Paused (as _meta.playState).")
@@ -505,7 +521,8 @@ namespace Engine {
 			.Field("input", &PlayStateResult::Input, "The game input as the last tick's step view saw it.")
 			.Field("worldPaused", &PlayStateResult::WorldPaused, "The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused.")
 			.Field("worldSounds", &PlayStateResult::WorldSounds, "The world pause's choice for the world's voices: Pause or Finish.")
-			.Field("worldTick", &PlayStateResult::WorldTick, "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.");
+			.Field("worldTick", &PlayStateResult::WorldTick, "The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads.")
+			.Field("locale", &PlayStateResult::Locale, "The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale.");
 
 		registry.Struct<PlayStopResult>("PlayStopResult", "Where a stopped play session ended.")
 			.Field("tick", &PlayStopResult::Tick, "The ticks the session ran.")

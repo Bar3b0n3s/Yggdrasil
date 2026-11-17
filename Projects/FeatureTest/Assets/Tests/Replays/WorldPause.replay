@@ -1,6 +1,6 @@
 {
 	"Format": "Replay",
-	"Version": 4,
+	"Version": 5,
 	"Scene": {
 		"Handle": "40e5ebc6558855eb",
 		"Path": "Assets/Scenes/WorldPause.scene"
@@ -11,6 +11,7 @@
 	"EngineVersion": "0.6.0",
 	"Config": "Editor",
 	"SaveData": {},
+	"Locale": "fr-CA",
 	"Fingerprint": {
 		"Entities": [
 			{

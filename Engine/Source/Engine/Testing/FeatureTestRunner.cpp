@@ -3,6 +3,7 @@
 
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/ReplayData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/Audio/AudioEngine.h"
 #include "Engine/Core/Clock.h"
 #include "Engine/Core/FixedStepScheduler.h"
@@ -44,6 +45,13 @@ namespace Engine {
 				return lower(a) == lower(b);
 			}) != text.end()
 				|| filter.empty();
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the name a suite's rows report: its declared name, with
+		// " (<locale>)" appended when its Testing.Suites entry names a locale.
+		std::string MakeTestSuiteName(std::string_view declared, std::string_view entryLocale)
+		{
+			return entryLocale.empty() ? std::string(declared) : std::format("{} ({})", declared, entryLocale);
 		}
 
 		// The cases of `description` that `filter` selects, by index: those whose "<suite>/<case>" it matches; none, for a
@@ -163,10 +171,11 @@ namespace Engine {
 		};
 		struct Selection
 		{
-			TestSuiteSettings Settings{};
+			TestSuiteSettings Settings{}; // the entry, its Locale the effective one (M38): the entry's, else the run's
 			TestSuiteDescription Description{};
 			std::vector<size_t> Cases{};
-			size_t SettingsIndex = 0; // the suite's index in Testing.Suites, for located errors
+			size_t SettingsIndex = 0;  // the suite's index in Testing.Suites, for located errors
+			std::string EntryLocale{}; // the entry's own Locale, which its name carries (MakeTestSuiteName)
 		};
 		// An unclaimed script error of the running case; a claim (OnExpectedScriptError) releases it.
 		struct Fault
@@ -632,6 +641,7 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidState, "suite session has no ScriptEngine");
 			ENGINE_TRY_ASSIGN(auto asset, Host->ResolveTestScript(Selected[SuiteIndex].Settings.Script));
 			ENGINE_TRY_ASSIGN(auto collected, scripts->CollectSuite(asset, *this));
+			collected.Name = MakeTestSuiteName(collected.Name, Selected[SuiteIndex].EntryLocale);
 			const auto& expected = Selected[SuiteIndex].Description;
 			if (compare)
 			{
@@ -1279,6 +1289,8 @@ namespace Engine {
 			suite.FinalStateHash = playback.StateHash;
 			suite.CheckpointsChecked = Count(playback.CheckpointsChecked);
 			suite.FailedCheckpointTick = playback.CheckpointFailed ? Count(playback.FinalTick) : 0;
+			// M38 (decision 6): the replay's start locale, its header's (or the project's for a header without one).
+			suite.Locale = Session != nullptr ? std::string(Session->GetStartLocale()) : std::string();
 			suite.ScriptErrors = Count(errors.GetCursor());
 			suite.Passed = playback.Passed && suite.ScriptErrors == 0;
 			ReportData.Suites.push_back(std::move(suite));
@@ -1351,8 +1363,16 @@ namespace Engine {
 					suite.Script = Selected[SuiteIndex].Settings.Script;
 					suite.Scene = Selected[SuiteIndex].Settings.Scene;
 					suite.Mode = Options.Mode;
+					// M38 (decision 6): the locale the suite's session starts in, its effective one (the entry's, else the
+					// run's) or the project's, before the session opens, so a suite whose session never starts names it too
+					// (the W38.1 review's finding 3: Scripts/Lib/games.py keys rows by script and effective locale).
+					suite.Locale = Selected[SuiteIndex].Settings.Locale.empty() ? Host->GetProjectSettings().Localization.Locale
+																				: Selected[SuiteIndex].Settings.Locale;
 					ReportData.Suites.push_back(std::move(suite));
 					const auto opened = OpenSession();
+					// The locale the session started in.
+					if (opened && Session != nullptr)
+						ReportData.Suites[SuiteResultIndex].Locale = std::string(Session->GetStartLocale());
 					if (!opened)
 					{
 						OutsideFailures.push_back(Failure(opened.error()));
@@ -1474,17 +1494,21 @@ namespace Engine {
 		return Matches(text, filter);
 	}
 
-	Result<TestSuiteDescription> FeatureTestRunner::DiscoverSuite(IFeatureTestHost& host, const TestSuiteSettings& settings, TestSuiteSettings::Mode mode)
+	Result<TestSuiteDescription> FeatureTestRunner::DiscoverSuite(IFeatureTestHost& host, const TestSuiteSettings& settings,
+		TestSuiteSettings::Mode mode, std::string_view runLocale)
 	{
 		State scratch;
 		scratch.Host = &host;
-		ENGINE_TRY_ASSIGN(scratch.Session, host.CreateSuiteSession(settings, mode, scratch, scratch));
+		TestSuiteSettings effective = settings;
+		if (effective.Locale.empty())
+			effective.Locale = runLocale;
+		ENGINE_TRY_ASSIGN(scratch.Session, host.CreateSuiteSession(effective, mode, scratch, scratch));
 		if (!scratch.Session || !scratch.Session->GetScripts())
 			return MakeError(ErrorCode::InvalidState, "suite discovery needs a script session");
 		ENGINE_TRY_ASSIGN(auto asset, host.ResolveTestScript(settings.Script));
 		ENGINE_TRY_ASSIGN(auto collected, scratch.Session->GetScripts()->CollectSuite(asset, scratch));
 		TestSuiteDescription description;
-		description.Name = collected.Name;
+		description.Name = MakeTestSuiteName(collected.Name, settings.Locale);
 		description.Script = settings.Script;
 		description.Scene = settings.Scene;
 		description.Modes = settings.Modes;
@@ -1510,7 +1534,7 @@ namespace Engine {
 		{
 			if (std::find(settings.Modes.begin(), settings.Modes.end(), mode) == settings.Modes.end())
 				continue;
-			ENGINE_TRY_ASSIGN(TestSuiteDescription description, DiscoverSuite(host, settings, mode));
+			ENGINE_TRY_ASSIGN(TestSuiteDescription description, DiscoverSuite(host, settings, mode, {}));
 			inventory.Suites.push_back(std::move(description));
 		}
 		ENGINE_TRY_ASSIGN(inventory.Replays, DiscoverReplays(host));
@@ -1534,6 +1558,8 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidArgument, "recording expectation {} is at tick {}, its compiled form at tick {}", index, options.RecordExpect[index].Tick, options.RecordExpectBytecode[index].Tick);
 		if (options.Mode != TestSuiteSettings::Mode::Editor && options.Mode != TestSuiteSettings::Mode::Release && options.Mode != TestSuiteSettings::Mode::Dist)
 			return MakeError(ErrorCode::InvalidArgument, "test discovery requires Editor, Release or Dist mode");
+		if (!options.Locale.empty() && !IsLocaleTag(options.Locale))
+			return MakeError(ErrorCode::InvalidArgument, "the run's locale must be a locale tag (got '{}')", options.Locale);
 		auto next = CreateScope<State>();
 		next->Host = &host;
 		next->Options = options;
@@ -1544,7 +1570,7 @@ namespace Engine {
 			const TestSuiteSettings& settings = suites[settingsIndex];
 			if (std::find(settings.Modes.begin(), settings.Modes.end(), options.Mode) == settings.Modes.end())
 				continue;
-			Result<TestSuiteDescription> description = DiscoverSuite(host, settings, options.Mode);
+			Result<TestSuiteDescription> description = DiscoverSuite(host, settings, options.Mode, options.Locale);
 			if (!description)
 			{
 				// ADR 0038, friction F03: a filtered run resolves and validates only the suites its filter selects. A suite
@@ -1555,7 +1581,7 @@ namespace Engine {
 					return std::unexpected(description.error());
 				TestSuiteSettings sceneless = settings;
 				sceneless.Scene.clear();
-				const Result<TestSuiteDescription> declared = DiscoverSuite(host, sceneless, options.Mode);
+				const Result<TestSuiteDescription> declared = DiscoverSuite(host, sceneless, options.Mode, options.Locale);
 				if (!declared || SelectCases(*declared, options.Filter).has_value())
 					return std::unexpected(description.error());
 				continue;
@@ -1565,6 +1591,9 @@ namespace Engine {
 				continue;
 			State::Selection selection;
 			selection.Settings = settings;
+			selection.EntryLocale = settings.Locale;
+			if (selection.Settings.Locale.empty())
+				selection.Settings.Locale = options.Locale;
 			selection.SettingsIndex = settingsIndex;
 			selection.Description = std::move(*description);
 			selection.Cases = std::move(*cases);

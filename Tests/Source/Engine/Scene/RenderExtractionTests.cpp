@@ -718,6 +718,22 @@ namespace Engine {
 			// Extraction adds no debug primitives and leaves the debug view Lit.
 			CHECK(snapshot->DebugDraw.IsEmpty());
 			CHECK(snapshot->DebugView == RenderDebugView::Lit);
+
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 11): the Text component lays out unshaped and left to right,
+			// so its Start extracts as Left and its End as Right.
+			title.Patch<TextComponent>([](TextComponent& text)
+			{
+				text.Alignment = TextAlignment::Start;
+			});
+			label.Patch<TextComponent>([](TextComponent& text)
+			{
+				text.Alignment = TextAlignment::End;
+			});
+			const Result<RenderSnapshot> directional = ExtractRenderSnapshot(scene, { .Width = 64, .Height = 64 });
+			REQUIRE_MESSAGE(directional.has_value(), directional.error().ToString());
+			REQUIRE(directional->Texts.size() == 2);
+			CHECK(directional->Texts[0].Alignment == RenderTextAlignment::Left);
+			CHECK(directional->Texts[1].Alignment == RenderTextAlignment::Right);
 		}
 
 		TEST_CASE("RenderExtraction: world texts in a play scene render at the interpolated pose")

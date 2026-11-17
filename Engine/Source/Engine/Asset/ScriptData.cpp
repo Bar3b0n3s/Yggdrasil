@@ -68,7 +68,9 @@ namespace Engine {
 				// M22 (Docs/Decisions/0033-m22-contract.md decision 27): the UI callbacks, appended in landing order.
 				"OnUiClick", "OnUiValueChanged", "OnUiFocus", "OnUiHover", "OnUiCancel", "OnUiScroll", "OnUiTextChanged", "OnUiSubmit",
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the animation events, appended in landing order.
-				"OnAnimationEvent" };
+				"OnAnimationEvent",
+				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2), appended in landing order.
+				"OnLocaleChanged" };
 			return name.starts_with("__") || std::find(std::begin(Reserved), std::end(Reserved), name) != std::end(Reserved);
 		}
 

@@ -1257,7 +1257,7 @@ A container that places its children's rectangles in a stack, a grid or a flexib
 | `Spacing` | `Vec2` | `[0,0]` | 0 to 1e+06 | units |  | The gaps between children, lines and cells along x and y, in canvas units. |
 | `MainAlignment` | `UiMainAlignment` | `"Start"` |  |  |  | Where the children sit along the main axis when they do not fill it. |
 | `CrossAlignment` | `UiCrossAlignment` | `"Start"` |  |  |  | Where each child sits across the main axis. |
-| `Columns` | `UInt32` | `0` | 0 to 1024 |  |  | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
+| `Columns` | `UInt32` | `0` | 0 to 1024 |  |  | Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds. |
 | `CellSize` | `Vec2` | `[100,100]` | 0 to 1e+06 | units |  | Grid: the size of each cell in canvas units. |
 | `Wrap` | `Bool` | `false` |  |  |  | Flex: whether a child that does not fit the line starts a new line. |
 
@@ -1266,7 +1266,7 @@ Script members of `UiLayout`:
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
 | `CellSize` | proxy field | `vector` | read/write | All | Grid: the size of each cell in canvas units. |
-| `Columns` | proxy field | `number` | read/write | All | Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds. |
+| `Columns` | proxy field | `number` | read/write | All | Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds. |
 | `CrossAlignment` | proxy field | `UiCrossAlignment` | read/write | All | Where each child sits across the main axis. |
 | `Direction` | proxy field | `UiLayoutDirection` | read/write | All | The main axis the children follow. |
 | `Kind` | proxy field | `UiLayoutKind` | read/write | All | How the children are placed. |
@@ -1364,11 +1364,11 @@ A UI slider: the pointer drags its value between Min and Max and the directions 
 | `Interactable` | `Bool` | `true` |  |  |  | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
 | `Focusable` | `Bool` | `true` |  |  |  | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
 | `Value` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
-| `Min` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value at the start edge (left, or bottom when Vertical); below Max. |
-| `Max` | `Float` | `1` | -1e+06 to 1e+06 |  |  | The value at the end edge (right, or top when Vertical). |
+| `Min` | `Float` | `0` | -1e+06 to 1e+06 |  |  | The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max. |
+| `Max` | `Float` | `1` | -1e+06 to 1e+06 |  |  | The value at the end edge (right; top when Vertical, left when HorizontalReverse). |
 | `WholeNumbers` | `Bool` | `false` |  |  |  | Whether the value is rounded to whole numbers. |
 | `Step` | `Float` | `0` | 0 to 1e+06 |  |  | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
-| `Direction` | `UiLayoutDirection` | `"Horizontal"` |  |  |  | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
+| `Direction` | `UiLayoutDirection` | `"Horizontal"` |  |  |  | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge. |
 | `Fill` | `EntityRef` | `null` |  |  |  | A UI element below the slider stretched from the Min edge to the value; null for none. |
 | `Handle` | `EntityRef` | `null` |  |  |  | A UI element below the slider placed at the value; null for none. |
 
@@ -1376,13 +1376,13 @@ Script members of `UiSlider`:
 
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
-| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge. |
+| `Direction` | proxy field | `UiLayoutDirection` | read/write | All | Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge. |
 | `Fill` | proxy field | `Entity?` | read/write | All | A UI element below the slider stretched from the Min edge to the value; null for none. |
 | `Focusable` | proxy field | `boolean` | read/write | All | Whether the widget takes keyboard and gamepad focus, from navigation, Ui.SetFocus or a pointer press; false: a press still activates it. |
 | `Handle` | proxy field | `Entity?` | read/write | All | A UI element below the slider placed at the value; null for none. |
 | `Interactable` | proxy field | `boolean` | read/write | All | Whether the widget takes the pointer, focus and input; false shows its Disabled tint and raises no event. |
-| `Max` | proxy field | `number` | read/write | All | The value at the end edge (right, or top when Vertical). |
-| `Min` | proxy field | `number` | read/write | All | The value at the start edge (left, or bottom when Vertical); below Max. |
+| `Max` | proxy field | `number` | read/write | All | The value at the end edge (right; top when Vertical, left when HorizontalReverse). |
+| `Min` | proxy field | `number` | read/write | All | The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max. |
 | `Step` | proxy field | `number` | read/write | All | The change per navigation press along the slider; 0 is a tenth of the range. With WholeNumbers it is rounded to a whole number of at least 1. |
 | `Value` | proxy field | `number` | read/write | All | The value, read clamped to Min and Max (and rounded with WholeNumbers). |
 | `WholeNumbers` | proxy field | `boolean` | read/write | All | Whether the value is rounded to whole numbers. |
@@ -2134,6 +2134,8 @@ How the lines of a text element are aligned to each other.
 | `Left` | Lines start at the left edge of the text block. |
 | `Center` | Lines are centred in the text block. |
 | `Right` | Lines end at the right edge of the text block. |
+| `Start` | Each line starts where its paragraph's direction starts: at the left edge for a left-to-right paragraph, at the right edge for a right-to-left one (Arabic, Hebrew); a paragraph without a strong character reads left to right. The Text component reads it as Left. |
+| `End` | Each line ends where its paragraph's direction ends: at the right edge for a left-to-right paragraph, at the left edge for a right-to-left one. The Text component reads it as Right. |
 
 ### TextSpace
 
@@ -2170,9 +2172,9 @@ Where each child of a container sits across its main axis.
 
 | Value | Description |
 |---|---|
-| `Start` | At the start of its line: the top (Horizontal) or the left edge (Vertical). |
+| `Start` | At the start of its line: the top (Horizontal, HorizontalReverse) or the left edge (Vertical). |
 | `Center` | Centred across the main axis. |
-| `End` | At the end of its line: the bottom (Horizontal) or the right edge (Vertical). |
+| `End` | At the end of its line: the bottom (Horizontal, HorizontalReverse) or the right edge (Vertical). |
 | `Stretch` | Stretched to fill its line's cross size (a Grid child: its cell's). |
 
 ### UiImageFilter
@@ -2201,6 +2203,7 @@ The main axis of a UI layout container.
 |---|---|
 | `Horizontal` | Children follow each other from left to right. |
 | `Vertical` | Children follow each other from top to bottom. |
+| `HorizontalReverse` | Children follow each other from right to left, Horizontal mirrored inside the padding (a right-to-left row; MainAlignment Start at the right edge); a slider's Min is at the right edge. |
 
 ### UiLayoutKind
 
@@ -2209,7 +2212,7 @@ How a UI layout container places its children.
 | Value | Description |
 |---|---|
 | `Stack` | One after another along Direction, each at its own size. |
-| `Grid` | In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical). |
+| `Grid` | In cells of CellSize, Columns cells per row (Horizontal, HorizontalReverse) or per column (Vertical). |
 | `Flex` | A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap. |
 
 ### UiMainAlignment
@@ -2218,9 +2221,9 @@ Where a container's children sit along its main axis when they do not fill it.
 
 | Value | Description |
 |---|---|
-| `Start` | At the start: the left edge (Horizontal) or the top (Vertical). |
+| `Start` | At the start: the left edge (Horizontal), the right edge (HorizontalReverse) or the top (Vertical). |
 | `Center` | Centred along the main axis. |
-| `End` | At the end: the right edge (Horizontal) or the bottom (Vertical). |
+| `End` | At the end: the right edge (Horizontal), the left edge (HorizontalReverse) or the bottom (Vertical). |
 
 ### UiScaleMode
 

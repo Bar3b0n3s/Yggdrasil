@@ -535,14 +535,18 @@ namespace Engine {
 			return pen;
 		}
 
-		// The x of a line's pen start in a block `blockWidth` wide.
-		static float AlignLine(RenderTextAlignment alignment, float blockWidth, float lineWidth)
+		// The x of a line's pen start in a block `blockWidth` wide; Start and End (M38, Docs/Decisions/0055-m38-runtime-locale.md
+		// decision 11) by the line's paragraph's direction (`rightToLeft`): Start is Left for a left-to-right paragraph and Right
+		// for a right-to-left one, End the opposite.
+		static float AlignLine(RenderTextAlignment alignment, bool rightToLeft, float blockWidth, float lineWidth)
 		{
 			switch (alignment)
 			{
 				case RenderTextAlignment::Left:   return 0.0f;
 				case RenderTextAlignment::Center: return (blockWidth - lineWidth) * 0.5f;
 				case RenderTextAlignment::Right:  return blockWidth - lineWidth;
+				case RenderTextAlignment::Start:  return rightToLeft ? blockWidth - lineWidth : 0.0f;
+				case RenderTextAlignment::End:    return rightToLeft ? 0.0f : blockWidth - lineWidth;
 			}
 			ENGINE_CORE_ASSERT(false, "Unknown RenderTextAlignment {}", std::to_underlying(alignment));
 			return 0.0f;
@@ -602,6 +606,8 @@ namespace Engine {
 		const TextShaper shaper(fonts);
 		const std::vector<TextParagraph> paragraphs = Utils::DecodeText(fonts, measured, result.SkippedCodepoints);
 		std::vector<uint32_t> codepoints;
+		// M38 (decision 11): whether each line's paragraph resolved right to left, for Start and End.
+		std::vector<bool> rightToLeftLines;
 		for (const TextParagraph& paragraph : paragraphs)
 		{
 			codepoints.clear();
@@ -629,6 +635,7 @@ namespace Engine {
 					.Top = top,
 					.Baseline = layout.Baseline,
 				});
+				rightToLeftLines.push_back((bidi.GetBaseLevel() & 1U) != 0);
 				if (end.End == clusters.Clusters.size())
 					break;
 				start = end.Resume;
@@ -647,7 +654,7 @@ namespace Engine {
 		for (size_t lineIndex = 0; lineIndex < result.Lines.size(); ++lineIndex)
 		{
 			TextMeasuredLine& line = result.Lines[lineIndex];
-			line.Left = Utils::AlignLine(options.Alignment, blockWidth, line.Width);
+			line.Left = Utils::AlignLine(options.Alignment, rightToLeftLines[lineIndex], blockWidth, line.Width);
 			for (size_t index = line.FirstGlyph; index < line.FirstGlyph + line.GlyphCount; ++index)
 			{
 				result.Glyphs[index].Min.x += line.Left;
@@ -676,7 +683,7 @@ namespace Engine {
 		if (measurement.Lines.empty())
 		{
 			// An empty text: its line 0 at the alignment's start of the block.
-			return { .Top = glm::vec2(Utils::AlignLine(measurement.Alignment, measurement.Size.x, 0.0f), 0.0f), .Line = 0 };
+			return { .Top = glm::vec2(Utils::AlignLine(measurement.Alignment, false, measurement.Size.x, 0.0f), 0.0f), .Line = 0 };
 		}
 		const uint32_t target = std::min(byteOffset, measurement.Lines.back().ByteEnd);
 		const auto caretAt = [&measurement](uint32_t line, float x)

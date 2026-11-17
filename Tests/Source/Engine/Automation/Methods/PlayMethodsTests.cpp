@@ -255,6 +255,45 @@ namespace Engine {
 			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetLoadParameters() == parameters);
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): play.start's locale is the session's start locale (absent:
+		// the project's; "" the empty locale), play.state reports the session's locale as Loc.SetLocale changes it, and a bad tag
+		// is refused at /locale before anything starts.
+		TEST_CASE("PlayMethods: play.start's locale starts the session in it and play.state reports the session's locale")
+		{
+			Test::AutomationFixture fixture("PlayMethods");
+			OpenSceneWithEntity(fixture);
+			for (const std::string_view invalid : { "de_DE", "-de", "1de" })
+			{
+				CAPTURE(invalid);
+				const Result<Json> refused = fixture.Call("play.start", Json{ { "locale", invalid } });
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+				REQUIRE_FALSE(refused.error().GetIssues().empty());
+				CHECK(refused.error().GetIssues().front().JsonPointer == "/locale");
+			}
+			CHECK_FALSE(fixture.GetEditor().GetPlay().IsPlaying());
+
+			const Result<Json> german = fixture.Call("play.start", Json{ { "locale", "de" }, { "lockstep", true } });
+			REQUIRE_MESSAGE(german.has_value(), german.error().ToString());
+			CHECK((*german)["locale"] == Json("de"));
+			CHECK(fixture.GetEditor().GetPlay().GetSession()->GetStartLocale() == "de");
+			const Result<Json> evaluated = fixture.Call("script.eval", Json{ { "context", "play" }, { "code", "Loc.SetLocale('ar')" } });
+			REQUIRE_MESSAGE(evaluated.has_value(), evaluated.error().ToString());
+			const Result<Json> state = fixture.Call("play.state", Json::object());
+			REQUIRE(state.has_value());
+			CHECK((*state)["locale"] == Json("ar"));
+			REQUIRE(fixture.Call("play.stop", Json::object()).has_value());
+
+			const std::string project = fixture.GetEditor().GetProject().GetSettings().Localization.Locale;
+			const Result<Json> inherited = fixture.Call("play.start", Json{ { "lockstep", true } });
+			REQUIRE(inherited.has_value());
+			CHECK((*inherited)["locale"] == Json(project));
+			REQUIRE(fixture.Call("play.stop", Json::object()).has_value());
+			const Result<Json> empty = fixture.Call("play.start", Json{ { "locale", "" }, { "lockstep", true } });
+			REQUIRE(empty.has_value());
+			CHECK((*empty)["locale"] == Json(""));
+		}
+
 		TEST_CASE("PlayMethods: play.setTimeScale validates its range")
 		{
 			Test::AutomationFixture fixture("PlayMethods");

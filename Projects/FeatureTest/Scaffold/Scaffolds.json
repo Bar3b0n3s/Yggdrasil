@@ -520,6 +520,29 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "SessionLocale.jsonl",
+			"IdSeed": 3501,
+			"Renderer": "none"
+		},
+		{
+			"File": "SessionLocaleReplay.jsonl",
+			"IdSeed": 3502,
+			"Renderer": "none"
+		},
+		{
+			"File": "UiDirection.jsonl",
+			"IdSeed": 3503,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenUiDirection.jsonl",
+			"IdSeed": 3504,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Scenes/GoldenUiDirection"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

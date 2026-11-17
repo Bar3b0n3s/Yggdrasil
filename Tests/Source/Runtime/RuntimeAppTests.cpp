@@ -292,6 +292,9 @@ namespace Engine {
 				{ { "--filter", "one" }, "--filter" },
 				{ { "--verify" }, "--verify" },
 				{ { "--replay=" }, "--replay" },
+				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 8): --locale takes a tag.
+				{ { "--locale", "de_DE" }, "--locale" },
+				{ { "--locale=" }, "--locale" },
 			};
 			for (const Case& usage : cases)
 			{
@@ -306,6 +309,138 @@ namespace Engine {
 				CHECK(result->ExitCode == ExitCode::UsageError);
 				CHECK(result->StandardError.contains(usage.Named));
 			}
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 8; Roadmap M38's acceptance): --locale starts the live session in
+		// its tag (the start line names the session's locale) and, with --feature-test, every suite whose entry names no locale,
+		// while an entry's own Locale still wins; --replay refuses it, since a replay starts in its header's locale.
+		TEST_CASE("RuntimeApp: --locale starts the sessions and the suites that name no locale in its tag, and --replay refuses it")
+		{
+			Test::TempDirectory directory("RuntimeLocale");
+			Test::TestGameSpecification specification;
+			specification.Name = "LocaleGame";
+			specification.Locale = "fr";
+			specification.Scripts = { { .Handle = AssetHandle(0x38C0001), .Path = "Assets/Tests/Locale.test.luau", .Source = R"(return Test.Suite("Locale", function()
+	Test.Case("starts in its locale", function()
+		Test.ExpectEqual(Loc.GetLocale(), Scene.GetLoadParameters().Expected)
+	end)
+end)
+)" } };
+			TestSuiteSettings inherits;
+			inherits.Script = "Assets/Tests/Locale.test.luau";
+			inherits.Parameters = VariantValue(Json{ { "Expected", "ar" } });
+			TestSuiteSettings german = inherits;
+			german.Locale = "de";
+			german.Parameters = VariantValue(Json{ { "Expected", "de" } });
+			specification.TestSuites = { inherits, german };
+			const auto manifest = Test::WriteTestGame(directory / "Game", specification);
+			REQUIRE_MESSAGE(manifest.has_value(), (manifest ? "" : manifest.error().ToString()));
+
+			// A live session.
+			const Result<ProcessResult> live = RunRuntime(directory, { "--headless", "--renderer", "none", "--frames", "2", "--locale", "ar", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(live.has_value(), live.error().ToString());
+			INFO("runtime stderr: ", live->StandardError);
+			CHECK(live->ExitCode == ExitCode::Success);
+			CHECK(live->StandardError.contains("Runtime: 'LocaleGame' started with scene 'Assets/Scenes/Main.scene' (3 entities, seed 7, locale 'ar')"));
+			const Result<ProcessResult> fallback = RunRuntime(directory, { "--headless", "--renderer", "none", "--frames", "2", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(fallback.has_value(), fallback.error().ToString());
+			CHECK(fallback->StandardError.contains("locale 'fr')"));
+
+			// The testing export's suites: the entry without a locale runs in --locale's, the German entry in its own.
+			EditFile(*manifest, "\"Testing\": false", "\"Testing\": true");
+			const Result<ProcessResult> suites = RunRuntime(directory, { "--headless", "--renderer", "none", "--feature-test", "--locale", "ar", ManifestArgument(*manifest) }, directory.GetPath());
+			REQUIRE_MESSAGE(suites.has_value(), suites.error().ToString());
+			INFO("feature-test stderr: ", suites->StandardError);
+			CHECK(suites->ExitCode == ExitCode::Success);
+			const auto json = FileSystem::ReadText(directory / "bin/TestResults/FeatureTest-Release.json");
+			REQUIRE_MESSAGE(json.has_value(), json.error().ToString());
+			const auto report = JsonReader::Parse(*json);
+			REQUIRE(report.has_value());
+			CHECK((*report)["passed"] == Json(true));
+			REQUIRE((*report)["suites"].size() == 2);
+			CHECK((*report)["suites"][0]["suite"] == Json("Locale"));
+			CHECK((*report)["suites"][0]["locale"] == Json("ar"));
+			CHECK((*report)["suites"][1]["suite"] == Json("Locale (de)"));
+			CHECK((*report)["suites"][1]["locale"] == Json("de"));
+
+			// --replay owns its locale.
+			const Result<ProcessResult> replay = RunRuntime(directory, { "--headless", "--renderer", "none", "--replay", "Recorded.replay", "--locale", "ar", ManifestArgument(*manifest) });
+			REQUIRE_MESSAGE(replay.has_value(), replay.error().ToString());
+			CHECK(replay->ExitCode == ExitCode::UsageError);
+			CHECK(replay->StandardError.contains("--locale"));
+		}
+
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 3, 5 and 8; the W38.1 review's finding 2): in the Runtime's
+		// automation subset, a recording that names no locale starts in the launch locale (--locale), one that names a locale in
+		// it, and the header records the start locale; input.replay starts its playback in the header's locale, neither the
+		// launch locale nor the project's.
+		TEST_CASE("RuntimeApp: a Runtime recording starts in --locale unless it names one, and input.replay plays in its header's locale")
+		{
+#if defined(ENGINE_PLATFORM_WINDOWS)
+			Test::TempDirectory userData("RuntimeLocaleRecord");
+			Test::TestGameSpecification specification;
+			specification.Name = "LocaleRecordGame";
+			specification.Locale = "fr";
+			const Result<std::filesystem::path> manifest = Test::WriteTestGame(userData / "Game", specification);
+			REQUIRE_MESSAGE(manifest.has_value(), (manifest ? "" : manifest.error().ToString()));
+			Result<std::filesystem::path> runtime = Test::GetBuiltExecutablePath("Runtime");
+			REQUIRE_MESSAGE(runtime.has_value(), runtime.error().ToString());
+			Result<Process> process = Process::Spawn({ .Executable = std::move(*runtime),
+				.Arguments = Test::WithoutAudioDevice({ "--headless", "--renderer", "none", "--automation", "--paused", "--locale", "de", ManifestArgument(*manifest),
+					"--user-data-dir=" + Test::PathToUtf8(userData.GetPath()) }) });
+			REQUIRE_MESSAGE(process.has_value(), process.error().ToString());
+			const uint32_t pid = process->GetId();
+			const std::filesystem::path game = userData / "LocaleRecordGame";
+			const std::filesystem::path sessions = game / "Automation" / "Sessions";
+			REQUIRE(Test::WaitUntil([&sessions, pid]()
+			{
+				return FileSystem::Exists(SessionFile::GetPath(sessions, pid));
+			}));
+			Result<RuntimeAutomationConnection> connection = RuntimeAutomationConnection::Open(sessions, pid);
+			REQUIRE_MESSAGE(connection.has_value(), connection.error().ToString());
+			const auto playStateLocale = [&connection]()
+			{
+				const Result<Json> state = connection->Call("play.state", Json::object());
+				REQUIRE_MESSAGE(state.has_value(), state.error().ToString());
+				return JsonReader(*state).ReadMember<std::string>("locale").value_or("<none>");
+			};
+			// Records two ticks from a restart with `start`'s members and returns the written header's Locale.
+			const auto record = [&connection, &game, &playStateLocale](Json start, std::string_view file, std::string_view sessionLocale)
+			{
+				start["action"] = "Start";
+				start["restart"] = true;
+				const Result<Json> started = connection->Call("input.record", start);
+				REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+				CHECK(playStateLocale() == sessionLocale);
+				REQUIRE(connection->Call("play.step", Json{ { "ticks", 2 }, { "render", "none" } }).has_value());
+				const Result<Json> stopped = connection->Call("input.record", Json{ { "action", "Stop" }, { "path", file } });
+				REQUIRE_MESSAGE(stopped.has_value(), stopped.error().ToString());
+				const Result<std::string> text = FileSystem::ReadText(game / "Replays" / Test::PathFromUtf8(file));
+				REQUIRE_MESSAGE(text.has_value(), text.error().ToString());
+				const Result<Json> document = JsonReader::Parse(*text);
+				REQUIRE(document.has_value());
+				return JsonReader(*document).ReadMember<std::string>("Locale").value_or("<null>");
+			};
+			// No locale named: the launch locale, not the project's fr.
+			CHECK(record(Json::object(), "Inherited.replay", "de") == "de");
+			// A named locale wins over the launch locale.
+			CHECK(record(Json{ { "locale", "ar" } }, "Arabic.replay", "ar") == "ar");
+
+			// The Arabic replay plays in its header's locale: a session in de or fr would be refused at its start.
+			const Result<Json> replayed = connection->Call("input.replay", Json{ { "path", "user://Replays/Arabic.replay" }, { "verify", true }, { "strictHash", true } });
+			REQUIRE_MESSAGE(replayed.has_value(), replayed.error().ToString());
+			CHECK((*replayed)["passed"] == Json(true));
+			CHECK(playStateLocale() == "ar");
+
+			REQUIRE(connection->Call("session.shutdown", Json::object()).has_value());
+			const Result<ProcessResult> result = process->Wait(std::chrono::seconds(120));
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			INFO("runtime stderr: ", result->StandardError);
+			CHECK(result->ExitCode == ExitCode::Success);
+#else
+			MESSAGE("RuntimeApp locale recording: the Runtime's automation client in this file is implemented on Windows only "
+					"(RuntimeAutomationConnection); the editor's recordings are covered by the ReplayMethods case");
+#endif
 		}
 
 		TEST_CASE("RuntimeApp: feature-test stays inert for an ordinary exported game")

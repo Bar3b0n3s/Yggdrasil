@@ -815,8 +815,9 @@ return true
 				{
 					// The 13 callbacks before M21, then M21's four 2D physics callbacks (Docs/Decisions/0032-m21-contract.md decision 13),
 					// then M22's six UI callbacks and C22.3's OnUiTextChanged and OnUiSubmit (Docs/Decisions/0033-m22-contract.md
-					// decisions 27 and 47), then M23's OnAnimationEvent (Docs/Decisions/0034-m23-contract.md decision 31).
-					REQUIRE(group.Members.size() == 26);
+					// decisions 27 and 47), then M23's OnAnimationEvent (Docs/Decisions/0034-m23-contract.md decision 31), then M38's
+					// OnLocaleChanged (Docs/Decisions/0055-m38-runtime-locale.md decision 2).
+					REQUIRE(group.Members.size() == 27);
 					for (const auto& member : group.Members)
 					{
 						CHECK(member.Kind == ScriptApiMemberKind::Callback);

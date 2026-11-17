@@ -33,6 +33,9 @@ namespace Engine {
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): OnAnimationEvent in a play session (ScriptAnimationTests.cpp).
 		void RunAnimationCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2): OnLocaleChanged (Bindings/LocTests.cpp).
+		void RunLocaleCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+
 		static int RecordScriptLifecycle(ScriptCall& call)
 		{
 			const std::string message = Lua::Check<std::string>(call, 1);
@@ -461,6 +464,7 @@ return Script.Define("UiCoverage", T)
 			RunBehaviour2DCallbacksCoverage(mode, snapshots);
 			RunBehaviourUiCoverage(mode, snapshots);
 			RunAnimationCallbackCoverage(mode, snapshots);
+			RunLocaleCallbackCoverage(mode, snapshots);
 			if (mode == RunModes::Editor)
 				RunBehaviourReloadCoverage(snapshots);
 			REQUIRE(snapshots.size() > firstSnapshot);

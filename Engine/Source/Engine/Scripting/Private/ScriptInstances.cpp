@@ -280,7 +280,7 @@ namespace Engine {
 	}
 
 	void ScriptEngine::State::Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event, bool destroying,
-		const AnimationEventRecord* animation)
+		const AnimationEventRecord* animation, const LocaleChange* locale)
 	{
 		if (Engine.IsStopped() || Engine.IsReadOnly())
 			return;
@@ -302,7 +302,7 @@ namespace Engine {
 		const ScriptTaskOwner owner{ .Entity = key.Entity, .Case = {}, .Slot = key.Slot };
 		const bool outerSignal = std::exchange(TestSignalRaised, false);
 		std::optional<ScriptError> callbackFailure;
-		const auto operation = [this, tableReference, callback, event, animation, &callbackFailure](ScriptCall& call) -> int
+		const auto operation = [this, tableReference, callback, event, animation, locale, &callbackFailure](ScriptCall& call) -> int
 		{
 			lua_getref(call.State, tableReference);
 			const int self = lua_gettop(call.State);
@@ -356,6 +356,13 @@ namespace Engine {
 				Lua::Push(call, animation->Time);
 				lua_setfield(call.State, -2, "Time");
 				++arguments;
+			}
+			if (locale != nullptr)
+			{
+				// OnLocaleChanged(self, locale, previous) (M38, Docs/Decisions/0055-m38-runtime-locale.md decision 2).
+				Lua::PushString(call, locale->Locale);
+				Lua::PushString(call, locale->Previous);
+				arguments += 2;
 			}
 			const auto result = Lua::ProtectedCall(call, arguments, 0);
 			if (!result)

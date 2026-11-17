@@ -39,16 +39,16 @@ namespace Engine {
 	// Its normalized position: (ReadUiSliderValue - Min) / (Max - Min), in [0, 1]; 0 when Min is not below Max. Pure.
 	[[nodiscard]] float GetUiSliderPosition(const UiSliderComponent& slider);
 
-	// Sets the slider `slider` to the value at `pointer` (scene pixels) along its slide rectangle (UiSliderComponent.h),
-	// writing it as read and raising ValueChanged (HasNumber, Number: the new value) when it differs from the value as read
-	// before.
+	// Sets the slider `slider` to the value at `pointer` (scene pixels) along its slide rectangle from its Min edge
+	// (UiSliderComponent.h), writing it as read and raising ValueChanged (HasNumber, Number: the new value) when it
+	// differs from the value as read before.
 	void SetUiSliderFromPointer(Scene& scene, const UiLayoutTable& table, UUID slider, glm::vec2 pointer, std::vector<UiEvent>& events);
 
-	// A navigation press while `slider` is focused: a direction along its Direction (Left or Right when Horizontal, Down or
-	// Up when Vertical) changes the value as read by its step (UiSliderComponent.h: with WholeNumbers a whole number, at
-	// least 1) toward Max (Right, Up) or Min (Left, Down), written as read, raising ValueChanged when it changed; returns
-	// true for such a direction (the slider consumes it, whether or not the value changed), false for the other two (they
-	// navigate).
+	// A navigation press while `slider` is focused: a direction along its Direction (Left or Right when Horizontal or
+	// HorizontalReverse, Down or Up when Vertical) changes the value as read by its step (UiSliderComponent.h: with
+	// WholeNumbers a whole number, at least 1) toward Max (Right, Up; Left when HorizontalReverse, M38) or Min (Left, Down;
+	// Right when HorizontalReverse), written as read, raising ValueChanged when it changed; returns true for such a
+	// direction (the slider consumes it, whether or not the value changed), false for the other two (they navigate).
 	[[nodiscard]] bool StepUiSlider(Scene& scene, UUID slider, UiDirection direction, std::vector<UiEvent>& events);
 
 	// --- ScrollView (stream C) -----------------------------------------------------------------------------------------

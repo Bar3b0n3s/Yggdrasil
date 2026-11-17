@@ -1,0 +1,31 @@
+{
+	"Format": "StringTable",
+	"Version": 1,
+	"Locales": ["en", "de", "ar"],
+	"Entries": [
+		{
+			"Key": "Title",
+			"Values": {
+				"ar": "شجرة العالم",
+				"de": "Weltenbaum",
+				"en": "World Tree"
+			}
+		},
+		{
+			"Key": "Play",
+			"Values": {
+				"ar": "العب",
+				"de": "Spielen",
+				"en": "Play"
+			}
+		},
+		{
+			"Key": "Language",
+			"Values": {
+				"ar": "العربية",
+				"de": "Deutsch",
+				"en": "English"
+			}
+		}
+	]
+}

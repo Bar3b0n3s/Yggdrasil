@@ -39,6 +39,10 @@ namespace Engine {
 		uint32_t Seed = 0; // absent inherits the session/project seed
 		std::string Path{};
 		std::vector<InputRecordExpectation> Expect{};
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): Start only: the locale the recording starts in, empty or a
+		// tag, which its header records; absent (HasParam): the project's in the editor, the launch locale (--locale) in the
+		// Runtime.
+		std::string Locale{};
 	};
 
 	struct InputRecordResult

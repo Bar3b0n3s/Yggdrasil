@@ -298,6 +298,13 @@ namespace Engine {
 			Utils::LayoutGrid(layout, frame, placements);
 		else
 			Utils::LayoutLines(layout, frame, children, placements);
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 12): HorizontalReverse is the Horizontal placement mirrored
+		// inside the padded rectangle, so its first child sits at the right edge.
+		if (layout.Direction == UiLayoutDirection::HorizontalReverse)
+		{
+			for (UiContainerPlacement& placement : placements)
+				placement.Position.x = frame.Origin.x + (frame.Size.x - ((placement.Position.x - frame.Origin.x) + placement.Size.x));
+		}
 		return placements;
 	}
 

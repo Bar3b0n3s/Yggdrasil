@@ -256,7 +256,8 @@ namespace Engine {
 			// The runner's run of the suite. Its session runs with the suite's overrides (the live VM's allocator); its cases
 			// pass only when the scene, parameters, clock, isolation and both limits reached it, and it ends with the
 			// expected quit. A filtered run of a coverage project reports the six gates unevaluated.
-			static_cast<void>(client.Submit("test.run", Json{ { "filter", "Main/" } }));
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the suite names a locale, so its rows are "Main (de)".
+			static_cast<void>(client.Submit("test.run", Json{ { "filter", "Main (de)/" } }));
 			std::optional<uint64_t> suiteSoftLimit;
 			std::optional<Json> run;
 			REQUIRE(Test::WaitUntil([&client, &editor, &suiteSoftLimit, &run]()
@@ -287,6 +288,9 @@ namespace Engine {
 			const bool isolated = caseStatus("case isolation restarts the scene")["status"] == Json("passed")
 				&& caseStatus("case isolation restarts the scene again")["status"] == Json("passed");
 			observe("/Testing/Suites/*/Isolation", isolated);
+			// M38 (decision 6): the suite's sessions start in its Locale (the case reads Loc.GetLocale), not the project's, and its
+			// rows report its name and locale.
+			observe("/Testing/Suites/*/Locale", caseStatus("the suite starts in its entry's locale")["status"] == Json("passed") && suiteResult["locale"] == Json(suite.Locale) && suiteResult["suite"] == Json("Main (de)") && suite.Locale != settings.Localization.Locale);
 			const Json quit = caseStatus("the suite quits with its expected code");
 			observe("/Testing/Suites/*/ExpectQuit", quit["status"] == Json("quit") && quit["quitCode"] == Json(3) && quit["quitExpected"] == Json(true));
 			uint32_t suiteTicks = 0;

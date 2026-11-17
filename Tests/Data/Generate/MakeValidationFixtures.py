@@ -778,7 +778,7 @@ return Script.Define("Jumper", Jumper)
     item.project["Testing"]["Suites"] = [{
         "Script": "Assets/Tests/Missing.test.luau", "Scene": "", "Parameters": None, "Isolation": "Suite", "Clock": [],
         "Overrides": {"CallbackBudgetMs": 0, "MemoryLimitMB": 0, "PauseOnError": "Inherit"}, "ExpectQuit": -1,
-        "Modes": ["Editor", "Release", "Dist"]}]
+        "Modes": ["Editor", "Release", "Dist"], "Locale": ""}]
 
     item = fixture("SCRIPT_COMPUTED_ASSET_LOAD")
     item.project["Export"]["PruneUnreferenced"] = True
@@ -1069,7 +1069,8 @@ OBSERVATION_SUITE = '''--!strict
 -- Observes the suite settings of Tests/Data/Project/AllSettings.eproj through the runner (gate 8). Every case passes \
 only
 -- when its setting reached the session: the Scene, the Parameters, the scripted Clock (fewer frames than ticks), case
--- Isolation, CaseTimeoutTicks and SuiteTickLimit (the long cases outlast both defaults) and ExpectQuit (the last case).
+-- Isolation, CaseTimeoutTicks and SuiteTickLimit (the long cases outlast both defaults), its Locale (M38: the suite's
+-- sessions start in it, not in the project's fr-CA) and ExpectQuit (the last case).
 local LongCases = 31
 local LongTicks = 1180
 
@@ -1105,6 +1106,10 @@ return Test.Suite("Main", function()
 \t\t\tTest.WaitTicks(LongTicks)
 \t\tend)
 \tend
+
+\tTest.Case("the suite starts in its entry's locale", function()
+\t\tTest.ExpectEqual(Loc.GetLocale(), "de")
+\tend)
 
 \tTest.Case("the suite quits with its expected code", function()
 \t\tApplication.Quit(3)
@@ -1170,9 +1175,9 @@ def observation_files() -> dict[str, bytes]:
     add_json("Assets/Tests/Main.test.luau.meta", meta("0b5e0000000000a4", "Script", "Script"))
     # The replay Testing.Replays' glob finds (the observation test lists it; a filtered run never verifies it).
     add_json("Assets/Tests/Replays/Main.replay", {
-        "Format": "Replay", "Version": 4, "Scene": {"Handle": "0b5e0000000000a1", "Path": "Assets/Scenes/Main.scene"},
+        "Format": "Replay", "Version": 5, "Scene": {"Handle": "0b5e0000000000a1", "Path": "Assets/Scenes/Main.scene"},
         "Parameters": {}, "Seed": 0, "FixedHz": 120, "EngineVersion": "0.1.0", "Config": "Editor", "SaveData": {},
-        "Fingerprint": None,
+        "Locale": "fr-CA", "Fingerprint": None,
         "Events": [], "Expect": [], "Checkpoints": [], "FinalTick": 1, "FinalStateHash": "0000000000000001"})
     add_json("Assets/Tests/Replays/Main.replay.meta", meta("0b5e0000000000a7", "Replay", "Replay"))
     files["Assets/Icon.png"] = checker_png(256)

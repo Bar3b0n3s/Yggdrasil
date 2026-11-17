@@ -231,6 +231,40 @@ namespace Engine {
 			CHECK_FALSE(result["junitPath"].empty());
 		}
 
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 6 and 7): test.run's locale is the locale of every selected suite
+		// whose entry names none; an entry's own Locale wins and names its rows; the run's locale must be a tag.
+		TEST_CASE("TestMethods: test.run's locale starts the suites that name none in it, and an entry's own Locale names its rows")
+		{
+			Test::AutomationFixture fixture("TestRunLocale");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Tests/Contract.test.luau" }, { "source", "return Test.Suite('Contract', function()\n"
+																													 "Test.Case('reads its locale', function() Test.ExpectEqual(Loc.GetLocale(), Scene.GetLoadParameters().Expected) end)\nend)" } });
+			const Json inherits{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "" }, { "Modes", Json::array({ "Editor" }) }, { "Parameters", Json{ { "Expected", "ar" } } } };
+			Json german = inherits;
+			german["Locale"] = "de";
+			german["Parameters"] = Json{ { "Expected", "de" } };
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ inherits, german }) } } } } } });
+			for (const std::string_view invalid : { "", "de_DE" })
+			{
+				CAPTURE(invalid);
+				const Result<Json> refused = fixture.Call("test.run", Json{ { "locale", invalid } });
+				REQUIRE_FALSE(refused.has_value());
+				REQUIRE_FALSE(refused.error().GetIssues().empty());
+				CHECK(refused.error().GetIssues().front().JsonPointer == "/locale");
+			}
+			const Json result = CallTestMethod(fixture, "test.run", Json{ { "locale", "ar" } });
+			CHECK(result["passed"] == Json(true));
+			REQUIRE(result["suites"].size() == 2);
+			CHECK(result["suites"][0]["suite"] == Json("Contract"));
+			CHECK(result["suites"][0]["locale"] == Json("ar"));
+			CHECK(result["suites"][1]["suite"] == Json("Contract (de)"));
+			CHECK(result["suites"][1]["locale"] == Json("de"));
+			REQUIRE(result["cases"].size() == 2);
+			CHECK(result["cases"][1]["suite"] == Json("Contract (de)"));
+			const Json germanOnly = CallTestMethod(fixture, "test.run", Json{ { "filter", "Contract (de)/" } });
+			REQUIRE(germanOnly["suites"].size() == 1);
+			CHECK(germanOnly["passed"] == Json(true));
+		}
+
 		// ADR 0038, friction F03: a filtered run resolved every suite of the run's mode, so a suite the filter leaves out that
 		// names a scene not made yet refused it. It resolves and validates only the suites and replays the filter selects; a
 		// selected suite or replay whose scene is missing still refuses the run, as an unfiltered run does.

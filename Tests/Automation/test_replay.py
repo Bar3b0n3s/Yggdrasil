@@ -249,8 +249,10 @@ class ReplayTests(AutomationTestCase):
         saved = client.call("input.record", {"action": "stop", "path": path})
         self.assertEqual((saved["events"], saved["checkpoints"], saved["inputCheckTick"]), (2, 1, 60))
         document = json.loads((root / path).read_text(encoding="utf-8"))
-        # ReplayFormatVersion, 4 since M28 (Docs/Decisions/0043-m28-game-services.md).
-        self.assertEqual(document["Version"], 4)
+        # ReplayFormatVersion, 5 since M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 5), whose header
+        # records the locale the recording started in.
+        self.assertEqual(document["Version"], 5)
+        self.assertIsInstance(document["Locale"], str)
         self.assertEqual([checkpoint["Tick"] for checkpoint in document["Checkpoints"]], [60])
 
     def test_replay_continue_past_checkpoint_counts_every_failed_checkpoint(self) -> None:

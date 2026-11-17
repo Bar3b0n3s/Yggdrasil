@@ -9,6 +9,7 @@
 #include "Engine/Asset/AssetRegistry.h"
 #include "Engine/Asset/ReplayData.h"
 #include "Engine/Asset/ScriptData.h"
+#include "Engine/Asset/StringTableData.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
@@ -84,7 +85,7 @@ namespace Engine {
 
 			[[nodiscard]] Status Begin(const TestRunParams& params, RecordExpectations expectations)
 			{
-				return m_Runner.Begin(*m_Host, { .Mode = TestSuiteSettings::Mode::Editor, .Filter = params.Filter, .TimeoutTicks = params.TimeoutTicks, .Record = !m_Record.empty(), .RecordExpect = std::move(expectations.Sources), .RecordExpectBytecode = std::move(expectations.Bytecode) });
+				return m_Runner.Begin(*m_Host, { .Mode = TestSuiteSettings::Mode::Editor, .Filter = params.Filter, .TimeoutTicks = params.TimeoutTicks, .Record = !m_Record.empty(), .RecordExpect = std::move(expectations.Sources), .RecordExpectBytecode = std::move(expectations.Bytecode), .Locale = params.Locale });
 			}
 
 			// What the successful Begin selected (FeatureTestRunner::GetSelection).
@@ -318,6 +319,13 @@ namespace Engine {
 		{
 			if (context.HasParam("timeoutTicks") && params.TimeoutTicks == 0)
 				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/timeoutTicks", "timeoutTicks must be positive", {}));
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): a tag; the empty locale cannot be named (empty inherits).
+			if (context.HasParam("locale") && !IsLocaleTag(params.Locale))
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, "/locale",
+					std::format("'{}' is not a locale tag: 1 to {} ASCII letters, digits and '-' starting with a letter, such as de or ar", params.Locale, MaxStringTableLocaleBytes),
+					"omit locale to start each suite in its own Locale or the project's; a suite cannot name the empty locale (name the fallback's tag)"));
+			}
 			if (context.HasParam("record"))
 			{
 				if (params.Record.empty())
@@ -376,7 +384,10 @@ namespace Engine {
 			.Field("timeoutTicks", &TestRunParams::TimeoutTicks, "Optional positive run-wide tick cap; omitted means no additional limit.")
 			.Field("record", &TestRunParams::Record, "Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written and, when it replaces an existing file, whether its checkpoints and final state hash equal that file's.")
 			.Field("coverage", &TestRunParams::Coverage, "Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them.")
-			.Field("expect", &TestRunParams::Expect, "With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written.");
+			.Field("expect", &TestRunParams::Expect, "With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written.")
+			.Field("locale", &TestRunParams::Locale,
+				"The locale, such as de or ar, every selected suite whose Testing.Suites entry names no Locale starts in; absent: the project's "
+				"Localization.Locale. Replays start in their headers' locales.");
 	}
 
 	void RegisterTestMethods(MethodRegistry& methods)

@@ -1218,7 +1218,7 @@
 {"type":"response","time":"2026-11-16T19:46:46.185Z","client":"cli","id":1,"requestLine":1217,"ok":true,"summary":"ok"}
 {"type":"request","time":"2026-11-16T19:46:46.188Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
 {"type":"response","time":"2026-11-16T19:46:46.303Z","client":"cli","id":2,"requestLine":1219,"ok":true,"summary":"ok"}
-{"type":"request","time":"2026-11-17T05:57:52.497Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
-{"type":"response","time":"2026-11-17T05:57:52.716Z","client":"cli","id":1,"requestLine":1221,"ok":true,"summary":"ok"}
-{"type":"request","time":"2026-11-17T05:57:52.718Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
-{"type":"response","time":"2026-11-17T05:57:52.823Z","client":"cli","id":2,"requestLine":1223,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-17T04:24:13.570Z","client":"cli","id":1,"method":"project.refreshAssets","params":{}}
+{"type":"response","time":"2026-11-17T04:24:14.726Z","client":"cli","id":1,"requestLine":1221,"ok":true,"summary":"ok"}
+{"type":"request","time":"2026-11-17T04:24:14.730Z","client":"cli","id":2,"method":"project.upgrade","params":{}}
+{"type":"response","time":"2026-11-17T04:24:16.354Z","client":"cli","id":2,"requestLine":1223,"ok":true,"summary":"ok"}

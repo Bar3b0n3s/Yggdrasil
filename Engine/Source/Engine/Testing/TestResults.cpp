@@ -181,7 +181,8 @@ namespace Engine {
 			.Field("finalStateHash", &TestSuiteResult::FinalStateHash, "FinalStateHash of the test report.")
 			.Field("passed", &TestSuiteResult::Passed, "Passed of the test report.")
 			.Field("checkpointsChecked", &TestSuiteResult::CheckpointsChecked, "A replay suite: the state-hash checkpoints its playback compared, a checkpoint that differed included (all of them when it passed); 0 for a script suite.")
-			.Field("failedCheckpointTick", &TestSuiteResult::FailedCheckpointTick, "A replay suite: the tick of the checkpoint whose state hash differed, where playback stopped (its Checkpoint@<tick> row); 0 when none differed.");
+			.Field("failedCheckpointTick", &TestSuiteResult::FailedCheckpointTick, "A replay suite: the tick of the checkpoint whose state hash differed, where playback stopped (its Checkpoint@<tick> row); 0 when none differed.")
+			.Field("locale", &TestSuiteResult::Locale, "The locale the suite's sessions started in: its Testing.Suites entry's Locale, else the run's (test.run's locale, the Runtime's --locale), else the project's Localization.Locale; a replay suite's, its header's. A suite whose session never started reports the one it would have started in; empty is the empty locale.");
 		registry.Struct<TestCoverageCounter>("TestCoverageCounter", "TestCoverageCounter shared test report.")
 			.Field("id", &TestCoverageCounter::Id, "Id of the test report.")
 			.Field("kind", &TestCoverageCounter::Kind, "Kind of the test report.")

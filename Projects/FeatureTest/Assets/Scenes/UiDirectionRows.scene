@@ -1,0 +1,722 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "UiDirectionRows",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"Camera": 1,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiImage": 1,
+		"UiText": 1,
+		"UiLayout": 1,
+		"UiSlider": 1
+	},
+	"Entities": [
+		{
+			"ID": "bfc0463f15d186f3",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Color",
+					"ClearColor": [0.06, 0.07, 0.09]
+				}
+			}
+		},
+		{
+			"ID": "041a706f895eab7e",
+			"Name": "Canvas",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": "d160cd437036b5f1",
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
+				}
+			}
+		},
+		{
+			"ID": "68081ef283087c1c",
+			"Name": "ArabicStart",
+			"Parent": "041a706f895eab7e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 16],
+					"Size": [288, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.14, 0.16, 0.21, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "شجرة العالم",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Start",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "abd1171359e6902e",
+			"Name": "ArabicEnd",
+			"Parent": "041a706f895eab7e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [328, 16],
+					"Size": [288, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.14, 0.16, 0.21, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "شجرة العالم",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "End",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "0078f14322a16d83",
+			"Name": "LatinStart",
+			"Parent": "041a706f895eab7e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 64],
+					"Size": [288, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.14, 0.16, 0.21, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "World Tree",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Start",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "5d027f66cfebad87",
+			"Name": "LatinEnd",
+			"Parent": "041a706f895eab7e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [328, 64],
+					"Size": [288, 40],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.14, 0.16, 0.21, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "World Tree",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "End",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "5fead0dbca39a0f4",
+			"Name": "Paragraphs",
+			"Parent": "041a706f895eab7e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 112],
+					"Size": [592, 80],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.14, 0.16, 0.21, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiText": {
+					"Text": "شجرة العالم\nWorld Tree",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Start",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "99e458bc763d76f9",
+			"Name": "Reverse",
+			"Parent": "041a706f895eab7e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 208],
+					"Size": [592, 48],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.14, 0.16, 0.21, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiLayout": {
+					"Kind": "Stack",
+					"Direction": "HorizontalReverse",
+					"Padding": {
+						"Left": 8,
+						"Top": 0,
+						"Right": 8,
+						"Bottom": 0
+					},
+					"Spacing": [16, 0],
+					"MainAlignment": "Start",
+					"CrossAlignment": "Center",
+					"Columns": 0,
+					"CellSize": [100, 100],
+					"Wrap": false
+				}
+			}
+		},
+		{
+			"ID": "a7256d2711dcb139",
+			"Name": "ReverseCaption",
+			"Parent": "99e458bc763d76f9",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [160, 40],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "الصوت",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Start",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "7bc3d59f15cbcd9c",
+			"Name": "ReverseVolume",
+			"Parent": "99e458bc763d76f9",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [280, 20],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.25, 0.27, 0.32, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiSlider": {
+					"Interactable": true,
+					"Focusable": true,
+					"Value": 25,
+					"Min": 0,
+					"Max": 100,
+					"WholeNumbers": false,
+					"Step": 5,
+					"Direction": "HorizontalReverse",
+					"Fill": "7d76e9e5424ded89",
+					"Handle": "ef5be059a878bcd9"
+				}
+			}
+		},
+		{
+			"ID": "7d76e9e5424ded89",
+			"Name": "ReverseVolumeFill",
+			"Parent": "7bc3d59f15cbcd9c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.6, 0.9, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "ef5be059a878bcd9",
+			"Name": "ReverseVolumeHandle",
+			"Parent": "7bc3d59f15cbcd9c",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [10, 8],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.95, 0.95, 0.95, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "86f84f1b859725ba",
+			"Name": "ReverseValue",
+			"Parent": "99e458bc763d76f9",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [80, 40],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "25",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Start",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "42610017c5393810",
+			"Name": "Forward",
+			"Parent": "041a706f895eab7e",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [24, 272],
+					"Size": [592, 48],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.14, 0.16, 0.21, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiLayout": {
+					"Kind": "Stack",
+					"Direction": "Horizontal",
+					"Padding": {
+						"Left": 8,
+						"Top": 0,
+						"Right": 8,
+						"Bottom": 0
+					},
+					"Spacing": [16, 0],
+					"MainAlignment": "Start",
+					"CrossAlignment": "Center",
+					"Columns": 0,
+					"CellSize": [100, 100],
+					"Wrap": false
+				}
+			}
+		},
+		{
+			"ID": "f8f0d7708855671b",
+			"Name": "ForwardCaption",
+			"Parent": "42610017c5393810",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [160, 40],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "Volume",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Start",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "2c232caef3b7e4db",
+			"Name": "ForwardVolume",
+			"Parent": "42610017c5393810",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [280, 20],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.25, 0.27, 0.32, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiSlider": {
+					"Interactable": true,
+					"Focusable": true,
+					"Value": 25,
+					"Min": 0,
+					"Max": 100,
+					"WholeNumbers": false,
+					"Step": 5,
+					"Direction": "Horizontal",
+					"Fill": "75d32cd1189dfb86",
+					"Handle": "e32251a666db6645"
+				}
+			}
+		},
+		{
+			"ID": "75d32cd1189dfb86",
+			"Name": "ForwardVolumeFill",
+			"Parent": "2c232caef3b7e4db",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [1, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [0, 0],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.3, 0.6, 0.9, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "e32251a666db6645",
+			"Name": "ForwardVolumeHandle",
+			"Parent": "2c232caef3b7e4db",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 1],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [10, 8],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.95, 0.95, 0.95, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				}
+			}
+		},
+		{
+			"ID": "4c2092a84294759c",
+			"Name": "ForwardValue",
+			"Parent": "42610017c5393810",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"UiRect": {
+					"AnchorMin": [0.5, 0.5],
+					"AnchorMax": [0.5, 0.5],
+					"Pivot": [0.5, 0.5],
+					"Position": [0, 0],
+					"Size": [80, 40],
+					"ClipChildren": false
+				},
+				"UiText": {
+					"Text": "25",
+					"Font": null,
+					"Size": 28,
+					"Color": [1, 1, 1, 1],
+					"Alignment": "Start",
+					"VerticalAlignment": "Middle",
+					"Wrap": false,
+					"LineSpacing": 1,
+					"RaycastTarget": true
+				}
+			}
+		}
+	]
+}

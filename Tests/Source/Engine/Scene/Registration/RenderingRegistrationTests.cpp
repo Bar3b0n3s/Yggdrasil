@@ -192,7 +192,7 @@ namespace Engine {
 				{ "ExposureMode", { "Manual", "Auto" } },
 				{ "AntiAliasing", { "None", "Fxaa", "Taa" } },
 				{ "TextSpace", { "Screen", "World" } },
-				{ "TextAlignment", { "Left", "Center", "Right" } },
+				{ "TextAlignment", { "Left", "Center", "Right", "Start", "End" } }, // M38 appends Start and End (ADR 0055 decision 11)
 			};
 			for (const auto& [name, values] : enums)
 			{

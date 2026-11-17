@@ -371,7 +371,7 @@
 			"type": "object",
 			"properties": {
 				"Locale": {
-					"description": "The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; empty reads every table's first.",
+					"description": "The locale play sessions start in, such as fr or pt-BR, which Loc.Get reads string tables in (a table's locale equal to it, else its language's, else the table's first; empty reads every table's first) until a script calls Loc.SetLocale; play.start's locale, the Runtime's --locale, a suite's Locale and a replay's header start a session in another.",
 					"type": "string"
 				}
 			},
@@ -523,6 +523,10 @@
 					"items": {
 						"enum": ["Editor", "Release", "Dist"]
 					}
+				},
+				"Locale": {
+					"description": "The locale the suite's sessions start in, such as de or ar; empty: the run's locale (test.run's locale, the Runtime's --locale), else Localization.Locale. A suite that names one is reported as \"<Name> (<Locale>)\", so one script listed once per locale gives distinct rows.",
+					"type": "string"
 				}
 			},
 			"additionalProperties": false

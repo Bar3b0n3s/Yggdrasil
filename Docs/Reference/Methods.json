@@ -4401,7 +4401,7 @@
 							},
 							"Alignment": {
 								"description": "How the lines are aligned to each other.",
-								"enum": ["Left", "Center", "Right"]
+								"enum": ["Left", "Center", "Right", "Start", "End"]
 							},
 							"Billboard": {
 								"description": "Whether world-space text always faces the camera.",
@@ -5655,7 +5655,7 @@
 							},
 							"Alignment": {
 								"description": "How each line is aligned within the rectangle's width.",
-								"enum": ["Left", "Center", "Right"]
+								"enum": ["Left", "Center", "Right", "Start", "End"]
 							},
 							"VerticalAlignment": {
 								"description": "Where the text block sits in the rectangle's height.",
@@ -5688,7 +5688,7 @@
 							},
 							"Direction": {
 								"description": "The main axis the children follow.",
-								"enum": ["Horizontal", "Vertical"]
+								"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 							},
 							"Padding": {
 								"description": "Insets of the container's rectangle that the children are placed in.",
@@ -5721,7 +5721,7 @@
 								"enum": ["Start", "Center", "End", "Stretch"]
 							},
 							"Columns": {
-								"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+								"description": "Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 1024
@@ -5850,13 +5850,13 @@
 								"maximum": 1000000
 							},
 							"Min": {
-								"description": "The value at the start edge (left, or bottom when Vertical); below Max.",
+								"description": "The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max.",
 								"type": "number",
 								"minimum": -1000000,
 								"maximum": 1000000
 							},
 							"Max": {
-								"description": "The value at the end edge (right, or top when Vertical).",
+								"description": "The value at the end edge (right; top when Vertical, left when HorizontalReverse).",
 								"type": "number",
 								"minimum": -1000000,
 								"maximum": 1000000
@@ -5872,8 +5872,8 @@
 								"maximum": 1000000
 							},
 							"Direction": {
-								"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.",
-								"enum": ["Horizontal", "Vertical"]
+								"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge.",
+								"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 							},
 							"Fill": {
 								"description": "A UI element below the slider stretched from the Min edge to the value; null for none.",
@@ -8801,7 +8801,7 @@
 							},
 							"Alignment": {
 								"description": "How the lines are aligned to each other.",
-								"enum": ["Left", "Center", "Right"]
+								"enum": ["Left", "Center", "Right", "Start", "End"]
 							},
 							"Billboard": {
 								"description": "Whether world-space text always faces the camera.",
@@ -10055,7 +10055,7 @@
 							},
 							"Alignment": {
 								"description": "How each line is aligned within the rectangle's width.",
-								"enum": ["Left", "Center", "Right"]
+								"enum": ["Left", "Center", "Right", "Start", "End"]
 							},
 							"VerticalAlignment": {
 								"description": "Where the text block sits in the rectangle's height.",
@@ -10088,7 +10088,7 @@
 							},
 							"Direction": {
 								"description": "The main axis the children follow.",
-								"enum": ["Horizontal", "Vertical"]
+								"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 							},
 							"Padding": {
 								"description": "Insets of the container's rectangle that the children are placed in.",
@@ -10121,7 +10121,7 @@
 								"enum": ["Start", "Center", "End", "Stretch"]
 							},
 							"Columns": {
-								"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+								"description": "Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 1024
@@ -10250,13 +10250,13 @@
 								"maximum": 1000000
 							},
 							"Min": {
-								"description": "The value at the start edge (left, or bottom when Vertical); below Max.",
+								"description": "The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max.",
 								"type": "number",
 								"minimum": -1000000,
 								"maximum": 1000000
 							},
 							"Max": {
-								"description": "The value at the end edge (right, or top when Vertical).",
+								"description": "The value at the end edge (right; top when Vertical, left when HorizontalReverse).",
 								"type": "number",
 								"minimum": -1000000,
 								"maximum": 1000000
@@ -10272,8 +10272,8 @@
 								"maximum": 1000000
 							},
 							"Direction": {
-								"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.",
-								"enum": ["Horizontal", "Vertical"]
+								"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge.",
+								"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 							},
 							"Fill": {
 								"description": "A UI element below the slider stretched from the Min edge to the value; null for none.",
@@ -14049,7 +14049,7 @@
 						"maximum": 4294967295
 					},
 					"header": {
-						"description": "The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion and Config."
+						"description": "The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion, Config and (version 5) Locale, the locale the recording started in (null for a replay migrated from version 1 to 4, which plays in the project's)."
 					},
 					"finalTick": {
 						"description": "Completed ticks the replay runs.",
@@ -14199,6 +14199,10 @@
 						"items": {
 							"$ref": "#/$defs/InputRecordExpectation"
 						}
+					},
+					"locale": {
+						"description": "Start only: the locale the recording starts in, such as de or ar (\"\" the empty locale), which its header records and every replay of it starts in; absent: the project's Localization.Locale in the editor, the launch locale (--locale) in the Runtime.",
+						"type": "string"
 					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
@@ -16785,6 +16789,10 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"locale": {
+						"description": "The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale.",
+						"type": "string"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -16951,6 +16959,10 @@
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"locale": {
+						"description": "The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale.",
+						"type": "string"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -17125,6 +17137,10 @@
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"locale": {
+						"description": "The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale.",
+						"type": "string"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -17304,6 +17320,10 @@
 						"minimum": 0,
 						"maximum": 4294967295
 					},
+					"locale": {
+						"description": "The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale.",
+						"type": "string"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -17415,6 +17435,10 @@
 						"description": "Pause on a script error; absent inherits project settings.",
 						"type": "boolean"
 					},
+					"locale": {
+						"description": "The locale the session starts in, such as de or ar, which Loc.Get reads until a script calls Loc.SetLocale; \"\" the empty locale (every string table's fallback); absent: the project's Localization.Locale. Check a language's texts with ui.tree {target: \"Play\"} without editing the project.",
+						"type": "string"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
@@ -17508,6 +17532,10 @@
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"locale": {
+						"description": "The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale.",
+						"type": "string"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -17678,6 +17706,10 @@
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295
+					},
+					"locale": {
+						"description": "The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale.",
+						"type": "string"
 					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
@@ -19385,7 +19417,7 @@
 							},
 							"Alignment": {
 								"description": "How the lines are aligned to each other.",
-								"enum": ["Left", "Center", "Right"]
+								"enum": ["Left", "Center", "Right", "Start", "End"]
 							},
 							"Billboard": {
 								"description": "Whether world-space text always faces the camera.",
@@ -20639,7 +20671,7 @@
 							},
 							"Alignment": {
 								"description": "How each line is aligned within the rectangle's width.",
-								"enum": ["Left", "Center", "Right"]
+								"enum": ["Left", "Center", "Right", "Start", "End"]
 							},
 							"VerticalAlignment": {
 								"description": "Where the text block sits in the rectangle's height.",
@@ -20672,7 +20704,7 @@
 							},
 							"Direction": {
 								"description": "The main axis the children follow.",
-								"enum": ["Horizontal", "Vertical"]
+								"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 							},
 							"Padding": {
 								"description": "Insets of the container's rectangle that the children are placed in.",
@@ -20705,7 +20737,7 @@
 								"enum": ["Start", "Center", "End", "Stretch"]
 							},
 							"Columns": {
-								"description": "Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.",
+								"description": "Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds.",
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 1024
@@ -20834,13 +20866,13 @@
 								"maximum": 1000000
 							},
 							"Min": {
-								"description": "The value at the start edge (left, or bottom when Vertical); below Max.",
+								"description": "The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max.",
 								"type": "number",
 								"minimum": -1000000,
 								"maximum": 1000000
 							},
 							"Max": {
-								"description": "The value at the end edge (right, or top when Vertical).",
+								"description": "The value at the end edge (right; top when Vertical, left when HorizontalReverse).",
 								"type": "number",
 								"minimum": -1000000,
 								"maximum": 1000000
@@ -20856,8 +20888,8 @@
 								"maximum": 1000000
 							},
 							"Direction": {
-								"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.",
-								"enum": ["Horizontal", "Vertical"]
+								"description": "Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge.",
+								"enum": ["Horizontal", "Vertical", "HorizontalReverse"]
 							},
 							"Fill": {
 								"description": "A UI element below the slider stretched from the Min edge to the value; null for none.",
@@ -23623,7 +23655,7 @@
 						"type": "object",
 						"properties": {
 							"Locale": {
-								"description": "The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; empty reads every table's first.",
+								"description": "The locale play sessions start in, such as fr or pt-BR, which Loc.Get reads string tables in (a table's locale equal to it, else its language's, else the table's first; empty reads every table's first) until a script calls Loc.SetLocale; play.start's locale, the Runtime's --locale, a suite's Locale and a replay's header start a session in another.",
 								"type": "string"
 							}
 						},
@@ -23775,6 +23807,10 @@
 								"items": {
 									"enum": ["Editor", "Release", "Dist"]
 								}
+							},
+							"Locale": {
+								"description": "The locale the suite's sessions start in, such as de or ar; empty: the run's locale (test.run's locale, the Runtime's --locale), else Localization.Locale. A suite that names one is reported as \"<Name> (<Locale>)\", so one script listed once per locale gives distinct rows.",
+								"type": "string"
 							}
 						},
 						"additionalProperties": false
@@ -24683,7 +24719,7 @@
 						"type": "object",
 						"properties": {
 							"Locale": {
-								"description": "The locale Loc.Get reads string tables in, such as fr or pt-BR: a table's locale equal to it, else its language's, else the table's first; empty reads every table's first.",
+								"description": "The locale play sessions start in, such as fr or pt-BR, which Loc.Get reads string tables in (a table's locale equal to it, else its language's, else the table's first; empty reads every table's first) until a script calls Loc.SetLocale; play.start's locale, the Runtime's --locale, a suite's Locale and a replay's header start a session in another.",
 								"type": "string"
 							}
 						},
@@ -24835,6 +24871,10 @@
 								"items": {
 									"enum": ["Editor", "Release", "Dist"]
 								}
+							},
+							"Locale": {
+								"description": "The locale the suite's sessions start in, such as de or ar; empty: the run's locale (test.run's locale, the Runtime's --locale), else Localization.Locale. A suite that names one is reported as \"<Name> (<Locale>)\", so one script listed once per locale gives distinct rows.",
+								"type": "string"
 							}
 						},
 						"additionalProperties": false
@@ -29168,6 +29208,10 @@
 							"$ref": "#/$defs/InputRecordExpectation"
 						}
 					},
+					"locale": {
+						"description": "The locale, such as de or ar, every selected suite whose Testing.Suites entry names no Locale starts in; absent: the project's Localization.Locale. Replays start in their headers' locales.",
+						"type": "string"
+					},
 					"ifRevision": {
 						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
 						"type": "integer",
@@ -29438,6 +29482,10 @@
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
+							},
+							"locale": {
+								"description": "The locale the suite's sessions started in: its Testing.Suites entry's Locale, else the run's (test.run's locale, the Runtime's --locale), else the project's Localization.Locale; a replay suite's, its header's. A suite whose session never started reports the one it would have started in; empty is the empty locale.",
+								"type": "string"
 							}
 						},
 						"additionalProperties": false

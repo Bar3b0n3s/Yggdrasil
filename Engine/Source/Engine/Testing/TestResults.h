@@ -63,6 +63,10 @@ namespace Engine {
 		// (checkpoint ticks are positive). Both 0 for a script suite.
 		uint32_t CheckpointsChecked = 0;
 		uint32_t FailedCheckpointTick = 0;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): the locale the suite's sessions started in (its entry's,
+		// the run's or the project's), or, for a suite whose session never started, the one it would have started in; a replay
+		// suite's, its header's (the project's for a header without one). Empty: the empty locale.
+		std::string Locale{};
 	};
 
 	// Stable registry identity, never a VM pointer or registration index. Id and Kind follow the table of

@@ -10,7 +10,7 @@
 		},
 		"Version": {
 			"description": "The format version this build writes; older versions are migrated when read.",
-			"enum": [4]
+			"enum": [5]
 		},
 		"Scene": {
 			"description": "The scene the replay starts in.",
@@ -55,6 +55,10 @@
 		"SaveData": {
 			"description": "Version 4: the session's save-data store at the recording's start (SaveData's values by key), which seeds every playback's store, so the replay verifies whatever the machine's store holds; its numbers are the store's doubles, written exactly (unlike Parameters, whose numbers are floats); empty for a replay upgraded from an earlier version.",
 			"type": "object"
+		},
+		"Locale": {
+			"description": "Version 5 (M38): the locale the recorded session started in, empty or a locale tag such as de or ar, which every playback starts in (a session started in another is refused, naming both); null for a replay upgraded from an earlier version, which plays in the project's Localization.Locale.",
+			"type": ["string", "null"]
 		},
 		"Fingerprint": {
 			"description": "The start fingerprint: what the recorded session held at tick 0, so a playback whose state hash differs names what changed since the recording (a component, an entity, a script, a material, another referenced asset). Null for a replay upgraded from version 1 or 2, which names no change until it is recorded again.",
@@ -268,6 +272,6 @@
 			"pattern": "^[0-9a-f]{16}$"
 		}
 	},
-	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash"],
+	"required": ["Format", "Version", "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "SaveData", "Locale", "Fingerprint", "Events", "Expect", "Checkpoints", "FinalTick", "FinalStateHash"],
 	"additionalProperties": false
 }

@@ -97,6 +97,9 @@ namespace Engine {
 		bool Paused = false;
 		float TimeScale = 1.0f;   // 0 to PlaySession::MaxTimeScale
 		bool PauseOnError = true; // Per-session override; omitted inherits project policy.
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): the locale the session starts in, empty or a tag;
+		// absent (HasParam): the project's Localization.Locale. A bad tag: InvalidArgument at /locale.
+		std::string Locale{};
 	};
 
 	// play.state's result, and the result of play.start, play.pause, play.resume and play.setTimeScale (the state after the
@@ -129,6 +132,9 @@ namespace Engine {
 		bool WorldPaused = false;
 		WorldPauseSounds WorldSounds = WorldPauseSounds::Pause;
 		uint32_t WorldTick = 0;
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): the session's locale (PlaySession::GetLocale), what
+		// Loc.Get reads; empty in Edit and for the empty locale.
+		std::string Locale{};
 	};
 
 	// play.stop's result: where the session ended.

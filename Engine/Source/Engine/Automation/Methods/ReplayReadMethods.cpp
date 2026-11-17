@@ -23,7 +23,8 @@ namespace Engine {
 
 		constexpr uint32_t MaxReadReplayLimit = 1000;
 		// The header members of a replay file, in its order (ReplayToJson).
-		constexpr std::array<std::string_view, 6> HeaderMembers = { "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config" };
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 7): Locale follows Config.
+		constexpr std::array<std::string_view, 7> HeaderMembers = { "Scene", "Parameters", "Seed", "FixedHz", "EngineVersion", "Config", "Locale" };
 
 		// One replay event in play.step's input form (InputEventParams, InputMethods.h): camelCase keys, only the members its
 		// type reads, its type and state in their PascalCase names (which are the replay's own spellings), its tick the

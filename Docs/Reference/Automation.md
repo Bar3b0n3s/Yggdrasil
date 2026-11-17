@@ -1274,7 +1274,7 @@ Reads a replay back: its header, its input events a page at a time in play.step'
 |---|---|---|
 | `path` | `String` | Canonical project-relative path. |
 | `formatVersion` | `UInt32` | The file's own format version, before migration. |
-| `header` | `Variant` | The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion and Config. |
+| `header` | `Variant` | The header as the file writes it: Scene {Handle, Path}, Parameters, Seed, FixedHz, EngineVersion, Config and (version 5) Locale, the locale the recording started in (null for a replay migrated from version 1 to 4, which plays in the project's). |
 | `finalTick` | `UInt32` | Completed ticks the replay runs. |
 | `finalStateHash` | `String` | The recorded state hash at finalTick. |
 | `eventCount` | `UInt32` | Every input event of the replay. |
@@ -1307,6 +1307,7 @@ Starts a tick-zero recording or saves its validated applied inputs, expectations
 | `seed` | `UInt32` |  | `0` | Start only: initial seed; absent inherits session/project policy. |
 | `path` | `String` |  | `""` | Stop only, required: confined replay destination (Runtime relative paths are below user://Replays). |
 | `expect` | `Array<InputRecordExpectation>` |  | `[]` | Stop only: ordered expectations, compiled before consuming the recording. |
+| `locale` | `String` |  | `""` | Start only: the locale the recording starts in, such as de or ar ("" the empty locale), which its header records and every replay of it starts in; absent: the project's Localization.Locale in the editor, the launch locale (--locale) in the Runtime. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -1816,6 +1817,7 @@ Param: none.
 | `worldPaused` | `Bool` | The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused. |
 | `worldSounds` | `WorldPauseSounds` | The world pause's choice for the world's voices: Pause or Finish. |
 | `worldTick` | `UInt32` | The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads. |
+| `locale` | `String` | The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale. |
 
 Example: Pause.
 
@@ -1852,6 +1854,7 @@ Param: none.
 | `worldPaused` | `Bool` | The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused. |
 | `worldSounds` | `WorldPauseSounds` | The world pause's choice for the world's voices: Pause or Finish. |
 | `worldTick` | `UInt32` | The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads. |
+| `locale` | `String` | The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale. |
 
 Example: Resume.
 
@@ -1891,6 +1894,7 @@ Sets the time scale of the play session (0 to 100, 1 is real time). Returns the 
 | `worldPaused` | `Bool` | The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused. |
 | `worldSounds` | `WorldPauseSounds` | The world pause's choice for the world's voices: Pause or Finish. |
 | `worldTick` | `UInt32` | The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads. |
+| `locale` | `String` | The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale. |
 
 Example: Half speed.
 
@@ -1931,6 +1935,7 @@ Pauses or resumes the play session's world from its next tick on, as Time.PauseW
 | `worldPaused` | `Bool` | The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused. |
 | `worldSounds` | `WorldPauseSounds` | The world pause's choice for the world's voices: Pause or Finish. |
 | `worldTick` | `UInt32` | The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads. |
+| `locale` | `String` | The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale. |
 
 Example: Pause the world, holding its sounds.
 
@@ -1955,6 +1960,7 @@ Starts a play session of the open scene (or of scene) through the serializer cop
 | `paused` | `Bool` |  | `false` | Start paused at tick 0. |
 | `timeScale` | `Float` |  | `1` | The time scale, 0 to 100 (1 is real time). |
 | `pauseOnError` | `Bool` |  | `true` | Pause on a script error; absent inherits project settings. |
+| `locale` | `String` |  | `""` | The locale the session starts in, such as de or ar, which Loc.Get reads until a script calls Loc.SetLocale; "" the empty locale (every string table's fallback); absent: the project's Localization.Locale. Check a language's texts with ui.tree {target: "Play"} without editing the project. |
 
 | Result | Type | Description |
 |---|---|---|
@@ -1976,6 +1982,7 @@ Starts a play session of the open scene (or of scene) through the serializer cop
 | `worldPaused` | `Bool` | The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused. |
 | `worldSounds` | `WorldPauseSounds` | The world pause's choice for the world's voices: Pause or Finish. |
 | `worldTick` | `UInt32` | The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads. |
+| `locale` | `String` | The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale. |
 
 Example: Play in lockstep with seed 42.
 
@@ -2012,6 +2019,7 @@ Param: none.
 | `worldPaused` | `Bool` | The world pause the next tick runs with (Time.PauseWorld, play.setWorldPaused): the world's physics, animation, particles and native systems hold and only behaviours that run while the world is paused update, while the session, its input and UI run on. Not the run state's Paused. |
 | `worldSounds` | `WorldPauseSounds` | The world pause's choice for the world's voices: Pause or Finish. |
 | `worldTick` | `UInt32` | The world's clock: the ticks the world ran (tick less the ticks the world pause held), what Time.GetTick reads. |
+| `locale` | `String` | The session's locale, which Loc.Get reads: the one it started in (play.start's locale, the project's Localization.Locale) or the last Loc.SetLocale's; empty in Edit and for the empty locale. |
 
 Example: Read the play state.
 
@@ -3344,6 +3352,7 @@ Runs configured tests and returns every outcome (counts, failedCases and the cas
 | `record` | `String` |  | `""` | Optional project Assets .replay output; requires one selected suite and strict reproduction in ordinary play (every state-hash checkpoint, one every 60 ticks, and the final hash). A recording with input events is also replayed without them and refused when that run reproduces every checkpoint and the final hash too, whatever script errors it raises: its outcome does not depend on its input. The result's recording block describes the replay written and, when it replaces an existing file, whether its checkpoints and final state hash equal that file's. |
 | `coverage` | `Bool` |  | `false` | Return coverage.counters in the result; without it they are left out unless the project sets Testing.CoverageGates. The JSON report at jsonPath always holds them. |
 | `expect` | `Array<InputRecordExpectation>` |  | `[]` | With record only: expectations ({tick, luau}, as input.record's stop takes them) written into the recorded replay; each must hold when the recording is verified with its input, before anything is written. |
+| `locale` | `String` |  | `""` | The locale, such as de or ar, every selected suite whose Testing.Suites entry names no Locale starts in; absent: the project's Localization.Locale. Replays start in their headers' locales. |
 
 | Result | Type | Description |
 |---|---|---|

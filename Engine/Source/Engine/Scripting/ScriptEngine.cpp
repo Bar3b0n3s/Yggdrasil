@@ -202,7 +202,7 @@ namespace Engine {
 	}
 
 	ScriptEngine::ScriptEngine(ConstructionKey /*key*/, const ScriptEngineSpecification& specification)
-		: m_Specification(specification)
+		: m_Specification(specification), m_Locale(specification.Locale)
 	{
 		m_State = CreateScope<State>(*this);
 		m_State->TestHost = specification.TestHost;
@@ -695,6 +695,46 @@ namespace Engine {
 		}
 	}
 
+	Status ScriptEngine::CheckLocaleChange() const
+	{
+		if (m_State->LocaleDispatching)
+		{
+			return std::unexpected(Error(ErrorCode::InvalidState, "Loc.SetLocale cannot change the locale while OnLocaleChanged is being delivered")
+					.WithHint("OnLocaleChanged receives the new locale: redraw there, and change the locale again from another callback"));
+		}
+		if (m_State->Stopping || IsStopped())
+			return MakeError(ErrorCode::InvalidState, "Loc.SetLocale cannot change the locale while the script engine stops");
+		return {};
+	}
+
+	Status ScriptEngine::NotifyLocaleChanged(std::string_view previous)
+	{
+		m_State->AssertOwner();
+		ENGINE_TRY(CheckLocaleChange());
+		if (IsReadOnly())
+			return {};
+		// The snapshot: the started, enabled instances, in (ExecutionOrder, canonical entity, slot) order, with their serials,
+		// so an instance a callback creates under a snapshotted key receives nothing.
+		std::vector<std::pair<State::InstanceKey, uint64_t>> snapshot;
+		for (const State::InstanceKey key : m_State->OrderedInstances(true))
+			snapshot.emplace_back(key, m_State->Instances.find(key)->second.Serial);
+		const std::string locale = m_Locale;
+		const std::string before(previous);
+		const State::LocaleChange change{ .Locale = locale, .Previous = before };
+		m_State->LocaleDispatching = true;
+		for (const auto& [key, serial] : snapshot)
+		{
+			if (IsStopped())
+				break;
+			const auto found = m_State->Instances.find(key);
+			if (found == m_State->Instances.end() || found->second.Serial != serial || !found->second.Started)
+				continue;
+			m_State->Invoke(key, "OnLocaleChanged", nullptr, false, nullptr, &change);
+		}
+		m_State->LocaleDispatching = false;
+		return {};
+	}
+
 	void ScriptEngine::Stop()
 	{
 		if (m_State == nullptr || m_State->Vm == nullptr || m_State->Stopping)
@@ -796,7 +836,11 @@ namespace Engine {
 	}
 	std::string_view ScriptEngine::GetLocale() const
 	{
-		return m_Specification.Locale;
+		return m_Locale;
+	}
+	void ScriptEngine::SetLocale(std::string locale)
+	{
+		m_Locale = std::move(locale);
 	}
 	RunModes ScriptEngine::GetRunMode() const
 	{

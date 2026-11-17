@@ -134,11 +134,14 @@ namespace Engine {
 			const UiLayoutNode* parent = FindUiLayoutNode(table, part->Parent);
 			area = parent != nullptr ? parent : node;
 		}
-		// t along the slide rectangle from its Min edge (the left one when Horizontal, the bottom one when Vertical), clamped to
-		// [0, 1]; a rectangle without length along the direction gives 0. The ends map to Min and Max exactly.
-		const bool horizontal = component->Direction == UiLayoutDirection::Horizontal;
-		const float length = horizontal ? area->Max.x - area->Min.x : area->Max.y - area->Min.y;
-		const float along = horizontal ? pointer.x - area->Min.x : area->Max.y - pointer.y;
+		// t along the slide rectangle from its Min edge (the left one when Horizontal, the bottom one when Vertical, the right one
+		// when HorizontalReverse, M38), clamped to [0, 1]; a rectangle without length along the direction gives 0. The ends map to
+		// Min and Max exactly.
+		const bool vertical = component->Direction == UiLayoutDirection::Vertical;
+		const float length = vertical ? area->Max.y - area->Min.y : area->Max.x - area->Min.x;
+		const float along = component->Direction == UiLayoutDirection::Horizontal ? pointer.x - area->Min.x
+			: vertical                                                            ? area->Max.y - pointer.y
+																				  : area->Max.x - pointer.x;
 		const float t = length > 0.0f ? std::max(0.0f, std::min(along / length, 1.0f)) : 0.0f;
 		UiSliderComponent target = *component;
 		target.Value = t >= 1.0f ? component->Max : component->Min + t * (component->Max - component->Min);
@@ -151,9 +154,14 @@ namespace Engine {
 		const UiSliderComponent* component = entity ? entity.TryGetComponent<UiSliderComponent>() : nullptr;
 		if (component == nullptr || !component->Interactable)
 			return false;
-		const bool horizontal = component->Direction == UiLayoutDirection::Horizontal;
-		const bool towardMax = direction == (horizontal ? UiDirection::Right : UiDirection::Up);
-		const bool towardMin = direction == (horizontal ? UiDirection::Left : UiDirection::Down);
+		// Horizontal: Right steps toward Max; Vertical: Up; HorizontalReverse (M38, decision 12): Left, its Min at the right.
+		const UiDirection maxward = component->Direction == UiLayoutDirection::Horizontal ? UiDirection::Right
+			: component->Direction == UiLayoutDirection::Vertical                         ? UiDirection::Up
+																						  : UiDirection::Left;
+		const UiDirection minward = maxward == UiDirection::Right ? UiDirection::Left : maxward == UiDirection::Up ? UiDirection::Down
+																												   : UiDirection::Right;
+		const bool towardMax = direction == maxward;
+		const bool towardMin = direction == minward;
 		if (!towardMax && !towardMin)
 			return false;
 		const float current = ReadUiSliderValue(*component);

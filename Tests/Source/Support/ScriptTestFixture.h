@@ -112,9 +112,22 @@ namespace Engine {
 			[[nodiscard]] UiSystem* GetUi() override { return Ui; }
 			// M30 (Docs/Decisions/0045-m30-navigation.md decision 11): the navigation the Navigation module queries.
 			[[nodiscard]] NavigationWorld* GetNavigation() override { return Navigation; }
+			// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 1): with SessionLocale set, the host has a session locale:
+			// Loc.SetLocale's change is recorded there and set on the engine (ScriptEngine::SetLocale), as a play session's host
+			// does; without it, the default, it refuses as a host without a session does (IScriptHost's default).
+			[[nodiscard]] Status SetLocale(std::string_view locale) override
+			{
+				if (!SessionLocale.has_value())
+					return IScriptHost::SetLocale(locale);
+				SessionLocale = std::string(locale);
+				if (m_Engine != nullptr)
+					m_Engine->SetLocale(std::string(locale));
+				return {};
+			}
 
 			ScriptFrameState Frame{};
-			std::optional<bool> WorldPaused{}; // M35: the recorded world pause; nullopt for a host without a world
+			std::optional<bool> WorldPaused{};          // M35: the recorded world pause; nullopt for a host without a world
+			std::optional<std::string> SessionLocale{}; // M38: the recorded session locale; nullopt for a host without one
 			WorldPauseSounds WorldSounds = WorldPauseSounds::Pause;
 			ScriptEnvironment Environment{ .IsEditor = true, .Platform = "Test", .Version = "1" };
 			uint64_t Generation = 1;

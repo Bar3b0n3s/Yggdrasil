@@ -23,7 +23,13 @@ namespace Engine {
 	{
 		Left,
 		Center,
-		Right
+		Right,
+		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 11): a UiText's lines align to their own paragraph's resolved
+		// base direction (the first strong character's; left to right without one): Start is Left for a left-to-right paragraph
+		// and Right for a right-to-left one, End the opposite. The Text component, laid out unshaped and left to right, reads
+		// Start as Left and End as Right.
+		Start,
+		End
 	};
 
 	// Registry name "Text" (Architecture §5.3, §8.10): SDF text on the screen or in the world (M22's UI lays text out in its

@@ -402,6 +402,18 @@ class TestingSettingsTests(unittest.TestCase):
         self.assertEqual(games.read_testing(write_project(self.root, "Projects/Bare")),
                          games.TestingSettings(suites=(), replays=()))
 
+    def test_read_testing_reads_each_entry_locale_and_the_project_locale(self) -> None:
+        project_file = write_project(self.root, "Projects/Localized", {
+            "Suites": [{"Script": SMOKE_SUITE, "Scene": TINY_SCENE, "Locale": "de"},
+                       {"Script": SMOKE_SUITE, "Scene": TINY_SCENE}]})
+        document = json.loads(project_file.read_text(encoding="utf-8"))
+        document["Localization"] = {"Locale": "fr-CA"}
+        project_file.write_bytes((json.dumps(document, indent="\t") + "\n").encode("utf-8"))
+        testing = games.read_testing(project_file)
+        self.assertEqual([entry.locale for entry in testing.suites], ["de", ""])
+        self.assertEqual(testing.locale, "fr-CA")
+        self.assertEqual([testing.effective_locale(entry) for entry in testing.suites], ["de", "fr-CA"])
+
     def test_replay_event_counts_are_read_from_each_replay(self) -> None:
         project = self.root / "Projects" / "Game"
         write_replay(project, events=3)
@@ -434,6 +446,28 @@ class EvaluationTests(unittest.TestCase):
         # A Dist run leaves the Editor-only suite out.
         dist = run_document("Dist", [suite_row(SMOKE_SUITE), replay_row(REPLAY, REPLAY_HASH)])
         self.assertEqual(games.evaluate_run(dist, "Dist", TESTING, {REPLAY: REPLAY_HASH}), [])
+
+    def test_a_script_listed_once_per_locale_needs_a_passing_row_in_each_locale(self) -> None:
+        # M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 6): suite rows are keyed by script and the locale the
+        # suite's session started in (its entry's, else the project's), so one script listed in de and ar needs both
+        # rows.
+        testing = games.TestingSettings(
+            suites=(games.SuiteEntry(SMOKE_SUITE, TINY_SCENE, games.DEFAULT_SUITE_MODES, "de"),
+                    games.SuiteEntry(SMOKE_SUITE, TINY_SCENE, games.DEFAULT_SUITE_MODES, "ar"),
+                    games.SuiteEntry(SMOKE_SUITE, TINY_SCENE, games.DEFAULT_SUITE_MODES)),
+            replays=(), locale="fr-CA")
+
+        def localized(locale: str, passed: bool = True) -> dict:
+            return {**suite_row(SMOKE_SUITE, passed), "locale": locale}
+
+        complete = [localized("de"), localized("ar"), localized("fr-CA")]
+        self.assertEqual(games.evaluate_run(run_document("Editor", complete), "Editor", testing, {}), [])
+        missing = games.evaluate_run(run_document("Editor", complete[1:]), "Editor", testing, {})
+        self.assertEqual(missing, [f"{SMOKE_SUITE} (de): the Editor run has no suite row for it, although its Modes "
+                                   f"include Editor"])
+        failed = games.evaluate_run(run_document("Editor", [complete[0], localized("ar", False), complete[2]]),
+                                    "Editor", testing, {})
+        self.assertEqual(failed, [f"{SMOKE_SUITE} (ar): the suite failed in the Editor run"])
 
     def test_each_defect_of_a_run_is_named(self) -> None:
         committed = {REPLAY: REPLAY_HASH}

@@ -186,7 +186,13 @@ namespace Engine {
 		registry.Enum<TextAlignment>("TextAlignment", "How the lines of a text element are aligned to each other.")
 			.Entry(TextAlignment::Left, "Left", "Lines start at the left edge of the text block.")
 			.Entry(TextAlignment::Center, "Center", "Lines are centred in the text block.")
-			.Entry(TextAlignment::Right, "Right", "Lines end at the right edge of the text block.");
+			.Entry(TextAlignment::Right, "Right", "Lines end at the right edge of the text block.")
+			.Entry(TextAlignment::Start, "Start",
+				"Each line starts where its paragraph's direction starts: at the left edge for a left-to-right paragraph, at the right edge for a "
+				"right-to-left one (Arabic, Hebrew); a paragraph without a strong character reads left to right. The Text component reads it as Left.")
+			.Entry(TextAlignment::End, "End",
+				"Each line ends where its paragraph's direction ends: at the right edge for a left-to-right paragraph, at the left edge for a "
+				"right-to-left one. The Text component reads it as Right.");
 
 		RegisterComponent<MeshRendererComponent>(registry, "MeshRenderer", "Draws a mesh asset with one material per submesh.")
 			.Category("Rendering")

@@ -66,18 +66,6 @@ namespace Engine {
 			});
 		}
 
-		// A locale tag (the file comment): 1 to MaxStringTableLocaleBytes bytes of ASCII letters, digits and '-', starting
-		// with a letter.
-		[[nodiscard]] static bool IsLocaleTag(std::string_view locale)
-		{
-			if (locale.empty() || locale.size() > MaxStringTableLocaleBytes || !IsAsciiLetter(locale.front()))
-				return false;
-			return std::ranges::all_of(locale, [](char character)
-			{
-				return IsAsciiLetter(character) || IsAsciiDigit(character) || character == '-';
-			});
-		}
-
 		// The control character `text` holds, other than those `allowed` lists, as its byte offset: a C0 control, DEL, or a
 		// C1 control (U+0080 to U+009F, encoded as C2 80 to C2 9F), the rule of sprite sheet names too. `text` is valid UTF-8.
 		[[nodiscard]] static std::optional<size_t> FindControlCharacter(std::string_view text, std::string_view allowed)
@@ -340,6 +328,16 @@ namespace Engine {
 		ValidationContext context;
 		Utils::ValidateTable(table, context);
 		return context.ToStatus("the string table");
+	}
+
+	bool IsLocaleTag(std::string_view locale)
+	{
+		if (locale.empty() || locale.size() > MaxStringTableLocaleBytes || !Utils::IsAsciiLetter(locale.front()))
+			return false;
+		return std::ranges::all_of(locale, [](char character)
+		{
+			return Utils::IsAsciiLetter(character) || Utils::IsAsciiDigit(character) || character == '-';
+		});
 	}
 
 	uint32_t ResolveStringTableLocale(const StringTableData& table, std::string_view locale)

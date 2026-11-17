@@ -508,7 +508,7 @@ All modes; Runtime|Test; pure/read.
 
 ## Loc
 
-Localized strings from string tables (.stringtable assets) in the project's locale (Localization.Locale): a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's.
+Localized strings from string tables (.stringtable assets) in the session's locale: a table's locale equal to it, else its language's, else the table's first (fallback) locale; an entry without a string for that locale gives the fallback's. A session starts in the project's Localization.Locale (or play.start's locale, the Runtime's --locale, a suite's Locale, a replay's header), and Loc.SetLocale changes it for the rest of the session.
 
 ### Loc.Get
 
@@ -522,7 +522,7 @@ All modes; Runtime|Test; pure/read.
 
 `() -> string`
 
-Returns the project's locale (Localization.Locale) that lookups use; empty when it is unset, so every table reads its fallback locale.
+Returns the session's locale that lookups use: the one it started in, or the last Loc.SetLocale's; empty reads every table's fallback locale.
 
 All modes; Runtime|Test; pure/read.
 
@@ -533,6 +533,14 @@ All modes; Runtime|Test; pure/read.
 Returns whether the string table has the key. An asset that is not a string table, or a table that fails to load, raises a located error naming it, as in Get.
 
 All modes; Runtime|Test; pure/read.
+
+### Loc.SetLocale
+
+`(locale: string) -> ()`
+
+Sets the session's locale, which Get and GetLocale read from the next call and which lasts through Scene.Load and Scene.Reload: empty (every table's fallback) or a tag such as de, ar or pt-BR, else a located error. Before it returns, OnLocaleChanged(locale, previous) reaches every started behaviour that defines it, in execution order; the locale in force changes nothing, and a call inside OnLocaleChanged raises. A game restores its player's saved choice with it at startup.
+
+All modes; Runtime|Test; mutates.
 
 ## Log
 
@@ -1949,6 +1957,14 @@ EditorOnly; Runtime|Test; mutates.
 `(self: ScriptInstance, dt: number) -> ()`
 
 Called for the current fixed, presentation or late presentation phase.
+
+All modes; Runtime|Test; mutates.
+
+### Behaviour.OnLocaleChanged
+
+`(self: ScriptInstance, locale: string, previous: string) -> ()`
+
+Called when Loc.SetLocale changes the session's locale, before that call returns: on every started, enabled behaviour that defines it, the caller's own included, in execution order, whether or not the world is paused (redraw texts here). Loc.SetLocale raises inside it. A new scene's behaviours after Scene.Load or Scene.Reload start in the locale without it.
 
 All modes; Runtime|Test; mutates.
 
@@ -5756,7 +5772,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-Grid: the cells per row (Horizontal) or per column (Vertical); 0 fits as many as the container holds.
+Grid: the cells per row (Horizontal, HorizontalReverse) or per column (Vertical); 0 fits as many as the container holds.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -5972,7 +5988,7 @@ A UI slider: the pointer drags its value between Min and Max and the directions 
 
 `UiLayoutDirection`
 
-Horizontal puts Min at the left edge; Vertical puts it at the bottom edge.
+Horizontal puts Min at the left edge; Vertical puts it at the bottom edge; HorizontalReverse at the right edge.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -6012,7 +6028,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The value at the end edge (right, or top when Vertical).
+The value at the end edge (right; top when Vertical, left when HorizontalReverse).
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -6020,7 +6036,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `number`
 
-The value at the start edge (left, or bottom when Vertical); below Max.
+The value at the start edge (left; bottom when Vertical, right when HorizontalReverse); below Max.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -7392,6 +7408,10 @@ How the lines of a text element are aligned to each other.
 
 - `Right`: Lines end at the right edge of the text block.
 
+- `Start`: Each line starts where its paragraph's direction starts: at the left edge for a left-to-right paragraph, at the right edge for a right-to-left one (Arabic, Hebrew); a paragraph without a strong character reads left to right. The Text component reads it as Left.
+
+- `End`: Each line ends where its paragraph's direction ends: at the right edge for a left-to-right paragraph, at the left edge for a right-to-left one. The Text component reads it as Right.
+
 ## TextSpace (enum)
 
 Where a text element is placed.
@@ -7450,11 +7470,11 @@ Where a UI canvas is drawn: over the scene image, or in the world.
 
 Where each child of a container sits across its main axis.
 
-- `Start`: At the start of its line: the top (Horizontal) or the left edge (Vertical).
+- `Start`: At the start of its line: the top (Horizontal, HorizontalReverse) or the left edge (Vertical).
 
 - `Center`: Centred across the main axis.
 
-- `End`: At the end of its line: the bottom (Horizontal) or the right edge (Vertical).
+- `End`: At the end of its line: the bottom (Horizontal, HorizontalReverse) or the right edge (Vertical).
 
 - `Stretch`: Stretched to fill its line's cross size (a Grid child: its cell's).
 
@@ -7482,13 +7502,15 @@ The main axis of a UI layout container.
 
 - `Vertical`: Children follow each other from top to bottom.
 
+- `HorizontalReverse`: Children follow each other from right to left, Horizontal mirrored inside the padding (a right-to-left row; MainAlignment Start at the right edge); a slider's Min is at the right edge.
+
 ## UiLayoutKind (enum)
 
 How a UI layout container places its children.
 
 - `Stack`: One after another along Direction, each at its own size.
 
-- `Grid`: In cells of CellSize, Columns cells per row (Horizontal) or per column (Vertical).
+- `Grid`: In cells of CellSize, Columns cells per row (Horizontal, HorizontalReverse) or per column (Vertical).
 
 - `Flex`: A stack whose children grow into free space and shrink when they overflow, wrapping with Wrap.
 
@@ -7496,11 +7518,11 @@ How a UI layout container places its children.
 
 Where a container's children sit along its main axis when they do not fill it.
 
-- `Start`: At the start: the left edge (Horizontal) or the top (Vertical).
+- `Start`: At the start: the left edge (Horizontal), the right edge (HorizontalReverse) or the top (Vertical).
 
 - `Center`: Centred along the main axis.
 
-- `End`: At the end: the right edge (Horizontal) or the bottom (Vertical).
+- `End`: At the end: the right edge (Horizontal), the left edge (HorizontalReverse) or the bottom (Vertical).
 
 ## UiScaleMode
 

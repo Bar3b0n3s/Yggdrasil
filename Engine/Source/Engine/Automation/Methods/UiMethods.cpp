@@ -139,7 +139,16 @@ namespace Engine {
 
 		static std::string_view GetUiLayoutDirectionName(UiLayoutDirection direction)
 		{
-			return direction == UiLayoutDirection::Horizontal ? "Horizontal" : "Vertical";
+			switch (direction)
+			{
+				case UiLayoutDirection::Horizontal:
+					return "Horizontal";
+				case UiLayoutDirection::Vertical:
+					return "Vertical";
+				case UiLayoutDirection::HorizontalReverse:
+					return "HorizontalReverse";
+			}
+			return "Horizontal";
 		}
 
 		// How the outline names a UiImage's frame: its sheet's project path without "Assets/" (or the first 8 hex digits of its
@@ -237,14 +246,16 @@ namespace Engine {
 		};
 
 		// The horizontal alignment a text draw item lays its lines out with (the Ui pass's rule: Start left, Center centred, End
-		// right).
+		// right, M38's ParagraphStart and ParagraphEnd by each line's paragraph).
 		static RenderTextAlignment ToUiTreeTextAlignment(UiDrawAlignment alignment)
 		{
 			switch (alignment)
 			{
-				case UiDrawAlignment::Start:  return RenderTextAlignment::Left;
-				case UiDrawAlignment::Center: return RenderTextAlignment::Center;
-				case UiDrawAlignment::End:    return RenderTextAlignment::Right;
+				case UiDrawAlignment::Start:          return RenderTextAlignment::Left;
+				case UiDrawAlignment::Center:         return RenderTextAlignment::Center;
+				case UiDrawAlignment::End:            return RenderTextAlignment::Right;
+				case UiDrawAlignment::ParagraphStart: return RenderTextAlignment::Start;
+				case UiDrawAlignment::ParagraphEnd:   return RenderTextAlignment::End;
 			}
 			return RenderTextAlignment::Left;
 		}
@@ -254,9 +265,11 @@ namespace Engine {
 		{
 			switch (alignment)
 			{
-				case UiDrawAlignment::Start:  return 0.0f;
-				case UiDrawAlignment::Center: return 0.5f;
-				case UiDrawAlignment::End:    return 1.0f;
+				case UiDrawAlignment::Start:          return 0.0f;
+				case UiDrawAlignment::Center:         return 0.5f;
+				case UiDrawAlignment::End:            return 1.0f;
+				case UiDrawAlignment::ParagraphStart: return 0.0f; // horizontal only; never a vertical alignment
+				case UiDrawAlignment::ParagraphEnd:   return 1.0f;
 			}
 			return 0.0f;
 		}
