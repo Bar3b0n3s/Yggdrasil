@@ -108,6 +108,9 @@ namespace Engine {
 				result.GroundNormal = report->Character->GroundNormal;
 				if (report->Character->GroundCollider.IsValid())
 					result.GroundCollider = Utils::SummarizeEntityId(context, scene, report->Character->GroundCollider);
+				result.Squeezed = report->Character->IsSqueezed;
+				if (report->Character->SqueezedBy.IsValid())
+					result.SqueezedBy = Utils::SummarizeEntityId(context, scene, report->Character->SqueezedBy);
 			}
 			result.Tick = ToAutomationCounter(session->GetTick());
 			return result;
@@ -156,6 +159,12 @@ namespace Engine {
 				"The collider entity a grounded character's last update stood on (another character's entity when it stood on one), as "
 				"CharacterController:GetGroundCollider reads it; empty for other bodies, a character in the air, and a ground that is disabled or "
 				"destroyed.")
+			.Field("squeezed", &PhysicsBodyInfoResult::Squeezed,
+				"Whether a character's last update found it squeezed (a Kinematic body, or a Dynamic one not lighter than it, pushing it while "
+				"something else holds it), as CharacterController:IsSqueezed reads it; false for other bodies.")
+			.Field("squeezedBy", &PhysicsBodyInfoResult::SqueezedBy,
+				"The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty "
+				"when it is not squeezed, for other bodies, and when that entity is disabled or destroyed.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 	}
 

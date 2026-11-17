@@ -285,6 +285,63 @@ namespace Engine {
 			session->GetScene().FindEntityByPath("/Level/Marble").SetActive(false);
 			CHECK_FALSE(physics.GetCharacterState(character)->GroundCollider.IsValid());
 		}
+
+		// M36 W36.2 (Docs/Decisions/0053-m36-contact-surfaces.md decision 12): the session names the press's entity, in Play and
+		// in Simulate, and physics.bodyInfo's report the same.
+		TEST_CASE("PhysicsSystem: a squeezed character reports the press's entity, and a Simulate session's press too")
+		{
+			for (const PlayMode mode : { PlayMode::Play, PlayMode::Simulate })
+			{
+				CAPTURE(mode == PlayMode::Play);
+				Test::SceneTestFixture fixture;
+				Scene& scene = fixture.GetScene();
+				static_cast<void>(Test::AddGround(scene));
+				Entity player = scene.CreateEntity("Player");
+				player.AddComponent<CharacterControllerComponent>(CharacterControllerComponent{});
+				static_cast<void>(Test::AddBoxBody(scene, "Press", glm::vec3(0.0f, 2.35f, 0.0f), glm::vec3(1.0f, 0.25f, 1.0f), BodyType::Kinematic));
+				PlaySessionSpecification specification = Test::MakePhysicsSessionSpecification(fixture, 42, mode);
+				Result<Scope<PlaySession>> started = Test::StartPhysicsSession(fixture, specification);
+				REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+				PlaySession& session = **started;
+				PhysicsSystem& physics = session.GetPhysics();
+				const UUID character = Test::GetEntityId(session.GetScene(), "/Player");
+				const UUID press = Test::GetEntityId(session.GetScene(), "/Press");
+				Test::RunTicks(session, 10);
+				CHECK_FALSE(physics.GetCharacterState(character)->IsSqueezed);
+				CHECK_FALSE(physics.GetCharacterState(character)->SqueezedBy.IsValid());
+				// The press comes down at 1 m/s, as a script's MoveKinematic in every fixed update would bring it.
+				bool squeezed = false;
+				for (uint32_t tick = 0; tick < 40 && !squeezed; ++tick)
+				{
+					const float y = 2.35f - static_cast<float>(tick + 1) / 60.0f;
+					REQUIRE(physics.MoveKinematic(press, glm::vec3(0.0f, y, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)).has_value());
+					session.Tick();
+					squeezed = physics.GetCharacterState(character)->IsSqueezed;
+				}
+				REQUIRE(squeezed);
+				CHECK(physics.GetCharacterState(character)->SqueezedBy == press);
+				const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(character);
+				REQUIRE(report.has_value());
+				REQUIRE(report->Character.has_value());
+				CHECK(report->Character->IsSqueezed);
+				CHECK(report->Character->SqueezedBy == press);
+				// A press disabled meanwhile is named by nobody.
+				session.GetScene().FindEntityByPath("/Press").SetActive(false);
+				CHECK(physics.GetCharacterState(character)->IsSqueezed);
+				CHECK_FALSE(physics.GetCharacterState(character)->SqueezedBy.IsValid());
+				session.GetScene().FindEntityByPath("/Press").SetActive(true);
+				CHECK(physics.GetCharacterState(character)->SqueezedBy == press);
+				// A press destroyed in a tick that squeezes (its body squeezes in the PreStep and goes at the destroy flush) is
+				// named by nobody after it, and the squeeze is still reported.
+				REQUIRE(physics.MoveKinematic(press, glm::vec3(0.0f, 1.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)).has_value());
+				session.GetScene().DestroyEntity(session.GetScene().FindEntityByPath("/Press"));
+				session.Tick();
+				CHECK(session.GetScene().FindEntityByPath("/Press").IsValid() == false);
+				REQUIRE(physics.GetCharacterState(character).has_value());
+				CHECK(physics.GetCharacterState(character)->IsSqueezed);
+				CHECK_FALSE(physics.GetCharacterState(character)->SqueezedBy.IsValid());
+			}
+		}
 	}
 
 }

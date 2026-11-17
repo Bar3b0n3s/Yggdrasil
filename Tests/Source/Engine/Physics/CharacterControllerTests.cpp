@@ -131,6 +131,42 @@ namespace Engine {
 			return *body;
 		}
 
+		// M36 W36.2: a Kinematic box moved at a constant velocity by MoveKinematic, as Scene/PhysicsSystem moves a Kinematic
+		// body in PreStep before the characters update: a piston, a press or a ram.
+		class KinematicBox
+		{
+		public:
+			KinematicBox(PhysicsWorld& world, const glm::vec3& center, const glm::vec3& halfExtents, const glm::vec3& velocity)
+				: m_World(&world), m_Velocity(velocity), m_Pose{ .Position = center }
+			{
+				Result<Ref<const PhysicsShape>> shape =
+					PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = halfExtents } } } });
+				REQUIRE(shape.has_value());
+				Result<BodyHandle> body = world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Kinematic, .Pose = m_Pose });
+				REQUIRE(body.has_value());
+				m_Body = *body;
+			}
+
+			// One step: the box starts its move, the character updates with `desired`, then the world steps.
+			void Step(CharacterController& character, const glm::vec3& desired = glm::vec3(0.0f))
+			{
+				m_Pose.Position += m_Velocity * FixedDelta;
+				m_World->MoveKinematic(m_Body, m_Pose, FixedDelta);
+				character.Update(FixedDelta, desired, Gravity);
+				REQUIRE(m_World->Step(FixedDelta, 1).has_value());
+			}
+
+			void SetVelocity(const glm::vec3& velocity) { m_Velocity = velocity; }
+			[[nodiscard]] BodyHandle GetBody() const { return m_Body; }
+			[[nodiscard]] glm::vec3 GetPosition() const { return m_World->GetPose(m_Body).Position; }
+		private:
+			// A documented back-reference: the world outlives the box (both live in one test case).
+			PhysicsWorld* m_World = nullptr;
+			glm::vec3 m_Velocity = glm::vec3(0.0f);
+			PhysicsPose m_Pose{};
+			BodyHandle m_Body{};
+		};
+
 		// A character created on a MovingPlatform that has not moved yet, standing on it after half a second at rest.
 		Scope<CharacterController> CreateCarriedCharacter(PhysicsWorld& world, bool inheritGroundVelocity)
 		{
@@ -1028,6 +1064,176 @@ namespace Engine {
 					CHECK(std::abs(moved) < 0.01f);
 				else
 					CHECK(moved == doctest::Approx(1.0f).epsilon(0.05));
+			}
+		}
+
+		// --- Pushes and the squeeze (M36 W36.2, Docs/Decisions/0053-m36-contact-surfaces.md decisions 11 and 12) -------------
+
+		// World Tree's brief 16: a Kinematic piston moved into a character pushes it at the piston's velocity. Within the
+		// character's look-ahead (0.1 m a tick, 6 m/s at 60 Hz) the piston never overlaps the capsule; a faster one overlaps it
+		// for one tick, by at most its step beyond the look-ahead, and pushes it out at the next update.
+		TEST_CASE("CharacterController: a Kinematic piston pushes a character at its velocity")
+		{
+			for (const float speed : { 2.0f, 8.0f })
+			{
+				CAPTURE(speed);
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+				Walk(*world, *character, glm::vec3(0.0f), 30);
+				REQUIRE(character->GetGroundState().IsGrounded);
+				// The piston's face starts 0.45 m from the capsule (radius 0.3 m), moving along +X.
+				constexpr float HalfWidth = 0.25f;
+				KinematicBox piston(*world, glm::vec3(-1.0f, 0.9f, 0.0f), glm::vec3(HalfWidth, 0.85f, 1.0f), glm::vec3(speed, 0.0f, 0.0f));
+				float deepest = -1.0f;
+				uint32_t overlappingTicks = 0;
+				float lastSecondStart = 0.0f;
+				for (uint32_t tick = 0; tick < 90; ++tick)
+				{
+					if (tick == 30)
+						lastSecondStart = character->GetPose().Position.x;
+					piston.Step(*character);
+					const float overlap = (piston.GetPosition().x + HalfWidth) - (character->GetPose().Position.x - 0.3f);
+					deepest = std::max(deepest, overlap);
+					overlappingTicks += overlap > 0.005f ? 1 : 0;
+					CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+				}
+				// The last second: the character moved at the piston's speed (its own velocity stays the one it asked for).
+				CHECK(character->GetPose().Position.x - lastSecondStart == doctest::Approx(speed).epsilon(0.02));
+				CHECK(character->GetGroundState().IsGrounded);
+				if (speed < 6.0f)
+				{
+					CHECK(deepest < 0.005f);
+				}
+				else
+				{
+					CHECK(deepest < speed * FixedDelta - 0.1f + 0.005f);
+					CHECK(overlappingTicks <= 1);
+				}
+			}
+		}
+
+		// World Tree's brief 16: a press's hammer brought down onto a character standing on the floor cannot push it out of the
+		// way (the floor holds it), so the character is squeezed by the press, from the second tick of the push on; while the
+		// hammer is still above its head, the first contact within the look-ahead included, it is not.
+		TEST_CASE("CharacterController: a press brought down onto a grounded character reports it squeezed by the press")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			REQUIRE(character->GetGroundState().IsGrounded);
+			// The hammer's face 0.3 m above the 1.8 m character, coming down at 1 m/s.
+			KinematicBox press(*world, glm::vec3(0.0f, 2.35f, 0.0f), glm::vec3(1.0f, 0.25f, 1.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+			std::optional<uint32_t> squeezedAt;
+			std::optional<uint32_t> reachedAt;
+			for (uint32_t tick = 0; tick < 40; ++tick)
+			{
+				press.Step(*character);
+				// The gap between the hammer's face and the top of the capsule after the step.
+				const float gap = (press.GetPosition().y - 0.25f) - (character->GetPose().Position.y + 1.8f);
+				if (!reachedAt.has_value() && gap <= 0.005f)
+					reachedAt = tick;
+				const CharacterSqueeze squeeze = character->GetSqueeze();
+				if (!squeezedAt.has_value() && squeeze.IsSqueezed)
+				{
+					squeezedAt = tick;
+					CHECK(squeeze.Body == press.GetBody());
+				}
+				// Still above the character's padding (2 cm), the first contact within its look-ahead included: no squeeze.
+				if (gap > 0.025f)
+					CHECK_FALSE(squeeze.IsSqueezed);
+			}
+			REQUIRE(reachedAt.has_value());
+			REQUIRE(squeezedAt.has_value());
+			CHECK(*squeezedAt <= *reachedAt + 1);
+			// The floor holds the character: it stays on it and stays squeezed while the press comes on.
+			CHECK(std::abs(character->GetPose().Position.y) < 0.02f);
+			CHECK(character->GetSqueeze().IsSqueezed);
+			// A press that stops is no push any more.
+			press.SetVelocity(glm::vec3(0.0f));
+			press.Step(*character);
+			press.Step(*character);
+			CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+		}
+
+		TEST_CASE("CharacterController: a piston pressing a character against a wall reports it squeezed by the piston")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A wall whose face is at x 1.
+			static_cast<void>(CreateBlock(*world, glm::vec3(1.5f, 2.0f, 0.0f), glm::vec3(0.5f, 1.0f, 2.0f)));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, 0.0f));
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			KinematicBox piston(*world, glm::vec3(-1.0f, 0.9f, 0.0f), glm::vec3(0.25f, 0.85f, 1.0f), glm::vec3(2.0f, 0.0f, 0.0f));
+			bool squeezed = false;
+			for (uint32_t tick = 0; tick < 90 && !squeezed; ++tick)
+			{
+				piston.Step(*character);
+				squeezed = character->GetSqueeze().IsSqueezed;
+				if (squeezed)
+					CHECK(character->GetSqueeze().Body == piston.GetBody());
+			}
+			CHECK(squeezed);
+			// Pushed up to the wall, no farther.
+			CHECK(character->GetPose().Position.x < 1.0f - 0.29f);
+		}
+
+		// World Tree's brief 16: a husk carried by a belt into a resting hammer stops against it, and a hammer at rest pushes
+		// nothing, so the character is not squeezed.
+		TEST_CASE("CharacterController: a character carried into a resting ram stops against it and is not squeezed")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			const BodyHandle belt = CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 2.0f));
+			REQUIRE(world->SetColliderSurfaces(belt, std::array{ PhysicsColliderSurface{ .Collider = 0, .SurfaceVelocity = glm::vec3(2.5f, 0.0f, 0.0f) } })
+					.has_value());
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-2.0f, 0.05f, 0.0f));
+			// The ram's face at x 1, its base 0.2 m above the belt, at rest.
+			KinematicBox ram(*world, glm::vec3(1.5f, 1.2f, 0.0f), glm::vec3(0.5f, 1.0f, 1.0f), glm::vec3(0.0f));
+			for (uint32_t tick = 0; tick < 120; ++tick)
+			{
+				ram.Step(*character);
+				CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+			}
+			// Against the ram's face, kept off it by the character's padding (2 cm).
+			const float stopped = character->GetPose().Position.x;
+			CHECK(stopped == doctest::Approx(1.0f - 0.3f - 0.02f).epsilon(0.02));
+			ram.Step(*character);
+			CHECK(std::abs(character->GetPose().Position.x - stopped) < 1.0e-3f);
+		}
+
+		// The squeeze's cases that are not (ADR 0052, the M36 risks): a character's own walk into a wall, into a corner and up
+		// a steep face meets only static bodies, which push nothing.
+		TEST_CASE("CharacterController: a character's own walk into a wall, a corner or a steep face is never a squeeze")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			// A corner of two walls whose faces are at x 2 and z 2, and a face rising at 60 degrees from x -4 towards -X.
+			static_cast<void>(CreateBlock(*world, glm::vec3(2.5f, 2.0f, 0.0f), glm::vec3(0.5f, 1.0f, 3.0f)));
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f, 2.0f, 2.5f), glm::vec3(3.0f, 1.0f, 0.5f)));
+			static_cast<void>(CreateBlock(*world, glm::vec3(-4.0f, 0.0f, 0.0f), glm::vec3(2.0f, 0.5f, 2.0f), glm::normalize(glm::quat(0.8660254f, 0.0f, 0.0f, -0.5f))));
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 0.05f, -1.0f));
+			struct Approach
+			{
+				glm::vec3 Start = glm::vec3(0.0f);
+				glm::vec3 Velocity = glm::vec3(0.0f);
+			};
+			for (const Approach& walk : { Approach{ glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(3.0f, 0.0f, 0.0f) }, Approach{ glm::vec3(1.0f, 0.0f, 1.0f), glm::vec3(3.0f, 0.0f, 3.0f) },
+					 Approach{ glm::vec3(-2.0f, 0.0f, 0.0f), glm::vec3(-3.0f, 0.0f, 0.0f) } })
+			{
+				CAPTURE(walk.Velocity.x);
+				CAPTURE(walk.Velocity.z);
+				character->SetPose({ .Position = walk.Start });
+				for (uint32_t tick = 0; tick < 90; ++tick)
+				{
+					character->Update(FixedDelta, walk.Velocity, Gravity);
+					REQUIRE(world->Step(FixedDelta, 1).has_value());
+					CHECK_FALSE(character->GetSqueeze().IsSqueezed);
+				}
+				// Held back by what it walked into: never through it, never up the steep face.
+				CHECK(character->GetPose().Position.y < 0.1f);
+				CHECK(character->GetPose().Position.x < 1.75f);
+				CHECK(character->GetPose().Position.x > -4.1f);
 			}
 		}
 	}

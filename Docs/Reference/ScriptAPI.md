@@ -2300,6 +2300,14 @@ Ground normal from the last update.
 
 All modes; Runtime|Test; pure/read.
 
+### CharacterController.GetSqueezingBody
+
+`(self: CharacterController) -> Entity?`
+
+The owner of the body that squeezed the character in its last update (the first in canonical order when several did), or nil while it is not squeezed or that entity is disabled or destroyed.
+
+All modes; Runtime|Test; pure/read.
+
 ### CharacterController.GetVelocity
 
 `(self: CharacterController) -> vector`
@@ -2337,6 +2345,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `(self: CharacterController) -> boolean`
 
 Whether the last character update found supporting ground.
+
+All modes; Runtime|Test; pure/read.
+
+### CharacterController.IsSqueezed
+
+`(self: CharacterController) -> boolean`
+
+Whether the last character update found the character squeezed: a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it (a press onto the floor, a piston against a wall). Read in the next fixed update; the engine makes no escape and deals no damage.
 
 All modes; Runtime|Test; pure/read.
 

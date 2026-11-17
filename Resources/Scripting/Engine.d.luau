@@ -516,6 +516,8 @@ declare extern type CharacterController with
 	GetGroundCollider: (self: CharacterController) -> Entity?
 	-- Ground normal from the last update. [All modes; Runtime|Test; pure/read]
 	GetGroundNormal: (self: CharacterController) -> vector
+	-- The owner of the body that squeezed the character in its last update (the first in canonical order when several did), or nil while it is not squeezed or that entity is disabled or destroyed. [All modes; Runtime|Test; pure/read]
+	GetSqueezingBody: (self: CharacterController) -> Entity?
 	-- Velocity after the last update. [All modes; Runtime|Test; pure/read]
 	GetVelocity: (self: CharacterController) -> vector
 	-- The multiplier of the project's gravity for the character. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -526,6 +528,8 @@ declare extern type CharacterController with
 	InheritGroundVelocity: boolean
 	-- Whether the last character update found supporting ground. [All modes; Runtime|Test; pure/read]
 	IsGrounded: (self: CharacterController) -> boolean
+	-- Whether the last character update found the character squeezed: a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it (a press onto the floor, a piston against a wall). Read in the next fixed update; the engine makes no escape and deals no damage. [All modes; Runtime|Test; pure/read]
+	IsSqueezed: (self: CharacterController) -> boolean
 	-- Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
 	Layer: string
 	-- The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. [All modes; Runtime|Test; pure/read; setter mutates]

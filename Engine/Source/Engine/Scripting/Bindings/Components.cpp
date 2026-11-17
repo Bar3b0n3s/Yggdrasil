@@ -266,17 +266,31 @@ namespace Engine {
 				Lua::Push(call, state->Velocity);
 			return 1;
 		}
-		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5): the collider entity the last update stood on, or nil.
-		static int CharacterGroundCollider(ScriptCall& call)
+		// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decisions 5 and 13): an entity of the character's last update, the
+		// collider it stood on (Field 0) or the owner of the body that squeezed it (Field 1), or nil.
+		template<int Field>
+		static int CharacterEntityRead(ScriptCall& call)
 		{
 			const Entity entity = ComponentSelf(call, "CharacterController");
 			auto state = ComponentPhysics(call).GetCharacterState(entity.GetUUID());
 			if (!state)
 				return Lua::RaiseError(call, state.error());
-			if (!state->GroundCollider.IsValid())
+			const UUID read = Field == 0 ? state->GroundCollider : state->SqueezedBy;
+			if (!read.IsValid())
 				Lua::PushNil(call);
 			else
-				Lua::Push(call, ScriptEntityIdentity{ state->GroundCollider, call.Engine->GetHost().GetSceneGeneration() });
+				Lua::Push(call, ScriptEntityIdentity{ read, call.Engine->GetHost().GetSceneGeneration() });
+			return 1;
+		}
+		// M36 W36.2 (Docs/Decisions/0053-m36-contact-surfaces.md decision 13): whether the last update found the character
+		// squeezed.
+		static int CharacterSqueezed(ScriptCall& call)
+		{
+			const Entity entity = ComponentSelf(call, "CharacterController");
+			auto state = ComponentPhysics(call).GetCharacterState(entity.GetUUID());
+			if (!state)
+				return Lua::RaiseError(call, state.error());
+			Lua::Push(call, state->IsSqueezed);
 			return 1;
 		}
 		static AudioSystem& ComponentAudio(ScriptCall& call)
@@ -520,9 +534,18 @@ namespace Engine {
 				.Method("IsGrounded", Utils::CharacterRead<0>, "(self: CharacterController) -> boolean", "Whether the last character update found supporting ground.", read)
 				.Method("GetGroundNormal", Utils::CharacterRead<1>, "(self: CharacterController) -> vector", "Ground normal from the last update.", read)
 				.Method("GetVelocity", Utils::CharacterRead<2>, "(self: CharacterController) -> vector", "Velocity after the last update.", read)
-				.Method("GetGroundCollider", Utils::CharacterGroundCollider, "(self: CharacterController) -> Entity?",
+				.Method("GetGroundCollider", Utils::CharacterEntityRead<0>, "(self: CharacterController) -> Entity?",
 					"The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when "
 					"that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity.",
+					read)
+				.Method("IsSqueezed", Utils::CharacterSqueezed, "(self: CharacterController) -> boolean",
+					"Whether the last character update found the character squeezed: a Kinematic body, or a Dynamic one not lighter than it, "
+					"pushing it while something else holds it (a press onto the floor, a piston against a wall). Read in the next fixed update; "
+					"the engine makes no escape and deals no damage.",
+					read)
+				.Method("GetSqueezingBody", Utils::CharacterEntityRead<1>, "(self: CharacterController) -> Entity?",
+					"The owner of the body that squeezed the character in its last update (the first in canonical order when several did), or "
+					"nil while it is not squeezed or that entity is disabled or destroyed.",
 					read);
 			api.Type("AudioSource")
 				.Method("Play", Utils::SourceWrite<&AudioSystem::Play, true>, "(self: AudioSource) -> ()", "Start or restart this active source.", write)

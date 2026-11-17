@@ -130,8 +130,8 @@
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decisions 11 to 13); M20, which owns the contact path in
 // phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md); M36 adds the collider surfaces (the
-// step's M36 paragraph), PhysicsCharacterState::GroundCollider, PhysicsSurfaceInfo and GetSurface
-// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5), reviewed as a change to a frozen interface.
+// step's M36 paragraph), PhysicsCharacterState's GroundCollider, IsSqueezed and SqueezedBy, PhysicsSurfaceInfo and GetSurface
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), reviewed as a change to a frozen interface.
 
 namespace Engine {
 
@@ -293,6 +293,11 @@ namespace Engine {
 		// character's entity when it stood on one); the null UUID when it was not grounded, or when that entity or its body's
 		// owner is disabled or pending destruction now.
 		UUID GroundCollider{};
+		// M36 W36.2 (Docs/Decisions/0053-m36-contact-surfaces.md decision 12): whether the last update found the character
+		// squeezed (CharacterController::GetSqueeze), and the owner of the squeezing body; SqueezedBy is the null UUID when it
+		// is not squeezed, or when that owner is disabled or pending destruction now.
+		bool IsSqueezed = false;
+		UUID SqueezedBy{};
 	};
 
 	// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5; §11.5 Physics.GetSurface's SurfaceInfo): what contacts

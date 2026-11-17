@@ -8,8 +8,9 @@
 #include <cmath>
 
 // The script-facing character functions of the play session (Architecture §9.6; §11.5 CharacterController:Move,
-// IsGrounded, GetGroundNormal, GetVelocity, and M36's GetGroundCollider). The characters' lifecycle (creation in canonical
-// order among the bodies, rebuilds, teleports, updates and write-back) belongs to the step phases in PhysicsSystem.cpp.
+// IsGrounded, GetGroundNormal, GetVelocity, and M36's GetGroundCollider, IsSqueezed and GetSqueezingBody). The characters'
+// lifecycle (creation in canonical order among the bodies, rebuilds, teleports, updates and write-back) belongs to the step
+// phases in PhysicsSystem.cpp.
 
 namespace Engine {
 
@@ -45,6 +46,17 @@ namespace Engine {
 		{
 			if (const std::optional<PhysicsOverlapHit> hit = ResolveHit(ground.GroundBody, ground.GroundCollider))
 				state.GroundCollider = hit->Entity;
+		}
+		// M36 W36.2: the squeeze, and the owner of the body that squeezes (a body's owner, or a character's entity).
+		const CharacterSqueeze squeeze = controller.GetSqueeze();
+		state.IsSqueezed = squeeze.IsSqueezed;
+		if (squeeze.IsSqueezed)
+		{
+			// The body may be gone since the update (FindBody verifies what an index names; this handle is the controller's).
+			if (const auto body = Bodies.find(squeeze.Body.GetValue()); body != Bodies.end() && IsPresent(body->second.Owner))
+				state.SqueezedBy = body->second.Owner;
+			else if (const UUID owner = FindCharacterOwner(squeeze.Body); owner.IsValid() && IsPresent(owner))
+				state.SqueezedBy = owner;
 		}
 		return state;
 	}

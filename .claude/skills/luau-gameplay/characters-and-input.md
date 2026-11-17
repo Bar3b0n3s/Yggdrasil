@@ -67,6 +67,36 @@ end
 return Script.Define("Conveyor", Conveyor)
 ```
 
+## Pushes and the squeeze
+
+- **Kinematic bodies push characters.** A piston, a press or a door moved with `RigidBody:MoveKinematic` (or a Dynamic body at least as heavy as the character) pushes a character it moves into at its own velocity, up to about 6 m/s at 60 Hz without ever entering the capsule; a faster one overlaps it for one tick first, and one moving more than about 0.4 m a tick can pass through a 0.3 m character. Keep machines below that, or make the fast part a trigger that deals the hit. A pushed character's `GetVelocity()` stays what its `Move` asked for; read how far it was pushed from its position.
+- **The squeeze.** A character the body cannot move out of the way (pinned under a press, against a wall by a piston) is squeezed: `CharacterController:IsSqueezed()` is true from the next fixed update, and `GetSqueezingBody()` names the body's entity. The engine does nothing else: there is no callback, no escape and no damage, and under a flat face it never shoves the character sideways. Read it in `OnFixedUpdate` and crush or shove the character yourself. A resting body (a hammer the belt carries the character into), the character's own walk into a wall and a press still above its head are never a squeeze.
+
+```luau path=Assets/Scripts/Crushable.luau
+--!strict
+export type Crushable = ScriptInstance & {
+	Crushed: boolean,
+}
+
+local Crushable = {}
+
+function Crushable.OnCreate(self: Crushable)
+	self.Crushed = false
+end
+
+function Crushable.OnFixedUpdate(self: Crushable, dt: number)
+	local controller = self.Entity.CharacterController
+	if not controller or self.Crushed or not controller:IsSqueezed() then
+		return
+	end
+	self.Crushed = true
+	local press = controller:GetSqueezingBody()
+	Log.Info(`{self.Entity.Name} was crushed by {if press then press.Name else "something"}`)
+end
+
+return Script.Define("Crushable", Crushable)
+```
+
 ## Triggers as buttons
 
 A Button action binds a trigger like any button: `{"Attack": {"Type": "Button", "Bindings": ["Gamepad.RightTrigger", "Mouse.Left"]}}`. The trigger is down once it is pulled to 0.5 and up again only when it falls below 0.4, so a trigger held near the threshold never chatters; `Input.IsActionDown`, `IsActionPressed` and `IsActionReleased` work as for a button, and an Axis action's `Positive` and `Negative` take a trigger the same way. A suite pulls it with `Test.InjectGamepad(0, "RightTrigger", 0.6)` and lets go with a value below 0.4. A stick (`Gamepad.LeftX` and the like) is no button: it belongs in an Axis action's `Gamepad`.

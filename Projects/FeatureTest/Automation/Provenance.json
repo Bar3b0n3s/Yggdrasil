@@ -4036,17 +4036,17 @@
 		},
 		{
 			"Path": "Assets/Scenes/Surfaces.scene",
-			"XXH64": "8e6aebd4c6f57fca",
+			"XXH64": "90db7d96a175a489",
 			"Method": "scene.save",
-			"RequestId": 5,
+			"RequestId": 6,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Scenes/Surfaces.scene.meta",
-			"XXH64": "9036168d3ef6f10c",
+			"XXH64": "d56d1c3d080cf591",
 			"Method": "edit.batch",
-			"RequestId": 4,
+			"RequestId": 5,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -4723,6 +4723,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scripts/Surfaces/KinematicMover.luau",
+			"XXH64": "b179a1392d7a654a",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Surfaces/KinematicMover.luau.meta",
+			"XXH64": "f9afb26fb1a80e2e",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scripts/Surfaces/SurfaceWalker.luau",
 			"XXH64": "8b6b85fe2b957cd9",
 			"Method": "script.write",
@@ -5190,15 +5206,15 @@
 			"Path": "Assets/Tests/Api/ColliderSurface.test.luau",
 			"XXH64": "8f2e73801117ae6d",
 			"Method": "script.write",
-			"RequestId": 7,
+			"RequestId": 8,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Tests/Api/ColliderSurface.test.luau.meta",
-			"XXH64": "45312f440eb9d2d1",
+			"XXH64": "587f3b2269a169f5",
 			"Method": "script.write",
-			"RequestId": 7,
+			"RequestId": 8,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6772,7 +6788,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/Surfaces.replay",
-			"XXH64": "0ec84d784f80bfdb",
+			"XXH64": "f84861578444edbe",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -6932,17 +6948,17 @@
 		},
 		{
 			"Path": "Assets/Tests/Surfaces/Surfaces.test.luau",
-			"XXH64": "32fe453dc164b553",
+			"XXH64": "794f5c0f0f370f22",
 			"Method": "script.write",
-			"RequestId": 6,
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
 		{
 			"Path": "Assets/Tests/Surfaces/Surfaces.test.luau.meta",
-			"XXH64": "79212b11b002457e",
+			"XXH64": "8b528a864d7d1122",
 			"Method": "script.write",
-			"RequestId": 6,
+			"RequestId": 7,
 			"Client": "batch",
 			"TranscriptLine": null
 		},

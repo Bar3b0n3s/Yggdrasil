@@ -40,9 +40,18 @@
 // collider surface's velocity (PhysicsWorld::SetColliderSurfaces) carries a grounded character: a conveyor belt moves it
 // whatever InheritGroundVelocity says, which stays about ground that really moves.
 //
+// Pushes and the squeeze (M36 W36.2, ADR 0053 decisions 11 and 12; World Tree's brief 16). A Kinematic body, or a Dynamic
+// body not lighter than the character, that moves into the character pushes it along the contact's normal at the body's
+// velocity, through CharacterVirtual's moving contact planes: while the body is within the character's look-ahead (0.1 m)
+// at its update, so up to about 6 m/s at 60 Hz with no overlap; a faster one overlaps the character for one tick and pushes
+// it out at the next update, and one beyond about 0.1 m plus Radius a tick can pass through it (Docs/Backlog.md §6). A
+// character such a body cannot move out of the way (pinned under a press, against a wall by a piston) is squeezed: after its
+// update, the body's push this step would leave it overlapping the character by more than CharacterSqueezeTolerance
+// (GetSqueeze). The engine makes no escape and deals no damage: the game decides.
+//
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8); M34 changes what it documents of Mass,
 // Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1); M36 adds the ground's body,
-// collider and surface velocity, reviewed as such a change too (ADR 0053 decision 4).
+// collider and surface velocity and the squeeze, reviewed as such a change too (ADR 0053 decisions 4 and 12).
 
 namespace Engine {
 
@@ -53,6 +62,12 @@ namespace Engine {
 	// component. Far beyond any game's character, and small enough that a step's movement stays well inside Jolt's world
 	// bounds whatever the gravity.
 	inline constexpr float MaxCharacterSpeed = 500.0f;
+
+	// M36 W36.2 (Docs/Decisions/0053-m36-contact-surfaces.md decision 12): how far, in metres, a body that pushes a character
+	// may end its step inside the character's padded capsule before the character counts as squeezed (GetSqueeze). Below one
+	// tick of a press at 1 m/s (1.6 cm at 60 Hz), above what Jolt's solver leaves of a push it follows (its tolerances are a
+	// millimetre).
+	inline constexpr float CharacterSqueezeTolerance = 0.01f;
 
 	// What a controller is created with (CharacterControllerComponent, §5.3). Every float finite.
 	struct CharacterControllerDescription
@@ -103,6 +118,15 @@ namespace Engine {
 		// invalid handle and 0 when not grounded. The body may have been destroyed since the update.
 		BodyHandle GroundBody{};
 		uint32_t GroundCollider = 0;
+	};
+
+	// M36 W36.2: whether the last update found the character squeezed, and by which body (GetSqueeze).
+	struct CharacterSqueeze
+	{
+		bool IsSqueezed = false;
+		// The squeezing body of the lowest handle (canonical creation order) when several squeeze it; invalid otherwise. It
+		// may have been destroyed since the update.
+		BodyHandle Body{};
 	};
 
 	class CharacterController
@@ -164,6 +188,17 @@ namespace Engine {
 		void SetVelocity(const glm::vec3& velocity);
 		// The ground state of the last Update (its ground's surface velocity as that update turned it).
 		[[nodiscard]] CharacterGroundState GetGroundState() const;
+		// M36 W36.2: the squeeze of the last Update (see the file comment). A body pushes the character when it is Kinematic, or
+		// Dynamic and not lighter than the character, and its velocity at a contact of the update moves it towards the character
+		// faster than 1 mm/s; it squeezes the character when, at the character's position after the update, its push over the
+		// step (that speed times the step) would leave it more than CharacterSqueezeTolerance inside the character's padded
+		// capsule: the update could not move the character ahead of it, so it is held by something else (the floor under a
+		// press, a wall behind a piston). A body the character merely touches, one at rest (a resting ram the character is carried
+		// into), one moving away, a static wall the character walks into, a corner or a steep face never squeezes; a press's first
+		// contact, while it is still above the character's head, does not either. Read with one extra shape query of the
+		// character's capsule against the pushing bodies alone, only in an update that met one. A teleport keeps the last
+		// update's value.
+		[[nodiscard]] CharacterSqueeze GetSqueeze() const;
 		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see; its object layer has the Character kind
 		// (M34), so no other body meets it in the solver.
 		[[nodiscard]] BodyHandle GetInnerBody() const;

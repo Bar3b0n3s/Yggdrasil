@@ -684,11 +684,13 @@ Script members of `CharacterController`:
 |---|---|---|---|---|---|
 | `GetGroundCollider` | method | `(self: CharacterController) -> Entity?` |  | All | The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity. |
 | `GetGroundNormal` | method | `(self: CharacterController) -> vector` |  | All | Ground normal from the last update. |
+| `GetSqueezingBody` | method | `(self: CharacterController) -> Entity?` |  | All | The owner of the body that squeezed the character in its last update (the first in canonical order when several did), or nil while it is not squeezed or that entity is disabled or destroyed. |
 | `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | Velocity after the last update. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for the character. |
 | `Height` | proxy field | `number` | read/write | All | The character's total height, in metres. |
 | `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way. |
 | `IsGrounded` | method | `(self: CharacterController) -> boolean` |  | All | Whether the last character update found supporting ground. |
+| `IsSqueezed` | method | `(self: CharacterController) -> boolean` |  | All | Whether the last character update found the character squeezed: a Kinematic body, or a Dynamic one not lighter than it, pushing it while something else holds it (a press onto the floor, a piston against a wall). Read in the next fixed update; the engine makes no escape and deals no damage. |
 | `Layer` | proxy field | `string` | read/write | All | Physics layer name from project settings. A value a script writes holds at most 4096 bytes of text. |
 | `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
 | `MaxSlopeAngle` | proxy field | `number` | read/write | All | The steepest slope the character can walk up, in degrees. |

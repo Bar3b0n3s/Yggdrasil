@@ -143,6 +143,7 @@ local character = Scene.FindByName("Character").CharacterController
 assert(type(character:IsGrounded()) == "boolean")
 assert(typeof(character:GetGroundNormal()) == "vector" and typeof(character:GetVelocity()) == "vector")
 assert(character:GetGroundCollider() == nil)
+assert(character:IsSqueezed() == false and character:GetSqueezingBody() == nil)
 character:Move(vector.create(1,0,0))
 return true
 )");

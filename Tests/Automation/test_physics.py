@@ -6,7 +6,8 @@ test_validate_reports_adjacent_static_bodies_and_fix_adds_parent_body are the Ro
 test_body_info_needs_a_play_session_and_a_body covers physics.bodyInfo's errors.
 test_belt_carries_a_character_that_reports_its_ground_collider covers M36's ColliderSurface (Docs/Decisions/
 0053-m36-contact-surfaces.md): physics.bodyInfo's groundCollider, a surface velocity written through entity.update, and
-PHYSICS_SURFACE_UNUSED.
+PHYSICS_SURFACE_UNUSED; test_body_info_reports_a_squeezed_character covers its W36.2 squeeze (physics.bodyInfo's
+squeezed and squeezedBy).
 """
 
 from __future__ import annotations
@@ -197,6 +198,37 @@ class PhysicsTests(AutomationTestCase):
         client.call("play.step", {"ticks": 30, "render": "none"})
         still = client.call("physics.bodyInfo", {"entity": "/Walker"})["position"][0]
         self.assertAlmostEqual(still, stopped, delta=0.01)
+        client.call("play.stop")
+
+    def test_body_info_reports_a_squeezed_character(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        client.call("entity.create", {"name": "Floor", "components": {
+            "Transform": {"Translation": [0, -0.5, 0]}, "RigidBody": {"Type": "Static"},
+            "BoxCollider": {"HalfExtents": [10, 0.5, 10]}}})
+        client.call("entity.create", {"name": "Pinned", "components": {
+            "Transform": {"Translation": [0, 0.02, 0]}, "CharacterController": {}}})
+        client.call("entity.create", {"name": "Press", "components": {
+            "Transform": {"Translation": [0, 2.35, 0]}, "RigidBody": {"Type": "Kinematic"},
+            "BoxCollider": {"HalfExtents": [1, 0.25, 1]}}})
+        client.call("play.start", {"mode": "simulate", "lockstep": True})
+        client.call("play.step", {"ticks": 10, "render": "none"})
+        standing = client.call("physics.bodyInfo", {"entity": "/Pinned"})
+        self.assertFalse(standing["squeezed"])
+        self.assertEqual(standing["squeezedBy"]["id"], "")
+
+        # The press comes down at 1 m/s, a tick at a time, until it holds the character against the floor.
+        squeezed = None
+        for tick in range(40):
+            client.call("entity.update", {"entity": "/Press", "target": "play", "components": {
+                "Transform": {"Translation": [0, 2.35 - (tick + 1) / 60, 0]}}})
+            client.call("play.step", {"ticks": 1, "render": "none"})
+            info = client.call("physics.bodyInfo", {"entity": "/Pinned"})
+            if info["squeezed"]:
+                squeezed = info
+                break
+        self.assertIsNotNone(squeezed)
+        assert squeezed is not None
+        self.assertEqual(squeezed["squeezedBy"]["path"], "/Press")
         client.call("play.stop")
 
 

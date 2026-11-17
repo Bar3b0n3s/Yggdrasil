@@ -271,6 +271,8 @@ return true
 				{ "CharacterController.GetVelocity", "holders.CharacterController.CharacterController:GetVelocity()" },
 				// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5).
 				{ "CharacterController.GetGroundCollider", "holders.CharacterController.CharacterController:GetGroundCollider()" },
+				{ "CharacterController.IsSqueezed", "holders.CharacterController.CharacterController:IsSqueezed()" },
+				{ "CharacterController.GetSqueezingBody", "holders.CharacterController.CharacterController:GetSqueezingBody()" },
 				{ "AudioSource.IsPlaying", "holders.AudioSource.AudioSource:IsPlaying()" },
 			};
 			// Mutating members, and the setters of the properties that have one.

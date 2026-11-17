@@ -17,8 +17,10 @@
 #include <Jolt/Physics/Body/MotionProperties.h>
 #include <Jolt/Physics/Character/CharacterID.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/CollisionGroup.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
+#include <Jolt/Physics/Collision/Shape/Shape.h>
 #include <Jolt/Physics/Collision/ShapeFilter.h>
 
 #include <algorithm>
@@ -61,6 +63,14 @@
 // (PhysicsBodyRecord::Surfaces) joins the ground's velocity, turned by the body's rotation when it is read: at the start of
 // Update for the step's velocity (the ground of the last update, where it is now), at its end for the ground state it
 // reports (the new ground). Without a surface the update computes exactly what it did before M36.
+//
+// The squeeze (M36 W36.2, ADR 0053 decision 12). After the update, the contacts of its last pass (GetActiveContacts) name the
+// bodies that push the character: not sensors or discarded, able to push it (CharacterContactSettings::mCanPushCharacter,
+// which the recorder turns off for a light Dynamic body), not Static, and moving towards it (the contact point's velocity
+// along the contact's normal, which points at the character) faster than MinPushSpeed. Their contacts' distances are those
+// of the pass's start, so the controller measures them again where the update left the character: one CheckCollision of the
+// character's capsule against those bodies alone. A body whose push over the step (its speed times the step) would end more
+// than CharacterSqueezeTolerance inside the padded capsule squeezes it; the update could not keep the character ahead of it.
 //
 // Range. A character never leaves the range physics places bodies in (IsPlaceablePhysicsPose): an update that would
 // carry it beyond MaxPhysicsCoordinate leaves it where it was, with no velocity, and logs a warning once per controller.
@@ -170,6 +180,57 @@ namespace Engine {
 			PhysicsObjectLayer m_Layer = 0;
 		};
 
+		// M36 W36.2: the speed, in m/s, at which a body's contact point must move towards the character for the body to push it
+		// (FindSqueeze): far below any machine's, above the drift of a body at rest.
+		constexpr float MinPushSpeed = 1.0e-3f;
+
+		// M36 W36.2: the squeeze's query sees the pushing bodies alone (FindSqueeze).
+		class PusherFilter final : public JPH::BodyFilter
+		{
+		public:
+			// `pushers` is a documented back-reference to FindSqueeze's list, which outlives the query.
+			explicit PusherFilter(const std::vector<std::pair<JPH::BodyID, float>>& pushers)
+				: m_Pushers(&pushers)
+			{
+			}
+
+			bool ShouldCollide(const JPH::BodyID& body) const override
+			{
+				return std::any_of(m_Pushers->begin(), m_Pushers->end(), [&body](const std::pair<JPH::BodyID, float>& pusher)
+				{
+					return pusher.first == body;
+				});
+			}
+		private:
+			const std::vector<std::pair<JPH::BodyID, float>>* m_Pushers = nullptr;
+		};
+
+		// M36 W36.2: the deepest penetration of each pushing body into the capsule the squeeze's query found (positive inside,
+		// negative while apart within the query's reach). The narrow phase reports hits on the main thread in an order of its
+		// own; the deepest of each body is the same whatever the order.
+		class PenetrationCollector final : public JPH::CollideShapeCollector
+		{
+		public:
+			void AddHit(const JPH::CollideShapeResult& result) override
+			{
+				m_Hits.emplace_back(result.mBodyID2, result.mPenetrationDepth);
+			}
+
+			// The deepest hit of `pushers[index]`'s body, or nullopt when the query met none.
+			[[nodiscard]] std::optional<float> GetDepth(size_t index, const std::vector<std::pair<JPH::BodyID, float>>& pushers) const
+			{
+				std::optional<float> deepest;
+				for (const auto& [body, depth] : m_Hits)
+				{
+					if (body == pushers[index].first && (!deepest.has_value() || depth > *deepest))
+						deepest = depth;
+				}
+				return deepest;
+			}
+		private:
+			std::vector<std::pair<JPH::BodyID, float>> m_Hits;
+		};
+
 		// The character's own collision (CharacterVirtual's queries): never its inner body, and no body of its collision
 		// group, decided by the inner body's CollisionGroup as the world installed it (its GroupFilter), so the rule is the
 		// world's own.
@@ -221,6 +282,9 @@ namespace Engine {
 		BodyHandle GroundBody{};
 		uint32_t GroundCollider = 0;
 		std::optional<glm::vec3> GroundSurfaceVelocity{};
+
+		// M36 W36.2: the squeeze of the last update (GetSqueeze).
+		CharacterSqueeze Squeeze{};
 
 		// M36: a collider a character stands on (FindGroundCollider).
 		struct GroundColliderInfo
@@ -363,6 +427,63 @@ namespace Engine {
 			const double magnitude = std::min(mass * -static_cast<double>(normalDotGravity) * static_cast<double>(deltaTime), Utils::MaxGroundImpulse);
 			const JPH::Vec3 impulse = joltGravity * static_cast<float>(magnitude / gravityLength);
 			World->m_State->System->GetBodyInterfaceNoLock().AddImpulse(ground, impulse, character.GetGroundPosition());
+		}
+
+		// M36 W36.2: the squeeze of the update that just ran (see the file comment).
+		[[nodiscard]] CharacterSqueeze FindSqueeze(float deltaTime, const JPH::BroadPhaseLayerFilter& broadPhaseFilter,
+			const JPH::ObjectLayerFilter& objectLayerFilter) const
+		{
+			const JPH::CharacterVirtual& character = *Character;
+			// The bodies that push the character this step, with the distance each push covers over it (the largest of the
+			// body's contacts).
+			std::vector<std::pair<JPH::BodyID, float>> pushers;
+			for (const JPH::CharacterContact& contact : character.GetActiveContacts())
+			{
+				// mCanPushCharacter is the recorder's answer only for a contact the update collided with, so a light body is
+				// asked here too.
+				if (contact.mIsSensorB || contact.mWasDiscarded || !contact.mCanPushCharacter || contact.mBodyB.IsInvalid()
+					|| contact.mMotionTypeB == JPH::EMotionType::Static || (contact.mMotionTypeB == JPH::EMotionType::Dynamic && IsLightBody(contact.mBodyB)))
+				{
+					continue;
+				}
+				const float speed = contact.mLinearVelocity.Dot(contact.mContactNormal);
+				if (!(speed > Utils::MinPushSpeed))
+					continue;
+				const float push = speed * deltaTime;
+				const auto found = std::find_if(pushers.begin(), pushers.end(), [&contact](const std::pair<JPH::BodyID, float>& pusher)
+				{
+					return pusher.first == contact.mBodyB;
+				});
+				if (found == pushers.end())
+					pushers.emplace_back(contact.mBodyB, push);
+				else
+					found->second = std::max(found->second, push);
+			}
+			if (pushers.empty())
+				return {};
+
+			// Where the update left the character: each pusher's deepest penetration of the capsule (negative while apart),
+			// within the farthest push.
+			float farthest = 0.0f;
+			for (const auto& [body, push] : pushers)
+				farthest = std::max(farthest, push);
+			Utils::PusherFilter bodyFilter(pushers);
+			Utils::PenetrationCollector collector;
+			character.CheckCollision(character.GetPosition(), character.GetRotation(), JPH::Vec3::sZero(), farthest, character.GetShape(),
+				character.GetPosition(), collector, broadPhaseFilter, objectLayerFilter, bodyFilter, JPH::ShapeFilter());
+
+			CharacterSqueeze squeeze;
+			for (size_t index = 0; index < pushers.size(); ++index)
+			{
+				const std::optional<float> depth = collector.GetDepth(index, pushers);
+				// The distance CharacterVirtual keeps (beyond its padding), less the push still to come.
+				if (!depth.has_value() || !(*depth + character.GetCharacterPadding() + pushers[index].second > CharacterSqueezeTolerance))
+					continue;
+				const BodyHandle body = Detail::ToBodyHandle(pushers[index].first);
+				if (!squeeze.IsSqueezed || body.GetValue() < squeeze.Body.GetValue())
+					squeeze = CharacterSqueeze{ .IsSqueezed = true, .Body = body };
+			}
+			return squeeze;
 		}
 
 		// Appends the recorded contacts to the world's buffer (see the file comment).
@@ -559,6 +680,9 @@ namespace Engine {
 		state.PlaceInnerBody();
 		state.AppendContacts();
 
+		// M36 W36.2: the squeeze, measured where the update left the character (see the file comment).
+		state.Squeeze = state.FindSqueeze(deltaTime, broadPhaseFilter, objectLayerFilter);
+
 		// M36: the ground this update found, for GetGroundState (see the file comment).
 		state.GroundBody = BodyHandle();
 		state.GroundCollider = 0;
@@ -621,6 +745,11 @@ namespace Engine {
 			.GroundVelocity = groundVelocity,
 			.GroundBody = m_State->GroundBody,
 			.GroundCollider = m_State->GroundCollider };
+	}
+
+	CharacterSqueeze CharacterController::GetSqueeze() const
+	{
+		return m_State->Squeeze;
 	}
 
 	BodyHandle CharacterController::GetInnerBody() const
