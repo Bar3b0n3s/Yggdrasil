@@ -20,7 +20,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 import unittest
 from collections.abc import Callable
 from pathlib import Path
@@ -424,27 +423,28 @@ class QueueTests(LockTestCase):
         later.ready()
 
     def test_a_dead_waiters_ticket_is_skipped_and_removed(self) -> None:
-        running = self.holder(GPU).ready()
-        dead = self.queued_holder(GPU)
-        alive = self.queued_holder(GPU)
+        # Two places kept without asking for the lock (queue:gpu): no process polls the queue, so the test's own
+        # listings decide when the dead ticket goes, whatever the timing.
+        dead = self.holder(f"queue:{GPU}").ready()
+        alive = self.holder(f"queue:{GPU}").ready()
         tickets = sorted(locks.queue_directory().glob(f"{GPU}-*{locks.TICKET_SUFFIX}"))
         self.assertEqual(len(tickets), 2)
         dead.kill()
         self.assertEqual([waiter.pid for waiter in locks.waiters(GPU, tidy=False)], [alive.pid])
         self.assertTrue(tickets[0].exists(), "a listing that does not tidy leaves the dead ticket")
         self.assertEqual(self.waiting_pids(GPU), [alive.pid])
-        deadline = time.monotonic() + DEADLINE_SECONDS
-        while tickets[0].exists() and time.monotonic() < deadline:
-            locks.waiters(GPU)  # a reader that takes the queue's claim removes the dead ticket
-            time.sleep(locks.POLL_SECONDS)
-        self.assertFalse(tickets[0].exists(), "the dead waiter's ticket is removed")
+        self.assertFalse(tickets[0].exists(), "a listing that tidies removes the dead waiter's ticket")
         self.assertTrue(tickets[1].exists())
-        running.release()
-        alive.ready()
-        # A waiter killed while it keeps a place without asking (queued) is skipped too.
         alive.release()
-        frozen = self.holder(f"queue:{GPU}").ready()
-        frozen.kill()
+        # A dead waiter that was polling is passed over: the live one behind it takes the lock.
+        running = self.holder(GPU).ready()
+        polling = self.queued_holder(GPU)
+        behind = self.queued_holder(GPU)
+        polling.kill()
+        running.release()
+        behind.ready()
+        self.assertIn("held gpu exclusive owned", behind.output)
+        behind.release()
         self.hold(locks.acquire_gpu(0, quiet))
 
     def test_the_build_slots_are_given_in_arrival_order(self) -> None:
@@ -501,6 +501,24 @@ class QueueTests(LockTestCase):
         self.assertEqual(self.waiting_pids(GPU), [earlier.pid])
         gate.release()
         earlier.ready()
+
+    def test_the_gate_goes_before_earlier_build_requests(self) -> None:
+        # The build queue's head-of-line rule passes over a request that waits for the gate: a CI.py holding the gate
+        # takes the build lock before the earlier capped request (were it not, each would wait for the other).
+        running = self.holder("build:uncapped").ready()
+        earlier = self.queued_holder("build:capped")
+        gate = self.holder(GATE, GPU, "build:uncapped", timeout=DEADLINE_SECONDS)
+        self.assertEqual(gate.wait_for("held", "unavailable"), "held gate exclusive owned")
+        self.assertEqual(gate.wait_for("held", "unavailable"), "held gpu exclusive owned")
+        gate.wait_for("waiting")
+        self.assertEqual(self.waiting_pids(BUILD), [earlier.pid, gate.pid])
+        running.release()
+        gate.ready()
+        self.assertIn("held build uncapped owned", gate.output)
+        self.assertEqual(self.waiting_pids(BUILD), [earlier.pid])
+        gate.release()
+        earlier.ready()
+        self.assertIn("held build capped owned", earlier.output)
 
     def test_a_ci_queued_for_the_gate_holds_off_new_gpu_and_build_requests(self) -> None:
         queued = self.holder(f"queue:{GATE}").ready()

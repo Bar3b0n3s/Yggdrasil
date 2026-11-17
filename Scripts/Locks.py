@@ -5,11 +5,12 @@
 The gate, gpu and build locks are shared by every checkout of the repository: their files are in the git common
 directory (<common>/machine-locks/). For each lock this prints whether it is free or which processes hold it: pid,
 worktree, command and since when; for build, each holder's mode (uncapped, capped, or the claim of an uncapped build
-waiting for the running ones). Then it lists the lock's queue, the requests waiting for it in the order they get it
-(first come, first served): each waiter's pid, worktree, command, since when it waits and for how long; for build, the
-mode it asks for. It changes nothing: the operating system releases a lock, and a waiter's place, when its process
-ends, so neither is ever cleared by hand; a holder or waiter that should not run any more is stopped like any process
-(its pid is listed). A dead waiter's ticket is never listed; the next waiter removes it.
+waiting for the running ones). Then it lists the lock's queue, the requests waiting for it in arrival order (first come,
+first served; while a gate runs or queues, a request inside a held run goes first): each waiter's pid, worktree,
+command, since when it waits and for how long; for build, the mode it asks for. It changes nothing: the operating
+system releases a lock, and a waiter's place, when its process ends, so neither is ever cleared by hand; a holder
+or waiter that should not run any more is stopped like any process (its pid is listed). A dead waiter's ticket is
+never listed; the next waiter that lists the queue removes it.
 
 It works from any directory (Docs/Architecture.md §2.3): once it has parsed its arguments, main() makes the repository
 root of its own checkout the working directory.

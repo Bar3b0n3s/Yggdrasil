@@ -42,8 +42,8 @@ with the first-party static libraries it links (its ProjectReferences outside Ve
 a library is a link MSBuild skipped although the library changed, so it would still run the code the library replaced
 (phase 5's stale Tests.exe as its builder reported it, which the setup of phase 6 could not reproduce). Build.py then
 removes it and runs the build once more, a full link, and the step ends as a warning naming it; it fails when the output
-cannot be removed (a running Tests.exe), the build fails, or the output is still older (relink). The step's --json
-result lists them ("staleLinks").
+cannot be removed (a running Tests.exe), the build fails, or the output is still older (relink), and ends as a timeout
+(exit code 5) when that build runs out of time. The step's --json result lists them ("staleLinks").
 
 After a build that builds the Runtime (every project, Runtime itself, or a project that depends on it, such as Tests),
 on every generator (Docs/Decisions/0024-m15-contract.md decisions 2, 5 and 8):
@@ -68,16 +68,29 @@ changes, so a commit recompiles that one translation unit; the first stamp of a 
 objects a build without one compiled. The step's detail ends with "; build stamp <commit>[.dirty]" and its --json result
 holds "buildStamp" (path, written, commit, dirty, description, removedObjects).
 
-Before the first configuration's build, once the build lock is held, on every generator, the source stamps
-(refresh_source_stamps): the builds decide what to recompile by modification times, so a first-party source or header
-put back with an older modification time than the objects compiled since (mv, cp -p, shutil.copy2 or an archive
-restoring a kept copy, as a proof that a regression test fails without its fix does) would never be recompiled, and the
-build would report its projects built while they still run the code it replaced. Build.py keeps the size, modification
-time and SHA-256 of every C and C++ file below Engine/Source, Engine/Config, Editor/Source, Runtime/Source, Tests/Source
-and Resources/Shaders in <workspace>/bin-int/SourceStamps.json, taken when each build begins; a file whose content
-differs from the previous build's record while its modification time is not newer than that build's start gets the
-current time as its modification time, so every configuration and project that compiles it, or includes it, compiles
-it again. Only a changed size or time is hashed. The --json document's "sourceStamps" lists the files it touched.
+The source stamps, on every generator (begin_source_stamps, end_source_stamps): the builds decide what to compile again
+by modification times, so an input put back with a time no newer than the objects made since (mv, cp -p, shutil.copy2
+or an archive restoring a kept copy, as the proof that a regression test fails without its fix does) would never be
+compiled again, and the build would report its projects built while they still run the code it replaced. The inputs are
+every C and C++ file below Engine/Source, Engine/Config, Editor/Source, Runtime/Source, Tests/Source and
+Resources/Shaders, and every input of the shader rule (Shaders.json and every .slang file below Resources/Shaders).
+<workspace>/bin-int/SourceStamps.json records each one's size, modification time and SHA-256, when the latest build
+began, and when the builds last ended with none still running:
+  - as a build begins, once it holds the build lock, an input whose content differs from the record while its time is
+    not newer than the last end (or than now, while another build of the workspace runs or after one that was killed)
+    gets the current time, so every configuration and project that compiles or includes it compiles it again;
+  - as the build ends, however it ends, an input whose content changed while it ran gets the current time too (the
+    build may have compiled it before the change, and a copy put back meanwhile keeps its older time; an ordinary edit
+    compiles once more at most);
+  - each time, the inputs are recorded through a temporary file of the build's own and the record's short lock
+    (SourceStamps.lock), and a running build keeps a locked mark in SourceStamps.running/, so two builds of one
+    workspace take turns and neither ends the other's window;
+  - only an input whose size or time changed is hashed, and one that stays unreadable (an editor saving it through a
+    rename) or cannot be touched is a warning naming it: the source stamps never fail a build.
+The --json document's "sourceStamps" lists the inputs touched as the build began and ended, those skipped, and the
+warnings. Not covered: an input put back during a build, after it compiled, to exactly its content at that build's
+start and with a time no newer than that build's objects, which no record taken as builds begin and end can tell from
+an untouched file.
 
 The machine-wide build lock (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16) is taken after the
 workspace is read and held across every requested configuration: one uncapped build or two capped builds at a time,
@@ -115,8 +128,10 @@ if sys.version_info < (3, 10):
     sys.exit(f"Build.py requires Python 3.10 or newer (this is Python {platform.python_version()})")
 
 import argparse
+import contextlib
 import dataclasses
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -162,14 +177,27 @@ BUILD_STAMP_GIT_TIMEOUT_SECONDS = 120.0
 # The objects of Engine/Source/Engine/Core/BuildId.cpp in the Engine project's intermediate directory: MSVC's and the
 # GCC/Clang generators' names.
 BUILD_STAMP_OBJECTS = ("BuildId.obj", "BuildId.o")
-# The source stamps (refresh_source_stamps): the record below the workspace's bin-int/, its format version, and the
-# first-party C and C++ files it covers, the ones the generated projects compile or include (the headers that
-# Resources/Shaders shares with the shaders among them).
+# The source stamps (begin_source_stamps, end_source_stamps): below the workspace's bin-int/, the record, its lock and
+# the running builds' marks, and the record's format version; the inputs it covers, each directory with its suffixes:
+# the C and C++ files the generated projects compile or include, and every input of the shader rule (Shaders.json and
+# every .slang and .h file below Resources/Shaders); how often, and how far apart, a read or touch of an input is tried
+# (a file saved through a rename is missing for a moment); and how long a build waits for the record's lock (another
+# build of the workspace holds it while it reads its inputs), and between two tries of it.
 SOURCE_STAMPS_FILE_NAME = "SourceStamps.json"
-SOURCE_STAMPS_VERSION = 1
-SOURCE_STAMP_DIRECTORIES = ("Engine/Source", "Engine/Config", "Editor/Source", "Runtime/Source", "Tests/Source",
-                            "Resources/Shaders")
-SOURCE_STAMP_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".inl"})
+SOURCE_STAMPS_LOCK_NAME = "SourceStamps.lock"
+SOURCE_STAMPS_RUNNING_DIRECTORY = "SourceStamps.running"
+SOURCE_STAMPS_VERSION = 2
+CPP_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".inl"})
+SOURCE_STAMP_INPUTS = (("Engine/Source", CPP_SUFFIXES), ("Engine/Config", CPP_SUFFIXES),
+                       ("Editor/Source", CPP_SUFFIXES), ("Runtime/Source", CPP_SUFFIXES),
+                       ("Tests/Source", CPP_SUFFIXES),
+                       ("Resources/Shaders", CPP_SUFFIXES | {".slang", ".json"}))
+SOURCE_STAMP_TRIES = 10
+SOURCE_STAMP_RETRY_SECONDS = 0.05
+SOURCE_STAMPS_LOCK_SECONDS = 60.0
+SOURCE_STAMPS_LOCK_PAUSE_SECONDS = 0.01
+# The unique part of this process's temporary record names and marks.
+_RECORD_WRITES = itertools.count(1)
 
 # Diagnostics in GCC/Clang/ld/xcodebuild output ("file:line:col: warning: ...", "ld: warning: ...").
 POSIX_WARNING_PATTERN = re.compile(r"(^|: )warning: ", re.IGNORECASE)
@@ -460,8 +488,8 @@ def relink(step: Step, stale: list[StaleLink], build: Callable[[], tuple[Process
     """After `step`, a build that succeeded, found the `stale` links: removes their outputs and runs `build` once more,
     so MSBuild links them again (a full link, as an incremental link needs its output), then `check`s them. The step
     ends with a warning naming them when the relink leaves no stale output, and fails otherwise: an output that cannot
-    be removed (a running Tests.exe), a build that fails, or an output still older than a library it links. Its --json
-    result lists them ("staleLinks")."""
+    be removed (a running Tests.exe), a build that fails (a timeout when it runs out of time), or an output still older
+    than a library it links. Its --json result lists them ("staleLinks")."""
     described = "; ".join(link.describe() for link in stale)
     step.data["staleLinks"] = [{"output": str(link.output), "library": str(link.library)} for link in stale]
     console.print(f"Stale links: {described}: MSBuild skipped their link although the library changed; relinking")
@@ -477,7 +505,7 @@ def relink(step: Step, stale: list[StaleLink], build: Callable[[], tuple[Process
     again = finish_step(step.name, result, warnings, errors, not arguments.allow_warnings, "relinked", tolerated)
     remaining = check() if not again.failed else stale
     if again.failed or remaining:
-        step.status = Status.FAILED
+        step.status = Status.TIMEOUT if again.status == Status.TIMEOUT else Status.FAILED
         left = "; ".join(link.describe() for link in remaining)
         step.detail += f"; relinking the stale links ({described}) failed: {again.detail if again.failed else left}"
         return
@@ -771,13 +799,13 @@ def write_build_stamp(root: Path, config: str, repository: Path) -> dict[str, ob
 
 
 # --------------------------------------------------------------------------------------------------------------------
-# The source stamps: a source restored with an older modification time is compiled again
+# The source stamps: an input put back with an older modification time is compiled again
 # --------------------------------------------------------------------------------------------------------------------
 
 
 @dataclasses.dataclass(frozen=True)
 class SourceStamp:
-    """What a build saw of one source file: its size, modification time (ns) and SHA-256."""
+    """What a build saw of one input file: its size, modification time (ns) and SHA-256."""
 
     size: int
     modified: int
@@ -785,84 +813,271 @@ class SourceStamp:
 
 
 @dataclasses.dataclass
-class SourceStamps:
-    """What refresh_source_stamps did: its record, how many sources it covers, how many it read (the ones whose size or
-    time changed) and the ones it touched (repository-relative)."""
+class SourceRecord:
+    """The workspace's record of its builds (SOURCE_STAMPS_FILE_NAME): when the latest build began, when the builds
+    last ended with none still running (ns; earlier than `started` while a build runs, and after one that was killed),
+    and each input's stamp as the latest build began or ended."""
 
-    path: Path
-    files: int
-    hashed: int
-    touched: list[str]
+    started: int = 0
+    ended: int = 0
+    files: dict[str, SourceStamp] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass
+class SourceStamps:
+    """One build's source stamps (begin_source_stamps, end_source_stamps): the inputs it covers and read, the ones it
+    gave the current time as it began and as it ended, the ones it could not read, its warnings, and while it runs its
+    snapshot of the inputs as it began and its mark (a file it keeps locked in SOURCE_STAMPS_RUNNING_DIRECTORY)."""
+
+    root: Path
+    repository: Path
+    files: int = 0
+    hashed: int = 0
+    touched: list[str] = dataclasses.field(default_factory=list)
+    touched_at_end: list[str] = dataclasses.field(default_factory=list)
+    skipped: list[str] = dataclasses.field(default_factory=list)
+    warnings: list[str] = dataclasses.field(default_factory=list)
+    snapshot: dict[str, SourceStamp] | None = None
+    mark: locks.LockFile | None = None
+
+    @property
+    def record(self) -> Path:
+        return self.root / "bin-int" / SOURCE_STAMPS_FILE_NAME
 
     def to_json(self) -> dict[str, object]:
-        return {"path": str(self.path), "files": self.files, "hashed": self.hashed, "touched": self.touched}
+        return {"path": str(self.record), "files": self.files, "hashed": self.hashed, "touched": self.touched,
+                "touchedAtEnd": self.touched_at_end, "skipped": self.skipped, "warnings": self.warnings}
 
 
-def stamped_sources(repository: Path) -> list[Path]:
-    """The first-party C and C++ files the builds compile or include (SOURCE_STAMP_DIRECTORIES of `repository`,
-    SOURCE_STAMP_SUFFIXES), sorted."""
+def stamped_inputs(repository: Path) -> list[Path]:
+    """The first-party files the builds compile, include or feed the shader rule (SOURCE_STAMP_INPUTS of
+    `repository`), sorted."""
     found: list[Path] = []
-    for directory in SOURCE_STAMP_DIRECTORIES:
-        root = repository / directory
-        for current, _, names in os.walk(root):
-            found.extend(Path(current) / name for name in names if Path(name).suffix.lower() in SOURCE_STAMP_SUFFIXES)
+    for directory, suffixes in SOURCE_STAMP_INPUTS:
+        for current, _, names in os.walk(repository / directory):
+            found.extend(Path(current) / name for name in names if Path(name).suffix.lower() in suffixes)
     return sorted(found)
 
 
-def read_source_stamps(path: Path) -> tuple[int, dict[str, SourceStamp]]:
-    """(when the record was taken in ns, each repository-relative path's stamp) of the record at `path`; (0, {}) when
-    there is none or it cannot be read, so the build records the sources as they are and touches nothing."""
+def read_source_record(path: Path) -> SourceRecord:
+    """The record at `path`; an empty one when there is none or it cannot be read (the build then records the inputs as
+    they are and touches nothing)."""
     try:
         document = json.loads(path.read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return 0, {}
+        return SourceRecord()
     if not isinstance(document, dict) or document.get("version") != SOURCE_STAMPS_VERSION:
-        return 0, {}
-    taken, files = document.get("taken"), document.get("files")
-    if not isinstance(taken, int) or not isinstance(files, dict):
-        return 0, {}
-    stamps: dict[str, SourceStamp] = {}
+        return SourceRecord()
+    started, ended, files = document.get("started"), document.get("ended"), document.get("files")
+    if not isinstance(started, int) or not isinstance(ended, int) or not isinstance(files, dict):
+        return SourceRecord()
+    record = SourceRecord(started, ended)
     for name, value in files.items():
         if (isinstance(value, list) and len(value) == 3 and all(isinstance(part, int) for part in value[:2])
                 and isinstance(value[2], str)):
-            stamps[name] = SourceStamp(value[0], value[1], value[2])
-    return taken, stamps
+            record.files[name] = SourceStamp(value[0], value[1], value[2])
+    return record
 
 
-def refresh_source_stamps(root: Path, repository: Path) -> SourceStamps:
-    """Records the stamps of the sources of `repository` in the workspace at `root` (bin-int/SOURCE_STAMPS_FILE_NAME)
-    as a build begins, after giving the current time as modification time to each source whose content differs from
-    the previous record while its modification time is not newer than when that record was taken: a copy put back with
-    its older time, which a build that compares modification times would never compile again. A file whose size and
-    time match its record is not read. Raises OSError when a source cannot be read or touched, or the record cannot be
-    written."""
-    record = root / "bin-int" / SOURCE_STAMPS_FILE_NAME
-    taken, previous = read_source_stamps(record)
-    now = time.time_ns()
-    stamps: dict[str, SourceStamp] = {}
-    touched: list[str] = []
-    hashed = 0
-    for path in stamped_sources(repository):
-        name = path.relative_to(repository).as_posix()
+def write_source_record(path: Path, record: SourceRecord) -> None:
+    """Writes `record` to `path` atomically, through a temporary name of this process's own (its pid and a counter), so
+    two builds of one workspace never move or truncate each other's file. Raises OSError."""
+    document = {"version": SOURCE_STAMPS_VERSION, "started": record.started, "ended": record.ended,
+                "files": {name: [stamp.size, stamp.modified, stamp.sha256] for name, stamp in record.files.items()}}
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.{next(_RECORD_WRITES)}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        temporary.write_bytes((json.dumps(document, sort_keys=True) + "\n").encode("utf-8"))
+        os.replace(temporary, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            temporary.unlink(missing_ok=True)
+        raise
+
+
+def stamp_input(path: Path, known: SourceStamp | None) -> tuple[SourceStamp, bool]:
+    """The stamp of `path` and whether it was hashed: `known` when its size and time match (its content is taken to
+    match), else its size, time and SHA-256, read again when the file changed while it was hashed. A file that an editor
+    saves through a rename is missing or pending deletion for a moment, so a read that fails is tried again,
+    SOURCE_STAMP_TRIES times SOURCE_STAMP_RETRY_SECONDS apart. Raises OSError when it never succeeds."""
+    failure: OSError = OSError(f"{path} kept changing while it was read")
+    for attempt in range(SOURCE_STAMP_TRIES):
+        if attempt:
+            time.sleep(SOURCE_STAMP_RETRY_SECONDS)
         try:
             status = path.stat()
-            before = previous.get(name)
-            if before is not None and (status.st_size, status.st_mtime_ns) == (before.size, before.modified):
-                stamps[name] = before
-                continue
+            if known is not None and (status.st_size, status.st_mtime_ns) == (known.size, known.modified):
+                return known, False
             digest = file_sha256(path)
-        except FileNotFoundError:
-            continue  # removed since the listing (an editor saving through a rename): the next build records it
-        hashed += 1
-        if before is not None and digest != before.sha256 and status.st_mtime_ns <= taken:
-            os.utime(path, ns=(status.st_atime_ns, now))
-            status = path.stat()
-            touched.append(name)
-        stamps[name] = SourceStamp(status.st_size, status.st_mtime_ns, digest)
-    document = {"version": SOURCE_STAMPS_VERSION, "taken": now,
-                "files": {name: [stamp.size, stamp.modified, stamp.sha256] for name, stamp in stamps.items()}}
-    write_if_changed(record, (json.dumps(document, sort_keys=True) + "\n").encode("utf-8"))
-    return SourceStamps(record, len(stamps), hashed, touched)
+            after = path.stat()
+        except (FileNotFoundError, PermissionError) as error:
+            failure = error
+            continue
+        if (after.st_size, after.st_mtime_ns) == (status.st_size, status.st_mtime_ns):
+            return SourceStamp(status.st_size, status.st_mtime_ns, digest), True
+    raise failure
+
+
+def touch_input(path: Path, stamp: SourceStamp, now: int) -> SourceStamp:
+    """Gives `path` the modification time `now`, tried again like stamp_input's reads, and returns its new stamp (the
+    file system may round the time). Raises OSError when it never succeeds."""
+    failure: OSError = OSError(f"{path} could not be touched")
+    for attempt in range(SOURCE_STAMP_TRIES):
+        if attempt:
+            time.sleep(SOURCE_STAMP_RETRY_SECONDS)
+        try:
+            os.utime(path, ns=(now, now))
+            return SourceStamp(stamp.size, path.stat().st_mtime_ns, stamp.sha256)
+        except (FileNotFoundError, PermissionError) as error:
+            failure = error
+    raise failure
+
+
+def take_source_stamps_lock(stamps: SourceStamps) -> locks.LockFile | None:
+    """The workspace's short exclusive lock on its record (SOURCE_STAMPS_LOCK_NAME), which two builds of one workspace
+    take in turn, waiting at most SOURCE_STAMPS_LOCK_SECONDS; None, with a warning in `stamps`, when another build kept
+    it throughout or it cannot be opened."""
+    lock = locks.LockFile(stamps.root / "bin-int" / SOURCE_STAMPS_LOCK_NAME)
+    deadline = time.monotonic() + SOURCE_STAMPS_LOCK_SECONDS
+    try:
+        while not lock.try_lock():
+            if time.monotonic() >= deadline:
+                stamps.warnings.append(f"another build of this workspace kept {SOURCE_STAMPS_LOCK_NAME} for "
+                                       f"{SOURCE_STAMPS_LOCK_SECONDS:.0f} s, so the inputs' times were not checked")
+                return None
+            time.sleep(SOURCE_STAMPS_LOCK_PAUSE_SECONDS)
+    except OSError as error:
+        stamps.warnings.append(f"{SOURCE_STAMPS_LOCK_NAME} cannot be opened, so the inputs' times were not checked: "
+                               f"{error}")
+        return None
+    return lock
+
+
+def other_builds_run(root: Path, own: locks.LockFile | None) -> bool:
+    """Whether another build of the workspace runs: one of the marks in SOURCE_STAMPS_RUNNING_DIRECTORY other than `own`
+    is still locked. A mark nobody holds is a killed build's, removed here; marks are only created and removed under the
+    record's lock, which the caller holds."""
+    directory = root / "bin-int" / SOURCE_STAMPS_RUNNING_DIRECTORY
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return False
+    running = False
+    for name in names:
+        path = directory / name
+        if own is not None and path == own.path:
+            continue
+        if locks.is_held(path):
+            running = True
+        else:
+            with contextlib.suppress(OSError):
+                path.unlink()
+    return running
+
+
+def begin_source_stamps(root: Path, repository: Path, clock: Callable[[], int] = time.time_ns) -> SourceStamps:
+    """As a build of the workspace at `root` begins, under the build lock: gives the current time to each input of
+    `repository` whose content differs from the record while its time is not newer than the newest object the builds
+    can have made (the end of the last build when none runs and the last one ended, otherwise now), so a copy put back
+    with its older time compiles again; then records the inputs, marks the build as running and keeps the snapshot for
+    end_source_stamps. It never fails: an input it cannot read is left as recorded, and every problem is a warning that
+    names it."""
+    stamps = SourceStamps(root, repository)
+    lock = take_source_stamps_lock(stamps)
+    if lock is None:
+        return stamps
+    try:
+        record = read_source_record(stamps.record)
+        now = clock()
+        others = other_builds_run(root, None)
+        newest_objects = record.ended if not others and record.ended >= record.started else now
+        current = stamp_inputs(stamps, record.files, record.files,
+                               lambda known, stamp: stamp.sha256 != known.sha256 and stamp.modified <= newest_objects,
+                               now, stamps.touched)
+        stamps.snapshot = current
+        stamps.files = len(current)
+        try:
+            write_source_record(stamps.record, SourceRecord(now, record.ended, current))
+        except OSError as error:
+            stamps.warnings.append(f"the record {paths.display_path(stamps.record)} was not written: {error}")
+        mark = locks.LockFile(root / "bin-int" / SOURCE_STAMPS_RUNNING_DIRECTORY /
+                              f"{os.getpid()}-{next(_RECORD_WRITES)}.mark")
+        if mark.try_lock():
+            stamps.mark = mark
+    except OSError as error:
+        stamps.warnings.append(f"the inputs' times were not all checked: {error}")
+    finally:
+        lock.unlock(clear=False)
+    return stamps
+
+
+def end_source_stamps(stamps: SourceStamps, clock: Callable[[], int] = time.time_ns) -> None:
+    """As the build ends, however it ends: gives the current time to each input whose content changed while it ran (it
+    may have compiled the input before the change, and a copy put back during the build keeps its older time; an
+    ordinary edit compiles once more at most), records the inputs, and when no other build of the workspace still runs,
+    when the builds ended; then removes the build's mark. It never fails, as begin_source_stamps."""
+    if stamps.snapshot is None:
+        return
+    snapshot, stamps.snapshot = stamps.snapshot, None
+    lock = take_source_stamps_lock(stamps)
+    if lock is None:
+        release_mark(stamps)
+        return
+    try:
+        record = read_source_record(stamps.record)
+        now = clock()
+        current = stamp_inputs(stamps, snapshot, record.files,
+                               lambda began, stamp: stamp.sha256 != began.sha256, now, stamps.touched_at_end)
+        ended = record.ended if other_builds_run(stamps.root, stamps.mark) else now
+        try:
+            write_source_record(stamps.record, SourceRecord(record.started, ended, current))
+        except OSError as error:
+            stamps.warnings.append(f"the record {paths.display_path(stamps.record)} was not written: {error}")
+    except OSError as error:
+        stamps.warnings.append(f"the inputs changed during the build were not all checked: {error}")
+    finally:
+        release_mark(stamps)
+        lock.unlock(clear=False)
+
+
+def stamp_inputs(stamps: SourceStamps, compared: dict[str, SourceStamp], recorded: dict[str, SourceStamp],
+                 stale: Callable[[SourceStamp, SourceStamp], bool], now: int,
+                 touched: list[str]) -> dict[str, SourceStamp]:
+    """Every input's stamp, read against its `compared` stamp (its size and time unchanged: not read again); one for
+    which `stale(compared, stamp)` holds gets the time `now` and is listed in `touched`. An input that cannot be read
+    keeps its `recorded` stamp and is listed in stamps.skipped with a warning."""
+    current: dict[str, SourceStamp] = {}
+    for path in stamped_inputs(stamps.repository):
+        name = path.relative_to(stamps.repository).as_posix()
+        known = compared.get(name)
+        try:
+            stamp, hashed = stamp_input(path, known)
+        except OSError as error:
+            stamps.skipped.append(name)
+            stamps.warnings.append(f"{name} could not be read, so its time was not checked: {error}")
+            if name in recorded:
+                current[name] = recorded[name]
+            continue
+        stamps.hashed += hashed
+        if known is not None and stale(known, stamp):
+            try:
+                stamp = touch_input(path, stamp, now)
+                touched.append(name)
+            except OSError as error:
+                stamps.warnings.append(f"{name} needs the current time to compile again but could not be given it, "
+                                       f"so touch it by hand: {error}")
+        current[name] = stamp
+    return current
+
+
+def release_mark(stamps: SourceStamps) -> None:
+    """Removes the build's mark (a killed build's is removed by the next build that finds it unlocked)."""
+    mark, stamps.mark = stamps.mark, None
+    if mark is None:
+        return
+    mark.unlock()
+    with contextlib.suppress(OSError):
+        mark.path.unlink()
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -1131,6 +1346,7 @@ def main(argv: list[str] | None = None) -> int:
     action = None
     hold: locks.Hold | None = None
     source_stamps: SourceStamps | None = None
+    reported_warnings = 0
     exit_code = EXIT_SUCCESS
     try:
         host = paths.host()
@@ -1139,14 +1355,14 @@ def main(argv: list[str] | None = None) -> int:
         projects = {config: (generated.require_project(arguments.project, config) if arguments.project else None)
                     for config in arguments.configs}
         hold = take_build_lock(arguments, console)
-        try:
-            source_stamps = refresh_source_stamps(generated.path.parent, paths.REPOSITORY_ROOT)
-        except OSError as error:
-            raise BuildSetupError(f"cannot check the sources' modification times: {error}") from error
+        source_stamps = begin_source_stamps(generated.path.parent, paths.REPOSITORY_ROOT)
         if source_stamps.touched:
-            console.print(f"Source stamps: {len(source_stamps.touched)} source(s) put back with a modification time "
-                          f"older than the last build's start, given the current one so they compile again: "
+            console.print(f"Source stamps: {len(source_stamps.touched)} input(s) put back with a modification time no "
+                          f"newer than the builds' objects, given the current one so they compile again: "
                           f"{', '.join(source_stamps.touched)}")
+        for warning in source_stamps.warnings:
+            console.print(f"Source stamps: warning: {warning}")
+        reported_warnings = len(source_stamps.warnings)
         for config in arguments.configs:
             console.heading(f"Build {config} ({action})" + (f": {projects[config]}" if projects[config] else ""))
             try:
@@ -1187,6 +1403,14 @@ def main(argv: list[str] | None = None) -> int:
         exit_code = error.exit_code
         console.result(steps[-1])
     finally:
+        if source_stamps is not None:
+            end_source_stamps(source_stamps)
+            if source_stamps.touched_at_end:
+                console.print(f"Source stamps: {len(source_stamps.touched_at_end)} input(s) changed while the "
+                              f"build ran, given the current time so the next build compiles them: "
+                              f"{', '.join(source_stamps.touched_at_end)}")
+            for warning in source_stamps.warnings[reported_warnings:]:
+                console.print(f"Source stamps: warning: {warning}")
         if hold is not None:
             hold.release()
 
