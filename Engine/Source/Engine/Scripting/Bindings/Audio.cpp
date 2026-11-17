@@ -221,10 +221,10 @@ namespace Engine {
 		{
 			// M40 (Docs/Decisions/0057-m40-music.md decision 6): the session's music.
 			ENGINE_TRY(api.RegisterAlias("MusicOptions", "{Volume: number?, FadeSeconds: number?, Loop: boolean?, Intro: AssetRef?}",
-				std::format("Audio.PlayMusic's options: Volume, the music's linear level (finite, at least 0; default 1); FadeSeconds, the "
+				std::format("Audio.PlayMusic's options: Volume, the music's linear level (0 to 1; default 1; louder music raises the Music group with SetGroupVolume); FadeSeconds, the "
 							"fade to it (0 to {}; default 0, at once); Loop (default true), which loops the clip after its intro; Intro, a "
-							"clip played once before the clip, which follows it from the first frame after its last (both of one sample rate "
-							"and channel count). No other key is accepted.",
+							"clip played once before the clip, which follows it from the first frame after its last (both of one sample rate, "
+							"channel count and sample format: two sound effects or two imported files). No other key is accepted.",
 					MaxMusicFadeSeconds)));
 			ENGINE_TRY(api.RegisterAlias("MusicState", "{Clip: AssetRef, Intro: AssetRef?, Volume: number, Loop: boolean}",
 				"The session's music as scripts last asked for it with Audio.PlayMusic: its clip, intro, Volume and Loop."));
@@ -251,8 +251,8 @@ namespace Engine {
 								"follow the voice's mixed frames: simulation time in lockstep, test runs and replays. Callable in every "
 								"callback, phase and test case; the engine's own failures (a voice pool full of higher-priority voices) are "
 								"logged, not raised; a session without audio (a test run's discovery of its suites) records the request and "
-								"plays nothing. Raises for a nil clip, an unknown option or one out of range, an intro whose sample rate or "
-								"channel count differs from the clip's, and \"audio is unavailable\" outside a play session (edit "
+								"plays nothing. Raises for a nil clip, an unknown option or one out of range, an intro whose sample rate, "
+								"channel count or sample format differs from the clip's (a sound effect and an imported file never chain), and \"audio is unavailable\" outside a play session (edit "
 								"evaluations).",
 						MaxMusicVoices))
 				.Function("StopMusic", Utils::AudioStopMusic, "(fadeSeconds: number?) -> ()",

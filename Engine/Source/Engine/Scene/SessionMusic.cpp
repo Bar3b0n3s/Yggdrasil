@@ -11,7 +11,6 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
-#include <limits>
 #include <utility>
 
 // Scene is a simulation-path module (§4.12): nothing here uses a CRT transcendental function. Audio is not simulated state,
@@ -161,13 +160,20 @@ namespace Engine {
 		const ResolvedAudioClip clip = Clips.Resolve(request.Clip);
 		if (AudioClipRegistry::IsPlaceholder(intro) || AudioClipRegistry::IsPlaceholder(clip))
 			return false;
-		if (intro.Data->SampleRate != clip.Data->SampleRate || intro.Data->ChannelCount != clip.Data->ChannelCount)
+		// A sound effect is 16-bit PCM and an imported file decodes to 32-bit float; the engine chains one sample format only.
+		const auto formatOf = [](const AudioClipData& data)
 		{
-			return MakeError(ErrorCode::InvalidArgument,
-				"the music's intro {} ({} Hz, {} channel(s)) and its clip {} ({} Hz, {} channel(s)) differ: the clip follows its intro "
-				"seamlessly, so both share one sample rate and channel count",
-				Clips.GetName(request.Intro), intro.Data->SampleRate, intro.Data->ChannelCount, Clips.GetName(request.Clip), clip.Data->SampleRate,
-				clip.Data->ChannelCount);
+			return data.Encoding == AudioClipEncoding::Pcm16 ? "16-bit PCM" : "32-bit float";
+		};
+		if (intro.Data->SampleRate != clip.Data->SampleRate || intro.Data->ChannelCount != clip.Data->ChannelCount
+			|| (intro.Data->Encoding == AudioClipEncoding::Pcm16) != (clip.Data->Encoding == AudioClipEncoding::Pcm16))
+		{
+			return std::unexpected(Error(ErrorCode::InvalidArgument,
+				std::format("the music's intro {} ({} Hz, {} channel(s), {}) and its clip {} ({} Hz, {} channel(s), {}) differ: the clip follows its "
+							"intro seamlessly, so both share one sample rate, channel count and sample format",
+					Clips.GetName(request.Intro), intro.Data->SampleRate, intro.Data->ChannelCount, formatOf(*intro.Data), Clips.GetName(request.Clip),
+					clip.Data->SampleRate, clip.Data->ChannelCount, formatOf(*clip.Data)))
+					.WithHint("use two sound effects or two imported files, never one of each"));
 		}
 		return true;
 	}
@@ -365,8 +371,9 @@ namespace Engine {
 	{
 		if (!request.Clip.IsValid())
 			return MakeError(ErrorCode::InvalidArgument, "the music needs a clip");
-		if (!std::isfinite(request.Volume) || request.Volume < 0.0 || request.Volume > static_cast<double>(std::numeric_limits<float>::max()))
-			return MakeError(ErrorCode::InvalidArgument, "the music's Volume must be finite and at least 0 (got {})", request.Volume);
+		// A multiplier on the voice's fader, which clips a held level above 1 (the W40.2 review): louder music raises its group.
+		if (!std::isfinite(request.Volume) || request.Volume < 0.0 || request.Volume > 1.0)
+			return MakeError(ErrorCode::InvalidArgument, "the music's Volume must be finite and from 0 to 1 (got {})", request.Volume);
 		return ValidateMusicFade(request.FadeSeconds);
 	}
 

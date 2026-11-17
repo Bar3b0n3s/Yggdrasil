@@ -515,6 +515,21 @@ namespace Engine {
 				REQUIRE_FALSE(refused.has_value());
 				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
 			}
+			// The W40.2 review: a decoded file (32-bit float) never chains to a sound effect (16-bit PCM), either way round.
+			auto file = CreateRef<AudioClipData>();
+			file->Encoding = AudioClipEncoding::Wav;
+			file->SampleRate = 48000;
+			file->ChannelCount = 1;
+			file->FrameCount = 2400;
+			file->Bytes = Test::MakeToneWav({ .FrameCount = 2400 });
+			const AssetHandle decoded(0x4000a9);
+			fixture.Assets.Publish(decoded, file, "Assets/Audio/Opening.wav");
+			for (const MusicRequest& request : { MusicRequest{ .Clip = TrackA, .Intro = decoded }, MusicRequest{ .Clip = decoded, .Intro = Opening } })
+			{
+				const Status refused = fixture.Music->Play(request);
+				REQUIRE_FALSE(refused.has_value());
+				CHECK(refused.error().GetCode() == ErrorCode::InvalidArgument);
+			}
 			CHECK(fixture.Music->GetState()->Volume == 0.5f);
 			CHECK(fixture.Current() == voice);
 

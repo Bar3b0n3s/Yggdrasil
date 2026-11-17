@@ -97,11 +97,12 @@
 // Voices (§10.1). A HandlePool of MaxAudioVoices voices, each one ma_sound in its group (Master -> Music, Sfx, Ui). When the
 // pool is full, PlayVoice steals the voice with the lowest priority, among those the one farthest from the listener (a
 // non-spatial voice counts as distance 0), among those the oldest (the smallest start sequence); a voice is stolen only
-// when its priority is not above the new voice's, else PlayVoice fails. A stolen voice's handle becomes stale. A looping
-// stream shorter than a page (a second) holds about two passes in its decoded pages, since miniaudio's page fill stops at a
-// clip's second end within one page; it then seeks back to its start, which a stream does through a resource-manager job,
-// so the voice is silent from that read until the job runs (the next pull under deterministic decoding; an accepted limit,
-// Docs/Backlog.md §6).
+// when its priority is not above the new voice's, else PlayVoice fails. A stolen voice's handle becomes stale. A voice
+// that loops is created looping (a chained voice's Next section too), since a stream decodes its first two pages (a
+// second each) when it opens, with the looping it has then. A looping stream shorter than a page still holds about two
+// passes per page fill, since miniaudio's page fill stops at a clip's second end within one page; it then seeks back to
+// its start, which a stream does through a resource-manager job, so the voice is silent from that read until the job
+// runs (the next pull chunk under deterministic decoding; an accepted limit, Docs/Backlog.md §6).
 //
 // Fades (§10.1; M40, Docs/Decisions/0057-m40-music.md decision 3). A voice's level is a multiplier of its Volume that a fade
 // moves linearly from one value to another over a number of the voice's own mixed frames (48 kHz), on miniaudio's per-voice
@@ -109,9 +110,10 @@
 // and FadeVoice starts one from the level the voice has reached. A fade counts the frames the engine mixes of its voice (the
 // voice node's own clock, ma_node_get_time), so a paused voice's fade holds and a fade follows the time source as cursors
 // do: simulation time in lockstep and test runs, real time while the device reads. A level lives on the fader alone, never
-// on the voice's volume, so a change of level is one deferred fader setting that the mixing thread takes whole at the
-// voice's next mixed frame: a device reading the voice never mixes a frame at a level the voice never had. A fade that
-// completes holds its target on the fader, re-armed from its start (a fader from the level to itself; off for 1, so a voice
+// on the voice's volume, and the engine hands miniaudio at most one fader setting per voice per pull and per Update, the
+// last one winning (miniaudio's hand-off is four separate atomics, so two settings within one device period could mix),
+// so a device reading the voice never mixes a frame at a level the voice never had. A fade that completes holds its
+// target on the fader, re-armed from its start (a fader from the level to itself; off for 1, so a voice
 // back at 1 mixes as one that never faded), and a held level is re-armed again before the fader's 32-bit cursor could run
 // out (every MaxFadeFrames mixed frames). A fade with AudioFadeEnd::Release releases its voice at the
 // end of the pull that completes it, like a voice at the end of its clip (exact while the engine pulls its own frames;
@@ -126,10 +128,11 @@
 // otherwise), never to the head, whose looping would stop the chain from advancing; when a looping stream's decoded pages
 // run out (see "Voices"), the section re-enters itself through the chain and seeks to its start, as a looping voice of one
 // clip does, and a section that read nothing since its start ends the chain. Both sections must share one sample
-// rate and channel count, since the voice's resampler follows its head. AudioVoiceInfo describes the section playing: its
-// cursor and length, InNext, and Next's clip; frames the voice has read ahead across the boundary but not mixed are the
-// head's tail (as GetVoiceInfo's cursor attributes read-ahead frames across a loop's wrap to its end), exact while the
-// engine pulls its own frames, the section miniaudio reads while the device does.
+// rate, channel count and sample format (a sound effect's 16-bit PCM and a decoded file's 32-bit float never chain),
+// since miniaudio reads the chain in its head's format and the voice's resampler follows its head. AudioVoiceInfo
+// describes the section playing: its cursor and length, InNext, and Next's clip; frames the voice has read ahead across
+// the boundary but not mixed are the head's tail (as GetVoiceInfo's cursor attributes read-ahead frames across a loop's
+// wrap to its end), exact while the engine pulls its own frames, the section miniaudio reads while the device does.
 //
 // Teardown (§4.1): destroying the engine with voices alive is a programmer error (asserted); their owners (play sessions,
 // the editor's preview) release them first. Registered clips are released with the engine.
@@ -435,7 +438,7 @@ namespace Engine {
 
 		// Starts a voice (see "Voices" for a full pool; "Chained voices" for a Next clip). Errors: NotFound for a stale clip or
 		// Next handle; InvalidArgument for settings, a transform or a fade outside their documented ranges, and for a Next whose
-		// sample rate or channel count differs from Clip's (naming both); InvalidState "all 64 voices have a higher priority"
+		// sample rate, channel count or sample format differs from Clip's (naming both); InvalidState "all 64 voices have a higher priority"
 		// (with the counts) when nothing may be stolen; Io or Unsupported when miniaudio cannot start the sound (a stream
 		// whose data cannot be decoded).
 		[[nodiscard]] Result<AudioVoiceHandle> PlayVoice(const AudioVoiceDescription& description);

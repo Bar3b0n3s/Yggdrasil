@@ -23,8 +23,8 @@ namespace Engine {
 	// cap releases the oldest fading one at once.
 	inline constexpr uint32_t MaxMusicVoices = 4;
 
-	// Audio.PlayMusic's request: `Clip` (valid) at `Volume` (linear, finite, >= 0 and within float's range, kept as asked:
-	// only the engine's level is a float), reached over `FadeSeconds` (finite, 0 to
+	// Audio.PlayMusic's request: `Clip` (valid) at `Volume` (linear, finite, 0 to 1, kept as asked: only the engine's level is
+	// a float; louder music raises the Music group's volume), reached over `FadeSeconds` (finite, 0 to
 	// MaxMusicFadeSeconds; 0 at once), looping or played once, after `Intro`, a clip played once before it (null for none;
 	// see "Voices").
 	struct MusicRequest
@@ -151,8 +151,8 @@ namespace Engine {
 		Scope<State> m_State;
 	};
 
-	// Audio.PlayMusic's and Audio.StopMusic's checks: InvalidArgument for a null clip, a Volume that is not finite, below 0 or
-	// beyond float's range,
+	// Audio.PlayMusic's and Audio.StopMusic's checks: InvalidArgument for a null clip, a Volume that is not finite or outside 0
+	// to 1,
 	// or a fade (`fadeSeconds`, MusicRequest::FadeSeconds) that is not finite or outside 0 to MaxMusicFadeSeconds. Pure.
 	[[nodiscard]] Status ValidateMusicRequest(const MusicRequest& request);
 	[[nodiscard]] Status ValidateMusicFade(double fadeSeconds);

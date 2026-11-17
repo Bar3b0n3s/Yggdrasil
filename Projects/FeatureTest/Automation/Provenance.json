@@ -6420,7 +6420,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Music/Music.test.luau",
-			"XXH64": "64f01c5dc35f4333",
+			"XXH64": "f3cff6e84b1c4d67",
 			"Method": "script.write",
 			"RequestId": 14,
 			"Client": "batch",

@@ -707,8 +707,9 @@ namespace Engine {
 			fixture.AddListener();
 			AudioSystem system(fixture.GetScene(), fixture.GetSpecification());
 			system.Start();
-			const Result<AudioVoiceHandle> effect = system.PlayOneShot(clip, std::nullopt);
+			// The stinger is the oldest voice, so at effect priority it would be the first one stolen (the W40.2 review).
 			const Result<AudioVoiceHandle> stinger = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Music);
+			const Result<AudioVoiceHandle> effect = system.PlayOneShot(clip, std::nullopt);
 			const Result<AudioVoiceHandle> click = system.PlayOneShot(clip, std::nullopt, 1.0f, AudioGroup::Ui);
 			REQUIRE(effect.has_value());
 			REQUIRE(stinger.has_value());
