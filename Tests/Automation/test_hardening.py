@@ -1802,6 +1802,22 @@ class SoakFramesTests(unittest.TestCase):
         step = hardening_script.soak_step("soak Release", outcome, 10.0, None, report, junit, frames=20_000)
         self.assertIn(f"did not finish within {2 * hardening_script.TIMEOUTS['soak']:.0f} s", step.detail)
 
+    def test_the_soak_deadline_grows_with_its_subjects(self) -> None:
+        # Phase 6's hardened gate timed out with 9 of 106 subjects left at the fixed 6,000 s (ADR 0052).
+        per_subject = hardening_script.SOAK_SECONDS_PER_SUBJECT
+        floor = hardening_script.TIMEOUTS["soak"]
+        self.assertEqual(hardening_script.soak_timeout(hardening.SOAK_FRAMES, 10), floor)
+        self.assertEqual(hardening_script.soak_timeout(hardening.SOAK_FRAMES, 106), 106 * per_subject)
+        self.assertGreater(hardening_script.soak_timeout(hardening.SOAK_FRAMES, 106), floor)
+        self.assertEqual(hardening_script.soak_timeout(20_000, 106), 2 * 106 * per_subject)
+        report, junit = self.directory / "Soak.json", self.directory / "Soak-Release.xml"
+        outcome = hardening_script.SoakOutcome()
+        outcome.timed_out = True
+        step = hardening_script.soak_step("soak Release", outcome, 10.0, None, report, junit,
+                                          timeout=106 * per_subject)
+        self.assertEqual(step.status, Status.TIMEOUT, step.detail)
+        self.assertIn(f"did not finish within {106 * per_subject:.0f} s", step.detail)
+
 
 class TestScriptSanitizerTests(unittest.TestCase):
     def test_a_sanitized_run_names_its_steps_and_reports_apart(self) -> None:

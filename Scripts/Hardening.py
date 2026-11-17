@@ -30,8 +30,9 @@ Steps, in this order, failing fast (a step after a failed one is reported as not
                  WARNING line that fails nothing, counted in the step's summary; the Runtime subject's, and an
                  editor's without the heap measure, are its private bytes (ADR 0036, "The soak", A-prime);
                  bin/TestResults/Soak.json and Soak-Release.xml record them. A missing or stale package is exit code 3
-                 naming Test.py --suite export --config Release --junit. The step has one deadline (soak_timeout(N):
-                 TIMEOUTS["soak"] at 10,000 frames, in proportion for a longer soak) for both halves: every call waits
+                 naming Test.py --suite export --config Release --junit. The step has one deadline (soak_timeout(N, S):
+                 the larger of TIMEOUTS["soak"] and S subjects at SOAK_SECONDS_PER_SUBJECT each, at 10,000 frames,
+                 in proportion for a longer soak) for both halves: every call waits
                  at most what is left of it, and at the deadline the subject running fails naming it, the rest do not
                  run and the step times out (exit code 5); Soak.json and the JUnit report are written from a finally
                  block, so the subjects that finished survive any failure
@@ -177,17 +178,23 @@ STEP_NAMES = {
     "fuzz": "fuzz Release (ASan)",
 }
 # Seconds per step (ADR 0024 decision 19's TIMEOUTS as amended at integration: perf 1200 s, the ASan build 7200 s, every
-# other step 3600 s; M18's debug-heap step 7200 s, Docs/Decisions/0029-m18-contract.md decision 37; the soak 6000 s
-# since phase 3's reservation ledger, Docs/Decisions/0028-backlog-program.md, which estimates phase 3's soak at about 82
-# subjects in about 3,400 s from phase 2's measured 41 s a subject, so more than a third of it stays spare). The fuzz
-# step's timeout follows its measured per-target costs and the shard count that runs (hardening.fuzz_timeout_seconds;
-# ADR 0028 decision 16, T-FUZZMODEL), within its budget of 5,400 s per 35 targets (hardening.fuzz_budget_seconds).
+# other step 3600 s; M18's debug-heap step 7200 s, Docs/Decisions/0029-m18-contract.md decision 37; the soak at least
+# 6000 s since phase 3's reservation ledger, Docs/Decisions/0028-backlog-program.md, which estimated phase 3's soak at
+# about 82 subjects in about 3,400 s from phase 2's measured 41 s a subject; since phase 6's hardened gate the soak's
+# deadline also grows with its subjects, SOAK_SECONDS_PER_SUBJECT each, Docs/Decisions/0052-world-tree-phase-6.md).
+# The fuzz step's timeout follows its measured per-target costs and the shard count that runs
+# (hardening.fuzz_timeout_seconds; ADR 0028 decision 16, T-FUZZMODEL), within its budget of 5,400 s per 35 targets
+# (hardening.fuzz_budget_seconds).
 # Measured on the 24-thread workstation: perf 3 min, soak 16 min, ASan build 20 min from scratch and 2 min incremental,
 # ASan unit 21 min, ASan feature 1 min, fuzz 52 min (M17: 55 min at 18 shards); at phase 2's hardened gate (M23,
 # 2026-11-11): perf 4 min, soak 44 min (65 subjects), ASan build 6 min, ASan unit 39 min, ASan feature 2 min, debug heap
 # 31 min, fuzz 70 min (46 targets at 18 shards).
 TIMEOUTS = {"perf": 1200.0, "soak": 6000.0, "asan-generate": 3600.0, "asan-build": 7200.0, "asan-unit": 3600.0,
             "asan-feature": 3600.0, "debug-heap": 7200.0}
+# The soak's seconds per subject at 10,000 frames: phase 6's hardened gate (2026-11-17) soaked 97 subjects in its
+# 6,000 s and timed out with 9 left, about 62 s a subject on the 24-thread workstation, the scenes heavier since phases
+# 5 and 6 (fog, the light caps, the game view's rendering); 90 s keeps about a third spare, as the first bound did.
+SOAK_SECONDS_PER_SUBJECT = 90.0
 # What the sanitized suites' and the debug-heap step's Test.py runs get beyond their own --timeout, to write their
 # reports after it.
 SUITE_GRACE_SECONDS = 60.0
@@ -424,10 +431,12 @@ class SoakDeadline:
         return min(seconds, remaining)
 
 
-def soak_timeout(frames: int) -> float:
-    """The soak step's deadline in seconds for a soak of `frames` (--soak-frames): TIMEOUTS["soak"] at the default
-    hardening.SOAK_FRAMES, grown in proportion for a longer soak."""
-    return TIMEOUTS["soak"] * max(frames, hardening.SOAK_FRAMES) / hardening.SOAK_FRAMES
+def soak_timeout(frames: int, subjects: int = 0) -> float:
+    """The soak step's deadline in seconds for `subjects` subjects soaked for `frames` (--soak-frames) each: the
+    larger of TIMEOUTS["soak"] and `subjects` times SOAK_SECONDS_PER_SUBJECT at the default hardening.SOAK_FRAMES,
+    grown in proportion for a longer soak."""
+    base = max(TIMEOUTS["soak"], subjects * SOAK_SECONDS_PER_SUBJECT)
+    return base * max(frames, hardening.SOAK_FRAMES) / hardening.SOAK_FRAMES
 
 
 def soak_deadline_error(where: str = "", seconds: float = TIMEOUTS["soak"]) -> str:
@@ -747,9 +756,11 @@ def run_soak_subjects(subjects: list[SoakSubject], deadline: SoakDeadline, conso
 
 
 def soak_step(name: str, outcome: SoakOutcome, duration: float, partial: str | None,
-              report: Path = SOAK_REPORT, junit: Path = SOAK_JUNIT, frames: int = hardening.SOAK_FRAMES) -> Step:
-    """The soak step of `outcome`, a soak of `frames`: timed out (exit code 5) when the deadline ended it, failed when a
-    subject failed, a warning for a partial soak (`partial`, the --soak-only patterns), passed otherwise."""
+              report: Path = SOAK_REPORT, junit: Path = SOAK_JUNIT, frames: int = hardening.SOAK_FRAMES,
+              timeout: float | None = None) -> Step:
+    """The soak step of `outcome`, a soak of `frames` under the deadline `timeout` (soak_timeout(frames) when None):
+    timed out (exit code 5) when the deadline ended it, failed when a subject failed, a warning for a partial soak
+    (`partial`, the --soak-only patterns), passed otherwise."""
     results = outcome.results
     failed = [result for result in results if not result.passed]
     data = {"report": paths.display_path(report), "junit": paths.display_path(junit),
@@ -763,7 +774,8 @@ def soak_step(name: str, outcome: SoakOutcome, duration: float, partial: str | N
     # A heap-measured subject's private growth fails nothing; the summary counts the subjects that showed one.
     warnings = f"; {warned} subject(s) with a private memory warning" if warned else ""
     if outcome.timed_out:
-        return Step(name, Status.TIMEOUT, f"the soak did not finish within {soak_timeout(frames):.0f} s: "
+        seconds = timeout if timeout is not None else soak_timeout(frames)
+        return Step(name, Status.TIMEOUT, f"the soak did not finish within {seconds:.0f} s: "
                                           f"{len(results) - len(failed)} of {len(results)} soaked subject(s) passed "
                                           f"and {len(outcome.not_run)} did not run; {paths.display_path(report)} "
                                           f"holds the soaked ones{warnings}", duration, data=data)
@@ -782,8 +794,6 @@ def step_soak(arguments: argparse.Namespace, console: Console) -> Step:
     name = STEP_NAMES["soak"]
     started = time.monotonic()
     frames = arguments.soak_frames
-    # One deadline for the whole step, the editor scenes and the Runtime alike.
-    deadline = SoakDeadline(started + soak_timeout(frames), seconds=soak_timeout(frames))
     editor = editor_executable()
     if not editor.is_file():
         return Step(name, Status.FAILED, f"{paths.display_path(editor)} not found: run python Scripts/Build.py "
@@ -842,6 +852,10 @@ def step_soak(arguments: argparse.Namespace, console: Console) -> Step:
                     for index, (subject, project, scene) in enumerate(selected)]
         if executable is not None:
             subjects.append(SoakSubject(runtime_subject, f"{frames} headless frames", runtime(executable)))
+        # One deadline for the whole step, the editor scenes and the Runtime alike, counted from the step's start
+        # and grown with its subjects (soak_timeout).
+        timeout = soak_timeout(frames, len(subjects))
+        deadline = SoakDeadline(started + timeout, seconds=timeout)
         outcome = run_soak_subjects(subjects, deadline, console, frames=frames)
 
     for result in (result for result in outcome.results if not result.passed):
@@ -853,7 +867,8 @@ def step_soak(arguments: argparse.Namespace, console: Console) -> Step:
     if outcome.not_run:
         console.print(f"TIMEOUT: not run: {', '.join(outcome.not_run)}")
     return soak_step(name, outcome, time.monotonic() - started,
-                     None if arguments.soak_only == "*" else arguments.soak_only, frames=frames)
+                     None if arguments.soak_only == "*" else arguments.soak_only, frames=frames,
+                     timeout=deadline.seconds)
 
 
 # --------------------------------------------------------------------------------------------------------------------
