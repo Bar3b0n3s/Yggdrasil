@@ -70,7 +70,9 @@ namespace Engine {
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 31): the animation events, appended in landing order.
 				"OnAnimationEvent",
 				// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2), appended in landing order.
-				"OnLocaleChanged" };
+				"OnLocaleChanged",
+				// M37 (Docs/Decisions/0054-m37-joints.md decision 8): a joint's break, appended in landing order.
+				"OnJointBreak" };
 			return name.starts_with("__") || std::find(std::begin(Reserved), std::end(Reserved), name) != std::end(Reserved);
 		}
 

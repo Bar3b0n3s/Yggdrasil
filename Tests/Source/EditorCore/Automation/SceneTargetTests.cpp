@@ -145,6 +145,7 @@ namespace Engine {
 				{ "native.status", SceneRelation::None },
 				{ "native.write", SceneRelation::None },
 				{ "physics.bodyInfo", SceneRelation::None },   // the play session's scene
+				{ "physics.jointInfo", SceneRelation::None },  // the play session's scene
 				{ "physics2d.bodyInfo", SceneRelation::None }, // M21: the play session's 2D world (ADR 0032 decision 27)
 				{ "physics2d.overlap", SceneRelation::None },  // M21: the play session's 2D world (ADR 0032 decision 15)
 				{ "physics2d.raycast", SceneRelation::None },  // M21: the play session's 2D world

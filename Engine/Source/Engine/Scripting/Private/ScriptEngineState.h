@@ -45,9 +45,10 @@ namespace Engine {
 	struct ScriptEngine::State
 	{
 		using InstanceKey = Detail::ScriptInstanceKey;
-		// A fixed-step callback an instance holds until it has started: a physics callback of either world (M21), or an
-		// animation event (M23, Docs/Decisions/0034-m23-contract.md decision 31).
-		using HeldEvent = std::variant<Detail::HeldPhysicsEvent, AnimationEventRecord>;
+		// A fixed-step callback an instance holds until it has started: a physics callback of either world (M21), an
+		// animation event (M23, Docs/Decisions/0034-m23-contract.md decision 31), or a joint's break (M37,
+		// Docs/Decisions/0054-m37-joints.md decision 8).
+		using HeldEvent = std::variant<Detail::HeldPhysicsEvent, AnimationEventRecord, PhysicsJointBreak>;
 		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2): OnLocaleChanged's arguments after self.
 		struct LocaleChange
 		{
@@ -176,12 +177,14 @@ namespace Engine {
 		// slice.
 		void InvokeDeferredCreates();
 		// `event` is a physics callback's (its other entity and contact), `animation` OnAnimationEvent's (its AnimationEvent),
-		// `locale` OnLocaleChanged's (the new locale and the previous one; M38).
+		// `locale` OnLocaleChanged's (the new locale and the previous one; M38), `jointBreak` OnJointBreak's (its force and
+		// torque; M37).
 		void Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event = nullptr, bool destroying = false,
-			const AnimationEventRecord* animation = nullptr, const LocaleChange* locale = nullptr);
+			const AnimationEventRecord* animation = nullptr, const LocaleChange* locale = nullptr, const PhysicsJointBreak* jointBreak = nullptr);
 		// The 3D callbacks (OnCollisionEnter, ...), or with `is2D` the 2D ones (OnCollisionEnter2D, ...; M21).
 		void InvokePhysics(InstanceKey key, const PhysicsEvent& event, bool is2D = false);
 		void InvokeAnimation(InstanceKey key, const AnimationEventRecord& event);
+		void InvokeJointBreak(InstanceKey key, const PhysicsJointBreak& jointBreak);
 		// OnPhysicsEvent's and OnPhysics2DEvent's delivery: every instance of the receiving entity, in slot order.
 		void DeliverPhysics(const PhysicsEvent& event, bool is2D);
 		// OnPhysicsDiagnostic's and OnPhysics2DDiagnostic's script error, its callback `callback`.

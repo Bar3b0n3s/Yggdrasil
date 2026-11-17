@@ -1960,6 +1960,14 @@ Called after the class is replaced while instance state survives.
 
 EditorOnly; Runtime|Test; mutates.
 
+### Behaviour.OnJointBreak
+
+`(self: ScriptInstance, force: number, torque: number) -> ()`
+
+Called in the fixed step when this entity's HingeJoint, SliderJoint, DistanceJoint or FixedJoint breaks, after the physics step's collision and trigger callbacks, with the force (N) and torque (N m) of the last collision step that broke it; Broken is true by then.
+
+All modes; Runtime|Test; mutates.
+
 ### Behaviour.OnLateUpdate
 
 `(self: ScriptInstance, dt: number) -> ()`
@@ -2620,6 +2628,106 @@ How far from the camera shadows reach, in metres.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## DistanceJoint
+
+Keeps a point of the body of the RigidBody at or above the entity between a minimum and a maximum distance from a point of another body or of the world, like a rope, a chain link or a rod, with an optional spring and breaking.
+
+### DistanceJoint.Anchor
+
+`vector`
+
+The joint's point in this entity's space, in metres (its scale applies).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.BreakForce
+
+`number`
+
+The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.Broken
+
+`boolean`
+
+Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.CollideConnected
+
+`boolean`
+
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.ConnectedAnchor
+
+`vector`
+
+The other end's point in ConnectedBody's space, in metres (its scale applies); in world space when ConnectedBody is null.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.ConnectedBody
+
+`Entity?`
+
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.Damping
+
+`number`
+
+The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.Frequency
+
+`number`
+
+The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.GetDistance
+
+`(self: DistanceJoint) -> number`
+
+The distance in metres between the joint's two anchors after the last physics step.
+
+All modes; Runtime|Test; pure/read.
+
+### DistanceJoint.GetForce
+
+`(self: DistanceJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
+
+### DistanceJoint.MaxDistance
+
+`number`
+
+The longest the distance between the anchors gets, in metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.MinDistance
+
+`number`
+
+The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## Entity
 
 A UUID and scene generation identifying an entity; no native address is exposed. After a Destroy, the entity's reads keep working until the destruction flush, while IsValid is false and its writes raise.
@@ -2736,6 +2844,14 @@ The entity's DirectionalLight component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
+### Entity.DistanceJoint
+
+`DistanceJoint?`
+
+The entity's DistanceJoint component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
 ### Entity.Environment
 
 `Environment?`
@@ -2749,6 +2865,14 @@ All modes; Runtime|Test; pure/read.
 `(self: Entity, name: string, recursive: boolean?) -> Entity?`
 
 Find the first exact child name in depth-first sibling order; recursive defaults false.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.FixedJoint
+
+`FixedJoint?`
+
+The entity's FixedJoint component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2770,7 +2894,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?)`
 
 Get a component proxy, or nil when absent.
 
@@ -2829,6 +2953,14 @@ All modes; Runtime|Test; pure/read.
 `(self: Entity, tag: string) -> boolean`
 
 Check an exact tag.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.HingeJoint
+
+`HingeJoint?`
+
+The entity's HingeJoint component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3021,6 +3153,14 @@ All modes; Runtime|Test; mutates.
 `SkinnedMesh?`
 
 The entity's SkinnedMesh component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.SliderJoint
+
+`SliderJoint?`
+
+The entity's SliderJoint component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -3256,6 +3396,74 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 An authenticated immutable Field constructor descriptor.
 
+## FixedJoint
+
+Welds the body of the RigidBody at or above the entity to another body or the world in the pose they have when it is first made, a weld that may break.
+
+### FixedJoint.Anchor
+
+`vector`
+
+The weld's point in this entity's space, in metres (its scale applies).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### FixedJoint.BreakForce
+
+`number`
+
+The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### FixedJoint.BreakTorque
+
+`number`
+
+The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### FixedJoint.Broken
+
+`boolean`
+
+Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### FixedJoint.CollideConnected
+
+`boolean`
+
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### FixedJoint.ConnectedBody
+
+`Entity?`
+
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### FixedJoint.GetForce
+
+`(self: FixedJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
+
+### FixedJoint.GetTorque
+
+`(self: FixedJoint) -> number`
+
+The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque.
+
+All modes; Runtime|Test; pure/read.
+
 ## Fog
 
 The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene).
@@ -3345,6 +3553,170 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `number`
 
 How tightly the sun glow gathers around the light's direction: higher is tighter.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## HingeJoint
+
+Joins the body of the RigidBody at or above the entity to another body or the world so it only turns about an axis, like a door or a trap door, with optional limits, motor and breaking.
+
+### HingeJoint.Anchor
+
+`vector`
+
+The hinge's pivot in this entity's space, in metres (its scale applies).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.Axis
+
+`vector`
+
+The axis the body turns about, in this entity's space; positive angles turn it by the right-hand rule. Normalized when used; a zero axis makes the joint invalid.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.BreakForce
+
+`number`
+
+The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.BreakTorque
+
+`number`
+
+The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.Broken
+
+`boolean`
+
+Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.CollideConnected
+
+`boolean`
+
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.ConnectedBody
+
+`Entity?`
+
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.GetAngle
+
+`(self: HingeJoint) -> number`
+
+The hinge's angle in degrees from the pose it was made in, positive by the right-hand rule about Axis, after the last physics step.
+
+All modes; Runtime|Test; pure/read.
+
+### HingeJoint.GetForce
+
+`(self: HingeJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
+
+### HingeJoint.GetTorque
+
+`(self: HingeJoint) -> number`
+
+The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque.
+
+All modes; Runtime|Test; pure/read.
+
+### HingeJoint.LowerAngle
+
+`number`
+
+The smallest angle, in degrees from the authored pose, while UseLimits holds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.MaxFrictionTorque
+
+`number`
+
+The friction torque, in newton metres, that resists turning while the motor is Off.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.Motor
+
+`JointMotorMode`
+
+What the motor does: Off, drive to a target velocity, or drive to a target through a spring.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.MotorDamping
+
+`number`
+
+The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.MotorFrequency
+
+`number`
+
+The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.MotorMaxTorque
+
+`number`
+
+The most torque the motor applies, in newton metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.MotorTargetAngle
+
+`number`
+
+The angle a Position motor drives to, in degrees from the authored pose; clamped to the limits while UseLimits holds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.MotorTargetVelocity
+
+`number`
+
+The angular velocity a Velocity motor drives to, in degrees per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.UpperAngle
+
+`number`
+
+The largest angle, in degrees from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.UseLimits
+
+`boolean`
+
+Whether the angle stays between LowerAngle and UpperAngle.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
@@ -4979,6 +5351,170 @@ All modes; Runtime|Test; pure/read; setter mutates.
 Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one.
 
 All modes; Runtime|Test; mutates.
+
+## SliderJoint
+
+Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking.
+
+### SliderJoint.Anchor
+
+`vector`
+
+The joint's point in this entity's space, in metres (its scale applies).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.Axis
+
+`vector`
+
+The axis the body moves along, in this entity's space; positive positions move it along the axis. Normalized when used; a zero axis makes the joint invalid.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.BreakForce
+
+`number`
+
+The force, in newtons, beyond which the joint breaks, measured over the last collision step after each physics step; 0 never breaks.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.BreakTorque
+
+`number`
+
+The torque, in newton metres, beyond which the joint breaks, measured as BreakForce is; 0 never breaks.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.Broken
+
+`boolean`
+
+Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.CollideConnected
+
+`boolean`
+
+Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.ConnectedBody
+
+`Entity?`
+
+The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.GetForce
+
+`(self: SliderJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
+
+### SliderJoint.GetPosition
+
+`(self: SliderJoint) -> number`
+
+The slider's position in metres along Axis from the pose it was made in, after the last physics step.
+
+All modes; Runtime|Test; pure/read.
+
+### SliderJoint.GetTorque
+
+`(self: SliderJoint) -> number`
+
+The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque.
+
+All modes; Runtime|Test; pure/read.
+
+### SliderJoint.LowerLimit
+
+`number`
+
+The smallest position, in metres from the authored pose, while UseLimits holds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.MaxFrictionForce
+
+`number`
+
+The friction force, in newtons, that resists sliding while the motor is Off.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.Motor
+
+`JointMotorMode`
+
+What the motor does: Off, drive to a target velocity, or drive to a target through a spring.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.MotorDamping
+
+`number`
+
+The damping ratio of the Position motor's spring: 0 oscillates, 1 is critically damped.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.MotorFrequency
+
+`number`
+
+The frequency of the spring a Position motor drives with, in hertz: higher is stiffer (2 Hz is Jolt's default).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.MotorMaxForce
+
+`number`
+
+The most force the motor applies, in newtons.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.MotorTargetPosition
+
+`number`
+
+The position a Position motor drives to, in metres from the authored pose; clamped to the limits while UseLimits holds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.MotorTargetVelocity
+
+`number`
+
+The velocity a Velocity motor drives to, in metres per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.UpperLimit
+
+`number`
+
+The largest position, in metres from the authored pose, while UseLimits holds; equal limits make the joint invalid (use a FixedJoint).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.UseLimits
+
+`boolean`
+
+Whether the position stays between LowerLimit and UpperLimit.
+
+All modes; Runtime|Test; pure/read; setter mutates.
 
 ## SphereCollider
 
@@ -6845,6 +7381,28 @@ Start a fresh recording or stop and save it.
 - `Start`: Start at tick zero.
 
 - `Stop`: Validate and save the completed recording.
+
+## JointMotorMode
+
+What a HingeJoint's or SliderJoint's motor does.
+
+- `Off`: No drive: the joint moves freely, against its MaxFrictionTorque or MaxFrictionForce.
+
+- `Velocity`: Drives the joint at MotorTargetVelocity with at most MotorMaxTorque or MotorMaxForce.
+
+- `Position`: Drives the joint to MotorTargetAngle or MotorTargetPosition through a spring of MotorFrequency and MotorDamping, with at most MotorMaxTorque or MotorMaxForce.
+
+## JointType
+
+Which joint component a joint is (physics.jointInfo's type).
+
+- `Hinge`: A HingeJoint: the body turns about an axis.
+
+- `Slider`: A SliderJoint: the body moves along an axis.
+
+- `Distance`: A DistanceJoint: the distance between two points stays within limits.
+
+- `Fixed`: A FixedJoint: the two bodies move as one.
 
 ## Key
 

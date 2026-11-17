@@ -274,6 +274,17 @@ return true
 				{ "CharacterController.IsSqueezed", "holders.CharacterController.CharacterController:IsSqueezed()" },
 				{ "CharacterController.GetSqueezingBody", "holders.CharacterController.CharacterController:GetSqueezingBody()" },
 				{ "AudioSource.IsPlaying", "holders.AudioSource.AudioSource:IsPlaying()" },
+				// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joints' readings of the physics.
+				{ "HingeJoint.GetAngle", "holders.HingeJoint.HingeJoint:GetAngle()" },
+				{ "HingeJoint.GetForce", "holders.HingeJoint.HingeJoint:GetForce()" },
+				{ "HingeJoint.GetTorque", "holders.HingeJoint.HingeJoint:GetTorque()" },
+				{ "SliderJoint.GetPosition", "holders.SliderJoint.SliderJoint:GetPosition()" },
+				{ "SliderJoint.GetForce", "holders.SliderJoint.SliderJoint:GetForce()" },
+				{ "SliderJoint.GetTorque", "holders.SliderJoint.SliderJoint:GetTorque()" },
+				{ "DistanceJoint.GetDistance", "holders.DistanceJoint.DistanceJoint:GetDistance()" },
+				{ "DistanceJoint.GetForce", "holders.DistanceJoint.DistanceJoint:GetForce()" },
+				{ "FixedJoint.GetForce", "holders.FixedJoint.FixedJoint:GetForce()" },
+				{ "FixedJoint.GetTorque", "holders.FixedJoint.FixedJoint:GetTorque()" },
 			};
 			// Mutating members, and the setters of the properties that have one.
 			const std::vector<MemberCheck> writes = {

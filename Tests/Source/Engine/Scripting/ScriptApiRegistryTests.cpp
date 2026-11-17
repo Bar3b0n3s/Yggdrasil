@@ -55,6 +55,8 @@ namespace Engine {
 		void RunTerrainBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunSaveDataBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 		void RunNavigationBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joint proxies' methods (Bindings/JointsTests.cpp).
+		void RunJointsBindingsCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 	}
 
@@ -179,7 +181,8 @@ namespace Engine {
 				&Test::RunParticlesBindingsCoverage,
 				&Test::RunTerrainBindingsCoverage,
 				&Test::RunSaveDataBindingsCoverage,
-				&Test::RunNavigationBindingsCoverage
+				&Test::RunNavigationBindingsCoverage,
+				&Test::RunJointsBindingsCoverage
 			};
 			Test::ScriptTestFixture catalog;
 			REQUIRE(catalog.Start());
@@ -815,9 +818,10 @@ return true
 				{
 					// The 13 callbacks before M21, then M21's four 2D physics callbacks (Docs/Decisions/0032-m21-contract.md decision 13),
 					// then M22's six UI callbacks and C22.3's OnUiTextChanged and OnUiSubmit (Docs/Decisions/0033-m22-contract.md
-					// decisions 27 and 47), then M23's OnAnimationEvent (Docs/Decisions/0034-m23-contract.md decision 31), then M38's
-					// OnLocaleChanged (Docs/Decisions/0055-m38-runtime-locale.md decision 2).
-					REQUIRE(group.Members.size() == 27);
+					// decisions 27 and 47), then M23's OnAnimationEvent (Docs/Decisions/0034-m23-contract.md decision 31), then, in
+					// phase 6's landing order, M38's OnLocaleChanged (Docs/Decisions/0055-m38-runtime-locale.md decision 2) and M37's
+					// OnJointBreak (Docs/Decisions/0054-m37-joints.md decision 8).
+					REQUIRE(group.Members.size() == 28);
 					for (const auto& member : group.Members)
 					{
 						CHECK(member.Kind == ScriptApiMemberKind::Callback);

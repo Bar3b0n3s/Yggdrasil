@@ -6,6 +6,7 @@
 #include "Engine/Core/Time.h"
 #include "Engine/Core/UUID.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
+#include "Engine/Physics/PhysicsJoint.h"
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Scene/PhysicsComposition.h"
@@ -122,6 +123,36 @@
 //     event's key has the null collider, so body events keep their relative order and a scene without scripted gathered
 //     colliders dispatches exactly as before. M21's 2D world and M26's height fields dispatch with the same key.
 //
+// M37 (Docs/Decisions/0054-m37-joints.md; Architecture §9.10; the work in Scene/PhysicsSystemJoints.cpp): joints.
+//   - Synchronization. After the bodies of every rebuild, and in PreStep and SynchronizeBodies whenever a joint component
+//     changed or a body was created or removed, the joints are brought in step with ComposePhysicsJoints (Scene/
+//     PhysicsJoints.h) in canonical order of their entities: a joint whose plan is creatable, whose component is not Broken
+//     and whose two bodies exist is created (PhysicsWorld::CreateJoint) or, when it lives already, has its settings applied
+//     in place (PhysicsWorld::SetJointSettings, waking its bodies); any other is not in force. A joint whose entity or end
+//     is leaving play (pending destruction or disabled) keeps what it has until FlushDestroyed, and a reason its plan has
+//     then is raised after the flush, which composes the plans again. The plan is composed again
+//     only when the bodies were rebuilt, a joint component was added or removed, or a changed joint's type, ConnectedBody,
+//     Anchor, Axis, ConnectedAnchor or limits differ from what the last plan read, so a script writing a motor target every
+//     tick changes the live joint and composes nothing. Its PHYSICS_JOINT_INVALID diagnostics are raised as the body
+//     composition's are. Every joint in force gets its entity's rank in UUID order as its solver priority, refreshed
+//     whenever the joints in force change.
+//   - Kept frames. A hinge's, slider's or fixed joint's two frames are formed when it is first created, from the poses of
+//     that moment (PhysicsJoints.h's MakePhysicsJointWorldFrame, expressed in each body's space relative to its origin),
+//     and kept once the creation succeeds: a body created again (a RigidBody change, a re-enabled entity, a refusal undone) gets its joints back at
+//     the same frames, so a door that swung keeps its zero and its limits. They are formed again when the joint's type,
+//     ConnectedBody, Anchor or Axis, the bodies its ends resolve to, or the entities between its entity and its body
+//     change. A distance joint keeps nothing: its two anchors are read from the scene at every creation, and it is made
+//     again when the same fields or its ConnectedAnchor change. Frames are dropped with the joint component or its entity.
+//   - Bodies first. RemoveBody destroys the body's joints before the body (the world would too), on every removal path: a
+//     RigidBody change, a refusal, the disable and destroy flushes and the session's end.
+//   - Breaking. At the start of PostStep, every joint in force with a BreakForce or BreakTorque compares its force and
+//     torque of the last collision step (PhysicsWorld::GetJointState) with them, in UUID order; one over either is removed
+//     (its bodies woken), Broken is written into its component (scene data, so hashed), and its PhysicsJointBreak is
+//     dispatched (IPhysicsEventListener::OnPhysicsJointBreak) after that PostStep's pair events. A Broken joint is never
+//     created; Broken written false mends it at the next synchronization, at its kept frames.
+//   - FlushDestroyed removes the joints of entities that left play: a destroyed entity's joint and frames go; a disabled
+//     one's joint goes and its frames stay for its return.
+//
 // Determinism (§9.1): bodies, characters, write-back, events and the state hash all follow canonical order or UUID order;
 // nothing iterates an unordered container to produce output; results do not depend on the worker thread count.
 //
@@ -131,7 +162,8 @@
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decisions 11 to 13); M20, which owns the contact path in
 // phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md); M36 adds the collider surfaces (the
 // step's M36 paragraph), PhysicsCharacterState's GroundCollider, IsSqueezed and SqueezedBy, PhysicsSurfaceInfo and GetSurface
-// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), reviewed as a change to a frozen interface.
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), and M37 appends its joints (the M37 paragraph
+// above), each reviewed as a change to a frozen interface.
 
 namespace Engine {
 
@@ -229,6 +261,50 @@ namespace Engine {
 	// event map to one key, whether or not they set SelfBody.
 	[[nodiscard]] PhysicsEventOrderKey GetPhysicsEventOrderKey(const PhysicsEvent& event);
 
+	// M37 (Docs/Decisions/0054-m37-joints.md decision 6): a joint that broke at a PostStep: its force or torque over the last
+	// collision step passed its BreakForce or BreakTorque, so the system removed it and wrote Broken into its component.
+	struct PhysicsJointBreak
+	{
+		UUID Joint{};        // the joint's entity
+		float Force = 0.0f;  // N, as measured (PhysicsJointState::Force)
+		float Torque = 0.0f; // N m
+		uint64_t Tick = 0;   // the tick whose PostStep broke it
+
+		bool operator==(const PhysicsJointBreak&) const = default;
+	};
+
+	// M37 (Docs/Decisions/0054-m37-joints.md decision 7): what scripts and physics.jointInfo read of a joint
+	// (PhysicsSystem::GetJointInfo).
+	struct PhysicsJointReport
+	{
+		UUID Entity{};
+		PhysicsJointType Type = PhysicsJointType::Hinge;
+		// The owners of the joint's body and of the connected body, as the joint composition resolved them (invalid when an
+		// end has none; Connected is also invalid for the world).
+		UUID Body{};
+		UUID Connected{};
+		// Whether the joint is in force: false for a refused, broken, disabled or not yet created joint.
+		bool Created = false;
+		// The component's Broken.
+		bool Broken = false;
+		// While Created, the reading after the last step (and a teleport since): a hinge's angle in degrees, a slider's position
+		// in metres, a distance joint's distance in metres; the force (N) and torque (N m) of the last collision step, as the
+		// break test measures them. Zero otherwise, and the readings of the other types are zero.
+		float Angle = 0.0f;
+		float Position = 0.0f;
+		float Distance = 0.0f;
+		float Force = 0.0f;
+		float Torque = 0.0f;
+		// A hinge's or slider's motor (Off for the other types).
+		PhysicsJointMotor Motor = PhysicsJointMotor::Off;
+		// While Created, the joint in world space as the bodies hold it (PhysicsJointState::Point, ConnectedPoint and Axis): its
+		// point on its body and on the connected body, and a hinge's or slider's axis; zero otherwise. The debug view draws them
+		// in play.
+		glm::vec3 Point = glm::vec3(0.0f);
+		glm::vec3 ConnectedPoint = glm::vec3(0.0f);
+		glm::vec3 Axis = glm::vec3(0.0f);
+	};
+
 	// Receives the sorted events and the run-time diagnostics (the interface scripting consumes in M13: the ScriptEngine
 	// dispatches each event to the scripts on Self, and turns diagnostics about refused bodies into script errors, §9.1).
 	// Implementations live outside Scene; tests record them.
@@ -260,6 +336,12 @@ namespace Engine {
 		// OnPhysicsEvent apply. The diagnostics Create raised precede any listener: GetDiagnostics holds them. The default
 		// ignores them.
 		virtual void OnPhysicsDiagnostic(const PhysicsDiagnostic& /*diagnostic*/) {}
+
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 6): called on the main thread from PostStep, after that PostStep's pair
+		// events, once per joint that broke there (PhysicsJointBreak), in UUID order of the joints' entities; the rules of
+		// OnPhysicsEvent apply (a break whose joint entity an earlier callback destroyed or disabled is not delivered). The
+		// default ignores them.
+		virtual void OnPhysicsJointBreak(const PhysicsJointBreak& /*jointBreak*/) {}
 	};
 
 	// A ray or shape-cast hit (§9.5, §11.5 RaycastHit {Entity, Body, Point, Normal, Distance}).
@@ -491,8 +573,19 @@ namespace Engine {
 		// Appends the physics state to the session's state hash (§5.1 "+ physics velocities at runtime", PlaySession::
 		// ComputeStateHash): for every created body and character in canonical order of its owner (and origin), the owner's
 		// UUID, the body's position, rotation, linear and angular velocity (as the bit patterns of their floats, little
-		// endian) and its sleeping flag. A scene without bodies appends nothing, so its hash stays that of M7.
+		// endian) and its sleeping flag. A scene without bodies appends nothing, so its hash stays that of M7. M37 (Docs/
+		// Decisions/0054-m37-joints.md decision 5): then the joint part, for every joint whose frames the session keeps, in
+		// canonical order of its entity: the entity's UUID and the bits of its two kept frames (point, axis and normal on the
+		// joint's body, then on the connected body); nothing without one, so a scene without joints hashes as before.
 		void AppendStateHash(XXH64Hasher& hasher) const;
+
+		// --- Joints (M37, Docs/Decisions/0054-m37-joints.md; Scene/PhysicsSystemJoints.cpp) ---------------------------------
+		// The joint of `entity` (its HingeJoint, SliderJoint, DistanceJoint or FixedJoint) as scripts (HingeJoint:GetAngle and
+		// the others) and physics.jointInfo read it; nullopt when the entity does not exist or holds no joint component.
+		[[nodiscard]] std::optional<PhysicsJointReport> GetJointInfo(UUID entity) const;
+		// The joints that broke at the last PostStep, in UUID order of their entities (cleared at the start of each PostStep;
+		// what tests and observability read).
+		[[nodiscard]] std::span<const PhysicsJointBreak> GetLastJointBreaks() const;
 	private:
 		// The world, the body and character tables, the contact pairs, the events and the diagnostics
 		// (Scene/Private/PhysicsSystemState.h, shared by the system's .cpp files).

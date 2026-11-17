@@ -38,8 +38,9 @@ namespace Engine {
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
-			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58.
-			static_assert(BuiltinComponents::Size == 58);
+			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, and M37's four joints (Docs/Decisions/0054-m37-joints.md
+			// decision 1) 62.
+			static_assert(BuiltinComponents::Size == 62);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -458,7 +459,8 @@ namespace Engine {
 		// Several paths read only the added component's own Excludes (Entity:AddComponent, component.list and component.schema,
 		// the generated reference), so both components of an exclusion declare it: RigidBody and CharacterController, UiCanvas
 		// and UiRect (the C22.1 review, Docs/Decisions/0033-m22-contract.md decision 2), and each pair of C22.2's four widgets
-		// (decision 21) and C22.3's text input (decision 45): five widgets, 20 ordered pairs.
+		// (decision 21) and C22.3's text input (decision 45): five widgets, 20 ordered pairs; M37's four joints
+		// (Docs/Decisions/0054-m37-joints.md decision 1): 12 more.
 		TEST_CASE("BuiltinComponents: every exclusion is declared by both components")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
@@ -472,7 +474,7 @@ namespace Engine {
 					++exclusions;
 				}
 			}
-			CHECK(exclusions == 24);
+			CHECK(exclusions == 36);
 			const ComponentInfo* canvas = registry->FindComponent<UiCanvasComponent>();
 			const ComponentInfo* rect = registry->FindComponent<UiRectComponent>();
 			REQUIRE(canvas != nullptr);
@@ -711,6 +713,11 @@ namespace Engine {
 				// landing order.
 				"Navigation",
 				"NavModifier",
+				// M37 (Docs/Decisions/0054-m37-joints.md decision 1): ADR 0052's phase-6 ledger's Joints category after Navigation.
+				"HingeJoint",
+				"SliderJoint",
+				"DistanceJoint",
+				"FixedJoint",
 			};
 			std::vector<std::string> names;
 			for (const ComponentInfo* component : registry->GetComponents())
@@ -722,7 +729,7 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			const std::vector<std::string> categories = { "Core", "Rendering", "Physics", "Audio", "Scripting", "Rendering2D", "Physics2D", "Ui",
-				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation" };
+				"Animation", "Particles", "Probes", "Terrain", "MaterialParameters", "Fog", "Navigation", "Joints" };
 			// The components that migrated since their first version: Prefab's override paths and Script's list of slots (M20,
 			// Docs/Decisions/0031-m20-contract.md decisions 10 and 17), PointLight's CastShadows (M23,
 			// Docs/Decisions/0034-m23-contract.md decision 3) and PostProcess's AntiAliasing, exposure, LUT and SSR members (M26,

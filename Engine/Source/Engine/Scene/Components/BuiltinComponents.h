@@ -13,8 +13,11 @@
 #include "Engine/Scene/Components/CircleCollider2DComponent.h"
 #include "Engine/Scene/Components/ColliderSurfaceComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
+#include "Engine/Scene/Components/DistanceJointComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/FixedJointComponent.h"
 #include "Engine/Scene/Components/FogComponent.h"
+#include "Engine/Scene/Components/HingeJointComponent.h"
 #include "Engine/Scene/Components/IDComponent.h"
 #include "Engine/Scene/Components/IrradianceVolumeComponent.h"
 #include "Engine/Scene/Components/Light2DComponent.h"
@@ -38,6 +41,7 @@
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
+#include "Engine/Scene/Components/SliderJointComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
@@ -115,7 +119,10 @@ namespace Engine {
 		// Navigation (Registration/NavigationRegistration.cpp; M30, Docs/Decisions/0045-m30-navigation.md decision 5). ADR 0042's
 		// phase-5 ledger: phase 5's new categories go after Terrain in landing order (M30's Navigation, M31's
 		// MaterialParameters, M32's Fog); M30 lands last, after batch 1's MaterialParameters and Fog.
-		NavigationComponent, NavModifierComponent>;
+		NavigationComponent, NavModifierComponent,
+		// Joints (Registration/JointsRegistration.cpp; M37, Docs/Decisions/0054-m37-joints.md decision 1). ADR 0052's phase-6
+		// ledger: a sixteenth category after Navigation, in landing order.
+		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -143,8 +150,10 @@ namespace Engine {
 	void RegisterFogComponents(TypeRegistry& registry);
 	// M30 (Docs/Decisions/0045-m30-navigation.md decision 5), after Terrain, in ADR 0042's phase-5 ledger's landing order.
 	void RegisterNavigationComponents(TypeRegistry& registry);
+	// M37 (Docs/Decisions/0054-m37-joints.md decision 1), after Navigation, in ADR 0052's phase-6 ledger's landing order.
+	void RegisterJointsComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the fifteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the sixteen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

@@ -7,7 +7,8 @@ test_body_info_needs_a_play_session_and_a_body covers physics.bodyInfo's errors.
 test_belt_carries_a_character_that_reports_its_ground_collider covers M36's ColliderSurface (Docs/Decisions/
 0053-m36-contact-surfaces.md): physics.bodyInfo's groundCollider, a surface velocity written through entity.update, and
 PHYSICS_SURFACE_UNUSED; test_body_info_reports_a_squeezed_character covers its W36.2 squeeze (physics.bodyInfo's
-squeezed and squeezedBy).
+squeezed and squeezedBy). test_joint_info_reads_a_joint_in_play reads physics.jointInfo (M37,
+Docs/Decisions/0054-m37-joints.md decision 10) and its errors.
 """
 
 from __future__ import annotations
@@ -229,6 +230,44 @@ class PhysicsTests(AutomationTestCase):
         self.assertIsNotNone(squeezed)
         assert squeezed is not None
         self.assertEqual(squeezed["squeezedBy"]["path"], "/Press")
+        client.call("play.stop")
+
+    def test_joint_info_reads_a_joint_in_play(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        client.call("edit.batch", {"label": "Joints", "ops": [
+            {"method": "entity.create", "params": {"name": "Post", "components": {
+                "Transform": {"Translation": [0, 5, 0]}, "RigidBody": {"Type": "Static"},
+                "BoxCollider": {"HalfExtents": [0.1, 0.1, 0.1]}}}},
+            {"method": "entity.create", "params": {"name": "Bob", "components": {
+                "Transform": {"Translation": [0, 3, 0]}, "RigidBody": {"Type": "Dynamic"},
+                "SphereCollider": {"Radius": 0.1},
+                "DistanceJoint": {"ConnectedBody": "/Post", "MinDistance": 0, "MaxDistance": 2}}}},
+            {"method": "entity.create", "params": {"name": "Plain"}}]})
+
+        # Joints exist only in a play session.
+        with self.assertRaises(engine_client.EngineError) as not_playing:
+            client.call("physics.jointInfo", {"entity": "/Bob"})
+        self.assert_engine_error(not_playing.exception, engine_client.INVALID_STATE, "InvalidState")
+
+        client.call("play.start", {"mode": "simulate", "lockstep": True})
+        client.call("play.step", {"ticks": 30, "render": "none"})
+        info = client.call("physics.jointInfo", {"entity": "/Bob"})
+        self.assertEqual(info["entity"]["name"], "Bob")
+        self.assertEqual(info["type"], "Distance")
+        self.assertEqual(info["body"]["name"], "Bob")
+        self.assertEqual(info["connectedBody"]["name"], "Post")
+        self.assertTrue(info["created"])
+        self.assertFalse(info["broken"])
+        self.assertAlmostEqual(info["distance"], 2.0, delta=0.05)
+        self.assertGreater(info["force"], 1.0)
+        self.assertEqual(info["motor"], "Off")
+        self.assertEqual(info["tick"], 30)
+
+        # An entity without a joint component holds no joint.
+        with self.assertRaises(engine_client.EngineError) as no_joint:
+            client.call("physics.jointInfo", {"entity": "/Plain"})
+        self.assert_engine_error(no_joint.exception, engine_client.NOT_FOUND, "NotFound")
+        self.assertEqual(no_joint.exception.issues[0]["pointer"], "/entity")
         client.call("play.stop")
 
 

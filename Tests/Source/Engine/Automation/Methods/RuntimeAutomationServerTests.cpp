@@ -627,7 +627,7 @@ namespace Engine {
 			const MethodRegistry& methods = fixture.GetServer().GetMethods();
 			for (const char* name : { "session.hello", "session.info", "session.shutdown", "rpc.discover", "scene.tree", "scene.query", "scene.get",
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
-					 "play.setTimeScale", "play.setWorldPaused", "input.inject", "viewport.screenshot", "physics.bodyInfo", "audio.stats", "stats.get",
+					 "play.setTimeScale", "play.setWorldPaused", "input.inject", "viewport.screenshot", "physics.bodyInfo", "physics.jointInfo", "audio.stats", "stats.get",
 					 "script.eval", "script.errors", "play.waitFor", "input.record", "input.replay", "physics2d.raycast", "physics2d.overlap", "physics2d.bodyInfo",
 					 "ui.tree" })
 			{
@@ -820,6 +820,45 @@ namespace Engine {
 			CHECK(result["contacts"].empty());
 			CHECK(result["tick"] == Json(0));
 			CHECK(JsonReader(result["boundsMax"][0]).ReadFloat().value_or(0.0f) == doctest::Approx(5.0f));
+		}
+
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 10): physics.jointInfo is in the Runtime subset and reads the Runtime's
+		// own session, through its host's context: a bob on a 2 m rope from a static post, which the session joined at tick 0,
+		// and the post, which holds no joint.
+		TEST_CASE("RuntimeAutomationServer: physics.jointInfo reports a joint of the Runtime's session")
+		{
+			RuntimeServerFixture fixture({ .GameName = "Tiny" }, [](Scene& scene)
+			{
+				Entity post = scene.CreateEntity("Post");
+				post.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 5.0f, 0.0f);
+				});
+				post.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+				post.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(0.1f) });
+				Entity bob = scene.CreateEntity("Bob");
+				bob.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 3.0f, 0.0f);
+				});
+				bob.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
+				bob.AddComponent<SphereColliderComponent>(SphereColliderComponent{ .Radius = 0.1f });
+				bob.AddComponent<DistanceJointComponent>(DistanceJointComponent{ .ConnectedBody = post.GetUUID(), .MinDistance = 0.0f, .MaxDistance = 2.0f });
+			});
+			const Json info = fixture.Call("physics.jointInfo", Json{ { "entity", "/Bob" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(info) == 0, info.dump());
+			const Json& result = info["result"];
+			CHECK(result["entity"]["name"] == Json("Bob"));
+			CHECK(result["type"] == Json("Distance"));
+			CHECK(result["body"]["name"] == Json("Bob"));
+			CHECK(result["connectedBody"]["name"] == Json("Post"));
+			CHECK(result["created"] == Json(true));
+			CHECK(result["broken"] == Json(false));
+			CHECK(JsonReader(result["distance"]).ReadFloat().value_or(0.0f) == doctest::Approx(2.0f).epsilon(1.0e-3));
+			CHECK(result["tick"] == Json(0));
+			const Json post = fixture.Call("physics.jointInfo", Json{ { "entity", "/Post" } });
+			CHECK(RuntimeServerFixture::GetErrorCode(post) == static_cast<int64_t>(RpcErrorCode::NotFound));
+			CHECK(post["error"]["data"]["issues"][0]["pointer"] == Json("/entity"));
 		}
 
 		// M21's milestone review (Docs/Decisions/0032-m21-contract.md decisions 15 and 27): physics2d.raycast, physics2d.overlap

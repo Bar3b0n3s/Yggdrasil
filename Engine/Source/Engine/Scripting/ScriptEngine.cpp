@@ -620,6 +620,25 @@ namespace Engine {
 		m_State->DeliverPhysics(event, false);
 	}
 
+	void ScriptEngine::OnPhysicsJointBreak(const PhysicsJointBreak& jointBreak)
+	{
+		m_State->AssertOwner();
+		// Every instance of the joint's entity, in slot order, as physics callbacks and animation events (ADR 0031 decision 17).
+		for (const State::InstanceKey key : m_State->InstancesOf(jointBreak.Joint))
+		{
+			const auto found = m_State->Instances.find(key);
+			if (found == m_State->Instances.end())
+				continue;
+			if (!found->second.Started || !found->second.PendingEvents.empty())
+			{
+				if (!IsStopped() && !IsReadOnly() && !found->second.FaultDisabled && !found->second.DestroyPrepared && found->second.Table != LUA_NOREF)
+					found->second.PendingEvents.emplace_back(jointBreak);
+				continue;
+			}
+			m_State->InvokeJointBreak(key, jointBreak);
+		}
+	}
+
 	// M22 (C22.2, Docs/Decisions/0033-m22-contract.md decision 27; ADR 0031 decision 18). An event's walk is the chain of its
 	// target and the target's ancestors as they are when the walk starts (all live then: a pending entity's subtree is
 	// pending with it), so a callback that reparents an entity cannot lengthen or repeat the walk, and an ancestor that a

@@ -35,6 +35,8 @@ namespace Engine {
 
 		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decision 2): OnLocaleChanged (Bindings/LocTests.cpp).
 		void RunLocaleCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): OnJointBreak in a play session (ScriptJointTests.cpp).
+		void RunJointBreakCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
 		static int RecordScriptLifecycle(ScriptCall& call)
 		{
@@ -465,6 +467,7 @@ return Script.Define("UiCoverage", T)
 			RunBehaviourUiCoverage(mode, snapshots);
 			RunAnimationCallbackCoverage(mode, snapshots);
 			RunLocaleCallbackCoverage(mode, snapshots);
+			RunJointBreakCallbackCoverage(mode, snapshots);
 			if (mode == RunModes::Editor)
 				RunBehaviourReloadCoverage(snapshots);
 			REQUIRE(snapshots.size() > firstSnapshot);

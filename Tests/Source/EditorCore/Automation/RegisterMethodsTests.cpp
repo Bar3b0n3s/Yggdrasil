@@ -29,8 +29,8 @@ namespace Engine {
 	// decision 12) and graph.liveValues (decision 14), M26's lighting.bake, terrain.edit and terrain.importHeightmap
 	// (Docs/Decisions/0037-m26-contract.md decisions 8, 20 and 23), M35's play.setWorldPaused
 	// (Docs/Decisions/0050-m35-pause-entity-state.md decision 5), M28's savedata.get, savedata.set and savedata.clear
-	// (Docs/Decisions/0043-m28-game-services.md decision 8), and M30's navigation.bake (Docs/Decisions/0045-m30-navigation.md
-	// decision 8), test hooks excluded.
+	// (Docs/Decisions/0043-m28-game-services.md decision 8), M30's navigation.bake (Docs/Decisions/0045-m30-navigation.md
+	// decision 8) and M37's physics.jointInfo (Docs/Decisions/0054-m37-joints.md decision 10), test hooks excluded.
 	static const std::vector<std::string>& GetExpectedMethodNames()
 	{
 		static const std::vector<std::string> ExpectedNames = { "animation.preview", "asset.create", "asset.delete", "asset.getImportSettings", "asset.getProperties",
@@ -41,7 +41,7 @@ namespace Engine {
 			"graph.moveNodes", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "input.inject", "input.readReplay",
 			"input.record", "input.replay", "lighting.bake", "log.read",
 			"native.build", "native.getComponents", "native.load", "native.read", "native.setComponents", "native.status", "native.write",
-			"navigation.bake", "physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
+			"navigation.bake", "physics.bodyInfo", "physics.jointInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "play.pause", "play.resume",
 			"play.setTimeScale", "play.setWorldPaused", "play.start", "play.state", "play.step", "play.stop", "play.waitFor", "prefab.apply", "prefab.create", "prefab.instantiate", "prefab.revert",
 			"prefab.unpack", "profiler.capture", "project.create", "project.export", "project.getSettings", "project.info", "project.open", "project.refreshAssets",
 			"project.save", "project.setSettings", "project.upgrade", "project.validate", "rpc.discover", "savedata.clear", "savedata.get", "savedata.set",
@@ -144,7 +144,7 @@ namespace Engine {
 				"entity.reparent", "entity.update", "events.read", "graph.addNode", "graph.connect", "graph.create", "graph.disconnect", "graph.liveValues",
 				"graph.moveNodes", "graph.nodes", "graph.read", "graph.removeNodes", "graph.setMembers", "graph.setValues", "log.read", "native.getComponents", "native.read",
 				"native.setComponents", "native.status",
-				"native.write", "physics.bodyInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
+				"native.write", "physics.bodyInfo", "physics.jointInfo", "physics2d.bodyInfo", "physics2d.overlap", "physics2d.raycast", "prefab.apply", "prefab.create", "prefab.instantiate",
 				"prefab.revert", "prefab.unpack", "project.getSettings", "project.info", "project.setSettings", "project.validate", "rpc.discover", "scene.diff",
 				"scene.get", "scene.query", "scene.raycast", "scene.tree", "script.check", "script.create", "script.errors", "script.fields", "script.read", "script.write",
 				"session.info", "stats.get", "tilemap.paint", "ui.createWidget", "ui.tree", "viewport.pick" };

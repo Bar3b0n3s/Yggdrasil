@@ -3,6 +3,9 @@
 #include "Engine/Automation/Methods/AutomationTypes.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Physics/PhysicsJoint.h"
+#include "Engine/Reflection/VariantValue.h"
+#include "Engine/Scene/Components/HingeJointComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/PhysicsComposition.h"
 
@@ -19,7 +22,8 @@
 //
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 18): the wire format below. M36 adds the
 // character's ground collider, its squeeze and the body that squeezes it after groundNormal
-// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 7 and 14), reviewed as a change to the frozen wire format.
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 7 and 14), and M37 appends physics.jointInfo
+// (Docs/Decisions/0054-m37-joints.md decision 10), each reviewed as a change to the frozen wire format.
 
 namespace Engine {
 
@@ -77,6 +81,35 @@ namespace Engine {
 		uint32_t Tick = 0; // the session's tick when read
 	};
 
+	// physics.jointInfo {entity} (M37, Docs/Decisions/0054-m37-joints.md decision 10): the HingeJoint, SliderJoint,
+	// DistanceJoint or FixedJoint of an entity of the play scene as the session holds it (PhysicsSystem::GetJointInfo):
+	// which bodies it joins, whether it is in force or broken, its reading after the last physics step and its motor. Joints
+	// are in force only in a play session (Play or Simulate), so the method always reads the play scene.
+	struct PhysicsJointInfoParams
+	{
+		std::string Entity{}; // an EntityRef of the play scene (§13.4)
+	};
+
+	struct PhysicsJointInfoResult
+	{
+		EntitySummary Entity{};                          // the joint's entity
+		PhysicsJointType Type = PhysicsJointType::Hinge; // registry enum "JointType"
+		// The owner of the joint's body as an EntitySummary's {id, name, path}, null when it has none; the owner of the connected
+		// body, null for the world (or none). VariantValues, as the registry has no optional struct field.
+		VariantValue Body{};
+		VariantValue ConnectedBody{};
+		bool Created = false; // in force: false for a refused, broken, disabled or not yet created joint
+		bool Broken = false;  // the component's Broken
+		// The type's reading after the last physics step while Created, 0 for the other types and otherwise.
+		float Angle = 0.0f;                         // a hinge's, degrees from its authored pose
+		float Position = 0.0f;                      // a slider's, metres along its axis
+		float Distance = 0.0f;                      // a distance joint's, metres between its anchors
+		float Force = 0.0f;                         // N, the last collision step's, as the break test measures it
+		float Torque = 0.0f;                        // N m
+		JointMotorMode Motor = JointMotorMode::Off; // registry enum "JointMotorMode"; Off for distance and fixed joints
+		uint32_t Tick = 0;                          // the session's tick when read
+	};
+
 	namespace Automation {
 
 		// physics.bodyInfo. Errors: InvalidState "not playing" without a play session (the hint names play.start {mode:
@@ -85,13 +118,19 @@ namespace Engine {
 		// a body a diagnostic refused: the hint names project.validate).
 		[[nodiscard]] Result<PhysicsBodyInfoResult> PhysicsBodyInfo(AutomationMethodContext& context, const PhysicsBodyInfoParams& params);
 
+		// physics.jointInfo. Errors: InvalidState "not playing" without a play session (the hint names play.start); the errors
+		// of AutomationMethodContext::ResolveEntity at /entity; NotFound at /entity "entity '<name>' (<id>) has no joint" when it
+		// holds no HingeJoint, SliderJoint, DistanceJoint or FixedJoint.
+		[[nodiscard]] Result<PhysicsJointInfoResult> PhysicsJointInfo(AutomationMethodContext& context, const PhysicsJointInfoParams& params);
+
 	}
 
-	// Registers the enum "PhysicsBodyOrigin" and the structs above.
+	// Registers the enum "PhysicsBodyOrigin" and the structs above (the joint result's enums, "JointType" and "JointMotorMode",
+	// are the Joints category's, registered with the components).
 	void RegisterPhysicsMethodTypes(TypeRegistry& registry);
 
-	// Registers physics.bodyInfo: read-only, AllowedInBatch, available in the Runtime; not a tool (§13.8 lists none for the
-	// physics domain), so agents reach it through engine_call.
+	// Registers physics.bodyInfo and (M37) physics.jointInfo: read-only, AllowedInBatch, available in the Runtime; not tools
+	// (§13.8 lists none for the physics domain), so agents reach them through engine_call.
 	void RegisterPhysicsMethods(MethodRegistry& methods);
 
 }

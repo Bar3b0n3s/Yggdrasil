@@ -102,6 +102,7 @@ Each entry is `{Script, Scene?, Parameters?, Isolation?, Clock?, Overrides?, Exp
 - **2D games** (sprites, sorting layers, the pixel-perfect camera, 2D lights, tilemaps, 2D physics): see `skills/game-building/sprites-2d`.
 - **UI** (menus, HUDs, labels in scene pixels): see `skills/game-building/ui`; `ui_tree` shows where every element landed.
 - **Terrain** (heightfields, sculpting and painting, splat layers, the terrain collider): see `skills/game-building/terrain`.
+- **Machines** (doors, trap doors, pistons, chains, welds that break): a `HingeJoint`, `SliderJoint`, `DistanceJoint` or `FixedJoint` on a body's entity joins it to `ConnectedBody` (another body, or null for the world); limits and motors drive it, `BreakForce` and `BreakTorque` break it, and a script mends it with `Broken = false`. A jointed body a character stands on needs the mass and motor force to carry it. See `skills/luau-gameplay/joints`; `physics.jointInfo` and the collider view show each joint (`game-debugging` item 8).
 
 ## 4. Scripts
 

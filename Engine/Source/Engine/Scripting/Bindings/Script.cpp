@@ -644,6 +644,10 @@ namespace Engine {
 				"Called when Loc.SetLocale changes the session's locale, before that call returns: on every started, enabled behaviour that defines "
 				"it, the caller's own included, in execution order, whether or not the world is paused (redraw texts here). Loc.SetLocale raises "
 				"inside it. A new scene's behaviours after Scene.Load or Scene.Reload start in the locale without it.");
+			// M37 (Docs/Decisions/0054-m37-joints.md decision 8): a joint's break, appended in landing order after M38's.
+			behaviour.Callback("OnJointBreak", "(self: ScriptInstance, force: number, torque: number) -> ()",
+				"Called in the fixed step when this entity's HingeJoint, SliderJoint, DistanceJoint or FixedJoint breaks, after the physics step's "
+				"collision and trigger callbacks, with the force (N) and torque (N m) of the last collision step that broke it; Broken is true by then.");
 			return {};
 		}
 

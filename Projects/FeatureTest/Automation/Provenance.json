@@ -3699,6 +3699,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Joints.scene",
+			"XXH64": "513da15f9a87a965",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Joints.scene.meta",
+			"XXH64": "95f13305bc9b1594",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Lights2D.scene",
 			"XXH64": "14a4f24310ad8b61",
 			"Method": "scene.save",
@@ -4637,6 +4653,38 @@
 		{
 			"Path": "Assets/Scripts/InputAim/Aimer.luau.meta",
 			"XXH64": "3dcaabe2b3bb9fbb",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Joints/JointWatcher.luau",
+			"XXH64": "c224f95371f48ac5",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Joints/JointWatcher.luau.meta",
+			"XXH64": "ae01826a1b802fcc",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Joints/MachineController.luau",
+			"XXH64": "24c58ecc34384c52",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Joints/MachineController.luau.meta",
+			"XXH64": "7ebd76d65f7f1e87",
 			"Method": "script.write",
 			"RequestId": 2,
 			"Client": "batch",
@@ -6595,6 +6643,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Joints/Joints.test.luau",
+			"XXH64": "fdedeb07274d4617",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Joints/Joints.test.luau.meta",
+			"XXH64": "c05917b866f1ade2",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Lights2D/Lights2D.test.luau",
 			"XXH64": "b4095a0a18d8639f",
 			"Method": "script.write",
@@ -7023,6 +7087,22 @@
 			"XXH64": "a6fca25f7b42fc16",
 			"Method": "input.record",
 			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Joints.replay",
+			"XXH64": "2ea64498bc0d0165",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Joints.replay.meta",
+			"XXH64": "c93a1362c2343ce9",
+			"Method": "input.record",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -7988,7 +8068,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "600b6010201d34b0",
+			"XXH64": "f65587b93eee71c1",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

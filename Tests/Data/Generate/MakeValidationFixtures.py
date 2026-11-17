@@ -79,8 +79,8 @@ COMPONENT_ORDER = [
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
     "Animator", "SkinnedMesh", "ParticleEmitter", "ParticleLook", "IrradianceVolume", "ReflectionProbe", "Terrain",
-    "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier", "ValidatorTarget",
-    "ValidatorFollower",
+    "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier", "HingeJoint", "SliderJoint",
+    "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -1036,6 +1036,12 @@ return Script.Define("Jumper", Jumper)
     item.entities.append(entity("e000000000000042", "Belt", {
         "Transform": transform(0, 0, -20), "BoxCollider": {"HalfExtents": [1, 0.1, 0.5], "IsTrigger": True},
         "ColliderSurface": {"SurfaceVelocity": [1, 0, 0]}}))
+    # M37 (Docs/Decisions/0054-m37-joints.md decision 9): a door on a hinge whose axis is zero cannot be made.
+    item = fixture("PHYSICS_JOINT_INVALID")
+    door = body("e000000000000003", "Door", 0, "Dynamic")
+    door["Components"]["HingeJoint"] = {"Axis": [0, 0, 0]}
+    door["Components"] = {key: door["Components"][key] for key in COMPONENT_ORDER if key in door["Components"]}
+    item.entities.append(door)
 
     return fixtures
 

@@ -318,7 +318,8 @@ namespace Engine {
 		if (m_State->System == nullptr)
 			return;
 
-		// Every body still in the world goes with it.
+		// Every joint first (M37: a constraint holds raw pointers to its bodies), then every body still in the world.
+		m_State->DestroyAllJoints();
 		JPH::BodyIDVector bodies;
 		m_State->System->GetBodies(bodies);
 		if (!bodies.empty())
@@ -366,8 +367,15 @@ namespace Engine {
 			state.ObjectLayerPairFilter);
 		state.System->SetGravity(Detail::ToJolt(specification.Gravity));
 		state.System->SetContactListener(&state.ContactListener);
-		// §9.2 "Seams": internal edge removal with a tighter face test than Jolt's (Physics/Private/PhysicsEdgeRemoval.h).
-		state.System->SetSimCollideBodyVsBody(&Detail::CollideBodiesWithEdgeRemoval);
+		// §9.2 "Seams": internal edge removal with a tighter face test than Jolt's, and (M37) no collision between the bodies
+		// of a joint whose CollideConnected is false (Physics/Private/PhysicsEdgeRemoval.h). The pairs outlive the system.
+		const Detail::PhysicsJointedPairs* jointedPairs = &state.JointedPairs;
+		state.System->SetSimCollideBodyVsBody([jointedPairs](const JPH::Body& body1, const JPH::Body& body2, JPH::Mat44Arg centerOfMassTransform1,
+												  JPH::Mat44Arg centerOfMassTransform2, JPH::CollideShapeSettings& settings, JPH::CollideShapeCollector& collector,
+												  const JPH::ShapeFilter& shapeFilter)
+		{
+			Detail::CollideBodiesUnlessJointed(*jointedPairs, body1, body2, centerOfMassTransform1, centerOfMassTransform2, settings, collector, shapeFilter);
+		});
 		Detail::RegisterPhysicsWorld(*state.System);
 		return world;
 	}
@@ -524,6 +532,8 @@ namespace Engine {
 		if (!live.has_value())
 			return;
 
+		// M37: its joints first, so no constraint is left with a pointer to the destroyed body.
+		state.DestroyJointsOf(live->ID);
 		JPH::BodyInterface& bodyInterface = state.System->GetBodyInterface();
 		const JPH::AABox bounds = bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds();
 		bodyInterface.RemoveBody(live->ID);
@@ -613,6 +623,9 @@ namespace Engine {
 		}
 
 		const JPH::AABox oldBounds = bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds();
+		// M37: Jolt keeps the body's origin where it is and moves its centre of mass by the shapes' difference, which the
+		// body's joints (whose frames Jolt holds relative to the centre of mass) are told below.
+		const JPH::Vec3 oldCenterOfMass = bodyInterface.GetShape(live->ID)->GetCenterOfMass();
 		// Never the shape's mass properties (a Kinematic body keeps the fixed ones CreateBody gave it, so it may take a
 		// mesh); a Dynamic body keeps its Mass with the new shape's inertia scaled to it.
 		const JPH::EActivation activation = live->MotionType == JPH::EMotionType::Static ? JPH::EActivation::DontActivate : JPH::EActivation::Activate;
@@ -635,6 +648,7 @@ namespace Engine {
 		{
 			return std::find(newShape.ColliderUserData.begin(), newShape.ColliderUserData.end(), surface.Collider) == newShape.ColliderUserData.end();
 		});
+		state.NotifyJointsShapeChanged(live->ID, newShape.Shape->GetCenterOfMass() - oldCenterOfMass);
 
 		JPH::AABox bounds = oldBounds;
 		bounds.Encapsulate(bodyInterface.GetTransformedShape(live->ID).GetWorldSpaceBounds());
@@ -909,6 +923,8 @@ namespace Engine {
 		state.ContactListener.SetCollisionStepDelta(deltaTime / static_cast<float>(collisionSteps));
 		Utils::BoundAccumulatedForces(*state.System, deltaTime);
 		const JPH::EPhysicsUpdateError errors = state.System->Update(deltaTime, static_cast<int>(collisionSteps), state.TempAllocator.get(), jobSystem);
+		// M37: the joints' last impulses are this collision step's (GetJointState divides them by it).
+		state.CollisionStepDelta = deltaTime / static_cast<float>(collisionSteps);
 		const auto [bodyPairs, contacts] = state.StepContacts.CountBodyPairsAndContacts();
 		state.LastStepBodyPairs = bodyPairs;
 		state.LastStepContacts = contacts;
