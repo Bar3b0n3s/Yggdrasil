@@ -1944,6 +1944,14 @@ Called after the class is replaced while instance state survives.
 
 EditorOnly; Runtime|Test; mutates.
 
+### Behaviour.OnJointBreak
+
+`(self: ScriptInstance, force: number, torque: number) -> ()`
+
+Called in the fixed step when this entity's HingeJoint, SliderJoint, DistanceJoint or FixedJoint breaks, after the physics step's collision and trigger callbacks, with the force (N) and torque (N m) of the last collision step that broke it; Broken is true by then.
+
+All modes; Runtime|Test; mutates.
+
 ### Behaviour.OnLateUpdate
 
 `(self: ScriptInstance, dt: number) -> ()`
@@ -2611,6 +2619,22 @@ All modes; Runtime|Test; pure/read; setter mutates.
 The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### DistanceJoint.GetDistance
+
+`(self: DistanceJoint) -> number`
+
+The distance in metres between the joint's two anchors after the last physics step.
+
+All modes; Runtime|Test; pure/read.
+
+### DistanceJoint.GetForce
+
+`(self: DistanceJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
 
 ### DistanceJoint.MaxDistance
 
@@ -3340,6 +3364,22 @@ The entity whose body this one is joined to: the body of the RigidBody at or abo
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+### FixedJoint.GetForce
+
+`(self: FixedJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
+
+### FixedJoint.GetTorque
+
+`(self: FixedJoint) -> number`
+
+The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque.
+
+All modes; Runtime|Test; pure/read.
+
 ## Fog
 
 The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene).
@@ -3491,6 +3531,30 @@ All modes; Runtime|Test; pure/read; setter mutates.
 The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### HingeJoint.GetAngle
+
+`(self: HingeJoint) -> number`
+
+The hinge's angle in degrees from the pose it was made in, positive by the right-hand rule about Axis, after the last physics step.
+
+All modes; Runtime|Test; pure/read.
+
+### HingeJoint.GetForce
+
+`(self: HingeJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
+
+### HingeJoint.GetTorque
+
+`(self: HingeJoint) -> number`
+
+The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque.
+
+All modes; Runtime|Test; pure/read.
 
 ### HingeJoint.LowerAngle
 
@@ -5263,6 +5327,30 @@ All modes; Runtime|Test; pure/read; setter mutates.
 The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world.
 
 All modes; Runtime|Test; pure/read; setter mutates.
+
+### SliderJoint.GetForce
+
+`(self: SliderJoint) -> number`
+
+The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce.
+
+All modes; Runtime|Test; pure/read.
+
+### SliderJoint.GetPosition
+
+`(self: SliderJoint) -> number`
+
+The slider's position in metres along Axis from the pose it was made in, after the last physics step.
+
+All modes; Runtime|Test; pure/read.
+
+### SliderJoint.GetTorque
+
+`(self: SliderJoint) -> number`
+
+The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque.
+
+All modes; Runtime|Test; pure/read.
 
 ### SliderJoint.LowerLimit
 

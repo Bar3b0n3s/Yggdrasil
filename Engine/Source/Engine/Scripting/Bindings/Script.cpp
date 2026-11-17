@@ -639,6 +639,10 @@ namespace Engine {
 			behaviour.Callback("OnAnimationEvent", "(self: ScriptInstance, event: AnimationEvent) -> ()",
 				"Called in the fixed step for each event an Animator layer's time passes on this entity, after every Animator of the tick was posed, in "
 				"layer and firing order.");
+			// M37 (Docs/Decisions/0054-m37-joints.md decision 8): a joint's break, appended in landing order after M23's.
+			behaviour.Callback("OnJointBreak", "(self: ScriptInstance, force: number, torque: number) -> ()",
+				"Called in the fixed step when this entity's HingeJoint, SliderJoint, DistanceJoint or FixedJoint breaks, after the physics step's "
+				"collision and trigger callbacks, with the force (N) and torque (N m) of the last collision step that broke it; Broken is true by then.");
 			return {};
 		}
 

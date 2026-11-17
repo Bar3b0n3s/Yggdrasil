@@ -417,6 +417,8 @@ declare extern type Behaviour with
 	OnFixedUpdate: (self: ScriptInstance, dt: number) -> ()
 	-- Called after the class is replaced while instance state survives. [EditorOnly; Runtime|Test; mutates]
 	OnHotReload: (self: ScriptInstance) -> ()
+	-- Called in the fixed step when this entity's HingeJoint, SliderJoint, DistanceJoint or FixedJoint breaks, after the physics step's collision and trigger callbacks, with the force (N) and torque (N m) of the last collision step that broke it; Broken is true by then. [All modes; Runtime|Test; mutates]
+	OnJointBreak: (self: ScriptInstance, force: number, torque: number) -> ()
 	-- Called for the current fixed, presentation or late presentation phase. [All modes; Runtime|Test; mutates]
 	OnLateUpdate: (self: ScriptInstance, dt: number) -> ()
 	-- Called once before the instance's first update, in a start flush: for a scene's entities after every OnCreate when the session or a Scene.Load or Scene.Reload starts the scene; for an entity created during the session at the next fixed step's start flush, before that tick's OnFixedUpdate (or in the running start flush, when an OnStart, or an OnCreate run by a start flush or a scene's startup, creates it), never in the frame phase, so it reads the tick's input and fixed delta whatever the frame rate. Its physics bodies exist from then on. While no tick runs (time scale 0) an entity created meanwhile gets no OnStart, and so no OnUpdate, until the first tick after the scale returns. [All modes; Runtime|Test; mutates]
@@ -614,6 +616,10 @@ declare extern type DistanceJoint with
 	Damping: number
 	-- The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope. [All modes; Runtime|Test; pure/read; setter mutates]
 	Frequency: number
+	-- The distance in metres between the joint's two anchors after the last physics step. [All modes; Runtime|Test; pure/read]
+	GetDistance: (self: DistanceJoint) -> number
+	-- The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. [All modes; Runtime|Test; pure/read]
+	GetForce: (self: DistanceJoint) -> number
 	-- The longest the distance between the anchors gets, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	MaxDistance: number
 	-- The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -860,6 +866,10 @@ declare extern type FixedJoint with
 	CollideConnected: boolean
 	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedBody: Entity?
+	-- The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. [All modes; Runtime|Test; pure/read]
+	GetForce: (self: FixedJoint) -> number
+	-- The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. [All modes; Runtime|Test; pure/read]
+	GetTorque: (self: FixedJoint) -> number
 end
 
 -- The scene's distance and height fog, drawn over every surface, terrain, 3D sprite and, optionally, the skybox by view depth (one per scene).
@@ -904,6 +914,12 @@ declare extern type HingeJoint with
 	CollideConnected: boolean
 	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedBody: Entity?
+	-- The hinge's angle in degrees from the pose it was made in, positive by the right-hand rule about Axis, after the last physics step. [All modes; Runtime|Test; pure/read]
+	GetAngle: (self: HingeJoint) -> number
+	-- The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. [All modes; Runtime|Test; pure/read]
+	GetForce: (self: HingeJoint) -> number
+	-- The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. [All modes; Runtime|Test; pure/read]
+	GetTorque: (self: HingeJoint) -> number
 	-- The smallest angle, in degrees from the authored pose, while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
 	LowerAngle: number
 	-- The friction torque, in newton metres, that resists turning while the motor is Off. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1410,6 +1426,12 @@ declare extern type SliderJoint with
 	CollideConnected: boolean
 	-- The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. [All modes; Runtime|Test; pure/read; setter mutates]
 	ConnectedBody: Entity?
+	-- The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. [All modes; Runtime|Test; pure/read]
+	GetForce: (self: SliderJoint) -> number
+	-- The slider's position in metres along Axis from the pose it was made in, after the last physics step. [All modes; Runtime|Test; pure/read]
+	GetPosition: (self: SliderJoint) -> number
+	-- The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. [All modes; Runtime|Test; pure/read]
+	GetTorque: (self: SliderJoint) -> number
 	-- The smallest position, in metres from the authored pose, while UseLimits holds. [All modes; Runtime|Test; pure/read; setter mutates]
 	LowerLimit: number
 	-- The friction force, in newtons, that resists sliding while the motor is Off. [All modes; Runtime|Test; pure/read; setter mutates]

@@ -1887,6 +1887,9 @@ Script members of `HingeJoint`:
 | `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
 | `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
+| `GetAngle` | method | `(self: HingeJoint) -> number` |  | All | The hinge's angle in degrees from the pose it was made in, positive by the right-hand rule about Axis, after the last physics step. |
+| `GetForce` | method | `(self: HingeJoint) -> number` |  | All | The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. |
+| `GetTorque` | method | `(self: HingeJoint) -> number` |  | All | The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. |
 | `LowerAngle` | proxy field | `number` | read/write | All | The smallest angle, in degrees from the authored pose, while UseLimits holds. |
 | `MaxFrictionTorque` | proxy field | `number` | read/write | All | The friction torque, in newton metres, that resists turning while the motor is Off. |
 | `Motor` | proxy field | `JointMotorMode` | read/write | All | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
@@ -1939,6 +1942,9 @@ Script members of `SliderJoint`:
 | `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
 | `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
+| `GetForce` | method | `(self: SliderJoint) -> number` |  | All | The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. |
+| `GetPosition` | method | `(self: SliderJoint) -> number` |  | All | The slider's position in metres along Axis from the pose it was made in, after the last physics step. |
+| `GetTorque` | method | `(self: SliderJoint) -> number` |  | All | The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. |
 | `LowerLimit` | proxy field | `number` | read/write | All | The smallest position, in metres from the authored pose, while UseLimits holds. |
 | `MaxFrictionForce` | proxy field | `number` | read/write | All | The friction force, in newtons, that resists sliding while the motor is Off. |
 | `Motor` | proxy field | `JointMotorMode` | read/write | All | What the motor does: Off, drive to a target velocity, or drive to a target through a spring. |
@@ -1985,6 +1991,8 @@ Script members of `DistanceJoint`:
 | `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
 | `Damping` | proxy field | `number` | read/write | All | The damping ratio of the limits' spring: 0 oscillates, 1 is critically damped. |
 | `Frequency` | proxy field | `number` | read/write | All | The frequency of the spring that softens the limits, in hertz: 0 is rigid, low values stretch like an elastic rope. |
+| `GetDistance` | method | `(self: DistanceJoint) -> number` |  | All | The distance in metres between the joint's two anchors after the last physics step. |
+| `GetForce` | method | `(self: DistanceJoint) -> number` |  | All | The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. |
 | `MaxDistance` | proxy field | `number` | read/write | All | The longest the distance between the anchors gets, in metres. |
 | `MinDistance` | proxy field | `number` | read/write | All | The shortest the distance between the anchors gets, in metres; above MaxDistance the joint is invalid. |
 
@@ -2017,6 +2025,8 @@ Script members of `FixedJoint`:
 | `Broken` | proxy field | `boolean` | read/write | All | Whether the joint is broken: the physics sets it when the joint breaks (OnJointBreak), and a broken joint joins nothing until Broken is set false again, which mends it where it was first made. |
 | `CollideConnected` | proxy field | `boolean` | read/write | All | Whether the two joined bodies still collide with each other; false keeps them apart, with no contact or collision event between them, over all of each body: every collider of a static body an ancestor gathers the connected entity's colliders into. |
 | `ConnectedBody` | proxy field | `Entity?` | read/write | All | The entity whose body this one is joined to: the body of the RigidBody at or above it, else the whole static body its own colliders belong to (an ancestor's, when the ancestor gathers them); null joins the body to the world. |
+| `GetForce` | method | `(self: FixedJoint) -> number` |  | All | The force the joint applied over the last collision step of the last physics step, in newtons, as the break test measures it against BreakForce. |
+| `GetTorque` | method | `(self: FixedJoint) -> number` |  | All | The torque the joint applied over the last collision step of the last physics step, in newton metres, as the break test measures it against BreakTorque. |
 
 ## Structs
 

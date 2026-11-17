@@ -16,8 +16,9 @@
 #include <format>
 #include <utility>
 
-// physics.bodyInfo (Docs/Decisions/0014-m11-decisions.md decision 18): a read of the play session's PhysicsSystem, mapped to
-// the reflected result. Shared by the Editor and the Runtime.
+// physics.bodyInfo (Docs/Decisions/0014-m11-decisions.md decision 18) and physics.jointInfo (M37,
+// Docs/Decisions/0054-m37-joints.md decision 10): reads of the play session's PhysicsSystem, mapped to the reflected results.
+// Shared by the Editor and the Runtime.
 
 namespace Engine {
 
@@ -46,6 +47,40 @@ namespace Engine {
 
 			ENGINE_CORE_ASSERT(false, "Unknown PhysicsMotionType {}", std::to_underlying(type));
 			return BodyType::Static;
+		}
+
+		// SummarizeEntityId's summary as JSON ({id, name, path}, EntitySummary's registered names), or null for the invalid UUID.
+		static VariantValue SummarizeNullableEntityId(const AutomationMethodContext& context, const Scene& scene, UUID id)
+		{
+			if (!id.IsValid())
+				return VariantValue();
+			const EntitySummary summary = SummarizeEntityId(context, scene, id);
+			return VariantValue(Json{ { "id", summary.Id }, { "name", summary.Name }, { "path", summary.Path } });
+		}
+
+		// The registry's JointMotorMode of the world's motor.
+		static JointMotorMode ToJointMotorMode(PhysicsJointMotor motor)
+		{
+			switch (motor)
+			{
+				case PhysicsJointMotor::Off:      return JointMotorMode::Off;
+				case PhysicsJointMotor::Velocity: return JointMotorMode::Velocity;
+				case PhysicsJointMotor::Position: return JointMotorMode::Position;
+			}
+			ENGINE_CORE_ASSERT(false, "Unknown PhysicsJointMotor {}", std::to_underlying(motor));
+			return JointMotorMode::Off;
+		}
+
+		// The play session, or InvalidState "not playing" naming what needs one.
+		static Result<PlaySession*> RequirePhysicsSession(AutomationMethodContext& context, std::string_view what)
+		{
+			PlaySession* session = context.GetPlaySession();
+			if (session == nullptr)
+			{
+				return std::unexpected(Error(ErrorCode::InvalidState, std::format("not playing: {} exist only in a play session", what))
+						.WithHint("start one with play.start {mode: \"simulate\"} (physics without scripts and audio) or play.start, then step it"));
+			}
+			return session;
 		}
 
 	}
@@ -111,6 +146,36 @@ namespace Engine {
 			return result;
 		}
 
+		Result<PhysicsJointInfoResult> PhysicsJointInfo(AutomationMethodContext& context, const PhysicsJointInfoParams& params)
+		{
+			ENGINE_TRY_ASSIGN(PlaySession* const session, Utils::RequirePhysicsSession(context, "joints"));
+			Scene& scene = session->GetScene();
+			ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(scene, params.Entity, "/entity"));
+			const std::optional<PhysicsJointReport> report = session->GetPhysics().GetJointInfo(entity.GetUUID());
+			if (!report.has_value())
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/entity",
+					std::format("entity '{}' ({}) has no joint", entity.GetName(), entity.GetUUID().ToString()),
+					"a joint is a HingeJoint, SliderJoint, DistanceJoint or FixedJoint component; physics.bodyInfo reports bodies"));
+			}
+
+			PhysicsJointInfoResult result;
+			result.Entity = context.MakeEntitySummary(entity);
+			result.Type = report->Type;
+			result.Body = Utils::SummarizeNullableEntityId(context, scene, report->Body);
+			result.ConnectedBody = Utils::SummarizeNullableEntityId(context, scene, report->Connected);
+			result.Created = report->Created;
+			result.Broken = report->Broken;
+			result.Angle = report->Angle;
+			result.Position = report->Position;
+			result.Distance = report->Distance;
+			result.Force = report->Force;
+			result.Torque = report->Torque;
+			result.Motor = Utils::ToJointMotorMode(report->Motor);
+			result.Tick = ToAutomationCounter(session->GetTick());
+			return result;
+		}
+
 	}
 
 	void RegisterPhysicsMethodTypes(TypeRegistry& registry)
@@ -151,6 +216,35 @@ namespace Engine {
 			.Field("grounded", &PhysicsBodyInfoResult::Grounded, "A character standing on walkable ground; false for other bodies.")
 			.Field("groundNormal", &PhysicsBodyInfoResult::GroundNormal, "The normal of a grounded character's ground; (0, 1, 0) otherwise.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
+
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).
+		registry.Struct<PhysicsJointInfoParams>("PhysicsJointInfoParams", "The params of physics.jointInfo.")
+			.Field("entity", &PhysicsJointInfoParams::Entity, "An entity of the play scene holding a joint: 16 hex digits, a unique id prefix or a path.");
+
+		registry.Struct<PhysicsJointInfoResult>("PhysicsJointInfoResult", "The joint of an entity of the play scene, as the play session holds it.")
+			.Field("entity", &PhysicsJointInfoResult::Entity, "The joint's entity.")
+			.Field("type", &PhysicsJointInfoResult::Type, "Which joint component the entity holds.")
+			.Field("body", &PhysicsJointInfoResult::Body,
+				"The owner of the joint's body, the RigidBody at or above the joint's entity, as {id, name, path}; null when the joint has none.")
+			.Field("connectedBody", &PhysicsJointInfoResult::ConnectedBody,
+				"The owner of the body the joint joins its body to, as {id, name, path}; null when it joins the world (or the end resolves to "
+				"no body).")
+			.Field("created", &PhysicsJointInfoResult::Created,
+				"Whether the joint is in force; false for a joint that is refused (PHYSICS_JOINT_INVALID), broken, disabled or not made yet.")
+			.Field("broken", &PhysicsJointInfoResult::Broken, "The component's Broken: the joint broke (or was written broken) and joins nothing.")
+			.Field("angle", &PhysicsJointInfoResult::Angle,
+				"A hinge's angle in degrees from the pose it was made in, after the last physics step; 0 for the other types and while not "
+				"in force.")
+			.Field("position", &PhysicsJointInfoResult::Position,
+				"A slider's position in metres along its axis from the pose it was made in, after the last physics step; 0 otherwise.")
+			.Field("distance", &PhysicsJointInfoResult::Distance,
+				"A distance joint's distance in metres between its anchors, after the last physics step; 0 otherwise.")
+			.Field("force", &PhysicsJointInfoResult::Force,
+				"The force the joint applied over the last collision step, in newtons, as the break test measures it; 0 while not in force.")
+			.Field("torque", &PhysicsJointInfoResult::Torque,
+				"The torque the joint applied over the last collision step, in newton metres; 0 for a distance joint and while not in force.")
+			.Field("motor", &PhysicsJointInfoResult::Motor, "A hinge's or slider's motor; Off for distance and fixed joints.")
+			.Field("tick", &PhysicsJointInfoResult::Tick, "The play session's tick when the joint was read.");
 	}
 
 	void RegisterPhysicsMethods(MethodRegistry& methods)
@@ -168,6 +262,22 @@ namespace Engine {
 				.Examples = { { .Description = "Check whether the ball rests on the ground.", .Params = example } },
 			},
 			&Automation::PhysicsBodyInfo);
+
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).
+		Json jointExample = Json::object();
+		jointExample["entity"] = "/TrapDoor";
+		methods.Add(
+			{
+				.Name = "physics.jointInfo",
+				.Description = "Reports the joint (HingeJoint, SliderJoint, DistanceJoint or FixedJoint) of an entity of the play scene: the "
+							   "bodies it joins, whether it is in force or broken, its angle, position or distance, its force and torque of the "
+							   "last physics step and its motor. Needs a play session.",
+				.RequiredParams = { "entity" },
+				.AvailableInRuntime = true,
+				.AllowedInBatch = true,
+				.Examples = { { .Description = "Read how far the trap door has opened.", .Params = jointExample } },
+			},
+			&Automation::PhysicsJointInfo);
 	}
 
 }

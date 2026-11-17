@@ -187,6 +187,11 @@ namespace Engine {
 		// step and enter/exit pairs stay symmetric (§9.4); destruction or a fault discards held events.
 		void OnPhysicsEvent(const PhysicsEvent& event) override;
 		void OnPhysicsDiagnostic(const PhysicsDiagnostic& diagnostic) override;
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): a joint's break reaches OnJointBreak(self, force, torque) on every
+		// slot of the joint's entity, in slot order, as physics callbacks do: a started instance at once, an unstarted one
+		// holding it (behind its held physics callbacks and animation events, in arrival order) until the first fixed-step
+		// start flush after its OnStart; destruction or a fault discards held events.
+		void OnPhysicsJointBreak(const PhysicsJointBreak& jointBreak) override;
 		// M21 (Docs/Decisions/0032-m21-contract.md decision 13, stream P2): the 2D world's events, delivered as OnPhysicsEvent
 		// delivers the 3D ones (held for unstarted instances, every slot of the receiving entity in slot order), to the
 		// callbacks OnCollisionEnter2D (with the contact), OnCollisionExit2D, OnTriggerEnter2D and OnTriggerExit2D; and its

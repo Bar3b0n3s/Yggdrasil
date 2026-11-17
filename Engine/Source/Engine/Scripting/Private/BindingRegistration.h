@@ -147,6 +147,9 @@ namespace Engine {
 		[[nodiscard]] Status RegisterSaveData(ScriptApiRegistry& api);
 		// M30 (Docs/Decisions/0045-m30-navigation.md decision 10): the Navigation module and its NavigationRaycast alias.
 		[[nodiscard]] Status RegisterNavigation(ScriptApiRegistry& api);
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the HingeJoint, SliderJoint, DistanceJoint and FixedJoint proxies'
+		// methods.
+		[[nodiscard]] Status RegisterJoints(ScriptApiRegistry& api);
 
 	}
 

@@ -280,7 +280,7 @@ namespace Engine {
 	}
 
 	void ScriptEngine::State::Invoke(InstanceKey key, std::string_view callback, const PhysicsEvent* event, bool destroying,
-		const AnimationEventRecord* animation)
+		const AnimationEventRecord* animation, const PhysicsJointBreak* jointBreak)
 	{
 		if (Engine.IsStopped() || Engine.IsReadOnly())
 			return;
@@ -302,7 +302,7 @@ namespace Engine {
 		const ScriptTaskOwner owner{ .Entity = key.Entity, .Case = {}, .Slot = key.Slot };
 		const bool outerSignal = std::exchange(TestSignalRaised, false);
 		std::optional<ScriptError> callbackFailure;
-		const auto operation = [this, tableReference, callback, event, animation, &callbackFailure](ScriptCall& call) -> int
+		const auto operation = [this, tableReference, callback, event, animation, jointBreak, &callbackFailure](ScriptCall& call) -> int
 		{
 			lua_getref(call.State, tableReference);
 			const int self = lua_gettop(call.State);
@@ -356,6 +356,13 @@ namespace Engine {
 				Lua::Push(call, animation->Time);
 				lua_setfield(call.State, -2, "Time");
 				++arguments;
+			}
+			if (jointBreak != nullptr)
+			{
+				// OnJointBreak(self, force, torque) (M37, Docs/Decisions/0054-m37-joints.md decision 8).
+				Lua::Push(call, jointBreak->Force);
+				Lua::Push(call, jointBreak->Torque);
+				arguments += 2;
 			}
 			const auto result = Lua::ProtectedCall(call, arguments, 0);
 			if (!result)
@@ -411,6 +418,12 @@ namespace Engine {
 	{
 		ENGINE_CORE_ASSERT(key.Entity == event.Entity, "An animation event reaches an instance of its Animator's entity");
 		Invoke(key, "OnAnimationEvent", nullptr, false, &event);
+	}
+
+	void ScriptEngine::State::InvokeJointBreak(InstanceKey key, const PhysicsJointBreak& jointBreak)
+	{
+		ENGINE_CORE_ASSERT(key.Entity == jointBreak.Joint, "A joint's break reaches an instance of its joint's entity");
+		Invoke(key, "OnJointBreak", nullptr, false, nullptr, &jointBreak);
 	}
 
 	void ScriptEngine::State::DeliverPhysics(const PhysicsEvent& event, bool is2D)
@@ -601,8 +614,10 @@ namespace Engine {
 					break;
 				if (const Detail::HeldPhysicsEvent* physics = std::get_if<Detail::HeldPhysicsEvent>(&event))
 					InvokePhysics(key, physics->Event, physics->Is2D);
+				else if (const AnimationEventRecord* animation = std::get_if<AnimationEventRecord>(&event))
+					InvokeAnimation(key, *animation);
 				else
-					InvokeAnimation(key, std::get<AnimationEventRecord>(event));
+					InvokeJointBreak(key, std::get<PhysicsJointBreak>(event));
 			}
 		}
 	}

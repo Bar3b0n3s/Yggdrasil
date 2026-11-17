@@ -186,6 +186,95 @@ namespace Engine {
 			REQUIRE((*checkpoint)["colliders"].size() == 1);
 			CHECK((*checkpoint)["colliders"][0]["name"] == Json("Checkpoint"));
 		}
+
+		TEST_CASE("PhysicsMethods: physics.jointInfo reports a joint's bodies, reading, force and motor in play")
+		{
+			Test::AutomationFixture setup("PhysicsJointInfo");
+			REQUIRE(setup.Call("edit.batch", ParsePhysicsMethodJson(R"({"label":"Joints","ops":[
+				{"method":"entity.create","params":{"name":"Post","components":{"Transform":{"Translation":[0,5,0]},
+					"RigidBody":{"Type":"Static"},"BoxCollider":{"HalfExtents":[0.1,0.1,0.1]}}}},
+				{"method":"entity.create","params":{"name":"Bob","components":{"Transform":{"Translation":[0,3,0]},
+					"RigidBody":{"Type":"Dynamic"},"SphereCollider":{"Radius":0.1},
+					"DistanceJoint":{"ConnectedBody":"/Post","MinDistance":0,"MaxDistance":2}}}},
+				{"method":"entity.create","params":{"name":"Door","components":{"Transform":{"Translation":[5,2,0]},
+					"RigidBody":{"Type":"Dynamic"},"BoxCollider":{"HalfExtents":[0.5,1,0.05]},
+					"HingeJoint":{"Anchor":[-0.5,0,0],"Axis":[0,1,0],"Motor":"Velocity","MotorTargetVelocity":90}}}},
+				{"method":"entity.create","params":{"name":"Loose","components":{"Transform":{"Translation":[10,2,0]},
+					"RigidBody":{"Type":"Dynamic"},"BoxCollider":{},"FixedJoint":{"Broken":true}}}}]})"))
+					.has_value());
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "seed", 3 } }).has_value());
+			StepPhysicsScene(setup, 30);
+
+			// The bob hangs at the end of its rope from the post, which carries its weight.
+			const Result<Json> bob = setup.Call("physics.jointInfo", Json{ { "entity", "/Bob" } });
+			REQUIRE_MESSAGE(bob.has_value(), bob.error().ToString());
+			CHECK((*bob)["entity"]["name"] == Json("Bob"));
+			CHECK((*bob)["type"] == Json("Distance"));
+			CHECK((*bob)["body"]["name"] == Json("Bob"));
+			CHECK((*bob)["connectedBody"]["name"] == Json("Post"));
+			CHECK((*bob)["created"] == Json(true));
+			CHECK((*bob)["broken"] == Json(false));
+			CHECK(JsonReader((*bob)["distance"]).ReadFloat().value_or(0.0f) == doctest::Approx(2.0f).epsilon(0.02));
+			CHECK(JsonReader((*bob)["force"]).ReadFloat().value_or(0.0f) > 1.0f);
+			CHECK((*bob)["angle"] == Json(0.0));
+			CHECK((*bob)["position"] == Json(0.0));
+			CHECK((*bob)["motor"] == Json("Off"));
+			CHECK((*bob)["tick"] == Json(30));
+
+			// The door turns on its motor, about a vertical hinge to the world.
+			const Result<Json> door = setup.Call("physics.jointInfo", Json{ { "entity", "/Door" } });
+			REQUIRE_MESSAGE(door.has_value(), door.error().ToString());
+			CHECK((*door)["type"] == Json("Hinge"));
+			CHECK((*door)["connectedBody"].is_null());
+			CHECK((*door)["created"] == Json(true));
+			CHECK(JsonReader((*door)["angle"]).ReadFloat().value_or(0.0f) > 10.0f);
+			CHECK((*door)["distance"] == Json(0.0));
+			CHECK((*door)["motor"] == Json("Velocity"));
+
+			// A joint authored broken is not in force and carries nothing.
+			const Result<Json> loose = setup.Call("physics.jointInfo", Json{ { "entity", "/Loose" } });
+			REQUIRE_MESSAGE(loose.has_value(), loose.error().ToString());
+			CHECK((*loose)["type"] == Json("Fixed"));
+			CHECK((*loose)["created"] == Json(false));
+			CHECK((*loose)["broken"] == Json(true));
+			CHECK((*loose)["force"] == Json(0.0));
+			CHECK((*loose)["torque"] == Json(0.0));
+		}
+
+		TEST_CASE("PhysicsMethods: physics.jointInfo needs a play session and an entity with a joint")
+		{
+			Test::AutomationFixture setup("PhysicsJointInfoErrors");
+			REQUIRE(setup.Call("entity.create", ParsePhysicsMethodJson(R"({"name":"Empty"})")).has_value());
+			const Json edit = setup.Request("physics.jointInfo", Json{ { "entity", "/Empty" } });
+			CHECK(edit["error"]["data"]["errorCode"] == Json("InvalidState"));
+			REQUIRE(setup.Call("play.start", Json{ { "lockstep", true }, { "mode", "simulate" } }).has_value());
+			const Result<Json> noJoint = setup.Call("physics.jointInfo", Json{ { "entity", "/Empty" } });
+			REQUIRE_FALSE(noJoint.has_value());
+			CHECK(noJoint.error().GetCode() == ErrorCode::NotFound);
+			const Json missing = setup.Request("physics.jointInfo", Json{ { "entity", "/Nobody" } });
+			CHECK(missing["error"]["code"] == Json(-32001));
+			const Json noEntity = setup.Request("physics.jointInfo", Json::object());
+			CHECK(noEntity["error"]["code"] == Json(-32602));
+		}
+
+		TEST_CASE("PhysicsMethods: physics.jointInfo is a read-only batchable method of both hosts and no tool")
+		{
+			Test::EditorTestFixture fixture("PhysicsJointInfoFlags");
+			MethodRegistry methods(fixture.GetEngine().GetTypeRegistry());
+			RegisterEditorMethods(methods, {});
+			methods.Freeze();
+			const MethodDescriptor* method = methods.Find("physics.jointInfo");
+			REQUIRE(method != nullptr);
+			const MethodSpecification& specification = method->Specification;
+			CHECK_FALSE(specification.Mutates);
+			CHECK_FALSE(specification.SupportsDryRun);
+			CHECK_FALSE(specification.ExposeAsTool);
+			CHECK_FALSE(specification.AvailableInLauncher);
+			CHECK(specification.AvailableInRuntime);
+			CHECK(specification.AllowedInBatch);
+			CHECK(specification.RequiredParams == std::vector<std::string>{ "entity" });
+			CHECK_FALSE(method->Pending);
+		}
 	}
 
 }

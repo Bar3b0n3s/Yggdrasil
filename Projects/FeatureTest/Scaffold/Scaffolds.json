@@ -510,6 +510,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "Joints.jsonl",
+			"IdSeed": 3400,
+			"Renderer": "none"
+		},
+		{
+			"File": "JointsReplay.jsonl",
+			"IdSeed": 3401,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

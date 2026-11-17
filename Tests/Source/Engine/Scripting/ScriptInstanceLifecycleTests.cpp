@@ -33,6 +33,9 @@ namespace Engine {
 		// M23 (Docs/Decisions/0034-m23-contract.md decision 31): OnAnimationEvent in a play session (ScriptAnimationTests.cpp).
 		void RunAnimationCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
 
+		// M37 (Docs/Decisions/0054-m37-joints.md decision 8): OnJointBreak in a play session (ScriptJointTests.cpp).
+		void RunJointBreakCallbackCoverage(RunModes mode, std::vector<ScriptApiCoverage>& snapshots);
+
 		static int RecordScriptLifecycle(ScriptCall& call)
 		{
 			const std::string message = Lua::Check<std::string>(call, 1);
@@ -461,6 +464,7 @@ return Script.Define("UiCoverage", T)
 			RunBehaviour2DCallbacksCoverage(mode, snapshots);
 			RunBehaviourUiCoverage(mode, snapshots);
 			RunAnimationCallbackCoverage(mode, snapshots);
+			RunJointBreakCallbackCoverage(mode, snapshots);
 			if (mode == RunModes::Editor)
 				RunBehaviourReloadCoverage(snapshots);
 			REQUIRE(snapshots.size() > firstSnapshot);

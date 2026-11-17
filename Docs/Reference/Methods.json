@@ -16880,6 +16880,137 @@
 			]
 		},
 		{
+			"name": "physics.jointInfo",
+			"domain": "physics",
+			"description": "Reports the joint (HingeJoint, SliderJoint, DistanceJoint or FixedJoint) of an entity of the play scene: the bodies it joins, whether it is in force or broken, its angle, position or distance, its force and torque of the last physics step and its motor. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PhysicsJointInfoParams",
+				"description": "The params of physics.jointInfo.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene holding a joint: 16 hex digits, a unique id prefix or a path.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PhysicsJointInfoResult",
+				"description": "The joint of an entity of the play scene, as the play session holds it.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The joint's entity.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"type": {
+						"description": "Which joint component the entity holds.",
+						"enum": ["Hinge", "Slider", "Distance", "Fixed"]
+					},
+					"body": {
+						"description": "The owner of the joint's body, the RigidBody at or above the joint's entity, as {id, name, path}; null when the joint has none."
+					},
+					"connectedBody": {
+						"description": "The owner of the body the joint joins its body to, as {id, name, path}; null when it joins the world (or the end resolves to no body)."
+					},
+					"created": {
+						"description": "Whether the joint is in force; false for a joint that is refused (PHYSICS_JOINT_INVALID), broken, disabled or not made yet.",
+						"type": "boolean"
+					},
+					"broken": {
+						"description": "The component's Broken: the joint broke (or was written broken) and joins nothing.",
+						"type": "boolean"
+					},
+					"angle": {
+						"description": "A hinge's angle in degrees from the pose it was made in, after the last physics step; 0 for the other types and while not in force.",
+						"type": "number"
+					},
+					"position": {
+						"description": "A slider's position in metres along its axis from the pose it was made in, after the last physics step; 0 otherwise.",
+						"type": "number"
+					},
+					"distance": {
+						"description": "A distance joint's distance in metres between its anchors, after the last physics step; 0 otherwise.",
+						"type": "number"
+					},
+					"force": {
+						"description": "The force the joint applied over the last collision step, in newtons, as the break test measures it; 0 while not in force.",
+						"type": "number"
+					},
+					"torque": {
+						"description": "The torque the joint applied over the last collision step, in newton metres; 0 for a distance joint and while not in force.",
+						"type": "number"
+					},
+					"motor": {
+						"description": "A hinge's or slider's motor; Off for distance and fixed joints.",
+						"enum": ["Off", "Velocity", "Position"]
+					},
+					"tick": {
+						"description": "The play session's tick when the joint was read.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Read how far the trap door has opened.",
+					"params": {
+						"entity": "/TrapDoor"
+					}
+				}
+			]
+		},
+		{
 			"name": "physics2d.bodyInfo",
 			"domain": "physics2d",
 			"description": "Reports the 2D physics body of an entity of the play scene (the body it owns, or the compound its colliders belong to): type, layer, colliders, position and angle in the XY plane, velocities, sleeping state, bounds and active contacts. Needs a play session.",

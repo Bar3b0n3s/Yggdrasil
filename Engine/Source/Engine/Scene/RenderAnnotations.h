@@ -25,6 +25,8 @@ namespace Engine {
 	// Label mode does not filter bounds/axes/colliders; those flags independently apply to eligible entities.
 	// InvalidArgument: invalid snapshot alpha/annotation values. Build first, then append, so failure is atomic.
 	// Repeated calls intentionally append again: the host calls once for each freshly extracted snapshot.
+	// M37 (Docs/Decisions/0054-m37-joints.md decision 11): with Colliders, the joints follow the colliders (BuildJointDebugDraw
+	// with `physics`: in force where the bodies hold them, otherwise where their components place them).
 	// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 28, stream P3): with Colliders, the 2D colliders follow the 3D
 	// ones (BuildCollider2DDebugDraw with `physics2D`, the session's Physics2DSystem for play, null in edit). Both hosts pass
 	// it for a play scene: the editor's views (EditorHostViewports) and viewport.screenshot (ScreenshotMethods.cpp's one

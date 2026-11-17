@@ -52,6 +52,9 @@ namespace Engine {
 			// M30 (Docs/Decisions/0045-m30-navigation.md decision 10): the Navigation module, after the earlier milestones'
 			// registrations (landing order: after M28's RegisterSaveData, ADR 0042's ledger).
 			ENGINE_TRY(ScriptBindings::RegisterNavigation(api));
+			// M37 (Docs/Decisions/0054-m37-joints.md decision 8): the joint proxies' methods, after M30's RegisterNavigation (ADR
+			// 0052's ledger: the only new line).
+			ENGINE_TRY(ScriptBindings::RegisterJoints(api));
 			return {};
 		}
 
