@@ -621,6 +621,75 @@ return Script.Define("Conductor", C)
 			CHECK(session.GetScriptErrors().GetErrors().empty());
 		}
 
+		// Phase 6's landing (M38 and M40 share PlaySession and IScriptHost in disjoint regions, the ledger): one Scene.Load keeps
+		// both the session's locale, which the new scene's VM starts in (Docs/Decisions/0055-m38-runtime-locale.md decision 1),
+		// and the session's music, whose voice plays on (Docs/Decisions/0057-m40-music.md decision 5).
+		TEST_CASE("PlaySession: a Scene.Load keeps both the session's locale and its music")
+		{
+			Test::ScriptTestFixture fixture;
+			const AssetHandle conductor(0x4000b4), next(0x4000b5);
+			fixture.GetAssetManager().Publish(TrackA, MakeToneClip(10.0, 0.5), "Assets/Audio/Realm.sfx");
+			REQUIRE(fixture.AddScript(conductor, "Assets/Scripts/Conductor.luau", R"(
+local C = {}
+function C:OnCreate() self.CreatedIn = Loc.GetLocale() end
+function C:OnStart()
+	Audio.PlayMusic(Assets.Load("Assets/Audio/Realm.sfx"))
+end
+function C:OnFixedUpdate()
+	if self.CreatedIn ~= "fr" then return end
+	if Time.GetTick() == 3 then Loc.SetLocale("de") end
+	if Time.GetTick() == 5 then Scene.Load(Assets.Load("Assets/Scenes/Hall.scene")) end
+end
+return Script.Define("Conductor", C)
+)"));
+			// The hall holds the same conductor, which asks for the track playing.
+			Scene& scene = fixture.GetScene();
+			AttachScript(scene.CreateEntity("Conductor"), conductor);
+			Result<Json> document = SceneSerializer::ToJson(scene);
+			REQUIRE(document.has_value());
+			auto data = CreateRef<SceneData>();
+			data->Document = CreateRef<const Json>(std::move(*document));
+			fixture.GetAssetManager().Publish(next, data, "Assets/Scenes/Hall.scene");
+
+			VirtualFileSystem vfs;
+			Result<Scope<AudioEngine>> createdAudio = AudioEngine::Create({ .Device = AudioDeviceKind::None, .Decoding = AudioDecoding::Deterministic }, vfs);
+			REQUIRE_MESSAGE(createdAudio.has_value(), createdAudio.error().ToString());
+			AudioEngine& audio = **createdAudio;
+			PlaySessionSpecification specification{};
+			specification.Registry = &fixture.GetTypes();
+			specification.Assets = &fixture.GetAssetManager();
+			specification.ScriptSchemas = fixture.GetSchemaSnapshot();
+			specification.Seed = 40;
+			specification.Audio = &audio;
+			specification.OwnsAudioTime = true;
+			specification.Project.Localization.Locale = "fr";
+			Result<Scope<PlaySession>> started = PlaySession::CreateFromScene(specification, scene);
+			REQUIRE_MESSAGE(started.has_value(), started.error().ToString());
+			PlaySession& session = **started;
+			session.SetExtractionEnabled(false);
+			SessionMusic* music = session.GetMusic();
+			REQUIRE(music != nullptr);
+
+			Test::RunTicks(session, 4);
+			CHECK(session.GetLocale() == "de");
+			const MusicVoices before = music->GetVoices();
+			REQUIRE(before.CurrentInfo.has_value());
+			Test::RunTicks(session, 6);
+			REQUIRE(session.GetSceneGeneration() == 2);
+			CHECK(session.GetScriptErrors().GetErrors().empty());
+			CHECK(session.GetLocale() == "de");
+			CHECK(session.GetStartLocale() == "fr");
+			const UUID hallConductor = session.GetScene().FindEntityByPath("/Conductor").GetUUID();
+			const Result<ScriptEvaluation> createdIn = session.GetScripts()->Evaluate("return self.CreatedIn", {}, hallConductor);
+			REQUIRE_MESSAGE(createdIn.has_value(), createdIn.error().ToString());
+			CHECK(createdIn->Value.Get() == Json("de"));
+			const MusicVoices through = music->GetVoices();
+			REQUIRE(through.CurrentInfo.has_value());
+			CHECK(through.Current.Voice == before.Current.Voice);
+			CHECK(through.Current.Clip == TrackA);
+			CHECK(audio.GetStats().StartedVoices == 1);
+		}
+
 		// Decisions 5 and 6: the feature host discovers test suites in scratch sessions without audio, whose scene's startup
 		// callbacks ask for their track and set the mix as in any session: the music records the request, and the mixer calls
 		// are checked, then ignored, GetGroupVolume reading 1 (the W40.1 review's follow-up).
