@@ -64,7 +64,8 @@ namespace Engine {
 			glm::vec3 Point{ 0.0f };
 		};
 
-		[[nodiscard]] static bool IsNavigationQueryPosition(const glm::vec3& position)
+		// Read only by the queries' ENGINE_CORE_ASSERTs, which Dist compiles out.
+		[[maybe_unused]] [[nodiscard]] static bool IsNavigationQueryPosition(const glm::vec3& position)
 		{
 			return std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z)
 				&& !glm::any(glm::greaterThan(glm::abs(position), glm::vec3(MaxNavigationCoordinate)));
