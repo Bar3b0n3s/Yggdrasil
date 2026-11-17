@@ -278,6 +278,21 @@ namespace Engine {
 			return {};
 		}
 
+		// M40 (AudioEngine.h "Fades"): a fade's frames fit miniaudio's 32-bit fader length.
+		static Status ValidateFadeFrames(uint64_t frames)
+		{
+			if (frames > AudioEngine::MaxFadeFrames)
+				return MakeError(ErrorCode::InvalidArgument, "a fade lasts at most {} frames (got {})", AudioEngine::MaxFadeFrames, frames);
+			return {};
+		}
+
+		static Status ValidateFade(const AudioVoiceFade& fade)
+		{
+			ENGINE_TRY(ValidateVolume(fade.From, "fade's starting level"));
+			ENGINE_TRY(ValidateVolume(fade.To, "fade's target level"));
+			return ValidateFadeFrames(fade.Frames);
+		}
+
 		static Status ValidateTransform(const AudioVoiceTransform& transform)
 		{
 			if (!IsFinite(transform.Position) || !IsFinite(transform.Direction) || !IsFinite(transform.Velocity))
@@ -364,6 +379,16 @@ namespace Engine {
 		uint64_t StartSequence = 0;
 		bool Paused = false;
 		bool Streamed = false;
+		// M40 (AudioEngine.h "Fades"): the voice's level while no fade is in progress, applied through its volume (1 while a
+		// fade is); and the fade in progress (Fading): its levels and length, where it began on the voice's clock
+		// (State::GetMixedFrames) and what its end does.
+		float Level = 1.0f;
+		bool Fading = false;
+		float FadeFrom = 1.0f;
+		float FadeTo = 1.0f;
+		uint64_t FadeFrames = 0;
+		uint64_t FadeStart = 0;
+		AudioFadeEnd FadeEnd = AudioFadeEnd::Hold;
 	};
 
 	struct AudioEngine::State
@@ -446,10 +471,20 @@ namespace Engine {
 		void ProcessJobs();
 		void Pull(uint64_t frames, std::span<float> destination);
 		void AppendCapture(std::span<const float> samples);
+		// M40: ends the fades that completed (AudioEngine.h "Fades"): a Hold fade is folded into its voice, a Release fade's
+		// voice is released.
+		void CompleteFades();
 		void ReleaseFinishedVoices();
 		[[nodiscard]] Ref<const AudioClipPayload> FindResidentPayload(std::string_view resourceName);
 		[[nodiscard]] Status ApplyGroup(ma_sound& sound, AudioGroup group);
-		static void ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings);
+		// The voice's settings, its volume times `level` (AudioVoice::Level).
+		static void ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, float level);
+		// M40: the frames the mixer has output of the voice (its node's clock, which a paused voice holds), and the level its
+		// fade has reached after `mixed` of them, computed as miniaudio's fader computes it (ma_fader_get_current_volume).
+		[[nodiscard]] static uint64_t GetMixedFrames(const AudioVoice& voice);
+		[[nodiscard]] static float GetLevel(const AudioVoice& voice, uint64_t mixed);
+		// M40: starts the fade of `voice` from `from` to `to` over `frames` (0: `to` at once, the fader switched off).
+		static void BeginFade(AudioVoice& voice, float from, float to, uint64_t frames, AudioFadeEnd end);
 		static void ApplyTransform(ma_sound& sound, const AudioVoiceTransform& transform);
 		// The voice's effective Doppler factor (GetEffectiveDopplerFactor) for its settings, its velocity and the listener's.
 		void ApplyDoppler(ma_sound& sound, const AudioVoiceSettings& settings, const AudioVoiceTransform& transform);
@@ -757,6 +792,7 @@ namespace Engine {
 				done += chunk;
 			}
 		}
+		CompleteFades();
 		ReleaseFinishedVoices();
 	}
 
@@ -769,6 +805,31 @@ namespace Engine {
 		Capture.Samples.insert(Capture.Samples.end(), samples.begin(), samples.begin() + static_cast<std::ptrdiff_t>(kept * AudioChannelCount));
 		if (kept < frames)
 			Capture.Truncated = true;
+	}
+
+	void AudioEngine::State::CompleteFades()
+	{
+		std::vector<AudioVoiceHandle> released;
+		Voices.ForEach([&released](AudioVoiceHandle handle, AudioVoice& voice)
+		{
+			if (!voice.Fading)
+				return;
+			const uint64_t mixed = GetMixedFrames(voice);
+			if (mixed < voice.FadeStart || mixed - voice.FadeStart < voice.FadeFrames)
+				return;
+			if (voice.FadeEnd == AudioFadeEnd::Release)
+			{
+				released.push_back(handle);
+				return;
+			}
+			// Folded: the fader is switched off and the voice plays on at the target level through its volume.
+			BeginFade(voice, voice.FadeTo, voice.FadeTo, 0, AudioFadeEnd::Hold);
+		});
+		for (const AudioVoiceHandle handle : released)
+		{
+			[[maybe_unused]] const Status destroyed = Voices.Destroy(handle);
+			ENGINE_CORE_ASSERT(destroyed.has_value(), "A faded audio voice was not alive");
+		}
 	}
 
 	void AudioEngine::State::ReleaseFinishedVoices()
@@ -806,10 +867,11 @@ namespace Engine {
 		return {};
 	}
 
-	void AudioEngine::State::ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings)
+	void AudioEngine::State::ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, float level)
 	{
 		const AudioSpatialization& spatialization = settings.Spatialization;
-		ma_sound_set_volume(&sound, settings.Volume);
+		// A level of 1 (every voice that never faded) leaves the volume exactly as given.
+		ma_sound_set_volume(&sound, settings.Volume * level);
 		ma_sound_set_pitch(&sound, std::min(settings.Pitch, MaxEffectivePitch));
 		ma_sound_set_looping(&sound, settings.Loop ? MA_TRUE : MA_FALSE);
 		ma_sound_set_spatialization_enabled(&sound, settings.Spatial ? MA_TRUE : MA_FALSE);
@@ -898,6 +960,56 @@ namespace Engine {
 		if (ma_sound_get_length_in_pcm_frames(voice.Sound.Get(), &length) != MA_SUCCESS)
 			return 0;
 		return length;
+	}
+
+	uint64_t AudioEngine::State::GetMixedFrames(const AudioVoice& voice)
+	{
+		// An atomic counter the mixing thread advances by the frames it outputs of the node, so it is read from the main
+		// thread whoever mixes (AudioEngine.h "Fades").
+		return ma_node_get_time(voice.Sound.Get());
+	}
+
+	float AudioEngine::State::GetLevel(const AudioVoice& voice, uint64_t mixed)
+	{
+		if (!voice.Fading)
+			return voice.Level;
+		const uint64_t progress = mixed > voice.FadeStart ? mixed - voice.FadeStart : 0;
+		if (progress == 0)
+			return voice.FadeFrom;
+		if (progress >= voice.FadeFrames)
+			return voice.FadeTo;
+		// ma_fader_get_current_volume's interpolation: both counts fit 32 bits (MaxFadeFrames), and the mix is x + (y - x) * a.
+		const float fraction = static_cast<float>(static_cast<uint32_t>(progress)) / static_cast<float>(static_cast<uint32_t>(voice.FadeFrames));
+		const float span = voice.FadeTo - voice.FadeFrom;
+		const float step = span * fraction;
+		return voice.FadeFrom + step;
+	}
+
+	void AudioEngine::State::BeginFade(AudioVoice& voice, float from, float to, uint64_t frames, AudioFadeEnd end)
+	{
+		ma_sound* sound = voice.Sound.Get();
+		if (frames == 0)
+		{
+			// The level at once, through the volume; a fader in use is switched off at the voice's next mixed frame (a fader
+			// from 1 to 1 does nothing), as the volume changes.
+			if (voice.Fading)
+				ma_sound_set_fade_in_pcm_frames(sound, 1.0f, 1.0f, 0);
+			voice.Fading = false;
+			voice.Level = to;
+			ma_sound_set_volume(sound, voice.Settings.Volume * voice.Level);
+			return;
+		}
+		// The fader takes the level from here on; miniaudio applies a fade at the voice's next mixed frame, so its first
+		// frame is the fade's frame 0 on the voice's clock (GetMixedFrames).
+		voice.Fading = true;
+		voice.FadeFrom = from;
+		voice.FadeTo = to;
+		voice.FadeFrames = frames;
+		voice.FadeStart = GetMixedFrames(voice);
+		voice.FadeEnd = end;
+		voice.Level = 1.0f;
+		ma_sound_set_volume(sound, voice.Settings.Volume);
+		ma_sound_set_fade_in_pcm_frames(sound, from, to, frames);
 	}
 
 	AudioEngine::AudioEngine(ConstructionKey /*key*/)
@@ -1046,6 +1158,7 @@ namespace Engine {
 			return MakeError(ErrorCode::NotFound, "the audio clip {:#x} is not registered", description.Clip.GetValue());
 		ENGINE_TRY(Utils::ValidateSettings(description.Settings));
 		ENGINE_TRY(Utils::ValidateTransform(description.Transform));
+		ENGINE_TRY(Utils::ValidateFade(description.Fade));
 
 		std::optional<AudioVoiceHandle> victim;
 		if (state.Voices.GetSize() >= MaxAudioVoices)
@@ -1063,21 +1176,6 @@ namespace Engine {
 			flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
 		ma_sound_group& group = *state.Groups[std::to_underlying(description.Settings.Group)].Get();
 		ENGINE_TRY_ASSIGN(SoundNode sound, SoundNode::CreateSound(state.Mixer, clip->ResourceName, flags, group));
-		State::ApplySettings(*sound.Get(), description.Settings);
-		State::ApplyTransform(*sound.Get(), description.Transform);
-		state.ApplyDoppler(*sound.Get(), description.Settings, description.Transform);
-		if (!description.StartPaused)
-		{
-			if (const ma_result result = ma_sound_start(sound.Get()); result != MA_SUCCESS)
-				return std::unexpected(MakeMiniaudioError(result, std::format("cannot start a voice of the audio clip '{}'", clip->ResourceName)));
-		}
-
-		if (victim.has_value())
-		{
-			ENGINE_TRY(state.Voices.Destroy(*victim));
-			++state.StolenVoices;
-		}
-
 		AudioVoice voice{ .Payload = clip->Payload,
 			.Sound = std::move(sound),
 			.Clip = description.Clip,
@@ -1087,9 +1185,30 @@ namespace Engine {
 			.Transform = description.Transform,
 			.Priority = description.Priority,
 			.Owner = description.Owner,
-			.StartSequence = state.NextStartSequence++,
+			.StartSequence = 0,
 			.Paused = description.StartPaused,
 			.Streamed = clip->Streamed };
+		ma_sound* started = voice.Sound.Get();
+		State::ApplySettings(*started, description.Settings, 1.0f);
+		State::ApplyTransform(*started, description.Transform);
+		state.ApplyDoppler(*started, description.Settings, description.Transform);
+		// M40: the voice's fade, set before it starts, so its first mixed frame is the fade's first (no fade, the default,
+		// leaves the voice exactly as before fades existed).
+		if (description.Fade != AudioVoiceFade{})
+			State::BeginFade(voice, description.Fade.From, description.Fade.To, description.Fade.Frames, AudioFadeEnd::Hold);
+		if (!description.StartPaused)
+		{
+			if (const ma_result result = ma_sound_start(started); result != MA_SUCCESS)
+				return std::unexpected(MakeMiniaudioError(result, std::format("cannot start a voice of the audio clip '{}'", clip->ResourceName)));
+		}
+
+		if (victim.has_value())
+		{
+			ENGINE_TRY(state.Voices.Destroy(*victim));
+			++state.StolenVoices;
+		}
+
+		voice.StartSequence = state.NextStartSequence++;
 		ENGINE_TRY_ASSIGN(const AudioVoiceHandle handle, state.Voices.Create(std::move(voice)));
 		++state.StartedVoices;
 		return handle;
@@ -1124,7 +1243,7 @@ namespace Engine {
 		ENGINE_TRY(Utils::ValidateSettings(settings));
 		if (settings.Group != target->Settings.Group)
 			ENGINE_TRY(m_State->ApplyGroup(*target->Sound.Get(), settings.Group));
-		State::ApplySettings(*target->Sound.Get(), settings);
+		State::ApplySettings(*target->Sound.Get(), settings, target->Level);
 		m_State->ApplyDoppler(*target->Sound.Get(), settings, target->Transform);
 		target->Settings = settings;
 		return {};
@@ -1143,6 +1262,21 @@ namespace Engine {
 		return {};
 	}
 
+	Status AudioEngine::FadeVoice(AudioVoiceHandle voice, float target, uint64_t frames, AudioFadeEnd end)
+	{
+		AudioVoice* fading = m_State->Voices.TryGet(voice);
+		if (fading == nullptr)
+			return MakeError(ErrorCode::NotFound, "the audio voice {:#x} is not alive", voice.GetValue());
+		ENGINE_TRY(Utils::ValidateVolume(target, "fade's target level"));
+		ENGINE_TRY(Utils::ValidateFadeFrames(frames));
+		if (end != AudioFadeEnd::Hold && end != AudioFadeEnd::Release)
+			return MakeError(ErrorCode::InvalidArgument, "unknown fade end {}", std::to_underlying(end));
+		if (frames == 0 && end == AudioFadeEnd::Release)
+			return m_State->Voices.Destroy(voice);
+		State::BeginFade(*fading, State::GetLevel(*fading, State::GetMixedFrames(*fading)), target, frames, end);
+		return {};
+	}
+
 	bool AudioEngine::IsVoiceAlive(AudioVoiceHandle voice) const
 	{
 		return m_State->Voices.IsAlive(voice);
@@ -1153,6 +1287,7 @@ namespace Engine {
 		const AudioVoice* target = m_State->Voices.TryGet(voice);
 		if (target == nullptr)
 			return MakeError(ErrorCode::NotFound, "the audio voice {:#x} is not alive", voice.GetValue());
+		const uint64_t mixed = State::GetMixedFrames(*target);
 		return AudioVoiceInfo{ .Voice = voice,
 			.Clip = target->Clip,
 			.ClipName = target->ClipName,
@@ -1165,7 +1300,10 @@ namespace Engine {
 			.Streamed = target->Streamed,
 			.CursorFrames = m_State->GetCursor(*target),
 			.LengthFrames = State::GetLength(*target),
-			.StartSequence = target->StartSequence };
+			.StartSequence = target->StartSequence,
+			.FadeVolume = State::GetLevel(*target, mixed),
+			.FadeTarget = target->Fading ? target->FadeTo : target->Level,
+			.FadeEnd = target->Fading ? target->FadeEnd : AudioFadeEnd::Hold };
 	}
 
 	std::vector<AudioVoiceInfo> AudioEngine::GetVoices() const
@@ -1263,6 +1401,7 @@ namespace Engine {
 			if (frames > 0)
 				state.Pull(frames, {});
 		}
+		state.CompleteFades();
 		state.ReleaseFinishedVoices();
 	}
 

@@ -55,8 +55,9 @@
 //     (round half up with a fractional accumulator), so voices advance in headless runs; tests pull with ReadFrames.
 // Every pull of the engine's own (AdvanceSimulationTick, Update's host pull, ReadFrames) first processes the pending
 // resource-manager jobs inline when decoding is Deterministic, then reads ma_engine_read_pcm_frames, appends the frames to
-// the capture buffer while capturing and discards them otherwise, and finally releases the voices that reached the end of
-// a non-looping clip. A pull longer than 10 ms (480 frames) is read in chunks of at most 480 frames with the pending jobs
+// the capture buffer while capturing and discards them otherwise, and finally ends the fades it completed (see "Fades") and
+// releases the voices that reached the end of a non-looping clip or of a releasing fade; Update does the same for the
+// device's reads. A pull longer than 10 ms (480 frames) is read in chunks of at most 480 frames with the pending jobs
 // processed before each chunk, so a stream's next page is decoded before the mixer needs it whatever the pull's length.
 //
 // Deterministic decoding (§10.1). AudioDecoding::Deterministic (tests and headless processes) creates the resource manager
@@ -97,6 +98,18 @@
 // pool is full, PlayVoice steals the voice with the lowest priority, among those the one farthest from the listener (a
 // non-spatial voice counts as distance 0), among those the oldest (the smallest start sequence); a voice is stolen only
 // when its priority is not above the new voice's, else PlayVoice fails. A stolen voice's handle becomes stale.
+//
+// Fades (§10.1; M40, Docs/Decisions/0057-m40-music.md decision 3). A voice's level is a multiplier of its Volume that a fade
+// moves linearly from one value to another over a number of the voice's own mixed frames (48 kHz), on miniaudio's per-voice
+// fader: AudioVoiceDescription::Fade starts a voice with one, applied before it starts so no frame plays at another level,
+// and FadeVoice starts one from the level the voice has reached. A fade counts the frames the engine mixes of its voice (the
+// voice node's own clock, ma_node_get_time), so a paused voice's fade holds and a fade follows the time source as cursors
+// do: simulation time in lockstep and test runs, real time while the device reads. A fade that completes is folded into the
+// voice: miniaudio's fader is switched off and the voice plays on at the target level through its volume (Volume times the
+// level), so the fader runs only while a fade is in progress. A fade with AudioFadeEnd::Release releases its voice at the
+// end of the pull that completes it, like a voice at the end of its clip (exact while the engine pulls its own frames;
+// within a device period, at a level near the target, at the Update after it while the device reads). A voice without a
+// fade never touches the fader, so it mixes exactly as before fades existed.
 //
 // Teardown (§4.1): destroying the engine with voices alive is a programmer error (asserted); their owners (play sessions,
 // the editor's preview) release them first. Registered clips are released with the engine.
@@ -213,6 +226,25 @@ namespace Engine {
 		bool operator==(const AudioVoiceSettings&) const = default;
 	};
 
+	// M40 (see "Fades"): what happens to a voice when its fade completes.
+	enum class AudioFadeEnd : uint8_t
+	{
+		Hold,   // the voice plays on at the fade's target level
+		Release // the voice is released at the end of the pull that completes the fade
+	};
+
+	// M40 (see "Fades"): a voice's level goes from From to To over Frames of its mixed frames at 48 kHz; with 0 frames it is
+	// To at once. Both levels are linear multipliers of the voice's Volume, finite and >= 0, and Frames is at most
+	// AudioEngine::MaxFadeFrames. The default, from 1 to 1 at once, is no fade.
+	struct AudioVoiceFade
+	{
+		float From = 1.0f;
+		float To = 1.0f;
+		uint64_t Frames = 0;
+
+		bool operator==(const AudioVoiceFade&) const = default;
+	};
+
 	// A spatial voice's pose in world space (§10.2: position, direction and velocity, metres and metres per second); every
 	// component finite. Ignored by non-spatial voices.
 	struct AudioVoiceTransform
@@ -237,8 +269,10 @@ namespace Engine {
 		// Starts paused at the clip's beginning (a paused play session's new voices, AudioSystem).
 		bool StartPaused = false;
 		// An opaque number the engine only reports (AudioVoiceInfo::Owner): AudioSystem stores the AudioSource entity's UUID
-		// value, so audio.stats can name the entity; 0 for one-shots and previews.
+		// value, so audio.stats can name the entity; 0 for one-shots, previews and the session's music.
 		uint64_t Owner = 0;
+		// M40: the fade the voice starts with (see "Fades"); none by default. A voice that starts paused holds it.
+		AudioVoiceFade Fade{};
 	};
 
 	// A snapshot of one live voice (GetVoiceInfo, GetVoices; audio.stats).
@@ -264,6 +298,12 @@ namespace Engine {
 		uint64_t LengthFrames = 0;
 		// The order voices were started in (1 for the engine's first voice): the "oldest" of the stealing rule.
 		uint64_t StartSequence = 0;
+		// M40 (see "Fades"): the voice's level now (a multiplier of Settings.Volume; 1 for a voice that never faded), the
+		// level its fade goes to (the level itself once no fade is in progress), and what the fade's end does (Hold once no
+		// fade is in progress).
+		float FadeVolume = 1.0f;
+		float FadeTarget = 1.0f;
+		AudioFadeEnd FadeEnd = AudioFadeEnd::Hold;
 	};
 
 	// Counters and state for audio.stats and the tests (GetStats).
@@ -315,6 +355,8 @@ namespace Engine {
 		static constexpr uint32_t MaxDeviceRecreationAttempts = 3;
 		// The longest capture: 10 minutes of frames (about 230 MB of samples); later frames are dropped (AudioCapture::Truncated).
 		static constexpr uint64_t MaxCaptureFrames = static_cast<uint64_t>(AudioSampleRate) * 600;
+		// M40: the longest fade (see "Fades"), miniaudio's fader's 32-bit length: about 24.8 hours at 48 kHz.
+		static constexpr uint64_t MaxFadeFrames = 0xFFFFFFFFull;
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
@@ -360,7 +402,7 @@ namespace Engine {
 		// --- Voices (§10.1, §10.2) ---------------------------------------------------------------------------------------
 
 		// Starts a voice (see "Voices" for a full pool). Errors: NotFound for a stale clip handle; InvalidArgument for
-		// settings or a transform outside their documented ranges; InvalidState "all 64 voices have a higher priority"
+		// settings, a transform or a fade outside their documented ranges; InvalidState "all 64 voices have a higher priority"
 		// (with the counts) when nothing may be stolen; Io or Unsupported when miniaudio cannot start the sound (a stream
 		// whose data cannot be decoded).
 		[[nodiscard]] Result<AudioVoiceHandle> PlayVoice(const AudioVoiceDescription& description);
@@ -374,9 +416,15 @@ namespace Engine {
 		// Moves a spatial voice (ignored, yet validated, for a non-spatial one). Errors: NotFound; InvalidArgument for a
 		// non-finite component.
 		[[nodiscard]] Status SetVoiceTransform(AudioVoiceHandle voice, const AudioVoiceTransform& transform);
+		// M40 (see "Fades"): fades the voice from the level it has reached to `target` over `frames` of its mixed frames,
+		// replacing a fade in progress; `end` says what the fade's end does. With 0 frames the voice is at `target` at once,
+		// and Release releases it at once. Errors: NotFound for a stale or null handle; InvalidArgument for a target that is
+		// not finite or below 0, more than MaxFadeFrames frames or an unknown end.
+		[[nodiscard]] Status FadeVoice(AudioVoiceHandle voice, float target, uint64_t frames, AudioFadeEnd end = AudioFadeEnd::Hold);
 
 		// False for a null or stale handle: the voice was stopped, stolen, or released after reaching the end of a
-		// non-looping clip (at the end of the pull that played its last frame, or at the next Update).
+		// non-looping clip or of a fade with AudioFadeEnd::Release (at the end of the pull that played its last frame, or at
+		// the next Update).
 		[[nodiscard]] bool IsVoiceAlive(AudioVoiceHandle voice) const;
 		// Errors: NotFound for a stale or null handle.
 		[[nodiscard]] Result<AudioVoiceInfo> GetVoiceInfo(AudioVoiceHandle voice) const;

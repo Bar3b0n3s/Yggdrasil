@@ -41,6 +41,24 @@ namespace Engine {
 		int32_t Priority = 0;
 		uint32_t CursorFrames = 0; // the clip's own frames played so far (saturating, AutomationTypes.h)
 		uint32_t LengthFrames = 0; // the clip's length in its own frames; 0 when not known yet
+		// M40 (Docs/Decisions/0057-m40-music.md decision 7): the voice's level now, a multiplier of its volume
+		// (AudioVoiceInfo::FadeVolume; 1 for a voice that never faded).
+		float FadeVolume = 1.0f;
+	};
+
+	// Registry struct "AudioMusicSummary" (M40, decision 7): the play session's music (Scene/SessionMusic.h). Empty (no clip,
+	// volume 0, loop false, no voices) without a request and outside a Play session.
+	struct AudioMusicSummary
+	{
+		// The current request (Audio.GetMusic): its clip, volume and loop.
+		AssetSummary Clip{};
+		float Volume = 0.0f;
+		bool Loop = false;
+		// The current request's voice handle as 16 lowercase hex digits (AudioVoiceSummary::Voice); empty when it ended or
+		// could not start.
+		std::string Voice{};
+		// The voices fading out to their release, oldest first.
+		std::vector<std::string> FadingVoices{};
 	};
 
 	// Registry struct "AudioGroupVolume": one mixer group's linear volume.
@@ -65,13 +83,14 @@ namespace Engine {
 		uint32_t PulledFrames = 0;               // frames the engine pulled itself (saturating)
 		uint32_t DeviceReadFrames = 0;           // frames the device read from the engine (saturating)
 		std::vector<AudioVoiceSummary> Voices{}; // by start order (oldest first)
+		AudioMusicSummary Music{};               // M40: the play session's music
 	};
 
 	namespace Automation {
 
 		// audio.stats. Works in Edit mode (previews only) and while playing (the session's voices with their entities, the
-		// play scene's). Errors: Unsupported "this host has no audio engine" when AutomationMethodContext::GetAudioEngine is
-		// null.
+		// play scene's, and the session's music). Errors: Unsupported "this host has no audio engine" when
+		// AutomationMethodContext::GetAudioEngine is null.
 		[[nodiscard]] Result<AudioStatsResult> AudioStats(AutomationMethodContext& context, const NoParams& params);
 
 	}

@@ -93,6 +93,54 @@ namespace Engine {
 			CHECK((*stopped)["timeSource"] == "Host");
 		}
 
+		// M40 (Docs/Decisions/0057-m40-music.md decision 7): the session's music, which agents drive through script.eval.
+		TEST_CASE("AudioMethods: audio.stats reports the session's music, its voices and their levels")
+		{
+			Test::AutomationFixture fixture("AudioStatsMusic", true, TestAudio);
+			const Result<Json> idle = fixture.Call("audio.stats", Json::object());
+			REQUIRE_MESSAGE(idle.has_value(), idle.error().ToString());
+			CHECK((*idle)["music"]["clip"]["id"] == "");
+			CHECK((*idle)["music"]["voice"] == "");
+			CHECK((*idle)["music"]["fadingVoices"].empty());
+
+			REQUIRE(fixture.Call("play.start", Json{ { "lockstep", true } }).has_value());
+			const Json play = { { "context", "play" },
+				{ "code", "Audio.PlayMusic(Assets.Load(\"engine://Audio/Silence\"), { Volume = 0.5, FadeSeconds = 0.1 })" } };
+			const Result<Json> played = fixture.Call("script.eval", play);
+			REQUIRE_MESSAGE(played.has_value(), played.error().ToString());
+			// Three ticks of the fade's 4,800 frames: half of 0.5.
+			REQUIRE(fixture.Call("play.step", Json{ { "ticks", 3 } }).has_value());
+			const Result<Json> stats = fixture.Call("audio.stats", Json::object());
+			REQUIRE_MESSAGE(stats.has_value(), stats.error().ToString());
+			const Json& music = (*stats)["music"];
+			CHECK(music["clip"]["id"] == BuiltinAssetHandles::SilentClip.ToString());
+			CHECK(music["clip"]["path"] == "engine://Audio/Silence");
+			CHECK(music["volume"] == 0.5);
+			CHECK(music["loop"] == true);
+			CHECK(music["fadingVoices"].empty());
+			REQUIRE((*stats)["voiceCount"] == 1);
+			const Json& voice = (*stats)["voices"][0];
+			CHECK(voice["voice"] == music["voice"]);
+			CHECK(voice["group"] == "Music");
+			CHECK(voice["priority"] == 1);
+			CHECK(voice["entity"]["id"] == "");
+			CHECK(voice["volume"] == 1.0);
+			CHECK(voice["fadeVolume"] == 0.25);
+
+			const Json stop = { { "context", "play" }, { "code", "Audio.StopMusic(0.1)" } };
+			REQUIRE(fixture.Call("script.eval", stop).has_value());
+			const Result<Json> stopped = fixture.Call("audio.stats", Json::object());
+			REQUIRE(stopped.has_value());
+			CHECK((*stopped)["music"]["clip"]["id"] == "");
+			CHECK((*stopped)["music"]["voice"] == "");
+			CHECK((*stopped)["music"]["fadingVoices"] == Json::array({ music["voice"] }));
+			REQUIRE(fixture.Call("play.stop", Json::object()).has_value());
+			const Result<Json> ended = fixture.Call("audio.stats", Json::object());
+			REQUIRE(ended.has_value());
+			CHECK((*ended)["voiceCount"] == 0);
+			CHECK((*ended)["music"]["fadingVoices"].empty());
+		}
+
 		TEST_CASE("AudioMethods: audio.stats reports an asset-browser preview without an entity")
 		{
 			Test::AutomationFixture fixture("AudioStatsPreview", true, TestAudio);

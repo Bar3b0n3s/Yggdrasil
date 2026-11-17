@@ -35,6 +35,7 @@
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SessionMusic.h"
 #include "Engine/Scene/SpriteAnimationSystem.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiInteraction.h"
@@ -438,6 +439,11 @@ namespace Engine {
 		bool AudioTimeOwned = false;
 		uint64_t AudioTick = 0;
 		bool AudioHeld = false;
+		// M40 (Docs/Decisions/0057-m40-music.md decision 5): the session's music, made by Activate in Play mode (with or
+		// without an engine) and kept across scene transitions; MusicHeld keeps its voices paused from Activate to the first
+		// AudioUpdate, as AudioHeld does the scene's, but a scene transition never sets it.
+		Scope<SessionMusic> Music;
+		bool MusicHeld = false;
 		// M19: the native module's runtime (NativeWorld.h), in Play with PlaySessionSpecification::Native; null otherwise.
 		Scope<NativeWorld> Native{};
 		// M22 (C22.1, Docs/Decisions/0033-m22-contract.md decision 3): the UiLayout and FrameUiLayout phases' layouts, and
@@ -574,6 +580,8 @@ namespace Engine {
 		[[nodiscard]] UiSystem* GetUi() override { return &Ui; }
 		// M30 (decision 11): the scene's navigation, which the Navigation script module queries.
 		[[nodiscard]] NavigationWorld* GetNavigation() override { return Navigation.get(); }
+		// M40 (decision 5): the session's music, which Audio.PlayMusic, StopMusic and GetMusic and Test.GetMusic drive.
+		[[nodiscard]] SessionMusic* GetMusic() override { return Music.get(); }
 		// M22 (C22.3, decision 46): the text latch, which Input.GetText reads.
 		[[nodiscard]] std::string_view GetText(InputPhase phase) const override { return Input.GetText(phase); }
 		// M28 (Docs/Decisions/0043-m28-game-services.md decision 4): Application.GetStats: the host's frame and render
@@ -769,7 +777,7 @@ namespace Engine {
 		// M12: applies the run state to the audio: the voices are paused while held, or while the session is paused and not in
 		// lockstep; the session owns the engine's simulation time while it is in lockstep or a test run. Voices pause before
 		// time goes back to the device and resume only after the session has taken it, so the device never plays a voice
-		// the session holds.
+		// the session holds. M40 (decision 5): the music's voices likewise, held by MusicHeld rather than AudioHeld.
 		void ApplyAudioRunState();
 		// M12: takes (true) or gives back (false) the audio engine's simulation time, when the session has audio.
 		void SetAudioTimeOwned(bool owned);
@@ -1461,19 +1469,24 @@ namespace Engine {
 	{
 		// M12 audio hook (§5.7 frame phase step 3, §10.1): the first phase releases the voices held since Create; then the
 		// listener and sources; then, while the session owns audio time, one tick of frames for every tick run since the last
-		// pull (one per Tick, 0 to MaxStepsPerFrame per frame of a ScriptedClock test run).
+		// pull (one per Tick, 0 to MaxStepsPerFrame per frame of a ScriptedClock test run). M40 (decision 5): the first phase
+		// releases the music's start hold too, and the music takes its snapshot after the pulls.
 		if (SceneAudio == nullptr)
 			return;
-		if (AudioHeld)
+		if (AudioHeld || MusicHeld)
 		{
 			AudioHeld = false;
+			MusicHeld = false;
 			ApplyAudioRunState();
 		}
 		SceneAudio->Update(deltaSeconds);
-		if (!AudioTimeOwned)
-			return;
-		for (; AudioTick < Tick; ++AudioTick)
-			Audio->AdvanceSimulationTick();
+		if (AudioTimeOwned)
+		{
+			for (; AudioTick < Tick; ++AudioTick)
+				Audio->AdvanceSimulationTick();
+		}
+		if (Music != nullptr)
+			Music->Update();
 	}
 
 	void PlaySession::State::ApplyAudioRunState()
@@ -1481,11 +1494,16 @@ namespace Engine {
 		if (SceneAudio == nullptr)
 			return;
 		const bool voicesPaused = AudioHeld || (Paused && !Lockstep);
+		const bool musicPaused = MusicHeld || (Paused && !Lockstep);
 		if (voicesPaused)
 			SceneAudio->SetPaused(true);
+		if (musicPaused && Music != nullptr)
+			Music->SetPaused(true);
 		SetAudioTimeOwned(Lockstep || TestRunAudioTime);
 		if (!voicesPaused)
 			SceneAudio->SetPaused(false);
+		if (!musicPaused && Music != nullptr)
+			Music->SetPaused(false);
 	}
 
 	void PlaySession::State::SetAudioTimeOwned(bool owned)
@@ -1614,6 +1632,8 @@ namespace Engine {
 		m_State->Scripts.reset();
 		// M12 (§10.2 Stop): the AudioSystem releases its voices and restores the group volumes while the scene exists, and
 		// only then does the engine's time go back to the device, so the device never plays a voice of the ended session.
+		// M40 (decision 5): the music releases its voices first, before the mix is restored.
+		m_State->Music.reset();
 		m_State->SceneAudio.reset();
 		m_State->SetAudioTimeOwned(false);
 	}
@@ -1761,8 +1781,16 @@ namespace Engine {
 				AudioSystemSpecification{ .Audio = state.Audio, .Assets = state.Assets });
 			state.SceneAudio->InitializeMix();
 			state.AudioHeld = true;
-			state.ApplyAudioRunState();
 		}
+		// M40 (decision 5): the session's music, before the startup callbacks that may play it, held like the scene's voices; in
+		// every Play session, so those callbacks ask for their track alike with or without an engine (without one it records the
+		// requests: the feature host's scratch sessions discover test suites by starting each suite's scene).
+		if (state.Mode == PlayMode::Play)
+		{
+			state.Music = CreateScope<SessionMusic>(SessionMusicSpecification{ .Audio = state.Audio, .Assets = state.Assets });
+			state.MusicHeld = true;
+		}
+		state.ApplyAudioRunState();
 		// M22 (decision 3, the review of W22.2): the scene is laid out before its startup callbacks, so the Ui module reads its
 		// layout from them, and again once they ran (below).
 		state.Ui.LayoutStep(*state.RuntimeScene, state.GetUiSceneResolution());
@@ -2156,6 +2184,16 @@ namespace Engine {
 	bool PlaySession::IsAudioTimeOwned() const
 	{
 		return m_State->AudioTimeOwned;
+	}
+
+	SessionMusic* PlaySession::GetMusic()
+	{
+		return m_State->Music.get();
+	}
+
+	const SessionMusic* PlaySession::GetMusic() const
+	{
+		return m_State->Music.get();
 	}
 
 	uint64_t PlaySession::ComputeStateHash() const

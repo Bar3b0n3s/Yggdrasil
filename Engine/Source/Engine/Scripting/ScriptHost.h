@@ -30,6 +30,7 @@ namespace Engine {
 	class PhysicsSystem;
 	class Random;
 	class Scene;
+	class SessionMusic;
 	class TypeRegistry;
 	class UiSystem;
 
@@ -230,6 +231,12 @@ namespace Engine {
 		// scene has none. A play session's host returns PlaySession::GetNavigation, and every other host (the edit
 		// evaluation, test fixtures without a session) keeps the default, null, for which every query finds nothing.
 		[[nodiscard]] virtual NavigationWorld* GetNavigation() { return nullptr; }
+		// M40 (Docs/Decisions/0057-m40-music.md decision 5): the play session's music (Scene/SessionMusic.h), which
+		// Audio.PlayMusic, Audio.StopMusic, Audio.GetMusic and Test.GetMusic drive. A play session's host returns
+		// PlaySession::GetMusic (null in Simulate, which runs no scripts; a session without an audio engine has one that
+		// records requests only), and every other host (the edit evaluation, test fixtures without a session) keeps the
+		// default, null, for which those calls raise "audio is unavailable".
+		[[nodiscard]] virtual SessionMusic* GetMusic() { return nullptr; }
 	private:
 		static constexpr std::string_view NoSaveDataReason = "this host has no save data: SaveData works in a play session";
 	};

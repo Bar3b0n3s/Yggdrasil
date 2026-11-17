@@ -284,6 +284,12 @@ export type DisplaySettingsRequest = {WindowMode: ("Windowed" | "Borderless" | "
 -- Editor metadata and numeric validation bounds for a field.
 export type FieldOptions = {Min: number?, Max: number?, Step: number?, Tooltip: string?}
 
+-- Audio.PlayMusic's options: Volume, the music's linear level (finite, at least 0; default 1); FadeSeconds, the fade to it (0 to 60; default 0, at once); Loop (default true). No other key is accepted.
+export type MusicOptions = {Volume: number?, FadeSeconds: number?, Loop: boolean?}
+
+-- The session's music as scripts last asked for it with Audio.PlayMusic: its clip, Volume and Loop.
+export type MusicState = {Clip: AssetRef, Volume: number, Loop: boolean}
+
 -- A walk along the navigation surface: Clear when nothing blocks it, Point where it ends on the surface, the blocking edge's horizontal Normal (pointing back along the walk; zero when Clear) and the Fraction of the way it got in XZ.
 export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
 
@@ -307,6 +313,9 @@ export type TestCaseOptions = {TimeoutTicks: number?}
 
 -- The last completed render extraction: its interpolation Alpha, and Frame, the number of extractions completed so far.
 export type TestExtraction = {Alpha: number, Frame: number}
+
+-- The session's music voice as of the last AudioUpdate phase: its engine handle as 16 hexadecimal digits, its clip, its position and length in the clip's own frames, its level and the music voices still fading out.
+export type TestMusic = {Voice: string, Clip: AssetRef, CursorFrames: number, LengthFrames: number, FadeVolume: number, FadingOut: number}
 
 -- Authenticated suite constructor result.
 export type TestSuite = {Name: string, Body: () -> (), Options: TestSuiteOptions}
@@ -1736,14 +1745,20 @@ declare Assets: {
 	Load: (reference: string) -> AssetRef?,
 }
 
--- Session-scoped mixing and one-shot playback.
+-- Session-scoped mixing, one-shot playback and the session's music.
 declare Audio: {
 	-- Read the session group gain. [All modes; Runtime|Test; pure/read]
 	GetGroupVolume: (group: AudioGroup) -> number,
+	-- Returns the session's music as scripts last asked for it with Audio.PlayMusic (its clip, Volume and Loop), or nil before the first PlayMusic and after StopMusic. It never reports the voice's progress, so it reads the same in live play, lockstep, test runs and replays, with or without audio. Raises "audio is unavailable" outside a play session. [All modes; Runtime|Test; pure/read]
+	GetMusic: () -> MusicState?,
+	-- Plays clip as the session's music: non-spatial, in the Music group, at music priority (effects never steal it), owned by the play session, so it plays on through Scene.Load and Scene.Reload. With no music playing, clip starts, its level rising from 0 to Volume over FadeSeconds. When clip is the music already playing, its voice is kept, never restarted: its level fades from where it is to Volume (which also ducks it) and Loop is applied, so every scene of a chain calls PlayMusic with its track and the track goes on through each doorway. Another clip crossfades over FadeSeconds: the playing voice fades out and stops while clip fades in, and a clip still fading out is taken back and fades up again. At most 4 music voices play at once (the current one and those still fading out; the oldest fading one stops first). A clip played once (Loop false) stays the session's music until StopMusic or another PlayMusic, and starts again when asked for after it ended. Fades follow the voice's mixed frames: simulation time in lockstep, test runs and replays. Callable in every callback, phase and test case; the engine's own failures (a voice pool full of higher-priority voices) are logged, not raised; a session without audio (a test run's discovery of its suites) records the request and plays nothing. Raises for a nil clip, an unknown option or one out of range, and "audio is unavailable" outside a play session (edit evaluations). [All modes; Runtime|Test; mutates]
+	PlayMusic: (clip: AssetRef, options: MusicOptions?) -> (),
 	-- Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most 1024 one-shots start per frame; a later call in the frame raises an error. [All modes; Runtime|Test; mutates]
 	PlayOneShot: (clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> (),
 	-- Set nonnegative session group gain; the prior mix is restored when the audio system stops. [All modes; Runtime|Test; mutates]
 	SetGroupVolume: (group: AudioGroup, volume: number) -> (),
+	-- Fades the session's music out over fadeSeconds (0 to 60; default 0, at once) and stops it; Audio.GetMusic returns nil from then on. Does nothing without music. Raises for a fade out of range and "audio is unavailable" outside a play session. [All modes; Runtime|Test; mutates]
+	StopMusic: (fadeSeconds: number?) -> (),
 }
 
 -- Depth-tested world-space debug primitives with white color and one-extraction duration by default.
@@ -2064,6 +2079,8 @@ declare Test: {
 	GetExtractedPosition: (entity: Entity) -> vector?,
 	-- Read the last completed render extraction. [All modes; Test; pure/read]
 	GetLastExtraction: () -> TestExtraction,
+	-- Returns the session's music voice as of the last AudioUpdate phase (Audio.PlayMusic), or nil without one (no music, or a clip played once that ended): Voice, the engine's voice handle as 16 hexadecimal digits, the same while the voice is kept, so a suite tells a track that plays on through Scene.Load from a restart; Clip; CursorFrames and LengthFrames, in the clip's own frames; FadeVolume, the voice's level, a multiplier of its Volume; and FadingOut, the music voices still fading out. Deterministic, since a test run owns audio time; test suites only. Raises "audio is unavailable" outside a play session. [All modes; Test; pure/read]
+	GetMusic: () -> TestMusic?,
 	-- Returns the seeded particle hash of a ParticleEmitter entity (the XXH64 of its live particles, random stream and emission state) as 16 hexadecimal digits, or nil before its first Particles phase or without a ParticleEmitter; the same in every configuration, so a suite compares it across runs; test suites only. [All modes; Test; pure/read]
 	GetParticleDigest: (entity: Entity) -> string?,
 	-- Returns the digest of an Animator entity's pose sampled in the last fixed step (the XXH64 of its joint model matrices and morph weights) as 16 hexadecimal digits, or nil without a pose; the same in every configuration, so a suite compares it across runs; test suites only. [All modes; Test; pure/read]

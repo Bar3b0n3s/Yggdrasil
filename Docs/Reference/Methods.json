@@ -1658,7 +1658,7 @@
 		{
 			"name": "audio.stats",
 			"domain": "audio",
-			"description": "Reports the host's audio engine: its device and time source, the master and group volumes, and every voice with its clip, owning entity, group, volume, position and cursor (the play session's voices, and the asset browser's preview in the editor).",
+			"description": "Reports the host's audio engine: its device and time source, the master and group volumes, every voice with its clip, owning entity, group, volume, level, position and cursor (the play session's voices, and the asset browser's preview in the editor), and the play session's music.",
 			"exposeAsTool": false,
 			"mutates": false,
 			"supportsDryRun": false,
@@ -1754,6 +1754,10 @@
 							"$ref": "#/$defs/AudioVoiceSummary"
 						}
 					},
+					"music": {
+						"description": "The play session's music: its request and its voices.",
+						"$ref": "#/$defs/AudioMusicSummary"
+					},
 					"_meta": {
 						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
 						"type": "object"
@@ -1848,6 +1852,40 @@
 								"type": "integer",
 								"minimum": 0,
 								"maximum": 4294967295
+							},
+							"fadeVolume": {
+								"description": "Its level now, a multiplier of its volume that a fade moves (the session's music fades in, out and between tracks); 1 for a voice that never faded.",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					},
+					"AudioMusicSummary": {
+						"description": "The play session's music (Audio.PlayMusic).",
+						"type": "object",
+						"properties": {
+							"clip": {
+								"description": "The clip of the current request; empty without music and outside a Play session.",
+								"$ref": "#/$defs/AssetSummary"
+							},
+							"volume": {
+								"description": "The current request's linear volume; 0 without music.",
+								"type": "number"
+							},
+							"loop": {
+								"description": "Whether the current request loops; false without music.",
+								"type": "boolean"
+							},
+							"voice": {
+								"description": "The current request's voice (a voice of voices); empty without music, and when its clip played once has ended or its voice could not start.",
+								"type": "string"
+							},
+							"fadingVoices": {
+								"description": "The music's voices fading out to their end, oldest first.",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
 							}
 						},
 						"additionalProperties": false

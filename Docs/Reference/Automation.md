@@ -412,7 +412,7 @@ Example: Make a material metallic.
 
 ### audio.stats
 
-Reports the host's audio engine: its device and time source, the master and group volumes, and every voice with its clip, owning entity, group, volume, position and cursor (the play session's voices, and the asset browser's preview in the editor).
+Reports the host's audio engine: its device and time source, the master and group volumes, every voice with its clip, owning entity, group, volume, level, position and cursor (the play session's voices, and the asset browser's preview in the editor), and the play session's music.
 
 - Flags: runtime, batch
 - Timeout: 60 s
@@ -433,6 +433,7 @@ Param: none.
 | `pulledFrames` | `UInt32` | Frames the engine mixed for simulation time or without a device. |
 | `deviceReadFrames` | `UInt32` | Frames the playback device read. |
 | `voices` | `Array<AudioVoiceSummary>` | Every live voice, oldest first. |
+| `music` | `AudioMusicSummary` | The play session's music: its request and its voices. |
 
 Example: Read the voices of a lockstep session.
 

@@ -13,6 +13,7 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSystem.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SessionMusic.h"
 #include "Engine/Scripting/Private/ScriptEngineAccess.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptLimits.h"
@@ -425,6 +426,37 @@ namespace Engine {
 			return 0;
 		}
 
+		// M40 (Docs/Decisions/0057-m40-music.md decision 6): the session's current music voice as of the last AudioUpdate phase
+		// (SessionMusic::GetVoices), or nil without one.
+		static int GetMusic(ScriptCall& call)
+		{
+			static_cast<void>(Host(call));
+			const SessionMusic* music = call.Engine->GetHost().GetMusic();
+			if (music == nullptr)
+				return Lua::RaiseError(call, "audio is unavailable");
+			const MusicVoices& voices = music->GetVoices();
+			if (!voices.CurrentInfo.has_value())
+			{
+				Lua::PushNil(call);
+				return 1;
+			}
+			const AudioVoiceInfo& info = *voices.CurrentInfo;
+			lua_createtable(call.State, 0, 6);
+			Lua::PushString(call, std::format("{:016x}", voices.Current.Voice.GetValue()));
+			lua_setfield(call.State, -2, "Voice");
+			Lua::Push(call, voices.Current.Clip);
+			lua_setfield(call.State, -2, "Clip");
+			Lua::Push(call, static_cast<double>(info.CursorFrames));
+			lua_setfield(call.State, -2, "CursorFrames");
+			Lua::Push(call, static_cast<double>(info.LengthFrames));
+			lua_setfield(call.State, -2, "LengthFrames");
+			Lua::Push(call, info.FadeVolume);
+			lua_setfield(call.State, -2, "FadeVolume");
+			Lua::Push(call, static_cast<double>(voices.FadingOut.size()));
+			lua_setfield(call.State, -2, "FadingOut");
+			return 1;
+		}
+
 		static int Screenshot(ScriptCall& call)
 		{
 			IScriptTestHost& host = Host(call);
@@ -625,6 +657,9 @@ namespace Engine {
 			ENGINE_TRY(api.RegisterAlias("TestSuite", "{Name: string, Body: () -> (), Options: TestSuiteOptions}", "Authenticated suite constructor result."));
 			ENGINE_TRY(api.RegisterAlias("TestAudioLevels", "{RmsLeft: number, RmsRight: number, Peak: number}", "Stereo RMS and absolute peak of the requested simulation sample interval."));
 			ENGINE_TRY(api.RegisterAlias("TestExtraction", "{Alpha: number, Frame: number}", "The last completed render extraction: its interpolation Alpha, and Frame, the number of extractions completed so far."));
+			ENGINE_TRY(api.RegisterAlias("TestMusic", "{Voice: string, Clip: AssetRef, CursorFrames: number, LengthFrames: number, FadeVolume: number, FadingOut: number}",
+				"The session's music voice as of the last AudioUpdate phase: its engine handle as 16 hexadecimal digits, its clip, its position "
+				"and length in the clip's own frames, its level and the music voices still fading out."));
 			ENGINE_TRY(api.RegisterAlias("ScriptError", "{id: number, kind: string, script: string, line: number, column: number, message: string, callback: string, entity: string, entityName: string, tick: number, count: number, jsonPointer: string, traceback: {{script: string, line: number, [\"function\"]: string}}}", "Owned script diagnostic with exclusive occurrence cursor."));
 			ScriptMemberOptions pure;
 			pure.Environments = ScriptApiEnvironment::Test;
@@ -726,7 +761,15 @@ namespace Engine {
 								"Isolation \"Case\" suite starts empty again; a case that seeds the store and calls Scene.Reload() returns in that "
 								"tick, and a later case of an Isolation \"Suite\" suite sees the reloaded scene read it.",
 						MaxSaveDataKeyBytes),
-					mutation);
+					mutation)
+				.Function("GetMusic", Utils::GetMusic, "() -> TestMusic?",
+					"Returns the session's music voice as of the last AudioUpdate phase (Audio.PlayMusic), or nil without one (no music, or "
+					"a clip played once that ended): Voice, the engine's voice handle as 16 hexadecimal digits, the same while the voice is "
+					"kept, so a suite tells a track that plays on through Scene.Load from a restart; Clip; CursorFrames and LengthFrames, in "
+					"the clip's own frames; FadeVolume, the voice's level, a multiplier of its Volume; and FadingOut, the music voices still "
+					"fading out. Deterministic, since a test run owns audio time; test suites only. Raises \"audio is unavailable\" outside a "
+					"play session.",
+					pure);
 			return {};
 		}
 

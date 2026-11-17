@@ -14,12 +14,15 @@
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/SessionMusic.h"
 #include "Engine/Scene/TransformSystem.h"
+#include "Engine/Scripting/ScriptEngine.h"
 #include "Support/GlmApprox.h"
 #include "Support/PhysicsTestScene.h"
 #include "Support/SceneTestFixture.h"
 
 #include <cstdint>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -83,6 +86,32 @@ namespace Engine {
 			std::vector<AudioVoiceInfo> voices = engine.GetVoices();
 			REQUIRE(voices.size() == 1);
 			return std::move(voices.front());
+		}
+
+		// M40: the session's music clip (any handle: the session has no asset manager, so it plays the silent clip, looping).
+		constexpr AssetHandle MusicClip(0x4000c1);
+
+		// The live voice of the session's music; fails the test case without one.
+		AudioVoiceInfo GetMusicVoice(const PlaySession& session)
+		{
+			const SessionMusic* music = session.GetMusic();
+			REQUIRE(music != nullptr);
+			MusicVoices voices = music->Inspect();
+			REQUIRE(voices.CurrentInfo.has_value());
+			return std::move(*voices.CurrentInfo);
+		}
+
+		// The voice of the AudioSource entity at `path` of the session's scene; fails the test case without one.
+		AudioVoiceInfo GetSourceVoice(const PlaySession& session, const AudioEngine& engine, std::string_view path)
+		{
+			const UUID owner = session.GetScene().FindEntityByPath(path).GetUUID();
+			for (const AudioVoiceInfo& voice : engine.GetVoices())
+			{
+				if (voice.Owner == owner.GetValue())
+					return voice;
+			}
+			FAIL("no voice of ", path);
+			return {};
 		}
 
 		// A frame phase of 1/60 s that follows no fixed step of its own (a ScriptedClock frame).
@@ -170,11 +199,14 @@ namespace Engine {
 			simulateSpecification.OwnsAudioTime = true;
 			const Scope<PlaySession> simulate = StartSession(fixture, simulateSpecification);
 			CHECK(simulate->GetAudioSystem() == nullptr);
+			CHECK(simulate->GetMusic() == nullptr);
 			simulate->SetLockstep(true);
 			CHECK_FALSE(simulate->IsAudioTimeOwned());
 			CHECK_FALSE(engine->IsSimulationTimeOwned());
 			const Scope<PlaySession> silent = StartSession(fixture, MakeAudioSpecification(fixture, nullptr));
 			CHECK(silent->GetAudioSystem() == nullptr);
+			// M40 (decision 5): its music records the scripts' requests and starts no voice (SessionMusic.h "Without audio").
+			CHECK(silent->GetMusic() != nullptr);
 			CHECK(engine->GetStats().LiveVoices == 0);
 		}
 
@@ -363,6 +395,94 @@ namespace Engine {
 					CHECK(Test::ApproxEqual(engine->GetListener().Velocity, BallVelocity, 0.01f));
 				}
 			}
+		}
+
+		// M40 (Docs/Decisions/0057-m40-music.md decision 5): the session's music is held from Activate to the first AudioUpdate
+		// like the scene's voices, but a scene transition, whose new AudioSystem is held to the next AudioUpdate, never holds it.
+		TEST_CASE("PlaySession: the session's music is held from its activation to its first frame phase and never at a scene transition")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateAudioScene(fixture.GetScene());
+			VirtualFileSystem vfs;
+			const Scope<AudioEngine> engine = CreateSessionEngine(vfs);
+			const Scope<PlaySession> session = StartSession(fixture, MakeAudioSpecification(fixture, engine.get()));
+			SessionMusic* music = session->GetMusic();
+			REQUIRE(music != nullptr);
+			CHECK(music->IsPaused());
+			REQUIRE(music->Play({ .Clip = MusicClip }).has_value());
+			const AudioVoiceInfo held = GetMusicVoice(*session);
+			CHECK(held.Paused);
+			CHECK(held.Settings.Group == AudioGroup::Music);
+			session->Tick();
+			CHECK_FALSE(music->IsPaused());
+			CHECK_FALSE(GetMusicVoice(*session).Paused);
+
+			// Scene.Reload: the new scene's PlayOnStart source is held until the next frame's AudioUpdate, the music is not.
+			REQUIRE(session->GetScripts()->Evaluate("Scene.Reload()", {}));
+			session->Tick();
+			REQUIRE(session->GetSceneGeneration() == 2);
+			CHECK(GetSourceVoice(*session, *engine, "/Autoplay").Paused);
+			const AudioVoiceInfo carried = GetMusicVoice(*session);
+			CHECK_FALSE(carried.Paused);
+			CHECK(carried.Voice == held.Voice);
+			session->Tick();
+			CHECK_FALSE(GetSourceVoice(*session, *engine, "/Autoplay").Paused);
+		}
+
+		TEST_CASE("PlaySession: pausing the session pauses its music, which follows a lockstep session's ticks")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateAudioScene(fixture.GetScene());
+			VirtualFileSystem vfs;
+			const Scope<AudioEngine> engine = CreateSessionEngine(vfs);
+			const Scope<PlaySession> session = StartSession(fixture, MakeAudioSpecification(fixture, engine.get()));
+			SessionMusic* music = session->GetMusic();
+			REQUIRE(music != nullptr);
+			REQUIRE(music->Play({ .Clip = MusicClip, .FadeSeconds = 1.0 }).has_value());
+			session->FrameUpdate(SixtiethFrame);
+			session->SetPaused(true);
+			CHECK(music->IsPaused());
+			CHECK(GetMusicVoice(*session).Paused);
+			session->SetPaused(false);
+			CHECK_FALSE(GetMusicVoice(*session).Paused);
+
+			// play.start {lockstep: true, paused: true}: play.step is the session's only clock, so the music advances with it,
+			// its fade too: one tick is 800 frames of the 48,000-frame fade.
+			session->SetPaused(true);
+			session->SetLockstep(true);
+			CHECK_FALSE(music->IsPaused());
+			const AudioVoiceInfo before = GetMusicVoice(*session);
+			session->Tick();
+			const AudioVoiceInfo after = GetMusicVoice(*session);
+			CHECK_FALSE(after.Paused);
+			CHECK(after.CursorFrames == (before.CursorFrames + 800) % after.LengthFrames);
+			CHECK(after.FadeVolume > before.FadeVolume);
+			// Leaving lockstep while paused pauses it before time goes back.
+			session->SetLockstep(false);
+			CHECK(GetMusicVoice(*session).Paused);
+			CHECK_FALSE(engine->IsSimulationTimeOwned());
+		}
+
+		TEST_CASE("PlaySession: the session's end releases its music with the scene's voices")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateAudioScene(fixture.GetScene());
+			VirtualFileSystem vfs;
+			const Scope<AudioEngine> engine = CreateSessionEngine(vfs);
+			REQUIRE(engine->SetGroupVolume(AudioGroup::Music, 0.5f).has_value());
+			{
+				const Scope<PlaySession> session = StartSession(fixture, MakeAudioSpecification(fixture, engine.get()));
+				SessionMusic* music = session->GetMusic();
+				REQUIRE(music != nullptr);
+				REQUIRE(music->Play({ .Clip = MusicClip }).has_value());
+				REQUIRE(music->Play({ .Clip = AssetHandle(0x4000c2), .FadeSeconds = 1.0 }).has_value());
+				session->Tick();
+				CHECK(engine->GetStats().LiveVoices == 3);
+				CHECK(engine->GetGroupVolume(AudioGroup::Music) == 1.0f);
+			}
+			CHECK(engine->GetStats().LiveVoices == 0);
+			CHECK(engine->GetStats().RegisteredClips == 0);
+			CHECK(engine->GetGroupVolume(AudioGroup::Music) == 0.5f);
 		}
 	}
 

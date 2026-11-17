@@ -132,7 +132,7 @@ All modes; Runtime|Test; pure/read.
 
 ## Audio
 
-Session-scoped mixing and one-shot playback.
+Session-scoped mixing, one-shot playback and the session's music.
 
 ### Audio.GetGroupVolume
 
@@ -143,6 +143,22 @@ Read the session group gain.
 All modes; Runtime|Test; pure/read.
 
 Argument 1: AudioGroup.
+
+### Audio.GetMusic
+
+`() -> MusicState?`
+
+Returns the session's music as scripts last asked for it with Audio.PlayMusic (its clip, Volume and Loop), or nil before the first PlayMusic and after StopMusic. It never reports the voice's progress, so it reads the same in live play, lockstep, test runs and replays, with or without audio. Raises "audio is unavailable" outside a play session.
+
+All modes; Runtime|Test; pure/read.
+
+### Audio.PlayMusic
+
+`(clip: AssetRef, options: MusicOptions?) -> ()`
+
+Plays clip as the session's music: non-spatial, in the Music group, at music priority (effects never steal it), owned by the play session, so it plays on through Scene.Load and Scene.Reload. With no music playing, clip starts, its level rising from 0 to Volume over FadeSeconds. When clip is the music already playing, its voice is kept, never restarted: its level fades from where it is to Volume (which also ducks it) and Loop is applied, so every scene of a chain calls PlayMusic with its track and the track goes on through each doorway. Another clip crossfades over FadeSeconds: the playing voice fades out and stops while clip fades in, and a clip still fading out is taken back and fades up again. At most 4 music voices play at once (the current one and those still fading out; the oldest fading one stops first). A clip played once (Loop false) stays the session's music until StopMusic or another PlayMusic, and starts again when asked for after it ended. Fades follow the voice's mixed frames: simulation time in lockstep, test runs and replays. Callable in every callback, phase and test case; the engine's own failures (a voice pool full of higher-priority voices) are logged, not raised; a session without audio (a test run's discovery of its suites) records the request and plays nothing. Raises for a nil clip, an unknown option or one out of range, and "audio is unavailable" outside a play session (edit evaluations).
+
+All modes; Runtime|Test; mutates.
 
 ### Audio.PlayOneShot
 
@@ -163,6 +179,14 @@ Set nonnegative session group gain; the prior mix is restored when the audio sys
 All modes; Runtime|Test; mutates.
 
 Argument 1: AudioGroup.
+
+### Audio.StopMusic
+
+`(fadeSeconds: number?) -> ()`
+
+Fades the session's music out over fadeSeconds (0 to 60; default 0, at once) and stops it; Audio.GetMusic returns nil from then on. Does nothing without music. Raises for a fade out of range and "audio is unavailable" outside a play session.
+
+All modes; Runtime|Test; mutates.
 
 ## Debug
 
@@ -1279,6 +1303,14 @@ All modes; Test; pure/read.
 `() -> TestExtraction`
 
 Read the last completed render extraction.
+
+All modes; Test; pure/read.
+
+### Test.GetMusic
+
+`() -> TestMusic?`
+
+Returns the session's music voice as of the last AudioUpdate phase (Audio.PlayMusic), or nil without one (no music, or a clip played once that ended): Voice, the engine's voice handle as 16 hexadecimal digits, the same while the voice is kept, so a suite tells a track that plays on through Scene.Load from a restart; Clip; CursorFrames and LengthFrames, in the clip's own frames; FadeVolume, the voice's level, a multiplier of its Volume; and FadingOut, the music voices still fading out. Deterministic, since a test run owns audio time; test suites only. Raises "audio is unavailable" outside a play session.
 
 All modes; Test; pure/read.
 
@@ -7600,6 +7632,18 @@ A request of Application.SetDisplaySettings: the DisplaySettings members to chan
 
 Editor metadata and numeric validation bounds for a field.
 
+## MusicOptions
+
+`{Volume: number?, FadeSeconds: number?, Loop: boolean?}`
+
+Audio.PlayMusic's options: Volume, the music's linear level (finite, at least 0; default 1); FadeSeconds, the fade to it (0 to 60; default 0, at once); Loop (default true). No other key is accepted.
+
+## MusicState
+
+`{Clip: AssetRef, Volume: number, Loop: boolean}`
+
+The session's music as scripts last asked for it with Audio.PlayMusic: its clip, Volume and Loop.
+
 ## NavigationRaycast (type)
 
 `{Clear: boolean, Point: vector, Normal: vector, Fraction: number}`
@@ -7647,6 +7691,12 @@ Positive tick timeout overriding the suite default.
 `{Alpha: number, Frame: number}`
 
 The last completed render extraction: its interpolation Alpha, and Frame, the number of extractions completed so far.
+
+## TestMusic
+
+`{Voice: string, Clip: AssetRef, CursorFrames: number, LengthFrames: number, FadeVolume: number, FadingOut: number}`
+
+The session's music voice as of the last AudioUpdate phase: its engine handle as 16 hexadecimal digits, its clip, its position and length in the clip's own frames, its level and the music voices still fading out.
 
 ## TestSuite (type)
 

@@ -17,6 +17,8 @@ LOCK_SOUND = {"Layers": [{"Wave": "Square", "Notes": ["A3:0.05", "E4:0.1"]}]}
 LOCK_PATH = "Assets/Audio/Lock.sfx"
 # Frames per lockstep tick at the default 60 Hz (§10.1).
 FRAMES_PER_TICK = 800
+# A one-second tone the session's music loops (M40).
+MUSIC_SOUND = {"Layers": [{"Wave": "Sine", "Notes": ["C4:1.0"]}]}
 
 
 class AudioTests(AutomationTestCase):
@@ -185,6 +187,66 @@ class AudioTests(AutomationTestCase):
             client.call("audio.stats", {"voices": True})
         self.assert_engine_error(raised.exception, engine_client.INVALID_PARAMS)
         self.assertEqual(raised.exception.issues[0]["pointer"], "/voices")
+
+    def test_audio_stats_reports_the_session_music_its_fade_and_its_voices(self) -> None:
+        # M40 (Docs/Decisions/0057-m40-music.md decision 7): the play session's music, which agents drive with
+        # script.eval in the play context, in audio.stats' music block, with every voice's level (fadeVolume).
+        client, _ = self.open_editor_with_scene()
+        tracks = {}
+        for name in ("TrackA", "TrackB"):
+            params = {"type": "SoundEffect", "path": f"Assets/Audio/{name}.sfx", "values": MUSIC_SOUND}
+            created = client.call("asset.create", params)
+            tracks[name] = created["asset"]["id"]
+        # Outside a Play session the block is empty.
+        idle = client.call("audio.stats")["music"]
+        self.assertEqual(idle["clip"]["id"], "")
+        self.assertEqual(idle["voice"], "")
+        self.assertEqual(idle["fadingVoices"], [])
+
+        def evaluate(code: str) -> object:
+            return client.call("script.eval", {"context": "play", "code": code})["value"]
+
+        client.call("play.start", {"lockstep": True})
+        evaluate('Audio.PlayMusic(Assets.Load("Assets/Audio/TrackA.sfx"), { Volume = 0.8, FadeSeconds = 0.5 })')
+        client.call("play.step", {"ticks": 15})
+        stats = client.call("audio.stats")
+        music = stats["music"]
+        self.assertEqual(music["clip"]["id"], tracks["TrackA"])
+        self.assertEqual(music["clip"]["path"], "Assets/Audio/TrackA.sfx")
+        self.assertAlmostEqual(music["volume"], 0.8, places=6)
+        self.assertTrue(music["loop"])
+        self.assertEqual(music["fadingVoices"], [])
+        voices = {voice["voice"]: voice for voice in stats["voices"]}
+        first = voices[music["voice"]]
+        self.assertEqual(first["group"], "Music")
+        self.assertEqual(first["priority"], 1)
+        self.assertEqual(first["volume"], 1.0)
+        # Halfway through its half-second fade (15 of 30 ticks): half of 0.8.
+        self.assertAlmostEqual(first["fadeVolume"], 0.4, places=6)
+
+        # A crossfade to the other track: the first voice fades out while the second fades in, then only the second
+        # plays.
+        evaluate('Audio.PlayMusic(Assets.Load("Assets/Audio/TrackB.sfx"), { FadeSeconds = 0.25 })')
+        crossfading = client.call("audio.stats")["music"]
+        self.assertEqual(crossfading["clip"]["id"], tracks["TrackB"])
+        self.assertNotEqual(crossfading["voice"], music["voice"])
+        self.assertEqual(crossfading["fadingVoices"], [music["voice"]])
+        client.call("play.step", {"ticks": 15})
+        after = client.call("audio.stats")
+        self.assertEqual(after["music"]["voice"], crossfading["voice"])
+        self.assertEqual(after["music"]["fadingVoices"], [])
+        self.assertEqual([voice["voice"] for voice in after["voices"]], [crossfading["voice"]])
+        self.assertEqual(after["voices"][0]["fadeVolume"], 1.0)
+
+        # StopMusic ends the request; its voice fades out to its end.
+        evaluate("Audio.StopMusic(0.25)")
+        stopped = client.call("audio.stats")["music"]
+        self.assertEqual(stopped["clip"]["id"], "")
+        self.assertEqual(stopped["voice"], "")
+        self.assertEqual(stopped["fadingVoices"], [crossfading["voice"]])
+        client.call("play.step", {"ticks": 15})
+        self.assertEqual(client.call("audio.stats")["voiceCount"], 0)
+        client.call("play.stop")
 
 
 if __name__ == "__main__":
