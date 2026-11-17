@@ -14,7 +14,6 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
-#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,50 +22,64 @@ namespace Engine {
 
 	namespace Utils {
 
-		static AudioSystem& ScriptAudio(ScriptCall& call)
+		// The session's AudioSystem, or null in a play session without an audio engine (it has the session's music, M40):
+		// there the mixer calls check their arguments and are then ignored, GetGroupVolume reading 1, the default mix
+		// (Docs/Decisions/0057-m40-music.md decision 6: test discovery's scratch sessions run each scene's startup callbacks
+		// without audio). "audio is unavailable" outside a play session.
+		static AudioSystem* ScriptAudio(ScriptCall& call)
 		{
-			auto* audio = call.Engine->GetHost().GetAudio();
-			if (!audio)
+			auto& host = call.Engine->GetHost();
+			AudioSystem* audio = host.GetAudio();
+			if (audio == nullptr && host.GetMusic() == nullptr)
 				Lua::RaiseError(call, "audio is unavailable");
-			return *audio;
+			return audio;
 		}
 		static int AudioPlayOneShot(ScriptCall& call)
 		{
-			auto& audio = ScriptAudio(call);
+			AudioSystem* audio = ScriptAudio(call);
 			const auto clip = Lua::Check<AssetHandle>(call, 1);
 			const auto position = Lua::IsNoneOrNil(call, 2) ? std::nullopt : std::optional{ Lua::Check<glm::vec3>(call, 2) };
 			const float volume = Lua::IsNoneOrNil(call, 3) ? 1.0f : Lua::Check<float>(call, 3);
 			const auto group = static_cast<AudioGroup>(Lua::CheckEnum(call, 4, "AudioGroup"));
 			if (!clip.IsValid() || volume < 0)
 				return Lua::RaiseError(call, "one-shot needs a valid clip and nonnegative volume");
+			// The checks AudioSystem::PlayOneShot and the engine make, so a call is refused alike with or without an engine.
+			if (!std::isfinite(volume) || (position.has_value() && !(std::isfinite(position->x) && std::isfinite(position->y) && std::isfinite(position->z))))
+				return Lua::RaiseError(call, "one-shot needs a finite volume and position");
 			auto permission = call.PrepareHostMutation();
 			if (!permission)
 				return Lua::RaiseError(call, permission.error());
-			auto voice = audio.PlayOneShot(clip, position, volume, group);
+			if (audio == nullptr)
+				return 0;
+			auto voice = audio->PlayOneShot(clip, position, volume, group);
 			if (!voice)
 				return Lua::RaiseError(call, voice.error());
 			return 0;
 		}
 		static int AudioSetGroupVolume(ScriptCall& call)
 		{
-			auto& audio = ScriptAudio(call);
+			AudioSystem* audio = ScriptAudio(call);
 			const auto group = static_cast<AudioGroup>(Lua::CheckEnum(call, 1, "AudioGroup"));
 			const float volume = Lua::Check<float>(call, 2);
 			if (volume < 0)
 				return Lua::RaiseError(call, "volume must be nonnegative");
+			if (!std::isfinite(volume))
+				return Lua::RaiseError(call, "volume must be finite");
 			auto permission = call.PrepareHostMutation();
 			if (!permission)
 				return Lua::RaiseError(call, permission.error());
-			auto result = audio.SetGroupVolume(group, volume);
+			if (audio == nullptr)
+				return 0;
+			auto result = audio->SetGroupVolume(group, volume);
 			if (!result)
 				return Lua::RaiseError(call, result.error());
 			return 0;
 		}
 		static int AudioGetGroupVolume(ScriptCall& call)
 		{
-			auto& audio = ScriptAudio(call);
+			AudioSystem* audio = ScriptAudio(call);
 			const auto group = static_cast<AudioGroup>(Lua::CheckEnum(call, 1, "AudioGroup"));
-			Lua::Push(call, audio.GetGroupVolume(group));
+			Lua::Push(call, audio != nullptr ? audio->GetGroupVolume(group) : 1.0f);
 			return 1;
 		}
 
@@ -124,11 +137,8 @@ namespace Engine {
 			}
 			if (PushMusicOption(call, index, "Volume", LUA_TNUMBER, "number"))
 			{
-				// A number float cannot hold is refused before it is narrowed (NaN, infinities and finite values past its range).
-				const double volume = lua_tonumber(call.State, -1);
-				if (!std::isfinite(volume) || std::abs(volume) > static_cast<double>(std::numeric_limits<float>::max()))
-					Lua::RaiseError(call, Error(ErrorCode::InvalidArgument, std::format("the music's Volume must be finite and at least 0 (got {})", volume)));
-				request.Volume = static_cast<float>(volume);
+				// Kept as asked (ValidateMusicRequest checks its range), so Audio.GetMusic returns the very number.
+				request.Volume = lua_tonumber(call.State, -1);
 				lua_pop(call.State, 1);
 			}
 			if (PushMusicOption(call, index, "FadeSeconds", LUA_TNUMBER, "number"))
@@ -221,10 +231,10 @@ namespace Engine {
 			const ScriptMemberOptions read{ .Mutates = false };
 			api.Module("Audio", "Session-scoped mixing, one-shot playback and the session's music.")
 				.Function("PlayOneShot", Utils::AudioPlayOneShot, "(clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> ()",
-					std::format("Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most {} one-shots start per frame; a later call in the frame raises an error.", MaxAudioOneShotsPerFrame),
+					std::format("Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most {} one-shots start per frame; a later call in the frame raises an error. A play session without audio (a test run's discovery of its suites) checks the call and plays nothing.", MaxAudioOneShotsPerFrame),
 					{ .EnumParameters = { { 4, "AudioGroup", true, "Sfx" } } })
-				.Function("SetGroupVolume", Utils::AudioSetGroupVolume, "(group: AudioGroup, volume: number) -> ()", "Set nonnegative session group gain; the prior mix is restored when the audio system stops.", { .EnumParameters = { { 1, "AudioGroup", false, {} } } })
-				.Function("GetGroupVolume", Utils::AudioGetGroupVolume, "(group: AudioGroup) -> number", "Read the session group gain.", { .Mutates = false, .EnumParameters = { { 1, "AudioGroup", false, {} } } })
+				.Function("SetGroupVolume", Utils::AudioSetGroupVolume, "(group: AudioGroup, volume: number) -> ()", "Set nonnegative session group gain; the prior mix is restored when the audio system stops. A play session without audio checks the call and ignores it.", { .EnumParameters = { { 1, "AudioGroup", false, {} } } })
+				.Function("GetGroupVolume", Utils::AudioGetGroupVolume, "(group: AudioGroup) -> number", "Read the session group gain; 1, the default mix, in a play session without audio.", { .Mutates = false, .EnumParameters = { { 1, "AudioGroup", false, {} } } })
 				.Function("PlayMusic", Utils::AudioPlayMusic, "(clip: AssetRef, options: MusicOptions?) -> ()",
 					std::format("Plays clip as the session's music: non-spatial, in the Music group, at music priority (effects never steal "
 								"it), owned by the play session, so it plays on through Scene.Load and Scene.Reload. With no music playing, "

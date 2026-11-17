@@ -208,6 +208,9 @@ namespace Engine {
 			std::atomic<bool> ExpectingStop{ false };
 			std::atomic<uint64_t> ReadFrames{ 0 };
 			std::atomic<uint64_t> SilentFrames{ 0 };
+			// M40: while capturing, the largest absolute sample the callback read from the engine (AudioCapture::DevicePeak).
+			std::atomic<bool> MeasuringPeak{ false };
+			std::atomic<float> DevicePeak{ 0.0f };
 			std::mutex QueueMutex; // guards Queue
 			std::vector<QueuedNotification> Queue;
 		};
@@ -239,7 +242,17 @@ namespace Engine {
 				// The node graph silences whatever it does not fill; a failed read is played as silence.
 				if (ma_engine_read_pcm_frames(shared.Mixer, frames, frameCount, nullptr) == MA_SUCCESS)
 				{
-					ReplaceNonFiniteSamples(std::span<float>(frames, static_cast<size_t>(frameCount) * AudioChannelCount));
+					const std::span<float> samples(frames, static_cast<size_t>(frameCount) * AudioChannelCount);
+					ReplaceNonFiniteSamples(samples);
+					if (shared.MeasuringPeak.load(std::memory_order_relaxed))
+					{
+						float peak = 0.0f;
+						for (const float sample : samples)
+							peak = std::max(peak, std::abs(sample));
+						// The main thread resets and reads the peak only while it holds ReadMutex, as this read does.
+						if (peak > shared.DevicePeak.load(std::memory_order_relaxed))
+							shared.DevicePeak.store(peak, std::memory_order_relaxed);
+					}
 					shared.ReadFrames.fetch_add(frameCount, std::memory_order_relaxed);
 					return;
 				}
@@ -516,10 +529,11 @@ namespace Engine {
 		uint64_t StartSequence = 0;
 		bool Paused = false;
 		bool Streamed = false;
-		// M40 (AudioEngine.h "Fades"): the voice's level while no fade is in progress, applied through its volume (1 while a
-		// fade is); and the fade in progress (Fading): its levels and length, where it began on the voice's clock
-		// (State::GetMixedFrames) and what its end does.
+		// M40 (AudioEngine.h "Fades"): the voice's level while no fade is in progress, held by the fader (off for 1), and
+		// where that hold was armed on the voice's clock (State::GetMixedFrames; re-armed before the fader's cursor runs out);
+		// and the fade in progress (Fading): its levels and length, where it began and what its end does.
 		float Level = 1.0f;
+		uint64_t HeldSince = 0;
 		bool Fading = false;
 		float FadeFrom = 1.0f;
 		float FadeTo = 1.0f;
@@ -614,7 +628,7 @@ namespace Engine {
 		void ProcessJobs();
 		void Pull(uint64_t frames, std::span<float> destination);
 		void AppendCapture(std::span<const float> samples);
-		// M40: ends the fades that completed (AudioEngine.h "Fades"): a Hold fade is folded into its voice, a Release fade's
+		// M40: ends the fades that completed (AudioEngine.h "Fades"): a Hold fade holds its target on the fader, a Release fade's
 		// voice is released.
 		void CompleteFades();
 		// M40: marks the chained voices whose mixer has played past their head (AudioVoice::NextReached); only while nothing
@@ -623,15 +637,17 @@ namespace Engine {
 		void ReleaseFinishedVoices();
 		[[nodiscard]] Ref<const AudioClipPayload> FindResidentPayload(std::string_view resourceName);
 		[[nodiscard]] Status ApplyGroup(ma_sound& sound, AudioGroup group);
-		// The voice's settings, its volume times `level` (AudioVoice::Level), its Loop on `nextSection` for a chained voice.
-		// Errors: miniaudio's, setting the section's looping.
-		[[nodiscard]] static Status ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, float level, ma_resource_manager_data_source* nextSection);
+		// The voice's settings (its level is the fader's, never its volume's: AudioEngine.h "Fades"), its Loop on
+		// `nextSection` for a chained voice. Errors: miniaudio's, setting the section's looping.
+		[[nodiscard]] static Status ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, ma_resource_manager_data_source* nextSection);
 		// M40: the frames the mixer has output of the voice (its node's clock, which a paused voice holds), and the level its
 		// fade has reached after `mixed` of them, computed as miniaudio's fader computes it (ma_fader_get_current_volume).
 		[[nodiscard]] static uint64_t GetMixedFrames(const AudioVoice& voice);
 		[[nodiscard]] static float GetLevel(const AudioVoice& voice, uint64_t mixed);
-		// M40: starts the fade of `voice` from `from` to `to` over `frames` (0: `to` at once, the fader switched off).
+		// M40: starts the fade of `voice` from `from` to `to` over `frames` (0: holds `to` at once).
 		static void BeginFade(AudioVoice& voice, float from, float to, uint64_t frames, AudioFadeEnd end);
+		// M40: holds `voice` at `level` on its fader (the fader off for 1), from the voice's next mixed frame.
+		static void HoldLevel(AudioVoice& voice, float level);
 		static void ApplyTransform(ma_sound& sound, const AudioVoiceTransform& transform);
 		// The voice's effective Doppler factor (GetEffectiveDopplerFactor) for its settings, its velocity and the listener's.
 		void ApplyDoppler(ma_sound& sound, const AudioVoiceSettings& settings, const AudioVoiceTransform& transform);
@@ -980,9 +996,15 @@ namespace Engine {
 		std::vector<AudioVoiceHandle> released;
 		Voices.ForEach([&released](AudioVoiceHandle handle, AudioVoice& voice)
 		{
-			if (!voice.Fading)
-				return;
 			const uint64_t mixed = GetMixedFrames(voice);
+			if (!voice.Fading)
+			{
+				// A held level stays on the fader, whose 32-bit cursor would end its hold after 2^32 frames: re-armed at the
+				// same level well before (glitch-free, the level unchanged).
+				if (voice.Level != 1.0f && mixed - voice.HeldSince >= AudioEngine::MaxFadeFrames)
+					HoldLevel(voice, voice.Level);
+				return;
+			}
 			if (mixed < voice.FadeStart || mixed - voice.FadeStart < voice.FadeFrames)
 				return;
 			if (voice.FadeEnd == AudioFadeEnd::Release)
@@ -990,8 +1012,8 @@ namespace Engine {
 				released.push_back(handle);
 				return;
 			}
-			// Folded: the fader is switched off and the voice plays on at the target level through its volume.
-			BeginFade(voice, voice.FadeTo, voice.FadeTo, 0, AudioFadeEnd::Hold);
+			// Held at the target, on the fader re-armed from its start, so the level never moves to the volume.
+			HoldLevel(voice, voice.FadeTo);
 		});
 		for (const AudioVoiceHandle handle : released)
 		{
@@ -1035,7 +1057,7 @@ namespace Engine {
 		return {};
 	}
 
-	Status AudioEngine::State::ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, float level, ma_resource_manager_data_source* nextSection)
+	Status AudioEngine::State::ApplySettings(ma_sound& sound, const AudioVoiceSettings& settings, ma_resource_manager_data_source* nextSection)
 	{
 		// A chained voice reads its sections in turn only while its head does not loop: Loop belongs to the section that
 		// follows (AudioEngine.h "Chained voices"). The one step that can fail goes first, so a failure changes nothing.
@@ -1045,8 +1067,7 @@ namespace Engine {
 				return std::unexpected(MakeMiniaudioError(result, "cannot loop the section of a chained audio voice"));
 		}
 		const AudioSpatialization& spatialization = settings.Spatialization;
-		// A level of 1 (every voice that never faded) leaves the volume exactly as given.
-		ma_sound_set_volume(&sound, settings.Volume * level);
+		ma_sound_set_volume(&sound, settings.Volume);
 		ma_sound_set_pitch(&sound, std::min(settings.Pitch, MaxEffectivePitch));
 		ma_sound_set_looping(&sound, settings.Loop && nextSection == nullptr ? MA_TRUE : MA_FALSE);
 		ma_sound_set_spatialization_enabled(&sound, settings.Spatial ? MA_TRUE : MA_FALSE);
@@ -1186,29 +1207,33 @@ namespace Engine {
 
 	void AudioEngine::State::BeginFade(AudioVoice& voice, float from, float to, uint64_t frames, AudioFadeEnd end)
 	{
-		ma_sound* sound = voice.Sound.Get();
 		if (frames == 0)
 		{
-			// The level at once, through the volume; a fader in use is switched off at the voice's next mixed frame (a fader
-			// from 1 to 1 does nothing), as the volume changes.
-			if (voice.Fading)
-				ma_sound_set_fade_in_pcm_frames(sound, 1.0f, 1.0f, 0);
-			voice.Fading = false;
-			voice.Level = to;
-			ma_sound_set_volume(sound, voice.Settings.Volume * voice.Level);
+			HoldLevel(voice, to);
 			return;
 		}
-		// The fader takes the level from here on; miniaudio applies a fade at the voice's next mixed frame, so its first
-		// frame is the fade's frame 0 on the voice's clock (GetMixedFrames).
+		// Only the fader changes, in one deferred setting that the mixing thread takes whole at the voice's next mixed frame,
+		// so its first frame is the fade's frame 0 on the voice's clock (GetMixedFrames) and no frame mixes a level the
+		// voice never had (AudioEngine.h "Fades").
 		voice.Fading = true;
 		voice.FadeFrom = from;
 		voice.FadeTo = to;
 		voice.FadeFrames = frames;
 		voice.FadeStart = GetMixedFrames(voice);
 		voice.FadeEnd = end;
-		voice.Level = 1.0f;
-		ma_sound_set_volume(sound, voice.Settings.Volume);
-		ma_sound_set_fade_in_pcm_frames(sound, from, to, frames);
+		ma_sound_set_fade_in_pcm_frames(voice.Sound.Get(), from, to, frames);
+	}
+
+	void AudioEngine::State::HoldLevel(AudioVoice& voice, float level)
+	{
+		// A fader from 1 to 1 is off (the voice mixes as one that never faded); any other level is a fader from the level to
+		// itself, whose cursor starts again here.
+		const bool touched = voice.Fading || voice.Level != 1.0f || level != 1.0f;
+		voice.Fading = false;
+		voice.Level = level;
+		voice.HeldSince = GetMixedFrames(voice);
+		if (touched)
+			ma_sound_set_fade_in_pcm_frames(voice.Sound.Get(), level, level, 0);
 	}
 
 	AudioEngine::AudioEngine(ConstructionKey /*key*/)
@@ -1384,10 +1409,7 @@ namespace Engine {
 		SoundNode sound;
 		if (next == nullptr)
 		{
-			// A looping voice loops from its initialization: a stream decodes its first two pages then, with the looping it
-			// has (AudioEngine.h "Voices"), so a short clip's pages hold its repeats rather than one pass.
-			const ma_uint32 loopFlag = description.Settings.Loop ? MA_SOUND_FLAG_LOOPING : 0;
-			const ma_uint32 flags = (clip->Streamed ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE) | spatialFlags | loopFlag;
+			const ma_uint32 flags = (clip->Streamed ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE) | spatialFlags;
 			ENGINE_TRY_ASSIGN(sound, SoundNode::CreateSound(state.Mixer, clip->ResourceName, flags, group));
 		}
 		else
@@ -1420,7 +1442,7 @@ namespace Engine {
 			.NextClip = description.Next,
 			.NextClipName = next != nullptr ? next->Name : std::string() };
 		ma_sound* started = voice.Sound.Get();
-		ENGINE_TRY(State::ApplySettings(*started, description.Settings, 1.0f, voice.NextSection.Get()));
+		ENGINE_TRY(State::ApplySettings(*started, description.Settings, voice.NextSection.Get()));
 		State::ApplyTransform(*started, description.Transform);
 		state.ApplyDoppler(*started, description.Settings, description.Transform);
 		// M40: the voice's fade, set before it starts, so its first mixed frame is the fade's first (no fade, the default,
@@ -1474,7 +1496,7 @@ namespace Engine {
 		ENGINE_TRY(Utils::ValidateSettings(settings));
 		if (settings.Group != target->Settings.Group)
 			ENGINE_TRY(m_State->ApplyGroup(*target->Sound.Get(), settings.Group));
-		ENGINE_TRY(State::ApplySettings(*target->Sound.Get(), settings, target->Level, target->NextSection.Get()));
+		ENGINE_TRY(State::ApplySettings(*target->Sound.Get(), settings, target->NextSection.Get()));
 		m_State->ApplyDoppler(*target->Sound.Get(), settings, target->Transform);
 		target->Settings = settings;
 		return {};
@@ -1704,6 +1726,9 @@ namespace Engine {
 	{
 		m_State->Capture = AudioCapture{};
 		m_State->Capturing = true;
+		const std::lock_guard lock(m_State->Shared.ReadMutex);
+		m_State->Shared.DevicePeak.store(0.0f, std::memory_order_relaxed);
+		m_State->Shared.MeasuringPeak.store(true, std::memory_order_relaxed);
 	}
 
 	AudioCapture AudioEngine::StopCapture()
@@ -1711,7 +1736,12 @@ namespace Engine {
 		if (!m_State->Capturing)
 			return {};
 		m_State->Capturing = false;
-		return std::exchange(m_State->Capture, AudioCapture{});
+		AudioCapture capture = std::exchange(m_State->Capture, AudioCapture{});
+		// The device callback reads under ReadMutex, so holding it waits out a read in progress.
+		const std::lock_guard lock(m_State->Shared.ReadMutex);
+		m_State->Shared.MeasuringPeak.store(false, std::memory_order_relaxed);
+		capture.DevicePeak = m_State->Shared.DevicePeak.load(std::memory_order_relaxed);
+		return capture;
 	}
 
 	bool AudioEngine::IsCapturing() const

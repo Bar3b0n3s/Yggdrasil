@@ -334,6 +334,8 @@ refused(function() Audio.PlayMusic(nil) end, "expected AssetRef")
 refused(function() Audio.PlayMusic("Assets/Tone.wav") end, "expected AssetRef")
 refused(function() Audio.PlayMusic(clip, 1) end, "expected MusicOptions table")
 refused(function() Audio.PlayMusic(clip, { Volum = 1 }) end, "unknown MusicOptions key 'Volum'")
+-- A key over 32 bytes is named by its length (the W40.1 review's finding 8).
+refused(function() Audio.PlayMusic(clip, { [string.rep("x", 40)] = 1 }) end, "unknown MusicOptions key 'a key of 40 bytes'")
 refused(function() Audio.PlayMusic(clip, { [1] = 1 }) end, "MusicOptions keys are Volume, FadeSeconds, Loop and Intro")
 refused(function() Audio.PlayMusic(clip, { Intro = 1 }) end, "options.Intro expected AssetRef")
 refused(function() Audio.PlayMusic(clip, { Intro = Scene.FindByName("Source") }) end, "options.Intro expected AssetRef, got another engine value")
@@ -366,15 +368,29 @@ return Audio.GetMusic() == nil
 )");
 			CHECK(readOnly.Audio->GetVoices().empty());
 
-			// A host without music (Simulate, the edit evaluation) raises "audio is unavailable" for every music call.
-			Test::ScriptTestFixture withoutMusic({ .TestMode = true });
+			// A host without music (outside a play session: the edit evaluation, a fixture without one) raises "audio is
+			// unavailable" for every music call, Test.GetMusic's included (the W40.1 review's finding 8).
+			MusicTestHost testHost;
+			Test::ScriptTestFixture withoutMusic({ .TestMode = true, .TestHost = &testHost });
 			REQUIRE(withoutMusic.Start());
 			CheckAudioBinding(withoutMusic, R"(
-for _, fn in { function() Audio.PlayMusic(nil) end, function() Audio.StopMusic() end, function() Audio.GetMusic() end } do
+for _, fn in { function() Audio.PlayMusic(nil) end, function() Audio.StopMusic() end, function() Audio.GetMusic() end,
+	function() Test.GetMusic() end } do
 	local ok, message = pcall(fn)
 	assert(not ok and string.find(message, "audio is unavailable", 1, true), message)
 end
 return true
+)");
+		}
+
+		// The W40.1 review's finding 7: Audio.GetMusic returns the Volume as the script asked for it, never its float.
+		TEST_CASE("AudioBindings: GetMusic returns the music's Volume exactly as asked")
+		{
+			AudioBindingFixture fixture;
+			REQUIRE(fixture.Start());
+			CheckAudioBinding(fixture.Script, R"(
+Audio.PlayMusic(Assets.Load("Assets/Tone.wav"), { Volume = 0.3 })
+return Audio.GetMusic().Volume == 0.3
 )");
 		}
 

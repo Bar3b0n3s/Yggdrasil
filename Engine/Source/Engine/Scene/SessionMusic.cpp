@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <iterator>
+#include <limits>
 #include <utility>
 
 // Scene is a simulation-path module (§4.12): nothing here uses a CRT transcendental function. Audio is not simulated state,
@@ -33,8 +35,11 @@ namespace Engine {
 		bool Paused = false;
 		MusicVoices Snapshot{};
 
-		// Forgets the voices the engine released (a fade's or a clip's end, a steal).
-		void Prune();
+		// Forgets the voices the engine released (a fade's or a clip's end, a steal); whether it forgot any.
+		bool Prune();
+		// Drops the registrations of the clips no voice and no request uses any more (the request's clip and intro stay
+		// registered, so asking for them again never decodes them again).
+		void ReleaseUnused();
 		// Stops `voice` when it is alive.
 		void Release(const MusicVoice& voice);
 		// Fades `voice` out over `frames` to its release (at once for 0), keeping it among FadingOut until then.
@@ -51,16 +56,51 @@ namespace Engine {
 		void Start(const MusicRequest& request, bool intro, uint64_t frames);
 	};
 
-	void SessionMusic::State::Prune()
+	bool SessionMusic::State::Prune()
 	{
 		if (Audio == nullptr)
-			return;
+			return false;
+		bool forgot = false;
 		if (!Current.Voice.IsNull() && !Audio->IsVoiceAlive(Current.Voice))
+		{
 			Current = MusicVoice{};
-		std::erase_if(FadingOut, [this](const MusicVoice& voice)
+			forgot = true;
+		}
+		const size_t released = std::erase_if(FadingOut, [this](const MusicVoice& voice)
 		{
 			return !Audio->IsVoiceAlive(voice.Voice);
 		});
+		return forgot || released > 0;
+	}
+
+	void SessionMusic::State::ReleaseUnused()
+	{
+		if (Audio == nullptr)
+			return;
+		std::vector<AudioClipHandle> kept;
+		const auto keepVoice = [this, &kept](const MusicVoice& voice)
+		{
+			if (Result<AudioVoiceInfo> info = Audio->GetVoiceInfo(voice.Voice); info.has_value())
+			{
+				kept.push_back(info->Clip);
+				if (!info->NextClip.IsNull())
+					kept.push_back(info->NextClip);
+			}
+		};
+		keepVoice(Current);
+		for (const MusicVoice& voice : FadingOut)
+			keepVoice(voice);
+		if (Request.has_value())
+		{
+			for (const AssetHandle clip : { Request->Clip, Request->Intro })
+			{
+				if (!clip.IsValid())
+					continue;
+				if (const std::optional<AudioClipHandle> registered = Clips.Find(clip); registered.has_value())
+					kept.push_back(*registered);
+			}
+		}
+		Clips.Retain(kept);
 	}
 
 	void SessionMusic::State::Release(const MusicVoice& voice)
@@ -159,8 +199,9 @@ namespace Engine {
 		description.Settings.Loop = request.Loop;
 		description.Priority = AudioSystemMusicPriority;
 		description.StartPaused = Paused;
-		description.Fade = frames == 0 ? AudioVoiceFade{ .From = request.Volume, .To = request.Volume, .Frames = 0 }
-									   : AudioVoiceFade{ .From = 0.0f, .To = request.Volume, .Frames = frames };
+		// The engine's level is a float; ValidateMusicRequest keeps Volume within its range.
+		const auto level = static_cast<float>(request.Volume);
+		description.Fade = frames == 0 ? AudioVoiceFade{ .From = level, .To = level, .Frames = 0 } : AudioVoiceFade{ .From = 0.0f, .To = level, .Frames = frames };
 		const Result<AudioVoiceHandle> voice = Audio->PlayVoice(description);
 		if (!voice)
 		{
@@ -208,7 +249,7 @@ namespace Engine {
 		if (!state.Current.Voice.IsNull() && state.Current.Clip == request.Clip)
 		{
 			// The same music: its voice is kept, its level and Loop follow the request.
-			state.Adjust(state.Current, request.Volume, frames, request.Loop);
+			state.Adjust(state.Current, static_cast<float>(request.Volume), frames, request.Loop);
 		}
 		else
 		{
@@ -228,13 +269,14 @@ namespace Engine {
 			if (reclaimed.has_value())
 			{
 				state.Current = *reclaimed;
-				state.Adjust(state.Current, request.Volume, frames, request.Loop);
+				state.Adjust(state.Current, static_cast<float>(request.Volume), frames, request.Loop);
 			}
 			else
 			{
 				state.Start(request, intro, frames);
 			}
 		}
+		state.ReleaseUnused();
 		return {};
 	}
 
@@ -248,6 +290,7 @@ namespace Engine {
 		state.Request.reset();
 		if (!state.Current.Voice.IsNull())
 			state.FadeOut(std::exchange(state.Current, MusicVoice{}), GetMusicFadeFrames(fadeSeconds));
+		state.ReleaseUnused();
 		return {};
 	}
 
@@ -282,7 +325,8 @@ namespace Engine {
 	void SessionMusic::Update()
 	{
 		State& state = *m_State;
-		state.Prune();
+		if (state.Prune())
+			state.ReleaseUnused();
 		state.Snapshot = Inspect();
 	}
 
@@ -321,7 +365,7 @@ namespace Engine {
 	{
 		if (!request.Clip.IsValid())
 			return MakeError(ErrorCode::InvalidArgument, "the music needs a clip");
-		if (!std::isfinite(request.Volume) || request.Volume < 0.0f)
+		if (!std::isfinite(request.Volume) || request.Volume < 0.0 || request.Volume > static_cast<double>(std::numeric_limits<float>::max()))
 			return MakeError(ErrorCode::InvalidArgument, "the music's Volume must be finite and at least 0 (got {})", request.Volume);
 		return ValidateMusicFade(request.FadeSeconds);
 	}

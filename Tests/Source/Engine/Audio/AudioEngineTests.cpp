@@ -1600,10 +1600,53 @@ namespace Engine {
 			CHECK(ErrorCodeOf(engine->FadeVoice(voice, nan, 10)) == ErrorCode::InvalidArgument);
 			CHECK(ErrorCodeOf(engine->FadeVoice(voice, infinity, 10)) == ErrorCode::InvalidArgument);
 			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, AudioEngine::MaxFadeFrames + 1)) == ErrorCode::InvalidArgument);
+			// The W40.1 review's finding 2: the longest fade ends well before miniaudio's fader cursor (32 bits) runs out, so
+			// its end is held before the fader would stop applying it.
+			CHECK(AudioEngine::MaxFadeFrames <= 0x7FFFFFFFull);
+			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, 0xFFFFFFFFull)) == ErrorCode::InvalidArgument);
 			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, 10, static_cast<AudioFadeEnd>(7))) == ErrorCode::InvalidArgument);
 			REQUIRE(engine->StopVoice(voice).has_value());
 			CHECK(ErrorCodeOf(engine->FadeVoice(voice, 1.0f, 10)) == ErrorCode::NotFound);
 			CHECK(ErrorCodeOf(engine->FadeVoice(AudioVoiceHandle(), 1.0f, 10)) == ErrorCode::NotFound);
+		}
+
+		// M40 (the W40.1 review's finding 1): a level lives on the fader alone, so a device reading a voice while the main thread
+		// moves it, as fast as it can, between a held level and a fade at that level never mixes a frame above it. A constant
+		// clip at half scale held at 0.25 mixes 0.125; W40.1 held a level on the volume, and a fade from it set the volume to 1
+		// before the fader, so a device read between the two mixed frames at 0.5.
+		TEST_CASE("AudioEngine: a fade from a held level never mixes a frame above its levels on a device-read voice")
+		{
+			VirtualFileSystem vfs;
+			const TestEngine engine = CreateTestEngine(vfs, AudioDeviceKind::Null);
+			REQUIRE(engine->GetTimeSource() == AudioTimeSource::Device);
+			Buffer bytes(static_cast<size_t>(4800) * sizeof(int16_t));
+			for (size_t frame = 0; frame < 4800; ++frame)
+			{
+				bytes[2 * frame] = std::byte{ 0x00 };
+				bytes[2 * frame + 1] = std::byte{ 0x40 }; // 16384, 0.5 of full scale (little-endian)
+			}
+			const Result<AudioClipHandle> clip = engine->RegisterClip(
+				{ .Name = "00000000000000f1", .Format = AudioClipFormat::Pcm16, .Bytes = CreateRef<const Buffer>(std::move(bytes)), .SampleRate = 48000, .ChannelCount = 1 });
+			REQUIRE_MESSAGE(clip.has_value(), clip.error().ToString());
+			const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = *clip, .Settings = { .Loop = true }, .Fade = { .From = 0.25f, .To = 0.25f } });
+			engine->StartCapture();
+			const uint64_t readBefore = GetDeviceReadFrames(*engine);
+			bool moved = true;
+			const bool read = Test::WaitUntil([&engine, voice, readBefore, &moved]()
+			{
+				for (int pass = 0; pass < 2000; ++pass)
+				{
+					moved = moved && engine->FadeVoice(voice, 0.25f, 4800).has_value();
+					moved = moved && engine->FadeVoice(voice, 0.25f, 0).has_value();
+				}
+				return GetDeviceReadFrames(*engine) > readBefore + 50 * 480;
+			});
+			const AudioCapture capture = engine->StopCapture();
+			CHECK(read);
+			CHECK(moved);
+			CHECK(capture.DevicePeak > 0.1f);
+			CHECK(capture.DevicePeak <= 0.125f * 1.001f);
+			REQUIRE(engine->StopVoice(voice).has_value());
 		}
 
 		// M40 (Docs/Decisions/0057-m40-music.md decision 11): an intro, then its loop, decoded and streamed. The reference is one
@@ -1671,18 +1714,17 @@ namespace Engine {
 			}
 		}
 
-		// M40 (decision 11): a voice that loops is created looping, so a stream shorter than a page decodes its repeats into the
-		// pages it fills when it opens, and its first wrap is as seamless as a decoded clip's (created without looping, its
-		// pages held one pass, and the voice was silent while it sought back to its start).
-		TEST_CASE("AudioEngine: a looping streamed clip shorter than a page wraps its first pass seamlessly")
+		// M40 (decision 11): a looping voice of one streamed clip a page long (a second) wraps its first pass as seamlessly as a
+		// decoded clip's, as a chained voice's loop does.
+		TEST_CASE("AudioEngine: a looping streamed clip wraps its first pass seamlessly")
 		{
-			constexpr uint64_t Frames = 4800 + 4700;
+			constexpr uint64_t Frames = 48000 + 4700;
 			std::vector<std::vector<float>> mixed;
 			for (const bool stream : { false, true })
 			{
 				VirtualFileSystem vfs;
 				const TestEngine engine = CreateTestEngine(vfs);
-				const AudioClipHandle clip = RegisterToneClip(*engine, "00000000000000e1", MakeTone(0.1), stream);
+				const AudioClipHandle clip = RegisterToneClip(*engine, "00000000000000e1", MakeTone(1.0), stream);
 				const AudioVoiceHandle voice = PlayTestVoice(*engine, { .Clip = clip, .Settings = { .Loop = true } });
 				mixed.push_back(PullFrames(*engine, Frames));
 				REQUIRE(engine->IsVoiceAlive(voice));

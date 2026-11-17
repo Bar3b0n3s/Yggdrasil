@@ -8,7 +8,9 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -51,6 +53,12 @@ namespace Engine {
 		// Only with an audio engine (verified). Errors: the engine's (AudioEngine::RegisterClip), with the context naming the
 		// clip.
 		[[nodiscard]] Result<AudioClipHandle> Acquire(AssetHandle handle);
+		// The registration `handle` resolves to (Resolve's handle and version), without registering it; nullopt when it has
+		// none.
+		[[nodiscard]] std::optional<AudioClipHandle> Find(AssetHandle handle);
+		// Drops the registrations this registry made that are not among `kept`; their voices keep their data until they end
+		// (AudioEngine.h).
+		void Retain(std::span<const AudioClipHandle> kept);
 		// Drops every registration this registry made; their voices keep their data until they end (AudioEngine.h).
 		void Clear();
 		// Whether `clip` is the placeholder a missing, failed or mistyped clip resolves to (Resolve).

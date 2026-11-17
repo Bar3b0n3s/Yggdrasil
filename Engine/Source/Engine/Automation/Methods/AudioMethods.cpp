@@ -113,7 +113,8 @@ namespace Engine {
 					result.Music.Clip = Utils::SummarizeAudioClip(assets, request->Clip.ToString());
 					if (request->Intro.IsValid())
 						result.Music.Intro = Utils::SummarizeAudioClip(assets, request->Intro.ToString());
-					result.Music.Volume = request->Volume;
+					// The reflected field is a float, as every volume audio.stats reports (Audio.GetMusic returns the double).
+					result.Music.Volume = static_cast<float>(request->Volume);
 					result.Music.Loop = request->Loop;
 				}
 				const MusicVoices voices = music->Inspect();

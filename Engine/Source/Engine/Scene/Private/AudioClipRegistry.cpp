@@ -66,6 +66,27 @@ namespace Engine {
 		return m_Assets != nullptr ? m_Assets->GetReferencePath(handle) : handle.ToString();
 	}
 
+	std::optional<AudioClipHandle> AudioClipRegistry::Find(AssetHandle handle)
+	{
+		const ResolvedAudioClip clip = Resolve(handle);
+		if (const auto found = m_Clips.find({ clip.Handle, clip.Version }); found != m_Clips.end())
+			return found->second;
+		return std::nullopt;
+	}
+
+	void AudioClipRegistry::Retain(std::span<const AudioClipHandle> kept)
+	{
+		std::erase_if(m_Clips, [this, kept](const auto& entry)
+		{
+			const auto& [key, clip] = entry;
+			if (std::ranges::find(kept, clip) != kept.end())
+				return false;
+			if (const Status unregistered = m_Audio->UnregisterClip(clip); !unregistered)
+				ENGINE_CORE_WARN("{}: unregistering audio clip {} failed: {}", m_Owner, key.first.ToString(), unregistered.error().ToString());
+			return true;
+		});
+	}
+
 	void AudioClipRegistry::Clear()
 	{
 		// Without an engine nothing was registered.

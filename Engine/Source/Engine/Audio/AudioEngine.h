@@ -97,22 +97,23 @@
 // Voices (§10.1). A HandlePool of MaxAudioVoices voices, each one ma_sound in its group (Master -> Music, Sfx, Ui). When the
 // pool is full, PlayVoice steals the voice with the lowest priority, among those the one farthest from the listener (a
 // non-spatial voice counts as distance 0), among those the oldest (the smallest start sequence); a voice is stolen only
-// when its priority is not above the new voice's, else PlayVoice fails. A stolen voice's handle becomes stale. A voice
-// that starts looping is created looping (M40), since a stream decodes its first two pages (a second each) when it opens,
-// with the looping it has then, and a looping clip shorter than a page fills them with its repeats. A looping stream whose
-// decoded pages run out seeks back to its start, which a stream does through a resource-manager job, so the voice is
-// silent from that read until the job runs (the next pull under deterministic decoding): with Loop turned on later, a
-// short stream does so after its first pass, and a looping stream shorter than a page does so whenever its pages run out,
-// since miniaudio's page fill stops at a clip's second end within one page (an accepted limit, Docs/Backlog.md §6).
+// when its priority is not above the new voice's, else PlayVoice fails. A stolen voice's handle becomes stale. A looping
+// stream shorter than a page (a second) holds about two passes in its decoded pages, since miniaudio's page fill stops at a
+// clip's second end within one page; it then seeks back to its start, which a stream does through a resource-manager job,
+// so the voice is silent from that read until the job runs (the next pull under deterministic decoding; an accepted limit,
+// Docs/Backlog.md §6).
 //
 // Fades (§10.1; M40, Docs/Decisions/0057-m40-music.md decision 3). A voice's level is a multiplier of its Volume that a fade
 // moves linearly from one value to another over a number of the voice's own mixed frames (48 kHz), on miniaudio's per-voice
 // fader: AudioVoiceDescription::Fade starts a voice with one, applied before it starts so no frame plays at another level,
 // and FadeVoice starts one from the level the voice has reached. A fade counts the frames the engine mixes of its voice (the
 // voice node's own clock, ma_node_get_time), so a paused voice's fade holds and a fade follows the time source as cursors
-// do: simulation time in lockstep and test runs, real time while the device reads. A fade that completes is folded into the
-// voice: miniaudio's fader is switched off and the voice plays on at the target level through its volume (Volume times the
-// level), so the fader runs only while a fade is in progress. A fade with AudioFadeEnd::Release releases its voice at the
+// do: simulation time in lockstep and test runs, real time while the device reads. A level lives on the fader alone, never
+// on the voice's volume, so a change of level is one deferred fader setting that the mixing thread takes whole at the
+// voice's next mixed frame: a device reading the voice never mixes a frame at a level the voice never had. A fade that
+// completes holds its target on the fader, re-armed from its start (a fader from the level to itself; off for 1, so a voice
+// back at 1 mixes as one that never faded), and a held level is re-armed again before the fader's 32-bit cursor could run
+// out (every MaxFadeFrames mixed frames). A fade with AudioFadeEnd::Release releases its voice at the
 // end of the pull that completes it, like a voice at the end of its clip (exact while the engine pulls its own frames;
 // within a device period, at a level near the target, at the Update after it while the device reads). A voice without a
 // fade never touches the fader, so it mixes exactly as before fades existed.
@@ -362,6 +363,9 @@ namespace Engine {
 		std::vector<float> Samples{};
 		// True when the capture reached AudioEngine::MaxCaptureFrames and later frames were dropped.
 		bool Truncated = false;
+		// M40: the largest absolute sample the device read from the engine while capturing (time source Device; 0 when the
+		// device read nothing). The device's frames themselves are never captured.
+		float DevicePeak = 0.0f;
 
 		[[nodiscard]] uint64_t GetFrameCount() const { return Samples.size() / AudioChannelCount; }
 	};
@@ -382,8 +386,9 @@ namespace Engine {
 		static constexpr uint32_t MaxDeviceRecreationAttempts = 3;
 		// The longest capture: 10 minutes of frames (about 230 MB of samples); later frames are dropped (AudioCapture::Truncated).
 		static constexpr uint64_t MaxCaptureFrames = static_cast<uint64_t>(AudioSampleRate) * 600;
-		// M40: the longest fade (see "Fades"), miniaudio's fader's 32-bit length: about 24.8 hours at 48 kHz.
-		static constexpr uint64_t MaxFadeFrames = 0xFFFFFFFFull;
+		// M40: the longest fade (see "Fades"): about 12.4 hours at 48 kHz, half of miniaudio's fader's 32-bit cursor, so a fade
+		// is held at its target long before the fader would stop applying it, a pull or a device period after its end.
+		static constexpr uint64_t MaxFadeFrames = 0x7FFFFFFFull;
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
 		class ConstructionKey
@@ -502,7 +507,8 @@ namespace Engine {
 
 		// --- Capture (Test.CaptureAudio, M13) ------------------------------------------------------------------------------
 
-		// Starts capturing every frame the engine pulls (never the device's reads), dropping an earlier capture.
+		// Starts capturing every frame the engine pulls (never the device's reads, of which only the peak is measured:
+		// AudioCapture::DevicePeak), dropping an earlier capture.
 		void StartCapture();
 		// Stops capturing and returns the frames pulled since StartCapture (empty when not capturing).
 		[[nodiscard]] AudioCapture StopCapture();

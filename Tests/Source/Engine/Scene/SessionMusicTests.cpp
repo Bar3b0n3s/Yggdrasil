@@ -440,6 +440,36 @@ namespace Engine {
 			CHECK_FALSE(music.GetState().has_value());
 		}
 
+		// The W40.1 review's follow-up: a track stays registered only while a voice or the request uses it, so a run through
+		// many scenes' tracks keeps the ones playing, not every one it ever played.
+		TEST_CASE("SessionMusic: a track's registration is released once no voice or request uses it")
+		{
+			MusicFixture fixture;
+			const auto registered = [&fixture]()
+			{
+				return fixture.Audio->GetStats().RegisteredClips;
+			};
+			REQUIRE(fixture.Music->Play({ .Clip = TrackA }).has_value());
+			CHECK(registered() == 1);
+			// At once: A's voice stops and A is no longer asked for.
+			REQUIRE(fixture.Music->Play({ .Clip = TrackB }).has_value());
+			CHECK(registered() == 1);
+			// A crossfade keeps B registered while its voice fades out, then releases it.
+			REQUIRE(fixture.Music->Play({ .Clip = TrackC, .FadeSeconds = 0.5 }).has_value());
+			CHECK(registered() == 2);
+			fixture.Pull(24000 + 480);
+			fixture.Music->Update();
+			CHECK(registered() == 1);
+			// A clip played once that ended stays registered while it is the request, and goes with it.
+			REQUIRE(fixture.Music->Play({ .Clip = Jingle, .Loop = false }).has_value());
+			fixture.Pull(4800 + 480);
+			fixture.Music->Update();
+			CHECK_FALSE(fixture.Music->GetVoices().CurrentInfo.has_value());
+			CHECK(registered() == 1);
+			REQUIRE(fixture.Music->Stop(0.0).has_value());
+			CHECK(registered() == 0);
+		}
+
 		TEST_CASE("SessionMusic: destroying it releases every voice and every clip it registered")
 		{
 			MusicFixture fixture;
@@ -576,9 +606,10 @@ return Script.Define("Conductor", C)
 			CHECK(session.GetScriptErrors().GetErrors().empty());
 		}
 
-		// Decision 5: the feature host discovers test suites in scratch sessions without audio, whose scene's startup callbacks
-		// ask for their track as in any session.
-		TEST_CASE("SessionMusic: a play session without an audio engine records the music its scripts ask for")
+		// Decisions 5 and 6: the feature host discovers test suites in scratch sessions without audio, whose scene's startup
+		// callbacks ask for their track and set the mix as in any session: the music records the request, and the mixer calls
+		// are checked, then ignored, GetGroupVolume reading 1 (the W40.1 review's follow-up).
+		TEST_CASE("SessionMusic: a play session without an audio engine records its music and checks then ignores its mixer calls")
 		{
 			Test::ScriptTestFixture fixture;
 			const AssetHandle conductor(0x4000b3);
@@ -587,6 +618,11 @@ return Script.Define("Conductor", C)
 local C = {}
 function C:OnStart()
 	Audio.PlayMusic(Assets.Load("Assets/Audio/Realm.sfx"), { Volume = 0.25 })
+	Audio.SetGroupVolume("Music", 0.5)
+	Audio.PlayOneShot(Assets.Load("Assets/Audio/Realm.sfx"), nil, 1, "Music")
+	assert(Audio.GetGroupVolume("Music") == 1)
+	assert(not pcall(Audio.SetGroupVolume, "Music", -1))
+	assert(not pcall(Audio.PlayOneShot, Assets.Load("Assets/Audio/Realm.sfx"), nil, 0 / 0))
 end
 return Script.Define("Conductor", C)
 )"));

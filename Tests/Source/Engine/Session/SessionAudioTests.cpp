@@ -463,6 +463,38 @@ namespace Engine {
 			CHECK_FALSE(engine->IsSimulationTimeOwned());
 		}
 
+		// M40 (decision 5; the W40.1 review's finding 3): the world pause holds the scene's world voices (an Sfx source) and
+		// never the session's music, which plays on under a pause menu.
+		TEST_CASE("PlaySession: the world pause never holds the session's music")
+		{
+			Test::SceneTestFixture fixture;
+			PopulateAudioScene(fixture.GetScene());
+			VirtualFileSystem vfs;
+			const Scope<AudioEngine> engine = CreateSessionEngine(vfs);
+			const Scope<PlaySession> session = StartSession(fixture, MakeAudioSpecification(fixture, engine.get()));
+			session->SetLockstep(true);
+			SessionMusic* music = session->GetMusic();
+			REQUIRE(music != nullptr);
+			REQUIRE(music->Play({ .Clip = MusicClip }).has_value());
+			session->Tick();
+			REQUIRE(session->RequestWorldPause(true, WorldPauseSounds::Pause).has_value());
+			session->Tick();
+			REQUIRE(session->IsWorldPaused());
+			CHECK(GetSourceVoice(*session, *engine, "/Autoplay").Paused);
+			const AudioVoiceInfo before = GetMusicVoice(*session);
+			CHECK_FALSE(before.Paused);
+			CHECK_FALSE(music->IsPaused());
+			session->Tick();
+			const AudioVoiceInfo after = GetMusicVoice(*session);
+			CHECK(after.Voice == before.Voice);
+			CHECK(after.CursorFrames == (before.CursorFrames + 800) % after.LengthFrames);
+			REQUIRE(session->RequestWorldPause(false).has_value());
+			session->Tick();
+			CHECK_FALSE(session->IsWorldPaused());
+			CHECK_FALSE(GetSourceVoice(*session, *engine, "/Autoplay").Paused);
+			CHECK_FALSE(GetMusicVoice(*session).Paused);
+		}
+
 		TEST_CASE("PlaySession: the session's end releases its music with the scene's voices")
 		{
 			Test::SceneTestFixture fixture;

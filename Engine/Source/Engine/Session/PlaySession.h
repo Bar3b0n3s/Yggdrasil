@@ -566,8 +566,9 @@ namespace Engine {
 		[[nodiscard]] const AudioSystem* GetAudioSystem() const;
 		// M12: true while the session holds the audio engine's simulation time (see "Audio" above).
 		[[nodiscard]] bool IsAudioTimeOwned() const;
-		// M40 (Docs/Decisions/0057-m40-music.md decision 5): the session's music (see "Audio" above): null in Simulate mode,
-		// without PlaySessionSpecification::Audio and before Activate. Valid for the session's lifetime once made.
+		// M40 (Docs/Decisions/0057-m40-music.md decision 5): the session's music (see "Audio" above): null in Simulate mode and
+		// before Activate; a session without PlaySessionSpecification::Audio has one that records requests only. Valid for
+		// the session's lifetime once made.
 		[[nodiscard]] SessionMusic* GetMusic();
 		[[nodiscard]] const SessionMusic* GetMusic() const;
 

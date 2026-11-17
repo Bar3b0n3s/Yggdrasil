@@ -138,7 +138,7 @@ Session-scoped mixing, one-shot playback and the session's music.
 
 `(group: AudioGroup) -> number`
 
-Read the session group gain.
+Read the session group gain; 1, the default mix, in a play session without audio.
 
 All modes; Runtime|Test; pure/read.
 
@@ -164,7 +164,7 @@ All modes; Runtime|Test; mutates.
 
 `(clip: AssetRef, position: vector?, volume: number?, group: AudioGroup?) -> ()`
 
-Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most 1024 one-shots start per frame; a later call in the frame raises an error.
+Play a non-spatial one-shot when position is nil, otherwise spatial; volume defaults 1 and group Sfx. At most 1024 one-shots start per frame; a later call in the frame raises an error. A play session without audio (a test run's discovery of its suites) checks the call and plays nothing.
 
 All modes; Runtime|Test; mutates.
 
@@ -174,7 +174,7 @@ Argument 4: AudioGroup (optional); default Sfx.
 
 `(group: AudioGroup, volume: number) -> ()`
 
-Set nonnegative session group gain; the prior mix is restored when the audio system stops.
+Set nonnegative session group gain; the prior mix is restored when the audio system stops. A play session without audio checks the call and ignores it.
 
 All modes; Runtime|Test; mutates.
 
