@@ -3603,6 +3603,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/GraphMembers.scene",
+			"XXH64": "2f91f3951b866415",
+			"Method": "scene.save",
+			"RequestId": 25,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GraphMembers.scene.meta",
+			"XXH64": "36005cc95466be9e",
+			"Method": "edit.batch",
+			"RequestId": 24,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Graphs.scene",
 			"XXH64": "5d60872210c16b0b",
 			"Method": "scene.save",
@@ -4275,8 +4291,136 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scripts/GraphMembers/Bubbles.luau",
+			"XXH64": "ab3b1a93e5a39989",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Bubbles.luau.meta",
+			"XXH64": "c2a2bba5a98a3ce5",
+			"Method": "script.write",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Clicker.graph",
+			"XXH64": "332db354a556e26e",
+			"Method": "edit.batch",
+			"RequestId": 16,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Clicker.graph.meta",
+			"XXH64": "0bbd23f29ef6e5d1",
+			"Method": "graph.create",
+			"RequestId": 13,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Health.luau",
+			"XXH64": "5a365376c9c0486a",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Health.luau.meta",
+			"XXH64": "fc4ddeff70a9de0f",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Press.luau",
+			"XXH64": "6b2ba0974a8fdbf7",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Press.luau.meta",
+			"XXH64": "fa2e99f1d76f0321",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Rune.graph",
+			"XXH64": "6ba6c44379b90c5a",
+			"Method": "edit.batch",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Rune.graph.meta",
+			"XXH64": "0c82749eefe28781",
+			"Method": "graph.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Striker.luau",
+			"XXH64": "ae48a66261931849",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Striker.luau.meta",
+			"XXH64": "489dc4ec7dad1331",
+			"Method": "script.write",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Ticker.graph",
+			"XXH64": "de68ce29d391281c",
+			"Method": "edit.batch",
+			"RequestId": 20,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Ticker.graph.meta",
+			"XXH64": "508b9c9bbab5205d",
+			"Method": "graph.create",
+			"RequestId": 17,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Valve.graph",
+			"XXH64": "ed844b6faad7b732",
+			"Method": "edit.batch",
+			"RequestId": 12,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/GraphMembers/Valve.graph.meta",
+			"XXH64": "f40d8b0a5c4e1236",
+			"Method": "graph.create",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scripts/Graphs/Arithmetic.graph",
-			"XXH64": "fafd7ea2b7602ab0",
+			"XXH64": "79c76c572085d1d8",
 			"Method": "edit.batch",
 			"RequestId": 4,
 			"Client": "batch",
@@ -4292,7 +4436,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/Graphs/Flows.graph",
-			"XXH64": "2f3b321f3c4cb14a",
+			"XXH64": "e8c2779e7af4a09d",
 			"Method": "edit.batch",
 			"RequestId": 12,
 			"Client": "batch",
@@ -4308,7 +4452,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/Graphs/Steering.graph",
-			"XXH64": "169cc07aa51c0dbc",
+			"XXH64": "890010bcecf406f7",
 			"Method": "edit.batch",
 			"RequestId": 16,
 			"Client": "batch",
@@ -4324,7 +4468,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/Graphs/Vectors.graph",
-			"XXH64": "0870f89a5b3c2c4a",
+			"XXH64": "41ec1cf19675bd8e",
 			"Method": "edit.batch",
 			"RequestId": 8,
 			"Client": "batch",
@@ -6147,6 +6291,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/GraphMembers/GraphMembers.test.luau",
+			"XXH64": "d2fcb308a4b5e1e8",
+			"Method": "script.write",
+			"RequestId": 21,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/GraphMembers/GraphMembers.test.luau.meta",
+			"XXH64": "2b0c2096fb9cad60",
+			"Method": "script.write",
+			"RequestId": 21,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Graphs/Graphs.test.luau",
 			"XXH64": "a888e2db90c00b59",
 			"Method": "script.write",
@@ -6559,6 +6719,22 @@
 			"XXH64": "a0ee6270932e03ac",
 			"Method": "input.record",
 			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/GraphMembers.replay",
+			"XXH64": "9508d55243d39424",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/GraphMembers.replay.meta",
+			"XXH64": "07f52e48a499867e",
+			"Method": "input.record",
+			"RequestId": 3,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -7492,7 +7668,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "0915607e529cedc5",
+			"XXH64": "0600021ae3aeb069",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

@@ -1,0 +1,120 @@
+{
+	"Format": "Graph",
+	"Version": 2,
+	"Name": "Clicker",
+	"RunsWhileWorldPaused": false,
+	"Fields": [
+		{
+			"Name": "Consume",
+			"Kind": "Bool",
+			"Default": true,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": [],
+			"Options": {}
+		}
+	],
+	"Variables": [
+		{
+			"Name": "Clicks",
+			"Kind": "Integer",
+			"Default": 0,
+			"Element": "Number",
+			"AssetType": "",
+			"EnumValues": []
+		}
+	],
+	"Methods": [],
+	"Nodes": [
+		{
+			"Id": 1,
+			"Kind": "Event.OnUiClick",
+			"Position": [0, 0],
+			"Values": {}
+		},
+		{
+			"Id": 2,
+			"Kind": "Self.Set.Clicks",
+			"Position": [240, 0],
+			"Values": {}
+		},
+		{
+			"Id": 3,
+			"Kind": "Number.Add",
+			"Position": [480, 0],
+			"Values": {
+				"B": 1
+			}
+		},
+		{
+			"Id": 4,
+			"Kind": "Self.Get.Clicks",
+			"Position": [720, 0],
+			"Values": {}
+		},
+		{
+			"Id": 5,
+			"Kind": "Return.OnUiClick",
+			"Position": [960, 0],
+			"Values": {}
+		},
+		{
+			"Id": 6,
+			"Kind": "Self.Get.Consume",
+			"Position": [1200, 0],
+			"Values": {}
+		}
+	],
+	"Links": [
+		{
+			"From": {
+				"Node": 1,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 2,
+				"Pin": "Then"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "In"
+			}
+		},
+		{
+			"From": {
+				"Node": 3,
+				"Pin": "Result"
+			},
+			"To": {
+				"Node": 2,
+				"Pin": "Value"
+			}
+		},
+		{
+			"From": {
+				"Node": 4,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 3,
+				"Pin": "A"
+			}
+		},
+		{
+			"From": {
+				"Node": 6,
+				"Pin": "Value"
+			},
+			"To": {
+				"Node": 5,
+				"Pin": "Value"
+			}
+		}
+	]
+}

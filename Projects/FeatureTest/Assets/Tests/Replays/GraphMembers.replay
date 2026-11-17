@@ -1,0 +1,221 @@
+{
+	"Format": "Replay",
+	"Version": 4,
+	"Scene": {
+		"Handle": "d7931fd20f2d536d",
+		"Path": "Assets/Scenes/GraphMembers.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.6.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "18c6e6312d8db5a0",
+				"Path": "/Camera",
+				"Hash": "e95165452f479cd0",
+				"Components": {
+					"Transform": "0452654d5f117792",
+					"Camera": "06bc5d3b8e2a9794",
+					"AudioListener": "5364d8903ff7ab7d"
+				}
+			},
+			{
+				"Id": "4f32163bc8f1b752",
+				"Path": "/Crystal",
+				"Hash": "98dada3bd4eb3cbf",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"MeshRenderer": "f433c3ab9a1171d2",
+					"Script": "a8a9baea05d236c8"
+				}
+			},
+			{
+				"Id": "64885067c87bb614",
+				"Path": "/Menu/Consuming",
+				"Hash": "d047264576560384",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "b6dd387b64af7e55",
+					"UiRect": "8c1bc92eaa51c1f4",
+					"UiImage": "c3b1f727855571cb",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "733f1f03518d681d",
+				"Path": "/Sun",
+				"Hash": "30e9fcb0b6286c97",
+				"Components": {
+					"Transform": "f4f82fb6196e9853",
+					"DirectionalLight": "60bab90e2cb40d0e"
+				}
+			},
+			{
+				"Id": "8265d01410ea35ef",
+				"Path": "/Ticker",
+				"Hash": "333719bab8e4cd8f",
+				"Components": {
+					"Transform": "7fe4c2f0fbb3d065",
+					"Script": "bc4f3527943ef374"
+				}
+			},
+			{
+				"Id": "ba125a7b600b9fd1",
+				"Path": "/Press",
+				"Hash": "6ac0a6e7782bdf5b",
+				"Components": {
+					"Transform": "72f7e126a92d16c7",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"Script": "950005f4cc3c2d4c"
+				}
+			},
+			{
+				"Id": "d0bda4aa3e8a9293",
+				"Path": "/Menu/Bubbling",
+				"Hash": "76115d69a59c8a5d",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "9923164f56d42f26",
+					"UiRect": "8bfc54faed117606",
+					"UiImage": "c3b1f727855571cb",
+					"UiButton": "2a3523b8a133ae8f"
+				}
+			},
+			{
+				"Id": "f873e7ad00d8cab4",
+				"Path": "/Valve",
+				"Hash": "632a7a814cb7a3b9",
+				"Components": {
+					"Transform": "e88b8a27a0db1398",
+					"Script": "00332980951fd51e"
+				}
+			},
+			{
+				"Id": "f9b91ccc7041ad60",
+				"Path": "/Menu",
+				"Hash": "1ee614535b7d3458",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "b39a512a4821e5cc",
+					"UiCanvas": "70252265789a9c55"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "3b808ddf68a58c2e",
+				"Path": "Assets/Scripts/GraphMembers/Valve.graph",
+				"Type": "Script",
+				"Hash": "baf7fbaa7e5d804b"
+			},
+			{
+				"Handle": "492552ee64aabd9f",
+				"Path": "Assets/Scripts/GraphMembers/Bubbles.luau",
+				"Type": "Script",
+				"Hash": "5f2b10470956f75a"
+			},
+			{
+				"Handle": "4f4325ee3d782bba",
+				"Path": "Assets/Scripts/GraphMembers/Ticker.graph",
+				"Type": "Script",
+				"Hash": "9231e48a1d10b694"
+			},
+			{
+				"Handle": "6d0ebc0041600295",
+				"Path": "Assets/Scripts/GraphMembers/Striker.luau",
+				"Type": "Script",
+				"Hash": "2677cfaab7446e3a"
+			},
+			{
+				"Handle": "8437e42391ce559f",
+				"Path": "Assets/Ui/Fonts/Inter-Regular.otf",
+				"Type": "Font",
+				"Hash": "e67ffca513fb248d"
+			},
+			{
+				"Handle": "869058ea3724e6da",
+				"Path": "Assets/Scripts/GraphMembers/Press.luau",
+				"Type": "Script",
+				"Hash": "86c74521f0ae1f60"
+			},
+			{
+				"Handle": "bf907087caeaac59",
+				"Path": "Assets/Scripts/GraphMembers/Health.luau",
+				"Type": "Script",
+				"Hash": "c80f553193f1fbcc"
+			},
+			{
+				"Handle": "de2799f0d41ad634",
+				"Path": "Assets/Scripts/GraphMembers/Clicker.graph",
+				"Type": "Script",
+				"Hash": "a04045052ab77ddd"
+			},
+			{
+				"Handle": "fa98f28a6d831108",
+				"Path": "Assets/Scripts/GraphMembers/Rune.graph",
+				"Type": "Script",
+				"Hash": "9e730f47acb24e79"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 10,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 11,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 50,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 51,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		},
+		{
+			"Tick": 90,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Down"
+		},
+		{
+			"Tick": 91,
+			"Type": "Action",
+			"Name": "Jump",
+			"State": "Up"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 160,
+			"Luau": "local crystal = Scene.FindByName(\"Crystal\")\nlocal rune = crystal:GetScript(\"Rune\")\nreturn rune.Blows == 3 and rune.Glyphs == \"***\" and crystal.Transform.Translation.x == 3"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "97e56edae7862dd1"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "b1b7ad4317b9fd40"
+		}
+	],
+	"FinalTick": 161,
+	"FinalStateHash": "95f717a4fd7eec22"
+}

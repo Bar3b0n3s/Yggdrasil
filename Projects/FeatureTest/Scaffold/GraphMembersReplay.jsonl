@@ -1,0 +1,5 @@
+{"method": "input.record", "params": {"action": "Start", "scene": "Assets/Scenes/GraphMembers.scene"}}
+{"method": "play.step", "params": {"ticks": 161, "input": [{"tick": 10, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 50, "type": "Action", "name": "Jump", "state": "Tap"}, {"tick": 90, "type": "Action", "name": "Jump", "state": "Tap"}], "render": "None"}}
+{"method": "input.record", "params": {"action": "Stop", "path": "Assets/Tests/Replays/GraphMembers.replay", "expect": [{"tick": 160, "luau": "local crystal = Scene.FindByName(\"Crystal\")\nlocal rune = crystal:GetScript(\"Rune\")\nreturn rune.Blows == 3 and rune.Glyphs == \"***\" and crystal.Transform.Translation.x == 3"}]}}
+{"method": "play.stop", "params": {}}
+{"method": "project.refreshAssets", "params": {}}

@@ -40,20 +40,22 @@ namespace Engine {
 	//
 	// It shows the graph as graph.read gives it (nodes as rounded boxes with their pins, Bezier links, a grid, each node's
 	// findings as its outline) with the kinds graph.nodes lists for it, and a side panel of the behaviour's members (name,
-	// fields, variables) and of the selected node's input literals, a field per pin type. Every action that changes the graph
-	// submits its method through the editor's queued actions, exactly as automation's in-process client does
-	// (EditorCore/Graph/GraphEditorActions.h, GraphEditorRequests.h): the node menu (right-click, or a link dropped on empty
-	// canvas) graph.addNode or an edit.batch with graph.connect, Delete graph.removeNodes, the end of a drag graph.moveNodes, a
-	// link dragged from a pin to a pin graph.connect, Alt+click on a link (or a link dragged off its input onto empty canvas)
-	// graph.disconnect, a link dragged off its input onto another input an edit.batch of graph.disconnect and graph.connect
-	// (one undo step, which a refused connect leaves undone), the literal fields graph.setValues, the members panel
-	// graph.setMembers, Ctrl+D and paste an edit.batch of graph.addNode and graph.connect, and Undo and Redo edit.undo and
-	// edit.redo (Ctrl+Z and Ctrl+Y are the editor's own, the same methods). A link or literal on a pin the node's kind no longer
-	// has (a binding's parameter renamed or removed, decision 10) shows as a pin of its own in the error colour, its tooltip
-	// saying why, and goes as any link or literal does (graph.disconnect, or the side panel's Clear literal through
-	// graph.setValues with null; M24's review); a field being edited keeps its text or drag across a read that arrives meanwhile.
-	// Its presentation (opening and closing, panning with the middle or right button, zooming with the wheel, framing with F,
-	// hovering and selecting by click or box, Ctrl+C) changes no graph and has no method (decision 16's exemption).
+	// fields, variables, and M39's world-pause opt-in and methods with their parameters and results:
+	// Docs/Decisions/0056-m39-graphs-behaviours.md decision 13) and of the selected node's input literals, a field per pin
+	// type. Every action that changes the graph submits its method through the editor's queued actions, exactly as
+	// automation's in-process client does (EditorCore/Graph/GraphEditorActions.h, GraphEditorRequests.h): the node menu
+	// (right-click, or a link dropped on empty canvas) graph.addNode or an edit.batch with graph.connect, Delete
+	// graph.removeNodes, the end of a drag graph.moveNodes, a link dragged from a pin to a pin graph.connect, Alt+click on
+	// a link (or a link dragged off its input onto empty canvas) graph.disconnect, a link dragged off its input onto
+	// another input an edit.batch of graph.disconnect and graph.connect (one undo step, which a refused connect leaves
+	// undone), the literal fields graph.setValues, the members panel graph.setMembers, Ctrl+D and paste an edit.batch of
+	// graph.addNode and graph.connect, and Undo and Redo edit.undo and edit.redo (Ctrl+Z and Ctrl+Y are the editor's own,
+	// the same methods). A link or literal on a pin the node's kind no longer has (a binding's parameter renamed or
+	// removed, decision 10) shows as a pin of its own in the error colour, its tooltip saying why, and goes as any link or
+	// literal does (graph.disconnect, or the side panel's Clear literal through graph.setValues with null; M24's review); a
+	// field being edited keeps its text or drag across a read that arrives meanwhile. Its presentation (opening and
+	// closing, panning with the middle or right button, zooming with the wheel, framing with F, hovering and selecting by
+	// click or box, Ctrl+C) changes no graph and has no method (decision 16's exemption).
 	//
 	// Live values (decision 14, W24.2's integration of stream B's GraphLiveView): while a play session that runs behaviours
 	// plays (a test run's included: graph.read, graph.nodes and graph.liveValues are among the reads a test run admits), the
@@ -146,6 +148,7 @@ namespace Engine {
 		void DrawSidePanel(EditorPanelContext& context);
 		void DrawMembers(EditorPanelContext& context);
 		void DrawFieldOptions(EditorPanelContext& context, const GraphField& field);
+		void DrawMethod(EditorPanelContext& context, const GraphMethod& method); // M39
 		void DrawNodeDetails(EditorPanelContext& context);
 		void DrawNodeMenu(EditorPanelContext& context);
 		void DrawContextMenu(EditorPanelContext& context);
@@ -237,6 +240,7 @@ namespace Engine {
 		int m_NewMemberAssetType = 0;
 		std::string m_NewMemberChoices{};
 		bool m_NewMemberVariable = false;
+		std::string m_NewMethodName{}; // M39
 	};
 
 }

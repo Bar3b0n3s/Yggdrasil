@@ -1,0 +1,321 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "GraphMembers",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"AudioListener": 1,
+		"Script": 2,
+		"UiCanvas": 1,
+		"UiRect": 1,
+		"UiImage": 1,
+		"UiButton": 1
+	},
+	"Entities": [
+		{
+			"ID": "18c6e6312d8db5a0",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 10],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 60,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				},
+				"AudioListener": {
+					"Primary": true
+				}
+			}
+		},
+		{
+			"ID": "733f1f03518d681d",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 10, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 3,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "ba125a7b600b9fd1",
+			"Name": "Press",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "869058ea3724e6da",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "f873e7ad00d8cab4",
+			"Name": "Valve",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "3b808ddf68a58c2e",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "4f32163bc8f1b752",
+			"Name": "Crystal",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000102",
+					"Materials": [],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "bf907087caeaac59",
+							"Fields": {},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "fa98f28a6d831108",
+							"Fields": {},
+							"ExecutionOrder": 0
+						},
+						{
+							"Script": "6d0ebc0041600295",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "8265d01410ea35ef",
+			"Name": "Ticker",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "4f4325ee3d782bba",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				}
+			}
+		},
+		{
+			"ID": "f9b91ccc7041ad60",
+			"Name": "Menu",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "492552ee64aabd9f",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"UiCanvas": {
+					"SortOrder": 0,
+					"ScaleMode": "ConstantPixelSize",
+					"ScaleFactor": 1,
+					"ReferenceHeight": 1080,
+					"PixelSnap": true,
+					"Font": "8437e42391ce559f",
+					"Theme": {
+						"Normal": [1, 1, 1, 1],
+						"Hovered": [0.85, 0.85, 0.85, 1],
+						"Pressed": [0.6, 0.6, 0.6, 1],
+						"Focused": [0.75, 0.85, 1, 1],
+						"Disabled": [0.5, 0.5, 0.5, 0.5]
+					},
+					"DefaultFocus": null,
+					"RenderMode": "Screen",
+					"WorldWidth": 1024,
+					"WorldHeight": 576,
+					"PixelsPerUnit": 512
+				}
+			}
+		},
+		{
+			"ID": "64885067c87bb614",
+			"Name": "Consuming",
+			"Parent": "f9b91ccc7041ad60",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "de2799f0d41ad634",
+							"Fields": {},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 100],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.25, 0.4, 0.55, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		},
+		{
+			"ID": "d0bda4aa3e8a9293",
+			"Name": "Bubbling",
+			"Parent": "f9b91ccc7041ad60",
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Script": {
+					"Scripts": [
+						{
+							"Script": "de2799f0d41ad634",
+							"Fields": {
+								"Consume": false
+							},
+							"ExecutionOrder": 0
+						}
+					]
+				},
+				"UiRect": {
+					"AnchorMin": [0, 0],
+					"AnchorMax": [0, 0],
+					"Pivot": [0, 0],
+					"Position": [40, 170],
+					"Size": [240, 56],
+					"ClipChildren": false
+				},
+				"UiImage": {
+					"Sheet": null,
+					"Frame": 0,
+					"Color": [0.25, 0.4, 0.55, 1],
+					"Type": "Simple",
+					"BorderScale": 1,
+					"Filter": "Point",
+					"RaycastTarget": true
+				},
+				"UiButton": {
+					"Interactable": true,
+					"Focusable": true
+				}
+			}
+		}
+	]
+}

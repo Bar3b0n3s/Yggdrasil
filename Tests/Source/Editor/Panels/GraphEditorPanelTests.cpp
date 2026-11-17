@@ -410,6 +410,9 @@ namespace Engine {
 			static_cast<void>(OpenDoor(fixture, panel));
 			const uint32_t branch = AddNode(fixture, "Flow.Branch", 0.0f, 0.0f);
 			static_cast<void>(Settle(fixture, panel));
+			// The side panel lists the members (M39's opt-in and Methods section included) before the node's literals: room
+			// for both.
+			EnlargeGraphWindow(fixture, panel);
 			Click(fixture, panel, TitlePoint(panel, branch));
 			CHECK(std::vector<uint32_t>(panel.GetSelection().begin(), panel.GetSelection().end()) == std::vector<uint32_t>{ branch });
 			static_cast<void>(fixture.Draw(panel));
@@ -441,6 +444,45 @@ namespace Engine {
 			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add Max");
 			fixture.Pump();
 			CHECK(ReadDocument(fixture)["Fields"][0]["Options"] == Json{ { "Max", 0 } });
+		}
+
+		// M39 (Docs/Decisions/0056-m39-graphs-behaviours.md decision 13): the side panel's opt-in checkbox and Methods section
+		// submit graph.setMembers, the method written whole each time (its parameters and its result).
+		TEST_CASE("GraphEditorPanel: the members panel sets the world-pause opt-in and adds a method, its parameter and its result through graph.setMembers")
+		{
+			Test::UtilityPanelFixture fixture;
+			GraphEditorPanel panel;
+			static_cast<void>(OpenDoor(fixture, panel));
+			static_cast<void>(Settle(fixture, panel));
+			EnlargeGraphWindow(fixture, panel);
+
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Runs while the world is paused");
+			fixture.Pump();
+			CHECK(ReadDocument(fixture)["RunsWhileWorldPaused"] == true);
+
+			static_cast<void>(Settle(fixture, panel));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "New method name");
+			TypeText(fixture, panel, "Pull");
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add method");
+			fixture.Pump();
+			Json methods = ReadDocument(fixture)["Methods"];
+			REQUIRE(methods.size() == 1);
+			CHECK(methods[0] == Json{ { "Name", "Pull" }, { "Parameters", Json::array() }, { "Results", Json::array() } });
+			// The members edit kept the opt-in.
+			CHECK(ReadDocument(fixture)["RunsWhileWorldPaused"] == true);
+
+			static_cast<void>(Settle(fixture, panel));
+			Test::SupportingPanelTestUi::ClickText(fixture, panel, "Add parameter");
+			fixture.Pump();
+			methods = ReadDocument(fixture)["Methods"];
+			REQUIRE(methods[0]["Parameters"].size() == 1);
+			CHECK(methods[0]["Parameters"][0] == Json{ { "Name", "arg1" }, { "Kind", "Any" }, { "AssetType", "" } });
+			CHECK(methods[0]["Results"].empty());
+
+			// The graph's own kinds follow: the node menu's listing holds the method's Method and Return kinds.
+			static_cast<void>(Settle(fixture, panel));
+			const Json nodes = CallOrFail(fixture, "graph.nodes", Json{ { "graph", std::string(DoorPath) }, { "kinds", Json::array({ "Method.Pull", "Return.Pull" }) } });
+			CHECK(nodes["nodes"].size() == 2);
 		}
 
 		TEST_CASE("GraphEditorPanel: Undo and Redo submit edit.undo and edit.redo")
