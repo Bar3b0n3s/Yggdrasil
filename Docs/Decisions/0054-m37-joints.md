@@ -171,5 +171,6 @@ Brief 16's "How the game will check it" (its first part): the chain of four link
 - [x] The lead's review pass of W37.1 taken and every finding fixed: 4fb91adf.
 - [x] W37.2 committed (decisions 8, 10 to 13).
 - [x] The lead's review pass of W37.2 taken and every finding fixed: "M37: W37.2's review fixed (W37.2)".
-- [ ] The wave-end runs: the unit suite unfiltered in Debug once per wave that changes shared code, the joint cases in Release, `Scaffold.py` and `Scaffold.py --check`, the feature suite in Debug, the automation suite filtered to `test_physics.py`, `GenerateDocs.py --check`. The rest at the batch gate.
-- [ ] The landing: the batch merge after M36, the merge adaptation (decision 5's hooks in M36's functions, the validation code after M36's), the merge review, the batch gate.
+- [x] The wave-end runs: the unit suite unfiltered in Debug once per wave that changes shared code, the joint cases in Release, `Scaffold.py` and `Scaffold.py --check`, the feature suite in Debug, the automation suite filtered to `test_physics.py`, `GenerateDocs.py --check`. The rest at the batch gate.
+- [x] The landing: the batch merge after M36, the merge adaptation (decision 5's hooks in M36's functions, the validation code after M36's), the merge review, the batch gate.
+- [x] Landed 2026-11-17 in phase 6's one batch (`Docs/Decisions/0052-world-tree-phase-6.md`, "The phase 6 gate"): `landing/phase6` merged main and M39, M38, M36, M37 and M40 with their adaptations and the last lander's duties (0.7.0), the merge review's findings were fixed, every stage of `CI.py --milestone` but the hardening stage passed, the hardening stage's perf capture passed and the product owner waived its other steps; main fast-forwarded to the landing.

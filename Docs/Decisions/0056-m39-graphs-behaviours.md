@@ -167,7 +167,8 @@ Roadmap M39's acceptance and brief 18's "How the game will check it", with the t
 
 ## Before milestone completion
 
-- [ ] W39.1 committed; the lead's review pass taken and every finding fixed.
-- [ ] W39.2 committed; the lead's review pass taken and every finding fixed.
-- [ ] The wave-end runs: the Debug unit suite unfiltered, the AssetPipeline and graph cases in Release, the automation suite filtered to `test_graphs.py`, `Scaffold.py` and `Scaffold.py --check`, the Debug feature suite, `GenerateDocs.py --check`, `Lint.py`, `Format.py --check`; the rest at the batch gate.
-- [ ] The landing (the lead's): main merged, Rolling Ball's upgrade redone on the merged tree if M38 landed first, the batch gate green.
+- [x] W39.1 committed; the lead's review pass taken and every finding fixed.
+- [x] W39.2 committed; the lead's review pass taken and every finding fixed.
+- [x] The wave-end runs: the Debug unit suite unfiltered, the AssetPipeline and graph cases in Release, the automation suite filtered to `test_graphs.py`, `Scaffold.py` and `Scaffold.py --check`, the Debug feature suite, `GenerateDocs.py --check`, `Lint.py`, `Format.py --check`; the rest at the batch gate.
+- [x] The landing (the lead's): main merged, Rolling Ball's upgrade redone on the merged tree if M38 landed first, the batch gate green.
+- [x] Landed 2026-11-17 in phase 6's one batch (`Docs/Decisions/0052-world-tree-phase-6.md`, "The phase 6 gate"): `landing/phase6` merged main and M39, M38, M36, M37 and M40 with their adaptations and the last lander's duties (0.7.0), the merge review's findings were fixed, every stage of `CI.py --milestone` but the hardening stage passed, the hardening stage's perf capture passed and the product owner waived its other steps; main fast-forwarded to the landing.
