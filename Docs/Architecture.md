@@ -2307,6 +2307,7 @@ Every milestone ends with one `python Scripts/CI.py` green on Windows: every sta
 | M38 | A language chosen while the game runs (phase 6) | a session locale scripts set, `--locale`, suites' locales, replay format 5; direction-following alignment, mirrored rows |
 | M39 | Graphs and Luau behaviours (phase 6) | graph nodes for members of behaviours and tables; graph methods and returns; the world-pause opt-in; graph format 2 |
 | M40 | Music across scenes (phase 6) | music owned by the session, kept or crossfaded across scene loads; voice fades, an intro then its loop; the `Music` group under the world pause |
+| M41 | Bone attachments (phase 7) | an entity placed on a bone of the Animator above it in the fixed step, hashed, and drawn at its Animator's rendered pose as the skin is (ADR 0058) |
 
 ---
 
