@@ -20,6 +20,23 @@
   - ADR 0052, whose form and process this phase keeps;
   - ADR 0034 (M23's skeletal animation) and ADR 0049 (M34's camera pose rule);
   - Architecture §5.2, §5.3, §5.7, §9.3, §11.5, §13.7, §15.5 and §18.
+- **Amended 2026-11-19 (M42 joins phase 7):**
+  - **What changed.** World Tree's brief 23, planar reflections, arrived after this plan, and the lead took it into phase 7 as M42 (`Docs/Decisions/0059-m42-planar-reflections.md`, its plan and record). Phase 7 is now brief 21's three fixes, M41 and M42, and the following supersede decision 2's "alone" and decision 7's "the phase's last (and only) lander".
+  - **Merge train:** M41, then M42.
+  - **The landing:**
+    - One batch by default: `landing/phase7` merges current main, M41 and M42 with their adaptations, then runs one merge review and one `CI.py --milestone` (decision 7's hardened gate, announced to the owner first). Main fast-forwards to it.
+    - M41 lands alone ahead of the batch, gated by `CI.py --require-clang-cl`, only if M42 runs far behind (W42.3 not begun when M41's milestone review is done). M42 then takes the hardened gate.
+    - The batch's lander takes the duties of decision 6: `EngineVersionString` 0.8.0, FeatureTest regenerated and the editor-UI goldens checked, once for the phase.
+  - **Contended files.** M41 owns every file the two share, and M42 appends after M41's entries at the landing:
+    - `BuiltinComponents.h`;
+    - `ProjectValidator.cpp`'s tables and `ProjectValidatorTests.cpp`'s count line;
+    - `MakeValidationFixtures.py`, `Tests/Data/Validation/README.md` and the `validation-codes` page;
+    - FeatureTest's `Scaffolds.json` and `Suites.jsonl`;
+    - `BuiltinComponentsTests.cpp`;
+    - `RenderExtraction.{h,cpp}` and `RenderExtractionTests.cpp`: M41's region is `ComputeRenderedWorldMatrix`, M42's the item in the canonical loop.
+
+    The generated references are regenerated on the landing, never merged.
+  - **The ledger.** M42's allocations are ADR 0059 decision 8's: IdSeeds 3900 to 3999; validation code 75, `RENDER_REFLECTION_INVALID`, after M41's; component 64, `PlanarReflection`, in Probes. A record outside the two milestones takes 0060 on.
 
 ## Context
 

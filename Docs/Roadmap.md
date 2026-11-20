@@ -1,8 +1,8 @@
 # Roadmap
 
-Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged). Amended on 2026-11-15 by `Docs/Decisions/0042-world-tree-engine-program.md` (the World Tree engine program: M28 to M33, first in phases 5 and 6, then, by the product owner's answers of the same day, in one phase, phase 5, without hardening; M34 and then M35 joined that phase the same day by the lead's decisions). Amended on 2026-11-17 by `Docs/Decisions/0052-world-tree-phase-6.md` (the World Tree program's phase 6: M36 to M40, the briefs phase 5 deferred, with the hardening stage once, at the phase's last batch gate). Amended on 2026-11-19 by `Docs/Decisions/0058-m41-bone-attachments.md` (the World Tree program's phase 7: brief 21's three fixes straight to main, then M41, bone attachments, alone).
+Status: authoritative plan, v1.2, 2026-10-05. Section references (§) point to `Docs/Architecture.md` v1.2, whose Appendix D lists the review findings this plan schedules. v1.2 incorporates the accepted M0 deviations of `Docs/Decisions/0002-m0-deviations.md` (M0 deliverables; `config.h` moves to the M1 contract task). Amended on 2026-10-19 by `Docs/Decisions/0028-backlog-program.md` (the backlog program, rules 1, 3, 4, 6 and 7), and again the same day by its revision after the owner's follow-up decisions (a setup commit and three phases of parallel milestones, M18 to M26, Rolling Ball renumbered M27; no Box2D; the Linux/macOS catch-up dropped; GitHub as an off-site backup only) and by the owner's answers to its open points (Windows backends only; hardening only at each phase's last lander; the fuzz count unchanged). Amended on 2026-11-15 by `Docs/Decisions/0042-world-tree-engine-program.md` (the World Tree engine program: M28 to M33, first in phases 5 and 6, then, by the product owner's answers of the same day, in one phase, phase 5, without hardening; M34 and then M35 joined that phase the same day by the lead's decisions). Amended on 2026-11-17 by `Docs/Decisions/0052-world-tree-phase-6.md` (the World Tree program's phase 6: M36 to M40, the briefs phase 5 deferred, with the hardening stage once, at the phase's last batch gate). Amended on 2026-11-19 by `Docs/Decisions/0058-m41-bone-attachments.md` (the World Tree program's phase 7: brief 21's three fixes straight to main, then M41, bone attachments), and the same day by `Docs/Decisions/0059-m42-planar-reflections.md` (M42, planar reflections, joining phase 7).
 
-The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work. After them, the World Tree engine program (M28 to M35 in one phase, phase 5, `Docs/Decisions/0042-world-tree-engine-program.md`) adds what the World Tree showcase game asked for, and its phase 6 (M36 to M40, `Docs/Decisions/0052-world-tree-phase-6.md`) the briefs that phase 5 deferred, and its phase 7 (M41, `Docs/Decisions/0058-m41-bone-attachments.md`) entities that follow a bone, after three fixes on main.
+The roadmap goes from an empty repository to a finished engine and editor (M15), then to two demo games built by an AI agent through editor automation (M17 Tetris, M27 Rolling Ball 3D), after a time-boxed dry run (M16). Between them, the backlog program (a setup commit, then M18 to M26 in three phases, ADR 0028) completes the engine: the backlog, a 2D path and a UI framework, with Tetris rebuilt in place as pixel art in M25, at the end of the 2D/UI work. After them, the World Tree engine program (M28 to M35 in one phase, phase 5, `Docs/Decisions/0042-world-tree-engine-program.md`) adds what the World Tree showcase game asked for, and its phase 6 (M36 to M40, `Docs/Decisions/0052-world-tree-phase-6.md`) the briefs that phase 5 deferred, and its phase 7 (M41 and M42, `Docs/Decisions/0058-m41-bone-attachments.md` and `Docs/Decisions/0059-m42-planar-reflections.md`) entities that follow a bone and mirrors, after three fixes on main.
 
 ## Rules for every milestone
 
@@ -60,9 +60,10 @@ The roadmap goes from an empty repository to a finished engine and editor (M15),
 | M38 A language chosen while the game runs (phase 6) | phase 5 | M36, M37, M39, M40 |
 | M39 Graphs and Luau behaviours (phase 6) | phase 5 | M36 to M38, M40 |
 | M40 Music across scenes (phase 6) | phase 5 | M36 to M39 |
-| M41 Bone attachments (phase 7, alone) | phase 6 | — |
+| M41 Bone attachments (phase 7, lands before M42) | phase 6 | M42 |
+| M42 Planar reflections (phase 7, lands after M41) | phase 6 | M41 |
 
-Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last; phase 5 (M28 to M35, one phase without a hardened gate, `Docs/Decisions/0042-world-tree-engine-program.md` decision 2) M28, M29, M31, M32, M34 and M35 in readiness order, M32 before M33, then M30 and M33 in readiness order, landing in two batch gates (`Docs/Decisions/0051-gates-in-proportion.md`); phase 6 (M36 to M40, `Docs/Decisions/0052-world-tree-phase-6.md`) M36 before M37, and M38, M39 and M40 in readiness order with them, landing in at most two batch gates, the last with the hardening stage (`CI.py --milestone`); phase 7 (`Docs/Decisions/0058-m41-bone-attachments.md`) M41 alone, after brief 21's three fixes reach main, with the hardening stage (`CI.py --milestone`). Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
+Milestones run in phases: the milestones of a phase are developed in parallel, each on its own branch in its own worktree, and their milestone-end `CI.py` runs go one at a time on the one GPU. Phase end: once the phase's last milestone has landed, main is pushed to `origin` as an off-site backup, and the work pauses for the product owner's go-ahead (`Docs/Decisions/0028-backlog-program.md` decision 14). Each phase lands in its merge train (ADR 0028 decision 17): phase 1 M18 and M19 in readiness order, then M20; phase 2 M21 and M22 in readiness order, then M23; phase 3 M24 at any time, M25 before M26, M26 last; phase 5 (M28 to M35, one phase without a hardened gate, `Docs/Decisions/0042-world-tree-engine-program.md` decision 2) M28, M29, M31, M32, M34 and M35 in readiness order, M32 before M33, then M30 and M33 in readiness order, landing in two batch gates (`Docs/Decisions/0051-gates-in-proportion.md`); phase 6 (M36 to M40, `Docs/Decisions/0052-world-tree-phase-6.md`) M36 before M37, and M38, M39 and M40 in readiness order with them, landing in at most two batch gates, the last with the hardening stage (`CI.py --milestone`); phase 7 (`Docs/Decisions/0058-m41-bone-attachments.md`, as amended) M41 then M42, after brief 21's three fixes reach main, in one batch with the hardening stage (`CI.py --milestone`) unless M41 lands ahead of a late M42 with `CI.py --require-clang-cl`. Rolling Ball was M18 until ADR 0028 and M24 in its first version; "M18" in the M16 and M17 sections below and in the ADRs up to 0027 means Rolling Ball, now M27.
 
 ---
 
@@ -881,7 +882,7 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 
 ## M41 — Bone attachments
 
-**Scope.** Phase 7, alone, after brief 21's three fixes reach main (`Docs/Decisions/0058-m41-bone-attachments.md` decisions 2, 3 and 8). World Tree's brief 22: a `BoneAttachment` component that places its entity on a named bone of the nearest Animator above it in the fixed step, as hashed state, drawn at its Animator's rendered pose as the skin is (wave W41.1), then FeatureTest, the automation case, the documents and the skills (W41.2). `Animator:GetJointTransform` (M23) stays the script read of a bone's pose. Its milestone end is the phase's gate: `CI.py --milestone` (ADR 0058 decision 7), announced to the product owner first.
+**Scope.** Phase 7, after brief 21's three fixes reach main, landing before M42 in one batch with it by default (`Docs/Decisions/0058-m41-bone-attachments.md` decisions 2, 3 and 8, as amended). World Tree's brief 22: a `BoneAttachment` component that places its entity on a named bone of the nearest Animator above it in the fixed step, as hashed state, drawn at its Animator's rendered pose as the skin is (wave W41.1), then FeatureTest, the automation case, the documents and the skills (W41.2). `Animator:GetJointTransform` (M23) stays the script read of a bone's pose. Its milestone end is the phase's batch gate: `CI.py --milestone` (ADR 0058 decision 7), announced to the product owner first, or `CI.py --require-clang-cl` if it lands ahead of a late M42.
 
 **Deliverables**
 - `BoneAttachment {Bone, Offset, Rotation}` (Animation), placed in a third pass of the AnimationSystem phase, after every Animator was posed and before the `OnAnimationEvent` dispatch, in Play and Simulate, held under the world pause.
@@ -908,3 +909,56 @@ Formerly M18; renumbered by `Docs/Decisions/0028-backlog-program.md` decision 14
 - Every replay still verifies at its hash: the attachment is fixed-step, hashed state, and no committed hash moves; `BoneAttachments.replay` in Debug, Release and Dist.
 
 **Parallelization**: W41.1 (attachments in the session), then W41.2 (coverage, documents and the editor), after `milestone/m41` merges main with brief 21's third fix.
+
+## M42 — Planar reflections
+
+**Scope.** Phase 7, after M41, in one batch with it by default (`Docs/Decisions/0058-m41-bone-attachments.md`, as amended; `Docs/Decisions/0059-m42-planar-reflections.md` decisions 2 to 4). World Tree's brief 23 is a flat surface that is a true mirror, delivered in three waves:
+- **W42.1:** a `PlanarReflection` component on the glass, rendered from the camera mirrored in its plane, with the component, the plan and the cap.
+- **W42.2:** the mirror view, a lighter path clipped at the plane by `SV_ClipDistance`, sampled by the glass's own material in place of its probe and SSR terms.
+- **W42.3:** stats, perf, the golden, FeatureTest and the documents.
+
+Its milestone end is phase 7's batch gate: `CI.py --milestone`.
+
+**Deliverables**
+- **The component.** `PlanarReflection {Normal, Offset, ResolutionScale}` (Probes), extracted at the rendered pose in every view, the bake's excepted.
+- **The pass.** `PlanarReflections` runs first in the Forward stage. It renders at most `MaxPlanarReflectionsPerView` (4) mirror views per renderer, the largest on screen first, through the mirror view's path:
+  - a rigid mirrored camera, clipped at the plane;
+  - the prepass, light clusters, the forward passes, the terrain, the sky, particles and a mip chain;
+  - the main view's shadows and probes;
+  - fog from the glass on.
+
+  A mirror past the cap, out of view or facing away falls back to today's probe and SSR.
+- **The device feature.** `shaderClipDistance` is required.
+- **Stats and perf.**
+  - `stats.get`'s `planarReflections`, `droppedPlanarReflections`, `culledPlanarReflections` and `planarReflectionEntities`, and the `PlanarReflection0` to `3` rows.
+  - The readout's `PlanarReflections` and `DroppedPlanarReflections`.
+  - Perf.py's `reflections/Mirrors3/gpuMs`, with a budget of 2.0 ms.
+- **Validation.** `RENDER_REFLECTION_INVALID` (Warning): no mesh to show the reflection, or a mesh off the plane, with the axis suggested.
+
+**Acceptance**
+- "PlanarReflections: the mirrored camera is rigid and maps the plane to the view's pixels mirrored"
+- "PlanarReflections: a reflection faces the camera only from its reflecting side"
+- "PlanarReflections: reflections rank by screen area with ties by UUID"
+- "RenderExtraction: a planar reflection is extracted at its rendered pose in every view"
+- "PlanarReflections: a mirror shows the view a camera mirrored in its plane sees"
+- "PlanarReflections: nothing behind the plane appears in a mirror"
+- "PlanarReflections: a view draws at most four reflections, and a mirror past the cap draws as without one"
+- "PlanarReflections: a mirror seen in a mirror shows its fallback"
+- "PlanarReflections: SSR does not trace a planar mirror's pixels"
+- "PlanarReflections: the main view's shadows shade a reflection"
+- "PlanarReflections: a reflection of a moving plane follows its rendered pose"
+- "PlanarReflections: a mirror scene renders the same bytes after a device loss"
+- `Golden: PlanarReflections`, with every existing golden byte-identical.
+- `test_planar_reflections.py` passes.
+- The `PlanarReflections` suite passes in the editor, Release and Dist.
+- Perf.py's `reflections/Mirrors3/gpuMs` is within 2.0 ms at the gate's perf capture (warning-only).
+
+**How the game will check it**
+- **The Mirror Hall's north mirror shows the Warden's back,** mirrored, at its distance, with the floor whole, the sky above and a husk behind it.
+  - "PlanarReflections: a mirror shows the view a camera mirrored in its plane sees" and "nothing behind the plane appears in a mirror".
+  - `Golden: PlanarReflections`: its marker on an object's back, its clipped box, its sky and fog.
+- **`Mirror.material` stays as it is,** with the component on the glass, and the aurora mirror's reflection turns with it: "PlanarReflections: a reflection of a moving plane follows its rendered pose".
+- **Three mirrors at 1080p cost about 2 ms or less** in a headless game view: Perf.py's metric, and `stats.get`'s `PlanarReflection<k>` rows.
+- **Every suite and replay passes unchanged.** No engine hash moves. The game records again only the replays of the scenes it adds the component to.
+
+**Parallelization**: W42.1 (CPU), then W42.2 (GPU, after `milestone/m42` merges main with brief 21's first fix), then W42.3 (coverage and documents).
