@@ -4,6 +4,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/Hash.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Core/Json/JsonWriter.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
@@ -785,9 +786,16 @@ namespace Engine {
 		static Status DiffMember(const TypeRegistry& registry, UUID memberID, const OverridePath& path, bool isRoot, const Json& expected,
 			const Json& actual, const EntityRefRemapper& toPrefab, std::vector<UUID>& ambiguous, std::vector<PrefabOverride>& overrides)
 		{
+			// Each value as a file holds it (JsonWriter::ToWrittenForm): a record read back from a scene file keeps its values
+			// verbatim, so a value recorded as the double of a float (0.800000011920929 for 0.8f) would never equal it again
+			// and every refresh after a load would rewrite the record (World Tree's brief 21: a scene that opened dirty). A value
+			// no file can hold (a non-finite number, which component validation keeps out) is kept as it is, for the save that
+			// writes it to report.
 			const auto record = [&overrides, &path](PrefabOverrideKind kind, std::string component, std::string field, Json value)
 			{
-				overrides.push_back(PrefabOverride{ path, kind, std::move(component), std::move(field), VariantValue(std::move(value)) });
+				Result<Json> written = JsonWriter::ToWrittenForm(value);
+				overrides.push_back(PrefabOverride{ path, kind, std::move(component), std::move(field),
+					VariantValue(written ? std::move(*written) : std::move(value)) });
 			};
 			const auto checkMapped = [&ambiguous, memberID](std::string pointer) -> Status
 			{

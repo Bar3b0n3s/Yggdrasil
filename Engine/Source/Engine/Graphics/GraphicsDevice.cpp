@@ -1322,14 +1322,22 @@ namespace Engine {
 			CollectLostDevice();
 			return;
 		}
+		CollectCompletedSubmissions();
+		// The first collection arms the injected device-lost faults (decision 30).
+		m_Diagnostics.OnGarbageCollected();
+	}
+
+	void GraphicsDevice::CollectCompletedSubmissions()
+	{
+		// A lost device: the frame boundary's collection (CollectLostDevice) and the recovery retire everything.
+		if (IsLost())
+			return;
 		// §8.14 item 2, ADR 0009 decision 9: NVRHI retires the completed submissions first, so the sweep sees the
 		// references they dropped, and the host images' release sees the sweep's.
 		m_NvrhiDevice->runGarbageCollection();
 		m_ResourceTracker.Sweep();
 		if (m_HostImageUpload != nullptr)
 			m_HostImageUpload->CollectGarbage();
-		// The first collection arms the injected device-lost faults (decision 30).
-		m_Diagnostics.OnGarbageCollected();
 	}
 
 	void GraphicsDevice::CollectLostDevice()
@@ -1642,12 +1650,8 @@ namespace Engine {
 			return;
 		// 2. The owners' hooks, last registered first.
 		static_cast<void>(m_Recreation.TrimUnused());
-		// 3. RunGarbageCollection's order without arming an injected fault (OnGarbageCollected is not called): NVRHI retires
-		// the completed submissions, so the sweep sees the references they dropped, and the host images' release the sweep's.
-		m_NvrhiDevice->runGarbageCollection();
-		m_ResourceTracker.Sweep();
-		if (m_HostImageUpload != nullptr)
-			m_HostImageUpload->CollectGarbage();
+		// 3. RunGarbageCollection's collection without arming an injected fault (OnGarbageCollected is not called).
+		CollectCompletedSubmissions();
 	}
 
 }

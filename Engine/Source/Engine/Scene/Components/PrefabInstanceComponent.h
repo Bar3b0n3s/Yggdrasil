@@ -45,7 +45,9 @@ namespace Engine {
 	// and Parent are implicit overrides and are never recorded; the root's Active and Tags are recorded like any member's. A
 	// RemoveEntity names the top of a removed subtree (never the root: deleting the root deletes the instance), and its
 	// prefab descendants have no overrides of their own. An override whose path names no entity of the prefab (an empty
-	// one included) is stale and dropped at the next update. Field order is the file's key order.
+	// one included) is stale and dropped at the next update. The diff records each Value as a file holds it
+	// (PrefabInstantiator::ComputeOverrides, JsonWriter::ToWrittenForm), as a file read keeps it, so a record equals itself
+	// read back after a save. Field order is the file's key order.
 	struct PrefabOverride
 	{
 		std::vector<UUID> Path;

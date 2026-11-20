@@ -12,6 +12,7 @@
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/CookedFormat.h"
 #include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/ScriptData.h"
 #include "Engine/AssetPipeline/AssetCache.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -1370,34 +1371,37 @@ return Script.Define("Host", Host)
 		TEST_CASE("EditorPlayController: a reload during ordinary play marks the session modified, whatever started it")
 		{
 			// §7.5 race rule 4: the editor's own write of an asset (asset.setProperties, asset.import) reloads it in the running
-			// game as an external change does, and both mark the session modified; a lockstep session defers both.
+			// game as an external change does, and both mark the session modified; a lockstep session defers both. The subject
+			// is a sound effect: a material's reload, presentation only, is never deferred and marks nothing (the next cases).
 			Test::EditorTestFixture fixture("PlayReloadModified");
 			fixture.CreateAndOpenProject();
 			fixture.CreateAndOpenScene();
 			EditorContext& editor = fixture.GetEditor();
 			EditorAssetManager& assets = editor.GetAssets();
-			const Result<VfsPath> material = VfsPath::Parse("project://Assets/Materials/Red.material");
-			REQUIRE(material.has_value());
-			const auto materialText = [](double roughness)
+			const Result<VfsPath> sound = VfsPath::Parse("project://Assets/Audio/Coin.sfx");
+			REQUIRE(sound.has_value());
+			const auto soundText = [](uint32_t seed)
 			{
-				return std::format(R"({{"Format": "Material", "Version": 1, "Roughness": {}}})", roughness);
+				constexpr std::string_view Layers = R"("Layers": [{"Wave": "Noise", "Duration": 0.05}])";
+				return std::format(R"({{"Format": "SoundEffect", "Version": 1, "Seed": {}, {}}})", seed, Layers);
 			};
-			const auto writeFromEditor = [&editor, &material](const std::string& text)
+			const auto writeFromEditor = [&editor, &sound](const std::string& text)
 			{
-				REQUIRE(editor.WriteProjectFile(*material, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+				REQUIRE(editor.WriteProjectFile(*sound, std::as_bytes(std::span(text.data(), text.size()))).has_value());
 			};
-			REQUIRE(editor.GetVfs().CreateDirectories(material->GetParent()).has_value());
-			writeFromEditor(materialText(0.1));
+			REQUIRE(editor.GetVfs().CreateDirectories(sound->GetParent()).has_value());
+			writeFromEditor(soundText(1));
 			REQUIRE(assets.Refresh().has_value());
-			const AssetHandle handle = assets.Resolve("Assets/Materials/Red.material").value_or(AssetHandle());
+			const AssetHandle handle = assets.Resolve("Assets/Audio/Coin.sfx").value_or(AssetHandle());
 			REQUIRE(assets.Load(handle).has_value());
+			REQUIRE_FALSE(assets.IsPresentationOnly(handle));
 			const uint64_t version = assets.GetVersion(handle);
 
 			EditorPlayController& play = editor.GetPlay();
 			REQUIRE(play.Start(PlayStartOptions{}).has_value());
 			CHECK_FALSE(play.GetSession()->IsModified());
-			// The editor's write reimports the material on a job; WaitIdle publishes it.
-			writeFromEditor(materialText(0.2));
+			// The editor's write reimports the sound on a job; WaitIdle publishes it.
+			writeFromEditor(soundText(2));
 			assets.WaitIdle();
 			REQUIRE(assets.GetVersion(handle) == version + 1);
 			CHECK(play.GetSession()->IsModified());
@@ -1405,8 +1409,8 @@ return Script.Define("Host", Host)
 
 			// An external change, found by a refresh.
 			REQUIRE(play.Start(PlayStartOptions{}).has_value());
-			const std::string external = materialText(0.3);
-			REQUIRE(FileSystem::WriteFileAtomic(editor.GetProject().GetRoot() / "Assets/Materials/Red.material",
+			const std::string external = soundText(3);
+			REQUIRE(FileSystem::WriteFileAtomic(editor.GetProject().GetRoot() / "Assets/Audio/Coin.sfx",
 				std::as_bytes(std::span(external.data(), external.size())))
 					.has_value());
 			REQUIRE(assets.Refresh().has_value());
@@ -1417,13 +1421,128 @@ return Script.Define("Host", Host)
 
 			// A lockstep session defers the reload until it stops, so it is never marked.
 			REQUIRE(play.Start(PlayStartOptions{ .Lockstep = true }).has_value());
-			writeFromEditor(materialText(0.4));
+			writeFromEditor(soundText(4));
 			assets.WaitIdle();
 			CHECK(assets.GetVersion(handle) == version + 2);
 			CHECK_FALSE(play.GetSession()->IsModified());
 			REQUIRE(play.Stop().has_value());
 			assets.WaitIdle();
 			CHECK(assets.GetVersion(handle) == version + 3);
+		}
+
+		TEST_CASE("EditorPlayController: a material changed while a session plays is published at once, unmodified, at the same state hash")
+		{
+			// World Tree brief 21 (§7.5 race rule 4's exception): only the renderer reads a material, so its change reaches a
+			// lockstep session at once (its next rendered frame draws it), the session is not modified and its state hash is
+			// the one it has without the change; an ordinary session is not marked either.
+			Test::EditorTestFixture fixture("PlayMaterialReload");
+			fixture.CreateAndOpenProject();
+			EditorContext& editor = fixture.GetEditor();
+			EditorAssetManager& assets = editor.GetAssets();
+			EditorPlayController& play = editor.GetPlay();
+			const Result<VfsPath> bark = VfsPath::Parse("project://Assets/Materials/Bark.material");
+			REQUIRE(bark.has_value());
+			const auto writeBark = [&editor, &bark](const glm::vec4& color)
+			{
+				const std::string text = std::format(R"({{"Format": "Material", "Version": 2, "BaseColor": [{}, {}, {}, {}]}})", color.r,
+					color.g, color.b, color.a);
+				REQUIRE(editor.WriteProjectFile(*bark, std::as_bytes(std::span(text.data(), text.size()))).has_value());
+			};
+			const auto baseColor = [&assets](AssetHandle handle)
+			{
+				const AssetRef<MaterialData> material = AssetCast<MaterialData>(assets.Load(handle).value_or(nullptr));
+				REQUIRE(material != nullptr);
+				return material->BaseColor;
+			};
+			const glm::vec4 white(1.0f);
+			const glm::vec4 brown(0.5f, 0.25f, 0.125f, 1.0f);
+			REQUIRE(editor.GetVfs().CreateDirectories(bark->GetParent()).has_value());
+			writeBark(white);
+			REQUIRE(assets.Refresh().has_value());
+			const AssetHandle handle = assets.Resolve("Assets/Materials/Bark.material").value_or(AssetHandle());
+			REQUIRE(assets.IsPresentationOnly(handle));
+
+			fixture.CreateAndOpenScene();
+			Scene& scene = editor.GetScene();
+			static_cast<void>(Test::AddGround(scene));
+			static_cast<void>(Test::AddSphereBody(scene, "Ball", glm::vec3(0.0f, 3.0f, 0.0f), 0.5f, BodyType::Dynamic));
+			MeshRendererComponent trunk;
+			trunk.Mesh = TypedAssetHandle<AssetType::Mesh>(BuiltinAssetHandles::CubeMesh);
+			trunk.Materials = { TypedAssetHandle<AssetType::Material>(handle) };
+			scene.CreateEntity("Trunk").AddComponent<MeshRendererComponent>(std::move(trunk));
+			// The state hash after the ball fell for a second, `recolour` changing the material from white to brown after half
+			// of it, and whether the session was marked modified.
+			const auto play60Ticks = [&](bool recolour)
+			{
+				writeBark(white);
+				assets.WaitIdle();
+				REQUIRE(play.Start(PlayStartOptions{ .Lockstep = true }).has_value());
+				PlaySession* session = play.GetSession();
+				REQUIRE(session != nullptr);
+				for (int tick = 0; tick < 30; ++tick)
+					session->Tick();
+				if (recolour)
+				{
+					const uint64_t version = assets.GetVersion(handle);
+					writeBark(brown);
+					assets.WaitIdle();
+					CHECK(assets.GetVersion(handle) == version + 1);
+					CHECK(baseColor(handle) == brown);
+				}
+				for (int tick = 0; tick < 30; ++tick)
+					session->Tick();
+				const std::pair<uint64_t, bool> outcome(session->ComputeStateHash(), session->IsModified());
+				REQUIRE(play.Stop().has_value());
+				return outcome;
+			};
+			const std::pair<uint64_t, bool> unchanged = play60Ticks(false);
+			const std::pair<uint64_t, bool> recoloured = play60Ticks(true);
+			CHECK(recoloured.first == unchanged.first);
+			CHECK_FALSE(recoloured.second);
+			CHECK_FALSE(unchanged.second);
+
+			// Ordinary play reloads it too, without marking the session.
+			REQUIRE(play.Start(PlayStartOptions{}).has_value());
+			writeBark(brown);
+			assets.WaitIdle();
+			CHECK(baseColor(handle) == brown);
+			CHECK_FALSE(play.GetSession()->IsModified());
+			REQUIRE(play.Stop().has_value());
+		}
+
+		TEST_CASE("EditorPlayController: a recording stays valid when a material changes while it records")
+		{
+			// World Tree brief 21: asset.setProperties of a material during input.record reaches the recording session at once
+			// and neither modifies it nor invalidates the recording, which stop writes once it reproduces itself.
+			Test::AutomationFixture fixture("RecordMaterialChange");
+			EditorContext& editor = fixture.GetEditor();
+			CallEditorHost(fixture, "asset.create", Json{ { "type", "Material" }, { "path", "Assets/Materials/Bark.material" } });
+			Json trunk = Json::object();
+			trunk["name"] = "Trunk";
+			trunk["components"]["MeshRenderer"]["Mesh"] = "engine://Meshes/Cube";
+			trunk["components"]["MeshRenderer"]["Materials"] = Json::array({ "Assets/Materials/Bark.material" });
+			CallEditorHost(fixture, "entity.create", trunk);
+			CallEditorHost(fixture, "scene.save");
+			const AssetHandle bark = editor.GetAssets().Resolve("Assets/Materials/Bark.material").value_or(AssetHandle());
+			REQUIRE(bark.IsValid());
+
+			CallEditorHost(fixture, "input.record", Json{ { "action", "start" } });
+			CallEditorHost(fixture, "play.step", Json{ { "ticks", 30 }, { "render", "none" } });
+			const uint64_t version = editor.GetAssets().GetVersion(bark);
+			Json recolour = Json::object();
+			recolour["asset"] = "Assets/Materials/Bark.material";
+			recolour["values"]["BaseColor"] = Json::array({ 0.5, 0.25, 0.125, 1.0 });
+			CallEditorHost(fixture, "asset.setProperties", recolour);
+			CallEditorHost(fixture, "play.step", Json{ { "ticks", 40 }, { "render", "none" } });
+			// The reimport runs on a job; an editor frame publishes it, and WaitIdle here (no frame runs in this fixture).
+			editor.GetAssets().WaitIdle();
+			CHECK(editor.GetAssets().GetVersion(bark) == version + 1);
+			const Json state = CallEditorHost(fixture, "play.state");
+			CHECK(state["modified"] == Json(false));
+			CHECK(state["recording"] == Json(true));
+			const Json stopped =
+				CallEditorHost(fixture, "input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Bark.replay" } });
+			CHECK(stopped["checkpoints"] == Json(1));
 		}
 
 		TEST_CASE("EditorPlayController: every session gets a serial of its own")

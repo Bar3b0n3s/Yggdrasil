@@ -23,7 +23,8 @@
 
 // The GPU environment bake (Architecture §8.6; Docs/Decisions/0013-m8-decisions.md decision 9) against its device-independent
 // oracles (§15.3): the white furnace for the prefilter and the SH, the prefilter against the CPU reference at 16²
-// (Support/RenderReference.h), and the continuity of the equirectangular-to-cube seams.
+// (Support/RenderReference.h), and the continuity of the equirectangular-to-cube seams; and the release of a bake's transient
+// objects before it returns (World Tree's brief 21).
 
 namespace Engine {
 
@@ -326,6 +327,34 @@ namespace Engine {
 				const Result<EnvironmentData> baked = baker->Bake(input);
 				REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
 				CHECK(ReadTexel(baked->Skybox, 0, 0, 3, 3).x == doctest::Approx(10.0).epsilon(0.01));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// World Tree's brief 21: a bake collects the garbage of its completed submissions before it returns, so its cubes,
+		// buffers and read-back staging go with it, not at the frame's garbage collection, and the bakes of many imports in one
+		// frame (a lighting bake's reflection probes) hold one bake's device allocations.
+		TEST_CASE("EnvironmentBaker: bakes release their transient objects as they return, so many between two collections add no allocation"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				Scope<EnvironmentBaker> baker = CreateBaker(gpu);
+				GraphicsDevice& device = gpu.GetDevice();
+				const EnvironmentBakeInput input = MakeGradientInput(64);
+				const EnvironmentBakeOptions options{ .SkyboxFaceSize = 16, .SpecularFaceSize = 16, .SpecularMipCount = 5, .MinSamples = 64, .MaxSamples = 256 };
+				// Nothing collects after the first bake, or between the bakes below.
+				const Result<EnvironmentData> first = baker->BakeWithOptions(input, options);
+				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+				const uint32_t settled = device.GetMemoryAllocationCount();
+				for (uint32_t index = 1; index <= 4; ++index)
+				{
+					CAPTURE(index);
+					const Result<EnvironmentData> baked = baker->BakeWithOptions(input, options);
+					REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
+					CHECK(device.GetMemoryAllocationCount() <= settled);
+				}
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

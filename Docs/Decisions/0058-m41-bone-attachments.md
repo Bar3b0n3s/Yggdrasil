@@ -20,6 +20,23 @@
   - ADR 0052, whose form and process this phase keeps;
   - ADR 0034 (M23's skeletal animation) and ADR 0049 (M34's camera pose rule);
   - Architecture §5.2, §5.3, §5.7, §9.3, §11.5, §13.7, §15.5 and §18.
+- **Amended 2026-11-19 (M42 joins phase 7):**
+  - **What changed.** World Tree's brief 23, planar reflections, arrived after this plan, and the lead took it into phase 7 as M42 (`Docs/Decisions/0059-m42-planar-reflections.md`, its plan and record). Phase 7 is now brief 21's three fixes, M41 and M42, and the following supersede decision 2's "alone" and decision 7's "the phase's last (and only) lander".
+  - **Merge train:** M41, then M42.
+  - **The landing:**
+    - One batch by default: `landing/phase7` merges current main, M41 and M42 with their adaptations, then runs one merge review and one `CI.py --milestone` (decision 7's hardened gate, announced to the owner first). Main fast-forwards to it.
+    - M41 lands alone ahead of the batch, gated by `CI.py --require-clang-cl`, only if M42 runs far behind (W42.3 not begun when M41's milestone review is done). M42 then takes the hardened gate.
+    - The batch's lander takes the duties of decision 6: `EngineVersionString` 0.8.0, FeatureTest regenerated and the editor-UI goldens checked, once for the phase.
+  - **Contended files.** M41 owns every file the two share, and M42 appends after M41's entries at the landing:
+    - `BuiltinComponents.h`;
+    - `ProjectValidator.cpp`'s tables and `ProjectValidatorTests.cpp`'s count line;
+    - `MakeValidationFixtures.py`, `Tests/Data/Validation/README.md` and the `validation-codes` page;
+    - FeatureTest's `Scaffolds.json` and `Suites.jsonl`;
+    - `BuiltinComponentsTests.cpp`;
+    - `RenderExtraction.{h,cpp}` and `RenderExtractionTests.cpp`: M41's region is `ComputeRenderedWorldMatrix`, M42's the item in the canonical loop.
+
+    The generated references are regenerated on the landing, never merged.
+  - **The ledger.** M42's allocations are ADR 0059 decision 8's: IdSeeds 3900 to 3999; validation code 75, `RENDER_REFLECTION_INVALID`, after M41's; component 64, `PlanarReflection`, in Probes. A record outside the two milestones takes 0060 on.
 
 ## Context
 
@@ -280,9 +297,9 @@ Each item is a change straight to main outside the milestone, with ADR 0051 deci
 
 | Item | The brief | Worktree and branch | Outcome |
 |---|---|---|---|
-| 1 | A 507-probe `IrradianceVolume` bake logged the allocation warning at 2,009 and then 23,521 native allocations; whether the count falls back after the bake is not visible | `b21a`, `fix/brief21-b21a` | pending |
-| 2 | `asset.setProperties` on a Material while a session plays is not seen until play restarts (`BaseColor` and `BaseColorMap`) | `b21b`, `fix/brief21-b21b` | pending |
-| 3 | A scene holding an instance of `AnimationLibrary_Godot_Standard.glb` reports `rebuiltInstances` on every open and opens dirty, though a save writes the file byte for byte | `b21c`, `fix/brief21-b21c` | pending |
+| 1 | A 507-probe `IrradianceVolume` bake logged the allocation warning at 2,009 and then 23,521 native allocations; whether the count falls back after the bake is not visible | `b21a`, `fix/brief21-b21a` | **A defect, fixed** (`8da6cbcb`): a bake ran inside one editor request, and nothing retired its submissions until that frame's garbage collection, so each capture's read-back staging textures and whatever a face's render dropped stayed held, and the count grew with the probe count during the bake (the 2,009 was the capture's view mid-bake, the 23,521 an editor view's first render after it) and fell at the frame's end; a reflection probe's import did the same. `GraphicsDevice::CollectCompletedSubmissions` (the frame's collection between recordings, never waiting, arming no injected fault) now runs after each capture and each environment bake, so a bake holds one capture's and one import's allocations whatever its probe count and a second bake adds none; the warning, `stats.get`'s description, `lighting.bake`'s, Architecture §8.6 and §8.14 say what the count includes and when it falls. Regression cases in `ProbeCaptureTests.cpp`, `EnvironmentBakerTests.cpp` and `LightingBakeTests.cpp` (a second bake of many more probes adds nothing), with `test_lighting.py`'s 13 x 3 x 13 volume baked twice |
+| 2 | `asset.setProperties` on a Material while a session plays is not seen until play restarts (`BaseColor` and `BaseColorMap`) | `b21b`, `fix/brief21-b21b` | **Intended behaviour, narrowed** (`5be59583`): Architecture §7.5 race rule 4 held every asset reload while a lockstep, recording, replay or test session ran, so the new material was never published to the renderer. Only the renderer and the views' annotations read a material's values, so a `.material` file's asset is now exempt (`EditorAssetManager::IsPresentationOnly`, the hot reloader's deferral exemption): it reloads at once in every session and shows in the next rendered frame, marks no session `modified` (a recording stays valid) and moves no hash, while its dependents' reimports and every other asset type stay held (`Docs/Backlog.md` §6). Race rule 4, ADR 0012, the method descriptions and the skills say so; regression cases in `AssetHotReloaderTests.cpp`, `EditorAssetManagerTests.cpp` and `EditorPlayControllerTests.cpp`, and `test_play.py`'s lockstep `BaseColor` and `BaseColorMap` screenshots |
+| 3 | A scene holding an instance of `AnimationLibrary_Godot_Standard.glb` reports `rebuiltInstances` on every open and opens dirty, though a save writes the file byte for byte | `b21c`, `fix/brief21-b21c` | **A defect, fixed** (`f4dd2dae`): a scene file holds a fractional number as its float's shortest text (`0.8`), which a load keeps verbatim in an override's `Value`, while the diff recorded the double the float widens to (`0.800000011920929`), so every refresh after a load rewrote the record, counted the instance rebuilt and left the scene dirty (any fractional override, here the Warden's Animator layer). The diff now records each value as a file holds it (`JsonWriter::ToWrittenForm`); saved bytes and hashes are unchanged. Regression cases in `PrefabInstantiatorTests.cpp` and `SceneMethodsTests.cpp` (a skinned model at `/Set/Warden` with fractional overrides opens clean), with `test_prefab.py`'s case |
 
 ### 9. Reservation ledger
 

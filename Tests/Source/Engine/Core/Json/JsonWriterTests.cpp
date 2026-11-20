@@ -341,6 +341,50 @@ namespace Engine {
 			CHECK(infinite.error().GetLocation().JsonPointer == "/Infinite");
 		}
 
+		// World Tree's brief 21: JSON computed from float fields holds each float widened to a double (0.8f as
+		// 0.800000011920929), which a file holds as the float's shortest text (0.8). ToWrittenForm gives the value a load of
+		// that file gives back, so the two compare equal, and leaves a value already in that form as it is.
+		TEST_CASE("JsonWriter: ToWrittenForm gives a value as a written file reads back")
+		{
+			Json computed = Json::object();
+			computed["Speed"] = static_cast<double>(0.8f);
+			computed["Weight"] = 1.0;
+			computed["Zero"] = -0.0;
+			computed["Layers"] = Json::array({ Json{ { "Time", static_cast<double>(0.3f) }, { "Loop", true } } });
+			computed["Count"] = 9007199254740993ULL;
+			computed["Clip"] = "b563e2a128af567e";
+			computed["Parent"] = nullptr;
+			REQUIRE(computed["Speed"] != Json(0.8));
+
+			const Result<std::string> text = JsonWriter::Write(computed, JsonStyle::Minified);
+			REQUIRE(text.has_value());
+			Result<Json> read = JsonReader::Parse(*text);
+			REQUIRE(read.has_value());
+			const Result<Json> written = JsonWriter::ToWrittenForm(computed);
+			REQUIRE_MESSAGE(written.has_value(), written.error().ToString());
+			CHECK(*written == *read);
+			CHECK((*written)["Speed"].get<double>() == 0.8);
+			CHECK((*written)["Layers"][0]["Time"].get<double>() == 0.3);
+			CHECK((*written)["Weight"].is_number_integer());
+			CHECK((*written)["Zero"].is_number_integer());
+			CHECK((*written)["Count"] == computed["Count"]);
+			CHECK((*written)["Clip"] == computed["Clip"]);
+			CHECK((*written)["Parent"].is_null());
+			CHECK(JsonWriter::Write(*written, JsonStyle::Minified) == *text);
+
+			// Idempotent: a value read from a file is already in its written form.
+			const Result<Json> again = JsonWriter::ToWrittenForm(*read);
+			REQUIRE(again.has_value());
+			CHECK(*again == *read);
+			CHECK((*again)["Speed"].get<double>() == (*read)["Speed"].get<double>());
+
+			// What a file cannot hold is the writer's error.
+			const Result<Json> infinite = JsonWriter::ToWrittenForm(Json::array({ 1, std::numeric_limits<double>::infinity() }));
+			REQUIRE_FALSE(infinite.has_value());
+			CHECK(infinite.error().GetCode() == ErrorCode::Validation);
+			CHECK(infinite.error().GetLocation().JsonPointer == "/1");
+		}
+
 		TEST_CASE("JsonWriter: keys with invalid UTF-8 fail Finish with the object's pointer")
 		{
 			JsonWriter writer;

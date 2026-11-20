@@ -45,6 +45,7 @@ namespace Engine {
 	{
 	public:
 		using ChangeListener = UniqueFunction<void(std::span<const FileChange> changes)>;
+		using DeferralExemption = UniqueFunction<bool(const FileChange& change)>;
 
 		// `vfs` and `jobs` are documented back-references that outlive the reloader.
 		AssetHotReloader(const VirtualFileSystem& vfs, JobSystem& jobs, AssetHotReloaderSpecification specification);
@@ -80,9 +81,16 @@ namespace Engine {
 		[[nodiscard]] bool IsCurrent(const AssetReimportTicket& ticket) const;
 
 		// Race rule 4 "deterministic sessions are frozen": while lockstep, a replay, a recording or a test run is active (M7,
-		// M13), changes are held instead of delivered; SetDeferred(false) delivers the held changes, merged per path, at once.
+		// M13), changes are held instead of delivered, except those the deferral exemption accepts (SetDeferralExemption);
+		// SetDeferred(false) delivers the held changes, merged per path, at once.
 		void SetDeferred(bool deferred);
 		[[nodiscard]] bool IsDeferred() const;
+		// Race rule 4's exception (World Tree brief 21): while deferred, a change of a poll that `exemption` accepts is
+		// delivered with that poll instead of held, unless a change of its path is held already, which it then joins
+		// (merged per path, so the path's changes stay in order). Called on the main thread, once per change of a deferred
+		// poll whose path has no held change. Empty (the default): every change is held. The EditorAssetManager exempts the
+		// modification of a presentation-only asset's source (EditorAssetManager::IsPresentationOnly).
+		void SetDeferralExemption(DeferralExemption exemption);
 		// The held changes, sorted by path (empty when not deferred).
 		[[nodiscard]] std::vector<FileChange> GetDeferredChanges() const;
 	private:

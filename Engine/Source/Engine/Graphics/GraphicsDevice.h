@@ -287,6 +287,16 @@ namespace Engine {
 		// command lists as completed with the queue's timeline answered on the host, then sweeps the tracker and collects the
 		// host images, so what only the lost device's submissions held is released, as Recover's release does.
 		void RunGarbageCollection();
+		// World Tree's brief 21: RunGarbageCollection's collection between recordings (NVRHI's runGarbageCollection, the
+		// tracker's Sweep, then HostImageUpload::CollectGarbage), for work that submits many times within one frame, so what
+		// its completed submissions alone still held goes now rather than at the frame's end: such work holds the allocations
+		// of its last submissions, not of all of them (ProbeCapture after each capture and EnvironmentBaker after each bake, so
+		// a lighting bake of any number of probes). It never waits and arms no injected fault
+		// (GpuDiagnostics::OnGarbageCollected is not called). Safe between any two recordings on the main thread, also while
+		// another command list is open with earlier recordings: NVRHI retires only submitted lists whose work completed, and
+		// the sweep releases only what nobody else holds. On a lost device it does nothing (the frame boundary's collection and
+		// the recovery retire everything).
+		void CollectCompletedSubmissions();
 
 		// vkDeviceWaitIdle, for shutdown and resize (§8.1), through the dispatcher's C entry point, so it never throws
 		// (§4.6 item 2) and works outside the frame boundary too. VK_ERROR_DEVICE_LOST, or the device-lost flag already set,
@@ -370,10 +380,10 @@ namespace Engine {
 		// configuration (in Dist no tracker reference delays a destruction, and NVRHI's command lists do not reference a
 		// texture used only by a clear, ADR 0009 decision 31); then every registered owner's TrimUnused hook, last registered
 		// first (GpuRecreationRegistry::TrimUnused: free pooled targets, stale and unloaded mirrors, a capture's targets
-		// between captures, and later owners' caches); then the garbage collection RunGarbageCollection does (NVRHI's garbage
-		// collection, which destroys what retired command lists alone still referenced, the tracker's Sweep and the host
-		// images' collection) without arming an injected fault (GpuDiagnostics::OnGarbageCollected is not called). It logs
-		// nothing itself: the request's Warn line names the trim (RetryAfterTrim; a host whose per-frame render failed logs
+		// between captures, and later owners' caches); then CollectCompletedSubmissions (NVRHI's garbage collection, which
+		// destroys what retired command lists alone still referenced, the tracker's Sweep and the host images' collection,
+		// without arming an injected fault). It logs nothing itself: the request's Warn line names the trim (RetryAfterTrim;
+		// a host whose per-frame render failed logs
 		// once per run of failing frames), so a trim every frame never floods the log. Main thread, between recordings: never
 		// while a command list records with an object an owner may drop, and never while a caller holds a reference an
 		// owner's documented accessors handed out (a GpuResourceCache mirror reference). A command list open with earlier

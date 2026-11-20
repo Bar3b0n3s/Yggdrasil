@@ -534,6 +534,12 @@ namespace Engine {
 			}
 			return {};
 		});
+		// World Tree's brief 21 (a bake of 507 probes ended with 23,521 native allocations): each face's read-back waited for
+		// its copy, queued after the face's render, so every submission of the capture completed, and what they alone still
+		// held (each face's staging texture, what a face's render stopped using) goes now, not at the end of the frame that
+		// runs the bake. A bake's thousands of captures thus hold one capture's device allocations, whatever its probe count;
+		// a failed capture collects what completed too.
+		state.Device->CollectCompletedSubmissions();
 		ENGINE_TRY(captured);
 		return capture;
 	}

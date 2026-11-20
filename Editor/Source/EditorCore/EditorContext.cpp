@@ -728,7 +728,7 @@ namespace Engine {
 		// applied to the scene in memory.
 		// §7.5 race rule 4: a reload during ordinary play marks the session modified, whether an external change or the
 		// editor's own write started it (a lockstep session defers reloads until it ends, EditorPlayController, so none reaches
-		// it).
+		// it); a material's, presentation only and never deferred, marks no session (EditorPlayController::OnAssetReload).
 		m_Assets->SetReloadListener([this](AssetHandle source)
 		{
 			m_Play->OnAssetReload(source);

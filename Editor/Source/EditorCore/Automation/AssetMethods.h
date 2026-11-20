@@ -271,8 +271,10 @@ namespace Engine {
 	// patch (Frames, Clips) replaces the whole array, as RFC 7386 says. A tilemap's result passes ValidateTilemap, its palette's
 	// Sheets taking every asset reference as asset.create's do; its Palette and Chunks are replaced whole (painting cells is
 	// tilemap.paint's). A string table's result passes asset.create's check (ValidateStringTable); its Locales and Entries are
-	// arrays, each replaced whole. A play session in lockstep (a recording or replay included) or a test run sees the change
-	// only after it ends: the asset reload is deferred like a script reload (§7.5 race rule 4).
+	// arrays, each replaced whole. A material's change shows in a running play session's next rendered frame, whatever the
+	// session (a material is presentation only, EditorAssetManager::IsPresentationOnly, so it neither changes the state hash
+	// nor marks the session modified); a play session in lockstep (a recording or replay included) or a test run sees any
+	// other native asset's change only after it ends: its reload is deferred like a script reload (§7.5 race rule 4).
 	struct AssetSetPropertiesParams
 	{
 		std::string Asset{};

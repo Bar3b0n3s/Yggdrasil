@@ -908,6 +908,58 @@ namespace Engine {
 			CHECK(loaded->GetRevision() == revision);
 		}
 
+		// World Tree's brief 21: a scene file holds each fractional number as its float's shortest text (0.8f as 0.8), which
+		// a load keeps verbatim in an override's Value, while the diff saw the field as the double of the float
+		// (0.800000011920929). The record now holds its values as a file holds them, so the one a load gives back equals the
+		// recorded one and a refresh after the load (every rebuild of scene.open's) leaves the instance untouched.
+		TEST_CASE("PrefabInstantiator: a record of fractional values reads back from a saved scene unchanged, so a refresh after the load changes nothing")
+		{
+			Test::SceneTestFixture setup;
+			Scene& scene = setup.GetScene();
+			const Prefab prefab = LoadBlockPrefab(setup.GetRegistry());
+			LoadReport report;
+			const UUID rootID(0x5b5b);
+			const UUID visualID = PrefabInstantiator::DeriveInstanceID(rootID, UUID(0x00000000000b0002));
+			const Result<Entity> root = PrefabInstantiator::Instantiate(scene, prefab, MakeOptions(rootID), PrefabOptions{}, report);
+			REQUIRE(root.has_value());
+			scene.FindEntityByID(visualID).Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.1f, -2.7f, 0.0f);
+				transform.Scale = glm::vec3(1.0f, 0.8f, 1.0f);
+			});
+			REQUIRE(PrefabInstantiator::RefreshOverrides(*root, prefab, PrefabOptions{}).has_value());
+			const std::vector<PrefabOverride> recorded = root->GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(recorded.size() == 2);
+			const Result<std::string> saved = SceneSerializer::SaveToString(scene);
+			REQUIRE(saved.has_value());
+
+			const Scope<Scene> loaded = setup.CreateEmptyScene();
+			LoadReport loadReport;
+			REQUIRE(SceneSerializer::LoadFromString(*loaded, *saved, LoadOptions{}, loadReport).has_value());
+			const Entity loadedRoot = loaded->FindEntityByID(rootID);
+			REQUIRE(loadedRoot.IsValid());
+			const std::vector<PrefabOverride> read = loadedRoot.GetComponent<PrefabInstanceComponent>().Overrides;
+			REQUIRE(read.size() == recorded.size());
+			for (size_t index = 0; index < recorded.size(); ++index)
+			{
+				INFO(recorded[index].Field);
+				CHECK(read[index].Value == recorded[index].Value);
+			}
+			CHECK(loaded->FindEntityByID(visualID).GetComponent<TransformComponent>().Scale == glm::vec3(1.0f, 0.8f, 1.0f));
+
+			// The refresh every rebuild ends with finds the record it already has.
+			const uint64_t revision = loaded->GetRevision();
+			REQUIRE(PrefabInstantiator::RefreshOverrides(loadedRoot, prefab, PrefabOptions{}).has_value());
+			CHECK(loaded->GetRevision() == revision);
+			LoadReport updateReport;
+			REQUIRE(PrefabInstantiator::UpdateInstance(*loaded, loadedRoot, prefab, PrefabOptions{}, updateReport).has_value());
+			REQUIRE(PrefabInstantiator::RefreshOverrides(loadedRoot, prefab, PrefabOptions{}).has_value());
+			CHECK(loaded->GetRevision() == revision);
+			const Result<std::string> resaved = SceneSerializer::SaveToString(*loaded);
+			REQUIRE(resaved.has_value());
+			CHECK(*resaved == *saved);
+		}
+
 		TEST_CASE("PrefabInstantiator: instantiation, override refreshes and updates are recorded by the change tracker")
 		{
 			Test::SceneTestFixture setup;

@@ -1,6 +1,7 @@
 """Baked lighting through automation (Docs/Decisions/0037-m26-contract.md decision 8; Roadmap M26's baked irradiance and
 reflection probes): lighting.bake, the editor's Bake Lighting action, writes each probe's data beside the saved scene,
-assigns it in one undoable edit, and two bakes write byte-identical files; a playing editor and an editor without a
+assigns it in one undoable edit, and two bakes write byte-identical files; a bake of hundreds of probes stays below the
+allocation warning, and a second adds no allocation (World Tree's brief 21); a playing editor and an editor without a
 renderer are refused, the latter tested without a GPU."""
 
 from __future__ import annotations
@@ -52,6 +53,29 @@ class LightingBakeTests(AutomationTestCase):
         # The second bake recorded nothing, so the undo takes back the first bake's assignment.
         client.call("edit.undo")
         self.assertIsNone(probe_data(client, "/Volume", "IrradianceVolume"))
+
+    def test_a_second_bake_of_hundreds_of_probes_adds_no_device_allocation(self) -> None:
+        # World Tree's brief 21: the bake of a 13 x 3 x 13 volume (507 captures of six faces each) ended with 23,521
+        # native allocations, which its frame's garbage collection freed only after the views had logged the allocation
+        # warning. Each capture now releases what it used before the next, so the bake stays below the warning's 2,000,
+        # and the count stats.get reads after a second bake is no higher than after the first.
+        if not self.require_gpu():
+            return
+        client, _ = self.open_editor_with_scene(renderer="vulkan")
+        client.call("entity.create", {"name": "Floor",
+                                      "components": {"MeshRenderer": {"Mesh": "engine://Meshes/Plane"}}})
+        client.call("entity.create", {"name": "Volume", "components": {"IrradianceVolume": {
+            "Size": [56, 14, 56], "ProbeCountX": 13, "ProbeCountY": 3, "ProbeCountZ": 13}}})
+        client.call("scene.save")
+
+        counts: list[int] = []
+        for _ in range(2):
+            baked = client.call("lighting.bake")
+            self.assertEqual(len(baked["irradianceVolumes"]), 1)
+            counts.append(client.call("stats.get", {"views": False})["memoryAllocationCount"])
+        self.assertGreater(counts[0], 0)
+        self.assertLessEqual(counts[1], counts[0])
+        self.assertEqual(self.warnings_containing(client, "native memory allocations"), [])
 
     def test_a_playing_editor_cannot_bake(self) -> None:
         # Decision 8: the probes are baked from the edit scene and stored in it, so a playing editor is refused with a

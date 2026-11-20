@@ -170,9 +170,12 @@ namespace Engine {
 		// AddComponent for components the prefab entity lacks, RemoveComponent for prefab components the member lacks, one
 		// EntityKey override per entity key (Name, Active, Tags) that differs, and one RemoveEntity per prefab entity without
 		// a member in the instance whose prefab parent has one (the top of each deleted subtree); implicit root overrides
-		// excluded; sorted by (Path, Component, Kind, Field). Errors: InvalidArgument when `instanceRoot` is not an
-		// outermost instance root or `prefab` is empty; InvalidState for a reference to an entity outside the instance whose ID is a
-		// prefab-local ID (see the class comment), located at the member.
+		// excluded; sorted by (Path, Component, Kind, Field). Each value is recorded as a file holds it
+		// (JsonWriter::ToWrittenForm: a float field's 0.8f as 0.8, not 0.800000011920929), so the record a scene file gives
+		// back after a save equals the one computed now and RefreshOverrides leaves it unchanged (World Tree's brief 21).
+		// Errors: InvalidArgument when `instanceRoot` is not an outermost instance root or `prefab` is empty; InvalidState for
+		// a reference to an entity outside the instance whose ID is a prefab-local ID (see the class comment), located at the
+		// member.
 		[[nodiscard]] static Result<std::vector<PrefabOverride>> ComputeOverrides(Entity instanceRoot, const Prefab& prefab,
 			const PrefabOptions& options);
 
