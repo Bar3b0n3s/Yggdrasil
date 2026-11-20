@@ -449,6 +449,17 @@ namespace Engine {
 	{
 		ENGINE_TRY(Utils::ValidateInput(input));
 		ENGINE_TRY(Utils::ValidateOptions(options));
+		Result<EnvironmentData> baked = BakeOnDevice(input, options);
+		// World Tree's brief 21: every submission of the bake completed (the bake and each readback waited for theirs), so what
+		// they alone still held, the transient objects BakeOnDevice dropped and its readbacks' staging textures, goes now
+		// rather than at the end of the frame that imports: an import of many environments in one frame (a lighting bake's
+		// reflection probes) holds one bake's device allocations. A failed bake collects what completed too.
+		m_State->Device->CollectCompletedSubmissions();
+		return baked;
+	}
+
+	Result<EnvironmentData> EnvironmentBaker::BakeOnDevice(const EnvironmentBakeInput& input, const EnvironmentBakeOptions& options)
+	{
 		State& state = *m_State;
 		GraphicsDevice& device = *state.Device;
 		const BakePlan plan = Utils::MakePlan(input, options);
@@ -456,7 +467,7 @@ namespace Engine {
 		// The transient GPU objects: the equirectangular source (written by the bake's own command list, not a host-copied
 		// image, so it needs no frame's garbage collection: a one-shot --bake-engine-assets run ends without one), both cubes,
 		// the SH9 partial sums and totals, and the totals' readback buffer. Dropped when this returns; NVRHI defers their
-		// destruction until the bake's command list retired (§8.14 item 2).
+		// destruction until the bake's command list retired (§8.14 item 2), which BakeWithOptions' collection does at once.
 		const std::vector<float> equirectTexels = Utils::MakeEquirectTexels(input);
 		nvrhi::TextureDesc equirectDesc;
 		equirectDesc.width = input.Width;

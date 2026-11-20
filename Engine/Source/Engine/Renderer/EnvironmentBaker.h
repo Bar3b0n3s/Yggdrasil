@@ -99,11 +99,17 @@ namespace Engine {
 
 		// The skybox cube, the prefiltered specular cube and the SH9 irradiance of `input` (steps 2 to 4), read back into an
 		// EnvironmentData. Blocks until the GPU work is done (Readback, WaitForSubmission bounded like every engine wait).
-		// The transient GPU objects are released before it returns. Errors: InvalidArgument for a malformed input (Width !=
+		// The transient GPU objects are released before it returns: it collects the garbage of its completed submissions
+		// (GraphicsDevice::CollectCompletedSubmissions; World Tree's brief 21), so an import of many environments in one frame
+		// holds one bake's device allocations. Errors: InvalidArgument for a malformed input (Width !=
 		// 2 * Height, a zero size, a texel count that does not match, a non-finite or negative value) or options outside their
 		// ranges; Gpu for a device failure, naming the resource, and for a device lost before or during the bake (M18).
 		[[nodiscard]] Result<EnvironmentData> BakeWithOptions(const EnvironmentBakeInput& input, const EnvironmentBakeOptions& options);
 	private:
+		// BakeWithOptions' GPU work on a validated input and options: records, submits and reads back, and drops its transient
+		// objects when it returns, still held by its completed submissions until a collection. Errors: as BakeWithOptions'
+		// after its validation.
+		[[nodiscard]] Result<EnvironmentData> BakeOnDevice(const EnvironmentBakeInput& input, const EnvironmentBakeOptions& options);
 		// The baker's hooks in the recreation protocol (see the file comment). Errors (Recreate): those of PipelineFactory and
 		// the GraphicsDevice wrappers.
 		void ReleaseGpuObjects();

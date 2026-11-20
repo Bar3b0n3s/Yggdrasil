@@ -879,9 +879,28 @@ namespace Engine {
 
 		// --- Change bookkeeping -----------------------------------------------------------------------------------------
 
+		// Race rule 4's exception (EditorAssetManager::IsPresentationOnly): `source` is a Material main asset.
+		[[nodiscard]] bool IsPresentationOnly(AssetHandle source) const
+		{
+			const AssetRecord* record = Registry.Find(source);
+			return record != nullptr && record->Metadata.Kind == AssetMetaKind::Asset && record->Metadata.Type == AssetType::Material;
+		}
+
+		// The hot reloader's deferral exemption (AssetHotReloader::SetDeferralExemption): a modification of the source of a
+		// registered presentation-only asset. A created or deleted file is held: it adds or removes an asset, which a
+		// deterministic session's scripts may resolve.
+		[[nodiscard]] bool IsPresentationOnlyChange(const FileChange& change) const
+		{
+			if (change.Kind != FileChangeKind::Modified)
+				return false;
+			const AssetRecord* record = Registry.FindBySourcePath(change.Path);
+			return record != nullptr && IsPresentationOnly(record->Metadata.Handle);
+		}
+
 		// The source `source` must be imported again: its source, a dependency file, its settings or a looked-up asset
 		// changed. Its remembered failure is dropped. When `schedule` and it was imported before, the reimport starts now
-		// (synchronously during a dry run, else on a job); while reloads are deferred it is held.
+		// (synchronously during a dry run, else on a job); while reloads are deferred it is held, unless it is
+		// presentation-only (race rule 4's exception), whose publication then holds its dependents' reimports in turn.
 		void InvalidateSource(AssetHandle source, bool schedule)
 		{
 			const auto import = Imports.find(source);
@@ -890,7 +909,7 @@ namespace Engine {
 			import->second.Failure.reset();
 			if (!schedule)
 				return;
-			if (Deferred)
+			if (Deferred && !IsPresentationOnly(source))
 			{
 				HeldReimports.insert(source);
 				return;
@@ -1797,7 +1816,8 @@ namespace Engine {
 
 		// The external changes `changes` (from a poll, or detected by Refresh): rescan, write the batch's metas, forget what
 		// went, find the imports whose inputs changed, notify the listener and reimport them (synchronously for Refresh, on
-		// jobs for a poll) or hold them while reloads are deferred.
+		// jobs for a poll) or hold them while reloads are deferred, but for the presentation-only ones (race rule 4's
+		// exception).
 		// Adds a synchronous import's failure (ASSET_IMPORT_FAILED) or warnings to a refresh report; a superseded import
 		// (Cancelled) adds nothing.
 		void AppendImportOutcome(AssetRefreshReport& report, AssetHandle source, const Result<AssetImportOutcome>& outcome) const
@@ -1948,11 +1968,30 @@ namespace Engine {
 
 			if (Deferred)
 			{
-				HeldReimports.insert(stale.begin(), stale.end());
+				// Race rule 4: held until the deferral ends, but for its exception (IsPresentationOnly): a presentation-only
+				// asset's reimport and its file's notice take the path below now, and the reimports of its dependents are held
+				// (by its publication, or after a synchronous import below).
+				std::set<AssetHandle> presentation;
+				for (const AssetHandle source : stale)
+				{
+					if (IsPresentationOnly(source))
+					{
+						presentation.insert(source);
+						continue;
+					}
+					HeldReimports.insert(source);
+					report.Deferred.push_back(source);
+				}
 				HeldReimports.insert(fresh.begin(), fresh.end());
-				HeldChanges.insert(HeldChanges.end(), external.begin(), external.end());
-				report.Deferred.assign(stale.begin(), stale.end());
-				return report;
+				fresh.clear();
+				std::erase_if(external, [this, &presentation](const AssetExternalChange& notice)
+				{
+					if (notice.Kind == FileChangeKind::Modified && presentation.contains(notice.Handle))
+						return false;
+					HeldChanges.push_back(notice);
+					return true;
+				});
+				stale = std::move(presentation);
 			}
 			for (const AssetExternalChange& notice : external)
 				NotifyChange(notice);
@@ -1972,8 +2011,10 @@ namespace Engine {
 				}
 			}
 
+			// While reloads are deferred, only the presentation-only assets themselves, not the dependents the reimport order
+			// adds: those are held, as a synchronous import (which schedules none) leaves them to InvalidateSource.
 			const std::vector<AssetHandle> staleList(stale.begin(), stale.end());
-			for (const AssetHandle source : Graph.GetReimportOrder(staleList))
+			for (const AssetHandle source : Deferred ? staleList : Graph.GetReimportOrder(staleList))
 			{
 				if (!Imports.contains(source) || !Registry.Find(source))
 					continue;
@@ -1982,6 +2023,11 @@ namespace Engine {
 				{
 					Result<AssetImportOutcome> outcome = ImportNow(source, true, true);
 					AppendImportOutcome(report, source, outcome);
+					if (Deferred)
+					{
+						for (const AssetHandle dependent : Graph.GetTransitiveDependents(source))
+							InvalidateSource(dependent, true);
+					}
 				}
 				else
 				{
@@ -2391,6 +2437,10 @@ namespace Engine {
 				{
 					state->OnPolledChanges(changes);
 				});
+				reloader->SetDeferralExemption([state](const FileChange& change)
+				{
+					return state->IsPresentationOnlyChange(change);
+				});
 				m_State->Writer.SetWatcher(&reloader->GetWatcher());
 				reloader->SetDeferred(m_State->Deferred);
 				m_State->OpenProject->HotReloader = std::move(reloader);
@@ -2669,6 +2719,11 @@ namespace Engine {
 	bool EditorAssetManager::AreReloadsDeferred() const
 	{
 		return m_State->Deferred;
+	}
+
+	bool EditorAssetManager::IsPresentationOnly(AssetHandle source) const
+	{
+		return m_State->IsPresentationOnly(source);
 	}
 
 	void EditorAssetManager::SetExternalChangeListener(ExternalChangeListener listener)

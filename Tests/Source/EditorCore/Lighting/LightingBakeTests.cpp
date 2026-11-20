@@ -48,8 +48,8 @@
 // lighting.bake's work (M26, C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 8, stream Q-A): BakeLighting's
 // refusals without a renderer, and, on the GPU, the acceptance "two probe bakes are byte-identical" (the first bake writes,
 // imports and assigns every probe's data in one undo step; the second writes the same bytes, changes no component and records
-// no step), the options and disabled probes, and the folders of scenes that share a name. The method's round trip is
-// Automation/LightingMethodsTests.cpp.
+// no step), the device allocations a bake leaves whatever its probe count (World Tree's brief 21), the options and disabled
+// probes, and the folders of scenes that share a name. The method's round trip is Automation/LightingMethodsTests.cpp.
 
 namespace Engine {
 
@@ -400,6 +400,57 @@ namespace Engine {
 				REQUIRE(editor.GetHistory().Undo(editor).has_value());
 				CHECK_FALSE(scene.FindEntityByID(RoomVolumeId).GetComponent<IrradianceVolumeComponent>().Data.IsValid());
 				CHECK_FALSE(scene.FindEntityByID(RoomMirrorId).GetComponent<ReflectionProbeComponent>().Data.IsValid());
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// World Tree's brief 21 (its look pass, where the bake of one 13 x 3 x 13 volume left 23,521 native allocations at its
+		// end): every capture of a bake releases what it used before the next (ProbeCapture), and so does every reflection
+		// probe's import (EnvironmentBaker), so a bake leaves the device's allocations at a fixed amount whatever its probe
+		// count, and a bake straight after another, with no frame and so no garbage collection between them, adds nothing to
+		// them: neither a second bake of the scene nor a third of six times the volume's probes and four times the reflection
+		// probes.
+		TEST_CASE("LightingBake: a second bake, even of many more probes, adds nothing to the device's allocations" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(gpu.GetDevice(), gpu.GetPipelines());
+			REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+			{
+				BakeEditor setup(**baker);
+				EditorContext& editor = setup.GetEditor();
+				const BakeCapture capture(gpu, editor);
+				GraphicsDevice& device = gpu.GetDevice();
+				const OpenSceneId room = editor.GetActiveSceneId();
+				const Result<LightingBakeResult> first = BakeLighting(editor, room, {});
+				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+				const uint32_t afterFirst = device.GetMemoryAllocationCount();
+
+				const Result<LightingBakeResult> second = BakeLighting(editor, room, {});
+				REQUIRE_MESSAGE(second.has_value(), second.error().ToString());
+				CHECK(device.GetMemoryAllocationCount() <= afterFirst);
+
+				// The volume's 2 x 2 x 2 probes become 4 x 3 x 4 (48 captures instead of 8), and three more reflection probes
+				// are captured and imported beside the first.
+				Scene& scene = editor.GetScene();
+				{
+					IrradianceVolumeComponent& grid = scene.FindEntityByID(RoomVolumeId).GetComponent<IrradianceVolumeComponent>();
+					grid.ProbeCountX = 4;
+					grid.ProbeCountY = 3;
+					grid.ProbeCountZ = 4;
+				}
+				for (const float x : { -1.5f, 0.5f, 1.5f })
+				{
+					const Entity mirror = scene.CreateEntity("Mirror");
+					mirror.GetComponent<TransformComponent>().Translation = glm::vec3(x, 0.5f, 0.0f);
+					mirror.AddComponent<ReflectionProbeComponent>().Resolution = 32;
+				}
+				const Result<LightingBakeResult> larger = BakeLighting(editor, room, {});
+				REQUIRE_MESSAGE(larger.has_value(), larger.error().ToString());
+				REQUIRE(larger->IrradianceVolumes.size() == 1);
+				CHECK(larger->IrradianceVolumes.front().Changed);
+				REQUIRE(larger->ReflectionProbes.size() == 4);
+				CHECK(device.GetMemoryAllocationCount() <= afterFirst);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

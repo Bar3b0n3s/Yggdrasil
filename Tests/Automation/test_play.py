@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import time
 import unittest
+from pathlib import Path
 
 from harness import AutomationTestCase, engine_client
+from test_environment import png_pixels
 
 SEED = 42
 # A play.step this long cannot fit one 50 ms frame (PlayStepFrameBudget) on any machine: it would need less than 250 ns
@@ -300,6 +302,66 @@ return Script.Define("StartupError", {
         self.start_lockstep(client)
         fresh = client.call("entity.create", {"name": "Spawned", "target": "play"})
         self.assertEqual(created["entity"]["id"], fresh["entity"]["id"])
+        client.call("play.stop")
+
+
+class PlayMaterialTests(AutomationTestCase):
+    """World Tree brief 21 (Docs/Architecture.md §7.5 race rule 4's exception): a material, which only the renderer
+    reads, reloads in a running lockstep session; a rendering editor, so each test needs a Vulkan device."""
+
+    def game_view_centre(self, client: engine_client.EngineClient) -> tuple[int, int, int]:
+        """The red, green and blue of the centre pixel of a 64 x 64 screenshot of the Game view."""
+        shot = client.call("viewport.screenshot", {"view": "game", "width": 64, "height": 64})
+        width, height, pixels = png_pixels(Path(shot["path"]))
+        self.assertEqual((width, height), (64, 64))
+        offset = (32 * width + 32) * 4
+        return pixels[offset], pixels[offset + 1], pixels[offset + 2]
+
+    def test_a_material_changed_while_a_lockstep_session_plays_shows_after_one_step(self) -> None:
+        # The brief's check: asset.setProperties of a material's BaseColor while the scene plays in lockstep, then one
+        # play.step: the Game view's screenshot shows the new colour, the session is not modified and its state hash is
+        # a run's without the change. A BaseColorMap shows the same way.
+        if not self.require_gpu():
+            return
+        client, _ = self.open_editor_with_scene(renderer="vulkan")
+        client.call("asset.create", {"type": "Material", "path": "Assets/Materials/Bark.material",
+                                     "values": {"BaseColor": [1, 1, 1, 1], "Roughness": 1}})
+        client.call("edit.batch", {"label": "Trunk", "ops": [
+            {"method": "entity.create", "params": {"name": "Camera", "components": {
+                "Transform": {"Translation": [0, 0, 3]},
+                "Camera": {"Primary": True, "Clear": "Color", "ClearColor": [0, 0, 0]}}}},
+            {"method": "entity.create", "params": {"name": "Sun", "components": {
+                "Transform": {"EulerAngles": [-20, 20, 0]}, "DirectionalLight": {"Intensity": 2}}}},
+            {"method": "entity.create", "params": {"name": "Trunk", "components": {
+                "MeshRenderer": {"Mesh": "engine://Meshes/Cube", "Materials": ["Assets/Materials/Bark.material"]}}}}]})
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 1})
+        red, green, blue = self.game_view_centre(client)
+        self.assertGreater(red, 60, "the lit white trunk")
+        self.assertLessEqual(max(red, green, blue) - min(red, green, blue), 8, "the lit white trunk is grey")
+
+        client.call("asset.setProperties", {"asset": "Assets/Materials/Bark.material",
+                                            "values": {"BaseColor": [0.6, 0.3, 0.05, 1]}})
+        stepped = client.call("play.step", {"ticks": 1})
+        brown = self.game_view_centre(client)
+        self.assertGreater(brown[0], brown[1], brown)
+        self.assertGreater(brown[1], brown[2], brown)
+        self.assertGreaterEqual(brown[0] - brown[2], 40, brown)
+        self.assertFalse(client.call("play.state")["modified"])
+
+        # Stone's case: a BaseColorMap, the built-in black texture, darkens the trunk at the next step.
+        client.call("asset.setProperties", {"asset": "Assets/Materials/Bark.material",
+                                            "values": {"BaseColor": [1, 1, 1, 1],
+                                                       "BaseColorMap": "engine://Textures/Black"}})
+        client.call("play.step", {"ticks": 1})
+        black = self.game_view_centre(client)
+        self.assertLess(sum(black), (red + green + blue) // 4, black)
+        client.call("play.stop")
+
+        # A session that never saw the change reaches the same state hash at the same tick.
+        client.call("play.start", {"lockstep": True})
+        replayed = client.call("play.step", {"ticks": 2})
+        self.assertEqual(replayed["stateHash"], stepped["stateHash"])
         client.call("play.stop")
 
 

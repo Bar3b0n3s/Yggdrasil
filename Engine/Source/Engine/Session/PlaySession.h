@@ -742,7 +742,8 @@ namespace Engine {
 		[[nodiscard]] bool IsStepping() const;
 		void SetStepping(bool stepping);
 		// §7.5 race rule 4: an asset or script reload during ordinary play marks the session modified (play.state "modified"),
-		// which invalidates a recording in progress (M13). Never cleared.
+		// which invalidates a recording in progress (M13); the editor's host does not mark it for a material's reload, which
+		// changes only what is drawn (EditorPlayController::OnAssetReload). Never cleared.
 		[[nodiscard]] bool IsModified() const;
 		void MarkModified();
 

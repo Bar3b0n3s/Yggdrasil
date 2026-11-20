@@ -192,7 +192,9 @@ namespace Engine {
 				"every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. "
 				"What a graphics driver keeps in allocations of its own is not in it, nor, in an AddressSanitizer build, what the C "
 				"runtime or HeapAlloc allocates, which the sanitizer's allocator serves. The hardening soak's memory rule measures it.")
-			.Field("memoryAllocationCount", &StatsGetResult::MemoryAllocationCount, "Current Vulkan device memory allocation count.")
+			.Field("memoryAllocationCount", &StatsGetResult::MemoryAllocationCount,
+				"Current Vulkan device memory allocation count, which counts what the frame released until the frame's garbage collection "
+				"frees it at the frame's end.")
 			.Field("maxMemoryAllocationCount", &StatsGetResult::MaxMemoryAllocationCount, "Vulkan device allocation limit, zero without a device.")
 			.Field("views", &StatsGetResult::Views,
 				"The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a "

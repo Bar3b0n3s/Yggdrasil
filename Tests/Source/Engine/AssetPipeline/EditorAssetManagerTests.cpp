@@ -1746,6 +1746,112 @@ namespace Engine {
 			CHECK(errors.front().Asset == box);
 			CHECK(errors.front().Code == AssetImportFailedCode);
 		}
+
+		TEST_CASE("EditorAssetManager: only a material of its own source is presentation-only")
+		{
+			// World Tree brief 21 (§7.5 race rule 4's exception): a .material's main asset; a glTF's material is a sub-asset of
+			// its prefab, published with its meshes, and every other type may reach the simulation.
+			Test::AssetTestFixture fixture;
+			EditorAssetManager& manager = fixture.GetManager();
+			fixture.WriteProjectText("Assets/Red.material", R"({"Format": "Material", "Version": 2, "Roughness": 0.5})");
+			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 1));
+			CopyGltfFixtures(fixture, { "Box.glb" });
+			fixture.OpenProject(false);
+			const AssetHandle red = manager.Resolve("Assets/Red.material").value_or(AssetHandle());
+			const AssetHandle wood = manager.Resolve("Assets/Wood.png").value_or(AssetHandle());
+			const AssetHandle box = manager.Resolve("Assets/Models/Box.glb").value_or(AssetHandle());
+			REQUIRE(manager.Load(box).has_value());
+			const AssetRecord* record = manager.GetRegistry().Find(box);
+			REQUIRE(record != nullptr);
+			const auto material = std::ranges::find(record->Metadata.SubAssets, AssetType::Material, &SubAssetEntry::Type);
+			REQUIRE(material != record->Metadata.SubAssets.end());
+
+			CHECK(manager.IsPresentationOnly(red));
+			CHECK_FALSE(manager.IsPresentationOnly(wood));
+			CHECK_FALSE(manager.IsPresentationOnly(box));
+			CHECK_FALSE(manager.IsPresentationOnly(material->Handle));
+			CHECK_FALSE(manager.IsPresentationOnly(BuiltinAssetHandles::DefaultMaterial));
+			CHECK_FALSE(manager.IsPresentationOnly(AssetHandle()));
+		}
+
+		TEST_CASE("EditorAssetManager: a material's change publishes while reloads are deferred, and every other change waits")
+		{
+			// World Tree brief 21 (§7.5 race rule 4's exception): the editor's write of a material and a change Refresh finds
+			// publish a new version at once while a deterministic session defers reloads, while a changed leaf is reimported
+			// only when the deferral ends. The pack that references the material (its dependent) publishes nothing new: its
+			// cooked output names the material by handle.
+			ImportCounts counts;
+			Test::AssetTestFixture fixture;
+			RegisterTestImporters(fixture, counts);
+			EditorAssetManager& manager = fixture.GetManager();
+			const auto materialText = [](double roughness)
+			{
+				return std::format(R"({{"Format": "Material", "Version": 2, "Roughness": {}}})", roughness);
+			};
+			const auto roughness = [&manager](AssetHandle handle)
+			{
+				const AssetRef<MaterialData> material = AssetCast<MaterialData>(manager.Load(handle).value_or(nullptr));
+				return material != nullptr ? material->Roughness : -1.0f;
+			};
+			fixture.WriteProjectText("Assets/Red.material", materialText(0.25));
+			fixture.WriteProjectText("Assets/A.leaf", MakeLeafText(1));
+			fixture.OpenProject(false);
+			// The pack arrives after the material has its own .meta, so it references the material instead of claiming its
+			// file as a dependency.
+			fixture.WriteProjectText("Assets/Kit.pack", R"({"Files": ["Red.material"]})");
+			REQUIRE(manager.Refresh().has_value());
+			const AssetHandle red = manager.Resolve("Assets/Red.material").value_or(AssetHandle());
+			const AssetHandle kit = manager.Resolve("Assets/Kit.pack").value_or(AssetHandle());
+			const AssetHandle leaf = manager.Resolve("Assets/A.leaf").value_or(AssetHandle());
+			REQUIRE(manager.Load(red).has_value());
+			REQUIRE(manager.Load(kit).has_value());
+			REQUIRE(manager.Load(leaf).has_value());
+			REQUIRE(manager.GetDependencyGraph().GetDependents(red) == std::vector<AssetHandle>{ kit });
+			std::vector<AssetHandle> reloaded;
+			manager.SetReloadListener([&reloaded](AssetHandle source)
+			{
+				reloaded.push_back(source);
+			});
+			std::vector<VfsPath> heard;
+			manager.SetExternalChangeListener([&heard](const AssetExternalChange& change)
+			{
+				heard.push_back(change.Path);
+			});
+
+			manager.SetReloadsDeferred(true);
+			// The editor's writes (asset.setProperties' path): the material publishes, the leaf waits.
+			REQUIRE(manager.GetWriter().Write(fixture.ProjectPath("Assets/Red.material"), AsBytes(materialText(0.5))).has_value());
+			REQUIRE(manager.GetWriter().Write(fixture.ProjectPath("Assets/A.leaf"), AsBytes(MakeLeafText(2))).has_value());
+			manager.WaitIdle();
+			CHECK(manager.GetVersion(red) == 2);
+			CHECK(roughness(red) == doctest::Approx(0.5));
+			CHECK(manager.GetVersion(leaf) == 1);
+			CHECK(manager.GetVersion(kit) == 1);
+			CHECK(reloaded == std::vector<AssetHandle>{ red });
+
+			// External changes that Refresh finds: the material is reimported and announced now, the leaf held.
+			fixture.WriteProjectText("Assets/Red.material", materialText(0.75));
+			fixture.WriteProjectText("Assets/A.leaf", MakeLeafText(3));
+			const Result<AssetRefreshReport> refreshed = manager.Refresh();
+			REQUIRE(refreshed.has_value());
+			CHECK(refreshed->Changed == std::vector<AssetHandle>{ red });
+			CHECK(refreshed->Deferred == std::vector<AssetHandle>{ leaf });
+			CHECK(manager.GetVersion(red) == 3);
+			CHECK(roughness(red) == doctest::Approx(0.75));
+			CHECK(manager.GetVersion(leaf) == 1);
+			CHECK(manager.GetVersion(kit) == 1);
+			CHECK(heard == std::vector<VfsPath>{ fixture.ProjectPath("Assets/Red.material") });
+			CHECK(reloaded == std::vector<AssetHandle>{ red, red });
+
+			// The deferral ends: the leaf is reimported and its change announced.
+			manager.SetReloadsDeferred(false);
+			manager.WaitIdle();
+			CHECK(manager.GetVersion(leaf) == 2);
+			CHECK(ReadLeafValue(manager.Load(leaf).value_or(nullptr)) == 3);
+			CHECK(manager.GetVersion(kit) == 1);
+			CHECK(manager.GetVersion(red) == 3);
+			CHECK(heard == std::vector<VfsPath>{ fixture.ProjectPath("Assets/Red.material"), fixture.ProjectPath("Assets/A.leaf") });
+		}
 	}
 
 }

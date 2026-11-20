@@ -103,6 +103,14 @@ namespace Engine {
 
 		// Writes `value` as one document (WriteJson with `numbers`).
 		[[nodiscard]] static Result<std::string> Write(const Json& value, JsonStyle style = JsonStyle::Pretty, JsonNumbers numbers = JsonNumbers::Float);
+
+		// `value` as an authored file holds it: what JsonReader::Parse reads back from Write(value) (JsonNumbers::Float). Every
+		// fractional number becomes the number its float's shortest text reads as (the double of 0.8f becomes 0.8, 1.0 the
+		// integer 1, -0.0 the integer 0); everything else is unchanged. JSON computed from typed fields (whose floats widen to
+		// doubles such as 0.800000011920929) and then kept verbatim beside JSON read from files, as a prefab override's Value
+		// is, takes this form so the two compare equal when a file would hold the same data. Errors: those of Write (a
+		// non-finite or out-of-range number, invalid UTF-8).
+		[[nodiscard]] static Result<Json> ToWrittenForm(const Json& value);
 	private:
 		struct State; // the document under construction and the open containers (JsonWriter.cpp)
 	private:

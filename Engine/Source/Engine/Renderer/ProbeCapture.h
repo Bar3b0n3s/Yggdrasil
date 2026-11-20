@@ -105,9 +105,12 @@ namespace Engine {
 			AssetManager& assets);
 
 		// The cube of `snapshot`'s radiance around `position` (world space), `faceSize` texels a face (a power of two in
-		// [16, 512]). Blocks until the readback is done (bounded like every engine wait). Errors: InvalidArgument for a face
-		// size out of range or a non-finite position; those of SceneRenderer::Render and of the readback (Gpu; on a lost device
-		// the loss).
+		// [16, 512]). Blocks until the readback is done (bounded like every engine wait). Before it returns, it collects the
+		// garbage of its completed submissions (GraphicsDevice::CollectCompletedSubmissions; World Tree's brief 21), so what its
+		// faces used and dropped (each face's read-back staging) is released with it rather than at the frame's garbage
+		// collection, and any number of captures in one frame hold one capture's device allocations. Errors: InvalidArgument
+		// for a face size out of range or a non-finite position; those of SceneRenderer::Render and of the readback (Gpu; on a
+		// lost device the loss).
 		[[nodiscard]] Result<ProbeCubeCapture> Capture(const RenderSnapshot& snapshot, const glm::vec3& position, uint32_t faceSize);
 	private:
 		// The renderer, the back-references and the staging textures (ProbeCapture.cpp).

@@ -2,6 +2,7 @@
 
 #include "Engine/AssetPipeline/AssetHotReloader.h"
 
+#include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/TextureData.h"
 #include "Engine/AssetPipeline/AssetWriter.h"
 #include "Engine/AssetPipeline/EditorAssetManager.h"
@@ -277,6 +278,54 @@ namespace Engine {
 			CHECK(reloader.GetDeferredChanges().empty());
 		}
 
+		TEST_CASE("AssetHotReloader: a deferral delivers the changes its exemption accepts and holds the rest")
+		{
+			// World Tree brief 21 (race rule 4's exception): an accepted change is delivered with its poll; a change of a path
+			// that is held already joins it, so that path's changes stay in order.
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Red.material", "r");
+			fixture.WriteProjectText("Assets/Wood.txt", "w");
+			AssetHotReloader reloader(fixture.GetVfs(), fixture.GetJobSystem(), { .Root = fixture.ProjectPath("Assets") });
+			std::vector<std::vector<FileChange>> delivered;
+			reloader.SetChangeListener([&delivered](std::span<const FileChange> changes)
+			{
+				delivered.emplace_back(changes.begin(), changes.end());
+			});
+			reloader.SetDeferralExemption([](const FileChange& change)
+			{
+				return change.Kind == FileChangeKind::Modified && change.Path.GetExtension() == ".material";
+			});
+			REQUIRE(reloader.Start().has_value());
+			RunReloaderFrame(fixture, reloader, 0.0);
+
+			reloader.SetDeferred(true);
+			fixture.WriteProjectText("Assets/Red.material", "r2");
+			fixture.WriteProjectText("Assets/Wood.txt", "w2");
+			fixture.WriteProjectText("Assets/Blue.material", "b"); // created: not accepted
+			RunReloaderFrame(fixture, reloader, 0.5);
+			RunReloaderFrame(fixture, reloader, 1.0);
+			const std::vector<FileChange> red = {
+				{ .Path = fixture.ProjectPath("Assets/Red.material"), .Kind = FileChangeKind::Modified },
+			};
+			REQUIRE(delivered.size() == 1);
+			CHECK(delivered.front() == red);
+
+			// Blue's modification joins its held creation instead of passing it.
+			fixture.WriteProjectText("Assets/Blue.material", "b2");
+			RunReloaderFrame(fixture, reloader, 1.5);
+			RunReloaderFrame(fixture, reloader, 2.0);
+			CHECK(delivered.size() == 1);
+			const std::vector<FileChange> held = {
+				{ .Path = fixture.ProjectPath("Assets/Blue.material"), .Kind = FileChangeKind::Created },
+				{ .Path = fixture.ProjectPath("Assets/Wood.txt"), .Kind = FileChangeKind::Modified },
+			};
+			CHECK(reloader.GetDeferredChanges() == held);
+
+			reloader.SetDeferred(false);
+			REQUIRE(delivered.size() == 2);
+			CHECK(delivered.back() == held);
+		}
+
 		TEST_CASE("AssetHotReloader: a poll result that arrives after Stop or destruction is dropped")
 		{
 			Test::AssetTestFixture fixture;
@@ -448,6 +497,43 @@ namespace Engine {
 			fixture.GetManager().SetReloadsDeferred(false);
 			fixture.GetManager().WaitIdle();
 			CHECK(fixture.GetManager().GetVersion(handle) == 2);
+		}
+
+		TEST_CASE("HotReload: a material's change a poll finds is published while a deterministic session runs")
+		{
+			// World Tree brief 21 (§7.5 race rule 4's exception): only the renderer reads a material, so its modified source
+			// is delivered past the deferral, reimported and published; the texture changed with it stays held.
+			Test::AssetTestFixture fixture;
+			fixture.WriteProjectText("Assets/Red.material", R"({"Format": "Material", "Version": 2, "Roughness": 0.25})");
+			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 1));
+			fixture.OpenProject(true);
+			EditorAssetManager& manager = fixture.GetManager();
+			const AssetHandle red = manager.Resolve("Assets/Red.material").value_or(AssetHandle());
+			const AssetHandle wood = manager.Resolve("Assets/Wood.png").value_or(AssetHandle());
+			REQUIRE(manager.Load(red).has_value());
+			REQUIRE(manager.Load(wood).has_value());
+			RunFrame(fixture, 0.0);
+
+			manager.SetReloadsDeferred(true);
+			fixture.WriteProjectText("Assets/Red.material", R"({"Format": "Material", "Version": 2, "Roughness": 0.75})");
+			fixture.WriteProjectFile("Assets/Wood.png", Test::MakeTestPng(4, 4, 2));
+			for (double seconds = 0.5; seconds <= 2.0; seconds += 0.5)
+				RunFrame(fixture, seconds);
+			manager.WaitIdle();
+			CHECK(manager.GetVersion(red) == 2);
+			const AssetRef<MaterialData> material = AssetCast<MaterialData>(manager.Load(red).value_or(nullptr));
+			REQUIRE(material != nullptr);
+			CHECK(material->Roughness == doctest::Approx(0.75));
+			CHECK(CountEvents(fixture.GetEventLog(), EngineEventType::AssetReloaded) == 1);
+			CHECK(manager.GetVersion(wood) == 1);
+			REQUIRE(manager.GetHotReloader() != nullptr);
+			const std::vector<FileChange> held = { { .Path = fixture.ProjectPath("Assets/Wood.png"), .Kind = FileChangeKind::Modified } };
+			CHECK(manager.GetHotReloader()->GetDeferredChanges() == held);
+
+			manager.SetReloadsDeferred(false);
+			manager.WaitIdle();
+			CHECK(manager.GetVersion(wood) == 2);
+			CHECK(manager.GetVersion(red) == 2);
 		}
 
 		TEST_CASE("HotReload: a failed reimport keeps the last good version and records a diagnostic")

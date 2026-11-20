@@ -33,6 +33,10 @@
 //     changes no component records no undo step (an EditorTransaction without a command records nothing), so an undo after
 //     it takes back the edit before it, such as the previous bake's assignment.
 //   - Captures render without the probes (RenderQualitySettings::Probes false): one bounce.
+//   - World Tree's brief 21: every capture collects the garbage of its submissions before it returns (ProbeCapture), and so
+//     does a reflection probe's import, which bakes its environment on the GPU (EnvironmentBaker), both through
+//     GraphicsDevice::CollectCompletedSubmissions, so a bake holds one capture's and one import's device allocations whatever
+//     its probe count, and a bake straight after another adds none.
 // Main thread (GPU work and the scene). Frozen by the M26 contract C26.1; stream Q-A implements it.
 
 namespace Engine {

@@ -50,8 +50,10 @@ namespace Engine {
 		// PlaySession::ComputeSessionSeed(Simulation.Seed, the scene's Seed)); then the run state: paused when options.Paused
 		// or initialization requested a pause (script error, Debug.Break or fatal stop),
 		// options.TimeScale, and lockstep owned by options.LockstepOwner when options.Lockstep. While a session is in lockstep
-		// the editor defers asset and script reloads until it ends (§7.5 race rule 4, EditorAssetManager); a reload during
-		// ordinary play marks the session modified. Appends PlayStateChanged ("Play" or "Simulate", or "Paused"). Errors:
+		// the editor defers asset and script reloads until it ends (§7.5 race rule 4, EditorAssetManager), but for a
+		// material's (presentation only, EditorAssetManager::IsPresentationOnly), which shows in the next rendered frame; a
+		// reload during ordinary play marks the session modified, a material's excepted (OnAssetReload). Appends
+		// PlayStateChanged ("Play" or "Simulate", or "Paused"). Errors:
 		// InvalidState while a session runs, without a project, without an open scene (for an empty ScenePath), or when the
 		// scene it plays references an asset in error (ValidatePlayRequest's asset gate, which names the asset; World Tree
 		// brief 14: the rest of the project stays playable); InvalidArgument for a time scale outside
@@ -130,7 +132,9 @@ namespace Engine {
 		// After UI dispatch, automation handlers and pending-operation polls have returned. Applies queued ordinary-play
 		// script reloads and consumes Quit through Stop; deterministic drivers keep ownership of their sessions.
 		void OnSafePoint();
-		// Asset publication only queues work: never enters a VM or drains further imports from a publication callback.
+		// Asset publication only queues work: never enters a VM or drains further imports from a publication callback. Marks
+		// the session modified (§7.5 race rule 4), unless `source` is presentation-only (a material, EditorAssetManager::
+		// IsPresentationOnly), whose reload changes only what the session draws.
 		void OnAssetReload(AssetHandle source);
 		// M14 (Docs/Decisions/0022-m14-contract.md decision 15): the type gate of a play-mode reload of `script`, shared by
 		// OnSafePoint's hot reload and Test.ReloadScript (§11.8 "the same path"; EditorFeatureTestHost::ReloadScript calls it
