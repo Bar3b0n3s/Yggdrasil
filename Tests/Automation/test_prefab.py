@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 import unittest
 from typing import Any
 
-from harness import AutomationTestCase, engine_client, read_json
+from harness import REPOSITORY_ROOT, AutomationTestCase, engine_client, read_json
 
 BRICK_SCRIPT = """--!strict
 local Brick = {}
@@ -18,6 +19,7 @@ Brick.Fields = {
 return Script.Define("Brick", Brick)
 """
 BRICK_PREFAB = "Assets/Prefabs/Brick.prefab"
+GLTF_FIXTURES = REPOSITORY_ROOT / "Tests" / "Data" / "Assets" / "Gltf"
 GAME_FLOW_SCRIPT = """--!strict
 local GameFlow = {}
 
@@ -456,6 +458,36 @@ class PrefabTests(AutomationTestCase):
         reloaded = client.call("scene.open", {"path": "Assets/Scenes/Level2.scene", "reload": True})
         self.assertEqual(reloaded["rebuiltInstances"], [])
         self.assertFalse(reloaded["scene"]["dirty"])
+
+    def test_scene_open_keeps_an_unchanged_model_instance_with_fractional_overrides_clean(self) -> None:
+        # World Tree's brief 21: a scene holding an instance of a skinned, animated model whose Animator layer it plays
+        # at Speed 0.8 listed that instance in rebuiltInstances and opened dirty on every open, though a save straight
+        # after wrote the file it had opened: the load kept the override's 0.8 as the file holds it, while the rebuild
+        # recorded the float field's value as 0.800000011920929. With its prefab unchanged, the scene now opens clean.
+        client, root = self.open_editor_with_scene()
+        models = root / "Assets" / "Models"
+        models.mkdir(parents=True, exist_ok=True)
+        shutil.copy(GLTF_FIXTURES / "Skinned.gltf", models / "Skinned.gltf")
+        client.call("project.refreshAssets")
+        client.call("entity.create", {"name": "Set"})
+        client.call("prefab.instantiate", {"prefab": "Assets/Models/Skinned.gltf", "parent": "/Set", "name": "Warden"})
+        armature = "/Set/Warden/Armature"
+        layers = client.call("entity.get", {"entity": armature})["entity"]["components"]["Animator"]["Layers"]
+        layers[0].update({"Speed": 0.8, "Time": 0.3, "Weight": 0.7})
+        client.call("entity.update", {"entity": armature, "components": {"Animator": {"Layers": layers}}})
+        client.call("scene.save")
+        scene_file = root / "Assets" / "Scenes" / "Main.scene"
+        saved = scene_file.read_bytes()
+        self.assertEqual(client.call("scene.diff", {"against": "saved"})["entities"], [])
+
+        for _ in range(2):
+            opened = client.call("scene.open", {"path": "Assets/Scenes/Main.scene", "reload": True})
+            self.assertEqual(opened["rebuiltInstances"], [])
+            self.assertFalse(opened["scene"]["dirty"])
+            client.call("scene.save")
+            self.assertEqual(scene_file.read_bytes(), saved)
+        kept = client.call("entity.get", {"entity": armature})["entity"]["components"]["Animator"]["Layers"][0]
+        self.assertAlmostEqual(kept["Speed"], 0.8, places=6)
 
     def test_prefab_errors_and_dry_run(self) -> None:
         client, root = self.open_editor_with_scene()

@@ -499,4 +499,12 @@ namespace Engine {
 		return writer.Finish();
 	}
 
+	Result<Json> JsonWriter::ToWrittenForm(const Json& value)
+	{
+		ENGINE_TRY_ASSIGN(const std::string text, Write(value, JsonStyle::Minified));
+		Result<Json> read = JsonReader::Parse(text);
+		ENGINE_CORE_ASSERT(read.has_value(), "JsonReader::Parse reads every document JsonWriter writes: {}", read ? std::string() : read.error().ToString());
+		return read;
+	}
+
 }

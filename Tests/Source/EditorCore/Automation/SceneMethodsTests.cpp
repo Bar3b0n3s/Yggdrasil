@@ -7,6 +7,8 @@
 #include "EditorCore/EditorContext.h"
 #include "Engine/Core/FileSystem.h"
 #include "Engine/Core/Json/JsonReader.h"
+#include "Engine/Scene/Components/AnimatorComponent.h"
+#include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Scene.h"
 #include "Support/AutomationTestClient.h"
@@ -17,6 +19,7 @@
 #include <map>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Engine {
 
@@ -298,6 +301,67 @@ namespace Engine {
 			const Json first = open(Json{ { "path", "Assets/Scenes/Main.scene" } });
 			CHECK(first["rebuiltInstances"] == Json::array());
 			CHECK(first["scene"]["dirty"] == Json(false));
+		}
+
+		// World Tree's brief 21: a scene holding an instance of a skinned, animated model (its Animator's layer and its skinned
+		// mesh's morph weight overridden with fractional values) reported that instance in rebuiltInstances and opened dirty on
+		// every open, though a save straight after wrote the file it had opened. The load kept each override's value as the
+		// file holds it (0.8) while the rebuild's refresh recorded it as the double of the float field (0.800000011920929), so
+		// the record never matched; scene.diff against the file it had just saved reported the same phantom change. The
+		// record now holds its values as a file holds them.
+		TEST_CASE("SceneMethods: scene.open opens an instance whose prefab is unchanged clean, a skinned model's with fractional overrides included")
+		{
+			Test::AutomationFixture setup("SceneOpenFractionalOverrides");
+			const auto call = [&setup](std::string_view method, const Json& params)
+			{
+				Result<Json> result = setup.Call(method, params);
+				REQUIRE_MESSAGE(result.has_value(), (std::string(method) + ": " + (result ? std::string() : result.error().ToString())));
+				return std::move(*result);
+			};
+			// The skinned glTF fixture (Tests/Data/Assets/Gltf/Skinned.gltf: "Armature" holds the Animator, which plays the clip
+			// "Wave", and "Body" below it the SkinnedMesh with one morph target), placed as /Set/Warden.
+			const std::filesystem::path root = setup.GetEditorFixture().GetProjectRoot();
+			const Result<Buffer> bytes = FileSystem::ReadFile(Test::GetTestDataPath("Assets/Gltf/Skinned.gltf"));
+			REQUIRE(bytes.has_value());
+			REQUIRE(FileSystem::CreateDirectories(root / "Assets/Models").has_value());
+			REQUIRE(FileSystem::WriteFileAtomic(root / "Assets/Models/Skinned.gltf", *bytes).has_value());
+			call("project.refreshAssets", Json::object());
+			call("entity.create", Json{ { "name", "Set" } });
+			call("prefab.instantiate", Json{ { "prefab", "Assets/Models/Skinned.gltf" }, { "parent", "/Set" }, { "name", "Warden" }, { "transform", Json{ { "Translation", Json::array({ 0.1, -2.7, 4.3 }) } } } });
+			const Json armature = call("entity.get", Json{ { "entity", "/Set/Warden/Armature" } });
+			Json layers = armature["entity"]["components"]["Animator"]["Layers"];
+			REQUIRE(layers.size() == 1);
+			layers[0]["Speed"] = 0.8;
+			layers[0]["Time"] = 0.3;
+			layers[0]["Weight"] = 0.7;
+			call("entity.update", Json{ { "entity", "/Set/Warden/Armature" }, { "components", Json{ { "Animator", Json{ { "Layers", layers } } } } } });
+			call("entity.update", Json{ { "entity", "/Set/Warden/Armature/Body" }, { "components", Json{ { "SkinnedMesh", Json{ { "MorphWeights", Json::array({ 0.35 }) } } } } } });
+			call("scene.save", Json::object());
+			const Result<std::string> saved = FileSystem::ReadText(root / "Assets/Scenes/Main.scene");
+			REQUIRE(saved.has_value());
+			REQUIRE(saved->contains("\"Speed\": 0.8"));
+
+			// The scene as saved is the scene in the editor.
+			CHECK(call("scene.diff", Json{ { "against", "saved" } })["entities"] == Json::array());
+
+			// Its prefab unchanged, the instance opens without a rebuild and the scene opens clean, its overrides kept.
+			const Json opened = call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "reload", true } });
+			CHECK(opened["rebuiltInstances"] == Json::array());
+			CHECK(opened["scene"]["dirty"] == Json(false));
+			const Entity warden = setup.GetEditor().GetScene().FindEntityByPath("/Set/Warden/Armature");
+			REQUIRE(warden.IsValid());
+			REQUIRE(warden.GetComponent<AnimatorComponent>().Layers.size() == 1);
+			CHECK(warden.GetComponent<AnimatorComponent>().Layers[0].Speed == 0.8f);
+			const Entity body = setup.GetEditor().GetScene().FindEntityByPath("/Set/Warden/Armature/Body");
+			REQUIRE(body.IsValid());
+			CHECK(body.GetComponent<SkinnedMeshComponent>().MorphWeights == std::vector<float>{ 0.35f });
+
+			// And again: a save writes the file it opened, and the next open finds nothing to rebuild either.
+			call("scene.save", Json::object());
+			CHECK(FileSystem::ReadText(root / "Assets/Scenes/Main.scene") == *saved);
+			const Json reopened = call("scene.open", Json{ { "path", "Assets/Scenes/Main.scene" }, { "reload", true } });
+			CHECK(reopened["rebuiltInstances"] == Json::array());
+			CHECK(reopened["scene"]["dirty"] == Json(false));
 		}
 
 		// Decision 14: scene.activate switches the active scene by path or id, and scene.close closes the addressed scene with
