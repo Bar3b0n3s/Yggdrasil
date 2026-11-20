@@ -62,6 +62,7 @@
 #include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
+#include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/ProbeValidation.h"
@@ -212,6 +213,10 @@ namespace Engine {
 			// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9), appended in landing order after main's (ADR
 			// 0052's phase-6 ledger: after M36's PHYSICS_SURFACE_UNUSED), an array of its own (PhysicsJointDiagnosticCodes).
 			PhysicsJointInvalidCode,
+			// M42 (Scene/PlanarReflectionValidation.h, Docs/Decisions/0059-m42-planar-reflections.md decision 3), appended in
+			// landing order (its ledger: after M41's ANIMATION_ATTACHMENT_INVALID), an array of its own
+			// (PlanarReflectionDiagnosticCodes).
+			RenderReflectionInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -473,6 +478,11 @@ namespace Engine {
 				"Correct the field or the hierarchy the finding names: put the joint on a RigidBody's entity or a child of it, name another "
 				"body (or null for the world) in ConnectedBody, give Axis a direction, separate the limits (a FixedJoint for a joint that does "
 				"not move), or set MinDistance at or below MaxDistance." },
+			ValidationCodeInfo{ RenderReflectionInvalidCode, "Warning", false,
+				"A PlanarReflection reflects nothing or not on its glass: its entity has no MeshRenderer with a Mesh, its Normal is zero, or "
+				"its mesh's bounds reach farther than 5 cm from its plane (usually a Normal along the wrong axis).",
+				"Put the PlanarReflection on the entity whose MeshRenderer draws the glass, and set its Normal to the glass's facing axis and "
+				"Offset to its surface (the finding names the axis along which the mesh is thinnest; the built-in Quad faces +Z, the Plane +Y)." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1324,6 +1334,24 @@ namespace Engine {
 			}
 		}
 
+		// The planar reflection checks of §13.7 (M42, Scene/PlanarReflectionValidation.h): RENDER_REFLECTION_INVALID on each
+		// PlanarReflection it names, its mesh loaded through the editor's asset manager. Not fixable.
+		static void CheckPlanarReflections(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			AssetManager* assets = editor.GetEngine().GetAssetManager();
+			if (assets == nullptr)
+				return;
+			for (PlanarReflectionSceneIssue& issue : FindPlanarReflectionIssues(*checked.Target, *assets))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static Status CheckRenderScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const auto render = EvaluateRenderSceneValidation(*checked.Target, *editor.GetEngine().GetAssetManager());
@@ -1621,6 +1649,7 @@ namespace Engine {
 			CheckUi(editor, checked, diagnostics);
 			CheckTerrain(editor, checked, diagnostics);
 			CheckNavigation(editor, checked, diagnostics);
+			CheckPlanarReflections(editor, checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

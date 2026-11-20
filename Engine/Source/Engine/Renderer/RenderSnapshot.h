@@ -46,7 +46,9 @@
 // PreviousWorld filled from the view's history (decision 11); and PostProcess version 2's settings, where the AntiAliasing
 // enum replaces FxaaEnabled (decision 12). M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 4 and 12; ADR 0042's phase-5
 // ledger) added the fog (RenderFog, Fog) after the terrains and the half-resolution SSR trace to the quality settings after
-// SsaoHalfResolution. Additions are frozen-header changes reviewed by their contract owner; no member here changes meaning.
+// SsaoHalfResolution. M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) added the planar
+// reflections (PlanarReflectionItem, PlanarReflections) after the fog. Additions are frozen-header changes reviewed by their
+// contract owner; no member here changes meaning.
 // A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
@@ -56,8 +58,8 @@
 // allocates from std::pmr::get_default_resource(), the global heap unless a host changed it. Assignment keeps the target's
 // resource. SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh
 // item's Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list, a terrain item's Layers)
-// keep the default allocator; M26's ParticleEmitters, Particles, IrradianceVolumes, ReflectionProbes and Terrains are the
-// snapshot's own containers and follow the rule.
+// keep the default allocator; M26's ParticleEmitters, Particles, IrradianceVolumes, ReflectionProbes and Terrains and M42's
+// PlanarReflections are the snapshot's own containers and follow the rule.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
@@ -768,6 +770,31 @@ namespace Engine {
 		bool FogSkybox = true;
 	};
 
+	// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the bounds of PlanarReflectionItem::ResolutionScale, the
+	// PlanarReflection component's field (Scene/Components/PlanarReflectionComponent.h), and its default.
+	inline constexpr float MinPlanarReflectionResolutionScale = 0.25f;
+	inline constexpr float MaxPlanarReflectionResolutionScale = 1.0f;
+	inline constexpr float DefaultPlanarReflectionResolutionScale = 0.5f;
+
+	// One PlanarReflection to render (M42, decision 3), from render extraction: every effectively enabled entity that holds a
+	// PlanarReflection and a MeshRenderer that is Visible with a mesh, in canonical entity order, in every view (an edit
+	// scene's included). World is the rendered world matrix its mesh item draws at; the plane passes through the local point
+	// Normal * Offset with the local normal Normal (the component's, normalized by the renderer; a zero or non-finite one
+	// renders no reflection), facing its reflecting side, and the renderer takes it into the world through World
+	// (Renderer/PlanarReflections.h: ComputePlanarReflectionPlane), so a non-uniform scale is handled and a moving glass is
+	// followed. ResolutionScale, in [MinPlanarReflectionResolutionScale,
+	// MaxPlanarReflectionResolutionScale], sizes the reflection's target from the view's scene resolution. The renderer
+	// reflects in the plane the draws of every mesh item but the reflection's own Entity, whose draws sample the reflection
+	// (§8.3, "Planar reflections"); lighting.bake's captures clear the list (Renderer/ProbeCapture.h).
+	struct PlanarReflectionItem
+	{
+		glm::mat4 World = glm::mat4(1.0f);
+		glm::vec3 Normal = glm::vec3(0.0f, 0.0f, 1.0f);
+		float Offset = 0.0f;
+		float ResolutionScale = DefaultPlanarReflectionResolutionScale;
+		UUID Entity{};
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
 	// is deterministic; Sprites (M21) are in draw order instead.
 	struct RenderSnapshot
@@ -844,6 +871,10 @@ namespace Engine {
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 4; ADR 0042's phase-5 ledger: new members after Terrains): the scene's
 		// fog, drawn by the forward passes, the terrains, the skybox, the SSR composite and the Sprites stage's quads of a Lit view.
 		RenderFog Fog{};
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: after the fog): the planar reflections of
+		// the view, each rendered by the Forward stage's PlanarReflections pass for a Lit view outside the wireframe, at most
+		// MaxPlanarReflectionsPerView of them (Renderer/PlanarReflections.h).
+		std::pmr::vector<PlanarReflectionItem> PlanarReflections{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

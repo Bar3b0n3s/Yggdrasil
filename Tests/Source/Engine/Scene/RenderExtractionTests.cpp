@@ -17,6 +17,7 @@
 #include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
+#include "Engine/Scene/Components/PlanarReflectionComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
@@ -1346,6 +1347,72 @@ namespace Engine {
 			CHECK(snapshot->PickTable[2] == field.GetUUID());
 			CHECK(second.PickId == 2);
 			CHECK(first.PickId == 3);
+		}
+
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): an entity with a PlanarReflection and a visible mesh
+		// gives one item in canonical order, in the game view and the editor's (explicit) view of an edit scene alike, at the
+		// rendered pose its mesh item draws at; a mirror without a drawn mesh, or disabled, gives none.
+		TEST_CASE("RenderExtraction: a planar reflection is extracted at its rendered pose in every view")
+		{
+			Test::SceneTestFixture edit;
+			Scene& scene = edit.GetScene();
+			CreateCamera(scene, "Camera", true);
+			Entity wall = scene.CreateEntity("Wall");
+			SetTranslation(wall, glm::vec3(0.0f, 1.5f, -4.0f));
+			wall.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::QuadMesh));
+			wall.AddComponent<PlanarReflectionComponent>(PlanarReflectionComponent{ .Normal = glm::vec3(0.0f, 0.0f, 2.0f), .Offset = 0.25f, .ResolutionScale = 0.75f });
+			Entity bare = scene.CreateEntity("Bare");
+			bare.AddComponent<PlanarReflectionComponent>();
+			Entity hidden = scene.CreateEntity("Hidden");
+			MeshRendererComponent hiddenRenderer = MakeMeshRenderer(BuiltinAssetHandles::QuadMesh);
+			hiddenRenderer.Visible = false;
+			hidden.AddComponent<MeshRendererComponent>(hiddenRenderer);
+			hidden.AddComponent<PlanarReflectionComponent>();
+			Entity unmeshed = scene.CreateEntity("Unmeshed");
+			unmeshed.AddComponent<MeshRendererComponent>();
+			unmeshed.AddComponent<PlanarReflectionComponent>();
+			Entity off = scene.CreateEntity("Off");
+			off.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::QuadMesh));
+			off.AddComponent<PlanarReflectionComponent>();
+			off.SetActive(false);
+			Entity floor = scene.CreateEntity("Floor");
+			floor.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::PlaneMesh));
+			floor.AddComponent<PlanarReflectionComponent>(PlanarReflectionComponent{ .Normal = glm::vec3(0.0f, 1.0f, 0.0f) });
+			TransformSystem::Update(scene);
+
+			for (const RenderCameraSource source : { RenderCameraSource::Primary, RenderCameraSource::Explicit })
+			{
+				CAPTURE(static_cast<int>(source));
+				const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Camera = source, .Width = 8, .Height = 8 });
+				REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+				REQUIRE(snapshot->PlanarReflections.size() == 2);
+				const PlanarReflectionItem& mirror = snapshot->PlanarReflections[0];
+				CHECK(mirror.Entity == wall.GetUUID());
+				CHECK(mirror.Normal == glm::vec3(0.0f, 0.0f, 2.0f));
+				CHECK(mirror.Offset == 0.25f);
+				CHECK(mirror.ResolutionScale == 0.75f);
+				const auto wallItem = std::ranges::find(snapshot->Meshes, wall.GetUUID(), &MeshDrawItem::Entity);
+				REQUIRE(wallItem != snapshot->Meshes.end());
+				CHECK(mirror.World == wallItem->World);
+				CHECK(snapshot->PlanarReflections[1].Entity == floor.GetUUID());
+				CHECK(snapshot->PlanarReflections[1].ResolutionScale == DefaultPlanarReflectionResolutionScale);
+			}
+
+			// In a runtime scene the item takes the interpolated pose its mesh draws at.
+			Test::SceneTestFixture runtime(1, true);
+			Entity moving = runtime.GetScene().CreateEntity("Moving");
+			moving.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::QuadMesh));
+			moving.AddComponent<PlanarReflectionComponent>();
+			TransformSystem::Update(runtime.GetScene());
+			SnapshotPreviousPose(moving);
+			SetTranslation(moving, glm::vec3(0.0f, 0.0f, -8.0f));
+			TransformSystem::Update(runtime.GetScene());
+			const Result<RenderSnapshot> between = ExtractRenderSnapshot(runtime.GetScene(), { .Width = 8, .Height = 8, .Alpha = 0.5f });
+			REQUIRE_MESSAGE(between.has_value(), between.error().ToString());
+			REQUIRE(between->PlanarReflections.size() == 1);
+			REQUIRE(between->Meshes.size() == 1);
+			CHECK(between->PlanarReflections[0].World[3].z == doctest::Approx(-4.0f));
+			CHECK(between->PlanarReflections[0].World == between->Meshes[0].World);
 		}
 	}
 

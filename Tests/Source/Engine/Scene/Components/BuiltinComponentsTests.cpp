@@ -39,8 +39,8 @@ namespace Engine {
 		{
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
 			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, and M37's four joints (Docs/Decisions/0054-m37-joints.md
-			// decision 1) 62.
-			static_assert(BuiltinComponents::Size == 62);
+			// decision 1) 62, and M42's PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 63.
+			static_assert(BuiltinComponents::Size == 63);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -543,6 +543,13 @@ namespace Engine {
 			CHECK(probe.Intensity == 1.0f);
 			CHECK(probe.BlendDistance == 1.0f);
 
+			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the built-in Quad's face, through the origin, at half
+			// resolution.
+			const PlanarReflectionComponent reflection;
+			CHECK(reflection.Normal == glm::vec3(0.0f, 0.0f, 1.0f));
+			CHECK(reflection.Offset == 0.0f);
+			CHECK(reflection.ResolutionScale == 0.5f);
+
 			const TerrainComponent terrain;
 			CHECK_FALSE(terrain.Heightfield.IsValid());
 			CHECK(terrain.Size == glm::vec2(64.0f));
@@ -702,6 +709,8 @@ namespace Engine {
 				"ParticleLook",
 				"IrradianceVolume",
 				"ReflectionProbe",
+				// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): after the ReflectionProbe in Probes.
+				"PlanarReflection",
 				"Terrain",
 				"TerrainCollider",
 				// M31 (Docs/Decisions/0046-m31-material-parameters.md decision 1): ADR 0042's phase-5 ledger's categories after

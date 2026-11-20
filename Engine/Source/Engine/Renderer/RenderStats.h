@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Core/Base.h"
+#include "Engine/Core/UUID.h"
 #include "Engine/Graphics/GpuProfiler.h"
 #include "Engine/Renderer/RenderStage.h"
 
@@ -86,6 +87,17 @@ namespace Engine {
 		uint32_t VisibleLights = 0;
 		uint32_t DroppedLights = 0;
 		uint32_t SkinnedMeshes = 0;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: appended after M28's rows): the frame's
+		// planar reflections (Renderer/PlanarReflections.h). PlanarReflections: those drawn (at most
+		// MaxPlanarReflectionsPerView); DroppedPlanarReflections: the candidates (in view, facing the camera, in a Lit view
+		// outside the wireframe) past that cap, which fall back to the probes and SSR; CulledPlanarReflections: the
+		// snapshot's others (out of view, facing away, a plane that is not finite, or in a view that draws none);
+		// PlanarReflectionEntities: the drawn reflections' entities in slot order, slot k's cost the pass row
+		// PlanarReflection<k>.
+		uint32_t PlanarReflections = 0;
+		uint32_t DroppedPlanarReflections = 0;
+		uint32_t CulledPlanarReflections = 0;
+		std::vector<UUID> PlanarReflectionEntities{};
 	};
 
 	// M32 (decision 13): the SSR area of one completed frame, which RenderStatsHistory::PublishSsrArea merges into the

@@ -32,6 +32,8 @@ namespace Engine {
 			snapshot.IrradianceVolumes.push_back(IrradianceVolumeItem{});
 			snapshot.ReflectionProbes.push_back(ReflectionProbeItem{});
 			snapshot.Terrains.push_back(TerrainItem{});
+			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
+			snapshot.PlanarReflections.push_back(PlanarReflectionItem{});
 			snapshot.DebugDraw.AddLine(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec4(1.0f));
 			snapshot.AnnotationDraw.AddLine(glm::vec3(0.0f), glm::vec3(1.0f), glm::vec4(1.0f));
 			CHECK(snapshot.Meshes.get_allocator().resource() == &arena);
@@ -47,6 +49,7 @@ namespace Engine {
 			CHECK(snapshot.IrradianceVolumes.get_allocator().resource() == &arena);
 			CHECK(snapshot.ReflectionProbes.get_allocator().resource() == &arena);
 			CHECK(snapshot.Terrains.get_allocator().resource() == &arena);
+			CHECK(snapshot.PlanarReflections.get_allocator().resource() == &arena);
 			CHECK(snapshot.DebugDraw.GetMemoryResource() == &arena);
 			CHECK(snapshot.AnnotationDraw.GetMemoryResource() == &arena);
 

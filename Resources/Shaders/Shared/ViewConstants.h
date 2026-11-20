@@ -62,16 +62,29 @@ inline constexpr uint32_t ProjectionKindOrthographic = 1;
 		// previous clip positions both moved by J, are unjittered, and exactly zero for what did not move.
 		Float4x4 PreviousViewProjection;
 		Float2 Jitter;
-		uint32_t Padding4 = 0;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: ReflectionView in Padding4, ClipPlane and
+		// CascadeDepthPlane appended, the members above frozen): the planar reflections' view (Renderer/PlanarReflections.h).
+		// ReflectionView: 1 in a mirror view (the camera mirrored in a planar reflection's plane), 0 in every other view.
+		// ClipPlane: the world plane (xyz the unit normal, w the distance, dot(ClipPlane, (p, 1)) >= 0 on the kept side) the
+		// vertex shaders a mirror view runs write as SV_ClipDistance0 (Passes/Scene.slang, Terrain.slang and
+		// Particles.slang), the mirror's plane moved PlanarReflectionClipBias towards its reflecting side; (0, 0, 0, 1),
+		// a distance of 1 at every vertex, clips nothing, which every other view sets. The fog of a mirror view starts at
+		// the view ray's crossing of it (Common/Fog.slang). CascadeDepthPlane: in a mirror view, the main view's depth
+		// plane (dot(CascadeDepthPlane, (p, 1)) is the main camera's view depth of the world point p), by which a mirror view
+		// chooses the main view's directional shadow cascade (Common/Shadows.slang); unread in every other view.
+		uint32_t ReflectionView = 0;
 		uint32_t Padding5 = 0;
+		Float4 ClipPlane = Float4(0.0f, 0.0f, 0.0f, 1.0f);
+		Float4 CascadeDepthPlane = Float4(0.0f, 0.0f, 0.0f, 0.0f);
 	};
 
 #if !defined(ENGINE_SHADER)
-	static_assert(sizeof(ViewConstants) == 480, "ViewConstants must match its 480-byte constant-buffer layout");
+	static_assert(sizeof(ViewConstants) == 512, "ViewConstants must match its 512-byte constant-buffer layout");
 	static_assert(offsetof(ViewConstants, CameraPosition) == 320 && offsetof(ViewConstants, OrthoHalfExtents) == 336
 			&& offsetof(ViewConstants, ViewportSize) == 352 && offsetof(ViewConstants, TanHalfFovY) == 368
 			&& offsetof(ViewConstants, LightCount) == 384 && offsetof(ViewConstants, PreviousViewProjection) == 400
-			&& offsetof(ViewConstants, Jitter) == 464,
+			&& offsetof(ViewConstants, Jitter) == 464 && offsetof(ViewConstants, ReflectionView) == 472
+			&& offsetof(ViewConstants, ClipPlane) == 480 && offsetof(ViewConstants, CascadeDepthPlane) == 496,
 		"ViewConstants members must sit where the constant-buffer layout puts them");
 
 }

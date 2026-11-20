@@ -78,9 +78,9 @@ COMPONENT_ORDER = [
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
-    "Animator", "SkinnedMesh", "ParticleEmitter", "ParticleLook", "IrradianceVolume", "ReflectionProbe", "Terrain",
-    "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier", "HingeJoint", "SliderJoint",
-    "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
+    "Animator", "SkinnedMesh", "ParticleEmitter", "ParticleLook", "IrradianceVolume", "ReflectionProbe",
+    "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier",
+    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -1042,6 +1042,11 @@ return Script.Define("Jumper", Jumper)
     door["Components"]["HingeJoint"] = {"Axis": [0, 0, 0]}
     door["Components"] = {key: door["Components"][key] for key in COMPONENT_ORDER if key in door["Components"]}
     item.entities.append(door)
+    # M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): a default PlanarReflection (the Quad's +Z face) on
+    # the built-in Cube, whose faces reach half a metre from the plane through its centre.
+    item = fixture("RENDER_REFLECTION_INVALID")
+    item.entities.append(entity("e000000000000042", "Mirror", {
+        "Transform": transform(0, 0, -20), "MeshRenderer": {"Mesh": CUBE_MESH}, "PlanarReflection": {}}))
 
     return fixtures
 

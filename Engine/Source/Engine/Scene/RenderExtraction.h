@@ -51,6 +51,12 @@
 // alignment, stretch and soft distance, and a Flat look's plane from the emitter's rendered world matrix (an emitter without
 // a look takes ParticleEmitterItem's defaults, which draw as M26 did).
 //
+// Planar reflections (M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3): an effectively enabled entity that
+// holds a PlanarReflection and a MeshRenderer that is Visible with a mesh gives one PlanarReflectionItem, in canonical
+// order, in every view (an edit scene's included), at the rendered world matrix its mesh item draws at, so the reflection
+// follows the glass between ticks; without a drawn mesh the component gives none (RENDER_REFLECTION_INVALID,
+// Scene/PlanarReflectionValidation.h).
+//
 // Pure function of the scene's components and the request: no asset access, no clock, no randomness; vectors in canonical
 // order (§5.1), so a deterministic scene gives an identical snapshot in every configuration. Only IEEE-exact operations and
 // Core/DetMath (Scene is on the simulation path's lint scope, §4.12). Main thread, like the scene (§4.11).

@@ -58,6 +58,7 @@ Every component of the type registry, in canonical component order: the order of
 | `ParticleLook` | Particles | Serializable, ScriptVisible, EditorVisible, Removable | How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter. |
 | `IrradianceVolume` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it. |
 | `ReflectionProbe` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A baked reflection of the probe's surroundings that glossy surfaces inside its box reflect instead of the Environment; lighting.bake bakes it. |
+| `PlanarReflection` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes as before. |
 | `Terrain` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | A heightfield laid out under the entity and drawn with up to four material layers blended by a splat map; sculpt and paint it with terrain.edit. |
 | `TerrainCollider` | Terrain | Serializable, ScriptVisible, EditorVisible, Removable | The entity's Terrain as a static height field in the physics world, colliding with exactly the surface that is drawn. |
 | `MaterialParameters` | MaterialParameters | Serializable, ScriptVisible, EditorVisible, Removable | Per-entity overrides on top of every material of the entity's MeshRenderer: a tint, an added glow, a texture offset and scroll, a dissolve with a glowing edge, and a dithered fade; they keep instancing and work on skinned meshes. |
@@ -1700,6 +1701,30 @@ Script members of `ReflectionProbe`:
 | `Intensity` | proxy field | `number` | read/write | All | The unitless strength of the reflection. |
 | `Resolution` | proxy field | `number` | read/write | All | The bake's capture cube face, in texels: a power of two. |
 | `Size` | proxy field | `vector` | read/write | All | The box whose surfaces reflect the probe, in metres, centred on the entity in its local axes. |
+
+## PlanarReflection
+
+Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes as before.
+
+- Category: Probes
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Normal` | `Vec3` | `[0,0,1]` |  |  |  | The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. |
+| `Offset` | `Float` | `0` | -10000 to 10000 | m |  | The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. |
+| `ResolutionScale` | `Float` | `0.5` | 0.25 to 1 |  |  | The reflection's size as a share of the view's scene resolution: 0.5 renders it at half the width and height, a quarter of the pixels. |
+
+Script members of `PlanarReflection`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Normal` | proxy field | `vector` | read/write | All | The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. |
+| `Offset` | proxy field | `number` | read/write | All | The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. |
+| `ResolutionScale` | proxy field | `number` | read/write | All | The reflection's size as a share of the view's scene resolution: 0.5 renders it at half the width and height, a quarter of the pixels. |
 
 ## Terrain
 

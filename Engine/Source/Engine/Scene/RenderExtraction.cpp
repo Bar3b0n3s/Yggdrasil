@@ -18,6 +18,7 @@
 #include "Engine/Scene/Components/ParticleLookComponent.h"
 #include "Engine/Scene/Components/ParticleStateComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
+#include "Engine/Scene/Components/PlanarReflectionComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
@@ -912,6 +913,23 @@ namespace Engine {
 			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16): the baked probes, in canonical order, in
 			// every view (an edit scene's included: baked lighting shows while editing).
 			Utils::AddProbeItems(entity, id, getWorld, snapshot);
+			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): a planar reflection whose entity draws a mesh, in
+			// canonical order, in every view (an edit scene's included: a mirror shows while authoring), at the rendered pose its
+			// mesh item draws at.
+			if (const PlanarReflectionComponent* reflection = entity.TryGetComponent<PlanarReflectionComponent>(); reflection != nullptr)
+			{
+				const MeshRendererComponent* renderer = entity.TryGetComponent<MeshRendererComponent>();
+				if (renderer != nullptr && renderer->Visible && renderer->Mesh.IsValid())
+				{
+					snapshot.PlanarReflections.push_back(PlanarReflectionItem{
+						.World = getWorld(),
+						.Normal = reflection->Normal,
+						.Offset = reflection->Offset,
+						.ResolutionScale = reflection->ResolutionScale,
+						.Entity = id,
+					});
+				}
+			}
 			// M26 (C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decision 22): a terrain with a heightfield, in canonical
 			// order, in every view (an edit scene's included: terrain is edited in the scene view).
 			if (const TerrainComponent* terrain = entity.TryGetComponent<TerrainComponent>(); terrain != nullptr && terrain->Heightfield.IsValid())

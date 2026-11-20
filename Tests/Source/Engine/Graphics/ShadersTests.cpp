@@ -298,8 +298,11 @@ namespace Engine {
 					// M26 (Docs/Decisions/0037-m26-contract.md decisions 11 and 17, stream X-C): the temporal inputs.
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, PreviousViewProjection),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Jitter),
-					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding4),
+					// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the mirror views' members.
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, ReflectionView),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding5),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, ClipPlane),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, CascadeDepthPlane),
 				},
 				.Program = "Triangle",
 				.Entry = "VSMain",
@@ -488,7 +491,7 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Emissive),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveNoiseScale),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveEdge),
-					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding0),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, PlanarReflectionSlot),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, UVOffset),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding1),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding2),

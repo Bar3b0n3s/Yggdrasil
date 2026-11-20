@@ -21,16 +21,22 @@ namespace Engine {
 	// DrawFlagMaterialParameters (M31; Docs/Decisions/0046-m31-material-parameters.md decision 4): the record's material
 	// parameters are not neutral, so the fragment shaders read and apply them (MakeMeshInstanceRecord, Renderer/RenderPrepare.h);
 	// without it they never read them and draw as before M31.
+	// DrawFlagPlanarReflection (M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3): the instance is a drawn
+	// planar reflection's glass in its main view: the forward passes reflect the reflection of slot
+	// InstanceRecord::PlanarReflectionSlot in place of the probe's or environment's specular, and the prepass writes a zero
+	// SceneRoughness multiplier so SSR neither traces nor composites over it. A mirror view's records never carry it.
 #if defined(ENGINE_SHADER)
 	static const uint DrawFlagMirrored = 1;
 	static const uint DrawFlagReceiveShadows = 2;
 	static const uint DrawFlagPreviousPositions = 4;
 	static const uint DrawFlagMaterialParameters = 8;
+	static const uint DrawFlagPlanarReflection = 16;
 #else
 inline constexpr uint32_t DrawFlagMirrored = 1;
 inline constexpr uint32_t DrawFlagReceiveShadows = 2;
 inline constexpr uint32_t DrawFlagPreviousPositions = 4;
 inline constexpr uint32_t DrawFlagMaterialParameters = 8;
+inline constexpr uint32_t DrawFlagPlanarReflection = 16;
 #endif
 
 	// The Scene program's debug views (§8.5): Vulkan specialization constant SceneDebugViewConstantId of the forward
