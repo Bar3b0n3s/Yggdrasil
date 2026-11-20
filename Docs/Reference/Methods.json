@@ -15481,7 +15481,7 @@
 		{
 			"name": "lighting.bake",
 			"domain": "lighting",
-			"description": "Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files.",
+			"description": "Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files. Each capture and import frees what it used before the next, so a bake's device allocations stay the same whatever its probe count, and baking again adds none.",
 			"exposeAsTool": true,
 			"mutates": true,
 			"supportsDryRun": false,
@@ -30094,7 +30094,7 @@
 						"type": "number"
 					},
 					"memoryAllocationCount": {
-						"description": "Current Vulkan device memory allocation count.",
+						"description": "Current Vulkan device memory allocation count, which counts what the frame released until the frame's garbage collection frees it at the frame's end.",
 						"type": "integer",
 						"minimum": 0,
 						"maximum": 4294967295

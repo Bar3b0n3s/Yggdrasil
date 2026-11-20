@@ -1421,7 +1421,11 @@ namespace Engine {
 		if (stats.MemoryAllocationCount > 2000 && !state.AllocationLimitLogged)
 		{
 			state.AllocationLimitLogged = true;
-			ENGINE_CORE_WARN("Renderer device uses {} native memory allocations (device limit {}); more than 2000 warrants inspection (logged once per view)",
+			// The count includes what the frame released, which its garbage collection frees at its end (World Tree's brief 21):
+			// the warning says so, and where the count that stays is read.
+			ENGINE_CORE_WARN("Renderer device uses {} native memory allocations (device limit {}); more than 2000 warrants inspection (logged once per view; "
+							 "what the frame released counts until its garbage collection frees it at the frame's end, so stats.get in a later frame "
+							 "reads what stays)",
 				stats.MemoryAllocationCount, stats.MaxMemoryAllocationCount);
 		}
 		stats.CpuMilliseconds = (Utils::SceneRendererNowSeconds() - started) * 1000.0;

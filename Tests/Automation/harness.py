@@ -211,6 +211,17 @@ class AutomationTestCase(unittest.TestCase):
                         and any(level in line for level in ("[warning]", "[error]", "[critical]"))]
         self.assertFalse(gpu_messages, process.output())
 
+    def warnings_containing(self, client: engine_client.EngineClient, text: str) -> list[dict[str, Any]]:
+        """The log entries at Warn or above that contain `text`, oldest first."""
+        entries: list[dict[str, Any]] = []
+        cursor = ""
+        while True:
+            page = client.call("log.read", {"cursor": cursor, "minLevel": "Warn", "contains": text})
+            if not page["entries"]:
+                return entries
+            entries += page["entries"]
+            cursor = page["nextCursor"]
+
 
 class GpuRecoveryTestCase(AutomationTestCase):
     """The shared helpers of the tests that inject GPU faults into rendering editors and exported games (M18,

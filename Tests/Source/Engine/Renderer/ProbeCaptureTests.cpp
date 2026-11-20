@@ -28,8 +28,8 @@
 // colour-bleed oracles of an irradiance probe's SH9 projection, against the test support's double-precision reference
 // (Test::ProjectIrradianceSH9), the reflection probe's deterministic HDR image, and the GPU capture: a uniform background
 // captured as its radiance, each face looking along its cube direction (neither mirrored nor flipped), the scene's SSR left
-// out, and the capture's recovery from a device loss. The bake's byte-identical files are LightingBakeTests.cpp's, the
-// shading's oracles stream Q-B's.
+// out, the release of what each capture used before it returns (World Tree's brief 21), and the capture's recovery from a
+// device loss. The bake's byte-identical files are LightingBakeTests.cpp's, the shading's oracles stream Q-B's.
 
 namespace Engine {
 
@@ -397,6 +397,35 @@ namespace Engine {
 				const Result<ProbeCubeCapture> fogged = setup.GetCapture().Capture(snapshot, position, 16);
 				REQUIRE_MESSAGE(fogged.has_value(), fogged.error().ToString());
 				CHECK(ToBytes(*fogged) == ToBytes(*clear));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
+		// World Tree's brief 21 (its look pass, where a bake of 507 probes left 23,521 native allocations at its end): a capture
+		// retires its own submissions before it returns, so what it created and dropped (each face's read-back staging among
+		// them) goes with it, not at the frame's garbage collection, and any number of captures between two collections keep
+		// the device's allocation count at one capture's.
+		TEST_CASE("ProbeCapture: captures release what they used, so many between two collections add no allocation" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				ProbeCaptureSetup setup(gpu);
+				RenderSnapshot snapshot = MakeProbeSnapshot(glm::vec3(0.25f));
+				AddFaceMarkers(snapshot);
+				GraphicsDevice& device = gpu.GetDevice();
+				// The first capture creates the renderer's targets and the markers' mirrors; nothing collects after it, or between
+				// the captures below.
+				const Result<ProbeCubeCapture> first = setup.GetCapture().Capture(snapshot, glm::vec3(0.0f), 16);
+				REQUIRE_MESSAGE(first.has_value(), first.error().ToString());
+				const uint32_t settled = device.GetMemoryAllocationCount();
+				for (uint32_t index = 1; index <= 8; ++index)
+				{
+					CAPTURE(index);
+					const Result<ProbeCubeCapture> capture = setup.GetCapture().Capture(snapshot, glm::vec3(0.25f * static_cast<float>(index), 0.0f, 0.0f), 16);
+					REQUIRE_MESSAGE(capture.has_value(), capture.error().ToString());
+					CHECK(device.GetMemoryAllocationCount() <= settled);
+				}
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

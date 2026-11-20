@@ -1383,7 +1383,7 @@ Example: Check that a replay's verification fails without its input.
 
 ### lighting.bake
 
-Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/\<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files.
+Bakes an edit scene's IrradianceVolumes and ReflectionProbes: renders their surroundings, writes their data for the saved scene (Assets/Lighting/\<the scene's path below Assets/ without .scene>/, so Assets/Scenes/Room.scene bakes into Assets/Lighting/Scenes/Room/), imports it and sets each probe's Data in one undoable edit. Two bakes of one scene write byte-identical files. Each capture and import frees what it used before the next, so a bake's device allocations stay the same whatever its probe count, and baking again adds none.
 
 - Flags: tool `lighting_bake`, mutates, scene target
 - Timeout: 600 s
@@ -3278,7 +3278,7 @@ Reads host and displayed-view statistics without waiting for the GPU or advancin
 | `scriptHardLimitBytes` | `Float` | Approximate script heap hard limit in bytes when available. |
 | `processHeapAvailable` | `Bool` | Whether the host measured the heap the C runtime allocates from: false on Linux and macOS, which have no measure, and when the query fails. |
 | `processHeapCommittedBytes` | `Float` | Approximate committed bytes of the heap the C runtime allocates from (malloc and new: the engine's own memory and that of every library allocating through the C runtime; on Windows the process heap, its large blocks included), when available. What a graphics driver keeps in allocations of its own is not in it, nor, in an AddressSanitizer build, what the C runtime or HeapAlloc allocates, which the sanitizer's allocator serves. The hardening soak's memory rule measures it. |
-| `memoryAllocationCount` | `UInt32` | Current Vulkan device memory allocation count. |
+| `memoryAllocationCount` | `UInt32` | Current Vulkan device memory allocation count, which counts what the frame released until the frame's garbage collection frees it at the frame's end. |
 | `maxMemoryAllocationCount` | `UInt32` | Vulkan device allocation limit, zero without a device. |
 | `views` | `Array<StatsViewSummary>` | The scene then the game view, as the editor's displayed viewport panels: a view whose panel is not displayed is unavailable, and a headless editor displays only the Scene view of its default layout, so game is unavailable there unless the editor was started with --headless-game-view, whose game view renders every frame at the project's window size (or viewport.setOptions' gameResolution). The Runtime supplies game only. |
 | `deviceLosses` | `UInt32` | The GPU device losses this host recovered from since it started, each also a GpuDeviceLost event; 0 with renderer none. |

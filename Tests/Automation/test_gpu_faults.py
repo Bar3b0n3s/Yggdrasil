@@ -51,17 +51,6 @@ class GpuFaultTests(GpuRecoveryTestCase):
             self.wait_for_rendered_frame(client, -1)
         return editor, client
 
-    def warnings_containing(self, client: engine_client.EngineClient, text: str) -> list[dict[str, Any]]:
-        """The log entries at Warn or above that contain `text`, oldest first."""
-        entries: list[dict[str, Any]] = []
-        cursor = ""
-        while True:
-            page = client.call("log.read", {"cursor": cursor, "minLevel": "Warn", "contains": text})
-            if not page["entries"]:
-                return entries
-            entries += page["entries"]
-            cursor = page["nextCursor"]
-
     def shut_down_cleanly(self, editor: engine_client.EditorProcess, client: engine_client.EngineClient) -> None:
         """Shuts `editor` down; it exits 0 (it runs with --expect-no-gpu-errors) and printed no GPU warning or error."""
         client.call("session.shutdown", {"force": True})
