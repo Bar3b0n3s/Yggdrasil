@@ -316,6 +316,7 @@ namespace Engine {
 			candidate.SamplerAnisotropy = features.features.samplerAnisotropy == VK_TRUE;
 			candidate.ImageCubeArray = features.features.imageCubeArray == VK_TRUE;
 			candidate.ShaderStorageImageExtendedFormats = features.features.shaderStorageImageExtendedFormats == VK_TRUE;
+			candidate.ShaderClipDistance = features.features.shaderClipDistance == VK_TRUE;
 			candidate.FillModeNonSolid = features.features.fillModeNonSolid == VK_TRUE;
 			candidate.TextureCompressionBC = features.features.textureCompressionBC == VK_TRUE;
 			candidate.DeviceFault = hasDeviceFaultExtension && faultFeatures.deviceFault == VK_TRUE;
@@ -856,6 +857,7 @@ namespace Engine {
 		features.features.samplerAnisotropy = VK_TRUE;
 		features.features.imageCubeArray = VK_TRUE;
 		features.features.shaderStorageImageExtendedFormats = VK_TRUE;
+		features.features.shaderClipDistance = VK_TRUE;
 		features.features.fillModeNonSolid = m_Info.FillModeNonSolid ? VK_TRUE : VK_FALSE;
 		features.features.textureCompressionBC = m_Info.TextureCompressionBC ? VK_TRUE : VK_FALSE;
 		void** tail = &features13.pNext;

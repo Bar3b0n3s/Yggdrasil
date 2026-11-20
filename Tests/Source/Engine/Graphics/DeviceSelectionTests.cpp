@@ -22,6 +22,7 @@ namespace Engine {
 		candidate.SamplerAnisotropy = true;
 		candidate.ImageCubeArray = true;
 		candidate.ShaderStorageImageExtendedFormats = true;
+		candidate.ShaderClipDistance = true;
 		candidate.StorageFormatSupported.fill(true);
 		candidate.HasGraphicsQueue = true;
 		candidate.HasPresentSupport = true;
@@ -72,6 +73,7 @@ namespace Engine {
 				{ "no imageCubeArray", WithoutFeature(base, &DeviceCandidate::ImageCubeArray), DeviceRejection::MissingImageCubeArray },
 				{ "no shaderStorageImageExtendedFormats", WithoutFeature(base, &DeviceCandidate::ShaderStorageImageExtendedFormats),
 					DeviceRejection::MissingShaderStorageImageExtendedFormats },
+				{ "no shaderClipDistance", WithoutFeature(base, &DeviceCandidate::ShaderClipDistance), DeviceRejection::MissingShaderClipDistance },
 				{ "R16_FLOAT is not a storage format", noR16Storage, DeviceRejection::MissingStorageFormat },
 				{ "R32_UINT is not a storage format", noR32Storage, DeviceRejection::MissingStorageFormat },
 				{ "no graphics queue", WithoutFeature(base, &DeviceCandidate::HasGraphicsQueue), DeviceRejection::NoGraphicsQueue },

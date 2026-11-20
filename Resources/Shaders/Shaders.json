@@ -215,6 +215,16 @@
 			]
 		},
 		{
+			"Name": "PlanarReflection",
+			"File": "Passes/PlanarReflection.slang",
+			"Entries": [
+				{
+					"Name": "CSDownsample",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "Quad",
 			"File": "Passes/Quad.slang",
 			"Entries": [

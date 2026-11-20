@@ -69,7 +69,11 @@ float4 PSMain(SkyboxVaryings input) : SV_Target0
 			const float3 nearPoint = Unproject(input.Ndc, 1.0);
 			eye = nearPoint - Fog.ViewForward * dot(nearPoint - Fog.CameraPosition, Fog.ViewForward);
 		}
-		radiance = ApplyFog(radiance, EvaluateSkyFog(direction, eye));
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): a mirror view fogs its sky from its glass on.
+		if (View.ReflectionView != 0)
+			radiance = ApplyFog(radiance, EvaluateSkyFogFrom(direction, eye, GetMirrorSkyFogStart(direction, eye, View.ClipPlane)));
+		else
+			radiance = ApplyFog(radiance, EvaluateSkyFog(direction, eye));
 	}
 	return float4(radiance, 1.0);
 }

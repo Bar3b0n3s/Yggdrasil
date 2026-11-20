@@ -639,7 +639,7 @@ namespace Engine {
 				commandList.beginMarker("Particles");
 				nvrhi::GraphicsState graphics;
 				graphics.viewport.addViewport(nvrhi::Viewport(static_cast<float>(width), static_cast<float>(height)));
-				graphics.viewport.addScissorRect(nvrhi::Rect(0, static_cast<int>(width), 0, static_cast<int>(height)));
+				graphics.viewport.addScissorRect(inputs.Scissor.value_or(nvrhi::Rect(0, static_cast<int>(width), 0, static_cast<int>(height))));
 				graphics.bindings.push_back(nullptr);
 				graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(state.Vertices).setSlot(0).setOffset(0));
 				graphics.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(state.Indices).setFormat(nvrhi::Format::R32_UINT).setOffset(0));

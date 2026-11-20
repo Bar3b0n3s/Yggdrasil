@@ -15,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <vector>
 
 // The terrain passes (M26, C26.1, C-TERR; Docs/Decisions/0037-m26-contract.md decisions 13, 22 and 29; Architecture §8.3,
@@ -164,13 +165,15 @@ namespace Engine {
 		[[nodiscard]] Status Prepare(nvrhi::ICommandList& commandList, GpuResourceCache& cache, TerrainViewResources& resources, const TerrainPassInputs& inputs);
 
 		// Records resources.Draws' chunks into `framebuffer` (the prepass's, or with `picking` the picking prepass's) with the
-		// view's prepass set `viewSet` (made for GetPrepassViewLayout), adding their draws and triangles to `counters`.
+		// view's prepass set `viewSet` (made for GetPrepassViewLayout), adding their draws and triangles to `counters`. M42
+		// (Docs/Decisions/0059-m42-planar-reflections.md decision 3): rasterization limited to `scissor` (a mirror view's glass
+		// rectangle), or the whole framebuffer without one; likewise RecordForward.
 		void RecordDepthNormal(nvrhi::ICommandList& commandList, const TerrainViewResources& resources, nvrhi::IFramebuffer& framebuffer, bool picking,
-			nvrhi::IBindingSet& viewSet, RenderPassCounters& counters) const;
+			nvrhi::IBindingSet& viewSet, RenderPassCounters& counters, const std::optional<nvrhi::Rect>& scissor = std::nullopt) const;
 		// Records resources.Draws' chunks into `framebuffer` (SceneColor with SceneDepth) with the view's forward set
 		// `forwardSet` (made for the mesh forward passes' set-0 layout), adding to `counters`.
 		void RecordForward(nvrhi::ICommandList& commandList, const TerrainViewResources& resources, nvrhi::IFramebuffer& framebuffer,
-			nvrhi::IBindingSet& forwardSet, RenderPassCounters& counters) const;
+			nvrhi::IBindingSet& forwardSet, RenderPassCounters& counters, const std::optional<nvrhi::Rect>& scissor = std::nullopt) const;
 
 		// Drops the chunk meshes and the sets the last render did not use and forgets its terrains, ending the render.
 		static void ReleaseUnused(TerrainViewResources& resources);

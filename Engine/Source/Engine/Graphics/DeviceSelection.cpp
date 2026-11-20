@@ -191,6 +191,8 @@ namespace Engine {
 			return DeviceRejection::MissingImageCubeArray;
 		if (!candidate.ShaderStorageImageExtendedFormats)
 			return DeviceRejection::MissingShaderStorageImageExtendedFormats;
+		if (!candidate.ShaderClipDistance)
+			return DeviceRejection::MissingShaderClipDistance;
 		if (!std::ranges::all_of(candidate.StorageFormatSupported, [](bool supported)
 		{
 			return supported;
@@ -298,6 +300,7 @@ namespace Engine {
 			case DeviceRejection::MissingSamplerAnisotropy:                 return "MissingSamplerAnisotropy";
 			case DeviceRejection::MissingImageCubeArray:                    return "MissingImageCubeArray";
 			case DeviceRejection::MissingShaderStorageImageExtendedFormats: return "MissingShaderStorageImageExtendedFormats";
+			case DeviceRejection::MissingShaderClipDistance:                return "MissingShaderClipDistance";
 			case DeviceRejection::MissingStorageFormat:                     return "MissingStorageFormat";
 			case DeviceRejection::NoGraphicsQueue:                          return "NoGraphicsQueue";
 			case DeviceRejection::NoPresentSupport:                         return "NoPresentSupport";

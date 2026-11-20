@@ -78,6 +78,7 @@ namespace Engine {
 		state.SkinMismatchLogged = released.SkinMismatchLogged;         // M23 (C23.3): RENDER_SKIN_MISMATCH's once-per-renderer flag
 		state.ProbeLimitLogged = released.ProbeLimitLogged;             // M26 (stream Q-B): the dropped probes' once-per-renderer flags
 		state.ProbeFormatLogged = released.ProbeFormatLogged;
+		state.PlanarReflectionLimitLogged = released.PlanarReflectionLimitLogged; // M42: the dropped reflections' once-per-renderer flag
 		// M18 (C18.4, decision 44): the mode a failed debug-view switch falls back to, and its once-per-view log flags.
 		state.RenderedDebugView = released.RenderedDebugView;
 		state.DebugViewFailureLogged = released.DebugViewFailureLogged;
@@ -120,6 +121,9 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle shadowConstants,
 			Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle casterConstants, device.CreateBuffer(ShadowPass::GetCasterConstantsDesc()));
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): b7 of the forward set, written by every Render.
+		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle planarReflectionConstants,
+			Utils::CreateViewBuffer(device, sizeof(PlanarReflectionConstants), 0, "SceneRenderer.PlanarReflectionConstants"));
 		const RenderOutputMapping mapping = ComputeRenderOutputMapping(state.ViewWidth, state.ViewHeight, state.OutputSettings);
 		ENGINE_TRY_ASSIGN(Detail::SceneRendererTargets targets, state.CreateTargets(mapping.SceneWidth, mapping.SceneHeight));
 		state.ViewConstantsBuffer = std::move(viewConstants);
@@ -128,6 +132,7 @@ namespace Engine {
 		state.LightBuffer = std::move(lights);
 		state.ShadowConstantsBuffer = std::move(shadowConstants);
 		state.ShadowCasterConstantsBuffer = std::move(casterConstants);
+		state.PlanarReflectionConstantsBuffer = std::move(planarReflectionConstants);
 		state.Targets = std::move(targets);
 		state.FinalTarget = 0;
 		state.Lights.reserve(MaxShadedLightsCeiling);

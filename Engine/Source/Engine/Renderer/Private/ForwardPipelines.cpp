@@ -9,6 +9,7 @@
 #include "Shared/FogConstants.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/PlanarReflectionConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShadowConstants.h"
@@ -64,6 +65,8 @@ namespace Engine {
 
 		[[nodiscard]] static nvrhi::BindingLayoutDesc MakeForwardViewLayout()
 		{
+			// M42: b7 and t17 to t20 (PlanarReflectionSlotCount images) after the M31 items.
+			static_assert(PlanarReflectionSlotCount == 4);
 			return MakeSetLayout(0, {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
 										nvrhi::BindingLayoutItem::ConstantBuffer(ShadowConstantsRegister),
@@ -86,6 +89,11 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::Texture_SRV(ReflectionProbeCubesRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(PointShadowMapsHalfRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(DissolveNoiseRegister),
+										nvrhi::BindingLayoutItem::ConstantBuffer(PlanarReflectionConstantsRegister),
+										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister),
+										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 1),
+										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 2),
+										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 3),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(ShadowCompareRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
@@ -156,6 +164,7 @@ namespace Engine {
 					{ .Set = 0, .Register = LightClusterConstantsRegister, .ByteSize = sizeof(LightClusterConstants) },
 					{ .Set = 0, .Register = ProbeConstantsRegister, .ByteSize = sizeof(ProbeConstants) },
 					{ .Set = 0, .Register = FogConstantsRegister, .ByteSize = sizeof(FogConstants) },
+					{ .Set = 0, .Register = PlanarReflectionConstantsRegister, .ByteSize = sizeof(PlanarReflectionConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
 				},
 			};

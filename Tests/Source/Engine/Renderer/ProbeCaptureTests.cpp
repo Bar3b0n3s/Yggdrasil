@@ -379,6 +379,34 @@ namespace Engine {
 			gpu.GetDevice().RunGarbageCollection();
 		}
 
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its W42.1 record): a bake is one bounce, as it turns the
+		// probes off, so a capture leaves the scene's planar reflections out (MakeCaptureSnapshot clears the list): the mirror
+		// floor before the red wall, a planar reflection facing the capture point, captures the same texels with its
+		// PlanarReflection as without it.
+		TEST_CASE("ProbeCapture: a capture leaves the scene's planar reflections out, so a PlanarReflection changes no texel" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			{
+				ProbeCaptureSetup setup(gpu);
+				RenderSnapshot snapshot = MakeProbeSnapshot(glm::vec3(0.0f, 0.05f, 0.1f));
+				const glm::mat4 floor(glm::vec4(6.0f, 0.0f, 0.0f, 0.0f), glm::vec4(0.0f, 0.0f, -6.0f, 0.0f), glm::vec4(0.0f, 6.0f, 0.0f, 0.0f),
+					glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+				const glm::mat4 wall = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, -3.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f, 2.0f, 1.0f));
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = floor, .Mesh = UUID(QuadMeshHandle), .Materials = { UUID(MirrorMaterialHandle) }, .Entity = UUID(1) });
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = wall, .Mesh = UUID(QuadMeshHandle), .Materials = { UUID(FirstMarkerMaterialHandle) }, .Entity = UUID(2) });
+				const glm::vec3 position(0.0f, 1.0f, 0.0f);
+				const Result<ProbeCubeCapture> plain = setup.GetCapture().Capture(snapshot, position, 32);
+				REQUIRE_MESSAGE(plain.has_value(), plain.error().ToString());
+				// The quad's +Z, the floor's +Y: the reflecting side the capture point lies on.
+				snapshot.PlanarReflections.push_back(PlanarReflectionItem{ .World = floor, .Normal = glm::vec3(0.0f, 0.0f, 1.0f), .Entity = UUID(1) });
+				const Result<ProbeCubeCapture> mirrored = setup.GetCapture().Capture(snapshot, position, 32);
+				REQUIRE_MESSAGE(mirrored.has_value(), mirrored.error().ToString());
+				CHECK(ToBytes(*mirrored) == ToBytes(*plain));
+			}
+			gpu.GetDevice().RunGarbageCollection();
+		}
+
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 4): a probe bakes the scene's light, which the views fog where they
 		// shade it, so a capture leaves the scene's fog out: a dense fog over the skybox and the wall changes no texel.
 		TEST_CASE("ProbeCapture: a capture leaves the scene's fog out, so a Fog changes no texel" * doctest::test_suite(Test::GpuSuite))

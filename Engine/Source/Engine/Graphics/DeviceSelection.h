@@ -58,6 +58,8 @@ namespace Engine {
 		bool SamplerAnisotropy = false;
 		bool ImageCubeArray = false;
 		bool ShaderStorageImageExtendedFormats = false;
+		// shaderClipDistance: the planar reflections' clip at their plane (SV_ClipDistance, §8.3; M42).
+		bool ShaderClipDistance = false;
 		// VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT per entry of RequiredStorageFormats, in the same order.
 		std::array<bool, RequiredStorageFormats.size()> StorageFormatSupported{};
 		// A queue family with graphics (and compute) support.
@@ -86,6 +88,7 @@ namespace Engine {
 		MissingSamplerAnisotropy,
 		MissingImageCubeArray,
 		MissingShaderStorageImageExtendedFormats,
+		MissingShaderClipDistance,
 		MissingStorageFormat, // one of RequiredStorageFormats lacks VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT
 		NoGraphicsQueue,
 		NoPresentSupport

@@ -42,8 +42,9 @@
 //     ProbeConstants (M26), b5 FogConstants (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 5), t0 Lights, t1 ShadowCascades, t2 ShadowAtlas, t3 EnvSpecular, t5 BRDFLut, t6 AmbientOcclusion,
 //     t8 ViewDepth, t9 SceneNormals, t10 Instances, t11 the light cluster masks (M23, Renderer/LightClusterPass.h), t12
 //     PointShadowMaps, t13 the irradiance volumes' coefficients and t14 the reflection probes' cubes (M26), t15
-//     PointShadowMapsHalf (M29), t16 the dissolve noise (M31), s0 LinearClamp, s1 ShadowCompare, s2 AnisoWrap and the push
-//     constants;
+//     PointShadowMapsHalf (M29), t16 the dissolve noise (M31), b7 PlanarReflectionConstants and t17 to t20 the planar
+//     reflections' images (M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3), s0 LinearClamp, s1 ShadowCompare,
+//     s2 AnisoWrap and the push constants;
 //   - set 1 (every variant): b0 MaterialConstants and t0..t4 the base colour, metallic-roughness, normal, occlusion and
 //     emissive maps.
 
@@ -95,6 +96,15 @@ namespace Engine {
 		// register. The Terrain program declares it unread, since it shares the forward set (ADR 0042's Terrain.slang row).
 		// t16 since batch 1's landing, after M29's t15 (ADR 0042's ForwardPipelines row: the later lander renumbers its own).
 		inline constexpr uint32_t DissolveNoiseRegister = 16;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the view's PlanarReflectionConstants (b7, the first
+		// constant-buffer slot after the push constants' b6) and its planar reflections' images, slot k's at
+		// PlanarReflectionsRegister + k for k below PlanarReflectionSlotCount (MaxPlanarReflectionsPerView,
+		// Renderer/PlanarReflections.h; checked in SceneRenderer.cpp): the forward set's, which the Terrain program declares
+		// unread since it shares the set. A mirror view, and a slot without a drawn reflection, binds the pipeline set's
+		// neutral 1 x 1 black texture there.
+		inline constexpr uint32_t PlanarReflectionConstantsRegister = 7;
+		inline constexpr uint32_t PlanarReflectionsRegister = 17;
+		inline constexpr uint32_t PlanarReflectionSlotCount = 4;
 		inline constexpr uint32_t LinearClampRegister = 0;
 		inline constexpr uint32_t ShadowCompareRegister = 1;
 		inline constexpr uint32_t AnisoWrapRegister = 2;

@@ -67,6 +67,7 @@
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/PlanarReflectionConstants.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ViewConstants.h"
@@ -109,6 +110,14 @@ TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
 Texture2D<float> DissolveNoise : register(t16, space0);
 // M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Common/Fog.slang), read by PSForward's Lit output.
 ConstantBuffer<FogConstants> Fog : register(b5, space0);
+// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the view's planar reflections (Common/PlanarReflections.slang):
+// their constants and the four slots' images, which a mirror view, and a view without a drawn reflection in a slot, bind as
+// the neutral 1 x 1 black texture.
+ConstantBuffer<PlanarReflectionConstants> PlanarReflection : register(b7, space0);
+Texture2D<float4> PlanarReflections0 : register(t17, space0);
+Texture2D<float4> PlanarReflections1 : register(t18, space0);
+Texture2D<float4> PlanarReflections2 : register(t19, space0);
+Texture2D<float4> PlanarReflections3 : register(t20, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -132,6 +141,8 @@ const uint DebugView = 0;
 #include "Common/Probes.slang"
 // The fog over the declarations above (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 3).
 #include "Common/Fog.slang"
+// The planar reflections' term over the declarations above (M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3).
+#include "Common/PlanarReflections.slang"
 
 struct VertexInput
 {
@@ -155,6 +166,9 @@ struct PrepassVertexInput
 struct VertexOutput
 {
 	float4 Position : SV_Position;
+	// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the vertex's signed distance to the view's
+	// ViewConstants::ClipPlane, which clips a mirror view's geometry at its glass; 1 in every other view, which clips nothing.
+	float ClipDistance : SV_ClipDistance0;
 	float3 WorldPosition : WORLDPOSITION;
 	float3 WorldNormal : NORMAL;
 	float4 WorldTangent : TANGENT;
@@ -411,6 +425,7 @@ VertexOutput TransformVertex(VertexInput input, InstanceRecord record, uint reco
 	const float4 world = MultiplyExact(record.World, float4(input.Position, 1.0));
 	VertexOutput output;
 	output.Position = MultiplyExact(View.ViewProjection, world);
+	output.ClipDistance = dot(View.ClipPlane, world);
 	output.WorldPosition = world.xyz;
 	output.WorldNormal = mul(MakeNormalMatrix(record.World, mirrored), input.Normal);
 	// A mirroring world turns the frame's handedness: the bitangent's sign flips with it.
@@ -551,12 +566,14 @@ SpecularInputs EvaluateSpecularInputs(VertexOutput input, Surface surface)
 
 // M26 (decision 14): SceneRoughness's two words (Renderer/SceneTargetFormats.h): word 0 rgb the prefiltered radiance's
 // multiplier before its specular occlusion (multiScatter times HorizonOcclusion, as ShadeForward multiplies it) and a the
-// roughness the forward pass samples the prefiltered cube at; word 1 x the material's occlusion.
+// roughness the forward pass samples the prefiltered cube at; word 1 x the material's occlusion. M42: a drawn planar
+// reflection's glass (DrawFlagPlanarReflection) writes a zero multiplier, so SSR neither traces nor composites over it.
 uint2 EncodeSpecularInputs(VertexOutput input, Surface surface)
 {
 	const SpecularInputs specular = EvaluateSpecularInputs(input, surface);
 	const float3 multiScatter = specular.SingleScatter * specular.EnergyCompensation;
-	const float3 multiplier = multiScatter * HorizonOcclusion(specular.Reflection, surface.GeometricNormal);
+	const float3 multiplier = (input.Flags & DrawFlagPlanarReflection) != 0 ? float3(0.0)
+																			 : multiScatter * HorizonOcclusion(specular.Reflection, surface.GeometricNormal);
 	return uint2(PackUnorm4x8(float4(multiplier, specular.Roughness)), PackUnorm4x8(float4(surface.Occlusion, 0.0, 0.0, 0.0)));
 }
 
@@ -602,8 +619,8 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 
 	// The direct light of the pixel's lights (Common/LightLoop.slang): its cluster's, or every light of the list.
 	const float viewDepth = -mul(View.View, float4(input.WorldPosition, 1.0)).z;
-	float3 radiance = ShadeDirectLights(input.WorldPosition, uint2(input.Position.xy), viewDepth, (input.Flags & DrawFlagReceiveShadows) != 0, shadowNormal,
-		normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, reflection);
+	float3 radiance = ShadeDirectLights(input.WorldPosition, uint2(input.Position.xy), viewDepth, GetCascadeDepth(input.WorldPosition, viewDepth),
+		(input.Flags & DrawFlagReceiveShadows) != 0, shadowNormal, normal, view, nDotV, diffuseColor, f0, energyCompensation, alpha, reflection);
 
 	// Image-based lighting (§8.6), or the constant ambient as a uniform environment.
 	float3 irradiance = Env.AmbientColor;
@@ -618,15 +635,19 @@ float4 ShadeForward(VertexOutput input, Surface surface)
 	// volumes replace the diffuse term's irradiance and the reflection probes the specular term's prefiltered radiance.
 	irradiance = ShadeProbeIrradiance(input.WorldPosition, normal, irradiance);
 	prefiltered = ShadeProbeSpecular(input.WorldPosition, reflection, roughness, prefiltered);
+	// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): on a drawn planar reflection's glass, its reflection in
+	// place of the probes' or environment's specular, under the same energy terms below.
+	if ((input.Flags & DrawFlagPlanarReflection) != 0)
+		prefiltered = ShadePlanarReflection(Instances[input.Instance].PlanarReflectionSlot, input.WorldPosition, roughness, alpha, prefiltered);
 	const float3 multiScatter = singleScatter * energyCompensation;
 	const float occlusion = min(surface.Occlusion, SampleGtao(AmbientOcclusion, LinearViewDepth, SceneNormals, uint2(input.Position.xy)));
 	radiance += irradiance * diffuseColor * saturate(float3(1.0) - multiScatter) * MultiBounceAmbientOcclusion(occlusion, diffuseColor);
 	radiance += prefiltered * multiScatter * (SpecularOcclusion(nDotV, occlusion, alpha) * HorizonOcclusion(reflection, surface.GeometricNormal));
 	radiance += surface.Emissive;
 	// M32: the fog in front of the surface, opaque or transparent (a transparent surface blends its fogged colour over the
-	// fogged surface behind it).
+	// fogged surface behind it). M42: a mirror view's from its glass on.
 	if (Fog.Enabled != 0)
-		radiance = ApplyFog(radiance, EvaluateFog(input.WorldPosition));
+		radiance = ApplyFog(radiance, EvaluateViewFog(input.WorldPosition, View.ReflectionView != 0, View.ClipPlane));
 
 	const float outputAlpha = Material.AlphaMode == MaterialAlphaModeBlend ? surface.BaseColor.a : 1.0;
 	return float4(radiance, outputAlpha);

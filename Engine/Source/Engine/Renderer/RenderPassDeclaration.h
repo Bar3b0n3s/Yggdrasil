@@ -83,7 +83,9 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> LightClustersPrograms = { "LightClusters" };
 		inline constexpr std::array<std::string_view, 1> LightClustersRows = { "LightClusters" };
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger): one row per reflection slot, in rank order,
-		// each timing that slot's whole mirror view; the slots' reflections and the mirror views' prepass scratch.
+		// each timing that slot's whole mirror view; the slots' reflections and the mirror views' prepass scratch; the program of
+		// the reflections' mip chain (PlanarReflectionPass.h).
+		inline constexpr std::array<std::string_view, 1> PlanarReflectionsPrograms = { "PlanarReflection" };
 		inline constexpr std::array<std::string_view, 4> PlanarReflectionsRows = { "PlanarReflection0", "PlanarReflection1", "PlanarReflection2",
 			"PlanarReflection3" };
 		inline constexpr std::array<std::string_view, 5> PlanarReflectionsTargets = { "PlanarReflectionColor", "PlanarReflectionDepth",
@@ -188,11 +190,10 @@ namespace Engine {
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: first in the Forward stage, before
 		// ForwardOpaque): the planar reflections a Lit view draws (Renderer/PlanarReflections.h), each a mirror view of the
 		// scene rendered from the camera mirrored in its plane into its slot's PlanarReflectionColor, whose mips the main view's
-		// forward passes sample on the mirror's glass; one row per slot (PlanarReflection0 to PlanarReflection3, by rank), and
-		// the mirror views' own light clusters under LightClusters. Declared by W42.1 with its rows and targets and without a
-		// pipeline, so nothing records it and no stats.get output changes; W42.2 adds the mip chain's compute pipeline of the
-		// program PlanarReflection, as M26's contract declared its passes before their streams.
-		{ .Name = "PlanarReflections", .Stage = RenderStage::Forward, .StatsRows = Detail::PlanarReflectionsRows, .Targets = Detail::PlanarReflectionsTargets },
+		// forward passes sample on the mirror's glass; one row per slot (PlanarReflection0 to PlanarReflection3, by rank), each
+		// timing that slot's whole mirror view, its light clusters included (LightClusterPass::RecordInRow); PlanarReflectionPass's
+		// one compute pipeline of the program PlanarReflection (the colour's mip chain).
+		{ .Name = "PlanarReflections", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::PlanarReflectionsPrograms, .StatsRows = Detail::PlanarReflectionsRows, .Targets = Detail::PlanarReflectionsTargets },
 		// Generates the DFG LUT once at creation (BrdfLut.h); the forward passes read it.
 		{ .Name = "BrdfLut", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::BrdfLutPrograms },
 		// The Lit forward variants, {Opaque, Mask} x the three cull modes; a material debug view adds its own lazily.

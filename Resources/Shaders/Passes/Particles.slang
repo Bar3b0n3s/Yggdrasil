@@ -50,6 +50,9 @@ struct VertexInput
 struct VertexOutput
 {
 	float4 Position : SV_Position;
+	// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the signed distance to ViewConstants::ClipPlane, which
+	// clips a mirror view's particles at its glass; 1 in every other view.
+	float ClipDistance : SV_ClipDistance0;
 	float4 Color : COLOR0;
 	float4 TexCoords : TEXCOORD0;
 	float2 Params : TEXCOORD1;
@@ -63,6 +66,7 @@ VertexOutput VSMain(VertexInput input)
 {
 	VertexOutput output;
 	output.Position = mul(View.ViewProjection, float4(input.Position, 1.0));
+	output.ClipDistance = dot(View.ClipPlane, float4(input.Position, 1.0));
 	output.Color = input.Color;
 	output.TexCoords = input.TexCoords;
 	output.Params = input.Params;
@@ -115,7 +119,7 @@ ColorOutput ShadeParticleColor(VertexOutput input, bool additive)
 	output.Color = shade.Color;
 	if (Fog.Enabled != 0)
 	{
-		const float4 fog = EvaluateFog(input.WorldPosition);
+		const float4 fog = EvaluateViewFog(input.WorldPosition, View.ReflectionView != 0, View.ClipPlane);
 		output.Color.rgb = additive ? ApplyFogAdditive(shade.Color.rgb, fog) : ApplyFog(shade.Color.rgb, fog);
 	}
 	output.Coverage = shade.Hidden ? 0u : 0xffffffffu;
