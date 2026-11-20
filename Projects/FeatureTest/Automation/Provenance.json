@@ -4404,7 +4404,7 @@
 		},
 		{
 			"Path": "Assets/Scripts/BoneAttachments/TriggerProbe.luau",
-			"XXH64": "4dea1e2e9eb1c6ad",
+			"XXH64": "d558fd71d20e7bc8",
 			"Method": "script.write",
 			"RequestId": 1,
 			"Client": "batch",
@@ -6564,7 +6564,7 @@
 		},
 		{
 			"Path": "Assets/Tests/BoneAttachments/BoneAttachments.test.luau",
-			"XXH64": "f80bb08c7943287d",
+			"XXH64": "cc557bdfdcb2bd03",
 			"Method": "script.write",
 			"RequestId": 10,
 			"Client": "batch",
@@ -7188,7 +7188,7 @@
 		},
 		{
 			"Path": "Assets/Tests/Replays/BoneAttachments.replay",
-			"XXH64": "ee32c06e32d736cf",
+			"XXH64": "91ee1ad166dd2632",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",

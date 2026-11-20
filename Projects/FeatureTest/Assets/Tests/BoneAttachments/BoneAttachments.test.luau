@@ -1,13 +1,15 @@
 --!strict
 -- Bone attachments in every run mode (M41; Docs/Decisions/0058-m41-bone-attachments.md decision 3; BoneAttachments.jsonl,
--- IdSeed 3801). BoneAttachments.scene holds two imported rigs: the Waver (Skinned.gltf) waves its Joint1 45 degrees about Z, and holds
--- a Sword on Joint1 (a Kinematic body with a trigger, a Gem light riding it, and a Charm below it attached to Joint0); the
--- Walker's Character (SkinnedRigs.gltf, RootMotion Apply) stands until a case starts its walk, with a Pack on its Spine and a
--- Rider (another Skinned.gltf) on its Hips. Each case starts the scene afresh (Isolation "Case"). Every check reads the
+-- IdSeed 3801). BoneAttachments.scene holds two imported rigs: the Waver (Skinned.gltf) waves its Joint1 45 degrees about
+-- Z, and holds a Sword on Joint1 (a Kinematic body with a trigger, a Gem light riding it, and a Charm below it attached to
+-- Joint0); the Walker's Character (SkinnedRigs.gltf, RootMotion Apply) stands until a case starts its walk, with a Pack on
+-- its Spine and a Rider (another Skinned.gltf) on its Hips. Each case starts the scene afresh (Isolation "Case"). Every check reads the
 -- attachments between ticks, where Animator:GetJointTransform reads the pose of the last AnimationSystem phase.
 
 -- The tolerance of Brief 22's check: an attached entity stays in the fist within a millimetre.
 local MILLIMETRE = 1e-3
+-- The Sword's trigger BoxCollider, centred on the Sword, in its axes.
+local SWORD_HALF_EXTENTS = vector.create(0.05, 0.4, 0.05)
 
 local function Find(path: string): Entity
 	local entity = Scene.FindByPath(path)
@@ -115,16 +117,23 @@ return Test.Suite("BoneAttachments", function()
 	Test.Case("removing the BoneAttachment keeps the last Transform, and reparenting away detaches", function()
 		StartWalk()
 		Test.WaitTicks(5)
+		-- The Pack, on the walking Spine, keeps the Transform it was placed at when its BoneAttachment goes.
+		ExpectOnBone("/Walker/Character/Pack", "/Walker/Character", "Spine")
 		local pack = Find("/Walker/Character/Pack")
+		local placed = pack.Transform.Translation
 		pack:RemoveComponent("BoneAttachment")
-		local kept = pack.Transform.Translation
 		Test.WaitTicks(10)
-		Test.ExpectEqual(pack.Transform.Translation, kept, "a removed attachment leaves the Transform")
-		local charm = Find("/Waver/Armature/Sword/Charm")
-		charm:SetParent(nil, true)
-		local world = charm.Transform.WorldPosition
+		Test.ExpectEqual(pack.Transform.Translation, placed, "a removed attachment keeps the Transform it was placed at")
+		-- The Rider, reparented away from the Walker while the Hips it was on walk on, stays where it was. Its attachment
+		-- then has no Animator above it: the run logs one ANIMATION_ATTACHMENT_INVALID warning naming /Rider, as expected.
+		local rider = Find("/Walker/Character/Rider")
+		local world = rider.Transform.WorldPosition
+		local hips = OnBone("/Walker/Character", "Hips", vector.zero)
+		rider:SetParent(nil, true)
 		Test.WaitTicks(10)
-		Test.ExpectNear(charm.Transform.WorldPosition, world, 1e-6, "a detached charm stays where it was")
+		Test.ExpectNear(rider.Transform.WorldPosition, world, 1e-5, "a detached Rider stays where it was")
+		local walked = OnBone("/Walker/Character", "Hips", vector.zero)
+		Test.Expect(vector.magnitude(walked - hips) > 0.1, "while the Hips it was on walked on")
 	end)
 
 	Test.Case("the world pause holds an attachment with its pose", function()
@@ -148,9 +157,21 @@ return Test.Suite("BoneAttachments", function()
 			return probe.Count >= 1
 		end, 120)
 		Test.ExpectEqual(probe.Other, "Target")
-		-- The Sword's sensor met the Target (a Kinematic body: sensors see moving bodies only) near the wave's peak, far from
-		-- where its Transform was authored.
-		local target = Find("/Target").Transform.WorldPosition
-		Test.Expect(vector.magnitude(probe.Position - target) < 0.5, `the Sword was at {probe.Position}, by the Target at {target}`)
+		-- A sensor's contact is found from the bodies' poses at the start of the physics step, and the AnimationSystem phase
+		-- places the Sword before PhysicsPreStep sweeps its Kinematic body there. So the contact begins exactly one tick
+		-- after the first pose of the bone that overlaps the Target: the bone-held pose of the tick before the contact
+		-- overlaps it, and the one before that does not. A body that lagged its bone meets the Target a tick later, one
+		-- teleported rather than swept a tick earlier, and either fails one of the two checks.
+		local function OverlapsTarget(pose: { Position: vector, Rotation: Quat }?): boolean
+			assert(pose, "the probe kept the bone's poses before the contact")
+			for _, hit in Physics.OverlapBox(pose.Position, SWORD_HALF_EXTENTS, pose.Rotation) do
+				if hit.Name == "Target" then
+					return true
+				end
+			end
+			return false
+		end
+		Test.Expect(OverlapsTarget(probe.Last), "the bone held the Sword on the Target in the tick before the contact")
+		Test.Expect(not OverlapsTarget(probe.Earlier), "and clear of it in the tick before that")
 	end)
 end)

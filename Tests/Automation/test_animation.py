@@ -133,7 +133,6 @@ class AnimationPreviewTests(AutomationTestCase):
         client.call("animation.preview", {"entity": "/Skinned/Armature", "stop": True})
 
 
-
 class BoneAttachmentTests(AutomationTestCase):
     def test_bone_attachment_follows_its_bone_in_play_and_survives_a_reopen(self) -> None:
         # M41 (decision 3): a BoneAttachment is created, updated and read through the generic entity methods. In the

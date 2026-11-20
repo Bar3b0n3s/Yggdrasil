@@ -249,7 +249,7 @@
 				"Handle": "682acfd37297fedb",
 				"Path": "Assets/Scripts/BoneAttachments/TriggerProbe.luau",
 				"Type": "Script",
-				"Hash": "38ce3728d6fe3fc0"
+				"Hash": "028e769c5d090587"
 			},
 			{
 				"Handle": "6b489bfc90dcec5d",
@@ -344,7 +344,7 @@
 		},
 		{
 			"Tick": 120,
-			"Luau": "local sword = Scene.FindByPath(\"/Waver/Armature/Sword\")\nlocal attachment = sword.BoneAttachment\nlocal position, rotation = Scene.FindByPath(\"/Waver/Armature\").Animator:GetJointTransform(\"Joint0\")\nreturn attachment.Bone == \"Joint0\" and vector.magnitude(sword.Transform.WorldPosition - (position + rotation * attachment.Offset)) < 0.001"
+			"Luau": "local sword = Scene.FindByPath(\"/Waver/Armature/Sword\")\nlocal attachment = sword.BoneAttachment\nlocal position, rotation = Scene.FindByPath(\"/Waver/Armature\").Animator:GetJointTransform(\"Joint0\")\nlocal director = Scene.FindByName(\"Director\"):GetScript()\nreturn director.Folds == 1 and attachment.Bone == \"Joint0\"\n\tand vector.magnitude(sword.Transform.WorldPosition - (position + rotation * attachment.Offset)) < 0.001"
 		}
 	],
 	"Checkpoints": [
