@@ -8,8 +8,10 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/SkeletonData.h"
 #include "Engine/Core/Log.h"
+#include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/AnimatorComponent.h"
+#include "Engine/Scene/Components/BoneAttachmentComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -178,7 +180,7 @@ namespace Engine {
 		IAnimationEventListener* Listener = nullptr; // documented back-reference, or null
 		std::vector<AnimationSceneIssue> Diagnostics{};
 		// The (entity, code) findings raised, so each is raised and logged once; the codes are AnimationValidation.h's
-		// constants.
+		// constants and M41's AnimationAttachmentInvalidCode (BoneAttachments.h).
 		std::set<std::pair<UUID, std::string_view>> RaisedIssues{};
 		// The Animators whose dropped events were logged (MaxAnimationEventsPerStep), each once.
 		std::set<UUID> EventDropsLogged{};
@@ -187,6 +189,10 @@ namespace Engine {
 		// The step's scratch, kept to reuse its capacity: the Animators in canonical order and the events collected.
 		std::vector<UUID> Animators{};
 		std::vector<AnimationEventRecord> Events{};
+		// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision 3): the attaching pass (Scene/BoneAttachments.h), with its
+		// joint cache and reported entities, and the step's scratch of its new findings.
+		BoneAttachmentPass Attachments{};
+		std::vector<AnimationSceneIssue> AttachmentFindings{};
 
 		void StepAnimator(Entity entity, const SimStep& step);
 		// Logs `what` for the Animator on `entity` once per Animator (NonFiniteLogged).
@@ -299,7 +305,11 @@ namespace Engine {
 	{
 		if (Diagnostics.size() >= MaxAnimationSystemDiagnostics)
 			return;
-		const std::string_view code = issue.Code == AnimationNoAnimatorCode ? AnimationNoAnimatorCode : AnimationSkeletonMismatchCode;
+		std::string_view code = AnimationSkeletonMismatchCode;
+		if (issue.Code == AnimationNoAnimatorCode)
+			code = AnimationNoAnimatorCode;
+		else if (issue.Code == AnimationAttachmentInvalidCode)
+			code = AnimationAttachmentInvalidCode;
 		if (!RaisedIssues.emplace(issue.Entity, code).second)
 			return;
 		if (Diagnostics.size() + 1 == MaxAnimationSystemDiagnostics)
@@ -350,10 +360,12 @@ namespace Engine {
 		State& state = *m_State;
 		Scene& scene = *state.RuntimeScene;
 		entt::registry& registry = scene.GetRegistry();
-		// A scene without the animation components (every scene before M23) costs two empty views and changes nothing.
+		// A scene without the animation components (every scene before M23) costs four empty views and changes nothing: M41's
+		// attaching pass also runs for the BoneAttachments, and for the attachment states it left (a removed BoneAttachment).
 		const bool animators = !registry.view<AnimatorComponent>().empty();
 		const bool skinned = !registry.view<SkinnedMeshComponent>().empty();
-		if (!animators && !skinned)
+		const bool attachments = !registry.view<BoneAttachmentComponent>().empty() || !registry.view<BoneAttachmentStateComponent>().empty();
+		if (!animators && !skinned && !attachments)
 			return;
 
 		// Stepping: every Animator of an effectively enabled entity, in the canonical order taken now.
@@ -378,6 +390,16 @@ namespace Engine {
 		}
 		if (skinned)
 			state.RaiseSkinnedMeshIssues();
+
+		// M41 (decision 3): attaching, after every Animator was posed and before the dispatch, so every callback reads every
+		// attachment at the tick's pose.
+		if (attachments)
+		{
+			state.AttachmentFindings.clear();
+			state.Attachments.Run(scene, state.AttachmentFindings);
+			for (AnimationSceneIssue& finding : state.AttachmentFindings)
+				state.RaiseIssue(std::move(finding));
+		}
 
 		// Dispatch: after every Animator was stepped, in (canonical entity, layer, firing) order, over the step's own list,
 		// which no callback reaches (a callback's Scene.CreateEntity or Scene.Destroy changes only the scene).

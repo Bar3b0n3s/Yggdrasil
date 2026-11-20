@@ -35,6 +35,15 @@
 // PlaySession::ExtractView run TransformSystem::Update first, so a follow camera placed from RenderPosition (M13) and the
 // rendered image agree.
 //
+// Attached subtrees (M41, Docs/Decisions/0058-m41-bone-attachments.md decision R; Scene/BoneAttachments.h). At an Alpha
+// below 1, an entity at or below an entity the last attaching pass attached (it holds BoneAttachmentStateComponent and its
+// recorded Animator's entity A is still its ancestor; the nearest such entity counts) renders at A's rendered world matrix
+// (this rule again, so a rider on a mount works) times its current pose relative to A (ComputeAttachedRelativeMatrix, the
+// product of the local matrices below A), whatever reset tags lie below A: the skinned palette's rule, so a held object
+// stays in the hand between ticks. At Alpha 1 it renders at its current pose, as every entity does. FindAttachedRenderAnimator
+// finds A; a scene without any BoneAttachmentStateComponent takes the rule above unchanged (one view emptiness check).
+// TransformSystem::GetRenderPosition and GetRenderRotation follow it too.
+//
 // Skinned items (M23, Docs/Decisions/0034-m23-contract.md decision 27): a SkinnedMesh's item carries its driving Animator's
 // palette (the runtime AnimationPoseComponent's skin matrices taken into the item's space at the rendered poses) and its
 // morph weights, the pose's channel for the entity's path overriding the component's (RenderSnapshot.h's MeshDrawItem).

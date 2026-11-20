@@ -29,6 +29,7 @@
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Scene/AnimationValidation.h"
 #include "Engine/Scene/AudioSystem.h"
+#include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentRegistration.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
@@ -1379,9 +1380,11 @@ end
 			// TILEMAP_FRAME_OUT_OF_RANGE and its milestone review's SPRITE_FRAME_OUTSIDE_TEXTURE, M22's three UI codes, M23's
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
-			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes).
+			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
+			// BoneAttachmentDiagnosticCodes).
 			CHECK(codes.size()
-				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size());
+				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
+					+ BoneAttachmentDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1439,10 +1442,12 @@ end
 			CHECK(position(NavMeshNotBakedCode) + 1 == position(NavMeshStaleCode));
 			// Phase 6's codes follow phase 5's in landing order (ADR 0052's phase-6 ledger, the validation row): M36's
 			// PHYSICS_SURFACE_UNUSED (Docs/Decisions/0053-m36-contact-surfaces.md decision 6) first, then M37's
-			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36 and ends the list.
+			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36. Phase 7's follow (ADR 0058's
+			// ledger): M41's ANIMATION_ATTACHMENT_INVALID (Docs/Decisions/0058-m41-bone-attachments.md decision 3) ends the list.
 			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
-			CHECK(codes.back() == PhysicsJointInvalidCode);
+			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
+			CHECK(codes.back() == AnimationAttachmentInvalidCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));

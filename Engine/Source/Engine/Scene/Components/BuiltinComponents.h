@@ -5,6 +5,7 @@
 #include "Engine/Scene/Components/AnimatorComponent.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
 #include "Engine/Scene/Components/AudioSourceComponent.h"
+#include "Engine/Scene/Components/BoneAttachmentComponent.h"
 #include "Engine/Scene/Components/BoxCollider2DComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
@@ -100,8 +101,9 @@ namespace Engine {
 		UiButtonComponent, UiToggleComponent, UiSliderComponent, UiScrollViewComponent, UiTextInputComponent,
 		// Animation (Registration/AnimationRegistration.cpp; M23, Docs/Decisions/0034-m23-contract.md decision 28). ADR 0028's
 		// phase-2 ledger: a milestone's new components go in categories of their own after Scripting, appended in landing
-		// order, so M23, the last lander, appended this category after M21's and M22's at its merge.
-		AnimatorComponent, SkinnedMeshComponent,
+		// order, so M23, the last lander, appended this category after M21's and M22's at its merge. M41's BoneAttachment
+		// follows the SkinnedMesh (Docs/Decisions/0058-m41-bone-attachments.md decision 3; its ledger's BuiltinComponents row).
+		AnimatorComponent, SkinnedMeshComponent, BoneAttachmentComponent,
 		// Particles (Registration/ParticlesRegistration.cpp), Probes (Registration/ProbesRegistration.cpp) and Terrain
 		// (Registration/TerrainRegistration.cpp; M26, Docs/Decisions/0037-m26-contract.md decision 4). ADR 0028's phase-3
 		// ledger: M26's components go in categories of their own after Animation, in that order; M24 adds none. M33's

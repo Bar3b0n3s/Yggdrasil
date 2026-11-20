@@ -36,6 +36,7 @@
 #include "Engine/Renderer/SpotShadowAtlas.h"
 #include "Engine/Scene/AnimationValidation.h"
 #include "Engine/Scene/AudioSystem.h"
+#include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/ComponentAccess.h"
 #include "Engine/Scene/ComponentHostOps.h"
 #include "Engine/Scene/Components/AudioListenerComponent.h"
@@ -212,6 +213,10 @@ namespace Engine {
 			// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9), appended in landing order after main's (ADR
 			// 0052's phase-6 ledger: after M36's PHYSICS_SURFACE_UNUSED), an array of its own (PhysicsJointDiagnosticCodes).
 			PhysicsJointInvalidCode,
+			// M41 (Scene/BoneAttachments.h, Docs/Decisions/0058-m41-bone-attachments.md decision 3), appended in landing order after
+			// main's (ADR 0058's phase-7 ledger: after M37's PHYSICS_JOINT_INVALID), an array of its own
+			// (BoneAttachmentDiagnosticCodes).
+			AnimationAttachmentInvalidCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -473,6 +478,14 @@ namespace Engine {
 				"Correct the field or the hierarchy the finding names: put the joint on a RigidBody's entity or a child of it, name another "
 				"body (or null for the world) in ConnectedBody, give Axis a direction, separate the limits (a FixedJoint for a joint that does "
 				"not move), or set MinDistance at or below MaxDistance." },
+			ValidationCodeInfo{ AnimationAttachmentInvalidCode, "Warning", false,
+				"A BoneAttachment cannot attach its entity to a joint of the Animator's Skeleton (a bone), or its entity's physics fights the "
+				"placement: no Animator above the entity, an empty Bone, a Skeleton without the joint Bone names (with up to three close joint "
+				"names), at run time an Animator without a pose, a CharacterController or a Dynamic RigidBody on the entity, or solid colliders "
+				"that move with it and form no Kinematic body of its own. An entity that is not attached keeps its Transform.",
+				"Make the entity a descendant of the Animator's entity (a model instance's armature), set Bone to a joint name exactly as the "
+				"model names it, and give an attached entity with solid colliders a Kinematic RigidBody of its own; a held object holds no "
+				"CharacterController or Dynamic RigidBody." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1251,13 +1264,17 @@ namespace Engine {
 		}
 
 		// The animation checks of §13.7 (M23, Scene/AnimationValidation.h): ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH
-		// on each SkinnedMesh they name, its mesh and skeleton loaded through the editor's asset manager. Neither is fixable.
+		// on each SkinnedMesh they name, its mesh and skeleton loaded through the editor's asset manager, then M41's
+		// ANIMATION_ATTACHMENT_INVALID on each BoneAttachment it names (Scene/BoneAttachments.h). None is fixable.
 		static void CheckAnimation(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			AssetManager* assets = editor.GetEngine().GetAssetManager();
 			if (assets == nullptr)
 				return;
-			for (AnimationSceneIssue& issue : FindAnimationSceneIssues(*checked.Target, *assets))
+			std::vector<AnimationSceneIssue> issues = FindAnimationSceneIssues(*checked.Target, *assets);
+			std::vector<AnimationSceneIssue> attachments = FindBoneAttachmentIssues(*checked.Target, *assets);
+			issues.insert(issues.end(), std::make_move_iterator(attachments.begin()), std::make_move_iterator(attachments.end()));
+			for (AnimationSceneIssue& issue : issues)
 			{
 				DiagnosticSite site;
 				site.File = checked.File;

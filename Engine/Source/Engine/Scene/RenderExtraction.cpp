@@ -5,6 +5,7 @@
 #include "Engine/Core/DetMath.h"
 #include "Engine/Core/Profiler.h"
 #include "Engine/Scene/AnimationSystem.h"
+#include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
@@ -643,6 +644,13 @@ namespace Engine {
 		ENGINE_CORE_ASSERT(entity.IsValid(), "ComputeRenderedWorldMatrix needs a valid entity");
 		ENGINE_CORE_ASSERT(alpha >= 0.0f && alpha <= 1.0f, "ComputeRenderedWorldMatrix needs an alpha in [0, 1], got {}", alpha);
 
+		// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision R): an attached subtree renders at its Animator's rendered
+		// pose times its current pose relative to that Animator's entity, the skin's rule; at alpha 1 that is its current pose.
+		if (alpha < 1.0f)
+		{
+			if (const ConstEntity animator = FindAttachedRenderAnimator(entity); animator.IsValid())
+				return ComputeRenderedWorldMatrix(animator, alpha) * ComputeAttachedRelativeMatrix(animator, entity);
+		}
 		const glm::mat4 current = Utils::GetCurrentWorldMatrix(entity);
 		const PreviousWorldTransformComponent* previous = Utils::FindInterpolationStart(entity);
 		if (previous == nullptr || alpha >= 1.0f || previous->Matrix == current)

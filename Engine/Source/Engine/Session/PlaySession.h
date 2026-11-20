@@ -106,8 +106,8 @@ namespace Engine {
 		SpriteAnimation,         // 4b: SpriteAnimationSystem::Step, every playing SpriteAnimator advanced one tick (M21,
 								 //     Docs/Decisions/0032-m21-contract.md decision 5); Play and Simulate
 		AnimationSystem,         // 4c: AnimationSystem::Step, every Animator's layers advanced, its pose sampled, root motion
-								 //     applied and events delivered (M23, Docs/Decisions/0034-m23-contract.md decision 29); Play
-								 //     and Simulate
+								 //     applied, then every BoneAttachment placed on its bone (M41, Scene/BoneAttachments.h), and
+								 //     events delivered (M23, Docs/Decisions/0034-m23-contract.md decision 29); Play and Simulate
 		PreStepTransformUpdate,  // 5: TransformSystem::Update, before PhysicsSystem::PreStep
 		PhysicsPreStep,          // 5: PhysicsSystem::PreStep: create, rebuild or remove bodies; teleports; MoveKinematic (M11)
 		PhysicsStep,             // 6: PhysicsSystem::Step: PhysicsWorld::Step(fixedDt) (M11)
@@ -364,7 +364,10 @@ namespace Engine {
 	//   - it was created (CreateEntity, scripts in M13; it also has no PreviousWorldTransform yet) or became effectively
 	//     enabled;
 	//   - it was teleported (MarkTeleported: RigidBody:Teleport and Transform:Teleport in M11/M13).
-	// Motion made inside the fixed steps (scripts in FixedUpdate, physics, kinematic platforms) interpolates.
+	// Motion made inside the fixed steps (scripts in FixedUpdate, physics, kinematic platforms) interpolates. M41
+	// (Docs/Decisions/0058-m41-bone-attachments.md decision R): an entity at or below an entity the AnimationSystem phase
+	// attached to a bone renders instead at its Animator's rendered pose times its pose relative to that Animator's entity,
+	// whatever its tags, as the skin does (RenderExtraction.h's "Attached subtrees").
 	//
 	// Entity cap (§5.7). A session holds at most Simulation.MaxEntities entities. CreateEntity and the hosts' creation paths
 	// (CheckEntityCapacity: automation's entity.create and entity.duplicate with target "play"; scripts in M13) fail with

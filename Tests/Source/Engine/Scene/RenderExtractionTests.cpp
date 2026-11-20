@@ -2,9 +2,15 @@
 
 #include "Engine/Scene/RenderExtraction.h"
 
+#include "Engine/Asset/AnimationClipData.h"
 #include "Engine/Asset/BuiltinAssets.h"
+#include "Engine/Asset/SkeletonData.h"
+#include "Engine/Core/Hash.h"
+#include "Engine/Scene/AnimationSystem.h"
+#include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/Components/AnimationPoseComponent.h"
 #include "Engine/Scene/Components/AnimatorComponent.h"
+#include "Engine/Scene/Components/BoneAttachmentComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
 #include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
@@ -33,9 +39,11 @@
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/GlmApprox.h"
+#include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
 
 #include <algorithm>
+#include <format>
 #include <limits>
 #include <memory_resource>
 #include <string_view>
@@ -76,6 +84,48 @@ namespace Engine {
 		void SnapshotPreviousPose(Entity entity)
 		{
 			entity.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = entity.GetComponent<WorldTransformComponent>().Matrix });
+		}
+
+		// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision R): a rig of hips one unit up and a hand one above them, a
+		// one-second walk of the hips 2 m along +Z and a one-second swing of the hand to 90 degrees about +Z and back.
+		constexpr AssetHandle RigSkeletonHandle(0xb0e5000000000101);
+		constexpr AssetHandle RigWalkHandle(0xb0e5000000000102);
+		constexpr AssetHandle RigSwingHandle(0xb0e5000000000103);
+
+		void PublishWalkingRig(Test::InMemoryAssetManager& assets)
+		{
+			Ref<SkeletonData> skeleton = CreateRef<SkeletonData>();
+			skeleton->Joints.push_back({ .Name = "Hips", .Translation = { 0.0f, 1.0f, 0.0f }, .InverseBind = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -1.0f, 0.0f)) });
+			skeleton->Joints.push_back({ .Name = "Hand", .Parent = 0, .Translation = { 0.0f, 1.0f, 0.0f }, .InverseBind = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -2.0f, 0.0f)) });
+			assets.Publish(RigSkeletonHandle, skeleton, "Assets/Models/Warden.gltf");
+			Ref<AnimationClipData> walk = CreateRef<AnimationClipData>();
+			walk->Duration = 1.0f;
+			walk->Channels.push_back(AnimationChannel{ .Target = "Hips", .Path = AnimationPath::Translation, .Interpolation = AnimationInterpolation::Linear, .Times = { 0.0f, 1.0f }, .Values = { 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 2.0f } });
+			assets.Publish(RigWalkHandle, walk, "Assets/Models/Warden.gltf");
+			const float half = 0.70710678f;
+			Ref<AnimationClipData> swing = CreateRef<AnimationClipData>();
+			swing->Duration = 1.0f;
+			swing->Channels.push_back(AnimationChannel{ .Target = "Hand", .Path = AnimationPath::Rotation, .Interpolation = AnimationInterpolation::Linear, .Times = { 0.0f, 0.5f, 1.0f }, .Values = { 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, half, half, 0.0f, 0.0f, 0.0f, 1.0f } });
+			assets.Publish(RigSwingHandle, swing, "Assets/Models/Warden.gltf");
+		}
+
+		// An Animator walking with root motion Apply (so its entity moves between ticks) and swinging the hand fast.
+		AnimatorComponent MakeWalkingAnimator()
+		{
+			AnimatorComponent animator;
+			animator.Skeleton = TypedAssetHandle<AssetType::Skeleton>(RigSkeletonHandle);
+			animator.Layers.push_back(AnimatorLayer{ .Clip = TypedAssetHandle<AssetType::AnimationClip>(RigWalkHandle) });
+			animator.Layers.push_back(AnimatorLayer{ .Clip = TypedAssetHandle<AssetType::AnimationClip>(RigSwingHandle), .Time = 0.1f, .Speed = 4.0f });
+			animator.RootMotion = AnimatorRootMotion::Apply;
+			return animator;
+		}
+
+		// Every entity's current world matrix as its previous pose (the play session's interpolation snapshot, phase 0).
+		void SnapshotPreviousPoses(Scene& scene)
+		{
+			entt::registry& registry = scene.GetRegistry();
+			for (const auto [entity, world] : registry.view<WorldTransformComponent>().each())
+				registry.emplace_or_replace<PreviousWorldTransformComponent>(entity, world.Matrix);
 		}
 
 	}
@@ -862,6 +912,138 @@ namespace Engine {
 			REQUIRE(snapshot->Meshes.size() == 1);
 			CHECK(snapshot->Meshes[0].JointPalette == std::vector<glm::mat4>{ glm::mat4(1.0f) });
 			CHECK(snapshot->Meshes[0].MorphWeights == std::vector<float>{ 0.5f, -0.5f, 1.5f });
+		}
+
+		// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision R): between ticks an attached subtree renders at its
+		// Animator's rendered pose times its current pose relative to the Animator's entity, as the skinned palette does, so
+		// the staff's item, one unit along the hand, lies on the hand the palette draws at alpha 0.5, while the walking
+		// Animator's entity interpolates and the hand swings, whatever reset tag the staff has; Transform.RenderPosition and
+		// RenderRotation give the same pose (the one rule of RenderExtraction.h), and so does a child of the staff. Plain
+		// interpolation of the staff would leave it off the hand. At alpha 1 the subtree renders at its current pose, bit for
+		// bit.
+		TEST_CASE("RenderExtraction: an attached subtree renders at its Animator's rendered pose")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishWalkingRig(assets);
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity warden = scene.CreateEntity("Warden");
+			warden.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 0.0f, -2.0f);
+				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(0.0f, 30.0f, 0.0f));
+			});
+			warden.AddComponent<AnimatorComponent>(MakeWalkingAnimator());
+			Entity body = scene.CreateEntity("Body", warden);
+			body.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c4)));
+			body.AddComponent<SkinnedMeshComponent>();
+			Entity staff = scene.CreateEntity("Staff", warden);
+			staff.AddComponent<BoneAttachmentComponent>(BoneAttachmentComponent{ .Bone = "Hand", .Offset = glm::vec3(0.0f, 1.0f, 0.0f) });
+			staff.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c5)));
+			Entity gem = scene.CreateEntity("Gem", staff);
+			SetTranslation(gem, glm::vec3(0.0f, 0.5f, 0.0f));
+			gem.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c6)));
+			TransformSystem::Update(scene);
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			(*system)->Step(SimStep::FromTick(0, 1.0 / 60.0));
+			TransformSystem::Update(scene);
+			SnapshotPreviousPoses(scene);
+			(*system)->Step(SimStep::FromTick(1, 1.0 / 60.0));
+			TransformSystem::Update(scene);
+			REQUIRE(staff.HasComponent<BoneAttachmentStateComponent>());
+			// A frame-phase write's tag on the staff changes nothing for the attached subtree.
+			staff.AddComponent<InterpolationResetTag>();
+			scene.SetInterpolationAlpha(0.5f);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, RenderExtractionRequest{ .Width = 64, .Height = 64, .Alpha = 0.5f });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 3);
+			const MeshDrawItem& bodyItem = snapshot->Meshes[0];
+			const MeshDrawItem& staffItem = snapshot->Meshes[1];
+			const MeshDrawItem& gemItem = snapshot->Meshes[2];
+			REQUIRE(bodyItem.JointPalette.size() == 2);
+			// The hand as the skin draws it: the body's item times its palette entry, undoing the hand's bind; the staff one unit
+			// along it.
+			const glm::mat4 hand = bodyItem.World * bodyItem.JointPalette[1] * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, 0.0f));
+			const glm::vec3 held(hand * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+			CHECK(Test::ApproxEqual(glm::vec3(staffItem.World[3]), held, 1e-5f));
+			CHECK(Test::ApproxEqual(glm::vec3(staffItem.World[0]), glm::vec3(hand[0]), 1e-5f));
+			CHECK(Test::ApproxEqual(glm::vec3(staffItem.World[1]), glm::vec3(hand[1]), 1e-5f));
+			CHECK(Test::ApproxEqual(TransformSystem::GetRenderPosition(staff), held, 1e-5f));
+			CHECK(Test::ApproxEqual(gemItem.World, staffItem.World * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.5f, 0.0f)), 1e-5f));
+			CHECK(Test::ApproxEqual(TransformSystem::GetRenderPosition(gem), glm::vec3(gemItem.World[3]), 1e-5f));
+			for (const Entity entity : { staff, gem })
+			{
+				INFO(std::string(entity.GetName()));
+				const Result<TransformDecomposition> rendered = TransformSystem::DecomposeMatrix(ComputeRenderedWorldMatrix(entity, 0.5f));
+				REQUIRE(rendered.has_value());
+				for (const glm::vec3 axis : { glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) })
+					CHECK(Test::ApproxEqual(rendered->Rotation * axis, TransformSystem::GetRenderRotation(entity) * axis, 1e-5f));
+			}
+			// Interpolating the staff like any entity would leave it off the hand by about half a tick of the swing.
+			const glm::vec3 previous(staff.GetComponent<PreviousWorldTransformComponent>().Matrix[3]);
+			const glm::vec3 current(staff.GetComponent<WorldTransformComponent>().Matrix[3]);
+			CHECK(glm::length(previous + (current - previous) * 0.5f - held) > 1e-2f);
+			// At alpha 1 the subtree renders at its current pose.
+			CHECK(ComputeRenderedWorldMatrix(staff, 1.0f) == staff.GetComponent<WorldTransformComponent>().Matrix);
+			CHECK(ComputeRenderedWorldMatrix(gem, 1.0f) == gem.GetComponent<WorldTransformComponent>().Matrix);
+		}
+
+		// M41 (decision R): a scene without attachments takes exactly the rule it had: the digest of the meshes' rendered
+		// matrices and palettes and the lights' poses at alpha 0.375, over a walking, swinging rig with a skinned body, a
+		// mesh that turns, grows and moves between the ticks, a child of a reset-tagged entity and a light, is the one its
+		// extraction gave before M41 (the committed value, checked against the extraction without M41's change).
+		TEST_CASE("RenderExtraction: a scene without attachments extracts as before")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishWalkingRig(assets);
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity warden = scene.CreateEntity("Warden");
+			warden.AddComponent<AnimatorComponent>(MakeWalkingAnimator());
+			Entity body = scene.CreateEntity("Body", warden);
+			body.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c4)));
+			body.AddComponent<SkinnedMeshComponent>();
+			Entity spinner = scene.CreateEntity("Spinner");
+			spinner.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c5)));
+			spinner.AddComponent<PointLightComponent>();
+			Entity written = scene.CreateEntity("Written");
+			Entity child = scene.CreateEntity("Child", written);
+			child.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c6)));
+			TransformSystem::Update(scene);
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			(*system)->Step(SimStep::FromTick(0, 1.0 / 60.0));
+			TransformSystem::Update(scene);
+			SnapshotPreviousPoses(scene);
+			(*system)->Step(SimStep::FromTick(1, 1.0 / 60.0));
+			spinner.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.5f, 1.0f, -0.25f);
+				transform.Rotation = TransformSystem::QuaternionFromEulerDegrees(glm::vec3(10.0f, 70.0f, -5.0f));
+				transform.Scale = glm::vec3(1.0f, 2.0f, 1.5f);
+			});
+			SetTranslation(written, glm::vec3(3.0f, 0.0f, 0.0f));
+			TransformSystem::Update(scene);
+			written.AddComponent<InterpolationResetTag>();
+			CHECK(scene.GetRegistry().view<BoneAttachmentStateComponent>().empty());
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, RenderExtractionRequest{ .Width = 64, .Height = 64, .Alpha = 0.375f });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 3);
+			XXH64Hasher hasher;
+			for (const MeshDrawItem& item : snapshot->Meshes)
+			{
+				hasher.Update(std::as_bytes(std::span(&item.World, 1)));
+				hasher.Update(std::as_bytes(std::span(item.JointPalette)));
+			}
+			REQUIRE(snapshot->Lights.size() == 1);
+			hasher.Update(std::as_bytes(std::span(&snapshot->Lights[0].Position, 1)));
+			hasher.Update(std::as_bytes(std::span(&snapshot->Lights[0].Direction, 1)));
+			CHECK(std::format("{:016x}", hasher.Digest()) == "f9f2df085179fed9");
 		}
 
 		// Docs/Decisions/0032-m21-contract.md decision 4 (stream A): sprites in draw order, their layers resolved by name.

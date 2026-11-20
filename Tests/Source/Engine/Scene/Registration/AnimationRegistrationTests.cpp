@@ -1,6 +1,7 @@
 #include "TestsPCH.h"
 
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/SkeletonData.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/ValidationContext.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
@@ -9,6 +10,7 @@
 #include <cstddef>
 #include <limits>
 #include <span>
+#include <string>
 #include <string_view>
 
 // The Animation category (M23, C23.3; Docs/Decisions/0034-m23-contract.md decision 28): the contract registers the Animator
@@ -111,6 +113,50 @@ namespace Engine {
 			CHECK(countErrors(skinnedInfo, &skinned) == 1);
 			skinned.MorphWeights.assign(MaxMeshMorphTargets + 1, 0.0f);
 			CHECK(countErrors(skinnedInfo, &skinned) == 1);
+		}
+
+		// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision 3): the BoneAttachment follows the SkinnedMesh in Animation,
+		// requires Transform, and its fields are the colliders' types; its Bone names a joint as a Skeleton can, at most
+		// MaxSkeletonJointNameBytes of valid UTF-8 (empty is valid: reported, never refused).
+		TEST_CASE("AnimationRegistration: a BoneAttachment follows the SkinnedMesh, requires Transform and holds a Bone of at most 256 bytes of UTF-8")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo& skinned = RequireAnimationComponent(*registry, "SkinnedMesh");
+			const ComponentInfo& attachment = RequireAnimationComponent(*registry, "BoneAttachment");
+			CHECK(attachment.GetIndex() == skinned.GetIndex() + 1);
+			CHECK(attachment.GetCategory() == "Animation");
+			CHECK(attachment.GetVersion() == 1);
+			REQUIRE(attachment.GetRequires().size() == 1);
+			CHECK(attachment.GetRequires()[0] == registry->FindComponent("Transform"));
+			REQUIRE(attachment.FindField("Bone") != nullptr);
+			CHECK(attachment.FindField("Bone")->GetKind() == FieldType::String);
+			CHECK(attachment.FindField("Offset")->GetKind() == FieldType::Vec3);
+			CHECK(attachment.FindField("Offset")->GetMeta().Unit == "m");
+			CHECK(attachment.FindField("Rotation")->GetKind() == FieldType::Quat);
+			for (const std::string_view field : { "Bone", "Offset", "Rotation" })
+			{
+				CAPTURE(field);
+				CHECK(attachment.FindField(field)->GetDescription().find("a joint of the Animator's Skeleton (a bone)") != std::string::npos);
+			}
+
+			ResolveContext resolve;
+			resolve.Registry = registry.get();
+			const auto countErrors = [&resolve, &attachment](const BoneAttachmentComponent& component)
+			{
+				ValidationContext context;
+				attachment.Validate(&component, resolve, context);
+				return context.GetErrorCount();
+			};
+			BoneAttachmentComponent component;
+			CHECK(countErrors(component) == 0);
+			component.Bone = "DEF-hand.R";
+			CHECK(countErrors(component) == 0);
+			component.Bone.assign(MaxSkeletonJointNameBytes, 'b');
+			CHECK(countErrors(component) == 0);
+			component.Bone.assign(MaxSkeletonJointNameBytes + 1, 'b');
+			CHECK(countErrors(component) == 1);
+			component.Bone = std::string("hand\xff");
+			CHECK(countErrors(component) == 1);
 		}
 	}
 

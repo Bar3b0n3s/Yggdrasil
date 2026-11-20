@@ -1,0 +1,177 @@
+{
+	"asset": {
+		"version": "2.0"
+	},
+	"scene": 0,
+	"scenes": [
+		{
+			"nodes": [
+				0,
+				3
+			]
+		}
+	],
+	"nodes": [
+		{
+			"name": "Root",
+			"children": [
+				1
+			]
+		},
+		{
+			"name": "Mid",
+			"translation": [
+				0,
+				1,
+				0
+			],
+			"children": [
+				2
+			]
+		},
+		{
+			"name": "Tip",
+			"translation": [
+				0,
+				1,
+				0
+			]
+		},
+		{
+			"name": "Body",
+			"mesh": 0,
+			"skin": 0
+		}
+	],
+	"skins": [
+		{
+			"name": "Rig",
+			"joints": [
+				0,
+				1,
+				2
+			],
+			"inverseBindMatrices": 6
+		}
+	],
+	"meshes": [
+		{
+			"name": "Body",
+			"primitives": [
+				{
+					"attributes": {
+						"POSITION": 0,
+						"NORMAL": 1,
+						"TANGENT": 2,
+						"JOINTS_0": 3,
+						"WEIGHTS_0": 4
+					},
+					"indices": 5
+				}
+			]
+		}
+	],
+	"accessors": [
+		{
+			"bufferView": 0,
+			"componentType": 5126,
+			"count": 3,
+			"type": "VEC3",
+			"min": [
+				0,
+				0,
+				0
+			],
+			"max": [
+				1,
+				1,
+				0
+			]
+		},
+		{
+			"bufferView": 1,
+			"componentType": 5126,
+			"count": 3,
+			"type": "VEC3"
+		},
+		{
+			"bufferView": 2,
+			"componentType": 5126,
+			"count": 3,
+			"type": "VEC4"
+		},
+		{
+			"bufferView": 3,
+			"componentType": 5121,
+			"count": 3,
+			"type": "VEC4"
+		},
+		{
+			"bufferView": 4,
+			"componentType": 5126,
+			"count": 3,
+			"type": "VEC4"
+		},
+		{
+			"bufferView": 5,
+			"componentType": 5123,
+			"count": 3,
+			"type": "SCALAR"
+		},
+		{
+			"bufferView": 6,
+			"componentType": 5126,
+			"count": 3,
+			"type": "MAT4"
+		}
+	],
+	"bufferViews": [
+		{
+			"buffer": 0,
+			"byteOffset": 0,
+			"byteLength": 36,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteOffset": 36,
+			"byteLength": 36,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteOffset": 72,
+			"byteLength": 48,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteOffset": 120,
+			"byteLength": 12,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteOffset": 132,
+			"byteLength": 48,
+			"target": 34962
+		},
+		{
+			"buffer": 0,
+			"byteOffset": 180,
+			"byteLength": 6,
+			"target": 34963
+		},
+		{
+			"buffer": 0,
+			"byteOffset": 188,
+			"byteLength": 192
+		}
+	],
+	"buffers": [
+		{
+			"byteLength": 380,
+			"uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAACAPwAAgD8AAAAAAAAAAAAAgD8AAIA/AAAAAAAAAAAAAIA/AAAAAAEAAAACAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAABAAIAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAgAAAAAAAAIA/AACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAACAPwAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAADAAAAAAAAAgD8="
+		}
+	]
+}
