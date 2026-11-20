@@ -679,6 +679,10 @@ namespace Engine {
 
 	void EditorPlayController::OnAssetReload(AssetHandle source)
 	{
+		// A presentation-only asset (a material, EditorAssetManager::IsPresentationOnly), which no reload deferral holds,
+		// changes what the session draws, never its state: the session is not modified, and its recording stays valid.
+		if (m_State->Editor->GetAssets().IsPresentationOnly(source))
+			return;
 		if (PlaySession* session = GetSession())
 			session->MarkModified();
 		if (m_State->TestOwner != nullptr || m_State->Session == nullptr)

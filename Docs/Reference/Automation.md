@@ -385,7 +385,7 @@ Example: Import a texture as a normal map.
 
 ### asset.setProperties
 
-Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet, a tilemap or a string table; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred like script reloads.
+Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet, a tilemap or a string table; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable command. A material's change shows in a running play session's next rendered frame, lockstep, recording, replay and test sessions included, and changes no state hash (a material is only drawn); for any other asset, a running lockstep, recording, replay or test session sees the change only after it ends: those asset reloads are deferred like script reloads.
 
 - Flags: tool `asset_set_properties`, mutates, dry run, batch
 - Timeout: 60 s
@@ -1845,7 +1845,7 @@ Param: none.
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
 | `timeScale` | `Float` | The time scale (1 is real time). |
-| `modified` | `Bool` | An asset or script reloaded during play (§7.5). |
+| `modified` | `Bool` | A script or an asset reloaded during play (§7.5); a material's reload, which only changes what is drawn, does not count. |
 | `recording` | `Bool` | An input recording is active. |
 | `stopped` | `Bool` | A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance. |
 | `stopError` | `Variant` | The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs. |
@@ -1882,7 +1882,7 @@ Param: none.
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
 | `timeScale` | `Float` | The time scale (1 is real time). |
-| `modified` | `Bool` | An asset or script reloaded during play (§7.5). |
+| `modified` | `Bool` | A script or an asset reloaded during play (§7.5); a material's reload, which only changes what is drawn, does not count. |
 | `recording` | `Bool` | An input recording is active. |
 | `stopped` | `Bool` | A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance. |
 | `stopError` | `Variant` | The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs. |
@@ -1922,7 +1922,7 @@ Sets the time scale of the play session (0 to 100, 1 is real time). Returns the 
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
 | `timeScale` | `Float` | The time scale (1 is real time). |
-| `modified` | `Bool` | An asset or script reloaded during play (§7.5). |
+| `modified` | `Bool` | A script or an asset reloaded during play (§7.5); a material's reload, which only changes what is drawn, does not count. |
 | `recording` | `Bool` | An input recording is active. |
 | `stopped` | `Bool` | A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance. |
 | `stopError` | `Variant` | The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs. |
@@ -1963,7 +1963,7 @@ Pauses or resumes the play session's world from its next tick on, as Time.PauseW
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
 | `timeScale` | `Float` | The time scale (1 is real time). |
-| `modified` | `Bool` | An asset or script reloaded during play (§7.5). |
+| `modified` | `Bool` | A script or an asset reloaded during play (§7.5); a material's reload, which only changes what is drawn, does not count. |
 | `recording` | `Bool` | An input recording is active. |
 | `stopped` | `Bool` | A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance. |
 | `stopError` | `Variant` | The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs. |
@@ -2010,7 +2010,7 @@ Starts a play session of the open scene (or of scene) through the serializer cop
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
 | `timeScale` | `Float` | The time scale (1 is real time). |
-| `modified` | `Bool` | An asset or script reloaded during play (§7.5). |
+| `modified` | `Bool` | A script or an asset reloaded during play (§7.5); a material's reload, which only changes what is drawn, does not count. |
 | `recording` | `Bool` | An input recording is active. |
 | `stopped` | `Bool` | A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance. |
 | `stopError` | `Variant` | The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs. |
@@ -2047,7 +2047,7 @@ Param: none.
 | `lockstepOwner` | `String` | The name of the client that owns lockstep; empty without lockstep. |
 | `ownedByCaller` | `Bool` | The requesting client owns lockstep. |
 | `timeScale` | `Float` | The time scale (1 is real time). |
-| `modified` | `Bool` | An asset or script reloaded during play (§7.5). |
+| `modified` | `Bool` | A script or an asset reloaded during play (§7.5); a material's reload, which only changes what is drawn, does not count. |
 | `recording` | `Bool` | An input recording is active. |
 | `stopped` | `Bool` | A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance. |
 | `stopError` | `Variant` | The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs. |

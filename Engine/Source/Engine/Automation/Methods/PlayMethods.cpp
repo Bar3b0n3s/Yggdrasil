@@ -512,7 +512,7 @@ namespace Engine {
 			.Field("lockstepOwner", &PlayStateResult::LockstepOwner, "The name of the client that owns lockstep; empty without lockstep.")
 			.Field("ownedByCaller", &PlayStateResult::OwnedByCaller, "The requesting client owns lockstep.")
 			.Field("timeScale", &PlayStateResult::TimeScale, "The time scale (1 is real time).")
-			.Field("modified", &PlayStateResult::Modified, "An asset or script reloaded during play (§7.5).")
+			.Field("modified", &PlayStateResult::Modified, "A script or an asset reloaded during play (§7.5); a material's reload, which only changes what is drawn, does not count.")
 			.Field("recording", &PlayStateResult::Recording, "An input recording is active.")
 			.Field("stopped", &PlayStateResult::Stopped, "A fatal script error (such as a second memory-limit breach) stopped the session: ticks no longer advance.")
 			.Field("stopError", &PlayStateResult::StopError, "The script error that stopped the session (§11.7 form, as scriptError error data); null while it runs.")

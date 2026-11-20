@@ -2312,8 +2312,9 @@ namespace Engine {
 				.Name = "asset.setProperties",
 				.Description = "Applies an RFC 7386 merge patch to a native asset's properties (a material, a sound effect, a sprite sheet, a tilemap or "
 							   "a string table; an array such as a sheet's Frames or a tilemap's Palette is replaced whole) and writes it, as one undoable "
-							   "command. A running lockstep, recording, replay or test session sees the change only after it ends: asset reloads are deferred "
-							   "like script reloads.",
+							   "command. A material's change shows in a running play session's next rendered frame, lockstep, recording, replay and test "
+							   "sessions included, and changes no state hash (a material is only drawn); for any other asset, a running lockstep, recording, "
+							   "replay or test session sees the change only after it ends: those asset reloads are deferred like script reloads.",
 				.RequiredParams = { "asset", "values" },
 				.ExposeAsTool = true,
 				.Mutates = true,

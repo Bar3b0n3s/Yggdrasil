@@ -63,6 +63,7 @@ namespace Engine {
 		std::set<std::string> LoggedPollErrors; // each failed poll's message is logged once
 		bool IsDeferred = false;
 		std::map<VfsPath, FileChangeKind> HeldChanges; // while deferred, merged per path
+		DeferralExemption Exemption;                   // the changes a deferral delivers at once (SetDeferralExemption)
 
 		mutable std::mutex GenerationMutex;            // guards Generations (tickets may be checked from import jobs)
 		std::map<AssetHandle, uint64_t> Generations{}; // the newest generation requested per handle
@@ -84,19 +85,24 @@ namespace Engine {
 			});
 		}
 
-		// The changes of one poll, on the main thread: held while deferred, else delivered to the listener.
+		// The changes of one poll, on the main thread: held while deferred (but those the exemption accepts, delivered in
+		// path order), else delivered to the listener.
 		void Deliver(std::vector<FileChange> changes)
 		{
 			if (changes.empty())
 				return;
 			if (IsDeferred)
 			{
+				std::vector<FileChange> exempt;
 				for (const FileChange& change : changes)
 				{
 					const auto held = HeldChanges.find(change.Path);
 					if (held == HeldChanges.end())
 					{
-						HeldChanges.emplace(change.Path, change.Kind);
+						if (Exemption && Exemption(change))
+							exempt.push_back(change);
+						else
+							HeldChanges.emplace(change.Path, change.Kind);
 						continue;
 					}
 					if (const std::optional<FileChangeKind> merged = Utils::MergeFileChanges(held->second, change.Kind))
@@ -104,6 +110,8 @@ namespace Engine {
 					else
 						HeldChanges.erase(held);
 				}
+				if (!exempt.empty() && Listener)
+					Listener(exempt);
 				return;
 			}
 			if (Listener)
@@ -243,6 +251,11 @@ namespace Engine {
 	bool AssetHotReloader::IsDeferred() const
 	{
 		return m_State->IsDeferred;
+	}
+
+	void AssetHotReloader::SetDeferralExemption(DeferralExemption exemption)
+	{
+		m_State->Exemption = std::move(exemption);
 	}
 
 	std::vector<FileChange> AssetHotReloader::GetDeferredChanges() const

@@ -114,7 +114,7 @@ namespace Engine {
 		std::string LockstepOwner{}; // the owning client's name; empty without lockstep or for an in-process driver
 		bool OwnedByCaller = false;  // the requesting client owns lockstep
 		float TimeScale = 1.0f;
-		bool Modified = false;  // §7.5 race rule 4
+		bool Modified = false;  // §7.5 race rule 4 (a material's reload excepted)
 		bool Recording = false; // Whether the session recorder is active.
 		// §11.1: a fatal script error (a second soft memory breach, the hard memory limit, a script VM that could not start)
 		// stopped the session (PlaySession::GetFatalError): it stays Paused and ticks no longer advance until play.stop or a

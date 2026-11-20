@@ -134,7 +134,9 @@ namespace Engine {
 		std::vector<VfsPath> CreatedMetas{}; // .meta files written for sources that had none (§7.3)
 		std::vector<AssetHandle> Added{};    // registered now, not before
 		std::vector<AssetHandle> Removed{};  // registered before, gone now
-		std::vector<AssetHandle> Changed{};  // reimported because their source, a dependency file or a referenced asset changed
+		// Reimported because their source, a dependency file or a referenced asset changed. While reloads are deferred, only
+		// presentation-only assets (EditorAssetManager::IsPresentationOnly), without their dependents.
+		std::vector<AssetHandle> Changed{};
 		// Changed, but held instead of reimported because reloads are deferred (race rule 4); reimported when the deferral
 		// ends.
 		std::vector<AssetHandle> Deferred{};
@@ -271,8 +273,10 @@ namespace Engine {
 		// published once (one version bump and one AssetReloaded event, as for a poll; dependents follow). While reloads
 		// are deferred (race rule 4), Refresh still rescans and writes the new sources' metas but reimports nothing: the
 		// changed assets are listed in Deferred and held with the hot reloader's held changes, and the listener hears of
-		// them when the deferral ends. Errors: InvalidState without a project; the scan's errors. Failed reimports are
-		// reported in the result and as diagnostics, not as errors.
+		// them when the deferral ends. A changed presentation-only asset (IsPresentationOnly, race rule 4's exception) is
+		// the one exception: it is reimported and published now, listed in Changed, and the listener hears of its change
+		// now; the reimports of its dependents are held with the rest. Errors: InvalidState without a project; the scan's
+		// errors. Failed reimports are reported in the result and as diagnostics, not as errors.
 		[[nodiscard]] Result<AssetRefreshReport> Refresh();
 
 		// Imports the main asset `handle` again, bypassing the cache, rewrites its .meta when its sub-assets changed, and
@@ -351,9 +355,22 @@ namespace Engine {
 		void Update(double nowSeconds);
 
 		// Race rule 4: while true, external changes (from polls and from Refresh) are held and nothing is reimported; false
-		// applies the held changes, merged per path, and publishes them.
+		// applies the held changes, merged per path, and publishes them. The exception (World Tree brief 21): a change of a
+		// presentation-only asset (IsPresentationOnly), whether the editor wrote it, a poll saw it (a modification of the
+		// source; AssetHotReloader::SetDeferralExemption) or Refresh did, is reimported and published as when nothing is
+		// deferred, while the reimports it causes for its dependents are held with the rest.
 		void SetReloadsDeferred(bool deferred);
 		[[nodiscard]] bool AreReloadsDeferred() const;
+
+		// Race rule 4's exception (World Tree brief 21): true when `source` is a Material main asset, a .material file's
+		// (MaterialImporter; a glTF's materials are sub-assets of its prefab, published with its meshes). Only the renderer
+		// and the views' annotations read a material's values: no component, state hash, script binding or physics reads
+		// them (a script reads a MeshRenderer's material handles, never a material), so a material's reload changes what a
+		// session draws, never what it simulates, and no reload deferral holds it. Every other type is read by the
+		// simulation or may be: a mesh is a collider's shape and a script reads its slots, and a texture sizes a sprite's
+		// bounds, which scripts read; they stay held (Docs/Backlog.md §6). A reload of a presentation-only asset does not
+		// mark a play session modified either (EditorPlayController::OnAssetReload). False for an unknown handle.
+		[[nodiscard]] bool IsPresentationOnly(AssetHandle source) const;
 
 		// Receives every published external change, whether a poll or Refresh detected it, once (race rule 3 is the
 		// listener's: EditorContext). Empty: none.
@@ -363,8 +380,9 @@ namespace Engine {
 		// AssetReloaded event is appended), whatever started it: an external change (a poll or Refresh), the editor's own
 		// write of the source or its .meta (EditorContext::WriteProjectFile: asset.setProperties, asset.import, script.write),
 		// Reimport. Not during a dry run, which publishes nothing that stays, and not while reloads are deferred (they are
-		// published when the deferral ends). EditorContext marks a running play session modified with it (§7.5 race rule 4).
-		// Empty: none.
+		// published when the deferral ends), except a presentation-only asset's (IsPresentationOnly), which no deferral
+		// holds. EditorContext marks a running play session modified with it, unless the asset is presentation-only (§7.5
+		// race rule 4). Empty: none.
 		void SetReloadListener(ReloadListener listener);
 
 		// The hot reloader of the open project, or nullptr (no project, read-only, or hot reload off). For tests and
