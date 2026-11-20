@@ -991,6 +991,112 @@ namespace Engine {
 			CHECK(ComputeRenderedWorldMatrix(gem, 1.0f) == gem.GetComponent<WorldTransformComponent>().Matrix);
 		}
 
+		// The review of W41.1 (finding 4): a rider holding its own Animator, attached to its mount's hips, is itself rendered
+		// by the rule (its Animator's rendered pose is its mount's times its pose relative to it), so its lance, attached to
+		// the rider's hand, lies on the hand the rider's skin draws, and Transform.RenderPosition and RenderRotation agree.
+		TEST_CASE("RenderExtraction: a rider on a mount renders with the mount, and its lance on the rider's rendered hand")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishWalkingRig(assets);
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity mount = scene.CreateEntity("Mount");
+			mount.AddComponent<AnimatorComponent>(MakeWalkingAnimator());
+			Entity rider = scene.CreateEntity("Rider", mount);
+			rider.AddComponent<BoneAttachmentComponent>(BoneAttachmentComponent{ .Bone = "Hips", .Offset = glm::vec3(0.0f, 0.3f, 0.0f) });
+			AnimatorComponent riding = MakeWalkingAnimator();
+			riding.RootMotion = AnimatorRootMotion::None;
+			riding.Layers[1].Time = 0.3f;
+			rider.AddComponent<AnimatorComponent>(riding);
+			Entity body = scene.CreateEntity("Body", rider);
+			body.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c4)));
+			body.AddComponent<SkinnedMeshComponent>();
+			Entity lance = scene.CreateEntity("Lance", rider);
+			lance.AddComponent<BoneAttachmentComponent>(BoneAttachmentComponent{ .Bone = "Hand", .Offset = glm::vec3(0.0f, 1.0f, 0.0f) });
+			lance.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c5)));
+			TransformSystem::Update(scene);
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			(*system)->Step(SimStep::FromTick(0, 1.0 / 60.0));
+			TransformSystem::Update(scene);
+			SnapshotPreviousPoses(scene);
+			(*system)->Step(SimStep::FromTick(1, 1.0 / 60.0));
+			TransformSystem::Update(scene);
+			REQUIRE(rider.HasComponent<BoneAttachmentStateComponent>());
+			REQUIRE(lance.HasComponent<BoneAttachmentStateComponent>());
+			scene.SetInterpolationAlpha(0.5f);
+
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, RenderExtractionRequest{ .Width = 64, .Height = 64, .Alpha = 0.5f });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 2);
+			const MeshDrawItem& bodyItem = snapshot->Meshes[0];
+			const MeshDrawItem& lanceItem = snapshot->Meshes[1];
+			REQUIRE(bodyItem.JointPalette.size() == 2);
+			const glm::mat4 hand = bodyItem.World * bodyItem.JointPalette[1] * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 2.0f, 0.0f));
+			const glm::vec3 held(hand * glm::vec4(0.0f, 1.0f, 0.0f, 1.0f));
+			CHECK(Test::ApproxEqual(glm::vec3(lanceItem.World[3]), held, 1e-5f));
+			CHECK(Test::ApproxEqual(TransformSystem::GetRenderPosition(lance), held, 1e-5f));
+			// The rider is itself rendered on the mount's rendered hips, and the two functions agree for it too.
+			CHECK(Test::ApproxEqual(TransformSystem::GetRenderPosition(rider), glm::vec3(ComputeRenderedWorldMatrix(rider, 0.5f)[3]), 1e-5f));
+			for (const Entity entity : { rider, lance })
+			{
+				INFO(std::string(entity.GetName()));
+				const Result<TransformDecomposition> rendered = TransformSystem::DecomposeMatrix(ComputeRenderedWorldMatrix(entity, 0.5f));
+				REQUIRE(rendered.has_value());
+				for (const glm::vec3 axis : { glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) })
+					CHECK(Test::ApproxEqual(rendered->Rotation * axis, TransformSystem::GetRenderRotation(entity) * axis, 1e-5f));
+			}
+		}
+
+		// The review of W41.1 (finding 4): a state whose recorded Animator is no longer an ancestor (the staff moved, after
+		// the pass, into a holster another Animator holds on its hips) is passed over, and the walk goes on to the holster's,
+		// so the staff renders with the still mount, not by plain interpolation from where the walking hand had it.
+		TEST_CASE("RenderExtraction: an attachment moved away from its Animator renders by the next attachment above it")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishWalkingRig(assets);
+			static_cast<void>(CreateCamera(scene, "Camera", true));
+			Entity walker = scene.CreateEntity("Walker");
+			walker.AddComponent<AnimatorComponent>(MakeWalkingAnimator());
+			Entity staff = scene.CreateEntity("Staff", walker);
+			staff.AddComponent<BoneAttachmentComponent>(BoneAttachmentComponent{ .Bone = "Hand", .Offset = glm::vec3(0.0f, 1.0f, 0.0f) });
+			staff.AddComponent<MeshRendererComponent>(MakeMeshRenderer(AssetHandle(0x5c5)));
+			Entity stand = scene.CreateEntity("Stand");
+			SetTranslation(stand, glm::vec3(3.0f, 0.0f, 0.0f));
+			AnimatorComponent still;
+			still.Skeleton = TypedAssetHandle<AssetType::Skeleton>(RigSkeletonHandle);
+			stand.AddComponent<AnimatorComponent>(still);
+			Entity holster = scene.CreateEntity("Holster", stand);
+			holster.AddComponent<BoneAttachmentComponent>(BoneAttachmentComponent{ .Bone = "Hips" });
+			TransformSystem::Update(scene);
+			Result<Scope<AnimationSystem>> system = AnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			(*system)->Step(SimStep::FromTick(0, 1.0 / 60.0));
+			TransformSystem::Update(scene);
+			SnapshotPreviousPoses(scene);
+			(*system)->Step(SimStep::FromTick(1, 1.0 / 60.0));
+			TransformSystem::Update(scene);
+			REQUIRE(scene.SetParent(staff, holster, std::nullopt, true).has_value());
+			TransformSystem::Update(scene);
+			REQUIRE(staff.GetComponent<BoneAttachmentStateComponent>().Animator == walker.GetUUID());
+			CHECK(FindAttachedRenderAnimator(staff) == ConstEntity(stand));
+			scene.SetInterpolationAlpha(0.5f);
+
+			const glm::vec3 current(staff.GetComponent<WorldTransformComponent>().Matrix[3]);
+			const glm::vec3 previous(staff.GetComponent<PreviousWorldTransformComponent>().Matrix[3]);
+			const glm::vec3 rendered(ComputeRenderedWorldMatrix(staff, 0.5f)[3]);
+			CHECK(Test::ApproxEqual(rendered, current, 1e-5f));
+			CHECK(glm::length(previous + (current - previous) * 0.5f - rendered) > 1e-2f);
+			CHECK(Test::ApproxEqual(TransformSystem::GetRenderPosition(staff), rendered, 1e-5f));
+			const Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, RenderExtractionRequest{ .Width = 64, .Height = 64, .Alpha = 0.5f });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 1);
+			CHECK(Test::ApproxEqual(glm::vec3(snapshot->Meshes[0].World[3]), rendered, 1e-5f));
+		}
+
 		// M41 (decision R): a scene without attachments takes exactly the rule it had: the digest of the meshes' rendered
 		// matrices and palettes and the lights' poses at alpha 0.375, over a walking, swinging rig with a skinned body, a
 		// mesh that turns, grows and moves between the ticks, a child of a reset-tagged entity and a light, is the one its

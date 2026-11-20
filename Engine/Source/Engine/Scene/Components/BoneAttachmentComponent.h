@@ -18,7 +18,7 @@ namespace Engine {
 	// Offset turned by the joint's rotation, turned by the joint's rotation times Rotation; its Scale stays as authored and
 	// the joint's scale is ignored. Its subtree renders at the Animator's rendered pose (Scene/RenderExtraction.h, "Attached
 	// subtrees"), as the skin does. Nothing is placed in edit scenes or by the editor's animation preview. A missing Animator
-	// or joint, an empty Bone, a Skeleton without a pose, and an entity whose own physics fights the placement are
+	// or joint, an empty Bone, an Animator without a pose, and an entity whose own physics fights the placement are
 	// ANIMATION_ATTACHMENT_INVALID.
 	struct BoneAttachmentComponent
 	{

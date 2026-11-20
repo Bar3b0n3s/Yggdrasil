@@ -11,12 +11,15 @@
 #include "Engine/Scene/Components/BoneAttachmentComponent.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
+#include "Engine/Scene/Components/DistanceJointComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
@@ -29,6 +32,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -53,6 +57,7 @@ namespace Engine {
 		constexpr AssetHandle VanishHandle(0xb0e5000000000005);
 		constexpr AssetHandle TallSkeletonHandle(0xb0e5000000000006);
 		constexpr AssetHandle OverflowHandle(0xb0e5000000000007);
+		constexpr AssetHandle TwinSkeletonHandle(0xb0e5000000000008);
 		constexpr double FixedDelta = 1.0 / 60.0;
 
 		// Hips `hipsHeight` above the Animator's entity with a hand one unit above them.
@@ -113,6 +118,12 @@ namespace Engine {
 			assets.Publish(GrowHandle, MakeHandScale(3.0f), "Assets/Models/Warden.gltf");
 			assets.Publish(VanishHandle, MakeHandScale(0.0f), "Assets/Models/Warden.gltf");
 			assets.Publish(OverflowHandle, MakeOverflow(), "Assets/Models/Warden.gltf");
+			// Two hands of close names, so a misspelt bone has two suggestions.
+			Ref<SkeletonData> twins = CreateRef<SkeletonData>();
+			twins->Joints.push_back({ .Name = "Root" });
+			twins->Joints.push_back({ .Name = "HandL", .Parent = 0, .Translation = { -0.5f, 1.0f, 0.0f } });
+			twins->Joints.push_back({ .Name = "HandR", .Parent = 0, .Translation = { 0.5f, 1.0f, 0.0f } });
+			assets.Publish(TwinSkeletonHandle, twins, "Assets/Models/Twins.gltf");
 		}
 
 		AnimatorLayer MakeLayer(AssetHandle clip, float time = 0.0f)
@@ -385,7 +396,10 @@ namespace Engine {
 			Entity broken = scene.CreateEntity("Broken");
 			broken.AddComponent<AnimatorComponent>(MakeAnimator({ MakeLayer(OverflowHandle, 0.5f) }));
 			Entity overflowed = AddAttachment(scene, "Overflowed", broken, "Hand");
-			const std::vector<Entity> invalid = { loose, empty, typo, unposed, overflowed };
+			Entity juggler = scene.CreateEntity("Juggler");
+			juggler.AddComponent<AnimatorComponent>(MakeAnimator({}, AnimatorRootMotion::None, TwinSkeletonHandle));
+			Entity ball = AddAttachment(scene, "Ball", juggler, "Hand");
+			const std::vector<Entity> invalid = { loose, empty, typo, unposed, overflowed, ball };
 			for (const Entity entity : invalid)
 				SetPose(entity, glm::vec3(1.0f, 2.0f, 3.0f), AboutY(10.0f));
 			TransformSystem::Update(scene);
@@ -410,7 +424,11 @@ namespace Engine {
 			CHECK(misspelt->Field == "Bone");
 			CHECK(misspelt->Severity == DiagnosticSeverity::Warning);
 			CHECK(misspelt->Message.find("'Hnad'") != std::string::npos);
-			CHECK(misspelt->Message.find("Did you mean 'Hand'?") != std::string::npos);
+			CHECK(misspelt->Message.find("did you mean 'Hand'?") != std::string::npos);
+			// Two close names are offered as alternatives.
+			const AnimationSceneIssue* ambiguous = FindIssue(system->GetDiagnostics(), ball.GetUUID());
+			REQUIRE(ambiguous != nullptr);
+			CHECK(ambiguous->Message.find("'HandL' or 'HandR'") != std::string::npos);
 			const AnimationSceneIssue* nameless = FindIssue(system->GetDiagnostics(), empty.GetUUID());
 			REQUIRE(nameless != nullptr);
 			CHECK(nameless->Field == "Bone");
@@ -438,6 +456,137 @@ namespace Engine {
 			CHECK(system->GetDiagnostics().size() == MaxAnimationSystemDiagnostics);
 			CHECK(findings.GetMatchCount() == MaxAnimationSystemDiagnostics);
 			CHECK(reached.GetMatchCount() == 1);
+		}
+
+		// The review of W41.1 (finding 2): an attached entity whose own physics fights its placement (a Dynamic RigidBody, a
+		// bare solid collider) is still placed every tick and holds its state, and the phase reports it once, however many
+		// ticks run.
+		TEST_CASE("BoneAttachments: an attached entity whose physics fights its placement is placed and reported once at run time")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			Entity warden = scene.CreateEntity("Warden");
+			warden.AddComponent<AnimatorComponent>(MakeAnimator({ MakeLayer(SwingHandle) }));
+			Entity brawler = AddAttachment(scene, "Brawler", warden, "Hand", glm::vec3(0.0f, 0.5f, 0.0f));
+			brawler.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
+			brawler.AddComponent<SphereColliderComponent>();
+			Entity club = AddAttachment(scene, "Club", warden, "Hand", glm::vec3(0.0f, 0.8f, 0.0f));
+			club.AddComponent<BoxColliderComponent>();
+			TransformSystem::Update(scene);
+			Scope<AnimationSystem> system = CreateSystem(scene, assets);
+			const Test::ExpectLog findings(LogLevel::Warn, AnimationAttachmentInvalidCode);
+			for (uint64_t tick = 0; tick < 6; ++tick)
+			{
+				CAPTURE(tick);
+				StepAndUpdate(*system, scene, tick);
+				CheckOnBone(brawler, warden, "Hand", glm::vec3(0.0f, 0.5f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+				CheckOnBone(club, warden, "Hand", glm::vec3(0.0f, 0.8f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+				CHECK(brawler.HasComponent<BoneAttachmentStateComponent>());
+				CHECK(club.HasComponent<BoneAttachmentStateComponent>());
+			}
+			CHECK(CountFindings(system->GetDiagnostics(), brawler.GetUUID()) == 1);
+			CHECK(CountFindings(system->GetDiagnostics(), club.GetUUID()) == 1);
+			CHECK(findings.GetMatchCount() == 2);
+			CHECK(FindIssue(system->GetDiagnostics(), brawler.GetUUID())->Message.find("Dynamic RigidBody") != std::string::npos);
+			CHECK(FindIssue(system->GetDiagnostics(), club.GetUUID())->Message.find("Kinematic body") != std::string::npos);
+		}
+
+		// The review of W41.1 (finding 3): removing a scene's last BoneAttachment still runs the attaching pass, which clears
+		// the state it left, so the entity keeps its Transform bit for bit and renders by plain interpolation again, never at
+		// its former Animator's pose.
+		TEST_CASE("BoneAttachments: removing the last BoneAttachment clears its state, and its entity renders by plain interpolation")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			Entity warden = scene.CreateEntity("Warden");
+			warden.AddComponent<AnimatorComponent>(MakeAnimator({ MakeLayer(SwingHandle) }));
+			Entity staff = AddAttachment(scene, "Staff", warden, "Hand", glm::vec3(0.0f, 1.0f, 0.0f));
+			TransformSystem::Update(scene);
+			Scope<AnimationSystem> system = CreateSystem(scene, assets);
+			for (uint64_t tick = 0; tick < 3; ++tick)
+				StepAndUpdate(*system, scene, tick);
+			REQUIRE(staff.HasComponent<BoneAttachmentStateComponent>());
+
+			staff.RemoveComponent<BoneAttachmentComponent>();
+			const TransformComponent held = staff.GetComponent<TransformComponent>();
+			StepAndUpdate(*system, scene, 3);
+			CHECK_FALSE(staff.HasComponent<BoneAttachmentStateComponent>());
+			CHECK(SameBits(staff.GetComponent<TransformComponent>().Translation, held.Translation));
+			CHECK(staff.GetComponent<TransformComponent>().Rotation == held.Rotation);
+
+			// A previous pose one unit below: the staff now renders half way between, as any entity does.
+			const glm::mat4 current = staff.GetComponent<WorldTransformComponent>().Matrix;
+			glm::mat4 previous = current;
+			previous[3] -= glm::vec4(0.0f, 1.0f, 0.0f, 0.0f);
+			staff.AddComponent<PreviousWorldTransformComponent>(PreviousWorldTransformComponent{ .Matrix = previous });
+			scene.SetInterpolationAlpha(0.5f);
+			const glm::vec3 halfway = glm::vec3(current[3]) - glm::vec3(0.0f, 0.5f, 0.0f);
+			CHECK_FALSE(FindAttachedRenderAnimator(staff).IsValid());
+			CHECK(Test::ApproxEqual(glm::vec3(ComputeRenderedWorldMatrix(staff, 0.5f)[3]), halfway, 1e-5f));
+			CHECK(Test::ApproxEqual(TransformSystem::GetRenderPosition(staff), halfway, 1e-5f));
+		}
+
+		// The review of W41.1 (finding 8): an Animator with no layer still poses its Skeleton's rest pose, and an attachment
+		// follows it (the hand rests one unit above the hips, two above the Animator's entity).
+		TEST_CASE("BoneAttachments: an Animator without a clip poses its rest pose, which an attachment follows")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			Entity warden = scene.CreateEntity("Warden");
+			warden.AddComponent<AnimatorComponent>(MakeAnimator({}));
+			Entity staff = AddAttachment(scene, "Staff", warden, "Hand", glm::vec3(0.0f, 0.5f, 0.25f), AboutY(90.0f));
+			TransformSystem::Update(scene);
+			Scope<AnimationSystem> system = CreateSystem(scene, assets);
+			StepAndUpdate(*system, scene, 0);
+			CHECK(staff.HasComponent<BoneAttachmentStateComponent>());
+			CHECK(Test::ApproxEqual(staff.GetComponent<TransformComponent>().Translation, glm::vec3(0.0f, 2.5f, 0.25f)));
+			CheckOnBone(staff, warden, "Hand", glm::vec3(0.0f, 0.5f, 0.25f), AboutY(90.0f));
+			CHECK(system->GetDiagnostics().empty());
+		}
+
+		// The review of W41.1 (finding 8): M37's joints work from an attached Kinematic handle. A lantern, a Dynamic body on a
+		// DistanceJoint to a staff swung by the hand, hangs within the joint's distance of the staff at every tick and swings
+		// with it, and no PHYSICS_JOINT_INVALID or ANIMATION_ATTACHMENT_INVALID is raised.
+		TEST_CASE("BoneAttachments: a joint from an attached Kinematic handle swings a Dynamic body")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& edit = fixture.GetScene();
+			Entity warden = edit.CreateEntity("Warden");
+			warden.AddComponent<AnimatorComponent>(MakeAnimator({ MakeLayer(SwingHandle) }));
+			Entity staff = AddAttachment(edit, "Staff", warden, "Hand", glm::vec3(0.0f, 1.0f, 0.0f));
+			staff.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Kinematic });
+			staff.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(0.05f, 0.5f, 0.05f) });
+			Entity lantern = Test::AddSphereBody(edit, "Lantern", glm::vec3(0.0f, 2.6f, 0.0f), 0.1f, BodyType::Dynamic);
+			lantern.AddComponent<DistanceJointComponent>(DistanceJointComponent{ .ConnectedBody = staff.GetUUID(), .MaxDistance = 0.5f });
+			Test::InMemoryAssetManager assets;
+			PublishRig(assets);
+			PlaySessionSpecification specification = Test::MakePhysicsSessionSpecification(fixture, 42, PlayMode::Play);
+			specification.Assets = &assets;
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, specification);
+			REQUIRE_MESSAGE(session.has_value(), session.error().ToString());
+			float farthest = 0.0f;
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				CAPTURE(tick);
+				(*session)->Tick();
+				const glm::vec3 handle = Test::GetWorldPosition(**session, "/Warden/Staff");
+				const glm::vec3 hanging = Test::GetWorldPosition(**session, "/Lantern");
+				// The joint's distance, with the solver's slack when the swing reverses under the swinging body (a free body
+				// would have fallen metres by the end).
+				CHECK(glm::length(hanging - handle) <= 0.5f + 0.15f);
+				farthest = std::min(farthest, hanging.x);
+			}
+			// The hand swung the staff's end towards -X and back, and the lantern went with it.
+			CHECK(farthest < -0.2f);
+			for (const PhysicsDiagnostic& diagnostic : (*session)->GetPhysics().GetDiagnostics())
+				CHECK(diagnostic.Code != PhysicsJointInvalidCode);
+			CHECK((*session)->GetAnimation()->GetDiagnostics().empty());
 		}
 
 		// The animation checks of project.validate (FindBoneAttachmentIssues, edit scenes): one finding per entity, the first
@@ -494,7 +643,7 @@ namespace Engine {
 			}
 			CHECK(issues[0].Field == "Bone");
 			CHECK(issues[1].Field == "Bone");
-			CHECK(issues[1].Message.find("Did you mean 'Hand'?") != std::string::npos);
+			CHECK(issues[1].Message.find("did you mean 'Hand'?") != std::string::npos);
 			CHECK(issues[2].Message.find("CharacterController") != std::string::npos);
 			CHECK(issues[3].Message.find("Dynamic RigidBody") != std::string::npos);
 			CHECK(issues[4].Message.find("Kinematic body") != std::string::npos);

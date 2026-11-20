@@ -149,8 +149,9 @@ namespace Engine {
 		// before Scripts.reset()), so the system never delivers to a destroyed engine (decision 29). Never called from the
 		// dispatch.
 		void SetEventListener(IAnimationEventListener* listener);
-		// The findings raised so far (FindAnimationSceneIssues' codes, raised once per entity and code at run time), in the
-		// order raised.
+		// The findings raised so far, in the order raised: FindAnimationSceneIssues' codes, raised once per entity and code at
+		// run time, and M41's ANIMATION_ATTACHMENT_INVALID (FindBoneAttachmentIssues' code, Scene/BoneAttachments.h), raised
+		// once per entity whatever its cause.
 		[[nodiscard]] std::span<const AnimationSceneIssue> GetDiagnostics() const;
 	private:
 		// The back-references, the diagnostics raised and the step's scratch poses (Scene/AnimationSystem.cpp).

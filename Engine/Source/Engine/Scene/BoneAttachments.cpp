@@ -109,7 +109,7 @@ namespace Engine {
 			std::string_view Bone{};
 		};
 
-		// "'A', 'B' and 'C'": up to three of `names`, quoted.
+		// "'A', 'B' and 'C'": up to three of `names`, quoted (the joints an empty Bone's hint lists).
 		static std::string QuoteNames(std::span<const std::string> names)
 		{
 			std::string text;
@@ -168,12 +168,12 @@ namespace Engine {
 						for (const SkeletonJoint& joint : context.Skeleton->Joints)
 							names.push_back(joint.Name);
 					}
+					// Up to three close joint names, joined as every "did you mean" of the engine is (FuzzySuggest.h).
 					const std::vector<std::string> suggestions = FuzzySuggest(context.Bone, std::span<const std::string>(names));
-					issue.Message = std::format("The BoneAttachment of '{}' names the bone '{}', which the Skeleton of the Animator of '{}' does not hold; it is "
-												"not attached and keeps its Transform.",
-						path, context.Bone, scene.GetEntityPath(context.Animator));
-					if (!suggestions.empty())
-						issue.Message += std::format(" Did you mean {}?", QuoteNames(suggestions));
+					const std::string question = suggestions.empty() ? std::string() : std::format(" ({})", MakeDidYouMeanHint(suggestions));
+					issue.Message = std::format("The BoneAttachment of '{}' names the bone '{}'{}, which the Skeleton of the Animator of '{}' does not hold; it "
+												"is not attached and keeps its Transform.",
+						path, context.Bone, question, scene.GetEntityPath(context.Animator));
 					issue.Hint = "Set Bone to the name of a joint of the Animator's Skeleton (a bone), written exactly as the model names it.";
 					break;
 				}
@@ -191,7 +191,8 @@ namespace Engine {
 					break;
 				case AttachmentFault::Colliders:
 					issue.Message = std::format("The solid colliders that the BoneAttachment of '{}' moves each fixed step form no Kinematic body of its own: "
-												"their body (an ancestor's compound or a static body) is rebuilt or teleported every step.",
+												"their body (an ancestor's compound or a static body) is rebuilt or teleported every step, or, under a "
+												"CharacterController, they make no body at all and collide with nothing.",
 						path);
 					issue.Hint = "Give the attached entity a RigidBody of Type Kinematic, so its colliders sweep with the bone; a trigger needs none.";
 					break;

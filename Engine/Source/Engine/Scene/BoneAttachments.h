@@ -71,8 +71,8 @@ namespace Engine {
 	// Warning, not fixable: an entity's BoneAttachment cannot attach it, or its physics fights the attachment: no Animator
 	// above the entity, an empty Bone, a Skeleton (that loads) without the joint named Bone (with up to three close joint
 	// names), at run time an Animator without a pose, a CharacterController or a Dynamic RigidBody on the entity, or solid
-	// colliders that move with it and form no Kinematic body of its own (an ancestor's compound rebuilt every step, or a
-	// static body teleported every step). Appended after M37's PHYSICS_JOINT_INVALID in both of ProjectValidator.cpp's
+	// colliders that move with it and form no Kinematic body of its own (an ancestor's compound rebuilt every step, a static
+	// body teleported every step, or, under a CharacterController, no body at all, so they collide with nothing). Appended after M37's PHYSICS_JOINT_INVALID in both of ProjectValidator.cpp's
 	// tables, an array of its own (BoneAttachmentDiagnosticCodes; the frozen AnimationValidation.h is M23's).
 	inline constexpr std::string_view AnimationAttachmentInvalidCode = "ANIMATION_ATTACHMENT_INVALID";
 	inline constexpr std::array<std::string_view, 1> BoneAttachmentDiagnosticCodes = { AnimationAttachmentInvalidCode };
@@ -88,7 +88,8 @@ namespace Engine {
 
 	// The findings of `scene`'s BoneAttachments (effectively enabled entities, canonical order), at most one per entity, the
 	// first cause in this order: no Animator above it; an empty Bone; the Skeleton of its Animator, loaded through `assets`,
-	// without the joint (one that is null or does not load is not checked: the asset checks report it); a CharacterController;
+	// without the joint (one that does not load is reported by the asset checks; a null one only in play, as an Animator
+	// without a pose); a CharacterController;
 	// a Dynamic RigidBody; solid colliders without a Kinematic RigidBody of its own. Each an AnimationSceneIssue on the
 	// entity, Component "BoneAttachment" (Field "Bone" for the bone's causes), Severity Warning. What project.validate reports.
 	// Pure; main thread.
