@@ -1,0 +1,283 @@
+{
+	"Format": "Scene",
+	"Version": 1,
+	"Name": "PlanarReflections",
+	"Seed": 0,
+	"ComponentVersions": {
+		"Transform": 1,
+		"MeshRenderer": 1,
+		"Camera": 1,
+		"DirectionalLight": 1,
+		"Environment": 1,
+		"PostProcess": 2,
+		"PlanarReflection": 1
+	},
+	"Entities": [
+		{
+			"ID": "d65979af14b18732",
+			"Name": "Rendering",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [1, 1, 1]
+				},
+				"Environment": {
+					"Environment": "0000000000000202",
+					"Intensity": 0.8,
+					"Rotation": 0,
+					"ShowSkybox": true,
+					"SkyboxBlur": 0,
+					"FallbackColor": [0.2, 0.22, 0.25]
+				},
+				"PostProcess": {
+					"ExposureEV": 0,
+					"ExposureMode": "Manual",
+					"AutoExposureMinEV": -6,
+					"AutoExposureMaxEV": 12,
+					"AutoExposureSpeedUp": 3,
+					"AutoExposureSpeedDown": 1,
+					"Tonemap": "AgX",
+					"Lut": null,
+					"LutIntensity": 1,
+					"SsaoEnabled": false,
+					"SsaoRadius": 0.5,
+					"SsaoIntensity": 1,
+					"SsaoQuality": "Medium",
+					"SsrEnabled": false,
+					"SsrIntensity": 1,
+					"SsrMaxDistance": 50,
+					"SsrThickness": 0.2,
+					"SsrMaxRoughness": 0.6,
+					"BloomEnabled": false,
+					"BloomIntensity": 0.04,
+					"AntiAliasing": "Fxaa"
+				}
+			}
+		},
+		{
+			"ID": "82cdbaad94dfc040",
+			"Name": "Camera",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 2, 9],
+					"Rotation": [-0.052335955, 0, 0, 0.9986295],
+					"Scale": [1, 1, 1]
+				},
+				"Camera": {
+					"Projection": "Perspective",
+					"VerticalFov": 55,
+					"OrthographicSize": 10,
+					"NearClip": 0.1,
+					"FarClip": 1000,
+					"Primary": true,
+					"Clear": "Skybox",
+					"ClearColor": [0.05, 0.05, 0.06]
+				}
+			}
+		},
+		{
+			"ID": "b38dfad7f1ab50a7",
+			"Name": "Sun",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [-0.3696438, 0.23911762, 0.09904576, 0.8923991],
+					"Scale": [1, 1, 1]
+				},
+				"DirectionalLight": {
+					"Color": [1, 1, 1],
+					"Intensity": 2.5,
+					"CastShadows": true,
+					"ShadowDistance": 100,
+					"CascadeCount": 4,
+					"CascadeSplitLambda": 0.75,
+					"LightAngle": 1,
+					"DepthBias": 1,
+					"NormalBias": 1
+				}
+			}
+		},
+		{
+			"ID": "ef3ae6f6f6c8815c",
+			"Name": "Ground",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0, 0],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [20, 1, 20]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["14d10e247f412e48"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "14bf2cb3c49bdce2",
+			"Name": "Marker",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 0.6, 5],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.6, 1.2, 0.6]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["e09c1cd9f4581097"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				}
+			}
+		},
+		{
+			"ID": "db4bb0302d725118",
+			"Name": "MirrorQuad",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-3, 1.6, -2],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [2.4, 1.8, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["3d9410d0e092c009"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PlanarReflection": {
+					"Normal": [0, 0, 1],
+					"Offset": 0,
+					"ResolutionScale": 0.25
+				}
+			}
+		},
+		{
+			"ID": "c04e6610f3b41087",
+			"Name": "MirrorSlabX",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [0, 1.6, -2.5],
+					"Rotation": [0, -0.70710677, 0, 0.70710677],
+					"Scale": [0.04, 1.6, 2.2]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["3d9410d0e092c009"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PlanarReflection": {
+					"Normal": [1, 0, 0],
+					"Offset": 0.5,
+					"ResolutionScale": 0.5
+				}
+			}
+		},
+		{
+			"ID": "212324ab8688c05a",
+			"Name": "MirrorPlaneY",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [3, 1.6, -2],
+					"Rotation": [0.70710677, 0, 0, 0.70710677],
+					"Scale": [1.8, 1, 1.4]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000103",
+					"Materials": ["3d9410d0e092c009"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PlanarReflection": {
+					"Normal": [0, 1, 0],
+					"Offset": 0,
+					"ResolutionScale": 0.75
+				}
+			}
+		},
+		{
+			"ID": "4b8792aee2405a72",
+			"Name": "MirrorSmall",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [-1.4, 0.6, -1],
+					"Rotation": [0, 0, 0, 1],
+					"Scale": [0.5, 0.4, 1]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000104",
+					"Materials": ["3d9410d0e092c009"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PlanarReflection": {
+					"Normal": [0, 0, 1],
+					"Offset": 0,
+					"ResolutionScale": 0.5
+				}
+			}
+		},
+		{
+			"ID": "a6e7a417a60077a0",
+			"Name": "MirrorSlabBack",
+			"Parent": null,
+			"Active": true,
+			"Tags": [],
+			"Components": {
+				"Transform": {
+					"Translation": [1.6, 0.7, -1],
+					"Rotation": [0, 1, 0, 6.123234e-17],
+					"Scale": [1.2, 0.9, 0.04]
+				},
+				"MeshRenderer": {
+					"Mesh": "0000000000000101",
+					"Materials": ["3d9410d0e092c009"],
+					"CastShadows": true,
+					"ReceiveShadows": true,
+					"Visible": true
+				},
+				"PlanarReflection": {
+					"Normal": [0, 0, -1],
+					"Offset": 0.5,
+					"ResolutionScale": 0.5
+				}
+			}
+		}
+	]
+}

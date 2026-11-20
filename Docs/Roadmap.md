@@ -930,7 +930,7 @@ Its milestone end is phase 7's batch gate: `CI.py --milestone`.
   A mirror past the cap, out of view or facing away falls back to today's probe and SSR.
 - **The device feature.** `shaderClipDistance` is required.
 - **Stats and perf.**
-  - `stats.get`'s `planarReflections`, `droppedPlanarReflections`, `culledPlanarReflections` and `planarReflectionEntities`, and the `PlanarReflection0` to `3` rows.
+  - `stats.get`'s `planarReflections`, `droppedPlanarReflections`, `culledPlanarReflections` and `planarReflectionEntities`, and the `PlanarReflection0` to `3` rows, each timing its mirror's whole view, its light clusters included.
   - The readout's `PlanarReflections` and `DroppedPlanarReflections`.
   - Perf.py's `reflections/Mirrors3/gpuMs`, with a budget of 2.0 ms.
 - **Validation.** `RENDER_REFLECTION_INVALID` (Warning): no mesh to show the reflection, or a mesh off the plane, with the axis suggested.

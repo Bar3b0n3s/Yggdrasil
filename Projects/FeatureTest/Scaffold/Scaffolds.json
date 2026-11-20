@@ -573,6 +573,20 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "PlanarReflections.jsonl",
+			"IdSeed": 3901,
+			"Renderer": "none"
+		},
+		{
+			"File": "GoldenPlanarReflections.jsonl",
+			"IdSeed": 3902,
+			"Renderer": "none",
+			"GoldenDirectories": [
+				"Assets/Materials/GoldenPlanarReflections",
+				"Assets/Scenes/GoldenPlanarReflections"
+			]
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

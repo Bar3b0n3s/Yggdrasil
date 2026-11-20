@@ -1939,6 +1939,134 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Box.material",
+			"XXH64": "097d55e348c2c4f1",
+			"Method": "asset.create",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Box.material.meta",
+			"XXH64": "d0d202e2fa69cd37",
+			"Method": "asset.create",
+			"RequestId": 8,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Cloak.material",
+			"XXH64": "2ca757794b648d61",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Cloak.material.meta",
+			"XXH64": "07389b685a008edb",
+			"Method": "asset.create",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Gold.material",
+			"XXH64": "ec42e9799a67ac3f",
+			"Method": "asset.create",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Gold.material.meta",
+			"XXH64": "b38946bce99c1d14",
+			"Method": "asset.create",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Ground.material",
+			"XXH64": "1e99d43f514e254f",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Ground.material.meta",
+			"XXH64": "16ead0d9579458ae",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Marker.material",
+			"XXH64": "0848b2b44ead6555",
+			"Method": "asset.create",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Marker.material.meta",
+			"XXH64": "66b4ab1d0623be73",
+			"Method": "asset.create",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/RoughMirror.material",
+			"XXH64": "6acc59b67d76df0c",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/RoughMirror.material.meta",
+			"XXH64": "81e2fd55ac6746bf",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/SharpMirror.material",
+			"XXH64": "0e7a643f91e3ecef",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/SharpMirror.material.meta",
+			"XXH64": "7f1b8892370cf9c9",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Stone.material",
+			"XXH64": "a26a8276818f10d5",
+			"Method": "asset.create",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/GoldenPlanarReflections/Stone.material.meta",
+			"XXH64": "5ec10b6c8dc8e2b2",
+			"Method": "asset.create",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Materials/GoldenPointShadows/Floor.material",
 			"XXH64": "a755c8cf4216b86e",
 			"Method": "asset.create",
@@ -2349,6 +2477,54 @@
 		{
 			"Path": "Assets/Materials/MeshPath/Floor.material.meta",
 			"XXH64": "695f07382f4e770c",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PlanarReflections/Ground.material",
+			"XXH64": "5f4622a5b41bcb4b",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PlanarReflections/Ground.material.meta",
+			"XXH64": "cd48f31dc58adbfd",
+			"Method": "asset.create",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PlanarReflections/Marker.material",
+			"XXH64": "b0a56c7bc186b28b",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PlanarReflections/Marker.material.meta",
+			"XXH64": "1b3561950cf2b884",
+			"Method": "asset.create",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PlanarReflections/Mirror.material",
+			"XXH64": "fe16bcc77082571a",
+			"Method": "asset.create",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Materials/PlanarReflections/Mirror.material.meta",
+			"XXH64": "49ebcb76ac4beadf",
 			"Method": "asset.create",
 			"RequestId": 1,
 			"Client": "batch",
@@ -3331,6 +3507,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/GoldenPlanarReflections/PlanarReflections.scene",
+			"XXH64": "bed5386fcd79f3de",
+			"Method": "scene.save",
+			"RequestId": 11,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/GoldenPlanarReflections/PlanarReflections.scene.meta",
+			"XXH64": "5d1bf26888ed0190",
+			"Method": "edit.batch",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/GoldenPointShadows/PointShadows.scene",
 			"XXH64": "b178d0fe5297d99b",
 			"Method": "scene.save",
@@ -4031,6 +4223,22 @@
 			"XXH64": "7cc3bc6640437165",
 			"Method": "edit.batch",
 			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/PlanarReflections.scene",
+			"XXH64": "c67d54f6fffe0c99",
+			"Method": "scene.save",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/PlanarReflections.scene.meta",
+			"XXH64": "c61c2e55a0bafe7e",
+			"Method": "edit.batch",
+			"RequestId": 5,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -6995,6 +7203,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/PlanarReflections/PlanarReflections.test.luau",
+			"XXH64": "96b727c7d42b313c",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/PlanarReflections/PlanarReflections.test.luau.meta",
+			"XXH64": "93abc82a9b9d8bad",
+			"Method": "script.write",
+			"RequestId": 7,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/PostProcess/PostProcessV2.test.luau",
 			"XXH64": "bc8f785c339ccacd",
 			"Method": "script.write",
@@ -8228,7 +8452,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "705563c4c9f63368",
+			"XXH64": "56da7f2e90416127",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",
