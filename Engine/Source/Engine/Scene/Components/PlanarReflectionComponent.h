@@ -16,8 +16,8 @@ namespace Engine {
 	//     not be zero (a write of a zero Normal is refused); Offset is in local units.
 	//   - Rendering: each view renders the reflection of what it sees in the plane from its camera mirrored in the plane,
 	//     clipped at the plane, at ResolutionScale of its scene resolution, through a lighter path, and the entity's own
-	//     MeshRenderer samples it in place of its probe and SSR reflections, blurred by the material's roughness (Renderer/
-	//     PlanarReflections.h; Architecture §8.3). Only mirrors in view and facing the camera render, at most
+	//     MeshRenderer samples it in place of its probe and SSR reflections, blurred by the material's roughness
+	//     (Renderer/PlanarReflections.h; Architecture §8.3). Only mirrors in view and facing the camera render, at most
 	//     MaxPlanarReflectionsPerView a view, the largest on screen first; the others fall back to the probes and SSR.
 	//   - Extraction: an effectively enabled entity whose MeshRenderer is Visible with a mesh gives a PlanarReflectionItem
 	//     (Renderer/RenderSnapshot.h) in every view, edit scenes included; without one the component does nothing, which

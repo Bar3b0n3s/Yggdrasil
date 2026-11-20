@@ -46,15 +46,18 @@ namespace Engine {
 		}
 
 		// The finding for a mesh whose bounds leave the plane, or none: the plane's world distance of each corner of `bounds`
-		// at `world` is its local distance (dot(unit, p) - offset) over |inverse transpose(world) * unit|.
-		static std::optional<std::pair<std::string, std::string>> CheckMeshOnPlane(const Aabb& bounds, const glm::dmat4& world, const glm::dvec3& unit,
-			double offset)
+		// at `world` is its local distance (dot(unit, p) - offset) over |inverse transpose(world) * unit|. A `unit` that is not
+		// finite (Normal's validator refuses a zero Normal on every write path, and a load drops a component that fails it, so
+		// none reaches here) gives none.
+		[[nodiscard]] static std::optional<std::pair<std::string, std::string>> CheckMeshOnPlane(const Aabb& bounds, const glm::dmat4& world,
+			const glm::dvec3& unit, double offset)
 		{
 			const glm::dmat3 linear(world);
 			const double determinant = glm::determinant(linear);
 			if (determinant == 0.0 || !std::isfinite(determinant))
 				return std::nullopt;
-			const double normalScale = glm::length(glm::transpose(glm::inverse(linear)) * unit);
+			const glm::dmat3 normals = glm::transpose(glm::inverse(linear));
+			const double normalScale = glm::length(normals * unit);
 			if (!(normalScale > 0.0) || !std::isfinite(normalScale))
 				return std::nullopt;
 			double farthest = 0.0;
@@ -67,25 +70,38 @@ namespace Engine {
 			if (!(farthest > PlanarReflectionMaxMeshDistance))
 				return std::nullopt;
 
-			// The local axis along which the bounds are thinnest in the world (its extent times the world length of the axis),
-			// its sign kept from Normal where Normal has one, and the Offset through the bounds' centre on it.
+			// The local axis along which the bounds are thinnest in the world (the world distance between their two faces across
+			// the axis: the local extent over |inverse transpose(world) * axis|), ties going to the axis Normal points along
+			// most, its sign kept from Normal where Normal has one.
 			const glm::dvec3 extent = glm::dvec3(bounds.Max) - glm::dvec3(bounds.Min);
-			int thinnest = 0;
+			const glm::dvec3 magnitudes = glm::abs(unit);
+			const int preferred = magnitudes.z >= magnitudes.x && magnitudes.z >= magnitudes.y ? 2 : (magnitudes.y >= magnitudes.x ? 1 : 0);
+			int thinnest = preferred;
 			double thinnestExtent = 0.0;
-			for (int axis = 0; axis < 3; ++axis)
+			for (const int axis : { preferred, (preferred + 1) % 3, (preferred + 2) % 3 })
 			{
-				const double worldExtent = extent[axis] * glm::length(linear[axis]);
-				if (axis == 0 || worldExtent < thinnestExtent)
+				const double worldExtent = extent[axis] / glm::length(normals[axis]);
+				if (axis == preferred || worldExtent < thinnestExtent)
 				{
 					thinnest = axis;
 					thinnestExtent = worldExtent;
 				}
 			}
-			const double sign = unit[thinnest] < 0.0 ? -1.0 : 1.0;
-			const double centre = 0.5 * (static_cast<double>(bounds.Min[thinnest]) + static_cast<double>(bounds.Max[thinnest]));
-			const double suggestedOffset = centre == 0.0 ? 0.0 : sign * centre; // never -0
 			std::string message = std::format("its mesh reaches {:.3g} m from the plane, farther than {} m, so the glass is not on its plane", farthest,
 				PlanarReflectionMaxMeshDistance);
+			// A mesh thicker than the distance across every axis: no plane on any face holds the whole glass.
+			if (thinnestExtent > PlanarReflectionMaxMeshDistance)
+			{
+				std::string thick = std::format("the mesh is {:.3g} m thick even along local {}, its thinnest axis, more than {} m: put the "
+												"PlanarReflection on a flat glass, such as the built-in Quad, whose own entity draws it",
+					thinnestExtent, "XYZ"[thinnest], PlanarReflectionMaxMeshDistance);
+				return std::make_pair(std::move(message), std::move(thick));
+			}
+			// The Offset of the bounds' face on the reflecting side, so following the hint puts every corner on the plane's side
+			// within the mesh's thickness.
+			const double sign = unit[thinnest] < 0.0 ? -1.0 : 1.0;
+			const double face = sign > 0.0 ? static_cast<double>(bounds.Max[thinnest]) : -static_cast<double>(bounds.Min[thinnest]);
+			const double suggestedOffset = face == 0.0 ? 0.0 : face; // never -0
 			std::string hint = std::format("set the PlanarReflection's Normal to the glass's facing axis and Offset to its surface: the mesh is "
 										   "thinnest along local {} (Normal {}, Offset {:.4g})",
 				"XYZ"[thinnest], FormatAxis(thinnest, sign), suggestedOffset);
@@ -111,25 +127,12 @@ namespace Engine {
 			}
 
 			const glm::dvec3 normal(reflection.Normal);
-			const double length = glm::length(normal);
-			if (!(length > 0.0) || !std::isfinite(length))
-			{
-				issues.push_back(PlanarReflectionSceneIssue{ .Code = std::string(RenderReflectionInvalidCode),
-					.Severity = DiagnosticSeverity::Warning,
-					.Entity = entity.GetUUID(),
-					.Component = "PlanarReflection",
-					.Field = "Normal",
-					.Message = std::format("the PlanarReflection of '{}' reflects nothing: its Normal is zero", path),
-					.Hint = "set Normal to the glass's facing axis in the entity's local axes (the built-in Quad faces +Z, the Plane +Y)" });
-				return;
-			}
-
 			const std::optional<Aabb> bounds = LoadMeshBounds(*renderer, assets);
 			if (!bounds.has_value())
 				return;
 			const glm::dmat4 world(TransformSystem::ComputeWorldMatrix(entity));
 			std::optional<std::pair<std::string, std::string>> found =
-				CheckMeshOnPlane(*bounds, world, normal / length, static_cast<double>(reflection.Offset));
+				CheckMeshOnPlane(*bounds, world, normal / glm::length(normal), static_cast<double>(reflection.Offset));
 			if (!found.has_value())
 				return;
 			issues.push_back(PlanarReflectionSceneIssue{ .Code = std::string(RenderReflectionInvalidCode),

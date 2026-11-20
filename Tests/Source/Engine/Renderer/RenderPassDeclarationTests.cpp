@@ -116,13 +116,15 @@ namespace Engine {
 			// (Docs/Decisions/0033-m22-contract.md decision 7): ADR 0028's phase-2 ledger's 31 rows. M26's six (C26.1,
 			// Docs/Decisions/0037-m26-contract.md decision 13) at the places phase 3's ledger fixes: TerrainDepthNormal after
 			// DepthNormal, TerrainForward after ForwardOpaque, SSR after Skybox, Particles after Lights2D, TAA before Bloom and
-			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get. M42's four (Docs/Decisions/0059-m42-planar-
-			// reflections.md decision 3; its ledger) first in the Forward stage, before ForwardOpaque: 41.
+			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get. M42's four
+			// (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) first in the Forward stage, before
+			// ForwardOpaque: 41.
 			constexpr std::array<std::string_view, 41> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
 				"DepthNormal", "TerrainDepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters",
-				"PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3", "ForwardOpaque", "TerrainForward", "Skybox", "SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA",
-				"Bloom", "Exposure", "Tonemap", "FXAA", "Text", "Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal",
-				"SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
+				"PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3", "ForwardOpaque", "TerrainForward", "Skybox",
+				"SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA", "Bloom", "Exposure", "Tonemap", "FXAA", "Text",
+				"Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
+				"Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
 				CHECK(RenderStatsOrder[index] == Expected[index]);

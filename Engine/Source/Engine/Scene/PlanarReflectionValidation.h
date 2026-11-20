@@ -23,7 +23,7 @@ namespace Engine {
 	// Warning, not fixable: a PlanarReflection whose entity draws no mesh (no MeshRenderer, or one without a Mesh), so nothing
 	// shows its reflection; or whose mesh's bounds reach farther than PlanarReflectionMaxMeshDistance from its plane, so the
 	// glass is not on the plane (usually a Normal along the wrong axis: the finding suggests the local axis along which the
-	// bounds are thinnest and its Offset); or whose Normal is zero.
+	// bounds are thinnest and the Offset of their face on it, or names a mesh too thick to be one glass).
 	inline constexpr std::string_view RenderReflectionInvalidCode = "RENDER_REFLECTION_INVALID";
 	// The planar reflection codes, an array of their own (M42's ledger; M36's and M37's pattern).
 	inline constexpr std::array<std::string_view, 1> PlanarReflectionDiagnosticCodes = { RenderReflectionInvalidCode };
@@ -39,7 +39,7 @@ namespace Engine {
 		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
 		UUID Entity{};           // the PlanarReflection's entity
 		std::string Component{}; // "PlanarReflection" or "MeshRenderer"
-		std::string Field{};     // "Normal" or "Mesh"
+		std::string Field{};     // "Normal", "Mesh" or empty (no MeshRenderer)
 		std::string Message{};
 		std::string Hint{};
 
@@ -49,12 +49,14 @@ namespace Engine {
 	// The planar reflection checks over `scene` (effectively enabled entities with a PlanarReflection, canonical order; at
 	// most one finding an entity):
 	//   - no MeshRenderer, or one whose Mesh is null (MeshRenderer.Mesh);
-	//   - a zero Normal (PlanarReflection.Normal; a file can hold one that no write path accepts);
 	//   - a mesh that loads through `assets` as a Mesh whose bounds' corners, at the entity's world matrix, lie farther than
 	//     PlanarReflectionMaxMeshDistance from the plane (PlanarReflection.Normal), with a hint naming the local axis along
-	//     which the bounds are thinnest in the world and the Offset that puts the plane through their centre on it. A mesh
-	//     that does not load is not checked (ASSET_MISSING and ASSET_TYPE_MISMATCH report it); a hidden MeshRenderer (Visible
-	//     false) is checked as a shown one.
+	//     which the bounds are thinnest in the world (ties going to Normal's own axis) and the Offset of their face on the
+	//     reflecting side, so following it clears the finding; or, for bounds thicker than that distance along every axis,
+	//     naming the mesh too thick to be one glass. A mesh that does not load is not checked (ASSET_MISSING and
+	//     ASSET_TYPE_MISMATCH report it); a hidden MeshRenderer (Visible false) is checked as a shown one.
+	// A zero Normal never reaches the checks: its validator refuses it on every write path, and a load drops a component that
+	// fails it (SCENE_INVALID_COMPONENT).
 	// Pure function of its inputs otherwise; main thread.
 	[[nodiscard]] std::vector<PlanarReflectionSceneIssue> FindPlanarReflectionIssues(const Scene& scene, AssetManager& assets);
 

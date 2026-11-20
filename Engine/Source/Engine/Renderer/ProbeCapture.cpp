@@ -274,8 +274,8 @@ namespace Engine {
 		// `source` as a capture renders it (ProbeCapture.h): a Lit view at the face size with the default output stage, the
 		// probes' indirect term and the planar reflections off, no particles, sprites, tilemaps, 2D lights, UI, texts, overlays,
 		// icons or selection, and every temporal input reset (no previous camera or worlds, no jitter, delta time 0). The
-		// capture reads SceneColor before the HDR chain, so bloom, exposure, the tonemap, the LUT and FXAA never reach it; of the post settings that
-		// write SceneColor before the read, TAA (a view's resolve and jitter) and SSR (a view-dependent screen-space
+		// capture reads SceneColor before the HDR chain, so bloom, exposure, the tonemap, the LUT and FXAA never reach it; of
+		// the post settings that write SceneColor before the read, TAA (a view's resolve and jitter) and SSR (a view-dependent screen-space
 		// reflection, which a 90-degree face would trace only within its own image and fade at its edges, seaming the cube)
 		// are off, and GTAO is kept as the scene sets it (ProbeCapture.h); so is the fog (M32). The camera and its clear colour
 		// are set per face by Capture.

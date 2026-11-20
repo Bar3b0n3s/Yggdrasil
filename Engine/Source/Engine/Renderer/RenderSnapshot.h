@@ -782,8 +782,8 @@ namespace Engine {
 	// Normal * Offset with the local normal Normal (the component's, normalized by the renderer; a zero or non-finite one
 	// renders no reflection), facing its reflecting side, and the renderer takes it into the world through World
 	// (Renderer/PlanarReflections.h: ComputePlanarReflectionPlane), so a non-uniform scale is handled and a moving glass is
-	// followed. ResolutionScale, in [MinPlanarReflectionResolutionScale,
-	// MaxPlanarReflectionResolutionScale], sizes the reflection's target from the view's scene resolution. The renderer
+	// followed. ResolutionScale, in [MinPlanarReflectionResolutionScale, MaxPlanarReflectionResolutionScale], sizes the
+	// reflection's target from the view's scene resolution. The renderer
 	// reflects in the plane the draws of every mesh item but the reflection's own Entity, whose draws sample the reflection
 	// (§8.3, "Planar reflections"); lighting.bake's captures clear the list (Renderer/ProbeCapture.h).
 	struct PlanarReflectionItem

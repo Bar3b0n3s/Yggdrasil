@@ -30,10 +30,10 @@ namespace Engine {
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
 			// The Probes category ends with M42's PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			const ComponentInfo& probe = RequireTerrainComponent(*registry, "PlanarReflection");
+			const ComponentInfo& lastProbes = RequireTerrainComponent(*registry, "PlanarReflection");
 			const ComponentInfo& terrain = RequireTerrainComponent(*registry, "Terrain");
 			const ComponentInfo& collider = RequireTerrainComponent(*registry, "TerrainCollider");
-			CHECK(terrain.GetIndex() == probe.GetIndex() + 1);
+			CHECK(terrain.GetIndex() == lastProbes.GetIndex() + 1);
 			CHECK(collider.GetIndex() == terrain.GetIndex() + 1);
 			for (const ComponentInfo* info : { &terrain, &collider })
 			{

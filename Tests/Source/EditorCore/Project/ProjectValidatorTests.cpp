@@ -2348,8 +2348,9 @@ end
 		}
 
 		// M42 (Scene/PlanarReflectionValidation.h, Docs/Decisions/0059-m42-planar-reflections.md decision 3): a mirror without a
-		// drawn mesh, and one whose plane misses its glass, with the axis the glass is thinnest along; a glass within 5 cm of
-		// its plane after the entity's scale is not reported.
+		// drawn mesh, and one whose plane misses its glass, with the axis the glass is thinnest along and its face's Offset,
+		// which clears the finding; a mesh too thick for any plane is named so; a glass within 5 cm of its plane after the
+		// entity's scale is not reported; a hidden MeshRenderer is checked as a shown one, and a disabled mirror is not.
 		TEST_CASE("ProjectValidator: RENDER_REFLECTION_INVALID reports a mirror without a mesh or off its glass, with the glass's axis")
 		{
 			Test::EditorTestFixture fixture("ValidatorPlanarReflections");
@@ -2380,6 +2381,15 @@ end
 				addMirror("Glass", quad, R"({"Scale":[2.5,3.15,1]})", "{}");
 				addMirror("Slab", cube, R"({"Scale":[2,2,0.04]})", R"({"Offset":0.5})");
 				addMirror("Block", cube, R"({"Scale":[2,2,0.5]})", R"({"Normal":[0,0,-1],"Offset":0.5})");
+				// A slab thin along Y whose Normal names Z, and the same slab with the hint's Normal and Offset applied.
+				addMirror("WrongAxis", cube, R"({"Scale":[2,0.04,2]})", "{}");
+				addMirror("HintApplied", cube, R"({"Scale":[2,0.04,2]})", R"({"Normal":[0,1,0],"Offset":0.5})");
+				// The Sideways quad's mirror twice more: behind a hidden MeshRenderer, and on a disabled entity.
+				addMirror("Hidden", quad, "", R"({"Normal":[0,1,0]})");
+				const Entity hidden = editor.GetScene().FindEntityByPath("/Hidden");
+				REQUIRE(ComponentAccess::PatchComponentJson(hidden, "MeshRenderer", ParseValidatorJson(R"({"Visible":false})")).has_value());
+				addMirror("Disabled", quad, "", R"({"Normal":[0,1,0]})");
+				editor.GetScene().FindEntityByPath("/Disabled").SetActive(false);
 				REQUIRE(edit.Commit().has_value());
 			}
 			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
@@ -2391,7 +2401,7 @@ end
 				if (diagnostic.Code == RenderReflectionInvalidCode)
 					CHECK(mirrors.emplace(diagnostic.Entity, &diagnostic).second);
 			}
-			CHECK(mirrors.size() == 4);
+			CHECK(mirrors.size() == 6);
 			const auto check = [&editor, &mirrors](std::string_view path, std::string_view component, std::string_view field) -> const ProjectDiagnostic*
 			{
 				CAPTURE(path);
@@ -2409,8 +2419,16 @@ end
 			check("/Unmeshed", "MeshRenderer", "Mesh");
 			// The Quad lies in its XY plane: the finding names local Z, its own Normal's sign kept where it has one.
 			CHECK(check("/Sideways", "PlanarReflection", "Normal")->Hint.find("Normal (0, 0, 1), Offset 0)") != std::string::npos);
-			// A thick block: its Z extent of 0.5 m reaches 0.5 m behind its face.
-			CHECK(check("/Block", "PlanarReflection", "Normal")->Hint.find("Normal (0, 0, -1)") != std::string::npos);
+			// A thick block: 0.5 m even along its thinnest axis, so no plane on a face holds it.
+			const std::string& block = check("/Block", "PlanarReflection", "Normal")->Hint;
+			CHECK(block.find("0.5 m thick even along local Z") != std::string::npos);
+			CHECK(block.find("Offset") == std::string::npos);
+			// The slab's face on its thinnest axis, Y, which the HintApplied twin follows and is not reported.
+			const std::string& wrongAxis = check("/WrongAxis", "PlanarReflection", "Normal")->Hint;
+			CHECK(wrongAxis.find("thinnest along local Y (Normal (0, 1, 0), Offset 0.5)") != std::string::npos);
+			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/HintApplied").GetUUID().ToString()));
+			CHECK(check("/Hidden", "PlanarReflection", "Normal")->Hint.find("Normal (0, 0, 1), Offset 0)") != std::string::npos);
+			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/Disabled").GetUUID().ToString()));
 			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/Glass").GetUUID().ToString()));
 			// A 4 cm slab whose front face carries the plane lies within 5 cm of it once scaled.
 			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/Slab").GetUUID().ToString()));
