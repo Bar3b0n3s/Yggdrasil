@@ -109,6 +109,8 @@ namespace Engine {
 			field("SsrTiles", stats.SsrTiles);
 			field("SsrTracedTiles", stats.SsrTracedTiles);
 			field("SsrTracedPixels", stats.SsrTracedPixels);
+			field("PlanarReflections", stats.PlanarReflections);
+			field("DroppedPlanarReflections", stats.DroppedPlanarReflections);
 			return 1;
 		}
 
@@ -260,7 +262,8 @@ namespace Engine {
 				"{RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, "
 				"DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, "
 				"Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, "
-				"CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number}",
+				"CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, "
+				"DroppedPlanarReflections: number}",
 				"The performance readout of Application.GetStats: frame-paced observations, never simulation state."));
 			ENGINE_TRY(api.RegisterAlias("DisplayMode", "{Width: number, Height: number, RefreshRate: number}", "One video mode of the monitor: its size in pixels and refresh rate in Hz."));
 			ENGINE_TRY(api.RegisterAlias("DisplaySettings", "{WindowMode: \"Windowed\" | \"Borderless\" | \"Exclusive\", Width: number, Height: number, RefreshRate: number, VSync: boolean}",
@@ -289,7 +292,8 @@ namespace Engine {
 					"DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows "
 					"those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and "
 					"the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and "
-					"SsrTracedPixels), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies "
+					"SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of "
+					"4), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies "
 					"(both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step "
 					"gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, "
 					"OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.",

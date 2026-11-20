@@ -42,6 +42,10 @@ namespace Engine {
 		uint32_t SsrTiles = 0;
 		uint32_t SsrTracedTiles = 0;
 		uint32_t SsrTracedPixels = 0;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the planar reflections the frame drew and those it dropped
+		// past the cap of 4 (RenderStats' PlanarReflections and DroppedPlanarReflections).
+		uint32_t PlanarReflections = 0;
+		uint32_t DroppedPlanarReflections = 0;
 	};
 
 }
