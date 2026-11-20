@@ -473,11 +473,42 @@ The lead's independent review of W41.1 (`844743f3`; `bin/Reviews/P7/M41-W1-revie
 - **Decision 3** now says that a joint whose matrix does not decompose keeps its entity attached, and that the state leaves an entity the pass did not attach.
 - **Runs** (2026-11-19, on the tree merged with main `bb8d6042`): unit, Debug, targeted (`BoneAttachments`, `RenderExtraction`, `AnimationSystem`, `AnimationValidation`, `ProjectValidator: GetCodes`, `Validation`, `DocExamples`): 94 passed, after the joint case's distance bound took the solver's slack when the swing reverses (0.59 m against the joint's 0.5 m at the reversal; a free body falls metres); unit, Release, targeted (`BoneAttachments`, `RenderExtraction`, `AnimationSystem`, `DocExamples`): 82 passed, the committed 600-tick and extraction digests unchanged; `Lint.py` and `Format.py --check` passed. After the merge and before these fixes, W41.1's cases passed again: 175 in Debug (with `DocExamples` and `PrefabInstantiator`), and `GenerateDocs.py --check` passed.
 
+## The W41.2 record
+
+W41.2 lands decision 3's coverage, documents and editor parts on `milestone/m41`, after the merge of main (`bb8d6042`, brief 21's three fixes and ADR 0059's plan; `64a90a21`), which W41.1's cases passed again on.
+
+- **FeatureTest** (IdSeeds 3801 and 3802, listed after main's scaffolds and before `Suites.jsonl`; `Suites.jsonl`'s one patch line gains the suite with case isolation).
+  - **`BoneAttachments.jsonl`** writes two behaviours (`Assets/Scripts/BoneAttachments/TriggerProbe.luau`, which records the first trigger its entity's sensor enters and where its entity stood then, and `BoneDirector.luau`, the replay's input: Jump starts the Walker's walk, Fire folds the Sword between `Joint1` and `Joint0`), makes `BoneAttachments.scene` and writes its suite `Assets/Tests/BoneAttachments/BoneAttachments.test.luau`.
+  - **The scene**, from the imported `Skinned.gltf` and `SkinnedRigs.gltf` (Animation.jsonl's imports):
+    - the Waver, a `Skinned.gltf` instance whose import layer waves `Joint1` 45 degrees about Z; its Armature holds the `Sword`, a user child with `BoneAttachment {Bone: "Joint1", Offset: [0, 0.6, 0.05], Rotation: 90 degrees about Y}` (gate 1: all three fields non-default), a Kinematic `RigidBody`, a trigger `BoxCollider` and the `TriggerProbe`; the Sword holds the `Gem` (a `PointLight` 0.4 m along it) and the `Charm` (`BoneAttachment {Bone: "Joint0", Offset: [0.3, 0, 0]}`, an attachment below an attachment);
+    - the Walker, a `SkinnedRigs.gltf` instance whose Character stands (`Playing` false, `RootMotion` Apply) with the `Pack` on its `Spine` and the `Rider`, a nested `Skinned.gltf` instance waving with its own Animator, attached by an `AddComponent` override to the Walker's `Hips`;
+    - the `Target`, a Kinematic box at the Sword's peak (a sensor sees moving bodies only: `PhysicsLayers.h`'s pair filter leaves sensors and static bodies apart), and the `Director` holding `BoneDirector`.
+  - **The suite** (`BoneAttachments`, eight cases, each from a fresh scene): the attachments as authored (the proxy's reads); every attachment within 1 mm of `GetJointTransform` plus its offset, turned with its joint, at six clip times while the Walker walks, and the Gem riding the Sword; a bone switch written by a test case in force at the tick it resumes after; `Offset` and `Rotation` writes (gate 4's writes); a disable and enable; `RemoveComponent` keeping the last Transform and `SetParent` away detaching; the world pause holding the attachment with its pose; the Sword's trigger meeting the Target where the bone holds it.
+  - **`BoneAttachmentsReplay.jsonl`** records `Assets/Tests/Replays/BoneAttachments.replay` (format 5, 240 ticks): Space at tick 20 starts the walk, F at tick 90 folds the Sword; its expectations: the Walker stands at tick 10, walks with the Pack carried past x 2.2 at tick 80, and the Sword sits on `Joint0` within 1 mm at tick 120. The walk's root motion and the fold reach the state hash, so the replay fails without its input. `Testing.Replays`' glob takes it.
+  - **No committed result moves:** `Scaffold.py` rewrote nothing of FeatureTest but the new scene, scripts, suite and replay, `FeatureTest.eproj`'s suite list and the provenance.
+  - **Gates:** 1 (the Sword's three non-default fields), 4 (`Bone`, `Offset` and `Rotation` read and written through the proxy), 6 (W41.1's fixture), 7 (the descriptions); 1b, 2, 3, 5, 8 and 9 nothing, as decision 3 says.
+  - **Goldens:** none added, none changed.
+  - **The soak** gains `BoneAttachments.scene`, which it finds under `Projects/FeatureTest` by itself.
+- **The Python case.** `Tests/Automation/test_animation.py`'s `test_bone_attachment_follows_its_bone_in_play_and_survives_a_reopen`: `entity.create` puts a `BoneAttachment` on a user child of a skinned model instance's Armature; the edit scene leaves it at its authored Transform; the scene saves and reopens clean (`rebuiltInstances` empty, not dirty: the case decision 3's risks ask for, that an attached user child survives `scene.open`); in lockstep play it sits within 1 mm of `GetJointTransform` plus its offset (`script.eval`), `entity.get {target: "play"}` reports the placed Transform, an `entity.update {target: "play"}` of `Bone` is in force after one tick, and the edit scene is untouched after `play.stop`.
+- **Documents:**
+  - Architecture: §5.2 (attached subtrees' rendering), §5.3 (the `BoneAttachmentComponent` row and the runtime `BoneAttachmentStateComponent`), §5.7 step 4c (the attaching pass), §9.3 (an attached Kinematic body is swept), §11.5 (the `Animator` row points to `BoneAttachment`), §13.7 (the code), §15.5 (`BoneAttachments.scene`).
+  - `Docs/Backlog.md` §6: the M23 row names `BoneAttachment`, and four accepted limits (an attached subtree drawn rigidly at its Animator's rendered pose, an intermediate entity's own fixed-step motion included; the closest rotation under a non-uniform scale; the attached entity's own writes overwritten; a write after the phase in force from the next tick). §2's rows landed with the plan.
+  - The skills: luau-gameplay's `animation` page (the BoneAttachment pattern and the `DocExamples`-checked fold, `StaffFold.luau`; `GetJointTransform`'s line now points to it) and its `SKILL.md` index line, extended in place (no line added); game-building's `prefabs-and-levels` (a held weapon on a model instance); game-debugging's `validation-codes` row (W41.1).
+  - The generated references were regenerated with W41.1 and are unchanged by W41.2 (`--check` passed).
+- **Runs** (2026-11-19, the wave's checkpoint on `milestone/m41`, after `48ef48ab`):
+  - FeatureTest's scaffolds tried first on a scratch copy (`Editor --batch` of the two scaffolds and `Suites.jsonl`, then `--run-tests`): the trigger case failed twice, first against a static target (a sensor sees moving bodies only), then against a target placed for a swing about X (the Wave turns `Joint1` about Z); with a Kinematic target at the peak, the suite's eight cases passed and the replay recorded its expectations.
+  - `Scaffold.py` (Release) passed and regenerated FeatureTest; `Scaffold.py --check` passed, byte for byte outside `Library/`.
+  - The feature suite, Debug: passed, 460 cases in 141 suites and replays, the six editor-mode gates green (gates 1 and 4 now covering `BoneAttachment`), `Projects/FeatureTest` unchanged.
+  - The automation suite filtered to `test_animation` (the Release editor): 4 tests passed, the attachment case among them.
+  - unit, Debug, unfiltered: 5,537 passed, the 48 child-process targets skipped (`DocExamples` checks the fold example).
+  - `Lint.py`, `Format.py --check` and `GenerateDocs.py --check` passed.
+  - The export, determinism, games and golden suites are the gate's (`BoneAttachments.replay` in Debug, Release and Dist, the suite in the exported Release and Dist runs).
+
 ## Before milestone completion
 
 - [ ] Brief 21's three items landed on main, each reviewed and its outcome recorded in decision 8.
 - [x] W41.1 committed; [x] the lead's review pass taken and every finding fixed.
-- [ ] W41.2 committed; [ ] the lead's review pass taken and every finding fixed.
+- [x] W41.2 committed; [ ] the lead's review pass taken and every finding fixed.
 - [ ] The milestone end: `milestone/m41` merged current main, the milestone review's findings fixed, `EngineVersionString` 0.8.0, FeatureTest regenerated and the editor-UI goldens checked on the final tree.
 - [ ] The gate green (decision 7), main fast-forwarded and pushed.
 - [ ] Brief 22's and brief 21's "How the game will check it" met, and reported to the World Tree session through the product owner with the corrections above.

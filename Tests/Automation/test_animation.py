@@ -1,6 +1,7 @@
 """Skeletal and morph animation through automation (Docs/Decisions/0034-m23-contract.md decisions 25 to 32; Roadmap
 M23's skeletal and morph animation with script-driven blending): the editor's animation preview, animation.preview, its
-one action."""
+one action; and M41's bone attachments (Docs/Decisions/0058-m41-bone-attachments.md decision 3), which go through the
+generic entity methods."""
 
 from __future__ import annotations
 
@@ -130,6 +131,60 @@ class AnimationPreviewTests(AutomationTestCase):
         bound = client.call("animation.preview", {"entity": "/Skinned/Armature", "time": 1.0e6})
         self.assertTrue(bound["previewing"])
         client.call("animation.preview", {"entity": "/Skinned/Armature", "stop": True})
+
+
+
+class BoneAttachmentTests(AutomationTestCase):
+    def test_bone_attachment_follows_its_bone_in_play_and_survives_a_reopen(self) -> None:
+        # M41 (decision 3): a BoneAttachment is created, updated and read through the generic entity methods. In the
+        # edit scene nothing places it; the scene, with the attached entity a user child of a skinned model instance,
+        # saves and reopens clean (brief 21's third fix, which M41's FeatureTest scene relies on); in play the
+        # AnimationSystem phase places it on its bone, and a Bone written in play takes effect at the next tick.
+        client, root = self.open_editor_with_scene()
+        import_skinned_fixture(client, root)
+        client.call("prefab.instantiate", {"prefab": "Assets/Models/Skinned.gltf"})
+        attachment = {"Bone": "Joint1", "Offset": [0, 0.6, 0.05], "Rotation": [0, 0.7071068, 0, 0.7071068]}
+        client.call("entity.create", {"name": "Staff", "parent": "/Skinned/Armature",
+                                      "components": {"BoneAttachment": attachment}})
+        staff = "/Skinned/Armature/Staff"
+        edited = client.call("entity.get", {"entity": staff})["entity"]["components"]
+        self.assertEqual(edited["BoneAttachment"]["Bone"], "Joint1")
+        self.assertEqual(edited["Transform"]["Translation"], [0, 0, 0])
+
+        client.call("scene.save")
+        opened = client.call("scene.open", {"path": MAIN, "reload": True})
+        self.assertEqual(opened["rebuiltInstances"], [])
+        self.assertFalse(opened["scene"]["dirty"])
+        reopened = client.call("entity.get", {"entity": staff})["entity"]["components"]["BoneAttachment"]
+        self.assertEqual(reopened["Bone"], "Joint1")
+        for got, expected in zip(reopened["Offset"], attachment["Offset"]):
+            self.assertAlmostEqual(got, expected, places=6)
+
+        client.call("play.start", {"lockstep": True})
+        client.call("play.step", {"ticks": 20})
+        distance = "\n".join([
+            "local staff = Scene.FindByPath(\"/Skinned/Armature/Staff\")",
+            "local armature = Scene.FindByPath(\"/Skinned/Armature\")",
+            "local position, rotation = armature.Animator:GetJointTransform(\"Joint1\")",
+            "local expected = position + rotation * staff.BoneAttachment.Offset",
+            "return vector.magnitude(staff.Transform.WorldPosition - expected)",
+        ])
+        self.assertLess(client.call("script.eval", {"context": "play", "code": distance})["value"], 1e-3)
+        placed = client.call("entity.get", {"entity": staff, "target": "play"})["entity"]["components"]["Transform"]
+        self.assertNotEqual(placed["Translation"], [0, 0, 0])
+
+        # Joint0 never moves in the Wave clip and sits at the Armature's origin, so the Staff lands on its Offset.
+        client.call("entity.update", {"entity": staff, "target": "play",
+                                      "components": {"BoneAttachment": {"Bone": "Joint0"}}})
+        client.call("play.step", {"ticks": 1})
+        folded = client.call("entity.get", {"entity": staff, "target": "play"})["entity"]["components"]
+        self.assertEqual(folded["BoneAttachment"]["Bone"], "Joint0")
+        for got, expected in zip(folded["Transform"]["Translation"], attachment["Offset"]):
+            self.assertAlmostEqual(got, expected, places=6)
+        client.call("play.stop")
+        # Nothing of play reaches the edit scene: the Staff is back at its authored Transform.
+        authored = client.call("entity.get", {"entity": staff})["entity"]["components"]["Transform"]
+        self.assertEqual(authored["Translation"], [0, 0, 0])
 
 
 if __name__ == "__main__":
