@@ -50,6 +50,10 @@ thirdparty/Vulkan-Headers/LICENSE.md, LICENSES/Apache-2.0.txt, LICENSES/MIT.txt
 
 **None.** Every file matches upstream byte for byte, apart from line endings. Files were normalised to LF to follow the repository's `.gitattributes` (`* text=auto eol=lf`). This was checked with `diff --strip-trailing-cr` against both upstream checkouts.
 
+## Known upstream issues
+
+- **`createBindingSet` leaks on a failed descriptor allocation** (found by M42's W42.2 review, 2026-11-23; `src/vulkan/vulkan-resource-bindings.cpp`, `Device::createBindingSet`). It allocates its `BindingSet` with `new` and gives it the layout, then returns null through `CHECK_VK_FAIL` when `vkCreateDescriptorPool` or `vkAllocateDescriptorSets` fails, without releasing that object, which keeps its reference to the layout. An out-of-memory binding set therefore leaks the `BindingSet` and keeps its `BindingLayout` (and the `VkDescriptorSetLayout`) alive until the process ends. The engine does not patch NVRHI's sources: its binding-set fault for tests (`GpuDiagnostics::SetBindingSetCreationFault`, used by `GraphicsDevice::CreateBindingSet` and `Tests/Source/Support/BindingSetCreationFails.h`) fails a creation before NVRHI is called, so a test of an out-of-memory binding set never reaches this path and the GPU fixture's leak check stays meaningful.
+
 ## premake project (mirrors upstream CMake)
 
 The upstream configuration this mirrors is `NVRHI_WITH_VULKAN=ON`, `NVRHI_WITH_VALIDATION=ON`, `NVRHI_WITH_DX11/DX12/RTXMU/NVAPI/AFTERMATH=OFF`, `NVRHI_BUILD_SHARED=OFF`. One deviation: upstream builds `nvrhi` (common + validation) and `nvrhi_vk` as two static libraries. Here they are merged into one `NVRHI` static library.

@@ -6,6 +6,8 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include <utility>
+
 namespace Engine {
 
 	namespace Utils {
@@ -266,6 +268,17 @@ namespace Engine {
 	bool GpuDiagnostics::TakeSwapchainCreationFault()
 	{
 		return TakeArmedFault(GpuFault::OomSwapchain, GpuFault::OomSwapchainPersistent);
+	}
+
+	void GpuDiagnostics::SetBindingSetCreationFault(BindingSetFaultSelector selector)
+	{
+		ENGINE_CORE_ASSERT(GpuTestHooksEnabled || !selector, "the binding-set fault does not exist in Dist");
+		m_BindingSetFault = std::move(selector);
+	}
+
+	bool GpuDiagnostics::ShouldFailBindingSetCreation(const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& layout) const
+	{
+		return GpuTestHooksEnabled && m_BindingSetFault && m_BindingSetFault(desc, layout);
 	}
 
 	bool GpuDiagnostics::TakeArmedFault(GpuFault onceFault, GpuFault persistentFault)

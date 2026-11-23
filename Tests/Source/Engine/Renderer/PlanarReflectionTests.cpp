@@ -18,6 +18,7 @@
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Support/BindingSetCreationFails.h"
 #include "Support/BufferCreationFails.h"
 #include "Support/DeviceLossTest.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -857,6 +858,79 @@ namespace Engine {
 					const Test::BufferCreationFails fails([](const VkBufferCreateInfo& info)
 					{
 						return (info.usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) != 0 && (info.usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) != 0;
+					});
+					rendered = RenderStatus(device, fixture, snapshot);
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				REQUIRE_FALSE(rendered.has_value());
+				CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+				const RenderStats skipped = fixture.Renderer().GetRenderStats();
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(skipped, "Skinning") == nullptr);
+				CHECK(skipped.PlanarReflections == 1);
+				const RenderPassStats* skippedRow = Test::SceneRendererIntegrationFixture::FindPass(skipped, "PlanarReflection0");
+				const RenderPassStats* skippedForward = Test::SceneRendererIntegrationFixture::FindPass(skipped, "ForwardOpaque");
+				REQUIRE(skippedRow != nullptr);
+				REQUIRE(skippedForward != nullptr);
+				CHECK(skippedRow->DrawCalls == plainRow->DrawCalls);
+				CHECK(skippedForward->DrawCalls == plainForward->DrawCalls);
+
+				const Status recovered = RenderStatus(device, fixture, snapshot);
+				CHECK(recovered.has_value());
+				const RenderStats drawn = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* drawnRow = Test::SceneRendererIntegrationFixture::FindPass(drawn, "PlanarReflection0");
+				const RenderPassStats* skinning = Test::SceneRendererIntegrationFixture::FindPass(drawn, "Skinning");
+				REQUIRE(drawnRow != nullptr);
+				REQUIRE(skinning != nullptr);
+				CHECK(drawnRow->DrawCalls == plainRow->DrawCalls + 2);
+				CHECK(skinning->Dispatches == 1);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The skinned strip in front of the mirror, seen by both views, whose Skinning dispatch cannot be recorded (its binding
+		// set runs out of memory, through the engine's fault before NVRHI): its vertices hold no deformation, so the Deform
+		// stage skips its draws in the main view and in the mirror view (SkipDeformedDraws), and the render returns the error;
+		// the next render deforms it and draws it in both.
+		TEST_CASE("PlanarReflections: a deformed item whose skinning cannot be recorded is drawn by neither the view nor its reflection"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				const Status plainRendered = RenderStatus(device, fixture, snapshot);
+				REQUIRE(plainRendered.has_value());
+				const RenderStats plain = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* plainRow = Test::SceneRendererIntegrationFixture::FindPass(plain, "PlanarReflection0");
+				const RenderPassStats* plainForward = Test::SceneRendererIntegrationFixture::FindPass(plain, "ForwardOpaque");
+				REQUIRE(plainRow != nullptr);
+				REQUIRE(plainForward != nullptr);
+
+				// At rest first (no palette, so nothing deforms), which uploads the strip's mesh.
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.9f, 0.0f, -2.0f)),
+					.Mesh = StripMeshHandle,
+					.Materials = { RedMaterialHandle },
+					.Entity = UUID(4) });
+				const Status rest = RenderStatus(device, fixture, snapshot);
+				REQUIRE(rest.has_value());
+				const glm::mat4 turn(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+				snapshot.Meshes.back().JointPalette = { glm::mat4(1.0f), turn };
+				Status rendered;
+				{
+					// The Skinning pass's set is the only one with three raw-buffer reads and a raw-buffer write.
+					const Test::BindingSetCreationFails fails(device, [](const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& /*layout*/)
+					{
+						const auto count = [&desc](nvrhi::ResourceType type)
+						{
+							return std::ranges::count_if(desc.bindings, [type](const nvrhi::BindingSetItem& item)
+							{
+								return item.type == type;
+							});
+						};
+						return count(nvrhi::ResourceType::RawBuffer_SRV) == 3 && count(nvrhi::ResourceType::RawBuffer_UAV) == 1;
 					});
 					rendered = RenderStatus(device, fixture, snapshot);
 					CHECK(fails.GetFailedCount() == 1);

@@ -1149,6 +1149,9 @@ namespace Engine {
 	{
 		if (IsLost())
 			return std::unexpected(Utils::MakeLostDeviceError("binding set", std::format("{} bindings", desc.bindings.size())));
+		// M42: a test's out-of-memory binding set fails here, before NVRHI, whose failure path leaks (GpuDiagnostics.h).
+		if (m_Diagnostics.ShouldFailBindingSetCreation(desc, layout))
+			return MakeError(ErrorCode::Gpu, "cannot create a binding set ({} bindings): out of device memory (injected by a test)", desc.bindings.size());
 		nvrhi::BindingSetHandle set = m_NvrhiDevice->createBindingSet(desc, &layout);
 		if (!set)
 			return MakeError(ErrorCode::Gpu, "cannot create a binding set ({} bindings)", desc.bindings.size());

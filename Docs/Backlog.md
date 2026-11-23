@@ -304,7 +304,6 @@ Limits accepted for v1. A limit that names a milestone is scheduled by ADR 0028 
   - A reflection is not temporally filtered, so TAA can trail a reflection that moves against its glass.
   - A mirror at the cap of 4 switches between its planar reflection and its fallback as the ranks change (no hysteresis).
   - Geometry on a mirror's reflecting side within the clip bias (1 cm) of its plane is clipped from its reflection.
-  - A deformed item whose Skinning dispatch cannot be recorded is skipped by the main view and every mirror view (W42.2's review, finding 2, `SkipDeformedDraws`), with no regression case: the only way that record fails for a valid item is its binding set running out of memory, and NVRHI's `createBindingSet` returns null without releasing the `BindingSet` it allocated, which keeps a reference to its layout, when the set's descriptor pool or set allocation fails (`Vendor/NVRHI/src/vulkan/vulkan-resource-bindings.cpp`), so a Vulkan-level injection fails the GPU fixture's leak check, and the engine has no binding-set fault hook. The same leak follows a real out-of-memory binding set: a layout held until the process ends. No work planned: lifted by a binding-set fault in `GpuDiagnostics` or an upstream fix of NVRHI's failure path.
 
 ## 7. Non-goals for v1
 
