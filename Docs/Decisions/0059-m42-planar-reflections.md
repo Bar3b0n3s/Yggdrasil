@@ -618,7 +618,7 @@ W42.3 adds the coverage, tools and documents decision 3 lists.
 
 - [x] W42.1 committed; [x] the lead's review pass taken and every finding fixed (7: findings 1 to 7 of `bin/Reviews/P7/M42-W1-review.md`, after W42.2).
 - [x] W42.2 committed; [x] the lead's review pass taken and every finding fixed (12: findings 1 to 12 of `bin/Reviews/P7/M42-W2-review.md`, in W42.3; finding 2's regression case through the binding-set fault the lead asked for).
-- [x] W42.3 committed; [ ] the lead's review pass taken and every finding fixed.
+- [x] W42.3 committed; [x] the lead's review pass taken and every finding fixed (9: `bin/Reviews/P7/M42-W3-review.md`, fixed in `8ec49111`; the review also confirmed W42.2's twelve fixes).
 - [ ] The landing: phase 7's batch (ADR 0058, as amended), with M41's contended files kept and M42's entries appended, FeatureTest regenerated, `EngineVersionString` 0.8.0, the gate green.
 - [ ] Brief 23's "How the game will check it" met in FeatureTest, the goldens and the gpu cases, and reported to the World Tree session through the product owner with the corrections above.
-- [ ] Architecture, the Roadmap, the skills, the Backlog and the generated references describe what landed.
+- [x] Architecture, the Roadmap, the skills, the Backlog and the generated references describe what landed.

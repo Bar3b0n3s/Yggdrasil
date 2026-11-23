@@ -38,6 +38,14 @@
     The generated references are regenerated on the landing, never merged.
   - **The ledger.** M42's allocations are ADR 0059 decision 8's: IdSeeds 3900 to 3999; validation code 75, `RENDER_REFLECTION_INVALID`, after M41's; component 64, `PlanarReflection`, in Probes. A record outside the two milestones takes 0060 on.
 
+- **Amended 2026-11-23 (phase 7's landing, `landing/phase7`):**
+  - **The batch.** `landing/phase7` merged M41 (`56612730`, its tree M41's tip byte for byte), then M42 (`1784a0d3`, 13 conflicted files, each list taking M41's entries first), then set `EngineVersionString` 0.8.0 with FeatureTest regenerated (`d7db913e`).
+  - **The counts both milestones raised.** git merged `BuiltinComponents::Size` silently at 63, and the landing set it to 64. The merged values are 64 components, 75 validation codes, 101 FeatureTest scaffolds, 116 suites, 104 scenes, 26 replays and 56 goldens on `nvidia-62x`.
+  - **The replays.** All 26 replays record 0.8.0, and every other field, hash included, is main's (M41's tip's for `BoneAttachments.replay`). No demo changed.
+  - **The goldens, against main.** Every golden was rendered on this machine with main `bb8d6042`'s Release build and with `d7db913e`'s. The 55 existing images are byte-identical, and two renders of main are byte-identical to each other. So neither milestone changed an existing image, as decision 3's rendering rule and ADR 0059's clip promised. The one new image is M42's `PlanarReflections`.
+  - **The merge review** (the lead's independent pass) found one nit, the count comment in `BuiltinComponentsTests.cpp`, and two documents the milestones missed: Architecture §15.4's golden list and the luau-gameplay `game-services` page's readout members. All three are fixed on the landing branch.
+  - **The gate.** `CI.py --milestone` (decision 7) remains, with the World Tree and Skerries sessions' rendering editors closed.
+
 ## Context
 
 - **The briefs.** World Tree's look pass (2026-11-18, engine 0.7.0) reported two briefs, both of low priority, in `Projects/WorldTree/Design/EngineTasks/`:
@@ -519,10 +527,10 @@ The lead's independent review of W41.2 (`f8739224`; `bin/Reviews/P7/M41-W2-revie
 
 ## Before milestone completion
 
-- [ ] Brief 21's three items landed on main, each reviewed and its outcome recorded in decision 8.
+- [x] Brief 21's three items landed on main, each reviewed and its outcome recorded in decision 8.
 - [x] W41.1 committed; [x] the lead's review pass taken and every finding fixed.
-- [x] W41.2 committed; [ ] the lead's review pass taken and every finding fixed.
-- [ ] The milestone end: `milestone/m41` merged current main, the milestone review's findings fixed, `EngineVersionString` 0.8.0, FeatureTest regenerated and the editor-UI goldens checked on the final tree.
+- [x] W41.2 committed; [x] the lead's review pass taken and every finding fixed.
+- [x] The milestone end: `milestone/m41` merged current main, the milestone review's findings fixed, `EngineVersionString` 0.8.0, FeatureTest regenerated and the editor-UI goldens checked on the final tree.
 - [ ] The gate green (decision 7), main fast-forwarded and pushed.
 - [ ] Brief 22's and brief 21's "How the game will check it" met, and reported to the World Tree session through the product owner with the corrections above.
-- [ ] Architecture, the Roadmap, the skills, the Backlog and the generated references describe what landed.
+- [x] Architecture, the Roadmap, the skills, the Backlog and the generated references describe what landed.

@@ -38,7 +38,7 @@ namespace Engine {
 		TEST_CASE("BuiltinComponents: every listed type is plain component data")
 		{
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
-			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, and M37's four joints (Docs/Decisions/0054-m37-joints.md
+			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, M37's four joints (Docs/Decisions/0054-m37-joints.md
 			// decision 1) 62, M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63, and M42's
 			// PlanarReflection (Docs/Decisions/0059-m42-planar-reflections.md decision 3) 64.
 			static_assert(BuiltinComponents::Size == 64);
