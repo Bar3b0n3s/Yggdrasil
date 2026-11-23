@@ -2,7 +2,9 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/SkeletonData.h"
 #include "Engine/Core/Random.h"
+#include "Engine/Core/Utf8.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/ValidationContext.h"
 #include "Engine/Scene/ComponentRegistration.h"
@@ -15,7 +17,9 @@
 // 0028's phase-2 ledger: a milestone's new components go in categories of their own after Scripting): the Animator, which
 // poses a skeleton from its layers' clips in the fixed step, and the SkinnedMesh, which deforms its MeshRenderer's mesh by
 // that pose and by morph weights. Registered by the contract, so every W23.3 stream builds on the final entries.
-// FeatureTest's Animation.scene and the SkinnedPose golden scene hold them; no audited demo does.
+// FeatureTest's Animation.scene and the SkinnedPose golden scene hold them; no audited demo does. M41
+// (Docs/Decisions/0058-m41-bone-attachments.md decision 3) appends the BoneAttachment, which places its entity on a joint of
+// the Animator above it each fixed step (Scene/BoneAttachments.h).
 
 namespace Engine {
 
@@ -55,6 +59,22 @@ namespace Engine {
 				skinned.MorphWeights.resize(MaxMeshMorphTargets);
 			for (float& weight : skinned.MorphWeights)
 				weight = std::isfinite(weight) ? std::clamp(weight, -1.0f, 1.0f) : 0.0f;
+		}
+
+		// M41 (decision 3): a BoneAttachment's Bone is a joint name a Skeleton can hold, at most MaxSkeletonJointNameBytes of
+		// valid UTF-8 (empty is valid: the attachment is reported, never refused, ANIMATION_ATTACHMENT_INVALID).
+		static void ValidateBoneAttachment(const BoneAttachmentComponent& attachment, ValidationContext& context)
+		{
+			if (attachment.Bone.size() > MaxSkeletonJointNameBytes)
+				context.Error("Bone", std::format("must hold at most {} bytes, not {}", MaxSkeletonJointNameBytes, attachment.Bone.size()));
+			else if (!IsValidUtf8(attachment.Bone))
+				context.Error("Bone", "must be valid UTF-8");
+		}
+
+		static void MakeBoneAttachmentValid(BoneAttachmentComponent& attachment, Random& /*random*/)
+		{
+			if (attachment.Bone.size() > MaxSkeletonJointNameBytes || !IsValidUtf8(attachment.Bone))
+				attachment.Bone.clear();
 		}
 
 	}
@@ -98,6 +118,24 @@ namespace Engine {
 				"One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it.")
 			.Validate(&Utils::ValidateSkinnedMesh)
 			.Generate(&Utils::MakeSkinnedMeshValid);
+
+		RegisterComponent<BoneAttachmentComponent>(registry, "BoneAttachment",
+			"Places the entity on a joint of the Animator's Skeleton (a bone), the Animator being the nearest one above the entity, each fixed step "
+			"after the pose is sampled; the entity and its children draw with the skin.")
+			.Category("Animation")
+			.Version(1)
+			.Requires<TransformComponent>()
+			.Field("Bone", &BoneAttachmentComponent::Bone,
+				"The name of a joint of the Animator's Skeleton (a bone), matched exactly as Animator:GetJointTransform matches it; empty attaches to "
+				"nothing.")
+			.Field("Offset", &BoneAttachmentComponent::Offset,
+				"The entity's position relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone), in metres along the joint's "
+				"axes, in the Animator entity's units.",
+				{ .Unit = "m" })
+			.Field("Rotation", &BoneAttachmentComponent::Rotation,
+				"The entity's rotation relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone): a unit quaternion.")
+			.Validate(&Utils::ValidateBoneAttachment)
+			.Generate(&Utils::MakeBoneAttachmentValid);
 	}
 
 }

@@ -30,9 +30,9 @@ Special cases (also in Tests/Data/Validation/README.md, which this generator wri
 - ASSET_MISSING.Tilemap and ASSET_TYPE_MISMATCH.Tilemap name a sprite sheet from a tilemap's palette. Sheets have no
   placeholder, so the asset manager logs nothing for them and only the validator reports them; the test declares no
   Error entry for those two codes there.
-- ANIMATION_NO_ANIMATOR and ANIMATION_SKELETON_MISMATCH reference the meshes and skeletons of generated skinned glTF
-  files (GltfImporter version 3) by their sub-asset handles, Hash64(the .meta's handle, the sub-asset key), so their
-  .meta files fix the handles.
+- ANIMATION_NO_ANIMATOR, ANIMATION_SKELETON_MISMATCH and ANIMATION_ATTACHMENT_INVALID reference the meshes and
+  skeletons of generated skinned glTF files (GltfImporter version 3) by their sub-asset handles, Hash64(the .meta's
+  handle, the sub-asset key), so their .meta files fix the handles.
 - GRAPH_INVALID and GRAPH_UNREACHABLE_NODE hold a .graph source (a Script asset whose importer is Graph,
   Docs/Decisions/0035-m24-contract.md decision 5), which the validator reads itself; a graph reported GRAPH_INVALID is
   never also ASSET_IMPORT_FAILED for the same cause.
@@ -78,9 +78,9 @@ COMPONENT_ORDER = [
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
-    "Animator", "SkinnedMesh", "ParticleEmitter", "ParticleLook", "IrradianceVolume", "ReflectionProbe", "Terrain",
-    "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier", "HingeJoint", "SliderJoint",
-    "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
+    "Animator", "SkinnedMesh", "BoneAttachment", "ParticleEmitter", "ParticleLook", "IrradianceVolume",
+    "ReflectionProbe", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier",
+    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -1043,6 +1043,18 @@ return Script.Define("Jumper", Jumper)
     door["Components"] = {key: door["Components"][key] for key in COMPONENT_ORDER if key in door["Components"]}
     item.entities.append(door)
 
+    # M41 (Docs/Decisions/0058-m41-bone-attachments.md decision 3): a staff held below an Animator posing the
+    # three-joint rig, attached to a bone the skeleton lacks ("Tipp", one letter from "Tip").
+    item = fixture("ANIMATION_ATTACHMENT_INVALID")
+    add_rigs(item)
+    item.entities.append(entity("e000000000000033", "Warden", {
+        "Transform": transform(),
+        "Animator": {"Skeleton": hash64(rig_handle, "skin:0:Rig"), "Layers": [], "Playing": True,
+                     "RootMotion": "None"}}))
+    item.entities.append(entity("e000000000000034", "Staff", {
+        "Transform": transform(), "BoneAttachment": {"Bone": "Tipp", "Offset": [0, 0.5, 0], "Rotation": [0, 0, 0, 1]}},
+        parent="e000000000000033"))
+
     return fixtures
 
 
@@ -1068,8 +1080,8 @@ reports: `ASSET_VERTEX_COLORS_IGNORED` since GltfImporter version 2 imports `COL
   lights) are expanded at test time.
 - `ASSET_MISSING.Tilemap` and `ASSET_TYPE_MISMATCH.Tilemap` name a sprite sheet from a tilemap's palette. Sheets have no
   placeholder, so the asset manager logs nothing for them and only the validator reports them.
-- `ANIMATION_NO_ANIMATOR` and `ANIMATION_SKELETON_MISMATCH` reference the meshes and skeletons of generated skinned glTF
-  files by their sub-asset handles, so their `.meta` files fix the source handles.
+- `ANIMATION_NO_ANIMATOR`, `ANIMATION_SKELETON_MISMATCH` and `ANIMATION_ATTACHMENT_INVALID` reference the meshes and
+  skeletons of generated skinned glTF files by their sub-asset handles, so their `.meta` files fix the source handles.
 - `GRAPH_INVALID` and `GRAPH_UNREACHABLE_NODE` hold a `.graph` source (a Script asset whose importer is Graph),
   which the validator reads itself; a graph reported `GRAPH_INVALID` is never also `ASSET_IMPORT_FAILED` for the same
   cause.

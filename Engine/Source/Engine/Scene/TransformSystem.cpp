@@ -4,6 +4,7 @@
 #include "Engine/Core/Assert.h"
 #include "Engine/Core/DetMath.h"
 #include "Engine/Reflection/FieldType.h"
+#include "Engine/Scene/BoneAttachments.h"
 #include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
@@ -146,6 +147,53 @@ namespace Engine {
 					return nullptr;
 			}
 			return entity.TryGetComponent<PreviousWorldTransformComponent>();
+		}
+
+		// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision R): the rendered world matrix of `entity` at `alpha` by the
+		// rule of RenderExtraction.h's ComputeRenderedWorldMatrix, over freshly computed world matrices (ComputeWorldMatrix)
+		// where extraction reads the cached ones: an attached subtree's Animator's rendered pose times its relative pose, else
+		// the translation lerped and, when both poses decompose, the rotation slerped and the scale lerped (the current
+		// rotation and scale otherwise). The render pose of an attached subtree is read from it, so a script's RenderPosition
+		// and the image agree.
+		static glm::mat4 ComputeRenderMatrix(ConstEntity entity, float alpha)
+		{
+			if (alpha < 1.0f)
+			{
+				if (const ConstEntity animator = FindAttachedRenderAnimator(entity); animator.IsValid())
+					return ComputeRenderMatrix(animator, alpha) * ComputeAttachedRelativeMatrix(animator, entity);
+			}
+			const glm::mat4 current = TransformSystem::ComputeWorldMatrix(entity);
+			const PreviousWorldTransformComponent* previous = FindInterpolationStart(entity);
+			if (previous == nullptr || alpha >= 1.0f || previous->Matrix == current)
+				return current;
+			const glm::vec3 startTranslation(previous->Matrix[3]);
+			const glm::vec3 translation = startTranslation + (glm::vec3(current[3]) - startTranslation) * alpha;
+			const Result<TransformDecomposition> start = TransformSystem::DecomposeMatrix(previous->Matrix);
+			const Result<TransformDecomposition> end = TransformSystem::DecomposeMatrix(current);
+			if (!start.has_value() || !end.has_value())
+			{
+				glm::mat4 rendered = current;
+				rendered[3] = glm::vec4(translation, 1.0f);
+				return rendered;
+			}
+			TransformComponent rendered;
+			rendered.Translation = translation;
+			rendered.Rotation = Slerp(start->Rotation, end->Rotation, alpha);
+			rendered.Scale = start->Scale + (end->Scale - start->Scale) * alpha;
+			return TransformSystem::ComputeLocalMatrix(rendered);
+		}
+
+		// The product of the local rotations of the entities below `animator` (a strict ancestor) down to `entity`, root side
+		// first: the rotation GetWorldRotation's chain takes from `animator`'s entity to `entity`.
+		static glm::quat ComputeRelativeRotation(ConstEntity animator, ConstEntity entity)
+		{
+			std::vector<ConstEntity> chain;
+			for (ConstEntity current = entity; current.IsReadable() && current != animator; current = current.GetParent())
+				chain.push_back(current);
+			glm::quat rotation(1.0f, 0.0f, 0.0f, 0.0f);
+			for (auto link = chain.rbegin(); link != chain.rend(); ++link)
+				rotation = rotation * link->GetComponent<TransformComponent>().Rotation;
+			return rotation;
 		}
 
 		// An angle in degrees in (-180, 180] from atan2's [-pi, pi].
@@ -314,9 +362,15 @@ namespace Engine {
 
 	glm::vec3 TransformSystem::GetRenderPosition(ConstEntity entity)
 	{
+		const float alpha = entity.GetScene()->GetInterpolationAlpha();
+		// M41 (decision R): an attached subtree's render pose is its rendered matrix's.
+		if (alpha < 1.0f)
+		{
+			if (const ConstEntity animator = FindAttachedRenderAnimator(entity); animator.IsValid())
+				return glm::vec3((Utils::ComputeRenderMatrix(animator, alpha) * ComputeAttachedRelativeMatrix(animator, entity))[3]);
+		}
 		const glm::vec3 current = GetWorldPosition(entity);
 		const PreviousWorldTransformComponent* previous = Utils::FindInterpolationStart(entity);
-		const float alpha = entity.GetScene()->GetInterpolationAlpha();
 		if (previous == nullptr || alpha >= 1.0f)
 			return current;
 
@@ -326,9 +380,15 @@ namespace Engine {
 
 	glm::quat TransformSystem::GetRenderRotation(ConstEntity entity)
 	{
+		const float alpha = entity.GetScene()->GetInterpolationAlpha();
+		// M41 (decision R): an attached subtree turns with its Animator's render rotation, by its rotation relative to it.
+		if (alpha < 1.0f)
+		{
+			if (const ConstEntity animator = FindAttachedRenderAnimator(entity); animator.IsValid())
+				return glm::normalize(GetRenderRotation(animator) * Utils::ComputeRelativeRotation(animator, entity));
+		}
 		const glm::quat current = GetWorldRotation(entity);
 		const PreviousWorldTransformComponent* previous = Utils::FindInterpolationStart(entity);
-		const float alpha = entity.GetScene()->GetInterpolationAlpha();
 		if (previous == nullptr || alpha >= 1.0f)
 			return current;
 

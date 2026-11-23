@@ -2427,6 +2427,54 @@
 			},
 			"additionalProperties": false
 		},
+		"BoneAttachment": {
+			"description": "Places the entity on a joint of the Animator's Skeleton (a bone), the Animator being the nearest one above the entity, each fixed step after the pose is sampled; the entity and its children draw with the skin.",
+			"type": "object",
+			"properties": {
+				"Bone": {
+					"description": "The name of a joint of the Animator's Skeleton (a bone), matched exactly as Animator:GetJointTransform matches it; empty attaches to nothing.",
+					"type": "string"
+				},
+				"Offset": {
+					"description": "The entity's position relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone), in metres along the joint's axes, in the Animator entity's units.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"Rotation": {
+					"description": "The entity's rotation relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone): a unit quaternion.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						},
+						{
+							"type": "number"
+						}
+					],
+					"minItems": 4,
+					"maxItems": 4
+				}
+			},
+			"additionalProperties": false
+		},
 		"ParticleEmitter": {
 			"description": "Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision.",
 			"type": "object",
@@ -4223,6 +4271,9 @@
 						},
 						"SkinnedMesh": {
 							"$ref": "#/$defs/SkinnedMesh"
+						},
+						"BoneAttachment": {
+							"$ref": "#/$defs/BoneAttachment"
 						},
 						"ParticleEmitter": {
 							"$ref": "#/$defs/ParticleEmitter"

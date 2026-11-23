@@ -29,14 +29,15 @@ namespace Engine {
 	// skeleton that loads); it draws its bind pose.
 	inline constexpr std::string_view AnimationSkeletonMismatchCode = "ANIMATION_SKELETON_MISMATCH";
 
-	// One animation validation finding.
+	// One animation validation finding. M41 reuses it for ANIMATION_ATTACHMENT_INVALID (Scene/BoneAttachments.h), whose
+	// findings name the BoneAttachment's entity and component.
 	struct AnimationSceneIssue
 	{
-		std::string Code{}; // one of the codes above
+		std::string Code{}; // one of the codes above, or M41's AnimationAttachmentInvalidCode
 		DiagnosticSeverity Severity = DiagnosticSeverity::Warning;
-		UUID Entity{};           // the SkinnedMesh's entity
-		std::string Component{}; // "SkinnedMesh"
-		std::string Field{};     // empty: the finding is about the component as a whole
+		UUID Entity{};           // the SkinnedMesh's (or the BoneAttachment's) entity
+		std::string Component{}; // "SkinnedMesh" (or "BoneAttachment")
+		std::string Field{};     // empty: the finding is about the component as a whole; "Bone" for a BoneAttachment's bone
 		std::string Message{};
 		std::string Hint{};
 

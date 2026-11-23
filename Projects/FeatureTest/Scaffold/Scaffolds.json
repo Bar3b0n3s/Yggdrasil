@@ -573,6 +573,16 @@
 			"Renderer": "none"
 		},
 		{
+			"File": "BoneAttachments.jsonl",
+			"IdSeed": 3801,
+			"Renderer": "none"
+		},
+		{
+			"File": "BoneAttachmentsReplay.jsonl",
+			"IdSeed": 3802,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

@@ -2675,6 +2675,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/BoneAttachments.scene",
+			"XXH64": "149c998fbfa566e2",
+			"Method": "scene.save",
+			"RequestId": 9,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/BoneAttachments.scene.meta",
+			"XXH64": "9613d8596900068a",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/Callbacks.scene",
 			"XXH64": "8f58a44d2271b009",
 			"Method": "scene.save",
@@ -4365,6 +4381,38 @@
 		{
 			"Path": "Assets/Scripts/Api/Probe.luau.meta",
 			"XXH64": "1738726b6bc195d2",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/BoneAttachments/BoneDirector.luau",
+			"XXH64": "da31ca077d9d96ea",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/BoneAttachments/BoneDirector.luau.meta",
+			"XXH64": "3591cd0f51932ac2",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/BoneAttachments/TriggerProbe.luau",
+			"XXH64": "d558fd71d20e7bc8",
+			"Method": "script.write",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/BoneAttachments/TriggerProbe.luau.meta",
+			"XXH64": "09035fa82ac8fce2",
 			"Method": "script.write",
 			"RequestId": 1,
 			"Client": "batch",
@@ -6515,6 +6563,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/BoneAttachments/BoneAttachments.test.luau",
+			"XXH64": "cc557bdfdcb2bd03",
+			"Method": "script.write",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/BoneAttachments/BoneAttachments.test.luau.meta",
+			"XXH64": "92eec88153808051",
+			"Method": "script.write",
+			"RequestId": 10,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Callbacks/Callbacks.test.luau",
 			"XXH64": "1742da6048b73fba",
 			"Method": "script.write",
@@ -7117,6 +7181,22 @@
 		{
 			"Path": "Assets/Tests/Replays/Animation.replay.meta",
 			"XXH64": "bccbda6a722111fc",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/BoneAttachments.replay",
+			"XXH64": "91ee1ad166dd2632",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/BoneAttachments.replay.meta",
+			"XXH64": "2b5c7e019acf250e",
 			"Method": "input.record",
 			"RequestId": 3,
 			"Client": "batch",
@@ -8228,7 +8308,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "705563c4c9f63368",
+			"XXH64": "a8e577dc344aff45",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

@@ -465,6 +465,16 @@ declare extern type Behaviour with
 	OnUpdate: (self: ScriptInstance, dt: number) -> ()
 end
 
+-- Places the entity on a joint of the Animator's Skeleton (a bone), the Animator being the nearest one above the entity, each fixed step after the pose is sampled; the entity and its children draw with the skin.
+declare extern type BoneAttachment with
+	-- The name of a joint of the Animator's Skeleton (a bone), matched exactly as Animator:GetJointTransform matches it; empty attaches to nothing. A value a script writes holds at most 4096 bytes of text. [All modes; Runtime|Test; pure/read; setter mutates]
+	Bone: string
+	-- The entity's position relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone), in metres along the joint's axes, in the Animator entity's units. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: vector
+	-- The entity's rotation relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone): a unit quaternion. [All modes; Runtime|Test; pure/read; setter mutates]
+	Rotation: Quat
+end
+
 -- A box-shaped collider in the entity's space.
 declare extern type BoxCollider with
 	-- Half the box's size along each local axis, in metres; at least 1 mm. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -668,6 +678,8 @@ declare extern type Entity with
 	AudioListener: AudioListener?
 	-- The entity's AudioSource component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	AudioSource: AudioSource?
+	-- The entity's BoneAttachment component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	BoneAttachment: BoneAttachment?
 	-- The entity's BoxCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	BoxCollider: BoxCollider?
 	-- The entity's BoxCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -741,6 +753,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "UiTextInput"): UiTextInput?
 	function GetComponent(self, name: "Animator"): Animator?
 	function GetComponent(self, name: "SkinnedMesh"): SkinnedMesh?
+	function GetComponent(self, name: "BoneAttachment"): BoneAttachment?
 	function GetComponent(self, name: "ParticleEmitter"): ParticleEmitter?
 	function GetComponent(self, name: "ParticleLook"): ParticleLook?
 	function GetComponent(self, name: "IrradianceVolume"): IrradianceVolume?

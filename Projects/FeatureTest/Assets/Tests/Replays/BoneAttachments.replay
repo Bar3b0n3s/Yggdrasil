@@ -1,0 +1,366 @@
+{
+	"Format": "Replay",
+	"Version": 5,
+	"Scene": {
+		"Handle": "c101e0e2bdb02848",
+		"Path": "Assets/Scenes/BoneAttachments.scene"
+	},
+	"Parameters": {},
+	"Seed": 1414,
+	"FixedHz": 64,
+	"EngineVersion": "0.7.0",
+	"Config": "Editor",
+	"SaveData": {},
+	"Locale": "fr-CA",
+	"Fingerprint": {
+		"Entities": [
+			{
+				"Id": "05be629fcb92b494",
+				"Path": "/Walker/Character",
+				"Hash": "c606370a93246f18",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "b8d1ecf7306802bb",
+					"Animator": "753bcce248d0b023"
+				}
+			},
+			{
+				"Id": "083560ab5dbc7676",
+				"Path": "/Waver/Armature",
+				"Hash": "b25bf56dd0da56aa",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "33e65a5e8898541b",
+					"Animator": "bc7313e24fa0e102"
+				}
+			},
+			{
+				"Id": "0d17563d1c3d551a",
+				"Path": "/Walker/Character/Pack",
+				"Hash": "d0be93e28a945fb2",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"BoneAttachment": "32b7879f1af77bc2"
+				}
+			},
+			{
+				"Id": "34a3bd1464237876",
+				"Path": "/Sun",
+				"Hash": "4f47f4e96caf3479",
+				"Components": {
+					"Transform": "b07ea994b8623969",
+					"DirectionalLight": "988225f78560efee"
+				}
+			},
+			{
+				"Id": "3c804ee2716167de",
+				"Path": "/Waver/Armature/Sword/Gem",
+				"Hash": "f81ddcde39f624b4",
+				"Components": {
+					"Transform": "81cadecfa9ad0ae7",
+					"PointLight": "38be6ad9ce5d13d7"
+				}
+			},
+			{
+				"Id": "3e359ee23674ec01",
+				"Path": "/Walker",
+				"Hash": "1d825e40665c0f87",
+				"Components": {
+					"Transform": "32110aa52c2b7fcf",
+					"Prefab": "572f762151584c98",
+					"PrefabLink": "8b041c9fca210c58",
+					"Animator": "733a8b884f745463"
+				}
+			},
+			{
+				"Id": "5f00b9833c2884f3",
+				"Path": "/Director",
+				"Hash": "34107c058e697343",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Script": "8bb5729df74da3ce"
+				}
+			},
+			{
+				"Id": "6e4152fff10d59e4",
+				"Path": "/Walker/Character/Rider",
+				"Hash": "46723ee049c9c1d0",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Prefab": "c36d3b0143b689ae",
+					"PrefabLink": "23b8d4fdedab485a",
+					"BoneAttachment": "1d5a0f7de053cede"
+				}
+			},
+			{
+				"Id": "8607c5bc186b19d9",
+				"Path": "/Target",
+				"Hash": "c3b1e7002fd7483d",
+				"Components": {
+					"Transform": "41c14418fdf8afbf",
+					"MeshRenderer": "f3111dc3c6cae010",
+					"RigidBody": "c9a59017b40e7d52",
+					"BoxCollider": "5c8184944c7a623b"
+				}
+			},
+			{
+				"Id": "8a1706791b35ff1b",
+				"Path": "/Waver/Armature/Sword/Charm",
+				"Hash": "22468acc05dba799",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"BoneAttachment": "82b0f0b98d2abdae"
+				}
+			},
+			{
+				"Id": "966612f35411a19e",
+				"Path": "/Floor",
+				"Hash": "bd995261d066bb00",
+				"Components": {
+					"Transform": "a5cc5f59c5e19ffe",
+					"MeshRenderer": "03647ffe46ad3dcf"
+				}
+			},
+			{
+				"Id": "a1d0a2fff6fcde31",
+				"Path": "/Waver/Armature/Body",
+				"Hash": "78b020939b15f7a5",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "0001084c83ffe883",
+					"MeshRenderer": "78299808b9993faa",
+					"SkinnedMesh": "64a263dfbb2c1662"
+				}
+			},
+			{
+				"Id": "a2b0a85c5c09e5ab",
+				"Path": "/Walker/Character/Rig",
+				"Hash": "22e493552e9917b4",
+				"Components": {
+					"Transform": "afba0333f1127e92",
+					"PrefabLink": "717b6f9e23f8173a"
+				}
+			},
+			{
+				"Id": "aa9a5d1493e13a39",
+				"Path": "/Walker/TailMesh",
+				"Hash": "6cdb87347b27e73d",
+				"Components": {
+					"Transform": "32110aa52c2b7fcf",
+					"PrefabLink": "2c749cd136791ae4",
+					"MeshRenderer": "0dfa89f317021588",
+					"SkinnedMesh": "ae47028c186d2e58"
+				}
+			},
+			{
+				"Id": "bc7aac9a938bb633",
+				"Path": "/Walker/Character/Rider/Armature/Body",
+				"Hash": "4c9e1ff554e0e861",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "f507434a943b7fda",
+					"MeshRenderer": "78299808b9993faa",
+					"SkinnedMesh": "64a263dfbb2c1662"
+				}
+			},
+			{
+				"Id": "be296544da14050f",
+				"Path": "/Waver/Armature/Sword",
+				"Hash": "e7f5971a24e015a7",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"RigidBody": "c9a59017b40e7d52",
+					"BoxCollider": "b9e0020a8a8fa23c",
+					"Script": "1b60e60d05ed870d",
+					"BoneAttachment": "012530b40bec1919"
+				}
+			},
+			{
+				"Id": "ccce8ffc6f506627",
+				"Path": "/Camera",
+				"Hash": "ba9069333334bdb1",
+				"Components": {
+					"Transform": "ab531146f017e636",
+					"Camera": "4f5a369fdb4a60d3"
+				}
+			},
+			{
+				"Id": "d4eff8c001b95d45",
+				"Path": "/Waver",
+				"Hash": "a692c24a7865c97b",
+				"Components": {
+					"Transform": "1932f71e873a0abe",
+					"Prefab": "cb2409301cc20370",
+					"PrefabLink": "015f961427247ac6"
+				}
+			},
+			{
+				"Id": "e6363c17c7c3063e",
+				"Path": "/Walker/Character/Rider/Armature",
+				"Hash": "3aa1b55452f5354f",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "0cf536f6f3983838",
+					"Animator": "bc7313e24fa0e102"
+				}
+			},
+			{
+				"Id": "e8e4db50856ae61d",
+				"Path": "/Walker/Character/Body",
+				"Hash": "44b11d96a487ae8e",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"PrefabLink": "ea4f98b612a29e00",
+					"MeshRenderer": "2e89fa3292df8ce0",
+					"SkinnedMesh": "ae47028c186d2e58"
+				}
+			},
+			{
+				"Id": "f69bfd708eca16d1",
+				"Path": "/Rendering",
+				"Hash": "ba5d2acbcb5495a3",
+				"Components": {
+					"Transform": "82125f902860db21",
+					"Environment": "5a9e8ee47e819a01",
+					"PostProcess": "8a0da1673d97fdb6"
+				}
+			}
+		],
+		"Assets": [
+			{
+				"Handle": "10c984b59171edd4",
+				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#mesh:0:BodyMesh",
+				"Type": "Mesh",
+				"Hash": "4bbce84a9332a5bb"
+			},
+			{
+				"Handle": "59e02d6792ed2ed9",
+				"Path": "Assets/Scripts/BoneAttachments/BoneDirector.luau",
+				"Type": "Script",
+				"Hash": "f65d06a036ecd4fd"
+			},
+			{
+				"Handle": "5a831424c6906c00",
+				"Path": "Assets/Models/Animation/Skinned.gltf#mesh:0:Strip",
+				"Type": "Mesh",
+				"Hash": "f93b6f3e2e93b029"
+			},
+			{
+				"Handle": "682acfd37297fedb",
+				"Path": "Assets/Scripts/BoneAttachments/TriggerProbe.luau",
+				"Type": "Script",
+				"Hash": "028e769c5d090587"
+			},
+			{
+				"Handle": "6b489bfc90dcec5d",
+				"Path": "Assets/Materials/Animation/Floor.material",
+				"Type": "Material",
+				"Hash": "1fe9451e9f26bae5"
+			},
+			{
+				"Handle": "6edf887d5f78a42a",
+				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#skin:1",
+				"Type": "Skeleton",
+				"Hash": "e43d9b514049dafa"
+			},
+			{
+				"Handle": "79e581911985caaf",
+				"Path": "Assets/Models/Animation/Skinned.gltf#animation:0:Wave",
+				"Type": "AnimationClip",
+				"Hash": "4eb078fb55869fc8"
+			},
+			{
+				"Handle": "aa94bd7ed48f6cb8",
+				"Path": "Assets/Models/Animation/Skinned.gltf#skin:0",
+				"Type": "Skeleton",
+				"Hash": "c2a60019d7f58e51"
+			},
+			{
+				"Handle": "ad0bee37d93bd2f2",
+				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#animation:0:Walk",
+				"Type": "AnimationClip",
+				"Hash": "67b63cb737ae7b44"
+			},
+			{
+				"Handle": "cb7763da4e141bc8",
+				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#skin:0",
+				"Type": "Skeleton",
+				"Hash": "2405f5b19fb704ca"
+			},
+			{
+				"Handle": "d47740a9e11d0fd1",
+				"Path": "Assets/Models/Animation/SkinnedRigs.gltf#mesh:1:TailMesh",
+				"Type": "Mesh",
+				"Hash": "5655c74242267e1f"
+			},
+			{
+				"Handle": "e707c63160b28aa4",
+				"Path": "Assets/Models/Animation/Skinned.gltf",
+				"Type": "Prefab",
+				"Hash": "ffc5b9f6a954d240"
+			},
+			{
+				"Handle": "f8760c5951025770",
+				"Path": "Assets/Models/Animation/SkinnedRigs.gltf",
+				"Type": "Prefab",
+				"Hash": "25f12870b60d901c"
+			}
+		]
+	},
+	"Events": [
+		{
+			"Tick": 20,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "Space"
+		},
+		{
+			"Tick": 21,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "Space"
+		},
+		{
+			"Tick": 90,
+			"Type": "Key",
+			"State": "Down",
+			"Key": "F"
+		},
+		{
+			"Tick": 91,
+			"Type": "Key",
+			"State": "Up",
+			"Key": "F"
+		}
+	],
+	"Expect": [
+		{
+			"Tick": 10,
+			"Luau": "return not Scene.FindByPath(\"/Walker/Character\").Animator.Playing"
+		},
+		{
+			"Tick": 80,
+			"Luau": "local character = Scene.FindByPath(\"/Walker/Character\")\nlocal position = Scene.FindByPath(\"/Walker/Character/Pack\").Transform.WorldPosition\nreturn character.Animator.Playing and vector.magnitude(character.Transform.Translation) > 0.2 and position.x > 2.2"
+		},
+		{
+			"Tick": 120,
+			"Luau": "local sword = Scene.FindByPath(\"/Waver/Armature/Sword\")\nlocal attachment = sword.BoneAttachment\nlocal position, rotation = Scene.FindByPath(\"/Waver/Armature\").Animator:GetJointTransform(\"Joint0\")\nlocal director = Scene.FindByName(\"Director\"):GetScript()\nreturn director.Folds == 1 and attachment.Bone == \"Joint0\"\n\tand vector.magnitude(sword.Transform.WorldPosition - (position + rotation * attachment.Offset)) < 0.001"
+		}
+	],
+	"Checkpoints": [
+		{
+			"Tick": 60,
+			"StateHash": "f2c410b3aded7ac1"
+		},
+		{
+			"Tick": 120,
+			"StateHash": "4d2ab3a115a35a83"
+		},
+		{
+			"Tick": 180,
+			"StateHash": "e50372049c9e05ed"
+		}
+	],
+	"FinalTick": 240,
+	"FinalStateHash": "f9463e643fb5ea7e"
+}

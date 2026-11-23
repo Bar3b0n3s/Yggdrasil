@@ -68,7 +68,10 @@ namespace Engine {
 
 		// The rendered pose (§5.2): lerp/slerp from PreviousWorldTransformComponent to the current world pose at the scene's
 		// interpolation Alpha; the current world pose when the entity or an ancestor has InterpolationResetTag, outside
-		// play, or when it has no previous pose yet.
+		// play, or when it has no previous pose yet. M41 (Docs/Decisions/0058-m41-bone-attachments.md decision R): below Alpha
+		// 1, an attached subtree's (RenderExtraction.h's "Attached subtrees") is its Animator's rendered pose times its current
+		// pose relative to that Animator's entity, the position from that matrix and the rotation the Animator's render
+		// rotation times the local rotations below it, so it agrees with the image.
 		[[nodiscard]] static glm::vec3 GetRenderPosition(ConstEntity entity);
 		[[nodiscard]] static glm::quat GetRenderRotation(ConstEntity entity);
 

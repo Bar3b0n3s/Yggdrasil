@@ -54,6 +54,7 @@ Every component of the type registry, in canonical component order: the order of
 | `UiTextInput` | Ui | Serializable, ScriptVisible, EditorVisible, Removable | A UI text field: while focused, typed characters insert at its caret and the editing keys edit it, raising OnUiTextChanged; Enter raises OnUiSubmit. |
 | `Animator` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Poses a skeleton from layers of animation clips, blended by their weights, each fixed step; skinned meshes on the entity and below it follow. |
 | `SkinnedMesh` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Deforms the entity's MeshRenderer mesh: its skin follows the nearest Animator on the entity or above it, and its morph targets take weights. |
+| `BoneAttachment` | Animation | Serializable, ScriptVisible, EditorVisible, Removable | Places the entity on a joint of the Animator's Skeleton (a bone), the Animator being the nearest one above the entity, each fixed step after the pose is sampled; the entity and its children draw with the skin. |
 | `ParticleEmitter` | Particles | Serializable, ScriptVisible, EditorVisible, Removable | Emits camera-facing textured particles from the entity: a presentation-only, seeded simulation that never changes the state hash and has no gameplay collision. |
 | `ParticleLook` | Particles | Serializable, ScriptVisible, EditorVisible, Removable | How the entity's ParticleEmitter's particles look: a flipbook from a sprite sheet, rotation and spin, soft edges against the scene, alignment and HDR intensity. Presentation only, like the emitter. |
 | `IrradianceVolume` | Probes | Serializable, ScriptVisible, EditorVisible, Removable | A box of baked irradiance probes that lights the diffuse surfaces inside it with the light their surroundings bounce; lighting.bake bakes it. |
@@ -1533,6 +1534,30 @@ Script members of `SkinnedMesh`:
 |---|---|---|---|---|---|
 | `MorphWeights` | proxy field | `{number}` | read/write | All | One weight in [-1, 1] per morph target of the mesh, in order; a missing weight is the target's default, and an animated weight overrides it. |
 | `SetMorphWeight` | method | `(self: SkinnedMesh, target: string, weight: number) -> ()` |  | All | Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one. |
+
+## BoneAttachment
+
+Places the entity on a joint of the Animator's Skeleton (a bone), the Animator being the nearest one above the entity, each fixed step after the pose is sampled; the entity and its children draw with the skin.
+
+- Category: Animation
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: `Transform`
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Bone` | `String` | `""` |  |  |  | The name of a joint of the Animator's Skeleton (a bone), matched exactly as Animator:GetJointTransform matches it; empty attaches to nothing. |
+| `Offset` | `Vec3` | `[0,0,0]` |  | m |  | The entity's position relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone), in metres along the joint's axes, in the Animator entity's units. |
+| `Rotation` | `Quat` | `[0,0,0,1]` |  |  |  | The entity's rotation relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone): a unit quaternion. |
+
+Script members of `BoneAttachment`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Bone` | proxy field | `string` | read/write | All | The name of a joint of the Animator's Skeleton (a bone), matched exactly as Animator:GetJointTransform matches it; empty attaches to nothing. A value a script writes holds at most 4096 bytes of text. |
+| `Offset` | proxy field | `vector` | read/write | All | The entity's position relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone), in metres along the joint's axes, in the Animator entity's units. |
+| `Rotation` | proxy field | `Quat` | read/write | All | The entity's rotation relative to the joint it attaches to, a joint of the Animator's Skeleton (a bone): a unit quaternion. |
 
 ## ParticleEmitter
 

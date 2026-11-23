@@ -20,8 +20,8 @@ reports: `ASSET_VERTEX_COLORS_IGNORED` since GltfImporter version 2 imports `COL
   lights) are expanded at test time.
 - `ASSET_MISSING.Tilemap` and `ASSET_TYPE_MISMATCH.Tilemap` name a sprite sheet from a tilemap's palette. Sheets have no
   placeholder, so the asset manager logs nothing for them and only the validator reports them.
-- `ANIMATION_NO_ANIMATOR` and `ANIMATION_SKELETON_MISMATCH` reference the meshes and skeletons of generated skinned glTF
-  files by their sub-asset handles, so their `.meta` files fix the source handles.
+- `ANIMATION_NO_ANIMATOR`, `ANIMATION_SKELETON_MISMATCH` and `ANIMATION_ATTACHMENT_INVALID` reference the meshes and
+  skeletons of generated skinned glTF files by their sub-asset handles, so their `.meta` files fix the source handles.
 - `GRAPH_INVALID` and `GRAPH_UNREACHABLE_NODE` hold a `.graph` source (a Script asset whose importer is Graph),
   which the validator reads itself; a graph reported `GRAPH_INVALID` is never also `ASSET_IMPORT_FAILED` for the same
   cause.

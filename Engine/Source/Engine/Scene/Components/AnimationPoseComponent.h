@@ -23,7 +23,8 @@ namespace Engine {
 	//
 	// Readers: render extraction (a SkinnedMesh's palette: its entity's inverse rendered world matrix times the Animator
 	// entity's rendered world matrix times Skin[j], Scene/RenderExtraction.h), the joint query (Animator:GetJointTransform,
-	// Scene/AnimationSystem.h's FindAnimatorJointWorldTransform), Test.GetPoseDigest and EntityBounds.
+	// Scene/AnimationSystem.h's FindAnimatorJointWorldTransform), Test.GetPoseDigest, EntityBounds and M41's attaching pass
+	// (Scene/BoneAttachments.h: a BoneAttachment's entity placed on JointModel[j] in the phase that wrote the pose).
 	struct AnimationPoseComponent
 	{
 		AssetRef<SkeletonData> Skeleton{};           // the skeleton the pose was sampled for (its joint names and count)

@@ -24,7 +24,8 @@
 // in the tick) advances from the next tick. Root motion it applies reaches physics through PreStepTransformUpdate, as script
 // and native writes do.
 //
-// The step has two passes, as PhysicsSystem's PostStep steps before it dispatches (decision 29):
+// The step has three passes, as PhysicsSystem's PostStep steps before it dispatches (decision 29; M41's attaching pass,
+// Docs/Decisions/0058-m41-bone-attachments.md decision 3, between the two of M23):
 //   Stepping, for every entity with an Animator in canonical order (the order taken once at the phase's start), skipping an
 //   entity that is pending destruction (PendingDestroyTag, destroyed earlier in the tick) or effectively disabled, whose pose
 //   component stays unchanged:
@@ -52,14 +53,19 @@
 //        the float range), with step 2's one warning.
 //   Then each effectively enabled SkinnedMesh's finding (AnimationValidation.h's checks) is raised once per entity and code
 //   (GetDiagnostics), logged as a warning.
-//   Dispatch, after every Animator was stepped: the collected events, in (canonical entity, layer, firing) order, reach the
-//   listener (SetEventListener: the session's ScriptEngine in Play; none in Simulate) as AnimationEventRecords. So every
-//   callback reads every Animator's new pose, and what a callback changes (a clip started, an Animator destroyed, disabled
-//   or created) takes effect from the next tick whatever the entities' order. An event whose entity an earlier callback of
-//   the dispatch destroyed (pending destruction) or disabled is dropped, as physics drops a callback whose Self is gone; the
-//   dispatch walks its own list, so a callback's Scene.CreateEntity never invalidates it.
-// An entity without an Animator is never touched: a scene without one adds no runtime component, writes nothing and hashes as
-// before (decision 29's live guard).
+//   Attaching (M41), after every Animator was stepped and posed: every BoneAttachment in canonical order is placed on its
+//   Animator's posed joint, its Transform written through the scene, and its ANIMATION_ATTACHMENT_INVALID finding raised
+//   once per entity like the others (Scene/BoneAttachments.h's BoneAttachmentPass).
+//   Dispatch, after every Animator was stepped and every attachment placed: the collected events, in (canonical entity,
+//   layer, firing) order, reach the listener (SetEventListener: the session's ScriptEngine in Play; none in Simulate) as
+//   AnimationEventRecords. So every callback reads every Animator's new pose and every attachment at it, and what a callback
+//   changes (a clip started, an Animator destroyed, disabled or created, a bone switched) takes effect from the next tick
+//   whatever the entities' order. An event whose entity an earlier callback of the dispatch destroyed (pending destruction)
+//   or disabled is dropped, as physics drops a callback whose Self is gone; the dispatch walks its own list, so a callback's
+//   Scene.CreateEntity never invalidates it.
+// An entity with neither an Animator nor a BoneAttachment is never touched: a scene without them adds no runtime component,
+// writes nothing and hashes as before (decision 29's live guard; the attaching pass runs only while the scene holds a
+// BoneAttachment, or the state of one it attached before).
 //
 // Threading: main thread only. Not copyable or movable. Frozen by the M23 contract C23.3; stream B implements it.
 
@@ -143,8 +149,9 @@ namespace Engine {
 		// before Scripts.reset()), so the system never delivers to a destroyed engine (decision 29). Never called from the
 		// dispatch.
 		void SetEventListener(IAnimationEventListener* listener);
-		// The findings raised so far (FindAnimationSceneIssues' codes, raised once per entity and code at run time), in the
-		// order raised.
+		// The findings raised so far, in the order raised: FindAnimationSceneIssues' codes, raised once per entity and code at
+		// run time, and M41's ANIMATION_ATTACHMENT_INVALID (FindBoneAttachmentIssues' code, Scene/BoneAttachments.h), raised
+		// once per entity whatever its cause.
 		[[nodiscard]] std::span<const AnimationSceneIssue> GetDiagnostics() const;
 	private:
 		// The back-references, the diagnostics raised and the step's scratch poses (Scene/AnimationSystem.cpp).

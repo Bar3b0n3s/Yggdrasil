@@ -39,8 +39,8 @@ namespace Engine {
 		{
 			// M30's Navigation and NavModifier (Docs/Decisions/0045-m30-navigation.md decision 5) made 57, M36's ColliderSurface
 			// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1) 58, and M37's four joints (Docs/Decisions/0054-m37-joints.md
-			// decision 1) 62.
-			static_assert(BuiltinComponents::Size == 62);
+			// decision 1) 62, and M41's BoneAttachment (Docs/Decisions/0058-m41-bone-attachments.md decision 3) 63.
+			static_assert(BuiltinComponents::Size == 63);
 			size_t count = 0;
 			ForEachType(BuiltinComponents{}, [&count]<typename T>()
 			{
@@ -498,6 +498,12 @@ namespace Engine {
 			CHECK(layer.Loop);
 
 			CHECK(SkinnedMeshComponent{}.MorphWeights.empty());
+
+			// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision 3).
+			const BoneAttachmentComponent attachment;
+			CHECK(attachment.Bone.empty());
+			CHECK(attachment.Offset == glm::vec3(0.0f));
+			CHECK(attachment.Rotation == glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
 		}
 
 		// M26 (C26.1, Docs/Decisions/0037-m26-contract.md decisions 4, 5 and 20).
@@ -695,6 +701,8 @@ namespace Engine {
 				// M23 (Docs/Decisions/0034-m23-contract.md decision 28): after M21's and M22's categories on phase 2's merged tree.
 				"Animator",
 				"SkinnedMesh",
+				// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision 3): in Animation, after SkinnedMesh.
+				"BoneAttachment",
 				// M26 (Docs/Decisions/0037-m26-contract.md decision 4): ADR 0028's phase-3 ledger's categories after Animation,
 				// Particles, Probes and Terrain in that order. M33's ParticleLook follows the emitter (Docs/Decisions/0048-m33-particle-look.md
 				// decision 1).

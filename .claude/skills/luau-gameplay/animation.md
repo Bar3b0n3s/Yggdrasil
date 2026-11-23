@@ -1,6 +1,6 @@
 # Skeletal and morph animation in scripts
 
-A reference page of the `luau-gameplay` skill (`skills/luau-gameplay`): the script surface of the `Animator` and `SkinnedMesh` components, blending, root motion and animation events. The signatures are in `reference/ScriptAPI` (sections `Animator`, `SkinnedMesh`, `Behaviour` and `Test`).
+A reference page of the `luau-gameplay` skill (`skills/luau-gameplay`): the script surface of the `Animator`, `SkinnedMesh` and `BoneAttachment` components, blending, root motion, animation events and held objects. The signatures are in `reference/ScriptAPI` (sections `Animator`, `SkinnedMesh`, `BoneAttachment`, `Behaviour` and `Test`).
 
 **Fields** are reached through the component shortcuts, which can be nil: `self.Entity.Animator` (`Skeleton`, `Layers`, `Playing`, `RootMotion`) and `self.Entity.SkinnedMesh` (`MorphWeights`). `Layers` is an array of at most eight `{Clip, Time, Speed, Weight, Loop}`: `Time` in seconds, `Speed` from 0 (held) to 100, `Weight` from 0 to 1. A glTF import gives the skin's entity an Animator with one layer playing the first clip, and each skinned or morphed mesh a `SkinnedMesh`.
 
@@ -46,11 +46,54 @@ return Script.Define("Crossfade", Crossfade)
 **Methods:**
 - `Animator:Play(layer, clip?, time?)` sets the 1-based layer's `Clip` and `Time` (0 when absent) and keeps its `Speed`, `Weight` and `Loop`; `#Layers + 1` appends a layer. A later index, a ninth layer or a negative time raises an error.
 - `Animator:SetWeight(layer, weight)` sets an existing layer's weight in [0, 1].
-- `Animator:GetJointTransform(joint) -> (vector?, Quat?)` reads the world position and rotation of a skeleton joint (by its glTF node name) in the pose of the last AnimationSystem phase; nil, nil without a pose or such a joint, and a position with a nil rotation when a scale of 0 on the way (a clip scaling a joint to nothing) leaves the joint no rotation, so check the rotation before you use it. Attach a sword or a muzzle flash with it.
+- `Animator:GetJointTransform(joint) -> (vector?, Quat?)` reads the world position and rotation of a skeleton joint (by its glTF node name) in the pose of the last AnimationSystem phase; nil, nil without a pose or such a joint, and a position with a nil rotation when a scale of 0 on the way (a clip scaling a joint to nothing) leaves the joint no rotation, so check the rotation before you use it. It is the fixed-step read: to make an entity follow a joint, give it a `BoneAttachment` (below), which a script placing it from this read could only do a tick late or with judder.
 - `Animator:GetRootMotion() -> (vector, Quat)` reads the last step's root motion in the entity's parent space.
 - `SkinnedMesh:SetMorphWeight(target, weight)` sets the weight of the morph target named `target` (a blink, a smile) in [-1, 1], growing `MorphWeights` with the targets' defaults; a name the mesh lacks raises NotFound. A clip's morph channel overrides the weights it keys.
 
 **When it runs:** every Animator steps in the AnimationSystem phase of the fixed step, after `OnFixedUpdate`, tasks and native systems and before the transform update, in Play and Simulate. A clip played in `OnFixedUpdate` is sampled at that tick; one played in a contact callback or `OnDestroy` advances from the next tick. While `Playing` is false the times stay but the pose follows them, so a script scrubs by writing `Time`. A looping layer passes at most eight ends of its clip in one step.
+
+**Holding things: `BoneAttachment`** (M41). A sword, a staff, a torch, a shield or a muzzle flash that must follow a hand is an entity of its own with a `BoneAttachment` (`Bone`, `Offset`, `Rotation`). The engine places it each fixed step on that joint of the nearest Animator above it (on its parent or the parent's nearest ancestor that holds one, never its own), after every Animator was posed and before `OnAnimationEvent`, and draws it with the skin between ticks, so it stays in the fist at any frame rate. Its placement is hashed state, so replays verify. The rules:
+- **Where it goes.** Make it a child of the model instance's Animator entity (a user child of the armature, which instance updates keep): `entity_create {parent: "/Warden/Armature", name: "Staff", components: {BoneAttachment: {Bone: "DEF-hand.R"}, MeshRenderer: {...}}}`. `Bone` is the glTF node name, written exactly; `Offset` (metres, along the joint's axes) and `Rotation` (relative to the joint) hold it in the hand. Its `Scale` stays as authored and the joint's scale is ignored.
+- **What scripts write.** `Bone`, `Offset` and `Rotation`, never the attached entity's Transform, which the next phase overwrites. A write in `OnFixedUpdate`, a task or a test case is in force at that tick's AnimationSystem phase; in `OnUpdate`, `OnLateUpdate`, a physics callback or `OnAnimationEvent`, at the next tick's. Hide it with `staff:SetActive(false)` (a clip that scales the bone to 0 does not hide it); enabled again, it is placed at the next phase. To hand it to another character, reparent it with `staff:SetParent(otherArmature, false)` and set `Bone`.
+- **Reading it.** Its `Transform.WorldPosition` is where the bone held it at the last tick: the joint's position plus the joint's rotation times `Offset` (`position + rotation * attachment.Offset`, from `animator:GetJointTransform(bone)`), and `Transform.RenderPosition` is where it is drawn. A child of the attached entity (a trail emitter at the tip, a light in a lantern) rides along.
+- **Physics.** A solid collider on it needs a `RigidBody` of Type `Kinematic` of its own, which is swept with the bone and pushes what it meets; a trigger can stay without one. A collider gathered into an ancestor's body, a static one, a Dynamic body or a `CharacterController` fights the placement.
+- **When it is not attached** (no Animator above it, an empty or misspelt `Bone`, an Animator without a pose), it keeps its Transform, and `ANIMATION_ATTACHMENT_INVALID` names the reason once (the validator's message names close joint names). Nothing is placed in the editor's edit view or its animation preview: there it sits at its authored Transform.
+
+A dodge that folds the staff along the forearm, the switch made in the fixed step so it is in force that tick:
+
+```luau path=Assets/Scripts/StaffFold.luau
+--!strict
+export type StaffFold = ScriptInstance & {
+	Staff: Entity?,
+	Fist: string,
+	Forearm: string,
+}
+
+local StaffFold = {}
+
+StaffFold.Fields = {
+	Staff = Field.Entity(),
+	Fist = Field.String("DEF-hand.R"),
+	Forearm = Field.String("DEF-forearm.R"),
+}
+
+function StaffFold.OnFixedUpdate(self: StaffFold, dt: number)
+	local staff = self.Staff
+	local attachment = if staff then staff.BoneAttachment else nil
+	if attachment == nil then
+		return
+	end
+	if Input.IsActionDown("Dash") then
+		attachment.Bone = self.Forearm
+		attachment.Rotation = Quat.FromEuler(0, 0, 90)
+	else
+		attachment.Bone = self.Fist
+		attachment.Rotation = Quat.Identity()
+	end
+end
+
+return Script.Define("StaffFold", StaffFold)
+```
 
 **Root motion** (`RootMotion`): `None` keeps the hips' planar motion in the pose (the mesh walks away from its entity); `Apply` moves the entity's Transform by it each step (it reaches physics like a script's write); `Extract` holds it out of the pose and only reports it through `GetRootMotion`, for a script to move a `CharacterController` (`controller:Move(moved / dt)`) or a body.
 

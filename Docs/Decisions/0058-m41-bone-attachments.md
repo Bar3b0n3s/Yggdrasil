@@ -146,9 +146,9 @@ No part of M41 adds any of these: a namespace, a settings section, an `AssetType
     - rotation Q = rotation(JointModel[j]) · Rotation.
   - **Into the parent's space.** P and Q are taken into the parent's space through the chain of local matrices from the Animator's entity down to the parent, never through cached world matrices. The result is exact when the attached entity is a direct child of the Animator's entity, the documented pattern.
   - **What is patched.** The pass patches only the entity's `Translation` and `Rotation`, and only when either differs bit for bit, so a held pose causes no revision churn. `Scale` stays as authored.
-  - **The bone's scale is ignored.** A held object keeps its own scale. A sheared or zero joint scale cannot become a TRS, and a joint whose matrix does not decompose (`TransformSystem::DecomposeMatrix`, a scale below `MinTransformScaleMagnitude` on the way) leaves the Transform as it is that tick.
+  - **The bone's scale is ignored.** A held object keeps its own scale. A sheared or zero joint scale cannot become a TRS, and a joint whose matrix does not decompose (`TransformSystem::DecomposeMatrix`, a scale below `MinTransformScaleMagnitude` on the way) leaves the Transform as it is that tick, and the entity stays attached (amended with W41.1's review: the record's third departure).
   - **Determinism.** The arithmetic is IEEE-exact plus DetMath (the simulation-path rule).
-  - **Runtime state.** The pass keeps a runtime-only `BoneAttachmentStateComponent {UUID Animator; uint32_t Joint}` on each entity it placed this tick, under `RuntimeComponents.h`'s rules: never registered, serialized or hashed, and invisible to scripts and automation. It removes the component from an entity it did not place. The joint index is cached per Skeleton and name.
+  - **Runtime state.** The pass keeps a runtime-only `BoneAttachmentStateComponent {UUID Animator; uint32_t Joint}` on each entity it attached this tick, under `RuntimeComponents.h`'s rules: never registered, serialized or hashed, and invisible to scripts and automation. It removes the component from an entity it did not attach. The joint index is cached per Skeleton and name.
 - **Rendering: the skin's rule** (decision R).
   - **The rule.** An entity at or below an attached entity X renders at `ComputeRenderedWorldMatrix(A) × (its current pose relative to A)` when:
     - X holds `BoneAttachmentStateComponent`, and
@@ -366,11 +366,162 @@ The Roadmap's M41 acceptance, each a named test or check:
 - **The first hardening since M27 ran in full.** It covers phases 5 to 7 at once, so a finding in earlier code lengthens M41's landing. The ASan unit run is the step nearest its bound: 5,506 cases fit its 3,600 s at a free machine's 0.5 s a case (§3's row). It runs on a quiet machine, announced beforehand (decision 7).
 - **Two sessions in one checkout.** The World Tree session works in `D:\Engine`. The phase works in worktrees and never touches `Projects/WorldTree` beyond reading its briefs.
 
+## The W41.1 record
+
+W41.1 lands decision 3's component, attaching pass, runtime state, decision R and validation code, on `milestone/m41` from `bb4b257f`. What decision 3 left to the milestone is made exact here; its departures are listed with their reasons at the end.
+
+- **The component** (`Scene/Components/BoneAttachmentComponent.h`). `BoneAttachmentComponent {std::string Bone{}; glm::vec3 Offset = 0; glm::quat Rotation = identity}`, registered as `BoneAttachment`, version 1, category Animation, after `SkinnedMesh` in `RegisterAnimationComponents` and in `BuiltinComponents` (63 components), with the default flags (serialized, script-visible, editor-visible, removable) and `Requires<TransformComponent>`.
+  - `Offset` takes the unit `m`; `Rotation` is a Quat field, so the registry's unit rule refuses a quaternion that is not unit; both are finite by the field rules.
+  - The component's validator refuses a `Bone` above `MaxSkeletonJointNameBytes` (256) bytes ("must hold at most 256 bytes, not N") and one that is not valid UTF-8 ("must be valid UTF-8"); an empty `Bone` is valid, since it is reported, never refused. Its generator clears an invalid `Bone`.
+  - The component's and every field's description name "a joint of the Animator's Skeleton (a bone)".
+- **`Scene/BoneAttachments.{h,cpp}`** holds the rest:
+  - `AnimationAttachmentInvalidCode` and its own array `BoneAttachmentDiagnosticCodes`;
+  - `BoneAttachmentStateComponent {UUID Animator; uint32_t Joint}`;
+  - `FindBoneAttachmentIssues(scene, assets)`;
+  - `BoneAttachmentPass` (the attaching pass, its joint cache and the entities it reported);
+  - decision R's helpers `FindAttachedRenderAnimator(entity)` and `ComputeAttachedRelativeMatrix(animator, entity)`.
+- **The attaching pass** (`BoneAttachmentPass::Run`), called from `AnimationSystem::Step` after the stepping pass and the SkinnedMesh findings, before the dispatch.
+  - **When it runs.** The step's early return checks four views: Animator, SkinnedMesh, BoneAttachment and `BoneAttachmentStateComponent`. The pass runs while either of the last two is not empty, so a removed BoneAttachment's state is cleared too.
+  - **The state.** The pass first clears every `BoneAttachmentStateComponent` (an unregistered type through the registry, as the interpolation snapshot clears its tag), then sets it on each entity it attaches: the state marks exactly the last pass's attachments.
+  - **Which entities.** Every entity with a BoneAttachment in the canonical order taken at the pass's start, skipping one pending destruction or effectively disabled (`HierarchyDisabledTag`).
+  - **The Animator.** `FindDrivingAnimator(entity.GetParent())`.
+  - **The joint.** `FindSkeletonJoint` on the pose's Skeleton, through a cache of the indices found per Skeleton and name. An entry holds the Skeleton's reference, so its address stays unique, and it is dropped at the end of a pass that did not use it, so a reloaded Skeleton's old data is released. A name the Skeleton lacks is never cached, so a script writing new names cannot grow the cache.
+  - **The placement.** `bone = DecomposeMatrix(JointModel[j])`; `P = bone.Translation + bone.Rotation * Offset`; `Q = normalize(bone.Rotation * Rotation)`.
+    - A direct child of the Animator's entity takes `P` and `Q` exactly.
+    - Otherwise the chain `M` is the product of `TransformSystem::ComputeLocalMatrix` of the entities below the Animator's entity down to the parent, root side first, and the entity takes the translation and rotation of `DecomposeMatrix(affineInverse(M) * T(P) * R(Q))`.
+    - A joint matrix or result that does not decompose, or a result that is not finite, writes nothing that tick, and the entity stays attached: it keeps its state and draws with the skin at the Transform it holds.
+  - **The write.** `Entity::Patch<TransformComponent>` of `Translation` and `Rotation` only, and only when either differs bit for bit (`std::bit_cast`; `-0` and `0` serialize differently), so a held pose changes no revision.
+- **Not attached, and the findings at run time.** In this order, each leaving the Transform as it is and the entity without state:
+  - no Animator above the entity;
+  - an empty `Bone`;
+  - an Animator without a pose (its Skeleton null, not loading, or posed to values that are not finite: the stepping pass removed the pose);
+  - a Skeleton without the joint.
+
+  An attached entity is then checked for a CharacterController, a Dynamic RigidBody, or solid colliders without a Kinematic RigidBody of its own. Such an entity is still placed, and the finding is reported.
+  - **Once per entity.** Each entity's first finding is raised through the AnimationSystem's diagnostics (`RaiseIssue`, logged as a warning, under `MaxAnimationSystemDiagnostics`), once per entity for the session's scene: the pass keeps the entities it reported, so it builds no message twice, and a later different cause on the same entity is not raised again. The pass stops reporting at `MaxAnimationSystemDiagnostics` entities, the most the system keeps, so a script that spawns a broken attachment every tick grows nothing.
+  - **Without an asset manager** no Animator is posed, so an attachment reports its Animator without a pose once. This is not special-cased: such a session holds no posed rig to attach to.
+- **`FindBoneAttachmentIssues`** (what `project.validate` reports, appended to `CheckAnimation` after `FindAnimationSceneIssues`). Over effectively enabled entities (`IsActive`) in canonical order, one finding per entity, the first cause in this order:
+  - no Animator above (Field empty);
+  - an empty `Bone` (Field `Bone`);
+  - a Skeleton that loads through the editor's asset manager and lacks the joint (Field `Bone`; a Skeleton that is null or does not load is not checked);
+  - a CharacterController;
+  - a Dynamic RigidBody;
+  - solid colliders without a Kinematic RigidBody of its own.
+
+  Each is Severity Warning, Component `BoneAttachment`, not fixable.
+- **The messages.**
+  - A missing joint's message names the bone, with "(did you mean 'A', 'B' or 'C'?)" after it from `FuzzySuggest` over the Skeleton's joint names and `MakeDidYouMeanHint` (up to three; left out when nothing is close; W41.1's review, finding 1), and the Animator's entity path. Its hint: set `Bone` to a joint name written exactly as the model names it.
+  - An empty `Bone`'s hint lists the Skeleton's first three joints when the Skeleton is known.
+  - The physics causes name the component that fights the placement, and their hints give the Kinematic RigidBody pattern. The colliders cause names its three outcomes: an ancestor's compound rebuilt or a static body teleported every step, or, under a CharacterController, no body at all (W41.1's review, finding 5).
+- **Solid colliders.** The entity's own BoxCollider, SphereCollider, CapsuleCollider and MeshCollider that are not triggers and its TerrainCollider, and those of its effectively enabled descendants that the physics composition gathers with them (no RigidBody or CharacterController of their own, none between). A Kinematic RigidBody on the entity holds them all. A Static RigidBody whose colliders are all triggers holds none, and neither does a trigger without a body: neither is reported.
+- **Decision R.**
+  - **`FindAttachedRenderAnimator(entity)`** returns at once in an edit scene or while the scene holds no `BoneAttachmentStateComponent` (one view emptiness check). Otherwise it walks from the entity up and returns the recorded Animator of the nearest entity holding the state whose Animator is still its strict ancestor. A state whose Animator is no longer an ancestor (reparented after the pass) is passed over, and the walk goes on up.
+  - **The relative pose.** `ComputeAttachedRelativeMatrix(A, entity)` is the product of the local matrices below `A` down to the entity, root side first: `inverse(World(A)) * World(entity)` without an inverse.
+  - **`ComputeRenderedWorldMatrix(entity, alpha)`**, below alpha 1 with an attached Animator `A`, returns `ComputeRenderedWorldMatrix(A, alpha) * ComputeAttachedRelativeMatrix(A, entity)`. At alpha 1 every entity renders at its current world matrix as before, bit for bit: goldens and lockstep screenshots change nothing.
+  - **`TransformSystem::GetRenderPosition`** is the translation of `ComputeRenderMatrix(A) * ComputeAttachedRelativeMatrix(A, entity)`, where `ComputeRenderMatrix` (`TransformSystem.cpp`) is the same rule over freshly computed world matrices (`ComputeWorldMatrix`), as GetRenderPosition already reads them.
+  - **`GetRenderRotation`** is `normalize(GetRenderRotation(A) * the local rotations below A)`, as `GetWorldRotation` multiplies the local rotations.
+  - **The comparison.** "RenderExtraction: an attached subtree renders at its Animator's rendered pose" compares the two functions, and both with the palette's hand.
+- **Shared and append-only files** (the ledger's):
+  - `BuiltinComponents.h`'s include and type list;
+  - `ProjectValidator.cpp`'s `ValidatorCodes` and `ValidatorCodeInfos` (the code after `PHYSICS_JOINT_INVALID`) and `CheckAnimation`;
+  - `ProjectValidatorTests.cpp`'s count line (`+ BoneAttachmentDiagnosticCodes.size()`) and its order case, where the code now ends the list;
+  - `MakeValidationFixtures.py`'s `COMPONENT_ORDER` and the fixture `ANIMATION_ATTACHMENT_INVALID`: the Rig glTF of `ANIMATION_SKELETON_MISMATCH`'s fixture, an Animator posing its three-joint skeleton, and a "Staff" below it attached to `Tipp`;
+  - the game-debugging skill's `validation-codes` row, which W41.1 lands because "Validation: the game-debugging skill's error table names every validation code" reads it;
+  - the generated references.
+- **The header comments:** `AnimationSystem.h` (three passes and, with W41.1's review, `GetDiagnostics`; a reviewed change to M23's frozen header, comment only), `AnimationValidation.h` (`AnimationSceneIssue`'s member comments, which M41 reuses for its code; M23's frozen header, comment only, approved by the lead's review, finding 7), `AnimationPoseComponent.h` (its readers), `RenderExtraction.h` ("Attached subtrees"), `TransformSystem.h` (the render pose) and `PlaySession.h` (phase 4c and "Render interpolation").
+- **The Acceptance's W41.1 cases** (`Tests/Source/Engine/Scene/BoneAttachmentsTests.cpp` and `RenderExtractionTests.cpp`):
+  - "BoneAttachments: an attached entity follows its bone across a clip": within 1e-5 m of `FindAnimatorJointWorldTransform` times the offset, with root motion Apply, and in a play session under a CharacterController parent moved by `MoveCharacter`. It reads both between ticks, so it is also the case that `Animator:GetJointTransform` and an attached entity's `WorldPosition` agree.
+  - "BoneAttachments: an attachment below another attachment follows its parent's new pose", with a rider holding its own Animator and the rider's lance.
+  - "BoneAttachments: an entity without a valid bone keeps its Transform and is reported": no Animator above (the entity's own Animator never counts), an empty `Bone`, a misspelt bone with its suggestion, a Skeleton that does not load, and a pose that is not finite.
+  - "BoneAttachments: a held pose changes no revision", with `Playing` false scrubbed by a layer's `Time`.
+  - "BoneAttachments: the world pause holds an attachment, and Simulate places it".
+  - "BoneAttachments: an animation event callback reads the placed pose".
+  - "BoneAttachments: an attached Kinematic body is swept with its bone": the body's velocity is the attached entity's motion over the step.
+  - "BoneAttachments: a clip stepped 600 ticks ends at its committed hash": every tick's attached Transforms hashed, through Offset and Rotation, an attachment below another and one under a non-uniformly scaled entity.
+  - "RenderExtraction: an attached subtree renders at its Animator's rendered pose" and "RenderExtraction: a scene without attachments extracts as before". The latter's committed digest was checked against the extraction without M41's change (below).
+- **Decision 3's reach, a case each:**
+  - "BoneAttachments: removing the Animator or reparenting away detaches, and another Animator's joint of the same name attaches", which also disables the Animator's entity;
+  - "BoneAttachments: a disabled attachment is skipped and placed again once enabled, and its own Transform writes are overwritten", with writes to `Offset` and `Rotation`;
+  - "BoneAttachments: the Animator's scale reaches the attachment and the bone's scale is ignored", with a bone scaled to nothing and a non-uniformly scaled intermediate entity;
+  - "BoneAttachments: FindBoneAttachmentIssues reports the first cause of each attachment that cannot attach or fights its placement";
+  - "BoneAttachments: findings past MaxAnimationSystemDiagnostics are neither kept nor logged".
+
+  The registration and defaults are "AnimationRegistration: a BoneAttachment follows the SkinnedMesh, requires Transform and holds a Bone of at most 256 bytes of UTF-8" and the extended "BuiltinComponents: animation defaults follow the component table", with the whole-list cases (63 components; the names) growing by one.
+- **Departures from decision 3, each with its reason.**
+  - **Decision R's walk is a helper of its own, not folded into `FindInterpolationStart`.** `FindAttachedRenderAnimator` walks the ancestors once, before the plain rule, and only below alpha 1 while the scene holds a state component. Both files' `FindInterpolationStart` and their plain paths stay byte for byte as they were, which is what "a scene without attachments takes exactly today's path" asks, and the one helper is shared by both functions. In a scene with attachments an entity's ancestors are walked twice; there are few of them.
+  - **The colliders cause covers the descendants the entity's colliders gather.** A solid collider on a child of the attached entity moves with it exactly as its own does, and makes the same rebuilt compound or teleported static body. Decision 3 names only "its solid colliders".
+  - **A joint that does not decompose keeps the entity attached.** Decision 3 has such a joint leave the Transform as it is, and the state removed from an entity the pass "did not place". The milestone reads "placed" as attached: the entity keeps its state and draws with the skin at the Transform it holds, rather than interpolating against its Animator for one tick.
+- **Runs** (2026-11-19, the wave's checkpoint on `milestone/m41`, before the merge of main):
+  - unit, Debug, targeted while the wave was written (`BoneAttachments`, `RenderExtraction`, `AnimationRegistration`, `BuiltinComponents`, `AnimationSystem`, `AnimationValidation`, `ScriptAnimation`, `TransformSystem`, `Interpolation`, `Validation`, `ProjectValidator: GetCodes` and the animation session cases): 127 passed.
+  - unit, Release, the same filter with the diagnostics cap case: 128 passed. The two committed values, `a709a18bf99f3fbf` (600 ticks) and `f9f2df085179fed9` (the extraction without attachments), were taken from the Debug run and hold in Release.
+  - "RenderExtraction: a scene without attachments extracts as before" was run on a build with `RenderExtraction.cpp` and `TransformSystem.cpp` at `bb4b257f`: it passed at the same digest, and "RenderExtraction: an attached subtree renders at its Animator's rendered pose" failed there (the item and `RenderPosition` off the hand), as it must without decision R.
+  - unit, Debug, unfiltered: 5,522 passed, the 48 child-process targets skipped. A first unfiltered run timed out at `Test.py`'s default 3,600 s on the shared machine with no failure; the rerun took `--timeout 14400`.
+  - `Lint.py` passed (its one finding, two lines of `MakeValidationFixtures.py` over 120 columns, fixed); `Format.py --check` passed; `MakeValidationFixtures.py --check` passed; `GenerateDocs.py --config Debug` regenerated `Components.md`, `Methods.json`, the scene and prefab schemas, `ScriptAPI.md`, `Validation.md` and `Engine.d.luau`, and `--check` passed.
+
+## W41.1's review
+
+The lead's independent review of W41.1 (`844743f3`; `bin/Reviews/P7/M41-W1-review.md`: 0 blocker, 0 major, 4 minor, 4 nit; the three departures accepted), fixed in one checkpoint:
+
+- **1 (minor).** The missing-joint message offers its close names through `MakeDidYouMeanHint` ("'A' or 'B'"), as every "did you mean" of the engine does; `QuoteNames`' "and" stays for the empty `Bone`'s list of joints. "BoneAttachments: an entity without a valid bone keeps its Transform and is reported" gains a two-suggestion misspelling (a Skeleton with `HandL` and `HandR`).
+- **2 (minor).** "BoneAttachments: an attached entity whose physics fights its placement is placed and reported once at run time" (a Dynamic RigidBody and a bare solid collider: placed every tick, attached, one finding each).
+- **3 (minor).** "BoneAttachments: removing the last BoneAttachment clears its state, and its entity renders by plain interpolation".
+- **4 (minor).** "RenderExtraction: a rider on a mount renders with the mount, and its lance on the rider's rendered hand" (the recursion) and "RenderExtraction: an attachment moved away from its Animator renders by the next attachment above it" (a stale state passed over), each comparing `ComputeRenderedWorldMatrix` with `Transform.RenderPosition`.
+- **5 (nit).** The colliders cause's message, `BoneAttachments.h` and the `validation-codes` row name the CharacterController case: no body at all.
+- **6 (nit).** `BoneAttachments.h` says a null Skeleton is reported only in play, as an Animator without a pose; `BoneAttachmentComponent.h` says "an Animator without a pose".
+- **7 (nit).** `GetDiagnostics`' comment (`AnimationSystem.h`) and `AnimationSceneIssue`'s member comments (`AnimationValidation.h`) cover the new code: comment-only changes to M23's frozen headers, which the lead approved; the record's header-comment item names them.
+- **8 (nit).** "BoneAttachments: an Animator without a clip poses its rest pose, which an attachment follows" and "BoneAttachments: a joint from an attached Kinematic handle swings a Dynamic body" (a lantern on a `DistanceJoint` to an attached Kinematic staff, in a play session: within the joint's distance every tick, swinging with it, no `PHYSICS_JOINT_INVALID`).
+- **Decision 3** now says that a joint whose matrix does not decompose keeps its entity attached, and that the state leaves an entity the pass did not attach.
+- **Runs** (2026-11-19, on the tree merged with main `bb8d6042`): unit, Debug, targeted (`BoneAttachments`, `RenderExtraction`, `AnimationSystem`, `AnimationValidation`, `ProjectValidator: GetCodes`, `Validation`, `DocExamples`): 94 passed, after the joint case's distance bound took the solver's slack when the swing reverses (0.59 m against the joint's 0.5 m at the reversal; a free body falls metres); unit, Release, targeted (`BoneAttachments`, `RenderExtraction`, `AnimationSystem`, `DocExamples`): 82 passed, the committed 600-tick and extraction digests unchanged; `Lint.py` and `Format.py --check` passed. After the merge and before these fixes, W41.1's cases passed again: 175 in Debug (with `DocExamples` and `PrefabInstantiator`), and `GenerateDocs.py --check` passed.
+
+## The W41.2 record
+
+W41.2 lands decision 3's coverage, documents and editor parts on `milestone/m41`, after the merge of main (`bb8d6042`, brief 21's three fixes and ADR 0059's plan; `64a90a21`), which W41.1's cases passed again on.
+
+- **FeatureTest** (IdSeeds 3801 and 3802, listed after main's scaffolds and before `Suites.jsonl`; `Suites.jsonl`'s one patch line gains the suite with case isolation).
+  - **`BoneAttachments.jsonl`** writes two behaviours (`Assets/Scripts/BoneAttachments/TriggerProbe.luau`, which records the first trigger its entity's sensor enters and, from the bone, where the bone held its entity in the two ticks before the contact, and `BoneDirector.luau`, the replay's input: Jump starts the Walker's walk, Fire folds the Sword between `Joint1` and `Joint0`), makes `BoneAttachments.scene` and writes its suite `Assets/Tests/BoneAttachments/BoneAttachments.test.luau`.
+  - **The scene**, from the imported `Skinned.gltf` and `SkinnedRigs.gltf` (Animation.jsonl's imports):
+    - the Waver, a `Skinned.gltf` instance whose import layer waves `Joint1` 45 degrees about Z; its Armature holds the `Sword`, a user child with `BoneAttachment {Bone: "Joint1", Offset: [0, 0.6, 0.05], Rotation: 90 degrees about Y}` (gate 1: all three fields non-default), a Kinematic `RigidBody`, a trigger `BoxCollider` and the `TriggerProbe`; the Sword holds the `Gem` (a `PointLight` 0.4 m along it) and the `Charm` (`BoneAttachment {Bone: "Joint0", Offset: [0.3, 0, 0]}`, an attachment below an attachment);
+    - the Walker, a `SkinnedRigs.gltf` instance whose Character stands (`Playing` false, `RootMotion` Apply) with the `Pack` on its `Spine` and the `Rider`, a nested `Skinned.gltf` instance waving with its own Animator, attached by an `AddComponent` override to the Walker's `Hips`;
+    - the `Target`, a Kinematic box at the Sword's peak (a sensor sees moving bodies only: `PhysicsLayers.h`'s pair filter leaves sensors and static bodies apart), and the `Director` holding `BoneDirector`.
+  - **The suite** (`BoneAttachments`, eight cases, each from a fresh scene): the attachments as authored (the proxy's reads); every attachment within 1 mm of `GetJointTransform` plus its offset, turned with its joint, at six clip times while the Walker walks, and the Gem riding the Sword; a bone switch written by a test case in force at the tick it resumes after; `Offset` and `Rotation` writes (gate 4's writes); a disable and enable; the Pack keeping the Transform it was placed at, read before its `RemoveComponent`, and the Rider staying where it was when reparented away while the Hips it was on walk on (its one `ANIMATION_ATTACHMENT_INVALID` warning, no Animator above it, is expected and named in the case); the world pause holding the attachment with its pose; the Sword's trigger meeting the Target exactly one tick after the bone first holds it there (a sensor's contact is found from the poses at the start of the physics step: the bone-held pose of the tick before the contact overlaps the Target in `Physics.OverlapBox`, the one before it does not, so a body lagging its bone or teleported fails).
+  - **`BoneAttachmentsReplay.jsonl`** records `Assets/Tests/Replays/BoneAttachments.replay` (format 5, 240 ticks): Space at tick 20 starts the walk, F at tick 90 folds the Sword; its expectations: the Walker stands at tick 10, walks with the Pack carried past x 2.2 at tick 80, and the Sword sits on `Joint0` within 1 mm at tick 120, folded once (`BoneDirector.Folds`). The walk's root motion and the fold reach the state hash, so the replay fails without its input. `Testing.Replays`' glob takes it.
+  - **No committed result moves:** `Scaffold.py` rewrote nothing of FeatureTest but the new scene, scripts, suite and replay, `FeatureTest.eproj`'s suite list and the provenance.
+  - **Gates:** 1 (the Sword's three non-default fields), 4 (`Bone`, `Offset` and `Rotation` read and written through the proxy), 6 (W41.1's fixture), 7 (the descriptions); 1b, 2, 3, 5, 8 and 9 nothing, as decision 3 says.
+  - **Goldens:** none added, none changed.
+  - **The soak** gains `BoneAttachments.scene`, which it finds under `Projects/FeatureTest` by itself.
+- **The Python case.** `Tests/Automation/test_animation.py`'s `test_bone_attachment_follows_its_bone_in_play_and_survives_a_reopen`: `entity.create` puts a `BoneAttachment` on a user child of a skinned model instance's Armature; the edit scene leaves it at its authored Transform; the scene saves and reopens clean (`rebuiltInstances` empty, not dirty: the case decision 3's risks ask for, that an attached user child survives `scene.open`); in lockstep play it sits within 1 mm of `GetJointTransform` plus its offset (`script.eval`), `entity.get {target: "play"}` reports the placed Transform, an `entity.update {target: "play"}` of `Bone` is in force after one tick, and the edit scene is untouched after `play.stop`.
+- **Documents:**
+  - Architecture: §5.2 (attached subtrees' rendering), §5.3 (the `BoneAttachmentComponent` row and the runtime `BoneAttachmentStateComponent`), §5.7 step 4c (the attaching pass), §9.3 (an attached Kinematic body is swept), §11.5 (the `Animator` row points to `BoneAttachment`), §13.7 (the code), §15.5 (`BoneAttachments.scene`).
+  - `Docs/Backlog.md` §6: the M23 row names `BoneAttachment`, and four accepted limits (an attached subtree drawn rigidly at its Animator's rendered pose, an intermediate entity's own fixed-step motion included; the closest rotation under a non-uniform scale; the attached entity's own writes overwritten; a write after the phase in force from the next tick). §2's rows landed with the plan.
+  - The skills: luau-gameplay's `animation` page (the BoneAttachment pattern and the `DocExamples`-checked fold, `StaffFold.luau`; `GetJointTransform`'s line now points to it) and its `SKILL.md` index line, extended in place (no line added); game-building's `prefabs-and-levels` (a held weapon on a model instance); game-debugging's `validation-codes` row (W41.1).
+  - The generated references were regenerated with W41.1 and are unchanged by W41.2 (`--check` passed).
+- **Runs** (2026-11-19, the wave's checkpoint on `milestone/m41`, after `48ef48ab`):
+  - FeatureTest's scaffolds tried first on a scratch copy (`Editor --batch` of the two scaffolds and `Suites.jsonl`, then `--run-tests`): the trigger case failed twice, first against a static target (a sensor sees moving bodies only), then against a target placed for a swing about X (the Wave turns `Joint1` about Z); with a Kinematic target at the peak, the suite's eight cases passed and the replay recorded its expectations.
+  - `Scaffold.py` (Release) passed and regenerated FeatureTest; `Scaffold.py --check` passed, byte for byte outside `Library/`.
+  - The feature suite, Debug: passed, 460 cases in 141 suites and replays, the six editor-mode gates green (gates 1 and 4 now covering `BoneAttachment`), `Projects/FeatureTest` unchanged.
+  - The automation suite filtered to `test_animation` (the Release editor): 4 tests passed, the attachment case among them.
+  - unit, Debug, unfiltered: 5,537 passed, the 48 child-process targets skipped (`DocExamples` checks the fold example).
+  - `Lint.py`, `Format.py --check` and `GenerateDocs.py --check` passed.
+  - The export, determinism, games and golden suites are the gate's (`BoneAttachments.replay` in Debug, Release and Dist, the suite in the exported Release and Dist runs).
+
+## W41.2's review
+
+The lead's independent review of W41.2 (`f8739224`; `bin/Reviews/P7/M41-W2-review.md`: 0 blocker, 0 major, 2 minor, 5 nit; the Kinematic target, case isolation and the expected warning accepted), fixed in one checkpoint through the scaffolds, `Scaffold.py` regenerating the suite, the probe and the replay:
+
+- **1 (minor).** The trigger case could not fail: every pose on the way in stayed within its 0.5 m bound. `TriggerProbe` now keeps, from the bone, where the bone held the Sword in the two ticks before the contact, and the case requires the first to overlap the Target and the second not (`Physics.OverlapBox` with the Sword's trigger box). A sensor's contact is found from the bodies' poses at the start of the physics step, so a correct attachment meets the Target exactly one tick after the bone first holds the Sword there. A temporary local change that ran the AnimationSystem phase after the physics step (the body one tick behind its bone; not committed) failed the case ("and clear of it in the tick before that"), as well as the replay's checkpoint.
+- **2 (minor).** The detaching case reparents the Rider away while the Hips it was on walk on (the Charm's `Joint0` never moves), and requires its world position to hold while the Hips move more than 0.1 m; the Pack's Transform is read, on its bone, before `RemoveComponent` and compared after.
+- **3 (nit).** `BoneDirector.Folds` is read by the replay's tick-120 expectation (exactly one fold).
+- **4 (nit).** `test_animation.py`: two blank lines before the new class.
+- **5 (nit).** The animation page's "Reading it" gives the joint's position plus the joint's rotation times `Offset`.
+- **6 (nit).** Architecture §13.7's closing sentence names ADR 0058's ledger.
+- **7 (nit).** The detaching case names its expected `ANIMATION_ATTACHMENT_INVALID` warning (now the Rider's), and so does the record.
+- **Runs** (2026-11-19): the scaffolds first on a scratch copy (the suite's eight cases and the replay's expectations passed; with the phase moved after the physics step, the trigger case failed); `Scaffold.py` (Release) regenerated only the probe, the suite, the replay and the provenance, and `Scaffold.py --check` passed; the feature suite, Debug: 460 cases, the six editor-mode gates green, `Projects/FeatureTest` unchanged; automation, `test_animation`: 4 passed; unit, Debug, `DocExamples`: 7 passed; `Lint.py --steps python,json` passed.
+
 ## Before milestone completion
 
 - [ ] Brief 21's three items landed on main, each reviewed and its outcome recorded in decision 8.
-- [ ] W41.1 committed; [ ] the lead's review pass taken and every finding fixed.
-- [ ] W41.2 committed; [ ] the lead's review pass taken and every finding fixed.
+- [x] W41.1 committed; [x] the lead's review pass taken and every finding fixed.
+- [x] W41.2 committed; [ ] the lead's review pass taken and every finding fixed.
 - [ ] The milestone end: `milestone/m41` merged current main, the milestone review's findings fixed, `EngineVersionString` 0.8.0, FeatureTest regenerated and the editor-UI goldens checked on the final tree.
 - [ ] The gate green (decision 7), main fast-forwarded and pushed.
 - [ ] Brief 22's and brief 21's "How the game will check it" met, and reported to the World Tree session through the product owner with the corrections above.
