@@ -182,9 +182,9 @@ namespace Engine {
 				"Planar reflections the frame drew, at most 4: PlanarReflection mirrors in view and facing the camera, each rendered from the "
 				"camera mirrored in its plane; its cost is the pass row PlanarReflection<k> of its slot k.")
 			.Field("droppedPlanarReflections", &StatsViewSummary::DroppedPlanarReflections,
-				"Planar reflections in view and facing the camera beyond the 4 the frame draws (the smallest on screen), or whose GPU objects "
-				"could not be created this render (the render reports that error); they reflect the probes and screen-space reflections "
-				"instead.")
+				"Planar reflections in view and facing the camera beyond the 4 the frame draws (the smallest on screen), or whose GPU objects, "
+				"or the view's probe constants, could not be created this render (the render reports that error); they reflect the probes and "
+				"screen-space reflections instead.")
 			.Field("culledPlanarReflections", &StatsViewSummary::CulledPlanarReflections,
 				"Planar reflections the frame did not consider: out of view, seen from behind their reflecting side, or in a view that draws "
 				"none (a debug view or the wireframe); they cost nothing.")

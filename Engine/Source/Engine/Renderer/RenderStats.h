@@ -90,8 +90,8 @@ namespace Engine {
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: appended after M28's rows): the frame's
 		// planar reflections (Renderer/PlanarReflections.h). PlanarReflections: those drawn (at most
 		// MaxPlanarReflectionsPerView); DroppedPlanarReflections: the candidates (in view, facing the camera, in a Lit view
-		// outside the wireframe) past that cap, or whose GPU objects could not be created this render (the render returns that
-		// error), which fall back to the probes and SSR; CulledPlanarReflections: the
+		// outside the wireframe) past that cap, or whose GPU objects, or the view's probe constants, could not be created this
+		// render (the render returns that error), which fall back to the probes and SSR; CulledPlanarReflections: the
 		// snapshot's others (out of view, facing away, a plane that is not finite, or in a view that draws none);
 		// PlanarReflectionEntities: the drawn reflections' entities in slot order, slot k's cost the pass row
 		// PlanarReflection<k>.

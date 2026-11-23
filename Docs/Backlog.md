@@ -95,6 +95,7 @@ Decisions left open with a default in force until their milestone lands. Reopeni
 | Rendering | A general render-to-texture camera (security cameras, portals, minimaps) | a `PlanarReflection` renders a mirror's view for its own glass only | later, on a game's brief | ADR 0059 decision 3 (M42) |
 | Rendering | Recursive reflections; curved mirrors, a normal map's distortion of a reflection, refraction and water waves; a terrain as the reflecting surface; opt-in per submesh or per material | a mirror seen in a mirror shows its fallback; a reflection is flat, undistorted and opted in per entity | later, on a game's brief | ADR 0059 decision 3 (M42) |
 | Rendering | 2D, text, UI and debug draw inside a reflection; a reflection's own shadow planning, probes and temporal filtering; a project setting for the reflection cap and hysteresis at it; a plane gizmo | a reflection draws the 3D scene with the main view's shadows and probes, at most four a view (an engine constant); the plane is edited in the inspector | later, on a game's brief | ADR 0059 decision 3 (M42) |
+| Rendering | A planar reflection's mip chain and blur margin sized from its glass material's roughness (which needs the material's roughness in Prepare) | the chain reaches the level of the view's `SsrMaxRoughness` and the cull and raster rectangle widens by two texels of its last level, for every mirror (§6) | later, when a game's mirrors cost too much | ADR 0059's W42.3 record (M42; the lead's decision on W42.3's review) |
 
 ## 3. Tracked follow-ups
 
@@ -304,6 +305,7 @@ Limits accepted for v1. A limit that names a milestone is scheduled by ADR 0028 
   - A reflection is not temporally filtered, so TAA can trail a reflection that moves against its glass.
   - A mirror at the cap of 4 switches between its planar reflection and its fallback as the ranks change (no hysteresis).
   - Geometry on a mirror's reflecting side within the clip bias (1 cm) of its plane is clipped from its reflection.
+  - A mirror's blur margin follows the view's `SsrMaxRoughness`, not its glass's own roughness (W42.3's review, the lead's decision): every slot's chain reaches the level of `SsrMaxRoughness`, and its cull and rasterization rectangle widens by two texels of the chain's last level, so even a polished mirror culls and renders about 29% of its reflection's width as margin on each side (276 of 960 pixels at 1080p's default half resolution and `SsrMaxRoughness` 0.6). The measured cost stays far within the budget: Perf.py's room of three mirrors, a median of 0.188 ms at 1920 x 1080 against 2 ms. Sizing the chain and the margin from the glass's roughness is §2's row for later.
 
 ## 7. Non-goals for v1
 

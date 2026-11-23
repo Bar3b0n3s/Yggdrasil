@@ -293,7 +293,7 @@ namespace Engine {
 					"those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and "
 					"the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and "
 					"SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of "
-					"4 or whose GPU objects could not be created), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies "
+					"4 or whose GPU objects, or the view's probe constants, could not be created), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies "
 					"(both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step "
 					"gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, "
 					"OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises.",

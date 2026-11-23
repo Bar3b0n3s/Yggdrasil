@@ -54,8 +54,9 @@ namespace Engine {
 		// ShaderResource between command lists (keepInitialState); the renderer's pool keys on it.
 		[[nodiscard]] static nvrhi::TextureDesc GetColorDesc(uint32_t width, uint32_t height, uint32_t mipCount);
 		// Records the levels after the first of `color` (made with GetColorDesc), each from the one above (level k's size
-		// max(1, size >> k)), one dispatch per level, into `commandList` (open), adding its dispatches to `counters`; opens no stats row (the slot's row times
-		// it). Errors: Gpu when a binding set cannot be created (the levels before it stay recorded).
+		// max(1, size >> k)), one dispatch per level, into `commandList` (open), adding its dispatches to `counters`; opens no
+		// stats row (the slot's row times it). Errors: Gpu when a binding set cannot be created (the levels before it stay
+		// recorded).
 		[[nodiscard]] Status Record(nvrhi::ICommandList& commandList, PassBindingCache& bindings, nvrhi::ITexture& color, RenderPassCounters& counters) const;
 	private:
 		struct State;

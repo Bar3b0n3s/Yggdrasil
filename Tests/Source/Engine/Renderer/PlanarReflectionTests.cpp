@@ -960,6 +960,112 @@ namespace Engine {
 			device.RunGarbageCollection();
 		}
 
+		// A rough mirror blurs its reflection by the level curve (Common/PlanarReflections.slang: the level log2(alpha * height *
+		// 0.5) of the GGX alpha = roughness^2) and fades it into the probe term over the upper half of the roughnesses up to
+		// SsrMaxRoughness.
+		//   - The blur: an emitting red panel behind the camera fills the left half of the mirror camera's view, its edge on the
+		//     64 x 64 reflection's centre line (a texel boundary at every level), and the glass's middle row ramps from red to
+		//     black over about 2^level pixels: none at roughness 0.05 (level 0), about 4 at 0.354 (level 2) and 8 at 0.5
+		//     (level 3), with SsrMaxRoughness 1 giving all three the whole weight.
+		//   - The fade: the panel fills the view and the fallback ambient (the probe term without an environment) is blue, so
+		//     the glass's blue over its blue without the PlanarReflection is the fallback's share, 1 - weight, with the weight
+		//     saturate((SsrMaxRoughness - roughness) / (SsrMaxRoughness / 2)): none at roughness 0.25, half at 0.45 and all at
+		//     0.6, with SsrMaxRoughness 0.6.
+		TEST_CASE("PlanarReflections: a rough mirror blurs its reflection by the level curve and fades into the probe term by SsrMaxRoughness"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				uint64_t nextMaterial = 0x5942000000000100ull;
+				// The mirror scene with a glass of `roughness`, the red panel behind the camera from x = -6 to `panelRight`, the
+				// fallback ambient `fallback` and SsrMaxRoughness `ssrMaxRoughness`, on a black background; without its
+				// PlanarReflection unless `reflected`.
+				const auto makeScene = [&fixture, &nextMaterial](float roughness, float ssrMaxRoughness, float panelRight, const glm::vec3& fallback, bool reflected)
+				{
+					const AssetHandle material(nextMaterial++);
+					fixture.Assets().Publish(material, MakeMaterial(glm::vec3(1.0f), 1.0f, roughness, glm::vec3(0.0f), false));
+					RenderSnapshot snapshot = MakeMirrorScene(fixture, false);
+					snapshot.Meshes.clear();
+					snapshot.Camera.ClearColor = glm::vec3(0.0f);
+					snapshot.Environment.FallbackColor = fallback;
+					snapshot.Post.SsrMaxRoughness = ssrMaxRoughness;
+					const float halfWidth = (panelRight + 6.0f) * 0.5f;
+					snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(panelRight - halfWidth, 0.0f, 2.0f))
+							* glm::scale(glm::mat4(1.0f), glm::vec3(halfWidth, 6.0f, 1.0f)),
+						.Mesh = QuadMeshHandle,
+						.Materials = { RedMaterialHandle },
+						.CastShadows = false,
+						.Entity = UUID(5) });
+					AddMirror(snapshot, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)), MirrorEntity, 1.0f, material);
+					if (!reflected)
+						snapshot.PlanarReflections.clear();
+					return snapshot;
+				};
+
+				// The blur: the pixels of the glass's middle row between 5% and 95% of the red plateau left of the edge.
+				const auto rampWidth = [&device, &fixture, &makeScene](float roughness)
+				{
+					const std::vector<glm::dvec4> view = RenderSceneColor(device, fixture, makeScene(roughness, 1.0f, 0.0f, glm::vec3(0.0f), true));
+					CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+					const double plateau = Texel(view, GlassMin + 2, 31).r;
+					CHECK(plateau > 0.5);
+					uint32_t ramp = 0;
+					for (uint32_t x = GlassMin; x < GlassMax; ++x)
+					{
+						const double red = Texel(view, x, 31).r;
+						if (red > 0.05 * plateau && red < 0.95 * plateau)
+							++ramp;
+					}
+					return ramp;
+				};
+				const uint32_t sharp = rampWidth(0.05f);
+				const uint32_t level2 = rampWidth(0.35355f);
+				const uint32_t level3 = rampWidth(0.5f);
+				CAPTURE(sharp);
+				CAPTURE(level2);
+				CAPTURE(level3);
+				CHECK(sharp <= 1);
+				CHECK(level2 >= 3);
+				CHECK(level2 <= 6);
+				CHECK(level3 >= 6);
+				CHECK(level3 <= 11);
+				CHECK(level3 > level2);
+
+				// The fade: the fallback's share of the glass's blue at its centre.
+				const glm::vec3 blue(0.0f, 0.0f, 0.5f);
+				const auto fallbackShare = [&device, &fixture, &makeScene, &blue](float roughness, double& red)
+				{
+					const std::vector<glm::dvec4> reflected = RenderSceneColor(device, fixture, makeScene(roughness, 0.6f, 6.0f, blue, true));
+					const std::vector<glm::dvec4> fallback = RenderSceneColor(device, fixture, makeScene(roughness, 0.6f, 6.0f, blue, false));
+					red = Texel(reflected, 32, 31).r;
+					const double without = Texel(fallback, 32, 31).b;
+					CHECK(without > 0.05);
+					return Texel(reflected, 32, 31).b / without;
+				};
+				double wholeRed = 0.0;
+				double halfRed = 0.0;
+				double goneRed = 0.0;
+				const double whole = fallbackShare(0.25f, wholeRed);
+				const double half = fallbackShare(0.45f, halfRed);
+				const double gone = fallbackShare(0.6f, goneRed);
+				CAPTURE(whole);
+				CAPTURE(half);
+				CAPTURE(gone);
+				CHECK(whole < 0.05);
+				CHECK(half == doctest::Approx(0.5).epsilon(0.16));
+				CHECK(gone > 0.95);
+				CHECK(wholeRed > 0.5);
+				CHECK(halfRed > 0.2 * wholeRed);
+				CHECK(halfRed < 0.8 * wholeRed);
+				CHECK(goneRed < 0.02);
+			}
+			device.RunGarbageCollection();
+		}
+
 		// A 7 x 5 reflection's whole chain (7 x 5, 3 x 2, 1 x 1), level 0 uploaded: each texel of a level is the mean of the
 		// level above over its span, weighted by the area each texel of it covers, so the last column and row of an odd level
 		// count. The reference is computed in double from the level read back above it; the levels are binary16.
