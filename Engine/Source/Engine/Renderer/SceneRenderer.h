@@ -191,8 +191,9 @@ namespace Engine {
 		// HdrLit and Normals and M22's LdrDepth; M26's HdrAdditive was removed at M33's merge), UpscalePass (2), M21's
 		// Lights2DPass (1), M26's ExposurePass (2), M26's TaaPass (1), SsrPass (3: M26's trace and composite and M32's tile
 		// classification), TerrainPass (3: TerrainDepthNormal's prepass and picking prepass, TerrainForward's forward pass) and
-		// M33's ParticlePass (3): 76, the declarations' sum (GetDeclaredPipelineCount, RenderPassDeclaration.h), which
-		// SceneRenderer.cpp checks against each pass's PipelineCount.
+		// M33's ParticlePass (3) and M42's PlanarReflectionPass (1, the planar reflections' mip chain): 77, the declarations'
+		// sum (GetDeclaredPipelineCount, RenderPassDeclaration.h), which SceneRenderer.cpp checks against each pass's
+		// PipelineCount.
 		static constexpr uint32_t StartupPipelineCount = GetDeclaredPipelineCount();
 
 		// Restricts construction to Create; CreateScope still reaches the constructor.
@@ -342,18 +343,18 @@ namespace Engine {
 		// every request. A target is never made smaller than asked.
 		[[nodiscard]] Status Resize(uint32_t width, uint32_t height);
 		// M18 (C18.4, decision 43): drops the renderer's size-dependent targets (the scene-resolution targets and their
-		// framebuffers, the output stage's targets, the entity-id target, the frame targets it holds from its pool) and the
-		// binding sets that reference them, keeping its size, pipelines, per-view buffers and material sets; the pooled ones
-		// become free in its RenderTargetPool, and it releases the pool's free targets whose last submission has completed
-		// (RenderTargetPool::ReleaseFree), so what nothing pending uses goes at once (its memory with its last reference: at
-		// once in Dist, at the next garbage collection where the resource tracker counts). For an owner whose image nothing
-		// displays between renders (ViewportCapture, before it resizes to another size and from its trim hook): it calls
-		// nothing on the device but the release of handles and GetCompletedSubmissionID, never waits and cannot fail, so a
-		// TrimUnused hook may call it.
-		// Pending picks resolve as cancelled (CancelPicks), and GetFinalTexture and GetEntityIdTexture return null until the
-		// next Render, which creates the targets of its size again (a Resize to the current size has no effect, and one to
-		// another size creates that size's). Between Renders: not while a Render awaits its OnSubmitted (asserted). Main
-		// thread.
+		// framebuffers, the output stage's targets, the entity-id target, the frame targets it holds from its pool, M42's
+		// planar reflection slots with their targets) and the binding sets that reference them, keeping its size,
+		// pipelines, per-view buffers and material sets; the pooled ones become free in its RenderTargetPool, and it
+		// releases the pool's free targets whose last submission has completed (RenderTargetPool::ReleaseFree), so what
+		// nothing pending uses goes at once (its memory with its last reference: at once in Dist, at the next garbage
+		// collection where the resource tracker counts). For an owner whose image nothing displays between renders
+		// (ViewportCapture, before it resizes to another size and from its trim hook): it calls nothing on the device but
+		// the release of handles and GetCompletedSubmissionID, never waits and cannot fail, so a TrimUnused hook may call
+		// it. Pending picks resolve as cancelled (CancelPicks), and GetFinalTexture and GetEntityIdTexture return null
+		// until the next Render, which creates the targets of its size again (a Resize to the current size has no effect,
+		// and one to another size creates that size's). Between Renders: not while a Render awaits its OnSubmitted
+		// (asserted). Main thread.
 		void ReleaseTargets();
 
 		// Records the pass list for `snapshot` into `commandList` (open, asserted). The snapshot's camera viewport should

@@ -3,6 +3,7 @@
 #include "Engine/Asset/AssetType.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/ValidationContext.h"
+#include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Scene/Components/BuiltinComponents.h"
 #include "Support/SceneTestFixture.h"
 
@@ -51,6 +52,38 @@ namespace Engine {
 			CHECK(volume.FindField("Data")->GetMeta().AssetFilter == "IrradianceVolume");
 			CHECK(probe.FindField("Data")->GetMeta().AssetFilter == "Environment");
 			CHECK_FALSE(AssetTypeFromString("ReflectionProbe").has_value());
+		}
+
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the third reflection source follows the ReflectionProbe
+		// in Probes, requires Transform, and its Validate rule refuses a zero Normal alone.
+		TEST_CASE("ProbesRegistration: the PlanarReflection follows the ReflectionProbe and refuses a zero Normal")
+		{
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo& probe = RequireProbesComponent(*registry, "ReflectionProbe");
+			const ComponentInfo& info = RequireProbesComponent(*registry, "PlanarReflection");
+			CHECK(info.GetIndex() == probe.GetIndex() + 1);
+			CHECK(info.GetCategory() == "Probes");
+			CHECK(info.GetVersion() == 1);
+			REQUIRE(info.GetRequires().size() == 1);
+			CHECK(info.GetRequires()[0] == registry->FindComponent("Transform"));
+			CHECK(info.GetExcludes().empty());
+			REQUIRE(info.FindField("ResolutionScale") != nullptr);
+			CHECK(info.FindField("ResolutionScale")->GetMeta().Min == static_cast<double>(MinPlanarReflectionResolutionScale));
+			CHECK(info.FindField("ResolutionScale")->GetMeta().Max == static_cast<double>(MaxPlanarReflectionResolutionScale));
+			ResolveContext resolve;
+			resolve.Registry = registry.get();
+			const auto countErrors = [&resolve, &info](const PlanarReflectionComponent& reflection)
+			{
+				ValidationContext context;
+				info.Validate(&reflection, resolve, context);
+				return context.GetErrorCount();
+			};
+			PlanarReflectionComponent reflection;
+			CHECK(countErrors(reflection) == 0);
+			reflection.Normal = glm::vec3(0.0f);
+			CHECK(countErrors(reflection) == 1);
+			reflection.Normal = glm::vec3(-3.0f, 0.0f, 0.0f);
+			CHECK(countErrors(reflection) == 0);
 		}
 
 		TEST_CASE("ProbesRegistration: a reflection probe's capture resolution is a power of two")

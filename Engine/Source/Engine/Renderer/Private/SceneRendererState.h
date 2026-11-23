@@ -16,6 +16,8 @@
 #include "Engine/Renderer/Lights2DPass.h"
 #include "Engine/Renderer/ParticlePass.h"
 #include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/PlanarReflectionPass.h"
+#include "Engine/Renderer/PlanarReflections.h"
 #include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
@@ -40,6 +42,7 @@
 #include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
+#include "Shared/PlanarReflectionConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
@@ -50,6 +53,8 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -95,6 +100,10 @@ namespace Engine {
 			uint32_t Submesh = 0;
 			size_t SnapshotIndex = 0;
 			float ViewDepth = 0.0f; // transparent draws: the view depth of the submesh bounds' centre
+			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the bounds the draw was culled by (its submesh's,
+			// or a deformed item's deformed bounds) in the item's local space, whose rectangle on screen ranks a planar
+			// reflection's glass.
+			Aabb Bounds{};
 		};
 
 		// A material of the frame, resolved once per render: its set, or null when its draws are skipped.
@@ -270,6 +279,80 @@ namespace Engine {
 			nvrhi::TextureHandle LetterboxEntityId{};
 		};
 
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): where RecordMeshPass draws a mirror view's draws: its
+		// framebuffer of `Width` x `Height` pixels, rasterization limited to `Scissor`. A mirror view's draws add nothing to
+		// SceneRenderStats, which describes the main view.
+		struct SceneRendererMeshTarget
+		{
+			nvrhi::IFramebuffer* Framebuffer = nullptr;
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			nvrhi::Rect Scissor{};
+		};
+
+		// M42: what PrepareViewDraws leaves out of a mirror view besides its cull camera's frustum: the reflection's own entity
+		// (a reflection never draws its own glass) and the submeshes wholly behind its clip plane.
+		struct SceneRendererMirrorCull
+		{
+			UUID Excluded{};
+			glm::vec4 ClipPlane = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+		};
+
+		// M42: the prepass targets of the mirror views of one size (the declaration's PlanarReflectionDepth, Normals, Velocity
+		// and Roughness, SceneTargetFormats.h's formats, from the renderer's pool) with their framebuffer: the slots of one
+		// size share them, since slots render in sequence. Kept across renders while a slot of the size is drawn
+		// (ReleaseUnusedReflections).
+		struct SceneRendererReflectionScratch
+		{
+			uint32_t Width = 0;
+			uint32_t Height = 0;
+			nvrhi::TextureHandle Depth{};
+			nvrhi::TextureHandle Normals{};
+			nvrhi::TextureHandle Velocity{};
+			nvrhi::TextureHandle Roughness{};
+			nvrhi::FramebufferHandle PrepassFramebuffer{};
+			bool Used = false; // a slot of this render uses it
+		};
+
+		// M42 (decision 3): one planar reflection slot of a renderer (the placement rule's place 2,
+		// SceneRenderer::State::ReflectionSlots): the mirror view the Prepare stage plans for the reflection drawn in the slot
+		// this render (PrepareReflectionSlot), which the Forward stage records (RecordPlanarReflections), and its GPU objects,
+		// kept across renders while the slot is drawn and released by the first render that does not draw it
+		// (ReleaseUnusedReflections).
+		struct SceneRendererReflectionSlot
+		{
+			// Set by the Prepare stage for a drawn slot.
+			bool Drawn = false;
+			UUID Entity{};
+			CameraData Camera{}; // the mirror camera at the slot's size (MakePlanarReflectionCamera)
+			ViewConstants View{};
+			FogConstants Fog{};
+			LightClusterGrid Clusters{};
+			// The mirror view's light list: the main view's (Lights, at their indices, with their shadow slots), then the lights
+			// only the mirror view sees, unshadowed, up to the snapshot's MaxShadedLights.
+			std::vector<ShaderLight> Lights{};
+			std::vector<SceneRendererDraw> OpaqueDraws{};
+			std::vector<SceneRendererDraw> TransparentDraws{};
+			// The glass's rectangle widened by the blur's footprint (ComputePlanarReflectionBlurMargin, from the slot's chain),
+			// mirrored into the reflection's pixels: the rectangle its draws are culled to and rasterized in.
+			nvrhi::Rect Scissor{};
+			size_t Scratch = 0; // its SceneRenderer::State::ReflectionScratch entry
+			// The GPU objects: the reflection (PlanarReflectionPass::GetColorDesc of the slot's size and chain, from the pool), its
+			// level 0 with the scratch's depth (the forward passes' and the skybox's framebuffer) and alone (the particles'),
+			// and the mirror view's constants, light list and light clusters.
+			nvrhi::TextureHandle Color{};
+			nvrhi::FramebufferHandle ForwardFramebuffer{};
+			nvrhi::FramebufferHandle ParticleFramebuffer{};
+			nvrhi::BufferHandle ViewConstantsBuffer{};
+			nvrhi::BufferHandle FogConstantsBuffer{};
+			nvrhi::BufferHandle LightBuffer{};
+			nvrhi::BufferHandle LightClusterConstantsBuffer{};
+			nvrhi::BufferHandle LightClusterBuffer{};
+			// The mirror view's terrain state (TerrainPass.h) and particle plan, as the main view's.
+			TerrainViewResources TerrainResources{};
+			ParticlePassPlan ParticlePlan{};
+		};
+
 		// M18 (C18.1, decision 1): what the stage functions of one Render share (SceneRenderer::State's Record*Stage). Render
 		// fills the first group before the Prepare stage; each later group is filled by the stage it names and read by the
 		// stages after it. These members are the frozen hand-over between stream A (Prepare to LdrPost) and stream F
@@ -385,6 +468,17 @@ namespace Engine {
 			// view's probes (Private/ProbeShading.h), which RecordViewSetup uploads into the renderer's ProbeResources and the
 			// forward passes read (b4, t13 and t14 of set 0).
 			Utils::ProbeShadingInputs Probes{};
+			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): set by the Prepare stage: the main view's light list
+			// as indices into the snapshot's Lights (CullLights' Visible, Lights' order), which every mirror view's list starts
+			// with; the reflections drawn this render (the slots 0 to PlanarReflectionCount - 1 of
+			// SceneRenderer::State::ReflectionSlots) and the view's PlanarReflectionConstants (b7 of the forward set); and
+			// RenderStats' DroppedPlanarReflections, CulledPlanarReflections and PlanarReflectionEntities.
+			std::vector<uint32_t> VisibleLights{};
+			uint32_t PlanarReflectionCount = 0;
+			PlanarReflectionConstants PlanarReflections{};
+			uint32_t DroppedPlanarReflections = 0;
+			uint32_t CulledPlanarReflections = 0;
+			std::vector<UUID> PlanarReflectionEntities{};
 
 			// Keeps `result` when it is the render's first error.
 			void KeepFirstError(Status result)
@@ -393,6 +487,23 @@ namespace Engine {
 					FirstError = std::move(result);
 			}
 		};
+
+	}
+
+	namespace Detail {
+
+		// M42: SceneRenderer.cpp's helpers that the renderer's other files share (SceneRendererReflections.cpp).
+		// A `width` x `height` attachment of `format` from `pool`, sampled by later passes and kept between command lists in its
+		// writing state (RenderTarget, or DepthWrite for SceneDepthFormat), named "SceneRenderer.<name>".
+		[[nodiscard]] Result<nvrhi::TextureHandle> CreateSceneAttachment(RenderTargetPool& pool, uint32_t width, uint32_t height, nvrhi::Format format,
+			std::string_view name);
+		// A buffer of `size` bytes kept in the renderer's state between command lists (keepInitialState): a constant buffer, or
+		// a structured buffer of `structStride`-byte elements (SceneRendererRecovery.cpp's, which the per-view buffers and each
+		// planar reflection slot's use). Errors: those of GraphicsDevice::CreateBuffer (Gpu).
+		[[nodiscard]] Result<nvrhi::BufferHandle> CreateViewBuffer(GraphicsDevice& device, size_t size, uint32_t structStride, std::string debugName);
+		// The ViewConstants of `camera` for a `width` x `height` target without jitter, with `exposure` (SceneRenderer.cpp's
+		// MakeViewConstants).
+		[[nodiscard]] ViewConstants MakeSceneViewConstants(const CameraData& camera, uint32_t width, uint32_t height, float exposure);
 
 	}
 
@@ -459,6 +570,11 @@ namespace Engine {
 		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the Particles pass's pipelines, samplers and buffers
 		// (place 1).
 		Scope<ParticlePass> Particles{};
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the planar reflections' mip chain (place 1), and the
+		// forward set's neutral 1 x 1 black reflection (SceneColorFormat), which a mirror view, and a main view's slot without
+		// a drawn reflection, binds at t17 to t20.
+		Scope<PlanarReflectionPass> PlanarReflections{};
+		nvrhi::TextureHandle EmptyPlanarReflection{};
 		uint32_t PipelineCount = 0;
 		// M18 (C18.1): SceneRendererPipelines::GetGeneration: 0 until Create's CreatePipelines, which makes it 1, and increased
 		// by every later successful CreatePipelines.
@@ -593,6 +709,16 @@ namespace Engine {
 		nvrhi::BufferHandle SsrArguments{};
 		std::vector<Detail::SceneRendererSsrAreaSlot> SsrAreaSlots{};
 		Detail::SceneRendererSsrAreaSlot PendingSsrArea{};
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the planar reflections (the placement rule's place 2):
+		// the view's PlanarReflectionConstants (b7 of the forward set, written by every Render, created with the other per-view
+		// buffers), the slots and the mirror views' shared prepass targets (both released when a render leaves them unused,
+		// ReleaseUnusedReflections), the mip chain's binding sets, and whether the reflections dropped at the cap were logged
+		// (once per renderer).
+		nvrhi::BufferHandle PlanarReflectionConstantsBuffer{};
+		std::array<Detail::SceneRendererReflectionSlot, MaxPlanarReflectionsPerView> ReflectionSlots{};
+		std::vector<Detail::SceneRendererReflectionScratch> ReflectionScratch{};
+		PassBindingCache ReflectionBindings{};
+		bool PlanarReflectionLimitLogged = false;
 		// M18 (C18.3, decision 26): the renderer's registration with its device's recreation registry (Create); kept by
 		// ReleaseGpuObjects like the back-references.
 		GpuRecreationRegistration Recreation{};
@@ -699,6 +825,12 @@ namespace Engine {
 		// Returns the first non-finite world matrix's error, after skipping that draw, or a material set's creation error,
 		// or a deformation's (ResolveItemDeform, AcquireDeformedMesh), after skipping that item's draws.
 		[[nodiscard]] Status PrepareDraws(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera);
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): PrepareDraws' work into `opaque` and `transparent`:
+		// the main view's without `mirror`; with it a mirror view's, culled by `camera` (its cull camera), without `mirror`'s
+		// excluded entity and the submeshes wholly behind its clip plane, counting no culled submesh in Stats, its instance
+		// records appended to Instances after those already there.
+		[[nodiscard]] Status PrepareViewDraws(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera,
+			std::vector<Detail::SceneRendererDraw>& opaque, std::vector<Detail::SceneRendererDraw>& transparent, const Detail::SceneRendererMirrorCull* mirror);
 		// M23 (C23.3, decision 27; stream C): resolves ItemDeforms[index] (a valid mesh handle) once per render from the item's
 		// mesh mirror (GetMesh, which may upload: the caller holds no mirror reference across it), logging a palette shorter
 		// than a skin once per renderer (RenderSkinMismatchCode; an empty palette is the bind pose without a warning). Errors,
@@ -719,8 +851,9 @@ namespace Engine {
 		void ReleaseUnusedDeforms();
 		// Passes 4, 7 and 9: `draws` with the pipelines of `pass` (the forward ones of `view`) and the view set `viewSet`, one
 		// instanced draw per batch of `draws` (M23, R-INST).
+		// M42: with `target`, a mirror view's draws into its framebuffer and scissor, added to no SceneRenderStats count.
 		void RecordMeshPass(nvrhi::ICommandList& commandList, Detail::SceneRendererMeshPass pass, std::span<const Detail::SceneRendererDraw> draws, nvrhi::IBindingSet& viewSet,
-			RenderDebugView view, RenderPassCounters& counters);
+			RenderDebugView view, RenderPassCounters& counters, const Detail::SceneRendererMeshTarget* target = nullptr);
 		// Drops what the render did not use from every binding-set cache.
 		void ReleaseUnusedBindings();
 		// M23 (C23.1, R-INST): grows InstanceBuffer, the view's Instances structured buffer (null after a device loss's
@@ -765,7 +898,41 @@ namespace Engine {
 		// `clusterCount` clusters of `wordCount` words (LightClusterPass's descs; M29: the grid's WordCount), each replacing
 		// the member only when its creation succeeded. Errors: those of GraphicsDevice::CreateBuffer (Gpu).
 		[[nodiscard]] Status EnsureLightClusterBuffers(uint32_t clusterCount, uint32_t wordCount);
+		// The planar reflections' mirror views first (RecordPlanarReflections), then the main view's forward passes.
 		void RecordForwardStage(Detail::SceneRendererFrame& frame);
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the forward set 0 of a view (Private/ForwardPipelines.h)
+		// with the frame's shadows, environment, probes and dissolve noise, and the view's own `viewConstants`, `fog`, `lights`,
+		// light clusters (`clusterConstants`, `clusterMasks`), occlusion and linear depth, `sceneNormals` and the planar
+		// reflections it samples (the neutral black texture for a slot without one).
+		[[nodiscard]] nvrhi::BindingSetDesc MakeForwardSetDesc(const Detail::SceneRendererFrame& frame, nvrhi::IBuffer* viewConstants, nvrhi::IBuffer* fog,
+			nvrhi::IBuffer* lights, nvrhi::IBuffer* clusterConstants, nvrhi::IBuffer* clusterMasks, nvrhi::ITexture* occlusion, nvrhi::ITexture* linearDepth,
+			nvrhi::ITexture* sceneNormals, const std::array<nvrhi::ITexture*, MaxPlanarReflectionsPerView>& planarReflections) const;
+		// M42 (decision 3; SceneRendererReflections.cpp): the end of the Prepare stage, after the main view's draws, shadow
+		// casters and selection: the snapshot's planar reflections that the view draws, ranked and capped
+		// (RankPlanarReflections; the drops logged once per renderer), each prepared in its slot (PrepareReflectionSlot) or,
+		// when its objects or the view's probe constants cannot be created, falling back (the error kept, counted as dropped);
+		// then the main view's records of a drawn reflection's entity flagged with its slot (DrawFlagPlanarReflection) and
+		// frame.PlanarReflections written.
+		// In a view other than a Lit view with a camera outside the wireframe, every reflection is culled.
+		void PreparePlanarReflections(Detail::SceneRendererFrame& frame);
+		// M42: the mirror view of snapshot reflection `item` (its world plane `plane`, its glass's rectangle `rect` on the main
+		// view) in `slot`: its camera, scissor, GPU objects (EnsureReflectionSlot), draws (PrepareViewDraws), light list,
+		// constants, fog and cluster grid. Errors: those of EnsureReflectionSlot, with the slot not drawn.
+		[[nodiscard]] Status PrepareReflectionSlot(Detail::SceneRendererFrame& frame, Detail::SceneRendererReflectionSlot& slot, size_t item,
+			const PlanarReflectionPlane& plane, const PlanarReflectionScreenRect& rect);
+		// M42: `slot`'s GPU objects for a `width` x `height` reflection of `mipCount` levels: its colour (replaced at another
+		// size or chain), the scratch of that size (found or created), its framebuffers, its constant buffers and light list,
+		// and its cluster buffers grown to `clusters`. Errors: those of the pool, the framebuffer and the buffer creations (Gpu).
+		[[nodiscard]] Status EnsureReflectionSlot(Detail::SceneRendererReflectionSlot& slot, uint32_t width, uint32_t height, uint32_t mipCount,
+			const LightClusterGrid& clusters);
+		// M42: the Forward stage's mirror views, slot by slot, each under its one row PlanarReflection<k>, which times its whole
+		// view: the clears, the prepass and TerrainDepthNormal, the slot's light clusters (LightClusterPass::RecordInRow), then
+		// ForwardOpaque, TerrainForward, the skybox, ForwardTransparent, the particles and the mip chain. A slot's error is the
+		// render's; its reflection then holds what was recorded.
+		void RecordPlanarReflections(Detail::SceneRendererFrame& frame);
+		// M42: releases the slots the last render did not draw and the scratch it did not use, and the drawn slots' unused
+		// terrain resources; called at the render's end.
+		void ReleaseUnusedReflections();
 		// M26 (C26.1, R-SSR; Docs/Decisions/0037-m26-contract.md decision 18, stream X-D): the SSR row, after the skybox and before
 		// the transparent pass, with frame.Ssr: SsrPass::Record of the view's SceneDepth, SceneNormals, SceneRoughness, depth
 		// pyramid, SceneColor (with SsrFramebuffer) and SsrColor, and the forward passes' specular inputs (the view's

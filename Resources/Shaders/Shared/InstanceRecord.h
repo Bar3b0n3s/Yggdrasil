@@ -47,7 +47,10 @@ namespace Engine {
 		Float3 Emissive = Float3(0.0f, 0.0f, 0.0f);
 		float DissolveNoiseScale = 1.0f;
 		Float3 DissolveEdge = Float3(0.0f, 0.0f, 0.0f);
-		uint32_t Padding0 = 0;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; in Padding0, the size unchanged): with
+		// DrawFlagPlanarReflection, the slot (0 to MaxPlanarReflectionsPerView - 1) of the view's reflection the instance
+		// samples; 0 and unread without the flag.
+		uint32_t PlanarReflectionSlot = 0;
 		Float2 UVOffset = Float2(0.0f, 0.0f);
 		uint32_t Padding1 = 0;
 		uint32_t Padding2 = 0;

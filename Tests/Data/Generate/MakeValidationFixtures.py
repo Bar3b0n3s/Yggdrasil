@@ -79,7 +79,8 @@ COMPONENT_ORDER = [
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
     "Animator", "SkinnedMesh", "BoneAttachment", "ParticleEmitter", "ParticleLook", "IrradianceVolume",
-    "ReflectionProbe", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation", "NavModifier",
+    "ReflectionProbe", "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation",
+    "NavModifier",
     "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
 ]
 
@@ -1054,6 +1055,12 @@ return Script.Define("Jumper", Jumper)
     item.entities.append(entity("e000000000000034", "Staff", {
         "Transform": transform(), "BoneAttachment": {"Bone": "Tipp", "Offset": [0, 0.5, 0], "Rotation": [0, 0, 0, 1]}},
         parent="e000000000000033"))
+
+    # M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): a default PlanarReflection (the Quad's +Z face) on
+    # the built-in Cube, whose faces reach half a metre from the plane through its centre.
+    item = fixture("RENDER_REFLECTION_INVALID")
+    item.entities.append(entity("e000000000000042", "Mirror", {
+        "Transform": transform(0, 0, -20), "MeshRenderer": {"Mesh": CUBE_MESH}, "PlanarReflection": {}}))
 
     return fixtures
 

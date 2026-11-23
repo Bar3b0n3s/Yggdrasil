@@ -300,7 +300,7 @@ export type MusicState = {Clip: AssetRef, Intro: AssetRef?, Volume: number, Loop
 export type NavigationRaycast = {Clear: boolean, Point: vector, Normal: vector, Fraction: number}
 
 -- The performance readout of Application.GetStats: frame-paced observations, never simulation state.
-export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number}
+export type PerformanceStats = {RenderAvailable: boolean, GpuAvailable: boolean, Fps: number, CpuMilliseconds: number, GpuMilliseconds: number, VisibleLights: number, DroppedLights: number, ShadowedLights: number, DrawCalls: number, Triangles: number, Particles: number, SkinnedMeshes: number, Bodies: number, ActiveBodies: number, Entities: number, ScriptHeapBytes: number, MaxShadedLights: number, CachedPointShadows: number, CachedSpotShadows: number, SsrTiles: number, SsrTracedTiles: number, SsrTracedPixels: number, PlanarReflections: number, DroppedPlanarReflections: number}
 
 -- A query hit distinguishes the collider entity from its body owner.
 export type RaycastHit = {Entity: Entity, Body: Entity, Point: vector, Normal: vector, Distance: number}
@@ -758,6 +758,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "ParticleLook"): ParticleLook?
 	function GetComponent(self, name: "IrradianceVolume"): IrradianceVolume?
 	function GetComponent(self, name: "ReflectionProbe"): ReflectionProbe?
+	function GetComponent(self, name: "PlanarReflection"): PlanarReflection?
 	function GetComponent(self, name: "Terrain"): Terrain?
 	function GetComponent(self, name: "TerrainCollider"): TerrainCollider?
 	function GetComponent(self, name: "MaterialParameters"): MaterialParameters?
@@ -808,6 +809,8 @@ declare extern type Entity with
 	ParticleLook: ParticleLook?
 	-- The entity's PixelPerfectCamera component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PixelPerfectCamera: PixelPerfectCamera?
+	-- The entity's PlanarReflection component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	PlanarReflection: PlanarReflection?
 	-- The entity's PointLight component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	PointLight: PointLight?
 	-- The entity's PolygonCollider2D component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -1166,6 +1169,16 @@ declare extern type PixelPerfectCamera with
 	ReferenceHeight: number
 	-- The width the scene renders at, in pixels. [All modes; Runtime|Test; pure/read; setter mutates]
 	ReferenceWidth: number
+end
+
+-- Makes the flat surface this entity's MeshRenderer draws a true mirror: each view renders the scene again from its camera mirrored in the plane, clipped at the plane, and the surface reflects that image in place of its probe and screen-space reflections, blurred by its roughness. At most 4 mirrors a view render, the largest on screen first; the others, and those out of view or seen from behind, reflect the probes and screen-space reflections as before.
+declare extern type PlanarReflection with
+	-- The plane's normal, pointing out of the reflecting side, in this entity's local axes (the built-in Quad faces +Z, the Plane +Y). Normalized when used; it must not be zero. [All modes; Runtime|Test; pure/read; setter mutates]
+	Normal: vector
+	-- The plane's distance from the entity's origin along Normal, in metres of the entity's local space (its scale applies): the mirror's surface for a glass that does not pass through its origin, such as one face of a thin box. [All modes; Runtime|Test; pure/read; setter mutates]
+	Offset: number
+	-- The reflection's size as a share of the view's scene resolution: 0.5 renders it at half the width and height, a quarter of the pixels. [All modes; Runtime|Test; pure/read; setter mutates]
+	ResolutionScale: number
 end
 
 -- A light shining in every direction from the entity.
@@ -1908,7 +1921,7 @@ declare Application: {
 	GetDisplaySettings: () -> DisplaySettings,
 	-- Returns the host platform name. [All modes; Runtime|Test; pure/read]
 	GetPlatform: () -> string,
-	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
+	-- Returns the performance readout, in every configuration, Dist included: the frame loop's Fps and CPU frame time in milliseconds; the game view's last rendered frame (RenderAvailable; its GPU time summed over the passes with a GPU sample, GpuAvailable; the lights it shaded, VisibleLights at most MaxShadedLights, the cap it rendered with, DroppedLights beyond it, ShadowedLights the shadowed spot and point lights, CachedPointShadows and CachedSpotShadows those whose shadow maps it reused; its DrawCalls and Triangles; SkinnedMeshes, the meshes with a skin it deformed; and the area the SSR trace covered in the last completed frame that traced, SsrTiles, SsrTracedTiles and SsrTracedPixels; and PlanarReflections, the planar reflections it drew, DroppedPlanarReflections those past the cap of 4 or whose GPU objects, or the view's probe constants, could not be created), all 0 without a renderer; and the session's live Particles, its physics Bodies and ActiveBodies (both worlds), its Entities and the script heap in bytes. Frame-paced, like ParticleEmitter:GetParticleCount: a fixed-step gameplay callback (OnFixedUpdate, a task, a physics, animation or UI event) raises an error; read it in OnUpdate, OnLateUpdate or a test case, and never keep it in hashed state. An edit-scene evaluation, which has no play session, raises. [All modes; Runtime|Test; pure/read]
 	GetStats: () -> PerformanceStats,
 	-- Returns the running engine version. [All modes; Runtime|Test; pure/read]
 	GetVersion: () -> string,

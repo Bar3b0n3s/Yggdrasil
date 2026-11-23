@@ -28,6 +28,8 @@
 #include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/Lights2DPass.h"
 #include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/PlanarReflectionPass.h"
+#include "Engine/Renderer/PlanarReflections.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/Private/LightingInputs.h"
 #include "Engine/Renderer/Private/MaterialBindingCache.h"
@@ -48,6 +50,7 @@
 #include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
+#include "Shared/PlanarReflectionConstants.h"
 #include "Shared/Private/SceneDataViewConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ShadowConstants.h"
@@ -137,7 +140,9 @@ namespace Engine {
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
 			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount
 			+ ExposurePass::PipelineCount + TaaPass::PipelineCount + SsrPass::PipelineCount + TerrainPass::PipelineCount
-			+ ParticlePass::PipelineCount);
+			+ ParticlePass::PipelineCount + PlanarReflectionPass::PipelineCount);
+	// M42: the forward set binds one planar reflection per slot (Private/ForwardPipelines.h).
+	static_assert(Utils::PlanarReflectionSlotCount == MaxPlanarReflectionsPerView);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
 	static_assert(SceneRendererPipelines::DebugViewPipelineCount == Utils::ForwardVariantCount);
 	// The Scene program's specialization constant takes RenderDebugView's values (Shared/DrawConstants.h).
@@ -475,6 +480,20 @@ namespace Engine {
 
 	}
 
+	namespace Detail {
+
+		Result<nvrhi::TextureHandle> CreateSceneAttachment(RenderTargetPool& pool, uint32_t width, uint32_t height, nvrhi::Format format, std::string_view name)
+		{
+			return Utils::CreateTarget(pool, width, height, format, Utils::TargetUsage::Attachment, name);
+		}
+
+		ViewConstants MakeSceneViewConstants(const CameraData& camera, uint32_t width, uint32_t height, float exposure)
+		{
+			return Utils::MakeViewConstants(camera, width, height, exposure);
+		}
+
+	}
+
 	SceneRendererPipelines::SceneRendererPipelines(ConstructionKey /*key*/)
 		: m_State(CreateScope<State>())
 	{
@@ -603,13 +622,17 @@ namespace Engine {
 		ENGINE_TRY_ASSIGN(created.Terrain, TerrainPass::Create(device, pipelines, *created.Layouts.ForwardView));
 		// M33 (Docs/Decisions/0048-m33-particle-look.md decision 4): the particles' own program.
 		ENGINE_TRY_ASSIGN(created.Particles, ParticlePass::Create(device, pipelines));
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the planar reflections' mip chain and the forward set's
+		// neutral black reflection.
+		ENGINE_TRY_ASSIGN(created.PlanarReflections, PlanarReflectionPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.EmptyPlanarReflection, Utils::CreateSceneNeutralTexture(device, SceneColorFormat, false, 0.0f));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
 			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
 			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount()
 			+ created.Exposure->GetPipelineCount() + created.Taa->GetPipelineCount() + created.Ssr->GetPipelineCount()
-			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount();
+			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount() + PlanarReflectionPass::PipelineCount;
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -651,6 +674,7 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, TaaPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, TerrainPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, ParticlePass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, PlanarReflectionPass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -805,12 +829,16 @@ namespace Engine {
 		ExposureBindings.Clear();
 		SsrBindings.Clear();
 		TaaBindings.Clear();
+		ReflectionBindings.Clear();
 	}
 
 	void SceneRenderer::State::ClearBindings()
 	{
 		ClearTargetBindings();
 		LightClusterBindings.Clear();
+		// M42: the mirror views' terrain sets, made for the terrain pass's set-1 layout.
+		for (Detail::SceneRendererReflectionSlot& slot : ReflectionSlots)
+			slot.TerrainResources.Bindings.Clear();
 		SkinningBindings.Clear();
 		UpscaleBindings.Clear();
 		UiQuadBindings.Clear();
@@ -840,6 +868,7 @@ namespace Engine {
 		ExposureBindings.ReleaseUnused();
 		SsrBindings.ReleaseUnused();
 		TaaBindings.ReleaseUnused();
+		ReflectionBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 		UiQuadBindings.ReleaseUnused();
 		ParticleBindings.ReleaseUnused();
@@ -864,8 +893,14 @@ namespace Engine {
 
 	Status SceneRenderer::State::PrepareDraws(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera)
 	{
-		OpaqueDraws.clear();
-		TransparentDraws.clear();
+		return PrepareViewDraws(frame, snapshot, camera, OpaqueDraws, TransparentDraws, nullptr);
+	}
+
+	Status SceneRenderer::State::PrepareViewDraws(Detail::SceneRendererFrame& frame, const RenderSnapshot& snapshot, const CameraData& camera,
+		std::vector<Detail::SceneRendererDraw>& opaque, std::vector<Detail::SceneRendererDraw>& transparent, const Detail::SceneRendererMirrorCull* mirror)
+	{
+		opaque.clear();
+		transparent.clear();
 		Status status;
 		std::map<AssetHandle, Detail::SceneRendererMaterial> materials;
 		std::set<AssetHandle> culledMaterials; // the materials of culled submeshes this render looked at
@@ -876,6 +911,9 @@ namespace Engine {
 			const MeshDrawItem& item = snapshot.Meshes[index];
 			if (!item.Mesh.IsValid())
 				continue; // a null handle draws nothing
+			// M42: a reflection never draws its own glass.
+			if (mirror != nullptr && item.Entity.IsValid() && item.Entity == mirror->Excluded)
+				continue;
 			if (!Utils::IsFinite(item.World))
 			{
 				if (status.has_value())
@@ -916,9 +954,11 @@ namespace Engine {
 				const AssetHandle materialHandle = Utils::SelectMaterial(item, defaults, submesh.MaterialSlot);
 				// M23 (C23.3): a deformed item's submeshes are culled by its deformed bounds.
 				const Aabb& bounds = deform.Deformed ? deform.Bounds : submesh.Bounds;
-				if (IsOutsideView(bounds, item.World, camera))
+				// M42: a mirror view also culls what lies wholly behind its glass.
+				if (IsOutsideView(bounds, item.World, camera) || (mirror != nullptr && IsBehindPlanarReflectionClipPlane(bounds, item.World, mirror->ClipPlane)))
 				{
-					++Stats.CulledSubmeshes;
+					if (mirror == nullptr)
+						++Stats.CulledSubmeshes;
 					// R-MATSET (M18): a material whose draws left the view keeps the set it has while it stays in the snapshot,
 					// so it makes no new set when it returns. Only an existing set is kept, and only for the mirror's current
 					// generation (its lookup rebuilds a replaced version, as the material's return would): a material that no
@@ -976,16 +1016,17 @@ namespace Engine {
 				draw.Entity = item.Entity;
 				draw.Submesh = submeshIndex;
 				draw.SnapshotIndex = index;
+				draw.Bounds = bounds;
 				if (mode == AlphaMode::Blend)
 				{
 					const glm::vec3 centre = bounds.IsEmpty() ? glm::vec3(0.0f) : (bounds.Min + bounds.Max) * 0.5f;
 					draw.ViewDepth = -(worldView * glm::vec4(centre, 1.0f)).z;
-					TransparentDraws.push_back(draw);
+					transparent.push_back(draw);
 				}
 				else
 				{
 					draw.PrepassVariant = Utils::GetPrepassVariant(mode, cullMode);
-					OpaqueDraws.push_back(draw);
+					opaque.push_back(draw);
 				}
 			}
 		}
@@ -993,18 +1034,18 @@ namespace Engine {
 		// §8.3 pass 1: opaque draws by pipeline, then material, then mesh, then submesh (M23: so the draws of one submesh are
 		// adjacent and batch), ties in snapshot order; transparent draws back to front, ties by entity UUID (RenderPrepare.h).
 		std::vector<OpaqueSortKey> opaqueKeys;
-		opaqueKeys.reserve(OpaqueDraws.size());
-		for (uint32_t index = 0; index < OpaqueDraws.size(); ++index)
+		opaqueKeys.reserve(opaque.size());
+		for (uint32_t index = 0; index < opaque.size(); ++index)
 		{
-			const Detail::SceneRendererDraw& draw = OpaqueDraws[index];
+			const Detail::SceneRendererDraw& draw = opaque[index];
 			opaqueKeys.push_back({ .Pipeline = draw.ForwardVariant, .Material = draw.MaterialHandle, .Mesh = draw.Mesh, .Submesh = draw.Submesh, .DrawIndex = index });
 		}
 		SortOpaqueDraws(opaqueKeys);
 		std::vector<TransparentSortKey> transparentKeys;
-		transparentKeys.reserve(TransparentDraws.size());
-		for (uint32_t index = 0; index < TransparentDraws.size(); ++index)
+		transparentKeys.reserve(transparent.size());
+		for (uint32_t index = 0; index < transparent.size(); ++index)
 		{
-			const Detail::SceneRendererDraw& draw = TransparentDraws[index];
+			const Detail::SceneRendererDraw& draw = transparent[index];
 			transparentKeys.push_back({ .ViewDepth = draw.ViewDepth, .Entity = draw.Entity, .Submesh = draw.Submesh, .DrawIndex = index });
 		}
 		SortTransparentDraws(transparentKeys);
@@ -1017,8 +1058,8 @@ namespace Engine {
 				sorted.push_back(draws[key.DrawIndex]);
 			draws = std::move(sorted);
 		};
-		reorder(OpaqueDraws, opaqueKeys);
-		reorder(TransparentDraws, transparentKeys);
+		reorder(opaque, opaqueKeys);
+		reorder(transparent, transparentKeys);
 
 		// M23 (R-INST): the draws' instance records in their order, opaque then transparent, and their instanced draws.
 		const auto appendInstances = [this, &snapshot](std::vector<Detail::SceneRendererDraw>& draws)
@@ -1049,13 +1090,13 @@ namespace Engine {
 					draws[batch.First + index].Batch = index == 0 ? batch.Count : 0;
 			}
 		};
-		appendInstances(OpaqueDraws);
-		appendInstances(TransparentDraws);
+		appendInstances(opaque);
+		appendInstances(transparent);
 		return status;
 	}
 
 	void SceneRenderer::State::RecordMeshPass(nvrhi::ICommandList& commandList, Detail::SceneRendererMeshPass pass, std::span<const Detail::SceneRendererDraw> draws, nvrhi::IBindingSet& viewSet,
-		RenderDebugView view, RenderPassCounters& counters)
+		RenderDebugView view, RenderPassCounters& counters, const Detail::SceneRendererMeshTarget* target)
 	{
 		const bool prepass = pass == Detail::SceneRendererMeshPass::Prepass || pass == Detail::SceneRendererMeshPass::Picking;
 		nvrhi::IFramebuffer* framebuffer = pass == Detail::SceneRendererMeshPass::Prepass ? Targets.PrepassFramebuffer.Get() : Targets.ForwardFramebuffer.Get();
@@ -1063,7 +1104,11 @@ namespace Engine {
 			framebuffer = Targets.PickingFramebuffer;
 		if (pass == Detail::SceneRendererMeshPass::Overdraw)
 			framebuffer = Targets.OverdrawFramebuffer;
-		const nvrhi::Viewport viewport(static_cast<float>(Targets.Width), static_cast<float>(Targets.Height));
+		// M42: a mirror view's framebuffer, viewport and scissor.
+		if (target != nullptr)
+			framebuffer = target->Framebuffer;
+		const nvrhi::Viewport viewport = target != nullptr ? nvrhi::Viewport(static_cast<float>(target->Width), static_cast<float>(target->Height))
+														   : nvrhi::Viewport(static_cast<float>(Targets.Width), static_cast<float>(Targets.Height));
 		const auto& forward = Pipelines->Forward[static_cast<size_t>(view)];
 
 		// The state of the last draw: setGraphicsState only when it changes (it also invalidates the push constants, which
@@ -1086,7 +1131,10 @@ namespace Engine {
 				nvrhi::GraphicsState state;
 				state.pipeline = pipeline.Pipeline;
 				state.framebuffer = framebuffer;
-				state.viewport.addViewportAndScissorRect(viewport);
+				if (target != nullptr)
+					state.viewport.addViewport(viewport).addScissorRect(target->Scissor);
+				else
+					state.viewport.addViewportAndScissorRect(viewport);
 				state.bindings = { &viewSet, draw.Material };
 				state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.VertexBuffer).setSlot(0).setOffset(0));
 				// The attribute stream (M23, C-MESH2): the mesh's own, or the cache's shared default stream, read from offset 0.
@@ -1111,6 +1159,8 @@ namespace Engine {
 			++counters.DrawCalls;
 			counters.Triangles += draw.IndexCount / 3 * draw.Batch;
 		}
+		if (target != nullptr)
+			return; // a mirror view's draws are not the main view's (SceneRenderStats)
 		if (pass == Detail::SceneRendererMeshPass::ForwardOpaque || pass == Detail::SceneRendererMeshPass::ForwardTransparent)
 			Stats.MeshDraws += static_cast<uint32_t>(draws.size());
 		if (pass == Detail::SceneRendererMeshPass::ForwardTransparent)
@@ -1218,6 +1268,9 @@ namespace Engine {
 		state.OutputTargets = {};
 		state.UpscaleBindings.Clear();
 		state.FinalTarget = 0;
+		// M42: the planar reflections' targets from the pool, with the rest of their slots, which the next Render creates again.
+		state.ReflectionSlots = {};
+		state.ReflectionScratch.clear();
 		state.ClearTargetBindings();
 		// What the pool holds that nothing pending uses goes at once: the released targets are free now, and those an
 		// EndFrame stamped with a completed submission are released (no wait).
@@ -1396,6 +1449,7 @@ namespace Engine {
 		commandList.endMarker();
 		state.ReleaseUnusedBindings();
 		state.ReleaseUnusedDeforms();
+		state.ReleaseUnusedReflections();
 		std::set<size_t> visibleMeshes;
 		for (const auto& draw : state.OpaqueDraws)
 			visibleMeshes.insert(draw.SnapshotIndex);
@@ -1413,6 +1467,12 @@ namespace Engine {
 		stats.VisibleLights = state.Stats.Lights;
 		stats.DroppedLights = state.Stats.DroppedLights;
 		stats.SkinnedMeshes = frame.SkinnedMeshes;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the planar reflections the Prepare stage drew, dropped
+		// and culled.
+		stats.PlanarReflections = frame.PlanarReflectionCount;
+		stats.DroppedPlanarReflections = frame.DroppedPlanarReflections;
+		stats.CulledPlanarReflections = frame.CulledPlanarReflections;
+		stats.PlanarReflectionEntities = std::move(frame.PlanarReflectionEntities);
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1505,6 +1565,17 @@ namespace Engine {
 			commandList.writeBuffer(InstanceBuffer, Instances.data(), Instances.size() * sizeof(InstanceRecord));
 		// M26 (C26.1, R-GI-PROBE; stream Q-B): the probes' constants, and their mirrors' copies when the view's probes changed.
 		Utils::RecordProbeUploads(commandList, ProbeResources, frame.Probes);
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the view's planar reflections, and each drawn slot's
+		// mirror-view constants, fog and light list.
+		commandList.writeBuffer(PlanarReflectionConstantsBuffer, &frame.PlanarReflections, sizeof(frame.PlanarReflections));
+		for (uint32_t index = 0; index < frame.PlanarReflectionCount; ++index)
+		{
+			const Detail::SceneRendererReflectionSlot& slot = ReflectionSlots[index];
+			commandList.writeBuffer(slot.ViewConstantsBuffer, &slot.View, sizeof(slot.View));
+			commandList.writeBuffer(slot.FogConstantsBuffer, &slot.Fog, sizeof(slot.Fog));
+			if (!slot.Lights.empty())
+				commandList.writeBuffer(slot.LightBuffer, slot.Lights.data(), slot.Lights.size() * sizeof(ShaderLight));
+		}
 		const glm::vec3 clearColor = frame.Camera.ClearColor;
 		commandList.clearTextureFloat(Targets.SceneColor, nvrhi::AllSubresources, nvrhi::Color(clearColor.r, clearColor.g, clearColor.b, 1.0f));
 		commandList.clearDepthStencilTexture(Targets.SceneDepth, nvrhi::AllSubresources, true, 0.0f, false, 0);
@@ -1605,6 +1676,7 @@ namespace Engine {
 			ShadedLightHistory = culled.Shaded;
 			for (const uint32_t index : culled.Visible)
 				Lights.push_back(Utils::MakeShaderLight(snapshot.Lights[index]));
+			frame.VisibleLights = culled.Visible; // M42: every mirror view's list starts with it
 			Stats.Lights = static_cast<uint32_t>(culled.Visible.size());
 			Stats.CulledLights = culled.Culled;
 			Stats.DroppedLights = culled.Dropped;
@@ -1789,11 +1861,6 @@ namespace Engine {
 				sources[selected[position]] = selectedSources[position];
 			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources);
 		}
-		// M23 (C23.3): the Deform stage dispatches in snapshot order.
-		std::ranges::sort(frame.Deforms, [this](size_t left, size_t right)
-		{
-			return DeformedMeshes[left].SnapshotIndex < DeformedMeshes[right].SnapshotIndex;
-		});
 		const GpuEnvironment* environment = hasCamera && frame.IsLit && !frame.Wireframe ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
 		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog, in the views that light with the environment.
@@ -1840,6 +1907,14 @@ namespace Engine {
 			if (!noise.IsPlaceholder && noise.Texture != nullptr)
 				frame.DissolveNoise = noise.Texture;
 		}
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the planar reflections, after every other instance
+		// record and with the view's environment and fog, which their mirror views share.
+		PreparePlanarReflections(frame);
+		// M23 (C23.3): the Deform stage dispatches in snapshot order (M42: a mirror view's deformed items included).
+		std::ranges::sort(frame.Deforms, [this](size_t left, size_t right)
+		{
+			return DeformedMeshes[left].SnapshotIndex < DeformedMeshes[right].SnapshotIndex;
+		});
 		recording.EndPass({});
 		ENGINE_TRY(EnsureInstanceBuffer());
 		const bool halfPoints = Utils::HasHalfTierPointShadow(frame.Points);
@@ -2005,15 +2080,23 @@ namespace Engine {
 
 	void SceneRenderer::State::SkipDeformedDraws(Detail::SceneRendererFrame& frame, const Detail::SceneRendererDeformedMesh& entry)
 	{
-		// A deformed draw's batch is itself alone (its VertexStream is its item's): the camera's lists skip it as an instance
-		// of another draw, and the casters' and the selection's lose its batch.
-		for (std::vector<Detail::SceneRendererDraw>* draws : { &OpaqueDraws, &TransparentDraws })
+		// A deformed draw's batch is itself alone (its VertexStream is its item's): the camera's lists and the drawn planar
+		// reflections' mirror views (M42) skip it as an instance of another draw, and the casters' and the selection's lose its
+		// batch.
+		const auto skip = [&entry](std::vector<Detail::SceneRendererDraw>& draws)
 		{
-			for (Detail::SceneRendererDraw& draw : *draws)
+			for (Detail::SceneRendererDraw& draw : draws)
 			{
 				if (draw.VertexStream == entry.VertexStream)
 					draw.Batch = 0;
 			}
+		};
+		skip(OpaqueDraws);
+		skip(TransparentDraws);
+		for (uint32_t slot = 0; slot < frame.PlanarReflectionCount; ++slot)
+		{
+			skip(ReflectionSlots[slot].OpaqueDraws);
+			skip(ReflectionSlots[slot].TransparentDraws);
 		}
 		const nvrhi::IBuffer* vertices = entry.Vertices.Get();
 		std::erase_if(frame.ShadowCasters.Batches, [&frame, vertices](const MeshInstanceBatch& batch)
@@ -2281,47 +2364,66 @@ namespace Engine {
 		commandList.writeBuffer(LightClusterConstantsBuffer, &constants, sizeof(constants));
 	}
 
+	nvrhi::BindingSetDesc SceneRenderer::State::MakeForwardSetDesc(const Detail::SceneRendererFrame& frame, nvrhi::IBuffer* viewConstants, nvrhi::IBuffer* fog,
+		nvrhi::IBuffer* lights, nvrhi::IBuffer* clusterConstants, nvrhi::IBuffer* clusterMasks, nvrhi::ITexture* occlusion, nvrhi::ITexture* linearDepth,
+		nvrhi::ITexture* sceneNormals, const std::array<nvrhi::ITexture*, MaxPlanarReflectionsPerView>& planarReflections) const
+	{
+		// M26 (stream Q-B): the probes' resources (Private/ProbeShading.h), or the neutral ones without probes of a kind.
+		const bool hasVolumes = !frame.Probes.Volumes.empty();
+		const bool hasReflections = !frame.Probes.Cubes.empty();
+		nvrhi::BindingSetDesc desc;
+		desc.bindings = {
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, viewConstants),
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::ShadowConstantsRegister, ShadowConstantsBuffer),
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::EnvironmentConstantsRegister, EnvironmentConstantsBuffer),
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::LightClusterConstantsRegister, clusterConstants),
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::FogConstantsRegister, fog),
+			nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightsRegister, lights),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowCascadesRegister, frame.Cascades.Count != 0 ? Targets.Cascades : Pipelines->EmptyCascades),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowAtlasRegister, !frame.Spots.Tiles.empty() ? Targets.SpotAtlas : Pipelines->EmptyAtlas),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::EnvSpecularRegister, frame.EnvironmentSpecular),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::AmbientOcclusionRegister, occlusion),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::ViewDepthRegister, linearDepth),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::SceneNormalsRegister, sceneNormals),
+			nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
+			nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightClusterMasksRegister, clusterMasks),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::PointShadowMapsRegister, !frame.Points.Lights.empty() ? Targets.PointShadowMaps : Pipelines->EmptyPointShadows),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::PointShadowMapsHalfRegister,
+				Utils::HasHalfTierPointShadow(frame.Points) ? Targets.PointShadowMapsHalf : Pipelines->EmptyPointShadows),
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::ProbeConstantsRegister, ProbeResources.Constants),
+			nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::IrradianceProbesRegister, hasVolumes ? ProbeResources.Coefficients : Pipelines->EmptyIrradianceProbes),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::ReflectionProbeCubesRegister, hasReflections ? ProbeResources.Cubes : Pipelines->EmptyReflectionProbeCubes),
+			nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
+			nvrhi::BindingSetItem::ConstantBuffer(Utils::PlanarReflectionConstantsRegister, PlanarReflectionConstantsBuffer),
+			nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
+			nvrhi::BindingSetItem::Sampler(Utils::ShadowCompareRegister, Pipelines->ShadowCompare),
+			nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
+			nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
+		};
+		for (uint32_t slot = 0; slot < MaxPlanarReflectionsPerView; ++slot)
+			desc.bindings.push_back(nvrhi::BindingSetItem::Texture_SRV(Utils::PlanarReflectionsRegister + slot, planarReflections[slot]));
+		return desc;
+	}
+
 	void SceneRenderer::State::RecordForwardStage(Detail::SceneRendererFrame& frame)
 	{
 		nvrhi::ICommandList& commandList = *frame.CommandList;
 		RenderRecordingContext& recording = *frame.Recording;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the planar reflections' mirror views, which the main
+		// view's forward passes sample.
+		RecordPlanarReflections(frame);
 		// M23 (stream C): the forward set binds the cluster grid and masks (RecordLightClusters); without them (their creation
 		// error is the render's) the forward passes are skipped.
 		if (frame.HasCamera && !frame.IsDataView && !frame.Wireframe && LightClusterConstantsBuffer != nullptr && LightClusterBuffer != nullptr
 			&& ProbeResources.Constants != nullptr)
 		{
-			// M26 (stream Q-B): the probes' resources (Private/ProbeShading.h), or the neutral ones without probes of a kind.
-			const bool hasVolumes = !frame.Probes.Volumes.empty();
-			const bool hasReflections = !frame.Probes.Cubes.empty();
-			nvrhi::BindingSetDesc desc;
-			desc.bindings = {
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::ViewConstantsRegister, ViewConstantsBuffer),
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::ShadowConstantsRegister, ShadowConstantsBuffer),
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::EnvironmentConstantsRegister, EnvironmentConstantsBuffer),
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::LightClusterConstantsRegister, LightClusterConstantsBuffer),
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::FogConstantsRegister, FogConstantsBuffer),
-				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightsRegister, LightBuffer),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowCascadesRegister, frame.Cascades.Count != 0 ? Targets.Cascades : Pipelines->EmptyCascades),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::ShadowAtlasRegister, !frame.Spots.Tiles.empty() ? Targets.SpotAtlas : Pipelines->EmptyAtlas),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::EnvSpecularRegister, frame.EnvironmentSpecular),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::AmbientOcclusionRegister, frame.Occlusion),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::ViewDepthRegister, frame.LinearDepth),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::SceneNormalsRegister, Targets.SceneNormals),
-				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
-				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::LightClusterMasksRegister, LightClusterBuffer),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::PointShadowMapsRegister, !frame.Points.Lights.empty() ? Targets.PointShadowMaps : Pipelines->EmptyPointShadows),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::PointShadowMapsHalfRegister,
-					Utils::HasHalfTierPointShadow(frame.Points) ? Targets.PointShadowMapsHalf : Pipelines->EmptyPointShadows),
-				nvrhi::BindingSetItem::ConstantBuffer(Utils::ProbeConstantsRegister, ProbeResources.Constants),
-				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::IrradianceProbesRegister, hasVolumes ? ProbeResources.Coefficients : Pipelines->EmptyIrradianceProbes),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::ReflectionProbeCubesRegister, hasReflections ? ProbeResources.Cubes : Pipelines->EmptyReflectionProbeCubes),
-				nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
-				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
-				nvrhi::BindingSetItem::Sampler(Utils::ShadowCompareRegister, Pipelines->ShadowCompare),
-				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
-				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
-			};
+			// M42: each drawn slot's reflection, the neutral black texture for the others.
+			std::array<nvrhi::ITexture*, MaxPlanarReflectionsPerView> planarReflections{};
+			for (uint32_t slot = 0; slot < MaxPlanarReflectionsPerView; ++slot)
+				planarReflections[slot] = slot < frame.PlanarReflectionCount ? ReflectionSlots[slot].Color.Get() : Pipelines->EmptyPlanarReflection.Get();
+			const nvrhi::BindingSetDesc desc = MakeForwardSetDesc(frame, ViewConstantsBuffer, FogConstantsBuffer, LightBuffer, LightClusterConstantsBuffer,
+				LightClusterBuffer, frame.Occlusion, frame.LinearDepth, Targets.SceneNormals, planarReflections);
 			auto forwardSet = ViewBindings.GetOrCreate(*Device, desc, *Pipelines->Layouts.ForwardView);
 			if (!forwardSet)
 				frame.KeepFirstError(std::unexpected(std::move(forwardSet).error()));

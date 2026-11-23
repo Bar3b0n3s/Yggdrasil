@@ -116,12 +116,15 @@ namespace Engine {
 			// (Docs/Decisions/0033-m22-contract.md decision 7): ADR 0028's phase-2 ledger's 31 rows. M26's six (C26.1,
 			// Docs/Decisions/0037-m26-contract.md decision 13) at the places phase 3's ledger fixes: TerrainDepthNormal after
 			// DepthNormal, TerrainForward after ForwardOpaque, SSR after Skybox, Particles after Lights2D, TAA before Bloom and
-			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get.
-			constexpr std::array<std::string_view, 37> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
+			// Exposure after it: the ledger's 37 rows, a frozen contract of stats.get. M42's four
+			// (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) first in the Forward stage, before
+			// ForwardOpaque: 41.
+			constexpr std::array<std::string_view, 41> Expected = { "Prepare", "Skinning", "DirectionalShadows", "SpotShadows", "PointShadows",
 				"DepthNormal", "TerrainDepthNormal", "DepthPyramid", "GTAO", "GTAODenoiseHorizontal", "GTAODenoiseVertical", "LightClusters",
-				"ForwardOpaque", "TerrainForward", "Skybox", "SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA",
-				"Bloom", "Exposure", "Tonemap", "FXAA", "Text", "Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal",
-				"SelectionDilateVertical", "SelectionComposite", "Wireframe", "Overlays", "Labels", "Letterbox" };
+				"PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3", "ForwardOpaque", "TerrainForward", "Skybox",
+				"SSR", "ForwardTransparent", "Overdraw", "Sprites", "Lights2D", "Particles", "TAA", "Bloom", "Exposure", "Tonemap", "FXAA", "Text",
+				"Ui", "Upscale", "SelectionMask", "SelectionDilateHorizontal", "SelectionDilateVertical", "SelectionComposite", "Wireframe",
+				"Overlays", "Labels", "Letterbox" };
 			REQUIRE(RenderStatsOrder.size() == Expected.size());
 			for (size_t index = 0; index < Expected.size(); ++index)
 				CHECK(RenderStatsOrder[index] == Expected[index]);
@@ -207,6 +210,31 @@ namespace Engine {
 			CHECK(find("Taa")->Targets[0] == "TaaHistory");
 		}
 
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger): the planar reflections first in the Forward
+		// stage, before ForwardOpaque, with a row per slot and the slots' and the mirror views' targets.
+		TEST_CASE("RenderPassDeclarations: the planar reflections come first in the Forward stage with a row per slot")
+		{
+			const auto found = std::find_if(ScenePassDeclarations.begin(), ScenePassDeclarations.end(), [](const RenderPassDeclaration& declaration)
+			{
+				return declaration.Name == "PlanarReflections";
+			});
+			REQUIRE(found != ScenePassDeclarations.end());
+			CHECK(found->Stage == RenderStage::Forward);
+			CHECK((found - 1)->Stage == RenderStage::Ambient);
+			CHECK((found - 1)->Name == "LightClusters");
+			CHECK((found + 1)->Name == "BrdfLut");
+			CHECK((found + 2)->Name == "ForwardOpaque");
+			REQUIRE(found->StatsRows.size() == 4);
+			for (size_t slot = 0; slot < found->StatsRows.size(); ++slot)
+				CHECK(found->StatsRows[slot] == std::format("PlanarReflection{}", slot));
+			REQUIRE(found->Targets.size() == 5);
+			CHECK(found->Targets[0] == "PlanarReflectionColor");
+			CHECK(found->Targets[1] == "PlanarReflectionDepth");
+			CHECK(found->Targets[2] == "PlanarReflectionNormals");
+			CHECK(found->Targets[3] == "PlanarReflectionVelocity");
+			CHECK(found->Targets[4] == "PlanarReflectionRoughness");
+		}
+
 		// M23 (C23.3, Docs/Decisions/0034-m23-contract.md decision 27; stream C): the Skinning pass's one compute pipeline joins
 		// its declaration with the pass, and the deformed draws keep the 24 mesh pipelines (Roadmap M23: "there are still 24
 		// mesh pipelines").
@@ -220,8 +248,8 @@ namespace Engine {
 			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22); 74 with M32's Ssr classification
 			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14), 77 with M33's Particles pass
 			// (Docs/Decisions/0048-m33-particle-look.md decision 4) and 76 without M26's HdrAdditive, which M33's merge removed
-			// (decision 10).
-			CHECK(GetDeclaredPipelineCount() == 76);
+			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
+			CHECK(GetDeclaredPipelineCount() == 77);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -250,8 +278,8 @@ namespace Engine {
 			CHECK((lights - 1)->Name == "Sprites");
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
 			CHECK(QuadBatcher::PipelineCount == 5);
-			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10).
-			CHECK(GetDeclaredPipelineCount() == 76);
+			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain.
+			CHECK(GetDeclaredPipelineCount() == 77);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -283,8 +311,8 @@ namespace Engine {
 			// 1 and the Ssr pass's 2, decision 13, and the terrain pass's 3, decision 22), M32's 1 (the Ssr classification,
 			// Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and M33's 3 (the Particles pass,
 			// Docs/Decisions/0048-m33-particle-look.md decision 4), less the QuadBatcher's HdrAdditive, which M33's merge removed
-			// (decision 10).
-			static_assert(GetDeclaredPipelineCount() == 76);
+			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3).
+			static_assert(GetDeclaredPipelineCount() == 77);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

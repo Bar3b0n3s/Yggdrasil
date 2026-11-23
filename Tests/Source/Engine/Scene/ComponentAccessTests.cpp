@@ -6,6 +6,7 @@
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/EnvironmentComponent.h"
+#include "Engine/Scene/Components/PlanarReflectionComponent.h"
 #include "Engine/Scene/Components/PrefabInstanceComponent.h"
 #include "Engine/Scene/Components/PrefabLinkComponent.h"
 #include "Engine/Scene/Components/RigidBodyComponent.h"
@@ -85,6 +86,35 @@ namespace Engine {
 			REQUIRE_FALSE(scale.has_value());
 			CHECK(entity.GetComponent<TransformComponent>().Translation == glm::vec3(0.0f));
 			CHECK(fixture.GetScene().GetRevision() == revision);
+		}
+
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): a PlanarReflection's Normal names the reflecting side,
+		// so a zero one is refused on every write path and the component keeps its value; a tiny one is a direction, and the
+		// other fields keep their ranges.
+		TEST_CASE("ComponentAccess: a PlanarReflection refuses a zero Normal and fields out of their ranges")
+		{
+			Test::SceneTestFixture fixture;
+			const Entity mirror = fixture.GetScene().CreateEntity("Mirror");
+			REQUIRE(ComponentAccess::AddComponent(mirror, "PlanarReflection", nullptr).has_value());
+
+			const Status zero = ComponentAccess::SetFieldValue(mirror, "PlanarReflection", "Normal", Value::FromVec3(glm::vec3(0.0f)));
+			REQUIRE_FALSE(zero.has_value());
+			CHECK(zero.error().GetCode() == ErrorCode::Validation);
+			const Status patched = ComponentAccess::PatchComponentJson(mirror, "PlanarReflection", ParseAccessJson(R"({ "Normal": [0, 0, 0] })"));
+			REQUIRE_FALSE(patched.has_value());
+			CHECK(mirror.GetComponent<PlanarReflectionComponent>().Normal == glm::vec3(0.0f, 0.0f, 1.0f));
+			const Entity other = fixture.GetScene().CreateEntity("Other");
+			const Json added = ParseAccessJson(R"({ "Normal": [0, 0, 0] })");
+			CHECK_FALSE(ComponentAccess::AddComponent(other, "PlanarReflection", &added).has_value());
+			CHECK_FALSE(other.HasComponent<PlanarReflectionComponent>());
+
+			REQUIRE(ComponentAccess::SetFieldValue(mirror, "PlanarReflection", "Normal", Value::FromVec3(glm::vec3(0.0f, 1.0e-30f, 0.0f))).has_value());
+			CHECK(mirror.GetComponent<PlanarReflectionComponent>().Normal == glm::vec3(0.0f, 1.0e-30f, 0.0f));
+			CHECK_FALSE(ComponentAccess::SetFieldValue(mirror, "PlanarReflection", "ResolutionScale", Value::FromFloat(0.2f)).has_value());
+			CHECK_FALSE(ComponentAccess::SetFieldValue(mirror, "PlanarReflection", "ResolutionScale", Value::FromFloat(1.5f)).has_value());
+			CHECK_FALSE(ComponentAccess::SetFieldValue(mirror, "PlanarReflection", "Offset", Value::FromFloat(20000.0f)).has_value());
+			REQUIRE(ComponentAccess::SetFieldValue(mirror, "PlanarReflection", "ResolutionScale", Value::FromFloat(0.25f)).has_value());
+			CHECK(mirror.GetComponent<PlanarReflectionComponent>().ResolutionScale == 0.25f);
 		}
 
 		TEST_CASE("ComponentAccess: whole-component writes replace every field and reject unknown members")

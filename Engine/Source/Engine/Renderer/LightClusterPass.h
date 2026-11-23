@@ -89,7 +89,17 @@ namespace Engine {
 		// command list is open.
 		[[nodiscard]] Status Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,
 			const LightClusterPassInputs& inputs);
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): Record's work inside the caller's open stats row (a
+		// mirror view's PlanarReflection<k>, which times its whole view), opening none: its dispatch is added to `counters`.
+		// The same errors, with nothing recorded.
+		[[nodiscard]] Status RecordInRow(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const LightClusterPassInputs& inputs,
+			RenderPassCounters& counters) const;
 	private:
+		// Record's checks of `inputs` and its binding set, from `bindings`.
+		[[nodiscard]] Result<nvrhi::IBindingSet*> PrepareSet(PassBindingCache& bindings, const LightClusterPassInputs& inputs) const;
+		// Record's commands with `set`: the clustered constants, then the masks' dispatch, counted in `counters`.
+		void RecordDispatch(nvrhi::ICommandList& commandList, nvrhi::IBindingSet& set, const LightClusterPassInputs& inputs, RenderPassCounters& counters) const;
+
 		struct State;
 		Scope<State> m_State;
 	};

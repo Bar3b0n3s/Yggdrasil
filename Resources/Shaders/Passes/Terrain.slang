@@ -34,10 +34,12 @@
 #include "Shared/FogConstants.h"
 #include "Shared/InstanceRecord.h"
 #include "Shared/LightClusterConstants.h"
+#include "Shared/PlanarReflectionConstants.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/TerrainConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Common/ClipPlane.slang"
 #include "Common/Shadows.slang"
 
 import Common.Brdf;
@@ -70,6 +72,12 @@ TextureCubeArray<float4> ReflectionProbeCubes : register(t14, space0);
 Texture2D<float> DissolveNoise : register(t16, space0); // M31: the mesh draws' dissolve noise, which the terrain does not read
 // M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Common/Fog.slang), read by PSForward's lit output.
 ConstantBuffer<FogConstants> Fog : register(b5, space0);
+// M42: the mesh draws' planar reflections, which the terrain does not read (it shares the forward set).
+ConstantBuffer<PlanarReflectionConstants> PlanarReflection : register(b7, space0);
+Texture2D<float4> PlanarReflections0 : register(t17, space0);
+Texture2D<float4> PlanarReflections1 : register(t18, space0);
+Texture2D<float4> PlanarReflections2 : register(t19, space0);
+Texture2D<float4> PlanarReflections3 : register(t20, space0);
 SamplerState LinearClamp : register(s0, space0);
 SamplerComparisonState ShadowCompare : register(s1, space0);
 SamplerState AnisoWrap : register(s2, space0);
@@ -102,6 +110,9 @@ struct TerrainVertexInput
 struct TerrainVertexOutput
 {
 	float4 Position : SV_Position;
+	// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the signed distance to ViewConstants::ClipPlane, which
+	// clips a mirror view's terrain at its glass; 1 in every other view.
+	float ClipDistance : SV_ClipDistance0;
 	float3 WorldPosition : WORLDPOSITION;
 	float3 WorldNormal : NORMAL;
 	float3 WorldTangent : TANGENT;
@@ -213,6 +224,7 @@ TerrainVertexOutput TransformVertex(TerrainVertexInput input)
 	const float4 world = MultiplyExact(Terrain.World, float4(local, 1.0));
 	TerrainVertexOutput output;
 	output.Position = MultiplyExact(View.ViewProjection, world);
+	output.ClipDistance = GetClipDistance(View.ClipPlane, world);
 	output.WorldPosition = world.xyz;
 	output.WorldNormal = mul(MakeNormalMatrix(Terrain.World, IsMirrored()), localNormal);
 	output.WorldTangent = mul((float3x3)Terrain.World, float3(1.0, 0.0, 0.0));
@@ -392,8 +404,8 @@ float4 PSForward(TerrainVertexOutput input, bool isFrontFace : SV_IsFrontFace) :
 	shadowNormal *= dot(shadowNormal, surface.GeometricNormal) < 0.0 ? -1.0 : 1.0;
 
 	const float viewDepth = -mul(View.View, float4(input.WorldPosition, 1.0)).z;
-	float3 radiance = ShadeDirectLights(input.WorldPosition, uint2(input.Position.xy), viewDepth, (Terrain.Flags & TerrainFlagReceiveShadows) != 0,
-		shadowNormal, surface.Normal, specular.View, specular.NDotV, specular.DiffuseColor, specular.F0, specular.EnergyCompensation, specular.Alpha,
+	float3 radiance = ShadeDirectLights(input.WorldPosition, uint2(input.Position.xy), viewDepth, GetCascadeDepth(input.WorldPosition, viewDepth),
+		(Terrain.Flags & TerrainFlagReceiveShadows) != 0, shadowNormal, surface.Normal, specular.View, specular.NDotV, specular.DiffuseColor, specular.F0, specular.EnergyCompensation, specular.Alpha,
 		specular.Reflection);
 
 	// Image-based lighting (§8.6), or the constant ambient as a uniform environment, then the probes inside their boxes.
@@ -412,6 +424,6 @@ float4 PSForward(TerrainVertexOutput input, bool isFrontFace : SV_IsFrontFace) :
 	radiance += irradiance * specular.DiffuseColor * saturate(float3(1.0) - multiScatter) * MultiBounceAmbientOcclusion(occlusion, specular.DiffuseColor);
 	radiance += prefiltered * multiScatter * (SpecularOcclusion(specular.NDotV, occlusion, specular.Alpha) * HorizonOcclusion(specular.Reflection, surface.GeometricNormal));
 	if (Fog.Enabled != 0)
-		radiance = ApplyFog(radiance, EvaluateFog(input.WorldPosition));
+		radiance = ApplyFog(radiance, EvaluateViewFog(input.WorldPosition, View.ReflectionView != 0, View.ClipPlane));
 	return float4(radiance, 1.0);
 }

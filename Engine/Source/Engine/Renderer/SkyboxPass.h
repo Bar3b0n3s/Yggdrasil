@@ -8,6 +8,7 @@
 #include <nvrhi/nvrhi.h>
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 // §8.3 pass 8, the skybox (Architecture §8.6): one fullscreen triangle at depth 0 drawn into SceneColor tested against
@@ -41,6 +42,9 @@ namespace Engine {
 		nvrhi::IBuffer* EnvironmentConstants = nullptr; // b2; never null
 		nvrhi::IBuffer* FogConstants = nullptr;         // b5 (M32: Shared/FogConstants.h); never null
 		nvrhi::ITexture* Skybox = nullptr;              // the environment's skybox cube (GpuEnvironment::Skybox); never null
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the rectangle rasterization is limited to (a mirror
+		// view's glass rectangle, widened by its blur's footprint); the whole framebuffer when empty.
+		std::optional<nvrhi::Rect> Scissor{};
 	};
 
 	class SkyboxPass

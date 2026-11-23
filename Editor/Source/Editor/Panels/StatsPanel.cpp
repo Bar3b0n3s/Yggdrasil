@@ -168,6 +168,8 @@ namespace Engine {
 				Utils::DrawSupportingMetric("Lights", std::to_string(view.Lights));
 				Utils::DrawSupportingMetric("Dropped lights", std::to_string(view.DroppedLights));
 				Utils::DrawSupportingMetric("Skinned meshes", std::to_string(view.SkinnedMeshes));
+				// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
+				Utils::DrawSupportingMetric("Planar reflections", std::format("{} drawn / {} dropped", view.PlanarReflections, view.DroppedPlanarReflections));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

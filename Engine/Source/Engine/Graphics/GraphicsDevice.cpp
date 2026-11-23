@@ -316,6 +316,7 @@ namespace Engine {
 			candidate.SamplerAnisotropy = features.features.samplerAnisotropy == VK_TRUE;
 			candidate.ImageCubeArray = features.features.imageCubeArray == VK_TRUE;
 			candidate.ShaderStorageImageExtendedFormats = features.features.shaderStorageImageExtendedFormats == VK_TRUE;
+			candidate.ShaderClipDistance = features.features.shaderClipDistance == VK_TRUE;
 			candidate.FillModeNonSolid = features.features.fillModeNonSolid == VK_TRUE;
 			candidate.TextureCompressionBC = features.features.textureCompressionBC == VK_TRUE;
 			candidate.DeviceFault = hasDeviceFaultExtension && faultFeatures.deviceFault == VK_TRUE;
@@ -856,6 +857,7 @@ namespace Engine {
 		features.features.samplerAnisotropy = VK_TRUE;
 		features.features.imageCubeArray = VK_TRUE;
 		features.features.shaderStorageImageExtendedFormats = VK_TRUE;
+		features.features.shaderClipDistance = VK_TRUE;
 		features.features.fillModeNonSolid = m_Info.FillModeNonSolid ? VK_TRUE : VK_FALSE;
 		features.features.textureCompressionBC = m_Info.TextureCompressionBC ? VK_TRUE : VK_FALSE;
 		void** tail = &features13.pNext;
@@ -1147,6 +1149,9 @@ namespace Engine {
 	{
 		if (IsLost())
 			return std::unexpected(Utils::MakeLostDeviceError("binding set", std::format("{} bindings", desc.bindings.size())));
+		// M42: a test's out-of-memory binding set fails here, before NVRHI, whose failure path leaks (GpuDiagnostics.h).
+		if (m_Diagnostics.ShouldFailBindingSetCreation(desc, layout))
+			return MakeError(ErrorCode::Gpu, "cannot create a binding set ({} bindings): out of device memory (injected by a test)", desc.bindings.size());
 		nvrhi::BindingSetHandle set = m_NvrhiDevice->createBindingSet(desc, &layout);
 		if (!set)
 			return MakeError(ErrorCode::Gpu, "cannot create a binding set ({} bindings)", desc.bindings.size());

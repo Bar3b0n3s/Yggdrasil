@@ -16,6 +16,7 @@
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/FogConstants.h"
 #include "Shared/LightClusterConstants.h"
+#include "Shared/PlanarReflectionConstants.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
@@ -118,6 +119,7 @@ namespace Engine {
 					{ .Set = 0, .Register = LightClusterConstantsRegister, .ByteSize = sizeof(LightClusterConstants) },
 					{ .Set = 0, .Register = ProbeConstantsRegister, .ByteSize = sizeof(ProbeConstants) },
 					{ .Set = 0, .Register = FogConstantsRegister, .ByteSize = sizeof(FogConstants) },
+					{ .Set = 0, .Register = PlanarReflectionConstantsRegister, .ByteSize = sizeof(PlanarReflectionConstants) },
 					{ .Set = 1, .Register = TerrainConstantsRegister, .ByteSize = sizeof(TerrainConstants) },
 				},
 			};
@@ -227,7 +229,8 @@ namespace Engine {
 			const TerrainLodLayout& layout, uint32_t chunkX, uint32_t chunkZ, const TerrainNeighbourLods& neighbours) const;
 		// Records `resources`' chunks with `pipeline` and the view's set 0.
 		void RecordChunks(nvrhi::ICommandList& commandList, const TerrainViewResources& resources, const GraphicsPipeline& pipeline,
-			nvrhi::IFramebuffer& framebuffer, nvrhi::IBindingSet& viewSet, RenderPassCounters& counters) const;
+			nvrhi::IFramebuffer& framebuffer, nvrhi::IBindingSet& viewSet, RenderPassCounters& counters,
+			const std::optional<nvrhi::Rect>& scissor) const;
 	};
 
 	TerrainPass::TerrainPass(ConstructionKey /*key*/)
@@ -470,7 +473,7 @@ namespace Engine {
 	}
 
 	void TerrainPass::State::RecordChunks(nvrhi::ICommandList& commandList, const TerrainViewResources& resources, const GraphicsPipeline& pipeline,
-		nvrhi::IFramebuffer& framebuffer, nvrhi::IBindingSet& viewSet, RenderPassCounters& counters) const
+		nvrhi::IFramebuffer& framebuffer, nvrhi::IBindingSet& viewSet, RenderPassCounters& counters, const std::optional<nvrhi::Rect>& scissor) const
 	{
 		const nvrhi::Viewport viewport = framebuffer.getFramebufferInfo().getViewport();
 		for (const TerrainDraw& draw : resources.Draws)
@@ -489,7 +492,10 @@ namespace Engine {
 					nvrhi::GraphicsState graphics;
 					graphics.pipeline = pipeline.Pipeline;
 					graphics.framebuffer = &framebuffer;
-					graphics.viewport.addViewportAndScissorRect(viewport);
+					if (scissor)
+						graphics.viewport.addViewport(viewport).addScissorRect(*scissor);
+					else
+						graphics.viewport.addViewportAndScissorRect(viewport);
 					graphics.bindings = { &viewSet, draw.Set };
 					graphics.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(mesh.Vertices).setSlot(0).setOffset(0));
 					graphics.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(mesh.Indices).setFormat(nvrhi::Format::R32_UINT).setOffset(0));
@@ -507,17 +513,17 @@ namespace Engine {
 	}
 
 	void TerrainPass::RecordDepthNormal(nvrhi::ICommandList& commandList, const TerrainViewResources& resources, nvrhi::IFramebuffer& framebuffer, bool picking,
-		nvrhi::IBindingSet& viewSet, RenderPassCounters& counters) const
+		nvrhi::IBindingSet& viewSet, RenderPassCounters& counters, const std::optional<nvrhi::Rect>& scissor) const
 	{
 		const State& state = *m_State;
-		state.RecordChunks(commandList, resources, picking ? state.Picking : state.Prepass, framebuffer, viewSet, counters);
+		state.RecordChunks(commandList, resources, picking ? state.Picking : state.Prepass, framebuffer, viewSet, counters, scissor);
 	}
 
 	void TerrainPass::RecordForward(nvrhi::ICommandList& commandList, const TerrainViewResources& resources, nvrhi::IFramebuffer& framebuffer,
-		nvrhi::IBindingSet& forwardSet, RenderPassCounters& counters) const
+		nvrhi::IBindingSet& forwardSet, RenderPassCounters& counters, const std::optional<nvrhi::Rect>& scissor) const
 	{
 		const State& state = *m_State;
-		state.RecordChunks(commandList, resources, state.Forward, framebuffer, forwardSet, counters);
+		state.RecordChunks(commandList, resources, state.Forward, framebuffer, forwardSet, counters, scissor);
 	}
 
 	void TerrainPass::ReleaseUnused(TerrainViewResources& resources)

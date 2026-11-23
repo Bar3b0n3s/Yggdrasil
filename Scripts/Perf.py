@@ -24,7 +24,12 @@ game view renders at 1920 x 1080 measures, over LOOK_SAMPLES single rendered tic
 passes it reaches in Assets/Scenes/Fog.scene, whose Fog sets every field (distance and height fog, the ambient tint and
 the sun glow, the skybox unfogged; fog/Fog/gpuCostMs: each sample with the Fog less the median without it; budget
 0.5 ms), and the SSR row of a generated isometric floor of 35 tiles with 0, 8 and 35 of them glossy, and with 8 at half
-resolution (ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also give the tiles the trace covered.
+resolution (ssr/Floor<n>of35/gpuMs, ssr/Floor8of35Half/gpuMs), whose stats also give the tiles the trace covered; and
+(M42, Docs/Decisions/0059-m42-planar-reflections.md decision 3) the planar reflections of a generated room
+(Assets/Perf/Mirrors.scene: three built-in Quad mirrors on its walls at the default half resolution, facing a
+perspective camera across a floor of props lit by a shadowed sun and a shadowed point light; reflections/Mirrors3/gpuMs:
+the sum of the PlanarReflection<k> rows, each a mirror's whole view; budget 2.0 ms, World Tree's brief 23's target),
+captured only when the view drew all three.
 --only selects some of the parts (playCopy, scenes, navigation, replay, look), a development aid for one measurement.
 
 The numbers are warning-only: an over-budget metric, a scene whose calls failed, or a capture without a Vulkan device
@@ -103,6 +108,11 @@ SSR_SCENE = "Assets/Perf/SsrFloor.scene"
 SSR_COLUMNS = 7
 SSR_ROWS = 5
 SSR_GLOSSY_COUNTS = (0, 8, 35)
+# M42: the planar reflections' room (module docstring) and the rows its metric sums.
+MIRROR_SCENE = "Assets/Perf/Mirrors.scene"
+MIRROR_METRIC = "reflections/Mirrors3/gpuMs"
+MIRROR_COUNT = 3
+MIRROR_PASSES = ("PlanarReflection0", "PlanarReflection1", "PlanarReflection2", "PlanarReflection3")
 DEVICE_PROBE_TIMEOUT_SECONDS = 120.0
 CALL_TIMEOUT_SECONDS = 120.0
 STEP_TIMEOUT_SECONDS = 600.0
@@ -367,6 +377,35 @@ class Capture:
                       else str(error))
             self.warnings.append(f"ssr/Floor: {detail}; not captured")
 
+    def mirror_cost(self, client: Any) -> None:
+        """reflections/Mirrors3/gpuMs (module docstring); an engine error, a view without GPU times or a view that did
+        not draw the three reflections makes it a warning."""
+        try:
+            mirror = {"BaseColor": [0.95, 0.95, 0.95, 1], "Metallic": 1, "Roughness": 0.03}
+            self.call(client, "asset.create",
+                      {"type": "Material", "path": "Assets/Perf/Mirror.material", "values": mirror})
+            self.call(client, "scene.new", {"path": MIRROR_SCENE, "template": "Empty", "discardChanges": True})
+            self.call(client, "edit.batch", {"label": "Perf: mirrors", "ops": mirror_room_ops()},
+                      timeout=STEP_TIMEOUT_SECONDS)
+            self.call(client, "scene.save", {})
+            samples, view = self.play_samples(client, MIRROR_PASSES)
+        except (self.engine_client.EngineError, ValueError) as error:
+            detail = (f"{error.method}: {error.detail}" if isinstance(error, self.engine_client.EngineError)
+                      else str(error))
+            self.warnings.append(f"{MIRROR_METRIC}: {detail}; not captured")
+            return
+        drawn = view.get("planarReflections", 0)
+        if drawn != MIRROR_COUNT:
+            self.warnings.append(f"{MIRROR_METRIC}: the game view drew {drawn} of the {MIRROR_COUNT} planar "
+                                 f"reflections; not captured")
+            return
+        if not samples:
+            self.warnings.append(f"{MIRROR_METRIC}: the game view reported no GPU times; not captured")
+            return
+        metric = perf.summarize(MIRROR_METRIC, "ms", samples)
+        self.metrics.append(metric)
+        self.console.print(f"  {MIRROR_METRIC}: median {metric.median:.3f} ms at {LOOK_WIDTH} x {LOOK_HEIGHT}")
+
     def set_glossy_tiles(self, client: Any, glossy: int) -> None:
         """Gives the floor's first `glossy` tiles (in ssr_tile_names' order) the glossy material and the rest the
         rough."""
@@ -517,6 +556,41 @@ def ssr_floor_ops() -> list[dict[str, Any]]:
     return ops
 
 
+def mirror_room_ops() -> list[dict[str, Any]]:
+    """edit.batch ops of the planar reflections' room: a perspective camera at (0, 2, 7) looking down -Z, a 12 m floor
+    with 12 props, a shadowed sun and a shadowed point light, the Studio environment, and three 3 x 2 m built-in Quad
+    mirrors, each with a PlanarReflection at its default half resolution: on the back wall (z = -5, facing +Z) and on
+    the side walls (x = -4 and x = 4 at z = -1, facing the room)."""
+    ops: list[dict[str, Any]] = [
+        {"method": "entity.create", "params": {"name": "Rendering", "components": {
+            "Environment": {"Environment": "engine://Environments/Studio", "Intensity": 0.6}}}},
+        {"method": "entity.create", "params": {"name": "Camera", "components": {
+            "Transform": {"Translation": [0, 2, 7], "EulerAngles": [-8, 0, 0]},
+            "Camera": {"Primary": True, "Projection": "Perspective", "VerticalFov": 60, "FarClip": 60}}}},
+        {"method": "entity.create", "params": {"name": "Sun", "components": {
+            "Transform": {"EulerAngles": [-50, 30, 0]}, "DirectionalLight": {"Intensity": 2, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Lamp", "components": {
+            "Transform": {"Translation": [0, 3, 0]},
+            "PointLight": {"Intensity": 30, "Range": 10, "CastShadows": True}}}},
+        {"method": "entity.create", "params": {"name": "Floor", "components": {
+            "Transform": {"Scale": [12, 1, 12]}, "MeshRenderer": {"Mesh": "engine://Meshes/Plane"}}}},
+    ]
+    for index in range(12):
+        row, column = divmod(index, 4)
+        mesh = "engine://Meshes/Sphere" if index % 2 else BUILTIN_CUBE_MESH
+        ops.append({"method": "entity.create", "params": {"name": f"Prop{index}", "components": {
+            "Transform": {"Translation": [-3.0 + column * 2.0, 0.5, -3.0 + row * 2.5],
+                          "EulerAngles": [0, index * 15.0, 0]},
+            "MeshRenderer": {"Mesh": mesh}}}})
+    for name, translation, turn in (("MirrorBack", [0, 1.5, -5], 0), ("MirrorLeft", [-4, 1.5, -1], 90),
+                                    ("MirrorRight", [4, 1.5, -1], -90)):
+        ops.append({"method": "entity.create", "params": {"name": name, "components": {
+            "Transform": {"Translation": translation, "EulerAngles": [0, turn, 0], "Scale": [3, 2, 1]},
+            "MeshRenderer": {"Mesh": "engine://Meshes/Quad", "Materials": ["Assets/Perf/Mirror.material"]},
+            "PlanarReflection": {}}}})
+    return ops
+
+
 def run_editor(capture: Capture, editor: Path, project_file: Path, renderer: str, user_data: Path, work: Any,
                extra_arguments: tuple[str, ...] = ()) -> None:
     """Starts a headless editor with `renderer` (and `extra_arguments`) on `project_file`, runs `work(client, pid)`
@@ -602,6 +676,7 @@ def capture_perf(config: str, output: Path, gpu_optional: bool, console: Console
                                  {"patch": {"Window": {"Width": LOOK_WIDTH, "Height": LOOK_HEIGHT}}})
                     capture.fog_cost(client)
                     capture.ssr_cost(client)
+                    capture.mirror_cost(client)
 
                 run_editor(capture, editor, project_file, renderer, root / "LookUserData", look,
                            ("--headless-game-view",))

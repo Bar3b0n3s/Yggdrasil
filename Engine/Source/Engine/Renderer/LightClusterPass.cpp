@@ -92,8 +92,7 @@ namespace Engine {
 		return desc;
 	}
 
-	Status LightClusterPass::Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,
-		const LightClusterPassInputs& inputs)
+	Result<nvrhi::IBindingSet*> LightClusterPass::PrepareSet(PassBindingCache& bindings, const LightClusterPassInputs& inputs) const
 	{
 		const uint32_t clusterCount = GetLightClusterCount(inputs.Grid);
 		if (inputs.ViewConstants == nullptr || inputs.ClusterConstants == nullptr || inputs.Lights == nullptr || inputs.Masks == nullptr
@@ -104,7 +103,7 @@ namespace Engine {
 				"the LightClusters pass needs its buffers, a grid of 1 to {} mask words per cluster and a mask buffer for the {} clusters of its grid",
 				MaxLightClusterWordCount, clusterCount);
 		}
-		State& state = *m_State;
+		const State& state = *m_State;
 		nvrhi::BindingSetDesc desc;
 		desc.bindings = {
 			nvrhi::BindingSetItem::ConstantBuffer(0, inputs.ViewConstants),
@@ -112,19 +111,41 @@ namespace Engine {
 			nvrhi::BindingSetItem::StructuredBuffer_SRV(0, inputs.Lights),
 			nvrhi::BindingSetItem::StructuredBuffer_UAV(0, inputs.Masks),
 		};
-		ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, bindings.GetOrCreate(*state.Device, desc, *state.Pipeline.BindingLayouts.front()));
+		return bindings.GetOrCreate(*state.Device, desc, *state.Pipeline.BindingLayouts.front());
+	}
 
-		recording.BeginPass("LightClusters", &commandList);
+	void LightClusterPass::RecordDispatch(nvrhi::ICommandList& commandList, nvrhi::IBindingSet& set, const LightClusterPassInputs& inputs,
+		RenderPassCounters& counters) const
+	{
+		const State& state = *m_State;
 		const LightClusterConstants constants = MakeLightClusterConstants(inputs.Grid, LightClusterModeClustered);
 		commandList.writeBuffer(inputs.ClusterConstants, &constants, sizeof(constants));
 		nvrhi::ComputeState compute;
 		compute.pipeline = state.Pipeline.Pipeline;
-		compute.bindings = { set };
+		compute.bindings = { &set };
 		commandList.setComputeState(compute);
 		// x: every tile's words of one slice (Passes/LightClusters.slang), y: the slices.
 		const uint32_t threads = inputs.Grid.TilesX * inputs.Grid.TilesY * inputs.Grid.WordCount;
 		commandList.dispatch((threads + ThreadGroupSize - 1) / ThreadGroupSize, inputs.Grid.Slices);
-		recording.EndPass({ .Dispatches = 1 });
+		++counters.Dispatches;
+	}
+
+	Status LightClusterPass::Record(nvrhi::ICommandList& commandList, RenderRecordingContext& recording, PassBindingCache& bindings,
+		const LightClusterPassInputs& inputs)
+	{
+		ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, PrepareSet(bindings, inputs));
+		recording.BeginPass("LightClusters", &commandList);
+		RenderPassCounters counters;
+		RecordDispatch(commandList, *set, inputs, counters);
+		recording.EndPass(counters);
+		return {};
+	}
+
+	Status LightClusterPass::RecordInRow(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const LightClusterPassInputs& inputs,
+		RenderPassCounters& counters) const
+	{
+		ENGINE_TRY_ASSIGN(nvrhi::IBindingSet * set, PrepareSet(bindings, inputs));
+		RecordDispatch(commandList, *set, inputs, counters);
 		return {};
 	}
 

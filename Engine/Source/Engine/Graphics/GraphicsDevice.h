@@ -222,9 +222,11 @@ namespace Engine {
 		// with Gpu, without calling NVRHI, when GpuDiagnostics::TakeRenderTargetCreationFault (--gpu-inject-fault=
 		// oom-rendertarget and oom-rendertarget-persistent), and CreateGraphicsPipeline and CreateComputePipeline when
 		// GpuDiagnostics::TakePipelineCreationFault (oom-pipeline, oom-pipeline-persistent), each "... out of device memory
-		// (injected by --gpu-inject-fault=<fault>)" as oom-texture's. After startup a Gpu error of a wrapper on a device that
-		// is not lost is out-of-memory (IsGpuOutOfMemory, GpuOutOfMemory.h): the request that met it trims and retries once
-		// (RetryAfterTrim) and then fails alone with ErrorCode::OutOfMemory; at startup it stays FatalError(OutOfMemory).
+		// (injected by --gpu-inject-fault=<fault>)" as oom-texture's. M42: CreateBindingSet also fails with Gpu, without
+		// calling NVRHI, when GpuDiagnostics::ShouldFailBindingSetCreation selects the set (a test's fault). After startup a
+		// Gpu error of a wrapper on a device that is not lost is out-of-memory (IsGpuOutOfMemory, GpuOutOfMemory.h): the
+		// request that met it trims and retries once (RetryAfterTrim) and then fails alone with ErrorCode::OutOfMemory; at
+		// startup it stays FatalError(OutOfMemory).
 		[[nodiscard]] Result<nvrhi::TextureHandle> CreateTexture(const nvrhi::TextureDesc& desc);
 		[[nodiscard]] Result<nvrhi::StagingTextureHandle> CreateStagingTexture(const nvrhi::TextureDesc& desc, nvrhi::CpuAccessMode cpuAccess);
 		[[nodiscard]] Result<nvrhi::BufferHandle> CreateBuffer(const nvrhi::BufferDesc& desc);

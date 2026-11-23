@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -174,6 +175,19 @@ namespace Engine {
 		// reports VK_ERROR_OUT_OF_DEVICE_MEMORY without calling Vulkan) under GpuFault::OomSwapchain and
 		// OomSwapchainPersistent.
 		[[nodiscard]] bool TakeSwapchainCreationFault();
+
+		// M42 (W42.2's review, Docs/Decisions/0059-m42-planar-reflections.md): a test's out-of-memory binding sets. While a
+		// selector is set, GraphicsDevice::CreateBindingSet fails with Gpu, without calling NVRHI, every creation whose
+		// description and layout it selects. The fault sits before NVRHI because NVRHI's createBindingSet leaks the set it
+		// allocated, with its reference to the layout, when the set's descriptor pool or allocation fails
+		// (Vendor/NVRHI/VENDOR.md), so a fault injected below it would leave objects alive. Set and cleared (an empty
+		// selector) on the main thread, which creates every binding set, unlike this class's other members; never in Dist
+		// (GpuTestHooksEnabled, asserted), where ShouldFailBindingSetCreation is always false.
+		using BindingSetFaultSelector = std::function<bool(const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& layout)>;
+		void SetBindingSetCreationFault(BindingSetFaultSelector selector);
+		// Whether the creation of a binding set of `desc` for `layout` must fail as if out of device memory: the selector's
+		// answer (SetBindingSetCreationFault), false without one. Main thread.
+		[[nodiscard]] bool ShouldFailBindingSetCreation(const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& layout) const;
 	private:
 		// M18 (C18.4): the shared rule of the Take functions: whether a fault of `onceFault` or `persistentFault` strikes now,
 		// once armed (ArmInjectedFault), the once fault only at its first call.
@@ -191,6 +205,8 @@ namespace Engine {
 		// (a process injects one fault): their once spellings strike at the first Take call after the arming, which sets the
 		// struck bit, and their -persistent spellings need only the armed bit.
 		std::atomic<uint8_t> m_InjectedFaultArming{ 0 };
+		// M42: SetBindingSetCreationFault's selector (main thread).
+		BindingSetFaultSelector m_BindingSetFault{};
 	};
 
 	// The fatal error a failed Vulkan result becomes (§4.6 item 2, §8.14 item 6): VK_ERROR_DEVICE_LOST is DeviceLost,

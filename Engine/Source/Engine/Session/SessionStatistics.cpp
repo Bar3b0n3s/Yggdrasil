@@ -42,6 +42,8 @@ namespace Engine {
 		stats.MaxShadedLights = view.MaxShadedLights;
 		stats.CachedPointShadows = view.CachedPointShadows;
 		stats.CachedSpotShadows = view.CachedSpotShadows;
+		stats.PlanarReflections = view.PlanarReflections;
+		stats.DroppedPlanarReflections = view.DroppedPlanarReflections;
 		if (view.SsrAreaAvailable)
 		{
 			stats.SsrTiles = view.SsrTiles;

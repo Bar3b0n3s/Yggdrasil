@@ -45,6 +45,7 @@
 #include "Engine/Scene/Physics2DValidation.h"
 #include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
+#include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -1381,10 +1382,10 @@ end
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
 			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
-			// BoneAttachmentDiagnosticCodes).
+			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes).
 			CHECK(codes.size()
 				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
-					+ BoneAttachmentDiagnosticCodes.size());
+					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1443,11 +1444,14 @@ end
 			// Phase 6's codes follow phase 5's in landing order (ADR 0052's phase-6 ledger, the validation row): M36's
 			// PHYSICS_SURFACE_UNUSED (Docs/Decisions/0053-m36-contact-surfaces.md decision 6) first, then M37's
 			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36. Phase 7's follow (ADR 0058's
-			// ledger): M41's ANIMATION_ATTACHMENT_INVALID (Docs/Decisions/0058-m41-bone-attachments.md decision 3) ends the list.
+			// ledger): M41's ANIMATION_ATTACHMENT_INVALID (Docs/Decisions/0058-m41-bone-attachments.md decision 3), then M42's
+			// RENDER_REFLECTION_INVALID (Docs/Decisions/0059-m42-planar-reflections.md, its ledger's validation row), which lands after
+			// M41 and ends the list.
 			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
 			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
-			CHECK(codes.back() == AnimationAttachmentInvalidCode);
+			CHECK(position(AnimationAttachmentInvalidCode) + 1 == position(RenderReflectionInvalidCode));
+			CHECK(codes.back() == RenderReflectionInvalidCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -2344,6 +2348,93 @@ end
 			check("/Locked", "HingeJoint", "UpperAngle");
 			check("/Pointless", "SliderJoint", "Axis");
 			CHECK_FALSE(joints.contains(editor.GetScene().FindEntityByPath("/Door").GetUUID().ToString()));
+		}
+
+		// M42 (Scene/PlanarReflectionValidation.h, Docs/Decisions/0059-m42-planar-reflections.md decision 3): a mirror without a
+		// drawn mesh, and one whose plane misses its glass, with the axis the glass is thinnest along and its face's Offset,
+		// which clears the finding; a mesh too thick for any plane is named so; a glass within 5 cm of its plane after the
+		// entity's scale is not reported; a hidden MeshRenderer is checked as a shown one, and a disabled mirror is not.
+		TEST_CASE("ProjectValidator: RENDER_REFLECTION_INVALID reports a mirror without a mesh or off its glass, with the glass's axis")
+		{
+			Test::EditorTestFixture fixture("ValidatorPlanarReflections");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto addMirror = [&editor](std::string_view name, std::string_view mesh, std::string_view transform, std::string_view reflection)
+			{
+				const Entity entity = editor.GetScene().CreateEntity(name);
+				if (!transform.empty())
+					REQUIRE(ComponentAccess::PatchComponentJson(entity, "Transform", ParseValidatorJson(transform)).has_value());
+				if (!mesh.empty())
+				{
+					const Json renderer = ParseValidatorJson(std::format(R"({{"Mesh":"{}"}})", mesh));
+					REQUIRE(ComponentAccess::AddComponent(entity, "MeshRenderer", &renderer).has_value());
+				}
+				const Json value = ParseValidatorJson(reflection);
+				REQUIRE(ComponentAccess::AddComponent(entity, "PlanarReflection", &value).has_value());
+			};
+			const std::string quad = BuiltinAssetHandles::QuadMesh.ToString();
+			const std::string cube = BuiltinAssetHandles::CubeMesh.ToString();
+			{
+				SceneEdit edit(editor, "Mirrors");
+				addMirror("Bare", "", "", "{}");
+				addMirror("Unmeshed", "", "", "{}");
+				REQUIRE(ComponentAccess::AddComponent(editor.GetScene().FindEntityByPath("/Unmeshed"), "MeshRenderer", nullptr).has_value());
+				addMirror("Sideways", quad, "", R"({"Normal":[0,1,0]})");
+				addMirror("Glass", quad, R"({"Scale":[2.5,3.15,1]})", "{}");
+				addMirror("Slab", cube, R"({"Scale":[2,2,0.04]})", R"({"Offset":0.5})");
+				addMirror("Block", cube, R"({"Scale":[2,2,0.5]})", R"({"Normal":[0,0,-1],"Offset":0.5})");
+				// A slab thin along Y whose Normal names Z, and the same slab with the hint's Normal and Offset applied.
+				addMirror("WrongAxis", cube, R"({"Scale":[2,0.04,2]})", "{}");
+				addMirror("HintApplied", cube, R"({"Scale":[2,0.04,2]})", R"({"Normal":[0,1,0],"Offset":0.5})");
+				// The Sideways quad's mirror twice more: behind a hidden MeshRenderer, and on a disabled entity.
+				addMirror("Hidden", quad, "", R"({"Normal":[0,1,0]})");
+				const Entity hidden = editor.GetScene().FindEntityByPath("/Hidden");
+				REQUIRE(ComponentAccess::PatchComponentJson(hidden, "MeshRenderer", ParseValidatorJson(R"({"Visible":false})")).has_value());
+				addMirror("Disabled", quad, "", R"({"Normal":[0,1,0]})");
+				editor.GetScene().FindEntityByPath("/Disabled").SetActive(false);
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> mirrors;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == RenderReflectionInvalidCode)
+					CHECK(mirrors.emplace(diagnostic.Entity, &diagnostic).second);
+			}
+			CHECK(mirrors.size() == 6);
+			const auto check = [&editor, &mirrors](std::string_view path, std::string_view component, std::string_view field) -> const ProjectDiagnostic*
+			{
+				CAPTURE(path);
+				const auto found = mirrors.find(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+				REQUIRE(found != mirrors.end());
+				const ProjectDiagnostic& diagnostic = *found->second;
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Warning);
+				CHECK_FALSE(diagnostic.AutoFixable);
+				CHECK(diagnostic.Component == component);
+				CHECK(diagnostic.Field == field);
+				CHECK(diagnostic.File == "Assets/Scenes/Main.scene");
+				return &diagnostic;
+			};
+			check("/Bare", "PlanarReflection", "");
+			check("/Unmeshed", "MeshRenderer", "Mesh");
+			// The Quad lies in its XY plane: the finding names local Z, its own Normal's sign kept where it has one.
+			CHECK(check("/Sideways", "PlanarReflection", "Normal")->Hint.find("Normal (0, 0, 1), Offset 0)") != std::string::npos);
+			// A thick block: 0.5 m even along its thinnest axis, so no plane on a face holds it.
+			const std::string& block = check("/Block", "PlanarReflection", "Normal")->Hint;
+			CHECK(block.find("0.5 m thick even along local Z") != std::string::npos);
+			CHECK(block.find("Offset") == std::string::npos);
+			// The slab's face on its thinnest axis, Y, which the HintApplied twin follows and is not reported.
+			const std::string& wrongAxis = check("/WrongAxis", "PlanarReflection", "Normal")->Hint;
+			CHECK(wrongAxis.find("thinnest along local Y (Normal (0, 1, 0), Offset 0.5)") != std::string::npos);
+			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/HintApplied").GetUUID().ToString()));
+			CHECK(check("/Hidden", "PlanarReflection", "Normal")->Hint.find("Normal (0, 0, 1), Offset 0)") != std::string::npos);
+			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/Disabled").GetUUID().ToString()));
+			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/Glass").GetUUID().ToString()));
+			// A 4 cm slab whose front face carries the plane lies within 5 cm of it once scaled.
+			CHECK_FALSE(mirrors.contains(editor.GetScene().FindEntityByPath("/Slab").GetUUID().ToString()));
 		}
 
 		TEST_CASE("ProjectValidator: fixing PHYSICS_ADJACENT_STATIC_BODIES adds a Static RigidBody to the common parent in one undo step")

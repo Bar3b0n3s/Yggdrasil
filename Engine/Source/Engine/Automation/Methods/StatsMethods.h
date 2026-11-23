@@ -77,6 +77,13 @@ namespace Engine {
 		uint32_t Lights = 0;
 		uint32_t DroppedLights = 0;
 		uint32_t SkinnedMeshes = 0;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: appended after M28's rows):
+		// RenderStats::PlanarReflections, DroppedPlanarReflections, CulledPlanarReflections and PlanarReflectionEntities (each
+		// entity's id as UUID::ToString gives it, in slot order).
+		uint32_t PlanarReflections = 0;
+		uint32_t DroppedPlanarReflections = 0;
+		uint32_t CulledPlanarReflections = 0;
+		std::vector<std::string> PlanarReflectionEntities{};
 	};
 
 	struct StatsGetResult

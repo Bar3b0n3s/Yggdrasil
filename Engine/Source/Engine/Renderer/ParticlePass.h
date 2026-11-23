@@ -15,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -159,6 +160,9 @@ namespace Engine {
 		// SceneDepth, shader-readable, ColorFramebuffer's size; never null. Bound as a texture (t1): the fragments test it.
 		nvrhi::ITexture* SceneDepth = nullptr;
 		QuadSampler Sampler = QuadSampler::Linear;
+		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the rectangle rasterization is limited to (a mirror
+		// view's glass rectangle, widened by its blur's footprint); the whole framebuffer when empty.
+		std::optional<nvrhi::Rect> Scissor{};
 	};
 
 	class ParticlePass

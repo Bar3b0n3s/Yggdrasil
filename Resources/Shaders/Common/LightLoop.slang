@@ -19,6 +19,14 @@
 #include "Common/LightClusters.slang"
 #include "Common/Shadows.slang"
 
+// M42: the view depth that chooses the directional shadow's cascade at `worldPosition`, whose own view depth is `viewDepth`:
+// that depth in a main view, and in a mirror view (ViewConstants::ReflectionView) the main camera's view depth of the point,
+// dot(CascadeDepthPlane, (worldPosition, 1)), since a mirror view samples the main view's cascades.
+float GetCascadeDepth(float3 worldPosition, float viewDepth)
+{
+	return View.ReflectionView != 0 ? dot(View.CascadeDepthPlane, float4(worldPosition, 1.0)) : viewDepth;
+}
+
 // The direct light of one light-list entry at `position`.
 float3 ShadeLight(ShaderLight light, float3 position, float3 normal, float3 view, float nDotV, float3 diffuseColor, float3 f0,
 	float3 energyCompensation, float alpha, float3 reflection)
@@ -60,9 +68,11 @@ uint GetLightListWord(uint word, uint count)
 
 // The direct light at the pixel `pixel` (its scene-resolution coordinates) shading `worldPosition` at view depth `viewDepth`,
 // summed over the lights in the light list's order: each light's ShadeLight times its shadow visibility (1 unless
-// `receiveShadows`). The BRDF inputs are ShadeForward's.
-float3 ShadeDirectLights(float3 worldPosition, uint2 pixel, float viewDepth, bool receiveShadows, float3 shadowNormal, float3 normal, float3 view,
-	float nDotV, float3 diffuseColor, float3 f0, float3 energyCompensation, float alpha, float3 reflection)
+// `receiveShadows`). The BRDF inputs are ShadeForward's. M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3):
+// `cascadeDepth` chooses the directional shadow's cascade: `viewDepth` in a main view, the main camera's view depth of the
+// point in a mirror view (GetCascadeDepth), whose shadows are the main view's.
+float3 ShadeDirectLights(float3 worldPosition, uint2 pixel, float viewDepth, float cascadeDepth, bool receiveShadows, float3 shadowNormal, float3 normal,
+	float3 view, float nDotV, float3 diffuseColor, float3 f0, float3 energyCompensation, float alpha, float3 reflection)
 {
 	const bool clustered = Clusters.Mode.x == LightClusterModeClustered;
 	const uint maskOffset = clustered ? GetLightClusterIndex(Clusters, pixel, viewDepth) * Clusters.Grid.w : 0;
@@ -80,7 +90,7 @@ float3 ShadeDirectLights(float3 worldPosition, uint2 pixel, float viewDepth, boo
 			{
 				const float visibility = receiveShadows
 					? GetLightVisibility(ShadowMaps, ShadowAtlas, PointShadowMaps, PointShadowMapsHalf, ShadowCompare, Shadows, light, index,
-						worldPosition, shadowNormal, viewDepth, pixel)
+						worldPosition, shadowNormal, cascadeDepth, pixel)
 					: 1.0;
 				radiance += visibility * direct;
 			}

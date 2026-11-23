@@ -7,6 +7,7 @@
 #include "Engine/Graphics/HostImageUpload.h"
 #include "Engine/Graphics/VulkanDispatch.h"
 #include "Engine/Platform/Process.h"
+#include "Support/BindingSetCreationFails.h"
 #include "Support/DeathTest.h"
 #include "Support/ExpectLog.h"
 #include "Support/HeadlessGpuFixture.h"
@@ -258,6 +259,60 @@ namespace Engine {
 			target.debugName = "StillWorks";
 			const Result<nvrhi::TextureHandle> created = device.CreateTexture(target);
 			CHECK_MESSAGE(created.has_value(), (created.has_value() ? std::string() : created.error().ToString()));
+		}
+
+		// M42 (W42.2's review): a binding set the test's fault selects (GpuDiagnostics::SetBindingSetCreationFault) fails with
+		// Gpu before NVRHI is called, so nothing is created and nothing is left alive (NVRHI's own failure path leaks,
+		// Vendor/NVRHI/VENDOR.md); a set it does not select, and every set once the fault is gone, is created.
+		TEST_CASE("GraphicsDevice: a binding set the test fault selects fails before NVRHI, and the others are created"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			GpuResourceTracker& tracker = device.GetResourceTracker();
+			{
+				nvrhi::BindingLayoutDesc layoutDesc;
+				layoutDesc.visibility = nvrhi::ShaderType::Compute;
+				layoutDesc.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(0) };
+				Result<nvrhi::BindingLayoutHandle> layout = device.CreateBindingLayout(layoutDesc);
+				REQUIRE_MESSAGE(layout.has_value(), layout.error().ToString());
+				const auto makeBuffer = [&device](const char* name)
+				{
+					nvrhi::BufferDesc desc;
+					desc.byteSize = 256;
+					desc.isConstantBuffer = true;
+					desc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+					desc.keepInitialState = true;
+					desc.debugName = name;
+					Result<nvrhi::BufferHandle> buffer = device.CreateBuffer(desc);
+					REQUIRE_MESSAGE(buffer.has_value(), buffer.error().ToString());
+					return *buffer;
+				};
+				const nvrhi::BufferHandle selected = makeBuffer("SelectedConstants");
+				const nvrhi::BufferHandle other = makeBuffer("OtherConstants");
+				nvrhi::BindingSetDesc selectedDesc;
+				selectedDesc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, selected) };
+				nvrhi::BindingSetDesc otherDesc;
+				otherDesc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, other) };
+				const uint64_t setsBefore = tracker.GetLiveCount(GpuResourceType::BindingSet);
+				{
+					const Test::BindingSetCreationFails fails(device, [&selected](const nvrhi::BindingSetDesc& desc, const nvrhi::IBindingLayout& /*layout*/)
+					{
+						return desc.bindings.size() == 1 && desc.bindings[0].resourceHandle == selected.Get();
+					});
+					const Result<nvrhi::BindingSetHandle> failed = device.CreateBindingSet(selectedDesc, **layout);
+					REQUIRE_FALSE(failed.has_value());
+					CHECK(failed.error().GetCode() == ErrorCode::Gpu);
+					CHECK(tracker.GetLiveCount(GpuResourceType::BindingSet) == setsBefore);
+					const Result<nvrhi::BindingSetHandle> created = device.CreateBindingSet(otherDesc, **layout);
+					CHECK_MESSAGE(created.has_value(), (created.has_value() ? std::string() : created.error().ToString()));
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				const Result<nvrhi::BindingSetHandle> afterwards = device.CreateBindingSet(selectedDesc, **layout);
+				CHECK_MESSAGE(afterwards.has_value(), (afterwards.has_value() ? std::string() : afterwards.error().ToString()));
+			}
+			device.RunGarbageCollection();
 		}
 
 		TEST_CASE("GraphicsDevice: GpuResourceTracker counts what the wrappers create"

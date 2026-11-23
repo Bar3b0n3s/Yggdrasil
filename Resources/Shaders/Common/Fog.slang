@@ -43,31 +43,63 @@ float3 GetFogColor(float3 ray)
 	return Fog.Color + Fog.SunColor * pow(saturate(dot(ray, Fog.SunDirection)), Fog.SunGlowExponent);
 }
 
-// The fog of the world point `worldPosition`: rgb its colour, a its amount.
-float4 EvaluateFog(float3 worldPosition)
+// The fog of the world point `worldPosition` fogged from the view depth `startDistance` on: rgb its colour, a its amount.
+float4 EvaluateFogFrom(float3 worldPosition, float startDistance)
 {
 	const float depth = dot(worldPosition - Fog.CameraPosition, Fog.ViewForward);
 	const float3 eye = Fog.Orthographic != 0 ? worldPosition - Fog.ViewForward * depth : Fog.CameraPosition;
 	const float3 offset = worldPosition - eye;
 	const float lengthSquared = dot(offset, offset);
 	const float3 ray = Fog.Orthographic != 0 || !(lengthSquared > 1e-20) ? Fog.ViewForward : offset * rsqrt(lengthSquared);
-	const float pathLength = max(depth - Fog.StartDistance, 0.0);
+	const float pathLength = max(depth - startDistance, 0.0);
 	float opticalDepth = Fog.Density * pathLength;
 	if (Fog.HeightDensity > 0.0 && pathLength > 0.0)
 	{
 		// The height gained per metre of view depth, and the path's heights where the fog begins and at the point: the
 		// density falls from the lower end over |rise| L metres of height.
 		const float rise = offset.y / depth;
-		const float startHeight = eye.y + rise * Fog.StartDistance;
+		const float startHeight = eye.y + rise * startDistance;
 		const float lowHeight = min(startHeight, startHeight + rise * pathLength);
 		opticalDepth += GetFogHeightDensity(lowHeight) * pathLength * GetFogPathFactor(Fog.HeightFalloff * abs(rise) * pathLength);
 	}
 	return float4(GetFogColor(ray), min(1.0 - exp(-opticalDepth), Fog.MaxOpacity));
 }
 
+// The fog of the world point `worldPosition` from the view's StartDistance on: rgb its colour, a its amount.
+float4 EvaluateFog(float3 worldPosition)
+{
+	return EvaluateFogFrom(worldPosition, Fog.StartDistance);
+}
+
+// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): a mirror view fogs only the path from the glass to the
+// reflected point, since the main view fogs the path from its camera to the glass. The view depth from which a mirror view
+// (whose camera, the main camera mirrored in the glass's plane, lies behind the glass) fogs `worldPosition`: where the
+// point's view ray from its eye point crosses `plane` (the mirror view's ViewConstants::ClipPlane), or StartDistance when
+// that lies farther. Every depth of a mirror view is the main camera's depth of the reflection's image, so the fog between
+// the crossing and the point is the fog along the reflected path.
+float GetMirrorFogStart(float3 worldPosition, float4 plane)
+{
+	const float depth = dot(worldPosition - Fog.CameraPosition, Fog.ViewForward);
+	const float3 eye = Fog.Orthographic != 0 ? worldPosition - Fog.ViewForward * depth : Fog.CameraPosition;
+	const float3 offset = worldPosition - eye;
+	const float along = dot(plane.xyz, offset);
+	const float fraction = abs(along) > 1e-20 ? saturate(-(dot(plane.xyz, eye) + plane.w) / along) : 0.0;
+	return max(Fog.StartDistance, fraction * depth);
+}
+
+// The fog of `worldPosition` in a view that is a mirror view when `mirrorView` (ViewConstants::ReflectionView), with its
+// clip plane `clipPlane`: EvaluateFog's in every other view.
+float4 EvaluateViewFog(float3 worldPosition, bool mirrorView, float4 clipPlane)
+{
+	if (mirrorView)
+		return EvaluateFogFrom(worldPosition, GetMirrorFogStart(worldPosition, clipPlane));
+	return EvaluateFog(worldPosition);
+}
+
 // The fog of the sky along the unit world direction `direction`, seen from the eye point `eye` (the camera for a
-// perspective view; the pixel's point on the camera's plane for an orthographic one, whose direction is ViewForward).
-float4 EvaluateSkyFog(float3 direction, float3 eye)
+// perspective view; the pixel's point on the camera's plane for an orthographic one, whose direction is ViewForward), fogged
+// from the view depth `startDistance` on.
+float4 EvaluateSkyFogFrom(float3 direction, float3 eye, float startDistance)
 {
 	if (Fog.Density > 0.0)
 		return float4(GetFogColor(direction), Fog.MaxOpacity);
@@ -75,11 +107,26 @@ float4 EvaluateSkyFog(float3 direction, float3 eye)
 	if (Fog.HeightDensity > 0.0)
 	{
 		const float rise = Fog.Orthographic != 0 ? Fog.ViewForward.y : direction.y / max(dot(direction, Fog.ViewForward), 1e-6);
-		const float atStart = GetFogHeightDensity(eye.y + rise * Fog.StartDistance);
+		const float atStart = GetFogHeightDensity(eye.y + rise * startDistance);
 		const float rate = Fog.HeightFalloff * rise;
 		amount = rate > 1e-6 ? min(1.0 - exp(-atStart / rate), Fog.MaxOpacity) : Fog.MaxOpacity;
 	}
 	return float4(GetFogColor(direction), amount);
+}
+
+// The fog of the sky along `direction` from `eye` from the view's StartDistance on.
+float4 EvaluateSkyFog(float3 direction, float3 eye)
+{
+	return EvaluateSkyFogFrom(direction, eye, Fog.StartDistance);
+}
+
+// M42: the view depth from which a mirror view fogs the sky along `direction` from `eye`: where the ray crosses `plane`
+// (GetMirrorFogStart's rule), or StartDistance when that lies farther or the ray does not cross it.
+float GetMirrorSkyFogStart(float3 direction, float3 eye, float4 plane)
+{
+	const float along = dot(plane.xyz, direction);
+	const float distance = along > 1e-6 ? max(-(dot(plane.xyz, eye) + plane.w) / along, 0.0) : 0.0;
+	return max(Fog.StartDistance, distance * dot(direction, Fog.ViewForward));
 }
 
 // `color` behind the fog `fog` (EvaluateFog's): blended toward its colour by its amount.

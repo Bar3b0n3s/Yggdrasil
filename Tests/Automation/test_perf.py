@@ -161,6 +161,45 @@ class PerfTests(unittest.TestCase):
         self.assertEqual([metric.name for metric in capture.metrics], ["fog/Fog/gpuCostMs"])
         self.assertEqual(capture.metrics[0].median, 0.25)
 
+    def test_the_mirror_cost_sums_the_reflection_rows_of_a_room_of_three_mirrors(self) -> None:
+        # M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): reflections/Mirrors3/gpuMs sums the slots'
+        # rows, each a mirror's whole view, over a generated room whose three Quad mirrors carry a PlanarReflection;
+        # budget 2 ms.
+        stats = {"views": [{"name": "game", "gpuAvailable": True, "passes": [
+            {"name": "PlanarReflection0", "gpuAvailable": True, "gpuMilliseconds": 0.5},
+            {"name": "PlanarReflection1", "gpuAvailable": True, "gpuMilliseconds": 0.25},
+            {"name": "PlanarReflection2", "gpuAvailable": True, "gpuMilliseconds": 0.125},
+            {"name": "ForwardOpaque", "gpuAvailable": True, "gpuMilliseconds": 3.0}]}]}
+        self.assertEqual(Perf.summed_gpu_time(Perf.game_view(stats), Perf.MIRROR_PASSES), 0.875)
+        mirrors = [op for op in Perf.mirror_room_ops() if "PlanarReflection" in op["params"]["components"]]
+        self.assertEqual(len(mirrors), Perf.MIRROR_COUNT)
+        for mirror in mirrors:
+            self.assertEqual(mirror["params"]["components"]["MeshRenderer"]["Mesh"], "engine://Meshes/Quad")
+        self.assertEqual(perf.BUDGETS[Perf.MIRROR_METRIC], 2.0)
+
+    def test_the_mirror_cost_is_captured_only_when_the_view_drew_the_three_mirrors(self) -> None:
+        class FakeEditor:
+            def call(self, method: str, params: dict[str, Any], timeout: float) -> dict[str, Any]:
+                return {}
+
+        class FixedSamples(Perf.Capture):
+            drawn = 3
+
+            def play_samples(self, client: Any, passes: tuple[str, ...]) -> tuple[list[float], dict[str, Any]]:
+                return [1.5, 1.25, 1.0], {"planarReflections": self.drawn}
+
+        capture = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        capture.mirror_cost(FakeEditor())
+        self.assertEqual(capture.warnings, [])
+        self.assertEqual([metric.name for metric in capture.metrics], [Perf.MIRROR_METRIC])
+        self.assertEqual(capture.metrics[0].median, 1.25)
+        dropped = FixedSamples(Console(json_mode=True), engine_client, "vulkan")
+        dropped.drawn = 2
+        dropped.mirror_cost(FakeEditor())
+        self.assertEqual(dropped.metrics, [])
+        self.assertEqual(len(dropped.warnings), 1)
+        self.assertIn("drew 2 of the 3", dropped.warnings[0])
+
     def test_the_capture_reads_scene_names_gpu_passes_and_the_device_line(self) -> None:
         self.assertEqual(Perf.scene_name("Assets/Scenes/Golden/Bloom.scene"), "Golden/Bloom")
         self.assertEqual(Perf.scene_name("Assets/Scenes/Physics.scene"), "Physics")

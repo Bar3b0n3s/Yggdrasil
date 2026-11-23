@@ -124,7 +124,11 @@ namespace Engine {
 		nvrhi::GraphicsState graphics;
 		graphics.pipeline = state.Pipeline.Pipeline;
 		graphics.framebuffer = inputs.Framebuffer;
-		graphics.viewport.addViewportAndScissorRect(inputs.Framebuffer->getFramebufferInfo().getViewport());
+		const nvrhi::Viewport viewport = inputs.Framebuffer->getFramebufferInfo().getViewport();
+		if (inputs.Scissor)
+			graphics.viewport.addViewport(viewport).addScissorRect(*inputs.Scissor);
+		else
+			graphics.viewport.addViewportAndScissorRect(viewport);
 		graphics.bindings = { set };
 
 		commandList.beginMarker("Skybox");

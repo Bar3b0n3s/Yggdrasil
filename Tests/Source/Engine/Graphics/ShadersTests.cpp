@@ -25,6 +25,7 @@
 #include "Shared/FogConstants.h"
 #include "Shared/ImGuiConstants.h"
 #include "Shared/MaterialConstants.h"
+#include "Shared/PlanarReflectionConstants.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/DepthPyramidConstants.h"
 #include "Shared/GtaoConstants.h"
@@ -298,8 +299,11 @@ namespace Engine {
 					// M26 (Docs/Decisions/0037-m26-contract.md decisions 11 and 17, stream X-C): the temporal inputs.
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, PreviousViewProjection),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Jitter),
-					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding4),
+					// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): the mirror views' members.
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, ReflectionView),
 					ENGINE_TEST_SHARED_FIELD(ViewConstants, Padding5),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, ClipPlane),
+					ENGINE_TEST_SHARED_FIELD(ViewConstants, CascadeDepthPlane),
 				},
 				.Program = "Triangle",
 				.Entry = "VSMain",
@@ -488,7 +492,7 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Emissive),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveNoiseScale),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveEdge),
-					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding0),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, PlanarReflectionSlot),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, UVOffset),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding1),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding2),
@@ -546,6 +550,34 @@ namespace Engine {
 				.Program = "Scene",
 				.Entry = "PSForward",
 				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): b7 of the forward passes, the view's planar
+			// reflections, and the mip chain's push constants.
+			{
+				.Name = "PlanarReflectionConstants",
+				.Size = sizeof(PlanarReflectionConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionConstants, ViewProjections),
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionConstants, MipCounts),
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionConstants, Heights),
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionConstants, SsrMaxRoughness),
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionConstants, Count),
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionConstants, Padding1),
+				},
+				.Program = "Scene",
+				.Entry = "PSForward",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
+			},
+			{
+				.Name = "PlanarReflectionMipConstants",
+				.Size = sizeof(PlanarReflectionMipConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionMipConstants, SourceSize),
+					ENGINE_TEST_SHARED_FIELD(PlanarReflectionMipConstants, DestinationSize),
+				},
+				.Program = "PlanarReflection",
+				.Entry = "CSDownsample",
 			},
 			// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): b4 of the forward passes.
 			{

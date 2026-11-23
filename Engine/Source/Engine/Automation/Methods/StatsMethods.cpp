@@ -101,6 +101,11 @@ namespace Engine {
 		result.Lights = stats.VisibleLights;
 		result.DroppedLights = stats.DroppedLights;
 		result.SkinnedMeshes = stats.SkinnedMeshes;
+		result.PlanarReflections = stats.PlanarReflections;
+		result.DroppedPlanarReflections = stats.DroppedPlanarReflections;
+		result.CulledPlanarReflections = stats.CulledPlanarReflections;
+		for (const UUID& entity : stats.PlanarReflectionEntities)
+			result.PlanarReflectionEntities.push_back(entity.ToString());
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -172,7 +177,19 @@ namespace Engine {
 			.Field("lights", &StatsViewSummary::Lights, "Lights the frame shaded after culling, at most maxShadedLights.")
 			.Field("droppedLights", &StatsViewSummary::DroppedLights,
 				"Visible lights beyond maxShadedLights, left unshaded (RENDER_LIGHT_LIMIT_EXCEEDED's).")
-			.Field("skinnedMeshes", &StatsViewSummary::SkinnedMeshes, "Meshes with a skin the frame deformed (morph-only meshes are not counted).");
+			.Field("skinnedMeshes", &StatsViewSummary::SkinnedMeshes, "Meshes with a skin the frame deformed (morph-only meshes are not counted).")
+			.Field("planarReflections", &StatsViewSummary::PlanarReflections,
+				"Planar reflections the frame drew, at most 4: PlanarReflection mirrors in view and facing the camera, each rendered from the "
+				"camera mirrored in its plane; its cost is the pass row PlanarReflection<k> of its slot k.")
+			.Field("droppedPlanarReflections", &StatsViewSummary::DroppedPlanarReflections,
+				"Planar reflections in view and facing the camera beyond the 4 the frame draws (the smallest on screen), or whose GPU objects, "
+				"or the view's probe constants, could not be created this render (the render reports that error); they reflect the probes and "
+				"screen-space reflections instead.")
+			.Field("culledPlanarReflections", &StatsViewSummary::CulledPlanarReflections,
+				"Planar reflections the frame did not consider: out of view, seen from behind their reflecting side, or in a view that draws "
+				"none (a debug view or the wireframe); they cost nothing.")
+			.Field("planarReflectionEntities", &StatsViewSummary::PlanarReflectionEntities,
+				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")
