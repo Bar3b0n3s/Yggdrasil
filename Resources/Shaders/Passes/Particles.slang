@@ -35,6 +35,7 @@ Texture2D<float> ParticleSceneDepth : register(t1, space0);
 // The view's fog (FogConstants, Shared/FogConstants.h): Enabled 0 in a view without fog.
 ConstantBuffer<FogConstants> Fog : register(b1, space0);
 
+#include "Common/ClipPlane.slang"
 #include "Common/Fog.slang"
 
 // ParticleVertex member by member (locations 0 to 4).
@@ -66,7 +67,7 @@ VertexOutput VSMain(VertexInput input)
 {
 	VertexOutput output;
 	output.Position = mul(View.ViewProjection, float4(input.Position, 1.0));
-	output.ClipDistance = dot(View.ClipPlane, float4(input.Position, 1.0));
+	output.ClipDistance = GetClipDistance(View.ClipPlane, float4(input.Position, 1.0));
 	output.Color = input.Color;
 	output.TexCoords = input.TexCoords;
 	output.Params = input.Params;

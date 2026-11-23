@@ -274,6 +274,54 @@ namespace Engine {
 			CHECK(ComputePlanarReflectionSize(1, 1, 0.25f) == glm::uvec2(1, 1));
 		}
 
+		// The chain holds every level the level curve log2(alpha * height * 0.5) reaches up to alpha = SsrMaxRoughness^2, where
+		// the reflection has faded out: that level rounded up, plus level 0.
+		TEST_CASE("PlanarReflections: a reflection's mip chain reaches the level of the view's SSR cutoff, within its full chain")
+		{
+			// 960 x 540 at the default 0.6: log2(0.36 * 540 * 0.5) = 6.6, levels 0 to 7; at 1080 and 2160 rows, 7.6 and 8.6.
+			CHECK(ComputePlanarReflectionMipCount(960, 540, 0.6f) == 8);
+			CHECK(ComputePlanarReflectionMipCount(1920, 1080, 0.6f) == 9);
+			CHECK(ComputePlanarReflectionMipCount(3840, 2160, 0.6f) == 10);
+			// A level reached exactly: log2(128 * 0.5) = 6, levels 0 to 6; the curve follows the height, not the width.
+			CHECK(ComputePlanarReflectionMipCount(256, 128, 1.0f) == 7);
+			CHECK(ComputePlanarReflectionMipCount(1024, 4, 1.0f) == 2);
+			CHECK(ComputePlanarReflectionMipCount(4, 1024, 1.0f) == 10);
+			// At a roughness of 1 the curve reaches the full chain of the height (960: 10 levels); above 1 counts as 1.
+			CHECK(ComputePlanarReflectionMipCount(960, 540, 1.0f) == 10);
+			CHECK(ComputePlanarReflectionMipCount(64, 100, 1.0f) == 7);
+			CHECK(ComputePlanarReflectionMipCount(960, 540, 2.0f) == 10);
+			// A polished cutoff (alpha * height * 0.5 <= 1), or one that is not positive or not finite, keeps level 0 alone.
+			CHECK(ComputePlanarReflectionMipCount(960, 540, 0.05f) == 1);
+			CHECK(ComputePlanarReflectionMipCount(960, 540, 0.0f) == 1);
+			CHECK(ComputePlanarReflectionMipCount(960, 540, -0.5f) == 1);
+			CHECK(ComputePlanarReflectionMipCount(960, 540, std::numeric_limits<float>::quiet_NaN()) == 1);
+			CHECK(ComputePlanarReflectionMipCount(960, 540, std::numeric_limits<float>::infinity()) == 1);
+			CHECK(ComputePlanarReflectionMipCount(1, 1, 1.0f) == 1);
+		}
+
+		// The margin is a bilinear sample's footprint at the chain's last level: two of its texels, in level-0 pixels.
+		TEST_CASE("PlanarReflections: the blur margin is two texels of the chain's last level, and widens the glass's rectangle within the view")
+		{
+			// 960 x 540 with 8 levels: the last is 7 x 4, a texel 138 x 135 pixels, rounded up.
+			CHECK(ComputePlanarReflectionBlurMargin(960, 540, 8) == glm::uvec2(276, 270));
+			// Level 0 alone: two pixels; a power-of-two chain: 2^levels.
+			CHECK(ComputePlanarReflectionBlurMargin(960, 540, 1) == glm::uvec2(2, 2));
+			CHECK(ComputePlanarReflectionBlurMargin(64, 64, 6) == glm::uvec2(64, 64));
+			// A side shorter than the chain ends at one texel: the whole side.
+			CHECK(ComputePlanarReflectionBlurMargin(1024, 4, 4) == glm::uvec2(16, 8));
+
+			// 10 of 100 pixels and 5 of 50 are 0.2 in normalized device coordinates on each side.
+			const PlanarReflectionScreenRect rect{ .Min = glm::vec2(-0.5f, -0.25f), .Max = glm::vec2(0.25f, 0.5f) };
+			const PlanarReflectionScreenRect widened = WidenPlanarReflectionScreenRect(rect, 100, 50, glm::uvec2(10, 5));
+			CHECK(widened.Min.x == doctest::Approx(-0.7f));
+			CHECK(widened.Min.y == doctest::Approx(-0.45f));
+			CHECK(widened.Max.x == doctest::Approx(0.45f));
+			CHECK(widened.Max.y == doctest::Approx(0.7f));
+			// Clamped to the view.
+			CHECK(WidenPlanarReflectionScreenRect(rect, 100, 50, glm::uvec2(100, 100)) == PlanarReflectionScreenRect{});
+			CHECK(WidenPlanarReflectionScreenRect(rect, 100, 50, glm::uvec2(0, 0)) == rect);
+		}
+
 		TEST_CASE("PlanarReflections: a glass's screen rectangle is clipped to the view, and the whole view when it reaches behind the camera")
 		{
 			const CameraData camera = MakePerspectiveCamera(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f, 0.0f, 0.0f));

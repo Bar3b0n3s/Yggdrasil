@@ -30,6 +30,17 @@ namespace Engine {
 		uint32_t Padding1 = 0;
 	};
 
+	// The scale of the planar reflections' level curve (Common/PlanarReflections.slang's ShadePlanarReflection): a point whose
+	// specular lobe has the GGX alpha samples its slot's reflection at the level log2(max(alpha * height *
+	// PlanarReflectionBlurScale, 1)), height being the reflection's level-0 height in texels, so a polished glass samples level 0
+	// and every doubling of alpha takes the next level. Renderer/PlanarReflections.h's ComputePlanarReflectionMipCount sizes each
+	// reflection's chain from the same curve.
+#if defined(ENGINE_SHADER)
+	static const float PlanarReflectionBlurScale = 0.5;
+#else
+inline constexpr float PlanarReflectionBlurScale = 0.5f;
+#endif
+
 	// The push constants of the PlanarReflection program's mip chain (Passes/PlanarReflection.slang,
 	// Renderer/PlanarReflectionPass.h): the level read (SourceSize, level k - 1) and the level written (DestinationSize, level
 	// k), in texels.

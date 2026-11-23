@@ -2080,15 +2080,23 @@ namespace Engine {
 
 	void SceneRenderer::State::SkipDeformedDraws(Detail::SceneRendererFrame& frame, const Detail::SceneRendererDeformedMesh& entry)
 	{
-		// A deformed draw's batch is itself alone (its VertexStream is its item's): the camera's lists skip it as an instance
-		// of another draw, and the casters' and the selection's lose its batch.
-		for (std::vector<Detail::SceneRendererDraw>* draws : { &OpaqueDraws, &TransparentDraws })
+		// A deformed draw's batch is itself alone (its VertexStream is its item's): the camera's lists and the drawn planar
+		// reflections' mirror views (M42) skip it as an instance of another draw, and the casters' and the selection's lose its
+		// batch.
+		const auto skip = [&entry](std::vector<Detail::SceneRendererDraw>& draws)
 		{
-			for (Detail::SceneRendererDraw& draw : *draws)
+			for (Detail::SceneRendererDraw& draw : draws)
 			{
 				if (draw.VertexStream == entry.VertexStream)
 					draw.Batch = 0;
 			}
+		};
+		skip(OpaqueDraws);
+		skip(TransparentDraws);
+		for (uint32_t slot = 0; slot < frame.PlanarReflectionCount; ++slot)
+		{
+			skip(ReflectionSlots[slot].OpaqueDraws);
+			skip(ReflectionSlots[slot].TransparentDraws);
 		}
 		const nvrhi::IBuffer* vertices = entry.Vertices.Get();
 		std::erase_if(frame.ShadowCasters.Batches, [&frame, vertices](const MeshInstanceBatch& batch)

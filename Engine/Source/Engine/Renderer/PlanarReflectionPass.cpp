@@ -50,15 +50,15 @@ namespace Engine {
 		return descriptions;
 	}
 
-	nvrhi::TextureDesc PlanarReflectionPass::GetColorDesc(uint32_t width, uint32_t height)
+	nvrhi::TextureDesc PlanarReflectionPass::GetColorDesc(uint32_t width, uint32_t height, uint32_t mipCount)
 	{
 		ENGINE_CORE_ASSERT(width > 0 && height > 0, "a planar reflection's target has a positive size");
+		ENGINE_CORE_ASSERT(mipCount > 0 && (std::max(width, height) >> (std::min(mipCount, 32U) - 1)) > 0,
+			"a planar reflection's target has from one level to its full chain");
 		nvrhi::TextureDesc desc;
 		desc.width = width;
 		desc.height = height;
-		desc.mipLevels = 1;
-		for (uint32_t extent = std::max(width, height); extent > 1 && desc.mipLevels < MaxMipCount; extent /= 2)
-			++desc.mipLevels;
+		desc.mipLevels = mipCount;
 		desc.format = SceneColorFormat;
 		desc.dimension = nvrhi::TextureDimension::Texture2D;
 		desc.isShaderResource = true;

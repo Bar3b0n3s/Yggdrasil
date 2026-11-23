@@ -71,6 +71,7 @@
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShaderLight.h"
 #include "Shared/ViewConstants.h"
+#include "Common/ClipPlane.slang"
 #include "Common/Shadows.slang"
 
 import Common.Brdf;
@@ -425,7 +426,7 @@ VertexOutput TransformVertex(VertexInput input, InstanceRecord record, uint reco
 	const float4 world = MultiplyExact(record.World, float4(input.Position, 1.0));
 	VertexOutput output;
 	output.Position = MultiplyExact(View.ViewProjection, world);
-	output.ClipDistance = dot(View.ClipPlane, world);
+	output.ClipDistance = GetClipDistance(View.ClipPlane, world);
 	output.WorldPosition = world.xyz;
 	output.WorldNormal = mul(MakeNormalMatrix(record.World, mirrored), input.Normal);
 	// A mirroring world turns the frame's handedness: the bitangent's sign flips with it.

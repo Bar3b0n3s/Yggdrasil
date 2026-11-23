@@ -2,6 +2,7 @@
 #include "Engine/Renderer/PlanarReflections.h"
 
 #include "Engine/Core/Assert.h"
+#include "Shared/PlanarReflectionConstants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -144,6 +145,40 @@ namespace Engine {
 			return std::max(1U, static_cast<uint32_t>(value));
 		};
 		return glm::uvec2(scaled(sceneWidth), scaled(sceneHeight));
+	}
+
+	uint32_t ComputePlanarReflectionMipCount(uint32_t width, uint32_t height, float ssrMaxRoughness)
+	{
+		uint32_t full = 1;
+		for (uint32_t extent = std::max(width, height); extent > 1; extent /= 2)
+			++full;
+		if (!std::isfinite(ssrMaxRoughness) || !(ssrMaxRoughness > 0.0f))
+			return 1;
+		const double roughness = std::min(static_cast<double>(ssrMaxRoughness), 1.0);
+		const double footprint = roughness * roughness * static_cast<double>(height) * static_cast<double>(PlanarReflectionBlurScale);
+		if (!(footprint > 1.0))
+			return 1;
+		const double levels = std::ceil(std::log2(footprint)) + 1.0;
+		return levels < static_cast<double>(full) ? static_cast<uint32_t>(levels) : full;
+	}
+
+	glm::uvec2 ComputePlanarReflectionBlurMargin(uint32_t width, uint32_t height, uint32_t mipCount)
+	{
+		ENGINE_CORE_ASSERT(width > 0 && height > 0 && mipCount > 0, "a planar reflection has a positive size and at least one level");
+		const uint32_t shift = std::min(mipCount - 1, 31U);
+		const auto margin = [shift](uint32_t size)
+		{
+			const uint32_t last = std::max(1U, size >> shift);
+			return 2 * (size / last + (size % last != 0 ? 1U : 0U));
+		};
+		return glm::uvec2(margin(width), margin(height));
+	}
+
+	PlanarReflectionScreenRect WidenPlanarReflectionScreenRect(const PlanarReflectionScreenRect& rect, uint32_t width, uint32_t height, const glm::uvec2& margin)
+	{
+		ENGINE_CORE_ASSERT(width > 0 && height > 0, "a planar reflection has a positive size");
+		const glm::vec2 widening(static_cast<float>(2.0 * margin.x / width), static_cast<float>(2.0 * margin.y / height));
+		return PlanarReflectionScreenRect{ .Min = glm::max(rect.Min - widening, glm::vec2(-1.0f)), .Max = glm::min(rect.Max + widening, glm::vec2(1.0f)) };
 	}
 
 	std::optional<PlanarReflectionScreenRect> ComputePlanarReflectionScreenRect(const Aabb& bounds, const glm::mat4& world, const CameraData& camera)

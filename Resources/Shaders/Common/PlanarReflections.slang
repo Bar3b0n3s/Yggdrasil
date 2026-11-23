@@ -13,11 +13,6 @@
 
 #include "Shared/PlanarReflectionConstants.h"
 
-// The level curve's scale: a point's level is log2 of its GGX alpha times the reflection's height in texels times this, so
-// a polished glass (alpha below about 1 / (Height * PlanarReflectionBlurScale)) samples level 0, and every doubling of
-// alpha takes the next level.
-static const float PlanarReflectionBlurScale = 0.5;
-
 // The reflection of slot `slot` at texture coordinates `uv`, at mip level `level`.
 float3 SamplePlanarReflectionSlot(uint slot, float2 uv, float level)
 {
@@ -32,9 +27,11 @@ float3 SamplePlanarReflectionSlot(uint slot, float2 uv, float level)
 
 // `prefiltered` with slot `slot`'s reflection in its place at the shaded point `worldPosition`, whose specular lobe has the
 // GGX `alpha` and the roughness coordinate `roughness` (sqrt(alpha), the one SSR compares with its MaxRoughness): the
-// reflection at level log2(max(alpha * Heights[slot] * PlanarReflectionBlurScale, 1)), at most the slot's last mip, weighted
-// by saturate((SsrMaxRoughness - roughness) / (SsrMaxRoughness / 2)), so it is whole up to half SsrMaxRoughness and gone at
-// it. A slot past Count, or a point the projection puts behind the mirror camera, keeps `prefiltered`.
+// reflection at level log2(max(alpha * Heights[slot] * PlanarReflectionBlurScale, 1)) (Shared/PlanarReflectionConstants.h),
+// weighted by saturate((SsrMaxRoughness - roughness) / (SsrMaxRoughness / 2)), so it is whole up to half SsrMaxRoughness and
+// gone at it. The slot's chain reaches the level of SsrMaxRoughness (Renderer/PlanarReflections.h's
+// ComputePlanarReflectionMipCount), so the clamp to its last mip changes no sample that has a weight. A slot past Count, or a
+// point the projection puts behind the mirror camera, keeps `prefiltered`.
 float3 ShadePlanarReflection(uint slot, float3 worldPosition, float roughness, float alpha, float3 prefiltered)
 {
 	if (slot >= PlanarReflection.Count)

@@ -31,11 +31,9 @@
 
 namespace Engine {
 
-	namespace Utils {
+	namespace Detail {
 
-		// A buffer of `size` bytes kept in the renderer's state between command lists (keepInitialState): a constant buffer,
-		// or a structured buffer of `structStride`-byte elements.
-		[[nodiscard]] static Result<nvrhi::BufferHandle> CreateViewBuffer(GraphicsDevice& device, size_t size, uint32_t structStride, std::string debugName)
+		Result<nvrhi::BufferHandle> CreateViewBuffer(GraphicsDevice& device, size_t size, uint32_t structStride, std::string debugName)
 		{
 			nvrhi::BufferDesc desc;
 			desc.byteSize = size;
@@ -112,18 +110,18 @@ namespace Engine {
 		// (the view's size for Create and the default settings), so a recovered view rendering at a scaled output does not
 		// first create, and possibly run out of memory for, a view-size set its next Render replaces (M18's milestone review).
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle viewConstants,
-			Utils::CreateViewBuffer(device, sizeof(ViewConstants), 0, "SceneRenderer.ViewConstants"));
+			Detail::CreateViewBuffer(device, sizeof(ViewConstants), 0, "SceneRenderer.ViewConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle environmentConstants,
-			Utils::CreateViewBuffer(device, sizeof(EnvironmentConstants), 0, "SceneRenderer.EnvironmentConstants"));
-		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle fogConstants, Utils::CreateViewBuffer(device, sizeof(FogConstants), 0, "SceneRenderer.FogConstants"));
+			Detail::CreateViewBuffer(device, sizeof(EnvironmentConstants), 0, "SceneRenderer.EnvironmentConstants"));
+		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle fogConstants, Detail::CreateViewBuffer(device, sizeof(FogConstants), 0, "SceneRenderer.FogConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle lights,
-			Utils::CreateViewBuffer(device, sizeof(ShaderLight) * MaxShadedLightsCeiling, sizeof(ShaderLight), "SceneRenderer.Lights"));
+			Detail::CreateViewBuffer(device, sizeof(ShaderLight) * MaxShadedLightsCeiling, sizeof(ShaderLight), "SceneRenderer.Lights"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle shadowConstants,
-			Utils::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
+			Detail::CreateViewBuffer(device, sizeof(ShadowConstants), 0, "SceneRenderer.ShadowConstants"));
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle casterConstants, device.CreateBuffer(ShadowPass::GetCasterConstantsDesc()));
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3): b7 of the forward set, written by every Render.
 		ENGINE_TRY_ASSIGN(nvrhi::BufferHandle planarReflectionConstants,
-			Utils::CreateViewBuffer(device, sizeof(PlanarReflectionConstants), 0, "SceneRenderer.PlanarReflectionConstants"));
+			Detail::CreateViewBuffer(device, sizeof(PlanarReflectionConstants), 0, "SceneRenderer.PlanarReflectionConstants"));
 		const RenderOutputMapping mapping = ComputeRenderOutputMapping(state.ViewWidth, state.ViewHeight, state.OutputSettings);
 		ENGINE_TRY_ASSIGN(Detail::SceneRendererTargets targets, state.CreateTargets(mapping.SceneWidth, mapping.SceneHeight));
 		state.ViewConstantsBuffer = std::move(viewConstants);

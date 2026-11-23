@@ -48,19 +48,21 @@
 // entity survived the main view's culling; its glass's rectangle on screen is the union of those draws' bounds'
 // rectangles, whose pixel area ranks it (RankPlanarReflections: the largest first, ties by entity, at most
 // MaxPlanarReflectionsPerView). Each ranked reflection takes the next slot: its mirror camera (the camera mirrored in its
-// plane, S * View * R, at ComputePlanarReflectionSize of the scene resolution), its draws (PrepareViewDraws with the
-// mirror camera cropped to the glass's rectangle and the clip plane; their instance records after the main view's, the
-// shadow casters' and the selection's), its light list (the main view's at their indices, then the lights only it sees,
-// unshadowed), its ViewConstants (ReflectionView 1, ClipPlane, CascadeDepthPlane) and fog. A reflection whose objects
-// cannot be created falls back for the render (counted as dropped). Then the main view's records of each drawn
-// reflection's glass carry DrawFlagPlanarReflection and its slot.
+// plane, S * View * R, at ComputePlanarReflectionSize of the scene resolution, with ComputePlanarReflectionMipCount's chain
+// for the view's SsrMaxRoughness), its draws (PrepareViewDraws with the mirror camera cropped to the glass's rectangle
+// widened by the chain's blur footprint, ComputePlanarReflectionBlurMargin, and the clip plane; their instance records after
+// the main view's, the shadow casters' and the selection's), its light list (the main view's at their indices, then the
+// lights only it sees, unshadowed), its ViewConstants (ReflectionView 1, ClipPlane, CascadeDepthPlane) and fog. A reflection
+// whose objects cannot be created, and every reflection of a view whose probe constants could not be created (the forward
+// set binds them), falls back for the render (counted as dropped). Then the main view's records of each drawn reflection's
+// glass carry DrawFlagPlanarReflection and its slot.
 //
 // Forward (RecordPlanarReflections, first in the Forward stage): each slot's mirror view into its reflection under its one
-// row PlanarReflection<k>, which times the whole view, scissored to the glass's mirrored rectangle widened by the blur's
-// footprint: the clears, the prepass and TerrainDepthNormal, its light clusters (LightClusterPass::RecordInRow, inside the
-// row; the lead's decision on W42.1's review), then ForwardOpaque, TerrainForward, the skybox, ForwardTransparent, the
-// particles (play scenes) and the mip chain. A mirror view binds the main view's shadow maps and constants, environment, probes and
-// instance buffer, the neutral white occlusion and far depth (no GTAO), and the neutral black reflections (no recursion).
+// row PlanarReflection<k>, which times the whole view, scissored to the rectangle its draws were culled to: the clears, the
+// prepass and TerrainDepthNormal, its light clusters (LightClusterPass::RecordInRow, inside the row; the lead's decision on
+// W42.1's review), then ForwardOpaque, TerrainForward, the skybox, ForwardTransparent, the particles (play scenes) and the
+// mip chain. A mirror view binds the main view's shadow maps and constants, environment, probes and instance buffer, the
+// neutral white occlusion and far depth (no GTAO), and the neutral black reflections (no recursion).
 // SSR, TAA, exposure, bloom, the tonemap and every 2D, text, UI and overlay pass stay out: the reflection is the main
 // view's pre-exposure radiance, which the main view's post chain exposes.
 
@@ -69,33 +71,19 @@ namespace Engine {
 	namespace Utils {
 
 		// The rectangle `rect` (the mirror camera's normalized device coordinates, +y up) in the pixels of a `width` x `height`
-		// target (row 0 at the top, the viewport's Y flip; Shared/ViewConstants.h), widened by `margin` pixels on every side and
-		// clamped to the target.
-		[[nodiscard]] static nvrhi::Rect ToReflectionScissor(const PlanarReflectionScreenRect& rect, uint32_t width, uint32_t height, uint32_t margin)
+		// target (row 0 at the top, the viewport's Y flip; Shared/ViewConstants.h), its bounds rounded outwards and clamped to
+		// the target.
+		[[nodiscard]] static nvrhi::Rect ToReflectionScissor(const PlanarReflectionScreenRect& rect, uint32_t width, uint32_t height)
 		{
-			const auto toPixel = [margin](double value, double offset, uint32_t limit)
+			const auto toPixel = [](double value, uint32_t limit)
 			{
-				return static_cast<int>(std::clamp(value + offset * static_cast<double>(margin), 0.0, static_cast<double>(limit)));
+				return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(limit)));
 			};
 			const double minX = std::floor((static_cast<double>(rect.Min.x) * 0.5 + 0.5) * width);
 			const double maxX = std::ceil((static_cast<double>(rect.Max.x) * 0.5 + 0.5) * width);
 			const double minY = std::floor((0.5 - static_cast<double>(rect.Max.y) * 0.5) * height);
 			const double maxY = std::ceil((0.5 - static_cast<double>(rect.Min.y) * 0.5) * height);
-			return nvrhi::Rect(toPixel(minX, -1.0, width), toPixel(maxX, 1.0, width), toPixel(minY, -1.0, height), toPixel(maxY, 1.0, height));
-		}
-
-		// A buffer of `size` bytes kept between command lists (keepInitialState): a constant buffer, or a structured buffer of
-		// `structStride`-byte elements. Errors: those of GraphicsDevice::CreateBuffer (Gpu).
-		[[nodiscard]] static Result<nvrhi::BufferHandle> CreateReflectionBuffer(GraphicsDevice& device, size_t size, uint32_t structStride, const char* name)
-		{
-			nvrhi::BufferDesc desc;
-			desc.byteSize = size;
-			desc.isConstantBuffer = structStride == 0;
-			desc.structStride = structStride;
-			desc.initialState = structStride == 0 ? nvrhi::ResourceStates::ConstantBuffer : nvrhi::ResourceStates::ShaderResource;
-			desc.keepInitialState = true;
-			desc.debugName = name;
-			return device.CreateBuffer(desc);
+			return nvrhi::Rect(toPixel(minX, width), toPixel(maxX, width), toPixel(minY, height), toPixel(maxY, height));
 		}
 
 		// `slot`'s reflection level 0 alone, or with `depth`.
@@ -166,10 +154,17 @@ namespace Engine {
 				selection.Dropped, MaxPlanarReflectionsPerView);
 		}
 
-		// Each ranked reflection in the next slot; one whose objects cannot be created falls back for this render.
+		// Each ranked reflection in the next slot; one whose objects cannot be created falls back for this render, and so does
+		// every one of a view whose probe constants could not be created (EnsureProbeViewResources kept that error), since a
+		// mirror view's forward set binds them as the main view's does, whose forward passes are skipped without them.
 		uint32_t drawn = 0;
 		for (const size_t index : selection.Slots)
 		{
+			if (ProbeResources.Constants == nullptr)
+			{
+				++frame.DroppedPlanarReflections;
+				continue;
+			}
 			Detail::SceneRendererReflectionSlot& slot = ReflectionSlots[drawn];
 			Status prepared = PrepareReflectionSlot(frame, slot, index, planes[index], rects[index]);
 			if (!prepared.has_value())
@@ -216,16 +211,20 @@ namespace Engine {
 		const RenderSnapshot& snapshot = *frame.Snapshot;
 		const PlanarReflectionItem& reflection = snapshot.PlanarReflections[item];
 		const glm::uvec2 size = ComputePlanarReflectionSize(Targets.Width, Targets.Height, reflection.ResolutionScale);
-		slot.Item = item;
+		const uint32_t mipCount = ComputePlanarReflectionMipCount(size.x, size.y, frame.PlanarReflections.SsrMaxRoughness);
 		slot.Entity = reflection.Entity;
 		slot.Camera = MakePlanarReflectionCamera(frame.Camera, plane, size.x, size.y);
 		slot.Clusters = ComputeLightClusterGrid(slot.Camera, size.x, size.y, snapshot.Quality.MaxShadedLights);
-		ENGINE_TRY(EnsureReflectionSlot(slot, size.x, size.y, slot.Clusters));
-		slot.Scissor = Utils::ToReflectionScissor(MirrorPlanarReflectionScreenRect(rect), size.x, size.y, PlanarReflectionPass::BlurMargin);
+		ENGINE_TRY(EnsureReflectionSlot(slot, size.x, size.y, mipCount, slot.Clusters));
+		// The glass's rectangle widened by the blur's footprint at the chain's last level, so every texel a sample on the glass
+		// averages was rendered with the scene in it: the mirror view culls to it and rasterizes in it.
+		const PlanarReflectionScreenRect widened = WidenPlanarReflectionScreenRect(rect, size.x, size.y, ComputePlanarReflectionBlurMargin(size.x, size.y, mipCount));
+		slot.Scissor = Utils::ToReflectionScissor(MirrorPlanarReflectionScreenRect(widened), size.x, size.y);
 
-		// The draws: every mesh item but the glass's own, culled by the mirror camera cropped to the glass and by the plane.
+		// The draws: every mesh item but the glass's own, culled by the mirror camera cropped to the widened rectangle and by
+		// the plane.
 		const glm::vec4 clipPlane = ComputePlanarReflectionClipPlane(plane);
-		const CameraData cull = MakePlanarReflectionCullCamera(slot.Camera, rect);
+		const CameraData cull = MakePlanarReflectionCullCamera(slot.Camera, widened);
 		const Detail::SceneRendererMirrorCull mirror{ .Excluded = reflection.Entity, .ClipPlane = clipPlane };
 		frame.KeepFirstError(PrepareViewDraws(frame, snapshot, cull, slot.OpaqueDraws, slot.TransparentDraws, &mirror));
 
@@ -254,14 +253,15 @@ namespace Engine {
 		return {};
 	}
 
-	Status SceneRenderer::State::EnsureReflectionSlot(Detail::SceneRendererReflectionSlot& slot, uint32_t width, uint32_t height, const LightClusterGrid& clusters)
+	Status SceneRenderer::State::EnsureReflectionSlot(Detail::SceneRendererReflectionSlot& slot, uint32_t width, uint32_t height, uint32_t mipCount,
+		const LightClusterGrid& clusters)
 	{
-		if (slot.Color == nullptr || slot.Color->getDesc().width != width || slot.Color->getDesc().height != height)
+		if (slot.Color == nullptr || slot.Color->getDesc().width != width || slot.Color->getDesc().height != height || slot.Color->getDesc().mipLevels != mipCount)
 		{
 			slot.ForwardFramebuffer = nullptr;
 			slot.ParticleFramebuffer = nullptr;
 			slot.Color = nullptr;
-			ENGINE_TRY_ASSIGN(slot.Color, TargetPool->Acquire(PlanarReflectionPass::GetColorDesc(width, height)));
+			ENGINE_TRY_ASSIGN(slot.Color, TargetPool->Acquire(PlanarReflectionPass::GetColorDesc(width, height, mipCount)));
 		}
 		// The prepass scratch of this size, which the slots of the size share.
 		auto scratch = std::ranges::find_if(ReflectionScratch, [width, height](const Detail::SceneRendererReflectionScratch& candidate)
@@ -298,17 +298,16 @@ namespace Engine {
 		}
 		if (slot.ViewConstantsBuffer == nullptr)
 		{
-			ENGINE_TRY_ASSIGN(slot.ViewConstantsBuffer,
-				Utils::CreateReflectionBuffer(*Device, sizeof(ViewConstants), 0, "SceneRenderer.PlanarReflectionViewConstants"));
+			ENGINE_TRY_ASSIGN(slot.ViewConstantsBuffer, Detail::CreateViewBuffer(*Device, sizeof(ViewConstants), 0, "SceneRenderer.PlanarReflectionViewConstants"));
 		}
 		if (slot.FogConstantsBuffer == nullptr)
 		{
-			ENGINE_TRY_ASSIGN(slot.FogConstantsBuffer, Utils::CreateReflectionBuffer(*Device, sizeof(FogConstants), 0, "SceneRenderer.PlanarReflectionFogConstants"));
+			ENGINE_TRY_ASSIGN(slot.FogConstantsBuffer, Detail::CreateViewBuffer(*Device, sizeof(FogConstants), 0, "SceneRenderer.PlanarReflectionFogConstants"));
 		}
 		if (slot.LightBuffer == nullptr)
 		{
 			ENGINE_TRY_ASSIGN(slot.LightBuffer,
-				Utils::CreateReflectionBuffer(*Device, sizeof(ShaderLight) * MaxShadedLightsCeiling, sizeof(ShaderLight), "SceneRenderer.PlanarReflectionLights"));
+				Detail::CreateViewBuffer(*Device, sizeof(ShaderLight) * MaxShadedLightsCeiling, sizeof(ShaderLight), "SceneRenderer.PlanarReflectionLights"));
 		}
 		if (slot.LightClusterConstantsBuffer == nullptr)
 		{
@@ -429,7 +428,7 @@ namespace Engine {
 				commandList.writeBuffer(slot.LightClusterConstantsBuffer, &constants, sizeof(constants));
 			}
 
-			// The counters mirror view, then its mip chain.
+			// The mirror view's forward passes, then its mip chain.
 			const nvrhi::BindingSetDesc forwardDesc = MakeForwardSetDesc(frame, slot.ViewConstantsBuffer, slot.FogConstantsBuffer, slot.LightBuffer,
 				slot.LightClusterConstantsBuffer, slot.LightClusterBuffer, Pipelines->WhiteAo, Pipelines->FarDepth, scratch.Normals, neutral);
 			auto forwardSet = ViewBindings.GetOrCreate(*Device, forwardDesc, *Pipelines->Layouts.ForwardView);

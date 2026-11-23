@@ -1,16 +1,22 @@
 #include "TestsPCH.h"
 #include "Engine/Renderer/PlanarReflections.h"
 
+#include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/HeightfieldData.h"
 #include "Engine/Asset/MaterialData.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Asset/TextureData.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Graphics/Image.h"
 #include "Engine/Graphics/Readback.h"
 #include "Engine/Graphics/RenderTargetPool.h"
+#include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/PlanarReflectionPass.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/RenderStats.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Shared/ProbeConstants.h"
 #include "Shared/ViewConstants.h"
 #include "Support/BufferCreationFails.h"
 #include "Support/DeviceLossTest.h"
@@ -51,6 +57,12 @@ namespace Engine {
 		constexpr AssetHandle WallMaterialHandle{ 0x5942000000000006ull };
 		constexpr AssetHandle StraddlerMeshHandle{ 0x5942000000000007ull };
 		constexpr AssetHandle StripMeshHandle{ 0x5942000000000008ull };
+		constexpr AssetHandle RedGlassMaterialHandle{ 0x5942000000000009ull };
+		constexpr AssetHandle BlueGlassMaterialHandle{ 0x594200000000000aull };
+		constexpr AssetHandle WhiteMaterialHandle{ 0x594200000000000bull };
+		constexpr AssetHandle SkyEnvironmentHandle{ 0x594200000000000cull };
+		constexpr AssetHandle HeightfieldHandle{ 0x594200000000000dull };
+		constexpr AssetHandle ParticleTextureHandle{ 0x594200000000000eull };
 		constexpr uint64_t MirrorEntity = 900;
 		constexpr uint32_t Size = 64;
 		constexpr glm::vec3 ClearColor(0.1f, 0.2f, 0.3f);
@@ -64,6 +76,66 @@ namespace Engine {
 			material.Emissive = emissive;
 			material.DoubleSided = doubleSided;
 			return CreateRef<MaterialData>(std::move(material));
+		}
+
+		// A double-sided transparent (Blend) material at alpha 0.5 that emits `emissive`.
+		AssetRef<Asset> MakeGlassMaterial(const glm::vec3& emissive)
+		{
+			MaterialData material;
+			material.BaseColor = glm::vec4(0.0f, 0.0f, 0.0f, 0.5f);
+			material.Metallic = 0.0f;
+			material.Roughness = 1.0f;
+			material.Emissive = emissive;
+			material.AlphaMode = AlphaMode::Blend;
+			material.DoubleSided = true;
+			return CreateRef<MaterialData>(std::move(material));
+		}
+
+		// An environment whose skybox has one texel a face (binary16), each face its own colour, with a black prefiltered cube
+		// and no irradiance, so the sky a view shows depends on where it looks.
+		AssetRef<Asset> MakeSkyEnvironment()
+		{
+			constexpr uint32_t FaceSize = 8;
+			constexpr uint32_t MipCount = 4;
+			constexpr std::array<glm::dvec3, 6> Faces = { glm::dvec3(0.6, 0.2, 0.2), glm::dvec3(0.2, 0.6, 0.2), glm::dvec3(0.5, 0.5, 0.5),
+				glm::dvec3(0.1, 0.1, 0.1), glm::dvec3(0.9, 0.5, 0.1), glm::dvec3(0.1, 0.3, 0.9) };
+			EnvironmentData environment;
+			environment.Skybox = { .FaceSize = 1, .MipCount = 1, .Texels = Buffer(ComputeCubeMapByteSize(1, 1)) };
+			for (size_t face = 0; face < Faces.size(); ++face)
+			{
+				const std::array<uint16_t, 4> texel = { Test::DoubleToHalf(Faces[face].x), Test::DoubleToHalf(Faces[face].y), Test::DoubleToHalf(Faces[face].z),
+					Test::DoubleToHalf(1.0) };
+				std::memcpy(environment.Skybox.Texels.data() + face * sizeof(texel), texel.data(), sizeof(texel));
+			}
+			environment.Specular = { .FaceSize = FaceSize, .MipCount = MipCount, .Texels = Buffer(ComputeCubeMapByteSize(FaceSize, MipCount), std::byte{ 0 }) };
+			return CreateRef<EnvironmentData>(std::move(environment));
+		}
+
+		// A heightfield of 33 samples a side in gentle diagonal waves (up to 0.92 of its height scale).
+		AssetRef<Asset> MakeWavyHeightfield()
+		{
+			constexpr uint32_t Resolution = 33;
+			HeightfieldData heightfield = MakeFlatHeightfield(Resolution);
+			for (uint32_t z = 0; z < Resolution; ++z)
+			{
+				for (uint32_t x = 0; x < Resolution; ++x)
+					heightfield.Heights[x + static_cast<size_t>(Resolution) * z] = static_cast<uint16_t>(((x * 7 + z * 5) % 16) * 4000);
+			}
+			return CreateRef<HeightfieldData>(std::move(heightfield));
+		}
+
+		// 8 x 8 opaque white texels, which a particle's Color tints.
+		AssetRef<Asset> MakeParticleTexture()
+		{
+			constexpr uint32_t Texels = 8;
+			Ref<TextureData> texture = CreateRef<TextureData>();
+			texture->Format = TextureFormat::RGBA8Srgb;
+			texture->Width = Texels;
+			texture->Height = Texels;
+			texture->Mips = { TextureMip{ .Width = Texels, .Height = Texels, .Offset = 0, .Size = Texels * Texels * 4 } };
+			for (uint32_t texel = 0; texel < Texels * Texels * 4; ++texel)
+				texture->Pixels.push_back(std::byte{ 255 });
+			return texture;
 		}
 
 		// Two quads in one submesh: a 2 x 2 m quad at z = 0 and a tiny one at (30, 0, 2), so its bounds reach 2 m in front of
@@ -123,6 +195,19 @@ namespace Engine {
 			assets.Publish(WallMaterialHandle, MakeMaterial(glm::vec3(0.8f), 0.0f, 1.0f, glm::vec3(0.0f), true));
 			assets.Publish(StraddlerMeshHandle, MakeStraddler());
 			assets.Publish(StripMeshHandle, MakeStrip());
+			assets.Publish(RedGlassMaterialHandle, MakeGlassMaterial(glm::vec3(2.0f, 0.0f, 0.0f)));
+			assets.Publish(BlueGlassMaterialHandle, MakeGlassMaterial(glm::vec3(0.0f, 0.0f, 2.0f)));
+			assets.Publish(WhiteMaterialHandle, MakeMaterial(glm::vec3(0.0f), 0.0f, 1.0f, glm::vec3(1.0f), true));
+			assets.Publish(SkyEnvironmentHandle, MakeSkyEnvironment());
+			assets.Publish(HeightfieldHandle, MakeWavyHeightfield());
+			assets.Publish(ParticleTextureHandle, MakeParticleTexture());
+		}
+
+		// The built-in quad's world matrix turned to face +Y (up), scaled `size` along X and Z, centred on `centre`.
+		glm::mat4 FloorWorld(const glm::vec3& centre, const glm::vec2& size)
+		{
+			return glm::translate(glm::mat4(1.0f), centre) * glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f))
+				* glm::scale(glm::mat4(1.0f), glm::vec3(size.x, size.y, 1.0f));
 		}
 
 		glm::mat4 MarkerWorld(float x)
@@ -222,6 +307,40 @@ namespace Engine {
 		// two pixels in from its edges.
 		constexpr uint32_t GlassMin = 16;
 		constexpr uint32_t GlassMax = 48;
+
+		// The glass's plane in MakeMirrorScene: z = -3, facing +Z.
+		constexpr PlanarReflectionPlane MirrorPlane{ .Normal = glm::vec3(0.0f, 0.0f, 1.0f), .Distance = 3.0f };
+
+		// `snapshot` rendered from the camera mirrored in MirrorPlane (MakePlanarReflectionCamera at the view's size), without
+		// the mirror's draw and without any PlanarReflection: what a full-resolution mirror view renders before its mip chain,
+		// for a fogless scene with nothing between the mirror camera and the glass. The main view's glass pixel (x, y) samples
+		// its texel (Size - 1 - x, y).
+		std::vector<glm::dvec4> RenderMirrorCameraView(GraphicsDevice& device, Test::SceneRendererIntegrationFixture& fixture, RenderSnapshot snapshot)
+		{
+			snapshot.Camera = MakePlanarReflectionCamera(snapshot.Camera, MirrorPlane, Size, Size);
+			std::erase_if(snapshot.Meshes, [](const MeshDrawItem& item)
+			{
+				return item.Entity == UUID(MirrorEntity);
+			});
+			snapshot.PlanarReflections.clear();
+			return RenderSceneColor(device, fixture, std::move(snapshot));
+		}
+
+		// The glass's pixels of `view` that differ by more than `tolerance` from `mirrorView`'s (RenderMirrorCameraView's)
+		// mirrored left for right.
+		uint32_t CountGlassMismatches(const std::vector<glm::dvec4>& view, const std::vector<glm::dvec4>& mirrorView, double tolerance)
+		{
+			uint32_t mismatched = 0;
+			for (uint32_t y = GlassMin; y < GlassMax; ++y)
+			{
+				for (uint32_t x = GlassMin; x < GlassMax; ++x)
+				{
+					if (!IsNear(Texel(view, x, y), Texel(mirrorView, Size - 1 - x, y), tolerance))
+						++mismatched;
+				}
+			}
+			return mismatched;
+		}
 
 	}
 
@@ -500,9 +619,12 @@ namespace Engine {
 			device.RunGarbageCollection();
 		}
 
-		// A mirror on the left, facing +X, reflects a lit wall at z = -7 inside the main view's cascades, on which an occluder
-		// off to the right casts the directional light's shadow: the reflection of the shadowed wall is dark, and bright when
-		// the occluder casts none, since the mirror view samples the main view's cascades.
+		// A 6 x 6 m mirror at z = -6 facing the camera and a floor at y = -1 before it (z from -6 to -2), on which a 2 x 2 m
+		// occluder above and to the left casts the directional light's shadow (x from -1 to 1, z from -5.5 to -3.5); the main
+		// view's cascades end at 6.5 m. The floor's point (0, -1, -4.6), seen in the glass at pixel (32, 39), lies 4.6 m from
+		// the main camera, inside the cascades, and its mirror image 7.4 m, beyond them: the mirror view chooses the cascade by
+		// the main camera's depth (ViewConstants::CascadeDepthPlane), so the reflection is shadowed, and bright when the
+		// occluder casts none. A mirror view that chose it by its own view depth would leave the point lit.
 		TEST_CASE("PlanarReflections: the main view's shadows shade a reflection" * doctest::test_suite(Test::GpuSuite))
 		{
 			Test::HeadlessGpuFixture gpu;
@@ -515,29 +637,27 @@ namespace Engine {
 				snapshot.Meshes.clear();
 				snapshot.Lights = { LightData{ .Type = RenderLightType::Directional,
 					.Intensity = 3.0f,
-					.Direction = glm::normalize(glm::vec3(-0.6f, 0.0f, -0.8f)),
+					.Direction = glm::normalize(glm::vec3(1.0f, -1.0f, 0.0f)),
 					.CastShadows = true,
-					.ShadowDistance = 15.0f } };
-				const glm::mat4 faceX = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -7.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(4.0f)),
+					.ShadowDistance = 6.5f } };
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(0.0f, -1.0f, -4.0f), glm::vec2(3.0f, 2.0f)),
 					.Mesh = QuadMeshHandle,
 					.Materials = { WallMaterialHandle },
 					.CastShadows = false,
 					.Entity = UUID(5) });
-				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.9f, 0.0f, -5.5f)) * faceX * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(-2.0f, 1.0f, -4.5f), glm::vec2(1.0f)),
 					.Mesh = QuadMeshHandle,
 					.Materials = { WallMaterialHandle },
 					.Entity = UUID(6) });
-				AddMirror(snapshot, glm::translate(glm::mat4(1.0f), glm::vec3(-1.2f, 0.0f, -4.0f)) * faceX, MirrorEntity);
+				AddMirror(snapshot, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -6.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f)), MirrorEntity);
 				const std::vector<glm::dvec4> shadowed = RenderSceneColor(device, fixture, snapshot);
 				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
 				snapshot.Meshes[1].CastShadows = false;
 				const std::vector<glm::dvec4> lit = RenderSceneColor(device, fixture, snapshot);
-				// The wall's point (-0.2, 0, -7), in the occluder's shadow, seen in the mirror at pixel (14, 31).
-				const double inShadow = Texel(shadowed, 14, 31).r;
-				const double inLight = Texel(lit, 14, 31).r;
+				const double inShadow = Texel(shadowed, 32, 39).r;
+				const double inLight = Texel(lit, 32, 39).r;
 				CHECK(inLight > 0.2);
-				CHECK(inShadow < 0.5 * inLight);
+				CHECK(inShadow < 0.25 * inLight);
 			}
 			device.RunGarbageCollection();
 		}
@@ -656,6 +776,498 @@ namespace Engine {
 				CHECK(recovered.has_value());
 				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
 				CHECK(fixture.Read().Pixels != fallback.Pixels);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The view's probe constants, which every forward set binds at b4, fail to create on the renderer's first render: the
+		// main view's forward passes are skipped (ProbeShading.h), and the reflection falls back with them, counted as dropped
+		// with the render returning the error, rather than drawing with b4 unwritten; the next render creates them and draws
+		// it.
+		TEST_CASE("PlanarReflections: a view whose probe constants cannot be created draws no reflection, and the next render draws it"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				Status rendered;
+				{
+					// The probe constants are the only constant buffers of their size the first render creates.
+					const Test::BufferCreationFails fails([](const VkBufferCreateInfo& info)
+					{
+						return info.size == sizeof(ProbeConstants) && (info.usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) != 0;
+					});
+					rendered = RenderStatus(device, fixture, snapshot);
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				REQUIRE_FALSE(rendered.has_value());
+				CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+				const RenderStats failed = fixture.Renderer().GetRenderStats();
+				CHECK(failed.PlanarReflections == 0);
+				CHECK(failed.DroppedPlanarReflections == 1);
+				CHECK(failed.PlanarReflectionEntities.empty());
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(failed, "PlanarReflection0") == nullptr);
+
+				const Status recovered = RenderStatus(device, fixture, snapshot);
+				CHECK(recovered.has_value());
+				const RenderStats drawn = fixture.Renderer().GetRenderStats();
+				CHECK(drawn.PlanarReflections == 1);
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(drawn, "PlanarReflection0") != nullptr);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The skinned strip in front of the mirror, seen by both views, whose deformed vertices cannot be created (an
+		// out-of-memory request): neither the main view nor the mirror view draws it, and the render returns the error; the
+		// next render deforms it once and draws it in both.
+		TEST_CASE("PlanarReflections: a deformed item whose deformation cannot be created is drawn by neither the view nor its reflection"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				const Status plainRendered = RenderStatus(device, fixture, snapshot);
+				REQUIRE(plainRendered.has_value());
+				const RenderStats plain = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* plainRow = Test::SceneRendererIntegrationFixture::FindPass(plain, "PlanarReflection0");
+				const RenderPassStats* plainForward = Test::SceneRendererIntegrationFixture::FindPass(plain, "ForwardOpaque");
+				REQUIRE(plainRow != nullptr);
+				REQUIRE(plainForward != nullptr);
+
+				// At rest first (no palette, so nothing deforms), which uploads the strip's mesh.
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.9f, 0.0f, -2.0f)),
+					.Mesh = StripMeshHandle,
+					.Materials = { RedMaterialHandle },
+					.Entity = UUID(4) });
+				const Status rest = RenderStatus(device, fixture, snapshot);
+				REQUIRE(rest.has_value());
+				const glm::mat4 turn(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, -1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+				snapshot.Meshes.back().JointPalette = { glm::mat4(1.0f), turn };
+				Status rendered;
+				{
+					// The deformed vertices are the only vertex buffers with storage views this render creates.
+					const Test::BufferCreationFails fails([](const VkBufferCreateInfo& info)
+					{
+						return (info.usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) != 0 && (info.usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) != 0;
+					});
+					rendered = RenderStatus(device, fixture, snapshot);
+					CHECK(fails.GetFailedCount() == 1);
+				}
+				REQUIRE_FALSE(rendered.has_value());
+				CHECK(rendered.error().GetCode() == ErrorCode::Gpu);
+				const RenderStats skipped = fixture.Renderer().GetRenderStats();
+				CHECK(Test::SceneRendererIntegrationFixture::FindPass(skipped, "Skinning") == nullptr);
+				CHECK(skipped.PlanarReflections == 1);
+				const RenderPassStats* skippedRow = Test::SceneRendererIntegrationFixture::FindPass(skipped, "PlanarReflection0");
+				const RenderPassStats* skippedForward = Test::SceneRendererIntegrationFixture::FindPass(skipped, "ForwardOpaque");
+				REQUIRE(skippedRow != nullptr);
+				REQUIRE(skippedForward != nullptr);
+				CHECK(skippedRow->DrawCalls == plainRow->DrawCalls);
+				CHECK(skippedForward->DrawCalls == plainForward->DrawCalls);
+
+				const Status recovered = RenderStatus(device, fixture, snapshot);
+				CHECK(recovered.has_value());
+				const RenderStats drawn = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* drawnRow = Test::SceneRendererIntegrationFixture::FindPass(drawn, "PlanarReflection0");
+				const RenderPassStats* skinning = Test::SceneRendererIntegrationFixture::FindPass(drawn, "Skinning");
+				REQUIRE(drawnRow != nullptr);
+				REQUIRE(skinning != nullptr);
+				CHECK(drawnRow->DrawCalls == plainRow->DrawCalls + 2);
+				CHECK(skinning->Dispatches == 1);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// A 7 x 5 reflection's whole chain (7 x 5, 3 x 2, 1 x 1), level 0 uploaded: each texel of a level is the mean of the
+		// level above over its span, weighted by the area each texel of it covers, so the last column and row of an odd level
+		// count. The reference is computed in double from the level read back above it; the levels are binary16.
+		TEST_CASE("PlanarReflections: each level of a reflection's mip chain is the area mean of the whole level above, odd sizes included"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Result<Scope<PlanarReflectionPass>> pass = PlanarReflectionPass::Create(device, gpu.GetPipelines());
+				REQUIRE_MESSAGE(pass.has_value(), pass.error().ToString());
+				constexpr glm::uvec2 Extent(7, 5);
+				constexpr uint32_t Levels = 3;
+				Result<nvrhi::TextureHandle> color = device.CreateTexture(PlanarReflectionPass::GetColorDesc(Extent.x, Extent.y, Levels));
+				REQUIRE_MESSAGE(color.has_value(), color.error().ToString());
+				// Red rises along x, green along y, and blue lights only the last column and the last row.
+				std::vector<uint16_t> halves;
+				for (uint32_t y = 0; y < Extent.y; ++y)
+				{
+					for (uint32_t x = 0; x < Extent.x; ++x)
+					{
+						const double blue = x == Extent.x - 1 || y == Extent.y - 1 ? 8.0 : 0.0;
+						for (const double value : { static_cast<double>(x + 1), static_cast<double>(y + 1), blue, 1.0 })
+							halves.push_back(Test::DoubleToHalf(value));
+					}
+				}
+				Result<nvrhi::CommandListHandle> list = device.CreateCommandList();
+				REQUIRE(list.has_value());
+				PassBindingCache bindings;
+				RenderPassCounters counters;
+				(*list)->open();
+				(*list)->writeTexture(*color, 0, 0, halves.data(), static_cast<size_t>(Extent.x) * 4 * sizeof(uint16_t));
+				const Status recorded = (*pass)->Record(**list, bindings, **color, counters);
+				(*list)->close();
+				REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
+				device.ExecuteCommandList(**list);
+				CHECK(counters.Dispatches == Levels - 1);
+
+				Readback readback(device);
+				const auto read = [&readback, &color](uint32_t mip, const glm::uvec2& size)
+				{
+					const Result<Image> image = readback.ReadTexture(**color, mip);
+					REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+					REQUIRE(image->Width == size.x);
+					REQUIRE(image->Height == size.y);
+					std::vector<glm::dvec4> texels;
+					for (uint32_t y = 0; y < size.y; ++y)
+					{
+						const std::span<const std::byte> row = image->GetRow(y);
+						for (uint32_t x = 0; x < size.x; ++x)
+						{
+							std::array<uint16_t, 4> texel{};
+							std::memcpy(texel.data(), row.data() + static_cast<size_t>(x) * sizeof(texel), sizeof(texel));
+							texels.emplace_back(Test::HalfToDouble(texel[0]), Test::HalfToDouble(texel[1]), Test::HalfToDouble(texel[2]), Test::HalfToDouble(texel[3]));
+						}
+					}
+					return texels;
+				};
+				// The share of destination texel i that source texel s covers on an axis of `source` texels reduced to
+				// `destination`: their overlap over the span's length source / destination.
+				const auto weight = [](uint32_t s, uint32_t i, uint32_t source, uint32_t destination)
+				{
+					const double span = static_cast<double>(source) / destination;
+					const double overlap = std::min(s + 1.0, (i + 1.0) * span) - std::max(static_cast<double>(s), i * span);
+					return std::max(overlap, 0.0) / span;
+				};
+				glm::uvec2 size = Extent;
+				std::vector<glm::dvec4> above = read(0, size);
+				for (uint32_t mip = 1; mip < Levels; ++mip)
+				{
+					const glm::uvec2 next(std::max(1U, size.x / 2), std::max(1U, size.y / 2));
+					const std::vector<glm::dvec4> level = read(mip, next);
+					for (uint32_t y = 0; y < next.y; ++y)
+					{
+						for (uint32_t x = 0; x < next.x; ++x)
+						{
+							glm::dvec4 expected(0.0);
+							for (uint32_t sy = 0; sy < size.y; ++sy)
+							{
+								for (uint32_t sx = 0; sx < size.x; ++sx)
+									expected += weight(sx, x, size.x, next.x) * weight(sy, y, size.y, next.y) * above[static_cast<size_t>(sy) * size.x + sx];
+							}
+							CAPTURE(mip);
+							CAPTURE(x);
+							CAPTURE(y);
+							CHECK(IsNear(glm::dvec3(level[static_cast<size_t>(y) * next.x + x]), glm::dvec3(expected), 2e-3));
+						}
+					}
+					above = level;
+					size = next;
+				}
+			}
+			device.RunGarbageCollection();
+		}
+
+		// A blue marker whose mirror image lies beside the glass (its centre 0.75 of the half-view left of the centre, the glass
+		// reaching 0.58), inside the blur's margin: the mirror view culls to the glass's rectangle widened by the margin of its
+		// chain (5 levels of the 64 x 64 reflection at SsrMaxRoughness 0.6: two 16-pixel texels), so it draws the marker (its
+		// prepass and forward draws), whose pixels the glass's edge texels average at the blurred levels.
+		TEST_CASE("PlanarReflections: a mirror view draws what its blur margin shows beside the glass" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				snapshot.Post.SsrMaxRoughness = 0.6f;
+				static_cast<void>(RenderSceneColor(device, fixture, snapshot));
+				const RenderStats plainStats = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* plain = Test::SceneRendererIntegrationFixture::FindPass(plainStats, "PlanarReflection0");
+				REQUIRE(plain != nullptr);
+				CHECK(plain->Dispatches == 4);
+
+				const float x = -0.75f * 8.0f * std::tan(glm::radians(30.0f));
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = MarkerWorld(x), .Mesh = QuadMeshHandle, .Materials = { BlueMaterialHandle }, .Entity = UUID(7) });
+				static_cast<void>(RenderSceneColor(device, fixture, snapshot));
+				const RenderStats besideStats = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* beside = Test::SceneRendererIntegrationFixture::FindPass(besideStats, "PlanarReflection0");
+				REQUIRE(beside != nullptr);
+				CHECK(beside->DrawCalls == plain->DrawCalls + 2);
+				CHECK(beside->Triangles == plain->Triangles + 4);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// A grey wall behind the camera (z = +2, facing the mirror) lit only by a point light 0.5 m in front of it, behind the
+		// camera and outside the main view's frustum: the main view culls the light, and the mirror view adds it to its own
+		// list, unshadowed, so the wall's reflection is lit, the same where a small occluder would shadow it; without the light
+		// it is black.
+		TEST_CASE("PlanarReflections: a light only the mirror camera sees lights the reflection, unshadowed" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture, false);
+				snapshot.Meshes.clear();
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 2.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(3.0f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { WallMaterialHandle },
+					.Entity = UUID(5) });
+				AddMirror(snapshot, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)), MirrorEntity);
+				const std::vector<glm::dvec4> dark = RenderSceneColor(device, fixture, snapshot);
+				snapshot.Lights = { LightData{ .Type = RenderLightType::Point,
+					.Intensity = 4.0f,
+					.Position = glm::vec3(0.0f, 0.0f, 1.5f),
+					.Range = 1.5f,
+					.CastShadows = true } };
+				const std::vector<glm::dvec4> lit = RenderSceneColor(device, fixture, snapshot);
+				const RenderStats stats = fixture.Renderer().GetRenderStats();
+				CHECK(stats.PlanarReflections == 1);
+				CHECK(stats.VisibleLights == 0);
+				// An occluder between the light and the wall, whose shadow would fall on the wall at x = 0.8 to 1.2, seen in the
+				// glass at pixel (38, 31); the occluder itself shows at pixels 35 and 36.
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.5f, 0.0f, 1.75f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.1f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { WallMaterialHandle },
+					.Entity = UUID(6) });
+				const std::vector<glm::dvec4> occluded = RenderSceneColor(device, fixture, snapshot);
+				CHECK(Texel(dark, 32, 31).r < 1e-3);
+				CHECK(Texel(dark, 38, 31).r < 1e-3);
+				CHECK(Texel(lit, 32, 31).r > 0.1);
+				CHECK(Texel(lit, 38, 31).r > 0.02);
+				CHECK(IsNear(Texel(occluded, 38, 31), Texel(lit, 38, 31), 1e-2));
+			}
+			device.RunGarbageCollection();
+		}
+
+		// Distance fog (no height fog, sun glow or ambient tint; the sky fogged) on the mirror scene: the mirror view fogs the
+		// path from the glass to each marker and the main view the path from the camera to the glass, so the glass shows the
+		// reflected scene under the same fog, as the main camera sees the markers' mirror images, and not the camera-to-glass
+		// stretch twice.
+		TEST_CASE("PlanarReflections: a reflection is fogged from the glass on, so a fogged mirror shows the reflected scene's fog"
+			* doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				const RenderFog fog{ .Enabled = true, .Density = 0.15f, .MaxOpacity = 1.0f, .HeightDensity = 0.0f, .SunGlow = 0.0f, .FogSkybox = true };
+				const std::vector<glm::dvec4> clear = RenderSceneColor(device, fixture, MakeMirrorScene(fixture));
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				snapshot.Fog = fog;
+				const std::vector<glm::dvec4> mirrored = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+
+				RenderSnapshot reference = MakeMirrorScene(fixture, false);
+				reference.Fog = fog;
+				const glm::mat4 reflection = ComputePlanarReflectionMatrix(MirrorPlane);
+				for (MeshDrawItem& item : reference.Meshes)
+					item.World = reflection * item.World;
+				const std::vector<glm::dvec4> expected = RenderSceneColor(device, fixture, reference);
+				uint32_t mismatched = 0;
+				for (uint32_t y = GlassMin; y < GlassMax; ++y)
+				{
+					for (uint32_t x = GlassMin; x < GlassMax; ++x)
+					{
+						if (!IsNear(Texel(mirrored, x, y), Texel(expected, x, y), 1e-2))
+							++mismatched;
+					}
+				}
+				CHECK(mismatched <= 8);
+				// The red marker, 8 m away along the reflected path, is fogged: e^-1.2 of its 2 plus the fog's colour.
+				const double transmittance = std::exp(-0.15 * 8.0);
+				CHECK(Texel(mirrored, 26, 31).r == doctest::Approx(2.0 * transmittance + fog.Color.r * (1.0 - transmittance)).epsilon(0.02));
+				CHECK(Texel(clear, 26, 31).r > 1.5);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// The skybox (a cube whose faces differ) in the mirror scene: the mirror view draws the sky along its own view, the
+		// main view's mirrored, so the glass shows the sky behind the camera, as the mirror camera sees it, and not the sky
+		// around the glass.
+		TEST_CASE("PlanarReflections: a mirror shows the skybox along the mirrored view" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				snapshot.Environment = RenderEnvironment{ .Environment = SkyEnvironmentHandle, .Intensity = 1.0f, .ShowSkybox = true, .FallbackColor = glm::vec3(0.0f) };
+				snapshot.Camera.ClearToSkybox = true;
+				const std::vector<glm::dvec4> view = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+				const std::vector<glm::dvec4> mirrorView = RenderMirrorCameraView(device, fixture, snapshot);
+				CHECK(CountGlassMismatches(view, mirrorView, 1e-2) <= 8);
+				// The glass's sky (above the markers) is the sky behind the camera, neither the clear colour nor the sky ahead.
+				CHECK_FALSE(IsNear(Texel(view, 32, 20), glm::dvec3(ClearColor), 5e-2));
+				CHECK_FALSE(IsNear(Texel(view, 32, 20), Texel(view, 32, 2), 5e-2));
+			}
+			device.RunGarbageCollection();
+		}
+
+		// Two overlapping transparent quads behind the camera, red at z = +1 and blue at z = +1.5 (nearer and farther for the
+		// mirror camera, the other way round for the main camera's depth): the mirror view's ForwardTransparent sorts them for
+		// the mirror camera, so the glass shows them blended as the mirror camera sees them.
+		TEST_CASE("PlanarReflections: a mirror's transparent pass blends back to front for the mirror camera" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				static_cast<void>(RenderSceneColor(device, fixture, snapshot));
+				const RenderStats plainStats = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* plain = Test::SceneRendererIntegrationFixture::FindPass(plainStats, "PlanarReflection0");
+				REQUIRE(plain != nullptr);
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 1.0f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { RedGlassMaterialHandle },
+					.Entity = UUID(5) });
+				snapshot.Meshes.push_back(MeshDrawItem{ .World = glm::translate(glm::mat4(1.0f), glm::vec3(0.4f, 0.2f, 1.5f)) * glm::scale(glm::mat4(1.0f), glm::vec3(0.5f)),
+					.Mesh = QuadMeshHandle,
+					.Materials = { BlueGlassMaterialHandle },
+					.Entity = UUID(6) });
+				const std::vector<glm::dvec4> view = RenderSceneColor(device, fixture, snapshot);
+				const RenderStats stats = fixture.Renderer().GetRenderStats();
+				const RenderPassStats* row = Test::SceneRendererIntegrationFixture::FindPass(stats, "PlanarReflection0");
+				REQUIRE(row != nullptr);
+				CHECK(row->DrawCalls == plain->DrawCalls + 2);
+				const std::vector<glm::dvec4> mirrorView = RenderMirrorCameraView(device, fixture, snapshot);
+				CHECK(CountGlassMismatches(view, mirrorView, 1e-2) <= 8);
+				// Where they overlap (the mirror images: red at pixels 28 to 36, blue at 31 to 38), the nearer red lies over the
+				// blue.
+				const glm::dvec3 overlap = Texel(view, 33, 31);
+				CHECK(overlap.r > overlap.b);
+				CHECK(overlap.b > 0.1);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// A lit, wavy terrain under the mirror, below the glass's sight in the main view, which the mirror view draws with its
+		// own terrain state and scissor (TerrainDepthNormal and TerrainForward): the glass shows it as the mirror camera sees it.
+		TEST_CASE("PlanarReflections: a terrain shows in a mirror as the mirror camera sees it" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				snapshot.Lights = { LightData{ .Type = RenderLightType::Directional, .Intensity = 1.0f, .Direction = glm::normalize(glm::vec3(0.3f, -1.0f, 0.2f)) } };
+				TerrainItem terrain;
+				terrain.World = glm::translate(glm::mat4(1.0f), glm::vec3(-4.0f, -1.6f, -2.5f));
+				terrain.Heightfield = HeightfieldHandle;
+				terrain.Size = glm::vec2(8.0f);
+				terrain.HeightScale = 0.3f;
+				terrain.Layers = { TerrainLayerItem{ .Tint = glm::vec3(0.2f, 0.7f, 0.25f), .Tiling = 3.0f, .Roughness = 0.8f } };
+				terrain.Entity = UUID(0x7e44);
+				snapshot.Terrains.push_back(std::move(terrain));
+				const std::vector<glm::dvec4> view = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+				const std::vector<glm::dvec4> mirrorView = RenderMirrorCameraView(device, fixture, snapshot);
+				CHECK(CountGlassMismatches(view, mirrorView, 1e-2) <= 8);
+				// The glass's lower rows show the terrain, green, not the clear colour.
+				const glm::dvec3 ground = Texel(view, 32, 44);
+				CHECK(ground.g > ground.b);
+				CHECK_FALSE(IsNear(ground, glm::dvec3(ClearColor), 5e-2));
+			}
+			device.RunGarbageCollection();
+		}
+
+		// Two particles behind the camera, which only the mirror view sees, drawn with the slot's plan, depth and scissor: the
+		// glass shows them as the mirror camera sees them.
+		TEST_CASE("PlanarReflections: particles show in a mirror as the mirror camera sees them" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				RenderSnapshot snapshot = MakeMirrorScene(fixture);
+				const std::array<ParticleItem, 2> particles = { ParticleItem{ .Position = glm::vec3(-0.3f, 0.2f, 1.2f), .Size = 0.6f, .Color = glm::vec4(1.0f, 0.5f, 0.2f, 1.0f) },
+					ParticleItem{ .Position = glm::vec3(0.3f, -0.1f, 1.6f), .Size = 0.5f, .Color = glm::vec4(0.2f, 0.6f, 1.0f, 0.7f) } };
+				snapshot.ParticleEmitters.push_back(ParticleEmitterItem{ .Texture = ParticleTextureHandle,
+					.Blend = RenderParticleBlend::Alpha,
+					.First = 0,
+					.Count = static_cast<uint32_t>(particles.size()),
+					.Entity = UUID(70) });
+				snapshot.Particles.insert(snapshot.Particles.end(), particles.begin(), particles.end());
+				const std::vector<glm::dvec4> view = RenderSceneColor(device, fixture, snapshot);
+				CHECK(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+				const std::vector<glm::dvec4> mirrorView = RenderMirrorCameraView(device, fixture, snapshot);
+				CHECK(CountGlassMismatches(view, mirrorView, 1e-2) <= 8);
+				// The first particle's mirror image, at pixels 27 to 31 across and 28 to 32 down, shows its orange.
+				const glm::dvec3 orange = Texel(view, 30, 30);
+				CHECK(orange.r > 0.8);
+				CHECK(orange.b < 0.4);
+			}
+			device.RunGarbageCollection();
+		}
+
+		// An emitting floor that crosses the glass's plane, at heights that move the junction across a pixel: the prepass and
+		// the forward passes clip it at the plane with the same exact distance (Common/ClipPlane.slang), so its reflection meets
+		// the floor with no pixel of the reflection's clear colour between them.
+		TEST_CASE("PlanarReflections: geometry that crosses the plane meets its reflection without a gap" * doctest::test_suite(Test::GpuSuite))
+		{
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			{
+				Test::SceneRendererIntegrationFixture fixture(gpu, Size, Size);
+				PublishAssets(fixture);
+				for (uint32_t step = 0; step < 8; ++step)
+				{
+					const float height = -0.5f + 0.007f * static_cast<float>(step);
+					CAPTURE(height);
+					RenderSnapshot snapshot = MakeMirrorScene(fixture, false);
+					snapshot.Meshes.clear();
+					snapshot.Meshes.push_back(MeshDrawItem{ .World = FloorWorld(glm::vec3(0.0f, height, 3.5f), glm::vec2(6.0f, 9.5f)),
+						.Mesh = QuadMeshHandle,
+						.Materials = { WhiteMaterialHandle },
+						.Entity = UUID(5) });
+					AddMirror(snapshot, glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -3.0f)), MirrorEntity);
+					const std::vector<glm::dvec4> view = RenderSceneColor(device, fixture, snapshot);
+					REQUIRE(fixture.Renderer().GetRenderStats().PlanarReflections == 1);
+					// From the floor's far edge's reflection (row 33) down past the junction (rows 40 to 42), every pixel of the
+					// glass's columns is the floor's.
+					uint32_t gaps = 0;
+					for (uint32_t y = 35; y < 56; ++y)
+					{
+						for (uint32_t x = 18; x < 46; ++x)
+						{
+							if (Texel(view, x, y).r < 0.5)
+								++gaps;
+						}
+					}
+					CHECK(gaps == 0);
+				}
 			}
 			device.RunGarbageCollection();
 		}

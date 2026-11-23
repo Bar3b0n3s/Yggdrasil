@@ -53,6 +53,7 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -322,7 +323,6 @@ namespace Engine {
 		{
 			// Set by the Prepare stage for a drawn slot.
 			bool Drawn = false;
-			size_t Item = 0; // its RenderSnapshot::PlanarReflections index
 			UUID Entity{};
 			CameraData Camera{}; // the mirror camera at the slot's size (MakePlanarReflectionCamera)
 			ViewConstants View{};
@@ -333,10 +333,11 @@ namespace Engine {
 			std::vector<ShaderLight> Lights{};
 			std::vector<SceneRendererDraw> OpaqueDraws{};
 			std::vector<SceneRendererDraw> TransparentDraws{};
-			// The glass's rectangle mirrored into the reflection's pixels, widened by PlanarReflectionPass::BlurMargin.
+			// The glass's rectangle widened by the blur's footprint (ComputePlanarReflectionBlurMargin, from the slot's chain),
+			// mirrored into the reflection's pixels: the rectangle its draws are culled to and rasterized in.
 			nvrhi::Rect Scissor{};
 			size_t Scratch = 0; // its SceneRenderer::State::ReflectionScratch entry
-			// The GPU objects: the reflection (PlanarReflectionPass::GetColorDesc of the slot's size, from the pool), its
+			// The GPU objects: the reflection (PlanarReflectionPass::GetColorDesc of the slot's size and chain, from the pool), its
 			// level 0 with the scratch's depth (the forward passes' and the skybox's framebuffer) and alone (the particles'),
 			// and the mirror view's constants, light list and light clusters.
 			nvrhi::TextureHandle Color{};
@@ -496,6 +497,10 @@ namespace Engine {
 		// writing state (RenderTarget, or DepthWrite for SceneDepthFormat), named "SceneRenderer.<name>".
 		[[nodiscard]] Result<nvrhi::TextureHandle> CreateSceneAttachment(RenderTargetPool& pool, uint32_t width, uint32_t height, nvrhi::Format format,
 			std::string_view name);
+		// A buffer of `size` bytes kept in the renderer's state between command lists (keepInitialState): a constant buffer, or
+		// a structured buffer of `structStride`-byte elements (SceneRendererRecovery.cpp's, which the per-view buffers and each
+		// planar reflection slot's use). Errors: those of GraphicsDevice::CreateBuffer (Gpu).
+		[[nodiscard]] Result<nvrhi::BufferHandle> CreateViewBuffer(GraphicsDevice& device, size_t size, uint32_t structStride, std::string debugName);
 		// The ViewConstants of `camera` for a `width` x `height` target without jitter, with `exposure` (SceneRenderer.cpp's
 		// MakeViewConstants).
 		[[nodiscard]] ViewConstants MakeSceneViewConstants(const CameraData& camera, uint32_t width, uint32_t height, float exposure);
@@ -905,8 +910,9 @@ namespace Engine {
 		// M42 (decision 3; SceneRendererReflections.cpp): the end of the Prepare stage, after the main view's draws, shadow
 		// casters and selection: the snapshot's planar reflections that the view draws, ranked and capped
 		// (RankPlanarReflections; the drops logged once per renderer), each prepared in its slot (PrepareReflectionSlot) or,
-		// when its objects cannot be created, falling back (its error kept, counted as dropped); then the main view's records
-		// of a drawn reflection's entity flagged with its slot (DrawFlagPlanarReflection) and frame.PlanarReflections written.
+		// when its objects or the view's probe constants cannot be created, falling back (the error kept, counted as dropped);
+		// then the main view's records of a drawn reflection's entity flagged with its slot (DrawFlagPlanarReflection) and
+		// frame.PlanarReflections written.
 		// In a view other than a Lit view with a camera outside the wireframe, every reflection is culled.
 		void PreparePlanarReflections(Detail::SceneRendererFrame& frame);
 		// M42: the mirror view of snapshot reflection `item` (its world plane `plane`, its glass's rectangle `rect` on the main
@@ -914,10 +920,11 @@ namespace Engine {
 		// constants, fog and cluster grid. Errors: those of EnsureReflectionSlot, with the slot not drawn.
 		[[nodiscard]] Status PrepareReflectionSlot(Detail::SceneRendererFrame& frame, Detail::SceneRendererReflectionSlot& slot, size_t item,
 			const PlanarReflectionPlane& plane, const PlanarReflectionScreenRect& rect);
-		// M42: `slot`'s GPU objects for a `width` x `height` reflection: its colour (replaced at another size), the scratch of
-		// that size (found or created), its framebuffers, its constant buffers and light list, and its cluster buffers grown to
-		// `clusters`. Errors: those of the pool, the framebuffer and the buffer creations (Gpu).
-		[[nodiscard]] Status EnsureReflectionSlot(Detail::SceneRendererReflectionSlot& slot, uint32_t width, uint32_t height, const LightClusterGrid& clusters);
+		// M42: `slot`'s GPU objects for a `width` x `height` reflection of `mipCount` levels: its colour (replaced at another
+		// size or chain), the scratch of that size (found or created), its framebuffers, its constant buffers and light list,
+		// and its cluster buffers grown to `clusters`. Errors: those of the pool, the framebuffer and the buffer creations (Gpu).
+		[[nodiscard]] Status EnsureReflectionSlot(Detail::SceneRendererReflectionSlot& slot, uint32_t width, uint32_t height, uint32_t mipCount,
+			const LightClusterGrid& clusters);
 		// M42: the Forward stage's mirror views, slot by slot, each under its one row PlanarReflection<k>, which times its whole
 		// view: the clears, the prepass and TerrainDepthNormal, the slot's light clusters (LightClusterPass::RecordInRow), then
 		// ForwardOpaque, TerrainForward, the skybox, ForwardTransparent, the particles and the mip chain. A slot's error is the

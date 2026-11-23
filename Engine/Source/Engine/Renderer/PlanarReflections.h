@@ -105,6 +105,26 @@ namespace Engine {
 	// ceil(size * scale) on each axis, at least 1.
 	[[nodiscard]] glm::uvec2 ComputePlanarReflectionSize(uint32_t sceneWidth, uint32_t sceneHeight, float resolutionScale);
 
+	// The mip levels a reflection of `width` x `height` (both >= 1) keeps in a view whose SSR cutoff is `ssrMaxRoughness`: as
+	// many as the forward passes' level curve reaches before the reflection has faded out (Common/PlanarReflections.slang: a
+	// point of GGX alpha samples the level log2(max(alpha * height * PlanarReflectionBlurScale, 1)), and its weight is 0 from
+	// the roughness ssrMaxRoughness, alpha = ssrMaxRoughness^2, on), so every level a weighted sample reads exists:
+	// ceil(log2(ssrMaxRoughness^2 * height * PlanarReflectionBlurScale)) + 1, the roughness at most 1, at least 1 level and at
+	// most the full chain (floor(log2(max(width, height))) + 1). A cutoff that is not finite or not positive keeps level 0
+	// alone (the reflection then has no weight). Computed in double precision.
+	[[nodiscard]] uint32_t ComputePlanarReflectionMipCount(uint32_t width, uint32_t height, float ssrMaxRoughness);
+
+	// The pixels by which a mirror view's cull and rasterization rectangle is widened on each axis for a reflection of `width` x
+	// `height` (both >= 1) with `mipCount` levels (at least 1): the footprint of a bilinear sample at its last level, two of
+	// that level's texels in level-0 pixels (2 * ceil(size / the last level's size, max(1, size >> (mipCount - 1))) per axis),
+	// so every texel the forward passes sample on the glass, at any level, averages pixels the mirror view rendered.
+	[[nodiscard]] glm::uvec2 ComputePlanarReflectionBlurMargin(uint32_t width, uint32_t height, uint32_t mipCount);
+
+	// `rect` widened by `margin` pixels of a `width` x `height` viewport (both >= 1) on each side (2 * margin / size in
+	// normalized device coordinates), clamped to [-1, 1].
+	[[nodiscard]] PlanarReflectionScreenRect WidenPlanarReflectionScreenRect(const PlanarReflectionScreenRect& rect, uint32_t width, uint32_t height,
+		const glm::uvec2& margin);
+
 	// The screen rectangle of `bounds` (local space) at `world` in `camera`'s view, clipped to the view: the bounds of its
 	// eight corners' projections. A box that reaches behind a perspective camera's near plane takes the whole view (a
 	// conservative rectangle). Empty for empty bounds, a box outside the view on one side, or a rectangle of zero area.

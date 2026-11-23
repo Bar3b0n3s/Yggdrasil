@@ -39,6 +39,7 @@
 #include "Shared/ShaderLight.h"
 #include "Shared/TerrainConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Common/ClipPlane.slang"
 #include "Common/Shadows.slang"
 
 import Common.Brdf;
@@ -223,7 +224,7 @@ TerrainVertexOutput TransformVertex(TerrainVertexInput input)
 	const float4 world = MultiplyExact(Terrain.World, float4(local, 1.0));
 	TerrainVertexOutput output;
 	output.Position = MultiplyExact(View.ViewProjection, world);
-	output.ClipDistance = dot(View.ClipPlane, world);
+	output.ClipDistance = GetClipDistance(View.ClipPlane, world);
 	output.WorldPosition = world.xyz;
 	output.WorldNormal = mul(MakeNormalMatrix(Terrain.World, IsMirrored()), localNormal);
 	output.WorldTangent = mul((float3x3)Terrain.World, float3(1.0, 0.0, 0.0));
