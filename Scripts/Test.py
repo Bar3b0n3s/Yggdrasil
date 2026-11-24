@@ -228,6 +228,32 @@ under a debugger that detaches at the loader's initial breakpoint, so every heap
 included, checks block tails, fills freed blocks and validates parameters, while its crash handler still reports a
 crash; the processes it starts run on their own heaps). The step names gain " (debug heap)" and the reports the suffix
 -DebugHeap (Gpu-Debug-Vulkan14-DebugHeap.xml).
+--parallel <n> (the unit suite; the hardening stage's sanitized unit run, Docs/Decisions/0060-skerries-engine-program.md
+decision 3; Scripts/Lib/shards.py) lists the run's selection once, skipped cases included (list_test_cases: also the
+run's skip check, as above), then cuts the cases that are not skipped, in the order the Tests binary runs them, into
+contiguous shards, each run by its own Tests process with doctest's --first=<a> --last=<b> (which count only the
+unskipped cases that pass the filters, in that order), so every case runs in exactly one shard; n processes run at a
+time, and as one ends the next shard starts, the dearest expected first. The shards hold about 120 s of measured work
+each (shards.shard_count; at least n of them, 100 cases each without a measurement): a sanitized process keeps the
+memory its work took, so small shards bound each process's memory. The cuts follow the per-case costs kept in
+<git common directory>/test-costs/<report stem>.xml for every checkout (a case they lack at the measured average;
+without them, equal case counts): a run whose shards all passed replaces the costs of the cases it ran and keeps the
+others' (shards.keep_costs), so a run of part of the suite (--filter, more --exclude-test-suites, a contract run's
+skipped cases) never drops the rest. Each shard has its own JUnit report, output and user-data root
+(bin/TestResults/<report stem>/Shard<k>.xml, Shard<k>.log and Shard<k>/UserData) and its own timeout, set as it starts:
+five times its expected time and at least 1,200 s (shards.shard_timeout), within what is left of the run's bound
+(--timeout or the default above, which the listing and the shards share); a shard past it is ended with its processes,
+one without a measurement gets what is left of the bound, and one the bound leaves unstarted fails as a timeout. A shard
+fails as a plain run does (a failed case, an exit code with its last test case, a crash report of its own, an
+AddressSanitizer line), when it times out (naming the last test case its log started) and when its report holds other
+cases than its range; the step fails naming each failed shard ("shard <k>/<n>: ..."), as its failures are named. The
+shards' reports merge into the run's (--junit), one test suite per shard naming it in a "shard" property; the run's
+report is removed before it starts, and a run that fails before the merge (no executable, a listing that fails, a shard
+that cannot start, a merge that fails) writes one naming the failure instead. The step counts its selection's test cases
+("selectedCases") apart from the passes through their subcases that the reports hold ("testCases", "passed", "failed").
+With --json it holds "shards", each one's range, start, expected and actual seconds, timeout, exit code, peak private
+and resident memory, "status", "outcome" (passed, failed, crashed, timed out or not started) and "detail"; the shards'
+wall time, the largest peak private memory of a shard and the least available memory of the machine seen.
 
 Machine-wide locks (Scripts/Lib/locks.py; Docs/Architecture.md §2.3, ADR 0028 decision 16): before its first suite, a
 run that includes a GPU-using suite (gpu, golden, feature, automation, export, determinism or games; --update-golden
@@ -263,6 +289,7 @@ if sys.version_info < (3, 10):
     sys.exit(f"Test.py requires Python 3.10 or newer (this is Python {platform.python_version()})")
 
 import argparse
+import collections
 import dataclasses
 import datetime
 import hashlib
@@ -270,6 +297,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import time
 import xml.etree.ElementTree as ElementTree
@@ -277,14 +305,17 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from Lib import coverage, debugheap, exports, games, hardening, locks, native_build, paths, provenance
+from Lib import coverage, debugheap, exports, games, hardening, locks, native_build, paths, provenance, shards
 from Lib.process import (
     ToolNotFoundError,
     child_environment,
     describe_exit_code,
     format_command,
+    query_process_memory,
     run_captured,
     run_streamed,
+    start_to_file,
+    terminate_tree,
 )
 from Lib.report import (
     EXIT_FAILED,
@@ -358,6 +389,21 @@ TESTS_EXIT_CODE_MEANINGS = {
 LISTING_TIMEOUT_SECONDS = 120.0
 UNEXPECTED_SKIPS_IN_DETAIL = 3
 NAMES_IN_DETAIL = 4
+# A sharded unit run (--parallel, Lib/shards.py): the seconds between two looks at its shard processes, at which each
+# one's memory is sampled, its timeout checked and the next shard started in place of one that ended, and the lines of
+# a failed shard's output it prints.
+SHARD_POLL_SECONDS = 2.0
+SHARD_OUTPUT_TAIL_LINES = 60
+# The outcome a shard's --json entry names (evaluate_shard): its cases passed; its report counts a failed case, its
+# output holds an AddressSanitizer report, it ran other cases than its range or it ended without a report and a
+# zero exit code; it ended with another exit code and without its report or with a crash report of its own; its
+# timeout ended it; or the run's bound ran out before it started.
+SHARD_PASSED = "passed"
+SHARD_FAILED = "failed"
+SHARD_CRASHED = "crashed"
+SHARD_TIMED_OUT = "timed out"
+SHARD_NOT_STARTED = "not started"
+SHARD_OUTCOMES = (SHARD_PASSED, SHARD_FAILED, SHARD_CRASHED, SHARD_TIMED_OUT, SHARD_NOT_STARTED)
 
 # The Vulkan API caps of the gpu suite (§8.1): the Tests option --vulkan-api=<cap>. 1.4 is also the cap of a run
 # without the option.
@@ -665,12 +711,22 @@ def describe_names(names: set[str] | list[str]) -> str:
     return shown + (f" and {more} more" if more > 0 else "")
 
 
-def list_skipped_test_cases(executable: Path, filters: list[str],
-                            environment: dict[str, str] | None = None) -> SkipCheck:
-    """Ask the Tests binary which test cases `filters` select, skipped ones included (--no-skip). doctest's XML
-    reporter gives each <TestCase> its suite and its doctest::skip flag; the listing goes to a file (--out), so the log
-    on stderr never interleaves with it, and the process's user data (its Tests.log) goes to the same temporary
-    directory. `environment` is the suite's (default: child_environment())."""
+@dataclasses.dataclass(frozen=True)
+class ListedTestCase:
+    """A test case of the Tests binary's listing (list_test_cases)."""
+
+    name: str
+    suite: str  # its doctest test suite
+    skipped: bool  # it carries doctest::skip
+
+
+def list_test_cases(executable: Path, filters: list[str],
+                    environment: dict[str, str] | None = None) -> list[ListedTestCase]:
+    """Ask the Tests binary which test cases `filters` select, skipped ones included (--no-skip), in the order it runs
+    them (doctest's default order, by file, line and template). doctest's XML reporter gives each <TestCase> its suite
+    and its doctest::skip flag; the listing goes to a file (--out), so the log on stderr never interleaves with it, and
+    the process's user data (its Tests.log) goes to the same temporary directory. `environment` is the suite's (default:
+    child_environment()). Raises SkipCheckError when the binary cannot list them."""
     with tempfile.TemporaryDirectory(prefix="Test-SkipCheck-") as directory:
         listing = Path(directory) / "TestCases.xml"
         command = [str(executable), *filters, "--no-skip", "--list-test-cases", "--reporters=xml", f"--out={listing}",
@@ -687,17 +743,48 @@ def list_skipped_test_cases(executable: Path, filters: list[str],
             cases = list(ElementTree.parse(listing).getroot().iter("TestCase"))
         except (OSError, ElementTree.ParseError) as error:
             raise SkipCheckError(f"cannot read the test case listing of {format_command(command)}: {error}") from error
-    skipped = sorted(case.get("name", "") for case in cases if case.get("skipped") == "true")
-    child_targets = sorted(case.get("name", "") for case in cases if case.get("testsuite") == CHILD_TARGET_SUITE)
-    unexpected = sorted(case.get("name", "") for case in cases
-                        if case.get("skipped") == "true" and case.get("testsuite") != CHILD_TARGET_SUITE)
+    return [ListedTestCase(case.get("name", ""), case.get("testsuite", ""), case.get("skipped") == "true")
+            for case in cases]
+
+
+def check_skips(cases: list[ListedTestCase]) -> SkipCheck:
+    """The skip check of a listing (list_test_cases): its skipped cases, its child-process targets, and the skipped
+    cases outside the ChildTargets suite, each by name, sorted."""
+    skipped = sorted(case.name for case in cases if case.skipped)
+    child_targets = sorted(case.name for case in cases if case.suite == CHILD_TARGET_SUITE)
+    unexpected = sorted(case.name for case in cases if case.skipped and case.suite != CHILD_TARGET_SUITE)
     return SkipCheck(skipped, child_targets, unexpected)
+
+
+def list_skipped_test_cases(executable: Path, filters: list[str],
+                            environment: dict[str, str] | None = None) -> SkipCheck:
+    """The skip check of the test cases `filters` select (list_test_cases, check_skips). Raises SkipCheckError."""
+    return check_skips(list_test_cases(executable, filters, environment))
 
 
 def describe_unexpected_skips(skips: SkipCheck) -> str:
     names = ", ".join(f"'{name}'" for name in skips.unexpected[:UNEXPECTED_SKIPS_IN_DETAIL])
     more = len(skips.unexpected) - UNEXPECTED_SKIPS_IN_DETAIL
     return names + (f" and {more} more" if more > 0 else "")
+
+
+def describe_skip_check(skips: SkipCheck, passed: str, allow_skips: bool) -> tuple[Status, str]:
+    """The outcome of a run whose test cases passed (`passed` describes them) under its skip check: failed, naming
+    them, when a test case outside the ChildTargets suite is skipped and `allow_skips` (contract mode) is off;
+    otherwise passed, with what was skipped."""
+    child_targets = f"{len(skips.child_targets)} child-process target(s) in the {CHILD_TARGET_SUITE} suite"
+    if skips.unexpected and not allow_skips:
+        return Status.FAILED, (f"{len(skips.unexpected)} skipped test case(s) outside the {CHILD_TARGET_SUITE} suite: "
+                               f"{describe_unexpected_skips(skips)}; only the {child_targets} may stay skipped "
+                               f"(Roadmap rule 3; --allow-skips is contract mode, for a contract checkpoint's targeted "
+                               f"runs)")
+    if allow_skips:
+        return Status.PASSED, (f"{passed}; contract mode (--allow-skips): {len(skips.skipped)} skipped, "
+                               f"{len(skips.unexpected)} of them outside the {CHILD_TARGET_SUITE} suite; "
+                               f"{child_targets}")
+    if skips.skipped:
+        return Status.PASSED, f"{passed}; {len(skips.skipped)} skipped, all of them among the {child_targets}"
+    return Status.PASSED, f"{passed}; none skipped"
 
 
 def tests_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
@@ -891,6 +978,29 @@ def tests_timeout(run: TestRun, arguments: argparse.Namespace) -> float:
     return DEBUG_UNIT_TIMEOUT_SECONDS if run.suite == "unit" and run.config == "Debug" else SUITE_TIMEOUT_SECONDS
 
 
+def describe_failed_tests(exit_code: int | None, process_id: int | None, counts: TestCounts | None,
+                          reports: list[Path], sanitizer_errors: list[str], user_data: Path, executable: Path,
+                          data: dict[str, Any]) -> str:
+    """The detail of a Tests process that exited with a non-zero `exit_code` or printed AddressSanitizer reports: its
+    failed test cases, or else its exit code and, without a crash report of its own (`reports`), what its log below
+    `user_data` says (read_process_log, describe_end_without_report; the last test case and log lines also go into
+    `data` as "lastTestCase" and "lastLogLines"); then its sanitizer reports and its crash reports."""
+    if counts is not None and counts.failed:
+        detail = f"{counts.failed} of {counts.executed} test case(s) failed"
+    else:
+        detail = f"Tests exited with code {describe_exit_code(exit_code)}"
+        if exit_code is not None and exit_code != 0 and not reports and process_id is not None:
+            log = read_process_log(user_data, executable.stem, process_id, LOG_LINES_IN_DATA)
+            data["lastTestCase"] = log.last_test_case
+            data["lastLogLines"] = log.last_lines
+            detail += f"; {describe_end_without_report(exit_code, log)}"
+    if sanitizer_errors:
+        detail += f"; {describe_sanitizer_errors(sanitizer_errors)}"
+    if reports:
+        detail += f"; {describe_crash_reports(reports)}"
+    return detail
+
+
 def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> Step:
     executable = tests_executable(run.config, arguments.build_root)
     if not executable.is_file():
@@ -995,20 +1105,8 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
         console.print(skip_error)
 
     if result.exit_code != 0 or sanitizer_errors:
-        if counts is not None and counts.failed:
-            detail = f"{counts.failed} of {counts.executed} test case(s) failed"
-        else:
-            detail = f"Tests exited with code {describe_exit_code(result.exit_code)}"
-            exit_code = result.exit_code
-            if exit_code is not None and exit_code != 0 and not reports and result.process_id is not None:
-                log = read_process_log(user_data, executable.stem, result.process_id, LOG_LINES_IN_DATA)
-                data["lastTestCase"] = log.last_test_case
-                data["lastLogLines"] = log.last_lines
-                detail += f"; {describe_end_without_report(exit_code, log)}"
-        if sanitizer_errors:
-            detail += f"; {describe_sanitizer_errors(sanitizer_errors)}"
-        if reports:
-            detail += f"; {describe_crash_reports(reports)}"
+        detail = describe_failed_tests(result.exit_code, result.process_id, counts, reports, sanitizer_errors,
+                                       user_data, executable, data)
         if device.mismatched:
             detail += f"; golden mismatches: {describe_names(device.mismatched)} (outputs in bin/TestResults/Golden/)"
         if device.class_changed:
@@ -1027,20 +1125,9 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
         if arguments.allow_skips:
             return Step(run.name, Status.PASSED, f"{passed}; {skip_error} (--allow-skips)", result.duration, data=data)
         return Step(run.name, Status.FAILED, skip_error, result.duration, data=data)
-    child_targets = f"{len(skips.child_targets)} child-process target(s) in the {CHILD_TARGET_SUITE} suite"
-    if skips.unexpected and not arguments.allow_skips:
-        return Step(run.name, Status.FAILED, f"{len(skips.unexpected)} skipped test case(s) outside the "
-                                             f"{CHILD_TARGET_SUITE} suite: {describe_unexpected_skips(skips)}; only "
-                                             f"the {child_targets} may stay skipped (Roadmap rule 3; --allow-skips is "
-                                             f"contract mode, for a contract checkpoint's targeted runs)",
-                                             result.duration, data=data)
-    if arguments.allow_skips:
-        detail = (f"{passed}; contract mode (--allow-skips): {len(skips.skipped)} skipped, {len(skips.unexpected)} "
-                  f"of them outside the {CHILD_TARGET_SUITE} suite; {child_targets}")
-    elif skips.skipped:
-        detail = f"{passed}; {len(skips.skipped)} skipped, all of them among the {child_targets}"
-    else:
-        detail = f"{passed}; none skipped"
+    status, detail = describe_skip_check(skips, passed, arguments.allow_skips)
+    if status == Status.FAILED:
+        return Step(run.name, status, detail, result.duration, data=data)
     if device.matched:
         detail += (f"; {len(device.matched)} golden image(s) matched on device class "
                    f"{', '.join(sorted(device.device_classes))}")
@@ -1050,6 +1137,360 @@ def run_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> 
     if notes:
         return Step(run.name, Status.WARNING, f"{detail}; {'; '.join(notes)}", result.duration, data=data)
     return Step(run.name, Status.PASSED, detail, result.duration, data=data)
+
+
+@dataclasses.dataclass
+class ShardProcess:
+    """One shard of a sharded Tests run (run_sharded_tests): its plan, its files, its process once it started, and what
+    was measured of it while it ran."""
+
+    plan: shards.ShardPlan
+    command: list[str]
+    report: Path  # its JUnit report (shard_files)
+    user_data: Path  # its user-data root
+    output: Path  # its standard output and standard error
+    timeout: float = 0.0  # set as it starts: its expected time's timeout within what is left of the run's bound
+    earlier_reports: set[Path] = dataclasses.field(default_factory=set)  # the crash reports before it started
+    process: subprocess.Popen[bytes] | None = None  # None until it starts, and for a shard the bound left unstarted
+    started: float = 0.0  # seconds after the first shard started
+    duration: float | None = None  # None while it runs
+    timed_out: bool = False
+    peak_private_bytes: int = 0  # the largest private memory sampled
+    peak_resident_bytes: int = 0  # the largest peak working set (resident memory) sampled
+
+
+@dataclasses.dataclass
+class ShardOutcome:
+    """What a shard's process left (evaluate_shard): its status and detail, its counts (None without a readable
+    report), its report's (name, seconds) entries and its data for the step's JSON."""
+
+    status: Status
+    detail: str
+    counts: TestCounts | None
+    entries: list[tuple[str, float]]
+    data: dict[str, Any]
+
+
+def shard_files(run: TestRun, index: int) -> tuple[Path, Path, Path]:
+    """(JUnit report, user-data root, output) of shard `index` of `run`: bin/TestResults/<report stem>/Shard<k>.xml, the
+    user-data root beside it (Lib/paths.py's tests_run_user_data: <report stem>/Shard<k>/UserData) and
+    <report stem>/Shard<k>.log. Like a plain run's user data, the root is kept: every sharded run of the suite and
+    configuration in the checkout shares it, so a run names only the crash reports its own process wrote."""
+    report = paths.TEST_RESULTS_ROOT / run.report_stem / f"Shard{index}.xml"
+    return report, paths.tests_run_user_data(report), report.with_suffix(".log")
+
+
+def run_shard_pool(queue: list[ShardProcess], parallel: int, bound: float, environment: dict[str, str]) -> int | None:
+    """Runs the shards of `queue`, in its order, at most `parallel` at a time, looking every SHARD_POLL_SECONDS: a shard
+    starts when a process ends, with the timeout of its expected time within what is left of `bound` (seconds from the
+    pool's start; shards.shard_timeout); each running one's memory is sampled, and one that has run for its timeout is
+    ended with its tree (terminate_tree) and marked timed out. A shard that `bound` leaves unstarted keeps no process.
+    Returns the least available physical memory of the machine seen, in bytes (None when it could not be read). Raises
+    ToolNotFoundError or OSError when a shard cannot start, ending the running ones."""
+    pool_started = time.monotonic()
+    pending = collections.deque(queue)
+    running: list[ShardProcess] = []
+    least_available: int | None = None
+    try:
+        while True:
+            now = time.monotonic() - pool_started
+            for shard in list(running):
+                if shard.process is None:
+                    continue
+                if shard.process.poll() is not None:
+                    shard.duration = now - shard.started
+                    running.remove(shard)
+                    continue
+                try:
+                    memory = query_process_memory(shard.process.pid)
+                    shard.peak_private_bytes = max(shard.peak_private_bytes, memory.private_bytes)
+                    shard.peak_resident_bytes = max(shard.peak_resident_bytes, memory.peak_resident_bytes)
+                except (ProcessLookupError, OSError):
+                    pass
+                if now - shard.started >= shard.timeout:
+                    terminate_tree(shard.process)
+                    shard.timed_out = True
+                    shard.duration = now - shard.started
+                    running.remove(shard)
+            while pending and len(running) < parallel and now < bound:
+                shard = pending.popleft()
+                shard.user_data.mkdir(parents=True, exist_ok=True)
+                shard.report.unlink(missing_ok=True)
+                shard.earlier_reports = set(crash_reports(shard.user_data))
+                shard.timeout = shards.shard_timeout(shard.plan.expected_seconds, bound - now)
+                shard.started = now
+                shard.process = start_to_file(shard.command, shard.output, cwd=paths.REPOSITORY_ROOT, env=environment)
+                running.append(shard)
+            try:
+                available = hardening.available_memory_bytes()
+                least_available = available if least_available is None else min(least_available, available)
+            except OSError:
+                pass
+            if not running and (not pending or now >= bound):
+                return least_available
+            time.sleep(SHARD_POLL_SECONDS)
+    finally:
+        for shard in running:
+            if shard.process is not None and shard.process.poll() is None:
+                terminate_tree(shard.process)
+
+
+def read_shard_output(output: Path) -> tuple[str, list[str]]:
+    """(the last SHARD_OUTPUT_TAIL_LINES lines, every "ERROR: AddressSanitizer:" line) of a shard's output file; empty
+    when it cannot be read."""
+    tail: collections.deque[str] = collections.deque(maxlen=SHARD_OUTPUT_TAIL_LINES)
+    sanitizer_errors: list[str] = []
+    try:
+        with output.open("rb") as stream:
+            for raw in stream:
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                tail.append(line)
+                if SANITIZER_ERROR_PATTERN.search(line):
+                    sanitizer_errors.append(line)
+    except OSError:
+        pass
+    return "\n".join(tail), sanitizer_errors
+
+
+def describe_shard_time(shard: ShardProcess) -> str:
+    """When a shard started and how long it ran, against its expected time and its timeout."""
+    expected = (f", expected {shard.plan.expected_seconds:.0f} s" if shard.plan.expected_seconds is not None
+                else ", no expected time")
+    return f"{shard.duration or 0.0:.0f} s from {shard.started:.0f} s{expected}, timeout {shard.timeout:.0f} s"
+
+
+def evaluate_shard(shard: ShardProcess, run: TestRun, executable: Path, bound: float, console: Console) -> ShardOutcome:
+    """The outcome of a shard: as a plain run's (run_tests), from its JUnit report, its output's AddressSanitizer lines,
+    the crash reports its process wrote and, when it ended without a report, its log; a process that ended without a
+    readable report, and a shard the run's `bound` left unstarted, get a report with an error test case naming the shard
+    (write_crash_junit). A shard whose process ran to its end must also have run exactly its range
+    (shards.check_shard_cases). A timed-out shard names the last test case its log says it started. Its data hold its
+    "status", its "outcome" (SHARD_OUTCOMES) and its "detail"."""
+    plan = shard.plan
+    data: dict[str, Any] = {
+        "shard": plan.index, "first": plan.first, "last": plan.last, "cases": len(plan.cases),
+        "expectedSeconds": plan.expected_seconds, "junit": paths.display_path(shard.report),
+        "output": paths.display_path(shard.output), "userData": paths.display_path(shard.user_data)}
+
+    def finish(status: Status, outcome: str, detail: str, counts: TestCounts | None = None,
+               entries: list[tuple[str, float]] | None = None) -> ShardOutcome:
+        data.update({"status": status.value, "outcome": outcome, "detail": detail})
+        return ShardOutcome(status, detail, counts, entries or [], data)
+
+    if shard.process is None or shard.duration is None:
+        detail = f"did not start: the run's {bound:.0f} s ran out first"
+        write_crash_junit(shard.report, run.junit_suite_name, f"{plan.label}: {detail}", "")
+        return finish(Status.TIMEOUT, SHARD_NOT_STARTED, detail)
+    process_id = shard.process.pid
+    exit_code = None if shard.timed_out else shard.process.returncode
+    tail, sanitizer_errors = read_shard_output(shard.output)
+    reports = [path for path in crash_reports(shard.user_data, process_id) if path not in shard.earlier_reports]
+    data.update({"startedAtSeconds": round(shard.started, 1), "seconds": round(shard.duration, 1),
+                 "timeoutSeconds": round(shard.timeout, 1), "exitCode": exit_code,
+                 "peakPrivateBytes": shard.peak_private_bytes, "peakResidentBytes": shard.peak_resident_bytes})
+    for path in reports:
+        console.print(f"CRASH REPORT: {paths.display_path(path)}")
+    if reports:
+        data["crashReports"] = [paths.display_path(path) for path in reports]
+    for line in sanitizer_errors:
+        console.print(f"SANITIZER: {plan.label}: {line.strip()}")
+    if sanitizer_errors:
+        data["sanitizerErrors"] = sanitizer_errors
+    counts: TestCounts | None = None
+    entries: list[tuple[str, float]] = []
+    if shard.timed_out:
+        write_crash_junit(shard.report, run.junit_suite_name, f"{plan.label}: Tests timed out after "
+                                                              f"{shard.duration:.0f} s", tail)
+    else:
+        try:
+            counts = read_junit(shard.report, run.junit_suite_name)
+            entries = shards.report_entries(shard.report)
+        except (OSError, ElementTree.ParseError):
+            counts = None
+            write_crash_junit(shard.report, run.junit_suite_name, f"{plan.label}: Tests exited with code "
+                                                                  f"{describe_exit_code(exit_code)} without a JUnit "
+                                                                  f"report", tail)
+    if counts is not None:
+        data.update({"testCases": counts.executed, "passed": counts.passed, "failed": counts.failed,
+                     "skipped": counts.skipped})
+    problems = shards.check_shard_cases(plan, [name for name, _ in entries]) if counts is not None else []
+    if problems:
+        data["caseProblems"] = problems
+    case_problems = (f"ran other test cases than its range {plan.first}..{plan.last}: {len(problems)} problem(s), "
+                     f"first: {problems[0]}") if problems else ""
+    if shard.timed_out:
+        log = read_process_log(shard.user_data, executable.stem, process_id, LOG_LINES_IN_DATA)
+        data["lastTestCase"] = log.last_test_case
+        data["lastLogLines"] = log.last_lines
+        detail = f"Tests timed out ({describe_shard_time(shard)})"
+        if log.last_test_case is not None:
+            detail += f"; the last test case it started: '{log.last_test_case}'"
+        if reports:
+            detail += f"; {describe_crash_reports(reports)}"
+        return finish(Status.TIMEOUT, SHARD_TIMED_OUT, detail, counts, entries)
+    if exit_code != 0 or sanitizer_errors:
+        detail = describe_failed_tests(exit_code, process_id, counts, reports, sanitizer_errors, shard.user_data,
+                                       executable, data)
+        # A process that ended without its report, or with a crash report of its own, crashed; one whose report counts
+        # failed passes, or whose output holds an AddressSanitizer report, failed.
+        crashed = exit_code != 0 and (counts is None or bool(reports))
+        return finish(Status.FAILED, SHARD_CRASHED if crashed else SHARD_FAILED,
+                      detail + (f"; {case_problems}" if problems else ""), counts, entries)
+    if counts is None:
+        return finish(Status.FAILED, SHARD_FAILED, "Tests exited with code 0 without a JUnit report")
+    if problems:
+        return finish(Status.FAILED, SHARD_FAILED, case_problems, counts, entries)
+    return finish(Status.PASSED, SHARD_PASSED, f"{len(plan.cases)} test case(s) passed ({counts.passed} pass(es) "
+                                               f"through their subcases)", counts, entries)
+
+
+def run_sharded_tests(run: TestRun, arguments: argparse.Namespace, console: Console) -> Step:
+    """--parallel <n> (the unit suite): one listing of the run's selection (list_test_cases), then its unskipped cases
+    in contiguous shards of about shards.SHARD_SECONDS of measured work each (Lib/shards.py shard_count and plan_shards,
+    sized from the costs that passing sharded runs of the report stem kept), each run by its own Tests process with
+    --first and --last, its own JUnit report, output and user-data root (shard_files), n at a time, dearest first
+    (run_shard_pool, shards.start_order), each with a timeout that follows its expected time within what is left of the
+    run's bound (tests_timeout, which the listing and the shards share). The skip check is the listing's, the reports
+    merge into the run's (--junit; removed first, and replaced by one naming the failure when the run fails before
+    the merge), and the step fails naming every failed shard; a run whose shards all passed merges its cases' costs into
+    the kept ones (shards.keep_costs, shards.machine_costs_path), whatever part of the suite it selected."""
+    started = time.monotonic()
+    report = junit_path(run.report_stem) if arguments.junit else None
+    if report is not None:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.unlink(missing_ok=True)
+    data: dict[str, Any] = {"suite": run.suite, "config": run.config}
+
+    def failed_early(detail: str, exit_code: int | None = None) -> Step:
+        # The run's report names the failure, so no earlier run's report stands for this one.
+        if report is not None:
+            write_crash_junit(report, run.junit_suite_name, detail, "")
+            data["junit"] = paths.display_path(report)
+        return Step(run.name, Status.FAILED, detail, time.monotonic() - started, exit_code=exit_code, data=data)
+
+    executable = tests_executable(run.config, arguments.build_root)
+    data["executable"] = paths.display_path(executable)
+    if not executable.is_file():
+        return failed_early(f"{paths.display_path(executable)} not found: "
+                            f"{build_hint(run.config, 'Tests', arguments)}", EXIT_INIT_FAILED)
+    try:
+        environment = suite_environment(arguments)
+    except FileNotFoundError as error:
+        return failed_early(missing_sanitizer_runtime(run.name, error).detail, EXIT_INIT_FAILED)
+    filters = list(run.filters)
+    if arguments.filter:
+        filters.append(f"--test-case={arguments.filter}")
+    if run.sanitizer:
+        data["sanitizer"] = run.sanitizer
+    try:
+        listed = list_test_cases(executable, filters, environment)
+    except SkipCheckError as error:
+        return failed_early(f"cannot list the test cases: {error}")
+    skips = check_skips(listed)
+    data["skipCheck"] = skips.to_json(arguments.allow_skips)
+    if not arguments.allow_skips:
+        for skipped_case in skips.unexpected:
+            console.print(f"UNEXPECTED SKIP: {skipped_case}")
+    selection = [case.name for case in listed if not case.skipped]
+    if not selection:
+        return failed_early("no test case ran" + (" (check --filter)" if arguments.filter else ""))
+
+    kept = shards.machine_costs_path(run.report_stem)
+    try:
+        costs = shards.read_case_costs(kept, selection)
+        unmeasured = len(selection) - len(costs)
+        sizing = (f"sized from {paths.display_path(kept)}: {len(costs)} of {len(selection)} test case(s) measured"
+                  + (f", {unmeasured} at their average" if unmeasured else "") if costs else
+                  f"equal case counts: no measurement in {paths.display_path(kept)}")
+    except ValueError as error:
+        costs, sizing = {}, f"equal case counts: {error}"
+    plans = shards.plan_shards(selection, shards.shard_count(selection, arguments.parallel, costs), costs)
+    processes: list[ShardProcess] = []
+    for plan in plans:
+        shard_report, user_data, output = shard_files(run, plan.index)
+        command = [str(executable), *filters, *plan.options(), *run.options, f"--user-data-dir={user_data.resolve()}",
+                   "--reporters=junit", f"--out={shard_report}"]
+        processes.append(ShardProcess(plan, command, shard_report, user_data, output))
+    bound = max(0.0, tests_timeout(run, arguments) - (time.monotonic() - started))
+    parallel = min(arguments.parallel, len(plans))
+    expected = [plan.expected_seconds for plan in plans if plan.expected_seconds is not None]
+    data.update({"selectedCases": len(selection), "shardCount": len(plans), "parallel": parallel, "sizing": sizing,
+                 "measuredCases": len(costs), "costs": paths.display_path(kept),
+                 "expectedSeconds": sum(expected) if expected else None})
+    console.heading(f"{run.name}: {len(selection)} test case(s) in {len(plans)} shard(s), {parallel} at a time "
+                    f"({sizing}" + (f"; {sum(expected):.0f} s of work expected" if expected else "")
+                    + f"; {bound:.0f} s left of the run's bound): "
+                      f"{format_command([paths.display_path(executable), *filters, *run.options])} --first=<a> "
+                      f"--last=<b> --user-data-dir={paths.display_path(paths.TEST_RESULTS_ROOT / run.report_stem)}"
+                      f"/Shard<k>/UserData")
+    pool_started = time.monotonic()
+    try:
+        order = {plan.index: position for position, plan in enumerate(shards.start_order(plans))}
+        least_available = run_shard_pool(sorted(processes, key=lambda shard: order[shard.plan.index]), parallel, bound,
+                                         environment)
+    except (ToolNotFoundError, OSError) as error:
+        return failed_early(f"cannot run the shards: {error}", EXIT_INIT_FAILED)
+    pool_seconds = time.monotonic() - pool_started
+
+    outcomes = [evaluate_shard(shard, run, executable, bound, console) for shard in processes]
+    counts = TestCounts()
+    failures: list[str] = []
+    for shard, outcome in zip(processes, outcomes):
+        timing = (f"{describe_shard_time(shard)}; peak private memory {shard.peak_private_bytes >> 20} MB"
+                  if shard.process is not None else "not started")
+        console.print(f"{run.name}: {shard.plan.label}: {outcome.status.value}: {outcome.detail} ({timing})")
+        if outcome.status != Status.PASSED and shard.process is not None:
+            console.print(f"{shard.plan.label}: the end of {paths.display_path(shard.output)}:\n"
+                          f"{read_shard_output(shard.output)[0]}")
+        if outcome.counts is not None:
+            counts.executed += outcome.counts.executed
+            counts.passed += outcome.counts.passed
+            counts.failed += outcome.counts.failed
+            counts.skipped += outcome.counts.skipped
+            failures += [f"{shard.plan.label}: {failure}" for failure in outcome.counts.failures]
+    for failure in failures:
+        console.print(f"FAILED: {failure}")
+    peak_private = max(shard.peak_private_bytes for shard in processes)
+    data.update({"testCases": counts.executed, "passed": counts.passed, "failed": counts.failed,
+                 "skipped": counts.skipped, "shards": [outcome.data for outcome in outcomes],
+                 "shardsSeconds": round(pool_seconds, 1), "peakPrivateBytes": peak_private,
+                 "peakResidentBytes": max(shard.peak_resident_bytes for shard in processes),
+                 "leastAvailableBytes": least_available})
+    if failures:
+        data["failures"] = failures
+    try:
+        merged = shards.merge_reports([(shard.plan, shard.report) for shard in processes], run.junit_suite_name)
+        if report is not None:
+            shards.write_report(merged, report)
+            data["junit"] = paths.display_path(report)
+    except (OSError, ElementTree.ParseError) as error:
+        return failed_early(f"cannot merge the shards' reports: {error}")
+    duration = time.monotonic() - started
+
+    failed = [(shard, outcome) for shard, outcome in zip(processes, outcomes) if outcome.status != Status.PASSED]
+    if failed:
+        status = Status.TIMEOUT if all(outcome.status == Status.TIMEOUT for _, outcome in failed) else Status.FAILED
+        listed_failures = "; ".join(f"{shard.plan.label}: {outcome.detail}" for shard, outcome in failed)
+        return Step(run.name, status, f"{len(failed)} of {len(plans)} shard(s) failed: {listed_failures}", duration,
+                    data=data)
+    longest = max(processes, key=lambda shard: shard.duration or 0.0)
+    passed = (f"{len(selection)} test case(s) ({counts.passed} pass(es) through their subcases) passed in "
+              f"{len(plans)} shard(s), {parallel} at a time, in {pool_seconds:.0f} s (the longest shard "
+              f"{longest.duration or 0.0:.0f} s, {longest.plan.label}; the peak private memory of a shard "
+              f"{peak_private >> 20} MB)")
+    status, detail = describe_skip_check(skips, passed, arguments.allow_skips)
+    if status == Status.FAILED:
+        return Step(run.name, status, detail, duration, data=data)
+    # A passing run measured the cases it ran: they replace those cases' kept costs for every checkout's next sharded
+    # run of the report stem, and the cases it did not select keep theirs. A failed run leaves the kept costs alone.
+    try:
+        shards.keep_costs(merged, kept, selection)
+    except OSError as error:
+        problem = f"the measured costs could not be kept in {paths.display_path(kept)}: {error}"
+        console.print(f"WARNING: {problem}")
+        return Step(run.name, Status.WARNING, f"{detail}; {problem}", duration, data=data)
+    data["keptCosts"] = paths.display_path(kept)
+    return Step(run.name, Status.PASSED, detail, duration, data=data)
 
 
 def editor_executable(config: str, build_root: Path = paths.BIN_ROOT) -> Path:
@@ -2614,7 +3055,10 @@ def run_suite(name: str, config: str, arguments: argparse.Namespace, console: Co
         yield run_feature(config, arguments, console)
         return
     for run in plan_runs(name, config, arguments):
-        yield run_tests(run, arguments, console)
+        if run.suite == "unit" and getattr(arguments, "parallel", None) is not None:
+            yield run_sharded_tests(run, arguments, console)
+        else:
+            yield run_tests(run, arguments, console)
 
 
 def suite_configurations(suite: Suite, configs: list[str] | None) -> tuple[list[str], list[str]]:
@@ -2673,7 +3117,8 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                              f"{CHILD_TARGET_SUITE} suite (unit, gpu, golden) and skipped Python tests (automation) "
                              "instead of failing the run")
     parser.add_argument("--timeout", type=float,
-                        help=f"seconds per Tests, automation or FeatureTest run, per export of the export suite, and "
+                        help=f"seconds per Tests, automation or FeatureTest run (a sharded unit run's listing and "
+                             f"shards together, --parallel), per export of the export suite, and "
                              f"per editor call and exported run of the games suite, whose testing Dist export waits "
                              f"{EXPORT_FEATURE_TEST_RUN_SECONDS:.0f} s more for its own feature-test run and whose "
                              f"Dist exports of a game with Native/ {EXPORT_NATIVE_BUILD_SECONDS:.0f} s more for its "
@@ -2710,6 +3155,17 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
                         help="unit suite: comma-separated doctest test suites to leave out besides GPU and Golden (the "
                              "hardening stage's sanitized unit run leaves out Fuzz, which its fuzz step runs as a "
                              "superset)")
+    parser.add_argument("--parallel", type=int, metavar="N",
+                        help="unit suite: list the run's test cases once, then run them in contiguous shards of about "
+                             f"{shards.SHARD_SECONDS:.0f} s of measured work each (at least N, one Tests process "
+                             "each), N at a time, dearest first, sized from the per-case costs that passing "
+                             f"sharded runs of the report kept in <git common dir>/{shards.COSTS_DIRECTORY_NAME}/"
+                             f"<report stem>.xml ({shards.SHARD_CASES} cases a shard without them); each shard's "
+                             "timeout follows its "
+                             f"expected time (x {shards.SHARD_TIMEOUT_FACTOR:g}, at least "
+                             f"{shards.SHARD_MINIMUM_TIMEOUT_SECONDS:.0f} s) within --timeout, which bounds the "
+                             "listing and the shards together; the shards' reports merge into the run's, and a failure "
+                             "names its shard (the hardening stage's sanitized unit run)")
     parser.add_argument("--json", action="store_true", help="print a machine-readable result on stdout")
     locks.add_wait_arguments(parser)
     arguments = parser.parse_args(argv)
@@ -2760,6 +3216,14 @@ def parse_arguments(argv: list[str]) -> argparse.Namespace:
         if "unit" not in arguments.suites:
             parser.error("--exclude-test-suites applies to the unit suite only")
         arguments.exclude_test_suites = names
+    if arguments.parallel is not None:
+        if arguments.parallel < 1:
+            parser.error("--parallel must be at least 1")
+        if "unit" not in arguments.suites:
+            parser.error("--parallel applies to the unit suite only")
+        if arguments.debug_heap:
+            parser.error("--parallel and --debug-heap do not combine: a sharded run starts its Tests processes without "
+                         "the debugger that sets up the debug heap")
     return arguments
 
 

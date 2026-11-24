@@ -5,16 +5,20 @@ parent's id (find_new_descendants): Windows never updates a recorded parent id a
 /T`, which follows the ids alone, could end another checkout's older process whose parent's id a process of the tree
 now holds (Docs/Backlog.md, R-GPUCRASH's evidence). A real reuse of an id takes thousands of process creations on
 Windows 11, so the selection is checked on a recorded table, and a real tree checks the rest. Waits for a process to end
-are bounded by a generous deadline that only bounds a failure. No editor.
+are bounded by a generous deadline that only bounds a failure. start_to_file, which starts a sharded unit run's
+Tests processes, writes a process's output to a file and leaves its tree to terminate_tree. No editor.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
+from pathlib import Path
 
 from harness import REPOSITORY_ROOT
 
@@ -95,6 +99,33 @@ class TerminateTreeTests(unittest.TestCase):
         self.assertIsNotNone(root.returncode)
         for watch in watches:
             self.assertTrue(watch.ended_within(DEADLINE_SECONDS), f"process {watch.process_id} still runs")
+
+    def test_a_process_started_to_a_file_writes_its_output_there_and_terminate_tree_ends_its_tree(self) -> None:
+        # Test.py's sharded runs start each shard so (start_to_file) and end one past its timeout with terminate_tree.
+        directory = Path(tempfile.mkdtemp(prefix="StartToFile-"))
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        output = directory / "Shard0.log"
+        root = process.start_to_file([sys.executable, "-c", TREE_SCRIPT, "2", TREE_SCRIPT], output)
+        self.addCleanup(process.terminate_tree, root)
+        # Both levels print their ids into the file, the child through the standard output it inherited.
+        deadline = time.monotonic() + DEADLINE_SECONDS
+        while len(output.read_text(encoding="utf-8").split()) < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        ids = [int(text) for text in output.read_text(encoding="utf-8").split()]
+        self.assertEqual(len(ids), 2, ids)
+        self.assertIsNone(root.poll())
+        watches = [ProcessWatch(process_id) for process_id in ids]
+        for watch in watches:
+            self.addCleanup(watch.close)
+
+        process.terminate_tree(root)
+
+        self.assertIsNotNone(root.returncode)
+        for watch in watches:
+            self.assertTrue(watch.ended_within(DEADLINE_SECONDS), f"process {watch.process_id} still runs")
+        # A file that cannot be created is an OSError before anything starts.
+        with self.assertRaises(OSError):
+            process.start_to_file([sys.executable, "-c", "pass"], directory / "Missing" / "Shard1.log")
 
     def test_a_process_older_than_the_holder_of_its_parents_id_is_no_descendant(self) -> None:
         # The root, 100, was created at tick 1000; 200 (created in the same tick) and 300 are its child and grandchild.

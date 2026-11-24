@@ -1872,13 +1872,56 @@ class TestScriptSanitizerTests(unittest.TestCase):
         document = {"steps": [{"name": "unit Release (ASan)", "status": "passed", "detail": "3,500 passed"}]}
         arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "asan-unit"])
         with mock.patch.object(hardening_script, "run_json_script",
-                               return_value=hardening_script.JsonRun(0, False, 1.0, document)) as run_json:
+                               return_value=hardening_script.JsonRun(0, False, 1.0, document)) as run_json, \
+                contextlib.redirect_stderr(io.StringIO()):
             step = hardening_script.step_asan_unit(arguments, hardening_script.Console(True))
         self.assertEqual(step.status, Status.PASSED)
         options = run_json.call_args.args[2]
         index = options.index("--exclude-test-suites")
         self.assertEqual(options[index + 1], hardening.FUZZ_SUITE)
         self.assertEqual(options[options.index("--suite") + 1], "unit")
+
+    def test_the_unit_processes_at_a_time_follow_the_cpus_and_the_memory(self) -> None:
+        peak = hardening.UNIT_PEAK_PROCESS_BYTES
+        self.assertEqual(hardening.unit_process_count(24, 64 << 30, peak), min(12, (64 << 30) // peak))
+        self.assertEqual(hardening.unit_process_count(64, 1 << 40, peak), hardening.UNIT_MAX_PROCESSES)
+        self.assertEqual(hardening.unit_process_count(24, 5 * peak + 1, peak), 5)
+        self.assertEqual(hardening.unit_process_count(1, 64 << 30, peak), 1)
+        self.assertEqual(hardening.unit_process_count(24, peak - 1, peak), 1)
+        for values in ((0, 1, 1), (1, 0, 1), (1, 1, 0)):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                hardening.unit_process_count(*values)
+
+    def test_the_sanitized_unit_run_is_sharded_by_the_cpus_and_the_memory(self) -> None:
+        # The step passes the processes at a time to Test.py and its 3,600 s as the bound of the listing and the
+        # shards; the shards' plan, pool, merge, skip check and timeouts are Test.py's
+        # (Tests/Automation/test_test_script.py).
+        document = {"steps": [{"name": "unit Release (ASan)", "status": "passed", "detail": "5,498 passed in 12 "
+                                                                                          "shard(s)"}]}
+        arguments = quiet_parse(hardening_script.parse_arguments, ["--steps", "asan-unit"])
+        peak = hardening.UNIT_PEAK_PROCESS_BYTES
+        for cpus, available, parallel in ((24, 64 << 30, min(12, (64 << 30) // peak)), (24, 3 * peak, 3)):
+            with self.subTest(cpus=cpus, available=available), \
+                    mock.patch.object(hardening, "available_memory_bytes", return_value=available), \
+                    mock.patch.object(hardening_script.os, "cpu_count", return_value=cpus), \
+                    mock.patch.object(hardening_script, "run_json_script",
+                                      return_value=hardening_script.JsonRun(0, False, 1.0, document)) as run_json, \
+                    contextlib.redirect_stderr(io.StringIO()):
+                step = hardening_script.step_asan_unit(arguments, hardening_script.Console(True))
+                self.assertEqual(step.status, Status.PASSED)
+                options = run_json.call_args.args[2]
+                self.assertEqual(options[options.index("--parallel") + 1], str(parallel))
+                self.assertEqual(options[options.index("--timeout") + 1],
+                                 str(int(hardening_script.TIMEOUTS["asan-unit"])))
+                self.assertEqual(run_json.call_args.args[3],
+                                 hardening_script.TIMEOUTS["asan-unit"] + hardening_script.SUITE_GRACE_SECONDS)
+                self.assertEqual((step.data["parallel"], step.data["logicalCpus"], step.data["availableBytes"]),
+                                 (parallel, cpus, available))
+        with mock.patch.object(hardening, "available_memory_bytes", side_effect=OSError("no memory status")), \
+                mock.patch.object(hardening_script, "run_json_script", side_effect=AssertionError("started")):
+            failed = hardening_script.step_asan_unit(arguments, hardening_script.Console(True))
+        self.assertEqual(failed.status, Status.FAILED)
+        self.assertIn("no memory status", failed.detail)
 
     def test_sanitized_options_are_refused_where_they_mean_nothing(self) -> None:
         for argv in (["--suite", "automation", "--sanitizer", "address"],
