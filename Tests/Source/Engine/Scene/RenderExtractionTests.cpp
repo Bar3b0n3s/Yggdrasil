@@ -27,6 +27,7 @@
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/PostProcessComponent.h"
 #include "Engine/Scene/Components/ReflectionProbeComponent.h"
+#include "Engine/Scene/Components/RenderDistanceComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -35,6 +36,7 @@
 #include "Engine/Scene/Components/TextComponent.h"
 #include "Engine/Scene/Components/TilemapRendererComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/WindComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/ParticleSimulation.h"
 #include "Engine/Scene/Scene.h"
@@ -335,6 +337,45 @@ namespace Engine {
 			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
 			CHECK(snapshot->Fog.Enabled);
 			CHECK(snapshot->Fog.Density == 9.0f);
+		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3C and 3G): a MeshRenderer's RenderDistance
+		// rides on its item (the defaults without one), and the effectively enabled Wind reaches the snapshot with the request's
+		// SimulationTime as its Time (none without one).
+		TEST_CASE("RenderExtraction: a mesh's RenderDistance and the scene's Wind reach the snapshot at the request's time")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity plain = scene.CreateEntity("Plain");
+			plain.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			Entity distant = scene.CreateEntity("Distant");
+			distant.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::CubeMesh));
+			distant.AddComponent<RenderDistanceComponent>(RenderDistanceComponent{ .CullDistance = 250.0f, .LodBias = 2.5f, .ShadowLodOffset = 3, .FadeWidth = 0.2f });
+			TransformSystem::Update(scene);
+			Result<RenderSnapshot> snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			REQUIRE(snapshot->Meshes.size() == 2);
+			CHECK(snapshot->Meshes[0].Distance == MeshDrawDistance{});
+			CHECK(snapshot->Meshes[1].Distance == MeshDrawDistance{ .CullDistance = 250.0f, .LodBias = 2.5f, .ShadowLodOffset = 3, .FadeWidth = 0.2f });
+			CHECK_FALSE(snapshot->Wind.Enabled);
+			CHECK(snapshot->Wind == RenderWind{});
+
+			Entity weather = scene.CreateEntity("Weather");
+			weather.AddComponent<WindComponent>(WindComponent{ .Direction = glm::vec3(0.0f, 0.0f, -3.0f), .Strength = 18.0f, .GustStrength = 6.0f, .GustFrequency = 0.4f, .Turbulence = 0.7f });
+			TransformSystem::Update(scene);
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
+			REQUIRE_MESSAGE(snapshot.has_value(), snapshot.error().ToString());
+			CHECK(snapshot->Wind == RenderWind{ .Enabled = true, .Direction = glm::vec3(0.0f, 0.0f, -3.0f), .Strength = 18.0f, .GustStrength = 6.0f, .GustFrequency = 0.4f, .Turbulence = 0.7f, .Time = 12.5 });
+			// An edit-time request (time 0) shows the wind without its sway's progress; a disabled Wind does not blow.
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8 });
+			REQUIRE(snapshot.has_value());
+			CHECK(snapshot->Wind.Enabled);
+			CHECK(snapshot->Wind.Time == 0.0);
+			weather.SetActive(false);
+			TransformSystem::Update(scene);
+			snapshot = ExtractRenderSnapshot(scene, { .Width = 8, .Height = 8, .SimulationTime = 12.5 });
+			REQUIRE(snapshot.has_value());
+			CHECK_FALSE(snapshot->Wind.Enabled);
 		}
 
 		// M26 (C26.1, R-AEX; Docs/Decisions/0037-m26-contract.md decision 12, stream X-A): every member of PostProcess version 2

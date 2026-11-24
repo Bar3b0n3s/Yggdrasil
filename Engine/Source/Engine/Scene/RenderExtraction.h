@@ -176,7 +176,8 @@ namespace Engine {
 	//   - Meshes: every effectively enabled entity with a MeshRendererComponent whose Visible is set and whose Mesh is not
 	//     null, at its rendered world matrix, with its Materials, CastShadows and ReceiveShadows; M31 (decision 3): with its
 	//     MaterialParametersComponent resolved into Parameters (ResolveMaterialParameters at request.SimulationTime), neutral
-	//     without one.
+	//     without one; M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3C): with its
+	//     RenderDistanceComponent copied into Distance, the defaults without one.
 	//   - Lights: every effectively enabled DirectionalLight, PointLight and SpotLight, at its rendered world pose (position
 	//     from the matrix's translation, direction its normalized -Z axis), with the component's fields.
 	//   - Environment and Post: the first effectively enabled EnvironmentComponent and PostProcessComponent in canonical
@@ -184,6 +185,9 @@ namespace Engine {
 	//   - Fog (M32, Docs/Decisions/0047-m32-fog-ssr.md decision 4): the first effectively enabled FogComponent in canonical
 	//     order (unique per scene), its fields as they are with Enabled set; the defaults (Enabled false) without one, in
 	//     every view and every scene, edit scenes included.
+	//   - Wind (M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the effectively enabled
+	//     WindComponent (FindSceneWind, Scene/Wind.h), its fields with Enabled set and Time = request.SimulationTime; the
+	//     defaults (Enabled false) without one, in every view and scene.
 	//   - Alpha: request.Alpha.
 	//   - Texts (M8): every effectively enabled entity with a TextComponent whose Text is not empty, with its fields mapped to
 	//     TextItem (Space, Alignment and the font handle as they are; World = the rendered world matrix, used by World

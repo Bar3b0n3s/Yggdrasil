@@ -321,6 +321,19 @@ namespace Engine {
 		bool operator==(const MeshMaterialParameters&) const = default;
 	};
 
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3C): a MeshRenderer's RenderDistance component
+	// (Scene/Components/RenderDistanceComponent.h) as extraction copied it, the component's defaults without one. Each view
+	// chooses the item's level of detail and cull by its own camera (Renderer/MeshLod.h).
+	struct MeshDrawDistance
+	{
+		float CullDistance = 0.0f; // metres from the view's camera; 0: only FarClip culls
+		float LodBias = 1.0f;
+		uint32_t ShadowLodOffset = 1;
+		float FadeWidth = 0.1f;
+
+		bool operator==(const MeshDrawDistance&) const = default;
+	};
+
 	// One MeshRenderer to draw (§8.2 "world matrix, mesh handle+version, material per submesh, flags"). The renderer resolves
 	// the asset versions, the mesh's default materials and placeholders through the AssetManager and its GpuResourceCache,
 	// so extraction never touches assets. M23 (C23.1, decision 2): each of its submesh draws is one instance record
@@ -362,6 +375,8 @@ namespace Engine {
 		// still share instanced draws, but a dissolving or fading item of an Opaque material draws with the Mask variants
 		// (SelectMeshAlphaMode, RenderPrepare.h).
 		MeshMaterialParameters Parameters{};
+		// M46 (decision 3C; ADR 0060's phase-8 ledger: appended): the entity's RenderDistance, or its defaults.
+		MeshDrawDistance Distance{};
 	};
 
 	// One light (§8.2: directional, point, spot). The renderer culls them on the CPU and lights with at most
@@ -795,6 +810,24 @@ namespace Engine {
 		UUID Entity{};
 	};
 
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the scene's Wind component
+	// (Scene/Components/WindComponent.h), from render extraction: the effectively enabled one (Scene/Wind.h's FindSceneWind),
+	// its fields as they are with Enabled set, and Time, the request's SimulationTime (the world clock's rendered time in play,
+	// 0 at edit time and in bakes); Enabled false (the defaults) without one. The renderer turns it into the view's
+	// WindConstants (Shared/WindConstants.h), which bend, sway and flutter the meshes whose material has wind enabled.
+	struct RenderWind
+	{
+		bool Enabled = false;
+		glm::vec3 Direction = glm::vec3(1.0f, 0.0f, 0.0f);
+		float Strength = 5.0f;      // m/s
+		float GustStrength = 3.0f;  // m/s
+		float GustFrequency = 0.2f; // Hz
+		float Turbulence = 0.25f;
+		double Time = 0.0; // seconds
+
+		bool operator==(const RenderWind&) const = default;
+	};
+
 	// One view's render snapshot (§8.2). Vectors are in canonical entity order (§5.1), so a snapshot of a deterministic scene
 	// is deterministic; Sprites (M21) are in draw order instead.
 	struct RenderSnapshot
@@ -875,6 +908,8 @@ namespace Engine {
 		// the view, each rendered by the Forward stage's PlanarReflections pass for a Lit view outside the wireframe, at most
 		// MaxPlanarReflectionsPerView of them (Renderer/PlanarReflections.h).
 		std::pmr::vector<PlanarReflectionItem> PlanarReflections{};
+		// M46 (decision 3G; ADR 0060's phase-8 ledger: after M43's StaticSet and M45's Sky): the scene's wind.
+		RenderWind Wind{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:
