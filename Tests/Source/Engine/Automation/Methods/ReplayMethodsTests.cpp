@@ -61,6 +61,69 @@ namespace Engine {
 			CallReplayMethod(fixture, "scene.save");
 		}
 
+		// An in-process client that asked for progress (Architecture §13.2 "Progress"): each Call pumps the fixture's server until
+		// its response and keeps the params of the $/progress notifications that came before it.
+		class ProgressClient
+		{
+		public:
+			explicit ProgressClient(Test::AutomationFixture& fixture)
+				: m_Server(fixture.GetClient().GetServer()), m_Client(m_Server.ConnectInProcess("agent", { .OffloadLargeResults = true, .Progress = true }))
+			{
+			}
+			~ProgressClient() { m_Server.DisconnectInProcess(m_Client); }
+
+			ProgressClient(const ProgressClient&) = delete;
+			ProgressClient& operator=(const ProgressClient&) = delete;
+
+			// The result of `method`; GetReports then holds its notifications' params in order.
+			Json Call(std::string_view method, const Json& params)
+			{
+				const int64_t id = m_NextId++;
+				m_Reports.clear();
+				m_Server.SubmitInProcess(m_Client, RpcRequest{ .Id = Json(id), .IsNotification = false, .Method = std::string(method), .Params = params, .TranscriptLine = std::nullopt });
+				for (uint32_t pump = 0; pump < 2000; ++pump)
+				{
+					m_Server.Pump();
+					for (Json& message : m_Server.TakeInProcessResponses(m_Client))
+					{
+						if (!message.contains("id"))
+						{
+							CHECK(message["method"] == Json("$/progress"));
+							CHECK(message["params"]["id"] == Json(id));
+							CHECK(message["params"]["method"] == Json(std::string(method)));
+							m_Reports.push_back(std::move(message["params"]));
+							continue;
+						}
+						REQUIRE_MESSAGE(message.contains("result"), message.dump());
+						return std::move(message["result"]);
+					}
+				}
+				FAIL_CHECK("no response to " << std::string(method));
+				return Json();
+			}
+
+			// The params of the last Call's $/progress notifications, in order.
+			[[nodiscard]] const std::vector<Json>& GetReports() const { return m_Reports; }
+
+			// The "stage" of each notification of the last Call in order, each once where it repeats.
+			[[nodiscard]] std::vector<std::string> GetStages() const
+			{
+				std::vector<std::string> stages;
+				for (const Json& params : m_Reports)
+				{
+					std::string stage = JsonReader(params["stage"]).ReadString().value_or(std::string());
+					if (stages.empty() || stages.back() != stage)
+						stages.push_back(std::move(stage));
+				}
+				return stages;
+			}
+		private:
+			AutomationServer& m_Server; // documented back-reference: the fixture's, which outlives the client
+			ClientId m_Client = NoClient;
+			int64_t m_NextId = 1;
+			std::vector<Json> m_Reports{};
+		};
+
 		bool ProjectFileExists(Test::AutomationFixture& fixture, std::string_view path)
 		{
 			const auto output = VfsPath::Create("project", path);
@@ -618,6 +681,42 @@ namespace Engine {
 			CHECK(replayed["checkpointFailed"] == Json(false));
 			CHECK(replayed["stateHash"] == saved["stateHash"]);
 			CHECK(replayed["withoutInput"] == Json(false));
+		}
+
+		// Skerries' brief S20: a long recording or replay ran past the MCP bridge's fixed timeout with nothing to show it still
+		// worked. input.record stop reports the recording's runs 2 and 3 (each begins in a frame of its own, so every client
+		// hears both), input.replay its playback, each with the replay's path and the tick of its final tick.
+		TEST_CASE("ReplayMethods: input.record stop and input.replay report the replay, its tick and the recording's runs")
+		{
+			Test::AutomationFixture fixture("ReplayProgress");
+			SaveInputScene(fixture);
+			ProgressClient agent(fixture);
+			agent.Call("input.record", Json{ { "action", "start" } });
+			agent.Call("play.step", Json{ { "ticks", 130 }, { "render", "none" }, { "input", Json::array({ Json{ { "tick", 100 }, { "type", "key" }, { "key", "A" }, { "state", "down" } } }) } });
+			CHECK(agent.GetReports().empty()); // play.step reports none
+			const std::string path = "Assets/Tests/Progress.replay";
+			const Json saved = agent.Call("input.record", Json{ { "action", "stop" }, { "path", path } });
+			CHECK(saved["tick"] == Json(130));
+			CHECK(agent.GetStages() == std::vector<std::string>{ "verify", "inputCheck" });
+			REQUIRE_FALSE(agent.GetReports().empty());
+			CHECK(agent.GetReports().front()["tick"] == Json(0));
+			uint64_t work = 0;
+			for (const Json& params : agent.GetReports())
+			{
+				INFO(params.dump());
+				CHECK(params["subject"] == Json(path));
+				CHECK(params["finalTick"] == Json(130));
+				const uint64_t done = JsonReader(params["work"]).ReadUInt64().value_or(0);
+				CHECK(done > work);
+				work = done;
+			}
+
+			const Json replayed = agent.Call("input.replay", Json{ { "path", path }, { "verify", true }, { "strictHash", true } });
+			CHECK(replayed["passed"] == Json(true));
+			CHECK(agent.GetStages() == std::vector<std::string>{ "replay" });
+			REQUIRE_FALSE(agent.GetReports().empty());
+			const Json& first = agent.GetReports().front();
+			CHECK((first["subject"] == Json(path) && first["tick"] == Json(0) && first["finalTick"] == Json(130)));
 		}
 
 		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 5 and 7): input.record's locale is the recording's start locale,

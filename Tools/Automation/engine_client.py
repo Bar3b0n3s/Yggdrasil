@@ -11,6 +11,9 @@ One module shared by the MCP bridge (Tools/MCP/engine_mcp/connection.py) and the
   - the project lock: <Project>/Library/Editor.lock names the holder's pid (§4.13, read_lock_holder);
   - connections: EngineClient.connect performs session.hello with the session token, then call() sends requests and
     raises EngineError for error responses;
+  - progress (§13.2 "Progress"): a long request's $/progress notifications reach request()'s `progress` callback, and
+    each one whose work advanced moves the request's deadline to `timeout` seconds after it (ProgressDeadline), so a
+    test.run, input.record or input.replay waits as long as its work advances and times out once it stops advancing;
   - launching: find_editor_executable and launch_editor start a headless editor and wait for its session file, at most
     LAUNCH_TIMEOUT_SECONDS (300 s, a hang bound with headroom over a loaded machine's start, ADR 0040);
   - method coverage (§15.6 gate 5): every call() is recorded by a CallLog; with the environment variable
@@ -32,7 +35,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Callable
 
 PROTOCOL_VERSION = "1.0"
 CLIENT_NAME = "engine-client"
@@ -54,6 +57,8 @@ MAX_FRAME_HEADER_BYTES = 1024
 OUTPUT_TAIL_LINES = 200
 # How often the polling helpers look again.
 POLL_INTERVAL_SECONDS = 0.05
+# The notification a pending operation's progress arrives in (§13.2 "Progress").
+PROGRESS_METHOD = "$/progress"
 
 # JSON-RPC error codes (§13.3), as in Engine/Source/Engine/Automation/Protocol/JsonRpc.h.
 PARSE_ERROR = -32700
@@ -378,6 +383,48 @@ def wait_for_lock_holder(project_root: Path, process: subprocess.Popen[bytes] | 
 # --------------------------------------------------------------------------------------------------------------------
 
 
+class ProgressDeadline:
+    """When the wait for one request's response ends (§13.2 "Progress"; Skerries' brief S20): `timeout` seconds after
+    the request was sent, moved to `timeout` seconds after each $/progress notification of the request whose "work" is
+    greater than that of every earlier one (the first counts as advancing: the operation began). A method that reports
+    no progress keeps its fixed deadline; one that does waits as long as its work advances, however long that takes,
+    and times out once `timeout` seconds pass without an advance: the bound the whole call had before, now measured
+    from the last advance, so a run that stops advancing is cut off no later than one that never started. `now` is the
+    client's clock (EngineClient.clock)."""
+
+    def __init__(self, timeout: float, now: float) -> None:
+        self.timeout = timeout
+        self.deadline = now + timeout
+        self.work: int | None = None
+        # The latest progress of the request (advancing or not), for the timeout's message.
+        self.last: dict[str, Any] | None = None
+
+    def observe(self, progress: dict[str, Any], now: float) -> bool:
+        """Notes one $/progress params object of the request; returns whether its work advanced (and so the deadline
+        moved). A params object without an integer "work" never advances."""
+        self.last = progress
+        work = progress.get("work")
+        if not isinstance(work, int) or isinstance(work, bool):
+            return False
+        if self.work is not None and work <= self.work:
+            return False
+        self.work = work
+        self.deadline = now + self.timeout
+        return True
+
+    def remaining(self, now: float) -> float:
+        """The seconds left before the deadline, never negative."""
+        return max(0.0, self.deadline - now)
+
+    def describe_timeout(self, method: str) -> str:
+        """The TimeoutError's message: no response at all, or the work that stopped advancing and its last report."""
+        if self.work is None:
+            return f"{method}: no response from the editor within {self.timeout:.1f} s"
+        message = self.last.get("message") if isinstance(self.last, dict) else None
+        reported = f"; its last progress: {message}" if isinstance(message, str) and message else ""
+        return f"{method}: its work has not advanced for {self.timeout:.1f} s (work {self.work}){reported}"
+
+
 class EngineClient:
     """One authenticated connection to an editor. Not thread-safe: one request at a time."""
 
@@ -387,6 +434,9 @@ class EngineClient:
         self.reader = FrameReader()
         self.next_id = 1
         self.hello: dict[str, Any] = {}
+        # The clock every wait of the connection is measured with; tests replace it, so no passing outcome depends on
+        # how long anything takes.
+        self.clock: Callable[[], float] = time.monotonic
 
     @classmethod
     def connect(cls, port: int, token: str, client_name: str = CLIENT_NAME, client_version: str = CLIENT_VERSION,
@@ -412,9 +462,12 @@ class EngineClient:
         return cls.connect(session.port, session.token, client_name=client_name, call_log=call_log)
 
     def request(self, method: str, params: dict[str, Any] | None = None, transcript_line: int | None = None,
-                timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+                timeout: float = DEFAULT_TIMEOUT_SECONDS,
+                progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
         """Sends one request (params._meta.transcriptLine when given) and returns the whole response message. Records
-        the method in the call log. Raises ConnectionClosed, ProtocolError or TimeoutError."""
+        the method in the call log. The wait ends `timeout` seconds after the request, or after the last $/progress
+        notification of the request whose work advanced (ProgressDeadline); `progress` receives the params of each of
+        the request's $/progress notifications. Raises ConnectionClosed, ProtocolError or TimeoutError."""
         request_id = self.next_id
         self.next_id += 1
         message = {"jsonrpc": "2.0", "id": request_id, "method": method,
@@ -422,18 +475,29 @@ class EngineClient:
         if self.call_log is not None:
             self.call_log.record(method)
         self.send_raw(encode_frame(json.dumps(message, ensure_ascii=False).encode("utf-8")))
-        deadline = time.monotonic() + timeout
+        deadline = ProgressDeadline(timeout, self.clock())
         while True:
-            response = self.receive_message(max(0.0, deadline - time.monotonic()))
-            # Notifications ($/progress) carry no id; a response with another id answers an earlier request that timed
-            # out on this side.
+            try:
+                response = self.receive_message(deadline.remaining(self.clock()))
+            except TimeoutError:
+                raise TimeoutError(deadline.describe_timeout(method)) from None
+            report = response.get("params")
+            if (response.get("method") == PROGRESS_METHOD and "id" not in response and isinstance(report, dict)
+                    and report.get("id") == request_id):
+                deadline.observe(report, self.clock())
+                if progress is not None:
+                    progress(report)
+                continue
+            # Other notifications carry no id; a response with another id answers an earlier request that timed out on
+            # this side.
             if response.get("id") == request_id and ("result" in response or "error" in response):
                 return response
 
     def call(self, method: str, params: dict[str, Any] | None = None, transcript_line: int | None = None,
-             timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+             timeout: float = DEFAULT_TIMEOUT_SECONDS,
+             progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
         """request(), returning the result object (with its "_meta") or raising EngineError for an error response."""
-        response = self.request(method, params, transcript_line, timeout)
+        response = self.request(method, params, transcript_line, timeout, progress)
         if "error" in response:
             raise error_from_response(method, response)
         result = response["result"]
@@ -464,7 +528,7 @@ class EngineClient:
         orderly way (end of stream) or by a reset (ConnectionResetError and ConnectionAbortedError are mapped to it),
         TimeoutError when nothing arrives within `timeout` (the connection is still open), and ProtocolError for
         malformed frames."""
-        deadline = time.monotonic() + timeout
+        deadline = self.clock() + timeout
         while True:
             payload = self.reader.next_payload()
             if payload is not None:
@@ -475,7 +539,7 @@ class EngineClient:
                 if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
                     raise ProtocolError(f"not a JSON-RPC 2.0 message: {payload[:200]!r}")
                 return message
-            remaining = deadline - time.monotonic()
+            remaining = deadline - self.clock()
             if remaining <= 0:
                 raise TimeoutError(f"no message from the editor within {timeout:.1f} s")
             if self.connection.fileno() < 0:

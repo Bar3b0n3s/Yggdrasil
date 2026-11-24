@@ -15,6 +15,14 @@ A reference page of the `game-building` skill (`skills/game-building`), for its 
 - `input_replay {path, verify: true, strictHash: true, withoutInput: true}` plays the replay with none of its input events. It must fail for a replay with events, as an error like every failed verification (-32003 `Validation`; `game-debugging` reads its data). When it passes, re-record the replay (the games suite checks this for every committed replay).
 - After `input_replay` the session stays paused where playback ended: inspect it (`script_eval {context: "Play"}`, `entity_get`), then `play_stop`.
 
+## Long runs
+
+A recording of a whole game (tens of thousands of ticks in a large scene, recorded, then verified, then checked without its input) or a full `test_run {}` can outlast the tool's `timeoutSeconds` (900 for `test_run`, 600 for `input_record` and `input_replay`). That bound counts only a stretch without progress: while the call runs, the editor reports what it does (`$/progress`), and the bridge waits as long as that work advances, so the call ends with the editor's answer, its `recording` block included (Skerries' brief S20).
+- The call's progress notifications name it: `test_run running for 1800 s: recording Record.Archipelago, run 2 of 3 (replayed strictly with its input): tick 41200 of 84637`. A recording's runs are 1 of 3 (`recorded`, the suite plays), 2 of 3 (`replayed strictly with its input`) and 3 of 3 (`replayed without its input`, the input check); a plain run names `suite 3 of 12, <suite>/<case>: tick 600` or `replay 13 of 14, <path>: tick 300 of 600`; `input_replay` names its replay and tick, and `input_record`'s `stop` its runs 2 and 3.
+- The transcript records the call and its response like any other, and the replay and its new `.meta` are attributed to the call's request, so `AuditProvenance.py` passes on them as they are: record through the bridge, never round it.
+- `Timeout` on such a call means its work stopped advancing for the whole bound (the message names the last progress it reported): look for a frozen editor (`editor_status`, `log_read`), never re-record round the bridge.
+- While a step of a run holds the editor's main thread (a suite's collection of a large scene takes seconds), another client's call or `editor_attach` can be refused with `Busy`, naming the request ("a test.run request is running a long step on it"): retry in a few seconds, once that step ends; the run itself goes on.
+
 ## Recording suites
 
 A replay is recorded by a test-only **recording suite** that plays like a player: an **autopilot** where hand-written input is impractical (steering a physics ball), or a single case that injects a **planned input list** at fixed ticks (a Tetris opening). Record its run, then verify the replay without it:

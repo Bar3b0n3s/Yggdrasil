@@ -185,8 +185,63 @@ namespace Engine {
 			CHECK(busy["error"]["code"] == Json(-32007));
 			CHECK(busy["error"]["data"]["errorCode"] == Json("Busy"));
 			CHECK(busy["error"]["data"]["phase"] == Json("Automation:debug.stall"));
+			CHECK(busy["error"]["data"]["request"] == Json(""));
 			CHECK(busy["error"]["data"]["stalledMilliseconds"] == Json(5200));
 			CHECK_FALSE(busy["error"]["data"].contains("_meta"));
+			CHECK_FALSE(busy["error"]["data"].contains("hint"));
+		}
+
+		// Skerries' brief S20: a second client refused while a run held the main thread was told only to "retry later".
+		TEST_CASE("JsonRpc: a Busy response names the request whose step holds the main thread and to retry once that step ends")
+		{
+			const Json busy = MakeBusyResponse(Json(3), "run case", 6179, "test.run");
+			const Json& data = busy["error"]["data"];
+			CHECK(data["request"] == Json("test.run"));
+			CHECK(data["phase"] == Json("run case"));
+			const std::string detail = JsonReader(data["detail"]).ReadString().value_or(std::string());
+			CHECK(detail.contains("6179 ms"));
+			CHECK(detail.contains("a test.run request"));
+			CHECK(detail.contains("retry once that step ends"));
+			CHECK(busy["error"]["message"] == data["detail"]);
+			CHECK(JsonReader(data["hint"]).ReadString().value_or(std::string()).contains("session.hello"));
+		}
+
+		TEST_CASE("JsonRpc: a progress notification carries the request's id and what the operation reports")
+		{
+			const PendingProgress progress{ .Work = 42, .Stage = PendingProgressStage::Verify, .Subject = "Record.Hops", .Tick = 120, .FinalTick = 480, .Step = 1, .Steps = 1 };
+			const Json notification = MakeProgressNotification(Json("named"), "test.run", progress);
+			CHECK(notification["jsonrpc"] == Json("2.0"));
+			CHECK(notification["method"] == Json("$/progress"));
+			CHECK_FALSE(notification.contains("id"));
+			const Json& params = notification["params"];
+			CHECK(params["id"] == Json("named"));
+			CHECK(params["method"] == Json("test.run"));
+			CHECK(params["work"] == Json(42));
+			CHECK(params["stage"] == Json("verify"));
+			CHECK(params["subject"] == Json("Record.Hops"));
+			CHECK(params["tick"] == Json(120));
+			CHECK(params["finalTick"] == Json(480));
+			CHECK(params["step"] == Json(1));
+			CHECK(params["steps"] == Json(1));
+			CHECK(params["message"] == Json("recording Record.Hops, run 2 of 3 (replayed strictly with its input): tick 120 of 480"));
+		}
+
+		TEST_CASE("JsonRpc: a progress message names the stage, its subject, a recording's run and the tick")
+		{
+			const auto describe = [](PendingProgressStage stage, std::string subject, uint64_t tick, uint64_t finalTick, uint32_t step, uint32_t steps)
+			{
+				return DescribePendingProgress({ .Work = 1, .Stage = stage, .Subject = std::move(subject), .Tick = tick, .FinalTick = finalTick, .Step = step, .Steps = steps });
+			};
+			CHECK(describe(PendingProgressStage::Suite, "Board/clears a line", 60, 0, 2, 5) == "suite 2 of 5, Board/clears a line: tick 60");
+			CHECK(describe(PendingProgressStage::Suite, "Board", 0, 0, 1, 1) == "suite Board: tick 0");
+			CHECK(describe(PendingProgressStage::Replay, "Assets/Tests/Replays/Opening.replay", 300, 600, 4, 5) == "replay 4 of 5, Assets/Tests/Replays/Opening.replay: tick 300 of 600");
+			CHECK(describe(PendingProgressStage::Replay, "Assets/Tests/Replays/Opening.replay", 3, 600, 0, 0) == "replay Assets/Tests/Replays/Opening.replay: tick 3 of 600");
+			CHECK(describe(PendingProgressStage::Record, "Record.Hops/hop", 30, 0, 1, 1) == "recording Record.Hops/hop, run 1 of 3 (recorded): tick 30");
+			CHECK(describe(PendingProgressStage::Verify, "Assets/Tests/Replays/Hops.replay", 0, 80, 0, 0) == "recording Assets/Tests/Replays/Hops.replay, run 2 of 3 (replayed strictly with its input): tick 0 of 80");
+			CHECK(describe(PendingProgressStage::InputCheck, "Record.Hops", 80, 80, 1, 1) == "recording Record.Hops, run 3 of 3 (replayed without its input): tick 80 of 80");
+			for (const PendingProgressStage stage : { PendingProgressStage::Suite, PendingProgressStage::Replay, PendingProgressStage::Record, PendingProgressStage::Verify, PendingProgressStage::InputCheck })
+				CHECK_FALSE(PendingProgressStageToString(stage).empty());
+			CHECK(PendingProgressStageToString(PendingProgressStage::InputCheck) == "inputCheck");
 		}
 	}
 

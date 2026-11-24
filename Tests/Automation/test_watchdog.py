@@ -37,11 +37,21 @@ class WatchdogTests(AutomationTestCase):
         time.sleep(WATCHDOG_THRESHOLD_SECONDS + 1.0)
         with self.assertRaises(engine_client.EngineError) as raised:
             observer.call("session.info", timeout=2.0)
+        # Skerries' brief S20: a new client's session.hello is refused too, and told which request's step holds the main
+        # thread and to retry once that step ends.
+        assert editor.session is not None
+        with self.assertRaises(engine_client.EngineError) as refused:
+            engine_client.EngineClient.connect(editor.session.port, editor.session.token, timeout=2.0)
         thread.join()
         self.assertEqual(raised.exception.code, engine_client.BUSY)
         self.assertEqual(raised.exception.data["phase"], f"Debug:stall {STALL_MILLISECONDS} ms")
         self.assertGreaterEqual(raised.exception.data["stalledMilliseconds"], 5000)
         self.assertNotIn("_meta", raised.exception.data)
+        for error in (raised.exception, refused.exception):
+            self.assertEqual(error.code, engine_client.BUSY)
+            self.assertEqual(error.data["request"], "debug.stall")
+            self.assertIn("a debug.stall request", error.detail)
+            self.assertIn("retry once that step ends", error.detail)
         self.assertEqual(outcome["result"]["stalledMs"], STALL_MILLISECONDS)
         observer.call("session.info")
 

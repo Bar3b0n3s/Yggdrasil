@@ -85,9 +85,10 @@ namespace Engine {
 			// With `candidate`, the operation is input.record stop's (ReplayMethods.h): `replay` is the candidate, first played
 			// with its input (the verification, Docs/Decisions/0027-m17-contract.md A1; Docs/Decisions/0030-m19-contract.md
 			// decisions 4 and 5), then, when it has input events, without it (the input check), and candidate->Document is
-			// written to candidate->Path only when the verification reproduces it and the input check does not.
-			explicit ReplayMethodOperation(AssetRef<ReplayData> replay, std::optional<RecordingCandidate> candidate = std::nullopt)
-				: m_Replay(std::move(replay)), m_Guard(std::move(candidate)), m_Stage(m_Guard ? Stage::Verification : Stage::Replay)
+			// written to candidate->Path only when the verification reproduces it and the input check does not. `path` names
+			// the replay in its progress (GetProgress): input.replay's path, or the candidate's destination.
+			ReplayMethodOperation(AssetRef<ReplayData> replay, std::string path, std::optional<RecordingCandidate> candidate = std::nullopt)
+				: m_Replay(std::move(replay)), m_Path(std::move(path)), m_Guard(std::move(candidate)), m_Stage(m_Guard ? Stage::Verification : Stage::Replay)
 			{
 			}
 
@@ -137,6 +138,7 @@ namespace Engine {
 						Cancel(context);
 						return Failed(error);
 					}
+					++m_Work;
 					if (m_Stage == Stage::Verification)
 						NoteScriptErrors(*session);
 					if (*advanced)
@@ -163,7 +165,9 @@ namespace Engine {
 								return WriteCandidate(host, 0, nullptr);
 							if (Status started = StartInputCheck(host); !started)
 								return std::unexpected(started.error());
-							continue;
+							// The input check, the recording's run 3 of 3, begins in a frame of its own, so the $/progress after
+							// this Poll reports it (Architecture §13.2 "Progress").
+							return std::nullopt;
 						}
 						if (m_Stage == Stage::InputCheck)
 							return FinishInputCheck(host, *playback, *serialized);
@@ -196,6 +200,21 @@ namespace Engine {
 				}
 			}
 
+			// The playback's progress (Architecture §13.2 "Progress"): input.replay's is a Replay; input.record stop's are the
+			// recording's runs 2 and 3, Verify and InputCheck; each names the replay's path and its tick of the replay's final
+			// tick. Work counts the ticks played and the playbacks begun.
+			[[nodiscard]] std::optional<PendingProgress> GetProgress() const override
+			{
+				if (m_Released)
+					return std::nullopt;
+				PendingProgressStage stage = PendingProgressStage::Replay;
+				if (m_Stage == Stage::Verification)
+					stage = PendingProgressStage::Verify;
+				else if (m_Stage == Stage::InputCheck)
+					stage = PendingProgressStage::InputCheck;
+				return PendingProgress{ .Work = m_Work, .Stage = stage, .Subject = m_Path, .Tick = m_Tick, .FinalTick = m_Replay->FinalTick, .Step = 0, .Steps = 0 };
+			}
+
 			[[nodiscard]] std::string GetPhase() const override
 			{
 				std::string_view stage = "Play:replay";
@@ -221,6 +240,7 @@ namespace Engine {
 				m_WithoutInput = options.WithoutInput;
 				m_Released = false;
 				ENGINE_TRY(m_Player.Begin(m_Replay, session, options));
+				++m_Work;
 				session.SetStepping(true);
 				if (m_Stage == Stage::Verification)
 					NoteScriptErrors(session);
@@ -440,11 +460,13 @@ namespace Engine {
 			}
 		private:
 			AssetRef<ReplayData> m_Replay{};
+			std::string m_Path{}; // what its progress names (GetProgress)
 			std::optional<RecordingCandidate> m_Guard{};
 			Stage m_Stage = Stage::Replay;
 			ReplayPlayer m_Player{};
 			uint64_t m_Serial = 0;
 			uint64_t m_Tick = 0;
+			uint64_t m_Work = 0;                             // ticks played and playbacks begun (GetProgress)
 			uint64_t m_ScriptErrors = 0;                     // the verification session's script error occurrences so far
 			std::optional<ScriptError> m_FirstScriptError{}; // the first of them, as it appeared
 			bool m_WithoutInput = false;
@@ -559,7 +581,7 @@ namespace Engine {
 			replay->Checkpoints = document.Checkpoints;
 			replay->FinalTick = document.FinalTick;
 			replay->FinalStateHash = document.FinalStateHash;
-			auto operation = CreateScope<ReplayMethodOperation>(AssetRef<ReplayData>(std::move(replay)), RecordingCandidate{ .Document = std::move(document), .Path = params.Path });
+			auto operation = CreateScope<ReplayMethodOperation>(AssetRef<ReplayData>(std::move(replay)), params.Path, RecordingCandidate{ .Document = std::move(document), .Path = params.Path });
 			ENGINE_TRY(operation->StartVerification(context));
 			return Scope<PendingOperation>(std::move(operation));
 		}
@@ -588,7 +610,7 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(const StampedPlayInputEvent event, DecodeReplayEvent(replay->Events[index], input.GetActions(), std::format("/Events/{}", index)));
 				static_cast<void>(event);
 			}
-			auto operation = CreateScope<ReplayMethodOperation>(replay);
+			auto operation = CreateScope<ReplayMethodOperation>(replay, params.Path);
 			ENGINE_TRY(operation->Restart(context, { .Verify = params.Verify, .StrictHash = params.StrictHash, .WithoutInput = params.WithoutInput, .NameDivergenceCauses = true, .ContinuePastCheckpoint = params.ContinuePastCheckpoint }));
 			return Scope<PendingOperation>(std::move(operation));
 		}
@@ -678,9 +700,9 @@ namespace Engine {
 	void RegisterReplayMethods(MethodRegistry& methods)
 	{
 		methods.AddPending<AutomationMethodContext, InputRecordParams, InputRecordResult>(
-			{ .Name = "input.record", .Description = "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. Every recording is first replayed with its input events, if any (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording. Once the run passed, its scripts are stopped, and an error their OnDestroy raises refuses the recording too (named at teardown). A recording without input events is then written, and the play session is the verification's, paused at its final tick with its scripts stopped (script.eval in the play context is refused there; scene.query and entity.get read its final state). One with input events is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). The play session is then the last run's, paused where it ended. End such a recording while the played state is still in the scene.", .RequiredParams = { "action" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Start a fresh recording.", .Params = Json{ { "action", "Start" } } }, { .Description = "Save the recording.", .Params = Json{ { "action", "Stop" }, { "path", "Assets/Tests/Recorded.replay" } } } } }, &Automation::InputRecord);
+			{ .Name = "input.record", .Description = "Starts a tick-zero recording or saves its validated applied inputs, expectations and state-hash checkpoints (one every 60 ticks). Stop checks output write permission. Every recording is first replayed with its input events, if any (the verification, which replaces the play session as input.replay does): unless that run reproduces every checkpoint, the final hash and every expectation and raises no script error, Stop refuses to write it (Validation naming the first divergence, the run's outcome in error data verification), which catches a script.eval that wrote script state during the recording. Once the run passed, its scripts are stopped, and an error their OnDestroy raises refuses the recording too (named at teardown). A recording without input events is then written, and the play session is the verification's, paused at its final tick with its scripts stopped (script.eval in the play context is refused there; scene.query and entity.get read its final state). One with input events is then replayed without them (the input check); when that run also reproduces every checkpoint, the final hash and every expectation, whatever script errors it raises, the recording's outcome does not depend on its input and Stop refuses to write it (Validation, the check's outcome in error data inputCheck). The play session is then the last run's, paused where it ended. End such a recording while the played state is still in the scene. While Stop replays the recording it reports $/progress (run 2 of 3, with its input, then run 3 of 3, without it, at their ticks), and the MCP bridge waits for it as long as that progress advances: timeoutSeconds bounds only a stretch without progress.", .RequiredParams = { "action" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Start a fresh recording.", .Params = Json{ { "action", "Start" } } }, { .Description = "Save the recording.", .Params = Json{ { "action", "Stop" }, { "path", "Assets/Tests/Recorded.replay" } } } } }, &Automation::InputRecord);
 		methods.AddPending<AutomationMethodContext, InputReplayParams, InputReplayResult>(
-			{ .Name = "input.replay", .Description = "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and, unless continuePastCheckpoint, stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it.", .RequiredParams = { "path" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Verify a replay.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true } } }, { .Description = "Check that a replay's verification fails without its input.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } } } } }, &Automation::InputReplay);
+			{ .Name = "input.replay", .Description = "Replays recorded inputs in a fresh session; verification failures retain every expectation and hash outcome in error data. strictHash compares the state hash at each checkpoint and at the final tick and, unless continuePastCheckpoint, stops at the first checkpoint that differs. The state hash covers the simulated world (entities and their serialized components, the tick, Random, id draws, physics), never script tables, so expectations observe script state. withoutInput replays without the input events, the check that the replay depends on its input. Afterwards the session stays paused at the replay's last tick (or where playback stopped), so script.eval, scene.query and entity.get read its final state; play.stop ends it. While it plays it reports $/progress (its tick of the replay's final tick), and the MCP bridge waits for it as long as that progress advances: timeoutSeconds bounds only a stretch without progress.", .RequiredParams = { "path" }, .ExposeAsTool = true, .AvailableInRuntime = true, .TimeoutSeconds = 600, .Examples = { { .Description = "Verify a replay.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true } } }, { .Description = "Check that a replay's verification fails without its input.", .Params = Json{ { "path", "Assets/Tests/Recorded.replay" }, { "verify", true }, { "strictHash", true }, { "withoutInput", true } } } } }, &Automation::InputReplay);
 		methods.Add(
 			{ .Name = "input.readReplay", .Description = "Reads a replay back: its header, its input events a page at a time in play.step's input form with absolute ticks, its expectations and checkpoints. So a replay made with input.record can be re-recorded from its own events: start a recording of the header's scene, seed and parameters, play.step {ticks: finalTick, input: events}, and stop with its expectations.", .RequiredParams = { "path" }, .ExposeAsTool = true, .Examples = { { .Description = "Read the first page of a replay.", .Params = Json{ { "path", "Assets/Tests/Replays/Opening.replay" } } } } }, &Automation::InputReadReplay);
 	}

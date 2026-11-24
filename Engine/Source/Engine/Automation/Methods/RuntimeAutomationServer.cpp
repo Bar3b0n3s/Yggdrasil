@@ -594,7 +594,7 @@ namespace Engine {
 				const ClientId client = state.NextClientId++;
 				state.Host.Clients[client] = RuntimeClientRecord{ .Name = event.Name, .Version = event.Version, .InProcess = false, .Connection = event.Client };
 				state.Connections[event.Client] = client;
-				state.Calls->AddClient(client, event.Name, true);
+				state.Calls->AddClient(client, event.Name, { .OffloadLargeResults = true, .Progress = true });
 				ENGINE_CORE_INFO("Automation client '{}' {} connected ({})", event.Name, event.Version, client);
 			}
 			for (InboundRequest& request : requests)
@@ -656,7 +656,7 @@ namespace Engine {
 		const ClientId client = state.NextClientId++;
 		state.Host.Clients[client] = RuntimeClientRecord{ .Name = name, .Version = {}, .InProcess = true, .Connection = NoClient };
 		state.InProcessResponses[client];
-		state.Calls->AddClient(client, std::move(name), true);
+		state.Calls->AddClient(client, std::move(name));
 		return client;
 	}
 

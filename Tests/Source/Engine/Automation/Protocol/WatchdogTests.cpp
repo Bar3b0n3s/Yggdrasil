@@ -61,6 +61,36 @@ namespace Engine {
 			const WatchdogPhaseScope noWatchdog(nullptr, "ignored");
 		}
 
+		// Skerries' brief S20: a Busy answer names the request that holds the main thread, so a refused client knows what it
+		// waits for and that it ends.
+		TEST_CASE("WatchdogRequestScope: sets the running request and restores the previous one")
+		{
+			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::time_point{});
+			CHECK(watchdog.GetRequest().empty());
+			{
+				const WatchdogRequestScope run(&watchdog, "test.run");
+				CHECK(watchdog.GetRequest() == "test.run");
+				{
+					// A scope inside it names its own method, then gives the outer one back.
+					const WatchdogRequestScope nested(&watchdog, "entity.create");
+					std::string seen;
+					std::thread reader([&watchdog, &seen]()
+					{
+						seen = watchdog.GetRequest();
+					});
+					reader.join();
+					CHECK(seen == "entity.create");
+				}
+				CHECK(watchdog.GetRequest() == "test.run");
+				// The request is apart from the phases.
+				watchdog.SetScriptPhase("Script:Test.Case");
+				CHECK(watchdog.GetRequest() == "test.run");
+				watchdog.SetScriptPhase({});
+			}
+			CHECK(watchdog.GetRequest().empty());
+			const WatchdogRequestScope noWatchdog(nullptr, "ignored");
+		}
+
 		TEST_CASE("Watchdog: a script phase is reported over the base phase until it is cleared")
 		{
 			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::time_point{});

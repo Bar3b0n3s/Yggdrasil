@@ -219,6 +219,7 @@ namespace Engine {
 		std::optional<Error> CaptureError{};
 		std::optional<int32_t> Quit{};
 		Phase CurrentPhase = Phase::Idle;
+		uint64_t Units = 0; // Advance calls that returned without an error (FeatureTestProgress::Units)
 		ReplayPlayer Player{};
 		ReplayHeader PlayingHeader{};
 		uint64_t PlayingFinalTick = 0;
@@ -1643,6 +1644,8 @@ namespace Engine {
 		m_State->CountingLoads = true;
 		auto result = m_State->Advance();
 		m_State->CountingLoads = false;
+		if (result)
+			++m_State->Units;
 		if (!result && m_State->CurrentPhase != State::Phase::Idle)
 		{
 			m_State->VerifiedRecording = false;
@@ -1708,6 +1711,87 @@ namespace Engine {
 	bool FeatureTestRunner::IsRunning() const
 	{
 		return m_State->CurrentPhase != State::Phase::Idle && m_State->CurrentPhase != State::Phase::Done;
+	}
+
+	std::optional<FeatureTestProgress> FeatureTestRunner::GetProgress() const
+	{
+		const std::optional<FeatureTestStage> stage = GetStage();
+		if (!stage.has_value())
+			return std::nullopt;
+		const State& state = *m_State;
+		FeatureTestProgress progress;
+		progress.Stage = *stage;
+		progress.Units = state.Units;
+		progress.Tick = state.Session != nullptr ? state.Session->GetTick() : 0;
+		progress.Steps = static_cast<uint32_t>(std::min<size_t>(state.Selected.size() + state.Replays.size(), std::numeric_limits<uint32_t>::max()));
+		const auto suiteName = [&state](size_t index)
+		{
+			return index < state.Selected.size() ? SanitizeTestReportText(state.Selected[index].Description.Name) : std::string();
+		};
+		switch (state.CurrentPhase)
+		{
+			case State::Phase::Suite:
+			case State::Phase::Case:
+			case State::Phase::Frame:
+			case State::Phase::CloseSuite:
+			{
+				// Past the last suite (the step that goes on to the replays) it still names the last one.
+				const size_t suite = state.Selected.empty() ? 0 : std::min(state.SuiteIndex, state.Selected.size() - 1);
+				progress.Subject = state.CurrentPhase == State::Phase::Frame ? SanitizeTestReportText(std::format("{}/{}", state.Current.Suite, state.Current.Case))
+																			 : suiteName(suite);
+				progress.Step = static_cast<uint32_t>(std::min<size_t>(suite + 1, progress.Steps));
+				break;
+			}
+			case State::Phase::Replay:
+				// Past the last replay (the step that ends the run or begins a recording's verification) it names the last
+				// replay, or without replays the last suite, as GetStage keeps their stage.
+				if (!state.Replays.empty())
+				{
+					const size_t index = std::min(state.ReplayIndex, state.Replays.size() - 1);
+					progress.Subject = SanitizeTestReportText(state.Replays[index]);
+					progress.Step = static_cast<uint32_t>(std::min<size_t>(state.Selected.size() + index + 1, progress.Steps));
+					progress.FinalTick = state.Session != nullptr ? state.PlayingFinalTick : 0;
+				}
+				else
+				{
+					progress.Subject = suiteName(state.Selected.empty() ? 0 : state.Selected.size() - 1);
+					progress.Step = progress.Steps;
+				}
+				break;
+			case State::Phase::Verify:
+			case State::Phase::InputCheck:
+				progress.Subject = suiteName(0);
+				progress.Step = std::min<uint32_t>(1, progress.Steps);
+				progress.FinalTick = state.Recording.has_value() ? state.Recording->FinalTick : state.PlayingFinalTick;
+				break;
+			case State::Phase::Idle:
+			case State::Phase::Done:
+				return std::nullopt;
+		}
+		return progress;
+	}
+
+	std::optional<FeatureTestStage> FeatureTestRunner::GetStage() const
+	{
+		const State& state = *m_State;
+		switch (state.CurrentPhase)
+		{
+			case State::Phase::Suite:
+			case State::Phase::Case:
+			case State::Phase::Frame:
+			case State::Phase::CloseSuite: return state.Options.Record ? FeatureTestStage::Record : FeatureTestStage::Suite;
+			case State::Phase::Replay:
+				// Past the last replay the run ends, or a recording's verification begins: still the stage before that step,
+				// the replays', or without replays the suites'.
+				if (!state.Replays.empty())
+					return FeatureTestStage::Replay;
+				return state.Options.Record ? FeatureTestStage::Record : FeatureTestStage::Suite;
+			case State::Phase::Verify:     return FeatureTestStage::Verify;
+			case State::Phase::InputCheck: return FeatureTestStage::InputCheck;
+			case State::Phase::Idle:
+			case State::Phase::Done:       return std::nullopt;
+		}
+		return std::nullopt;
 	}
 
 	std::string FeatureTestRunner::GetPhase() const

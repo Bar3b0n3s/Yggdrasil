@@ -29,6 +29,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Tests" / "Automation"))
 import engine_client  # noqa: E402
 import fake_editor  # noqa: E402
 import lock_holder  # noqa: E402
+from engine_mcp import connection as connection_module  # noqa: E402
 from engine_mcp import server, transcript  # noqa: E402
 from engine_mcp.connection import EditorConnection, EditorCrashed  # noqa: E402
 from engine_mcp.launcher import EditorAlreadyOpen, Launcher, LaunchRequest  # noqa: E402
@@ -730,9 +731,10 @@ class EngineCallTests(BridgeTestCase):
         original = connection.client.request
 
         def request(method: str, params: dict[str, Any] | None = None, transcript_line: int | None = None,
-                    timeout: float = engine_client.DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+                    timeout: float = engine_client.DEFAULT_TIMEOUT_SECONDS,
+                    progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
             sent.append((method, timeout))
-            return original(method, params, transcript_line, timeout)
+            return original(method, params, transcript_line, timeout, progress)
 
         with mock.patch.object(connection.client, "request", side_effect=request):
             for method in ("project.upgrade", "project.upgrade", "scene.tree", "debug.echo"):
@@ -747,6 +749,102 @@ class EngineCallTests(BridgeTestCase):
         self.assertEqual([line["method"] for line in lines if line["type"] == "request"],
                          ["project.upgrade", "project.upgrade", "scene.tree", "debug.echo"])
         self.assertEqual(len(lines), 8)
+
+
+class AdvancingProgress(connection_module.EditorProgress):
+    """The bridge's EditorProgress, which moves `clock` by `gap` with every report the editor sends: each report then
+    arrives most of the call's bound after the last one, as in a recording that runs for hours."""
+
+    def __init__(self, clock: fake_editor.FakeClock, gap: float) -> None:
+        super().__init__()
+        self.clock = clock
+        self.gap = gap
+        self.reports: list[dict[str, Any]] = []
+
+    def set(self, report: dict[str, Any] | None) -> None:
+        super().set(report)
+        if report is not None:
+            self.reports.append(report)
+            self.clock.advance(self.gap)
+
+
+class LongCallTests(BridgeTestCase):
+    """Skerries' brief S20: the bridge ended test_run at its 900 s timeoutSeconds while the editor went on recording, so
+    the transcript held only the timeout and the replay it then wrote went round the bridge. A call whose editor reports
+    progress (test.run, input.record, input.replay) now runs while that progress advances and is transcribed with its
+    response; one whose progress stops advancing still times out. The bound here is a fake clock's, which moves only
+    with each report."""
+
+    BOUND = 1000.0
+    GAP = 0.75 * BOUND
+    RECORDING = {"path": "Assets/Tests/Replays/Hops.replay", "ticks": 84637, "events": 12, "checkpoints": 1410}
+
+    def make_bridge(self, editor: fake_editor.FakeEditor, root: Path) -> tuple[server.Bridge, AdvancingProgress]:
+        catalog = [server.CatalogTool(name="test_run", method="test.run", description="Runs the tests.",
+                                      input_schema={"type": "object"}, mutates=False, supports_dry_run=False,
+                                      timeout_seconds=int(self.BOUND))]
+        bridge = server.Bridge(REPOSITORY_ROOT, catalog, Launcher(REPOSITORY_ROOT, self.directory / "UserData"))
+        bridge.connection = EditorConnection(root, supervised=False, client=self.connect(editor))
+        assert bridge.connection.client is not None
+        clock = fake_editor.FakeClock()
+        bridge.connection.client.clock = clock
+        progress = AdvancingProgress(clock, self.GAP)
+        bridge.editor_progress = progress
+        return bridge, progress
+
+    def test_a_long_run_that_keeps_advancing_outlives_its_timeout_and_is_transcribed(self) -> None:
+        root = self.make_project()
+        editor = self.start_server({})
+
+        def record(params: dict[str, Any]) -> dict[str, Any]:
+            for run, (stage, work) in enumerate((("record", 1), ("verify", 2), ("inputCheck", 3)), start=1):
+                editor.send_progress(work, f"recording Record.Hops, run {run} of 3: tick {work * 100}", stage=stage)
+            return {"passed": True, "recordingPath": self.RECORDING["path"], "recording": self.RECORDING}
+
+        editor.handlers["test.run"] = record
+        bridge, progress = self.make_bridge(editor, root)
+        started = progress.clock.now
+        structured, text, is_error = bridge.call_tool("test_run", {"filter": "Record.Hops",
+                                                                   "record": self.RECORDING["path"]})
+        self.assertFalse(is_error, text)
+        self.assertEqual(structured["recording"], self.RECORDING)
+        self.assertGreater(progress.clock.now - started, 2 * self.BOUND, "the call outlived its bound")
+        self.assertEqual([report["stage"] for report in progress.reports], ["record", "verify", "inputCheck"])
+        self.assertEqual(bridge.editor_progress.read(), "", "the report ends with its call")
+        # The request and its own response, ok, as for any bridge write: the editor attributes the replay and its .meta
+        # to this request's line (provenance), and the audit finds the request there.
+        lines = self.read_lines(root / "Automation" / "BuildLog.jsonl")
+        self.assertEqual([(line["type"], line.get("method")) for line in lines],
+                         [("request", "test.run"), ("response", None)])
+        self.assertEqual(lines[0]["params"]["record"], self.RECORDING["path"])
+        self.assertEqual(editor.requests[-1].params["_meta"], {"transcriptLine": 1})
+        self.assertEqual((lines[1]["requestLine"], lines[1]["ok"]), (1, True))
+        self.assertIn(f"recordingPath {self.RECORDING['path']}", lines[1]["summary"])
+
+    def test_a_run_whose_progress_stops_advancing_times_out(self) -> None:
+        root = self.make_project()
+        editor = self.start_server({})
+        gave_up = threading.Event()
+
+        def stalled(params: dict[str, Any]) -> dict[str, Any]:
+            for _ in range(4):
+                editor.send_progress(7, "suite 3 of 12, Board/clears a line: tick 600", stage="suite")
+            # Answers only once the bridge gave up (bounded), so nothing but the bound can end the call.
+            gave_up.wait(60.0)
+            return {"passed": True}
+
+        editor.handlers["test.run"] = stalled
+        bridge, progress = self.make_bridge(editor, root)
+        structured, text, is_error = bridge.call_tool("test_run", {})
+        gave_up.set()
+        self.assertTrue(is_error)
+        self.assertEqual(structured["error"], "Timeout")
+        self.assertIn("its work has not advanced for 1000.0 s", structured["message"])
+        self.assertIn("Board/clears a line", structured["message"])
+        lines = self.read_lines(root / "Automation" / "BuildLog.jsonl")
+        self.assertEqual([line["type"] for line in lines], ["request", "response"])
+        self.assertFalse(lines[1]["ok"])
+        self.assertEqual(lines[1]["error"]["errorCode"], "Timeout")
 
 
 class ArgumentCoercionTests(BridgeTestCase):

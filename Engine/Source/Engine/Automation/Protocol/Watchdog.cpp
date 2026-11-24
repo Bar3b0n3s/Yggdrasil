@@ -30,6 +30,7 @@ namespace Engine {
 		std::chrono::steady_clock::time_point LastHeartbeat{};
 		std::string Phase{};       // the base phase; empty: "Idle"
 		std::string ScriptPhase{}; // the running gameplay script entry; empty: none
+		std::string Request{};     // the method whose request or pending operation runs; empty: none
 	};
 
 	Watchdog::Watchdog(std::chrono::milliseconds stallThreshold, std::chrono::steady_clock::time_point now)
@@ -78,6 +79,20 @@ namespace Engine {
 		return m_State->Phase.empty() ? std::string("Idle") : m_State->Phase;
 	}
 
+	std::string Watchdog::ExchangeRequest(std::string_view method)
+	{
+		std::string copy(Utils::TruncatePhase(method));
+		const std::scoped_lock lock(m_State->Lock);
+		std::swap(m_State->Request, copy);
+		return copy;
+	}
+
+	std::string Watchdog::GetRequest() const
+	{
+		const std::scoped_lock lock(m_State->Lock);
+		return m_State->Request;
+	}
+
 	std::optional<std::chrono::milliseconds> Watchdog::GetStall(std::chrono::steady_clock::time_point now) const
 	{
 		std::chrono::steady_clock::time_point last;
@@ -116,6 +131,19 @@ namespace Engine {
 	{
 		if (m_Watchdog != nullptr)
 			m_Watchdog->SetPhase(m_PreviousPhase);
+	}
+
+	WatchdogRequestScope::WatchdogRequestScope(Watchdog* watchdog, std::string_view method)
+		: m_Watchdog(watchdog)
+	{
+		if (m_Watchdog != nullptr)
+			m_PreviousRequest = m_Watchdog->ExchangeRequest(method);
+	}
+
+	WatchdogRequestScope::~WatchdogRequestScope()
+	{
+		if (m_Watchdog != nullptr)
+			static_cast<void>(m_Watchdog->ExchangeRequest(m_PreviousRequest));
 	}
 
 }

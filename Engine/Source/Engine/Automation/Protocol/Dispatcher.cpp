@@ -39,12 +39,17 @@ namespace Engine {
 			Scope<PendingOperation> Operation;
 			DispatcherRequestEvent Activity{};
 			bool IsNotification = false;
+			// When its last $/progress notification was sent, and that notification's stage and step; none before the first
+			// (§13.2 "Progress").
+			std::optional<std::chrono::steady_clock::time_point> ProgressSent{};
+			PendingProgressStage SentStage = PendingProgressStage::Suite;
+			uint32_t SentStep = 0;
 		};
 
 		struct Client
 		{
 			std::string Name{};
-			bool Offload = true;
+			DispatcherClientOptions Options{};
 			std::deque<RpcRequest> Queue{};
 			Scope<PendingRequest> Pending; // at most one: the client's next request waits until it resolves
 		};
@@ -65,6 +70,11 @@ namespace Engine {
 
 		// The steps of Pump (see the Dispatcher class comment), appending responses to `messages`.
 		void PollPending(ClientId client, std::vector<OutboundMessage>& messages);
+		// When the handler returned `pending` of `client`, and after each Poll that left it running: its $/progress
+		// notification, when the client asked for progress and the operation reports it, unless one was sent less than
+		// ProgressInterval ago for the same stage and step (§13.2 "Progress").
+		void NotifyProgress(ClientId client, const Client& state, PendingRequest& pending, std::vector<OutboundMessage>& messages);
+		[[nodiscard]] std::chrono::steady_clock::time_point Now() const;
 		void RunRequest(ClientId client, RpcRequest request, std::vector<OutboundMessage>& messages);
 		// Cancels a pending operation without answering it (§13.2 "Disconnect"): Cancel between EnterInvocation and
 		// LeaveInvocation, then FinishRequest.
@@ -181,6 +191,7 @@ namespace Engine {
 		Host->EnterInvocation(context);
 		std::optional<Result<Json>> outcome;
 		{
+			const WatchdogRequestScope request(PhaseMarker, context.GetRequest().Method);
 			const WatchdogPhaseScope phase(PhaseMarker, Utils::GetOperationPhase(*pending->Operation, context.GetRequest().Method));
 			outcome = Utils::PollGuarded(*pending->Operation, context, Specification.SystemErrors);
 		}
@@ -190,7 +201,10 @@ namespace Engine {
 		if (!outcome.has_value())
 		{
 			if (owner != Clients.end())
+			{
+				NotifyProgress(client, owner->second, *pending, messages);
 				owner->second.Pending = std::move(pending);
+			}
 			else
 				Cancel(*pending); // the client went away while the operation ran
 			return;
@@ -291,6 +305,7 @@ namespace Engine {
 		Host->EnterInvocation(*context);
 		MethodResult result;
 		{
+			const WatchdogRequestScope requestScope(PhaseMarker, request.Method);
 			const WatchdogPhaseScope phase(PhaseMarker, std::format("Automation:{}", request.Method));
 			result = Utils::InvokeGuarded(*Registry, *context, Specification.SystemErrors);
 		}
@@ -309,6 +324,8 @@ namespace Engine {
 				Cancel(*pending);
 				return;
 			}
+			// The operation began: its client hears so before its first Poll (§13.2 "Progress").
+			NotifyProgress(client, owner->second, *pending, messages);
 			owner->second.Pending = std::move(pending);
 			// Its first frame of work is this one.
 			PollPending(client, messages);
@@ -330,12 +347,36 @@ namespace Engine {
 		MethodContext& context = *pending.Context;
 		Host->EnterInvocation(context);
 		{
+			const WatchdogRequestScope request(PhaseMarker, context.GetRequest().Method);
 			const WatchdogPhaseScope phase(PhaseMarker, Utils::GetOperationPhase(*pending.Operation, context.GetRequest().Method));
 			Utils::CancelGuarded(*pending.Operation, context, Specification.SystemErrors);
 		}
 		Host->LeaveInvocation(context);
 		Host->FinishRequest(context);
 		Observe(pending.Activity, DispatcherRequestPhase::Cancelled);
+	}
+
+	void Dispatcher::State::NotifyProgress(ClientId client, const Client& state, PendingRequest& pending, std::vector<OutboundMessage>& messages)
+	{
+		if (!state.Options.Progress || pending.IsNotification)
+			return;
+		// Method code, like GetPhase: it only reads the operation's state.
+		const std::optional<PendingProgress> progress = pending.Operation->GetProgress();
+		if (!progress.has_value())
+			return;
+		const std::chrono::steady_clock::time_point now = Now();
+		const bool sameStage = progress->Stage == pending.SentStage && progress->Step == pending.SentStep;
+		if (pending.ProgressSent.has_value() && sameStage && now - *pending.ProgressSent < Specification.ProgressInterval)
+			return;
+		pending.ProgressSent = now;
+		pending.SentStage = progress->Stage;
+		pending.SentStep = progress->Step;
+		messages.push_back({ .Client = client, .Message = MakeProgressNotification(pending.Activity.Request.Id, pending.Activity.Request.Method, *progress) });
+	}
+
+	std::chrono::steady_clock::time_point Dispatcher::State::Now() const
+	{
+		return Specification.TimeSource ? Specification.TimeSource() : std::chrono::steady_clock::now();
 	}
 
 	void Dispatcher::State::Observe(const DispatcherRequestEvent& activity, DispatcherRequestPhase phase) const
@@ -365,7 +406,7 @@ namespace Engine {
 			Observe(activity, DispatcherRequestPhase::Succeeded);
 			return;
 		}
-		const bool offload = found->second.Offload;
+		const bool offload = found->second.Options.OffloadLargeResults;
 		const Json meta = Meta.Build(client, Host->GetMetaState());
 
 		if (offload)
@@ -425,14 +466,14 @@ namespace Engine {
 			RemoveClient(client);
 	}
 
-	void Dispatcher::AddClient(ClientId client, std::string name, bool offloadLargeResults)
+	void Dispatcher::AddClient(ClientId client, std::string name, DispatcherClientOptions options)
 	{
 		ENGINE_CORE_ASSERT(client != NoClient && !m_State->Clients.contains(client), "Dispatcher::AddClient: client {} is invalid or known", client);
 		if (client == NoClient || m_State->Clients.contains(client))
 			return;
 		State::Client& state = m_State->Clients[client];
 		state.Name = std::move(name);
-		state.Offload = offloadLargeResults;
+		state.Options = options;
 		m_State->Meta.AddClient(client);
 	}
 

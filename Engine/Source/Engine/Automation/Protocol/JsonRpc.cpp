@@ -320,15 +320,27 @@ namespace Engine {
 		return MakeErrorResponse(id, ToRpcErrorCode(error.GetCode()), error, extraData, meta);
 	}
 
-	Json MakeBusyResponse(const Json& id, std::string_view phase, uint64_t stalledMilliseconds)
+	Json MakeBusyResponse(const Json& id, std::string_view phase, uint64_t stalledMilliseconds, std::string_view request)
 	{
-		const std::string message = std::format("the main thread has not responded for {} ms (phase '{}'); retry later",
-			stalledMilliseconds, phase);
+		// A step of a request holds the main thread (test.run's collection of its suites, a scene load), and the main thread
+		// answers again once that step ends, while the request may run on for hours (Skerries' brief S20: a second client's
+		// session.hello during a recording).
+		const std::string message = request.empty()
+			? std::format("the main thread has not responded for {} ms (phase '{}'); retry later", stalledMilliseconds, phase)
+			: std::format("the main thread has not responded for {} ms: a {} request is running a long step on it (phase '{}'); retry once that step ends",
+				  stalledMilliseconds, request, phase);
 		Json data = Json::object();
 		data["errorCode"] = "Busy";
 		data["detail"] = message;
 		data["phase"] = std::string(phase);
+		data["request"] = std::string(request);
 		data["stalledMilliseconds"] = stalledMilliseconds;
+		if (!request.empty())
+		{
+			data["hint"] = std::format("the main thread answers again when the current step of the {} request ends, usually within seconds, though the request "
+									   "itself may run on: retry then (a refused session.hello on the same connection before its handshake deadline, or on a new one)",
+				request);
+		}
 		data["issues"] = Json::array();
 
 		Json body = Json::object();
@@ -339,6 +351,62 @@ namespace Engine {
 		Json response = Utils::MakeResponseHead(id);
 		response["error"] = std::move(body);
 		return response;
+	}
+
+	std::string_view PendingProgressStageToString(PendingProgressStage stage)
+	{
+		switch (stage)
+		{
+			case PendingProgressStage::Suite:      return "suite";
+			case PendingProgressStage::Replay:     return "replay";
+			case PendingProgressStage::Record:     return "record";
+			case PendingProgressStage::Verify:     return "verify";
+			case PendingProgressStage::InputCheck: return "inputCheck";
+		}
+		return "suite";
+	}
+
+	std::string DescribePendingProgress(const PendingProgress& progress)
+	{
+		const std::string subject = progress.Subject.empty() ? std::string() : std::format(" {}", progress.Subject);
+		const std::string ticks = progress.FinalTick != 0 ? std::format("tick {} of {}", progress.Tick, progress.FinalTick) : std::format("tick {}", progress.Tick);
+		std::string_view run;
+		switch (progress.Stage)
+		{
+			case PendingProgressStage::Suite:
+			case PendingProgressStage::Replay:
+			{
+				// "suite 2 of 5, Board/clears a line: tick 60"; one of one names no count.
+				const std::string_view kind = progress.Stage == PendingProgressStage::Suite ? "suite" : "replay";
+				const std::string counter = progress.Steps > 1 ? std::format(" {} of {}", progress.Step, progress.Steps) : std::string();
+				const std::string separator = counter.empty() || subject.empty() ? std::string() : std::string(",");
+				return std::format("{}{}{}{}: {}", kind, counter, separator, subject, ticks);
+			}
+			case PendingProgressStage::Record:     run = "run 1 of 3 (recorded)"; break;
+			case PendingProgressStage::Verify:     run = "run 2 of 3 (replayed strictly with its input)"; break;
+			case PendingProgressStage::InputCheck: run = "run 3 of 3 (replayed without its input)"; break;
+		}
+		return std::format("recording{}, {}: {}", subject, run, ticks);
+	}
+
+	Json MakeProgressNotification(const Json& id, std::string_view method, const PendingProgress& progress)
+	{
+		Json params = Json::object();
+		params["id"] = id;
+		params["method"] = std::string(method);
+		params["work"] = progress.Work;
+		params["stage"] = std::string(PendingProgressStageToString(progress.Stage));
+		params["subject"] = progress.Subject;
+		params["tick"] = progress.Tick;
+		params["finalTick"] = progress.FinalTick;
+		params["step"] = progress.Step;
+		params["steps"] = progress.Steps;
+		params["message"] = DescribePendingProgress(progress);
+		Json notification = Json::object();
+		notification["jsonrpc"] = "2.0";
+		notification["method"] = "$/progress";
+		notification["params"] = std::move(params);
+		return notification;
 	}
 
 }

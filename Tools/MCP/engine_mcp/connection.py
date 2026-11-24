@@ -1,6 +1,9 @@
 """The bridge's connection to one editor (Docs/Architecture.md §13.8): framing, handshake and calls through
 Tools/Automation/engine_client.py, each call bounded by its method's timeoutSeconds (from the catalogue for a tool, and
-for engine_call as the editor's rpc.discover declares it, method_timeout; default 60),
+for engine_call as the editor's rpc.discover declares it, method_timeout; default 60), measured from the request or
+from the last $/progress notification whose work advanced (engine_client.ProgressDeadline: test.run, input.record and
+input.replay run as long as their work advances; Skerries' brief S20), whose reports reach the call's `progress`
+callback (EditorProgress, which the server's heartbeat carries to the MCP client),
 every request written to the transcript first so its line number travels as params._meta.transcriptLine, and crash
 detection: when the editor the bridge launched exits unexpectedly, the next call fails with EditorCrashed {exitCode,
 lastLogLines (50), crashReportPath, autosaveAvailable}.
@@ -14,9 +17,10 @@ path an agent passes is resolved against the repository root, never the bridge's
 from __future__ import annotations
 
 import dataclasses
+import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import engine_client
 from engine_mcp.autosave import has_published_autosave
@@ -54,6 +58,30 @@ class EditorCrashed(Exception):
                 "hint": hint}
 
 
+class EditorProgress:
+    """The editor's latest $/progress report of the running call (Docs/Architecture.md §13.2 "Progress"): what a
+    test.run, input.record or input.replay is doing (the suite or replay, its tick, a recording's run), which the
+    call's MCP progress notifications carry (server.py, "Progress"). The worker thread that runs the call sets it, and
+    the server's event loop reads it, so a lock guards it."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._report: dict[str, Any] | None = None
+
+    def set(self, report: dict[str, Any] | None) -> None:
+        """The params of the call's latest $/progress notification; None when no call reports any."""
+        with self._lock:
+            self._report = report
+
+    def read(self) -> str:
+        """The report's one-line message ("recording Hops, run 2 of 3 (replayed strictly with its input): tick 120 of
+        480"), or "" while there is none."""
+        with self._lock:
+            report = self._report
+        message = report.get("message") if isinstance(report, dict) else None
+        return message if isinstance(message, str) else ""
+
+
 class EditorConnection:
     """One connected editor: launched (supervised) or attached (never killed, §13.8)."""
 
@@ -83,11 +111,13 @@ class EditorConnection:
         # The timeoutSeconds of each method the editor declared, by domain, as method_timeout asked for them.
         self.method_timeouts: dict[str, dict[str, float]] = {}
 
-    def call(self, method: str, params: dict[str, Any] | None,
-             timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any]:
+    def call(self, method: str, params: dict[str, Any] | None, timeout: float = DEFAULT_TIMEOUT_SECONDS,
+             progress: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
         """Writes the request to the transcript, sends it with its transcript line, writes the response summary and
-        returns the response message. Raises EditorCrashed when a supervised editor has died, ConnectionClosed
-        otherwise."""
+        returns the response message. `timeout` bounds the wait from the request and from each advance of its work
+        (engine_client.ProgressDeadline), so a long run that keeps advancing ends when the editor answers, and what it
+        wrote is transcribed under its request with its response; `progress` receives its $/progress reports. Raises
+        EditorCrashed when a supervised editor has died, ConnectionClosed otherwise."""
         self.check_editor()
         if self.client is None:
             raise engine_client.ConnectionClosed("no editor is connected: call editor_launch or editor_attach")
@@ -101,7 +131,7 @@ class EditorConnection:
         line = (transcript.append_request(request_id, method, self.transcript_params(method, params))
                 if transcript is not None else None)
         try:
-            response = self.client.request(method, params, transcript_line=line, timeout=timeout)
+            response = self.client.request(method, params, transcript_line=line, timeout=timeout, progress=progress)
         except (engine_client.ConnectionClosed, engine_client.ProtocolError) as error:
             failure = self.connection_failed(error)
             if transcript is not None and line is not None:

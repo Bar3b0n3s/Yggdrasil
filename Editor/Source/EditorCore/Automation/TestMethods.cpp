@@ -97,6 +97,7 @@ namespace Engine {
 					return MakeError(ErrorCode::Cancelled, "the test run was cancelled");
 				auto& host = static_cast<EditorMethodContext&>(context);
 				const auto start = host.GetWallClockTime();
+				const std::optional<FeatureTestStage> stage = m_Runner.GetStage();
 				do
 				{
 					const Result<bool> advanced = m_Runner.Advance();
@@ -127,6 +128,10 @@ namespace Engine {
 						Cancel(context);
 						return result;
 					}
+					// A new stage (a recording's next run, the replays after the suites) begins in a frame of its own, so the
+					// $/progress after this Poll reports it (Architecture §13.2 "Progress").
+					if (m_Runner.GetStage() != stage)
+						return std::nullopt;
 				} while (host.GetWallClockTime() - start < TestRunFrameBudget);
 				return std::nullopt;
 			}
@@ -143,6 +148,24 @@ namespace Engine {
 			[[nodiscard]] std::string GetPhase() const override
 			{
 				return m_Released ? "Test:complete" : m_Runner.GetPhase();
+			}
+
+			// The runner's (FeatureTestRunner::GetProgress): the suite or replay, its tick, and a recording's run.
+			[[nodiscard]] std::optional<PendingProgress> GetProgress() const override
+			{
+				const std::optional<FeatureTestProgress> progress = m_Released ? std::nullopt : m_Runner.GetProgress();
+				if (!progress.has_value())
+					return std::nullopt;
+				PendingProgressStage stage = PendingProgressStage::Suite;
+				switch (progress->Stage)
+				{
+					case FeatureTestStage::Suite:      stage = PendingProgressStage::Suite; break;
+					case FeatureTestStage::Replay:     stage = PendingProgressStage::Replay; break;
+					case FeatureTestStage::Record:     stage = PendingProgressStage::Record; break;
+					case FeatureTestStage::Verify:     stage = PendingProgressStage::Verify; break;
+					case FeatureTestStage::InputCheck: stage = PendingProgressStage::InputCheck; break;
+				}
+				return PendingProgress{ .Work = progress->Units, .Stage = stage, .Subject = progress->Subject, .Tick = progress->Tick, .FinalTick = progress->FinalTick, .Step = progress->Step, .Steps = progress->Steps };
 			}
 		private:
 			[[nodiscard]] Result<Json> Finish(EditorMethodContext& context)
@@ -394,7 +417,7 @@ namespace Engine {
 	{
 		methods.Add({ .Name = "test.list", .Description = "Collects test suite and case names and source locations without running case bodies.", .Examples = { { .Description = "List configured tests.", .Params = Json::object() } } }, &Automation::TestList);
 		methods.AddPending<EditorMethodContext, TestRunParams, TestRunMethodResult>(
-			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged, and for a replay written over an existing file whether its checkpoints, one every 60 ticks, and its final hash equal the replaced file's, which a change seen only between checkpoints leaves equal); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
+			{ .Name = "test.run", .Description = "Runs configured tests and returns every outcome (counts, failedCases and the case rows; a replay's suite entry counts the checkpoints it compared) plus JSON/JUnit reports. The coverage object always keeps its registryFingerprint and gates; its counters are returned only with coverage: true or Testing.CoverageGates. Optional recording is published only after strict replay verification and, with input events, the input check (§13.6: refused when a run without them still passes that verification, whatever script errors it raises), and reported in the recording block (format version, ticks, events, checkpoints, final hash, where the input check diverged, and for a replay written over an existing file whether its checkpoints, one every 60 ticks, and its final hash equal the replaced file's, which a change seen only between checkpoints leaves equal); a refused recording names the selected rows that did not pass. Runs play saved scene files, so test.run refuses (InvalidState, nothing run) while an open scene has unsaved changes and a selected suite or replay plays it: scene.save first. While it runs it reports $/progress (the suite or replay, its tick, and a recording's run 1, 2 or 3 of 3: recorded, replayed strictly with its input, replayed without it), and the MCP bridge waits for it as long as that progress advances: timeoutSeconds bounds only a stretch without progress.", .ExposeAsTool = true, .TimeoutSeconds = 900, .Examples = { { .Description = "Run every configured test.", .Params = Json::object() }, { .Description = "Run every test and return the script API coverage counters.", .Params = Json{ { "coverage", true } } } } }, &Automation::TestRun);
 	}
 
 }

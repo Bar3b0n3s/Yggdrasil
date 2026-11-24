@@ -174,14 +174,17 @@ namespace Engine {
 		// checkpoint that differed, else where the check ended). When the check failed only at checkpoints, every expectation
 		// satisfied and the recorded final hash reproduced, the replay is written with one warning in InputRecordResult::
 		// Warnings (MakeFinalHashIndependentWarning): its final hash does not depend on its input, so only its checkpoints prove
-		// the play. Each playback advances at least one tick per Poll within PlayStepFrameBudget. Whatever the outcome, the play
+		// the play. Each playback advances at least one tick per Poll within PlayStepFrameBudget, and the input check begins
+		// at the next Poll. While Stop replays it reports $/progress (Architecture §13.2 "Progress"): the recording's run 2 of
+		// 3 (Verify) and run 3 of 3 (InputCheck), naming its path, the tick and the candidate's final tick. Whatever the outcome, the play
 		// session is then the last playback's, paused where it ended (the input check's at the replay's final tick, since it
 		// continues past its checkpoints), with lockstep released, as after input.replay. A disconnect during either playback
 		// writes nothing. The verification names no divergence causes in its stop reason (ReplayPlaybackOptions::
 		// NameDivergenceCauses false) and no fingerprint changes: nothing changed since a recording made moments before.
 		[[nodiscard]] Result<Scope<PendingOperation>> InputRecord(AutomationMethodContext& context, const InputRecordParams& params);
 		// A fresh session from the validated header. Pending: at least one tick per Poll within the common 50 ms
-		// budget, never an unbounded synchronous replay. Reject another time owner or active driver before replacing
+		// budget, never an unbounded synchronous replay; it reports $/progress (a Replay naming the path, the tick and the
+		// replay's final tick; Architecture §13.2 "Progress"). Reject another time owner or active driver before replacing
 		// the session. Completion, failure and cancellation pause the owned session and release this operation's input
 		// suppression, stepping, audio/time and temporary lockstep ownership without another Poll. Check session serial
 		// before cleanup, so a replacement session is untouched. Verification uses cooked Expect bytecode; Dist never

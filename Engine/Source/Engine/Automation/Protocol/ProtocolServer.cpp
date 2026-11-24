@@ -366,7 +366,7 @@ namespace Engine {
 			if (const std::optional<std::chrono::milliseconds> stall = PhaseMarker->GetStall(now))
 			{
 				if (!request.IsNotification)
-					Answer(connection, MakeBusyResponse(request.Id, PhaseMarker->GetPhase(), static_cast<uint64_t>(stall->count())));
+					Answer(connection, MakeBusyResponse(request.Id, PhaseMarker->GetPhase(), static_cast<uint64_t>(stall->count()), PhaseMarker->GetRequest()));
 				return;
 			}
 		}
@@ -418,7 +418,7 @@ namespace Engine {
 			{
 				// Busy at once, not a failure: the client retries session.hello and never hangs on a frozen editor (§13.2).
 				if (!request.IsNotification)
-					Answer(connection, MakeBusyResponse(request.Id, PhaseMarker->GetPhase(), static_cast<uint64_t>(stall->count())));
+					Answer(connection, MakeBusyResponse(request.Id, PhaseMarker->GetPhase(), static_cast<uint64_t>(stall->count()), PhaseMarker->GetRequest()));
 				connection.Deadline = now + Specification.HandshakeTimeout;
 				return;
 			}

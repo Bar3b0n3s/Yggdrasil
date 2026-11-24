@@ -60,6 +60,15 @@ class FramingTests(unittest.TestCase):
                     reader.next_payload()
 
 
+# A request's bound in the progress tests, in the fake clock's seconds; each report arrives most of a bound after the
+# last one (PROGRESS_GAP), so four of them outlast the bound twice over. The socket waits what is left of it in
+# real seconds, so it is generous: only a failure waits that long.
+PROGRESS_BOUND = 1000.0
+PROGRESS_GAP = 0.75 * PROGRESS_BOUND
+# Bounds the stand-in editor's wait for the client to give up (only a failure lasts this long).
+GIVE_UP_WAIT_SECONDS = 60.0
+
+
 class ConnectionTests(unittest.TestCase):
     def start_server(self, handlers: dict[str, fake_editor.Handler]) -> fake_editor.FakeEditor:
         server = fake_editor.FakeEditor(handlers)
@@ -139,6 +148,104 @@ class ConnectionTests(unittest.TestCase):
             self.assertEqual(client.receive_message(timeout=10.0)["method"], "$/progress")
             self.assertEqual(client.receive_message(timeout=10.0)["id"], "named")
         self.assertEqual([request.request_id for request in server.requests], [2, None, "named"])
+
+    def test_a_request_waits_as_long_as_its_progress_advances(self) -> None:
+        # Skerries' brief S20: a recording that outlasted test.run's 900 s ended with Timeout although the editor went
+        # on and finished. Each $/progress whose work advanced moves the deadline, so the call outlives its bound.
+        server = self.start_server({})
+
+        def run(params: dict[str, Any]) -> dict[str, Any]:
+            for work in range(1, 5):
+                server.send_progress(work, f"recording Record.Hops, run 1 of 3 (recorded): tick {work * 60}",
+                                     stage="record")
+            return {"passed": True}
+
+        server.handlers["test.run"] = run
+        with engine_client.EngineClient.connect(server.port, server.token) as client:
+            clock = fake_editor.FakeClock()
+            client.clock = clock
+            started = clock.now
+            reports: list[dict[str, Any]] = []
+
+            def progress(report: dict[str, Any]) -> None:
+                reports.append(report)
+                clock.advance(PROGRESS_GAP)
+
+            result = client.call("test.run", {}, timeout=PROGRESS_BOUND, progress=progress)
+            self.assertTrue(result["passed"])
+            self.assertGreater(clock.now - started, 2 * PROGRESS_BOUND, "the call outlived its bound")
+            # The callback heard every report of the request, as the editor sent it.
+            self.assertEqual([report["work"] for report in reports], [1, 2, 3, 4])
+            self.assertEqual(reports[-1]["message"], "recording Record.Hops, run 1 of 3 (recorded): tick 240")
+            self.assertEqual({report["id"] for report in reports}, {server.requests[-1].request_id})
+
+    def test_a_request_whose_progress_stops_advancing_times_out(self) -> None:
+        # A run that still reports but no longer advances (the same work) is cut off once its bound passes without an
+        # advance, naming its last report.
+        server = self.start_server({})
+        gave_up = threading.Event()
+
+        def run(params: dict[str, Any]) -> dict[str, Any]:
+            server.send_progress(5, "suite Board: tick 300")
+            for _ in range(3):
+                server.send_progress(5, "suite Board: tick 300")
+            # Answers only once the client gave up (bounded), so nothing but the bound can end the call.
+            gave_up.wait(GIVE_UP_WAIT_SECONDS)
+            return {"passed": True}
+
+        server.handlers["test.run"] = run
+        server.handlers["session.info"] = lambda params: {"pid": 1}
+        with engine_client.EngineClient.connect(server.port, server.token) as client:
+            clock = fake_editor.FakeClock()
+            client.clock = clock
+            heard: list[int] = []
+
+            def progress(report: dict[str, Any]) -> None:
+                heard.append(report["work"])
+                clock.advance(PROGRESS_GAP)
+
+            with self.assertRaises(TimeoutError) as raised:
+                client.call("test.run", {}, timeout=PROGRESS_BOUND, progress=progress)
+            gave_up.set()
+            self.assertIn("test.run: its work has not advanced for 1000.0 s", str(raised.exception))
+            self.assertIn("suite Board: tick 300", str(raised.exception))
+            self.assertEqual(heard[:2], [5, 5])
+            # The connection still serves: the late reports and answer of the timed-out request are skipped by id.
+            client.clock = time.monotonic
+            self.assertEqual(client.call("session.info", timeout=30.0)["pid"], 1)
+
+    def test_progress_of_another_request_never_moves_the_deadline(self) -> None:
+        # Reports of an earlier request that timed out on this side (still running in the editor) are not this
+        # request's.
+        server = self.start_server({})
+        gave_up = threading.Event()
+
+        def run(params: dict[str, Any]) -> dict[str, Any]:
+            for work in range(1, 4):
+                server.send_progress(work, "replay Assets/Tests/Replays/Old.replay: tick 1 of 600", id=-1)
+            gave_up.wait(GIVE_UP_WAIT_SECONDS)
+            return {"passed": True}
+
+        server.handlers["input.replay"] = run
+        with engine_client.EngineClient.connect(server.port, server.token) as client:
+            clock = fake_editor.FakeClock()
+            client.clock = clock
+            original = engine_client.EngineClient.receive_message
+            heard: list[dict[str, Any]] = []
+
+            def receive_and_advance(this: engine_client.EngineClient, timeout: float = 60.0) -> dict[str, Any]:
+                message = original(this, timeout)
+                if message.get("method") == engine_client.PROGRESS_METHOD:
+                    clock.advance(PROGRESS_GAP)
+                return message
+
+            with mock.patch.object(engine_client.EngineClient, "receive_message", receive_and_advance), \
+                    self.assertRaises(TimeoutError) as raised:
+                client.call("input.replay", {"path": "Assets/Tests/Replays/New.replay"}, timeout=PROGRESS_BOUND,
+                            progress=heard.append)
+            gave_up.set()
+            self.assertIn("input.replay: no response from the editor within 1000.0 s", str(raised.exception))
+            self.assertEqual(heard, [])
 
     def test_unreachable_port_is_connection_closed(self) -> None:
         server = self.start_server({})

@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -798,6 +799,66 @@ class BridgeAuditTests(AutomationTestCase):
         (repository / ".gitignore").write_text("Library/\n", encoding="utf-8")
         git(repository, "add", "--all")
         self.assertEqual(provenance.audit_project(project, "index").findings, [])
+
+    def test_a_long_recording_through_the_bridge_is_transcribed_and_passes_the_audit(self) -> None:
+        """Skerries' brief S20: a recording that outlasted test.run's timeoutSeconds ended at the bridge with Timeout
+        while the editor wrote the replay and its .meta, and the game re-imported them by hand to pass the audit. The
+        bridge now waits while the editor's progress advances: the call ends with the editor's answer, transcribed with
+        its request, and the replay and its new .meta pass the audit as they are. The client's clock moves most of the
+        call's bound with every progress report, so the recording lasts longer than its bound in that clock however
+        fast it runs."""
+        from engine_mcp.launcher import Launcher, LaunchRequest  # Tools/MCP is on sys.path (setUp)
+
+        bound = 1000.0
+        offset = [0.0]
+        launcher = Launcher(REPOSITORY_ROOT, self.user_data, engine_client.configurations_from_environment())
+        project = self.directory / "Game"
+        replay = "Assets/Tests/Replays/Hops.replay"
+        connection = launcher.launch(LaunchRequest(project=project, create=True))
+        try:
+            hopper = ("local Hopper = {}\nfunction Hopper.OnFixedUpdate(self: any, dt: number)\n"
+                      "\tif Input.IsKeyDown(\"A\") then\n\t\tself.Entity.Transform:Translate(vector.create(0, 1, 0))\n"
+                      "\tend\nend\nreturn Script.Define(\"Hopper\", Hopper)\n")
+            suite = ('return Test.Suite("Record.Hops", function()\nTest.Case("hop", function()\n'
+                     'Test.InjectKey("A", "Down"); Test.WaitTicks(70)\nTest.InjectKey("A", "Up"); Test.WaitTicks(9)\n'
+                     'end)\nend)\n')
+            for method, params in (
+                    ("scene.new", {"path": "Assets/Scenes/Main.scene"}),
+                    ("script.write", {"path": "Assets/Scripts/Hopper.luau", "source": hopper}),
+                    ("entity.create", {"name": "Hopper", "components": {
+                        "Script": {"Scripts": [{"Script": "Assets/Scripts/Hopper.luau"}]}}}),
+                    ("scene.save", {}),
+                    ("script.write", {"path": "Assets/Tests/Hops.test.luau", "source": suite}),
+                    ("project.setSettings", {"patch": {"Testing": {"Suites": [{
+                        "Script": "Assets/Tests/Hops.test.luau", "Scene": "Assets/Scenes/Main.scene",
+                        "Modes": ["Editor"]}]}}})):
+                self.assertIn("result", connection.call(method, params), method)
+            assert connection.client is not None
+            connection.client.clock = lambda: time.monotonic() + offset[0]
+            stages: list[str] = []
+
+            def progress(report: dict) -> None:
+                stages.append(report["stage"])
+                offset[0] += 0.75 * bound
+
+            response = connection.call("test.run", {"filter": "Record.Hops", "record": replay}, timeout=bound,
+                                       progress=progress)
+            self.assertIn("result", response, response)
+            self.assertTrue(engine_client.load_offloaded(response["result"])["passed"])
+            self.assertGreater(offset[0], bound, "the recording outlasted its bound in the client's clock")
+            self.assertEqual([stage for index, stage in enumerate(stages) if index == 0 or stages[index - 1] != stage],
+                             ["record", "verify", "inputCheck"])
+            connection.client.clock = time.monotonic
+        finally:
+            self.assertTrue(connection.shutdown(force=True)["shutDown"])
+        for relative in (replay, replay + ".meta"):
+            self.assert_recorded_by(project, relative, "test.run", "engine-mcp")
+        lines = provenance.load_transcript(project / provenance.TRANSCRIPT_FILE).lines
+        records = [line.record or {} for line in lines]
+        request = next(index for index, record in enumerate(records) if record.get("method") == "test.run") + 1
+        self.assertTrue(any(record.get("type") == "response" and record.get("requestLine") == request
+                            and record.get("ok") is True for record in records), "the run's response is transcribed")
+        self.assertEqual(provenance.audit_project(project, "disk").findings, [])
 
     def test_a_hand_edit_after_the_build_fails_with_hash_mismatch(self) -> None:
         project = self.build_project()

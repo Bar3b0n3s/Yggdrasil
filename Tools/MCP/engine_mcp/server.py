@@ -57,7 +57,9 @@ call which reports nothing (Claude Code, after 30 min) keeps waiting. The progre
 one at a time, so while a call waits for its turn the message names the tool, how long it has been queued and the tool
 whose call runs (queued_message); once it runs on the worker thread, the message names the tool and how long it has
 run, followed, while editor_launch waits for a machine-wide lock, by that wait's report (the lock, its holder's pid,
-worktree and command, the seconds waited, counted when the message is sent, and the bound; launcher.Activity). The
+worktree and command, the seconds waited, counted when the message is sent, and the bound; launcher.Activity), and,
+while a test_run, input_record or input_replay runs, by the editor's latest $/progress report (the suite or replay, its
+tick, and a recording's run 1, 2 or 3 of 3; connection.EditorProgress; Skerries' brief S20). The
 heartbeat stops when the call returns, is cancelled or raises. Each notification is bounded by NOTIFY_TIMEOUT_SECONDS,
 and one that cannot be sent ends the heartbeat (logged), never the call. A launch that gives up its wait
 (launcher.LOCK_WAIT_SECONDS, below that client's 30 min) fails with LockUnavailable naming the lock, its holders and the
@@ -69,7 +71,8 @@ anyio does not interrupt, so a call the client cancels sets the call's cancel ev
 Bridge.call_tool hands down). editor_launch's wait for a machine-wide lock checks it between its tries of the lock and
 ends (launcher.LaunchCancelled): it spawns nothing, releases a lock it took as the call was cancelled, and leaves the
 bridge free for the next call at once, such as the LockUnavailable hint's launch with renderer "none". Every other call
-runs to its end, each bounded by its method's timeoutSeconds.
+runs to its end, each bounded by its method's timeoutSeconds, which for a method that reports progress (test.run,
+input.record, input.replay) bounds only a stretch in which its work does not advance (engine_client.ProgressDeadline).
 
 Environment (all optional): ENGINE_MCP_TRANSCRIPT redirects the transcript (transcript.py); ENGINE_MCP_USER_DATA_DIR
 replaces the OS user-data root the bridge passes to the editors it launches and scans for session files (the bridge's
@@ -95,7 +98,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import engine_client
-from engine_mcp.connection import EditorConnection, EditorCrashed
+from engine_mcp.connection import EditorConnection, EditorCrashed, EditorProgress
 from engine_mcp.launcher import EditorAlreadyOpen, LaunchCancelled, Launcher, LaunchRequest
 from Lib import locks
 
@@ -334,7 +337,8 @@ class CallTimes:
 
 def progress_message(name: str, elapsed: float, activity: str) -> str:
     """The message of a running tool call's progress notification (module comment, "Progress"): the tool and how long it
-    has run, then `activity`, the launcher's report of what it waits for (launcher.Activity), when there is one."""
+    has run, then `activity` when there is one: the launcher's report of what it waits for (launcher.Activity), or the
+    editor's report of what the call does (EditorProgress)."""
     running = f"{name} running for {elapsed:.0f} s"
     return f"{running}: {activity}" if activity else running
 
@@ -588,8 +592,8 @@ class Bridge:
     """The bridge's state: the catalogue, the launcher and the current editor connection. Tool calls run one at a time
     on a worker thread (the server serializes them), so nothing here is shared between threads at once, except that
     the server lists the tools of `catalog` on its event loop meanwhile (reload_catalog replaces that dictionary,
-    never changes it, so a listing reads one catalogue whole) and reads the launcher's activity for the call's progress
-    notifications (launcher.Activity, which a lock guards)."""
+    never changes it, so a listing reads one catalogue whole) and reads the launcher's activity and the editor's
+    progress for the call's progress notifications (launcher.Activity and EditorProgress, which locks guard)."""
 
     def __init__(self, repository_root: Path, catalog: list[CatalogTool], launcher: Launcher,
                  catalog_path: Path | None = None, catalog_digest: str = "") -> None:
@@ -599,6 +603,9 @@ class Bridge:
         self.catalog = {tool.name: tool for tool in catalog}
         self.launcher = launcher
         self.connection: EditorConnection | None = None
+        # The running proxied call's latest $/progress report, which its progress notifications carry (module comment,
+        # "Progress").
+        self.editor_progress = EditorProgress()
         self.catalog_path = catalog_path
         self.catalog_digest = catalog_digest
         # How many times reload_catalog changed the tool list (the server notifies the client when a call changed it),
@@ -663,7 +670,12 @@ class Bridge:
     def proxy(self, method: str, params: dict[str, Any], timeout: float) -> tuple[dict[str, Any], str, bool]:
         if self.connection is None:
             return _failure("NotConnected", NOT_CONNECTED)
-        response = self.connection.call(method, params, timeout=timeout)
+        # The call's $/progress reports, for its progress notifications while it runs; none once it returned.
+        self.editor_progress.set(None)
+        try:
+            response = self.connection.call(method, params, timeout=timeout, progress=self.editor_progress.set)
+        finally:
+            self.editor_progress.set(None)
         structured, text = format_result(response)
         return structured, text, "error" in response
 
@@ -1026,7 +1038,8 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
             if times.started is None:
                 message = queued_message(name, now - times.arrived, running_tool)
             else:
-                message = progress_message(name, now - times.started, bridge.launcher.activity.read(now))
+                activity = bridge.launcher.activity.read(now) or bridge.editor_progress.read()
+                message = progress_message(name, now - times.started, activity)
             # A notification is best effort: one that cannot be sent ends the heartbeat, never the call.
             with anyio.move_on_after(NOTIFY_TIMEOUT_SECONDS):
                 try:
@@ -1053,9 +1066,9 @@ def _build_server(bridge: Bridge) -> tuple[Any, Bridge]:
             running_tool = name
             times.started = time.monotonic()
             try:
-                # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds), so the
-                # call runs on a worker thread and the event loop keeps serving the MCP session meanwhile, the
-                # heartbeats included.
+                # The editor connection blocks on its socket (each call bounded by its method's timeoutSeconds, for a
+                # method that reports progress from its last advance), so the call runs on a worker thread and the
+                # event loop keeps serving the MCP session meanwhile, the heartbeats included.
                 return await anyio.to_thread.run_sync(bridge.call_tool, name, arguments, cancelled)
             finally:
                 running_tool = ""

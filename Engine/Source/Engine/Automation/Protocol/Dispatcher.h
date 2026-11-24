@@ -127,9 +127,19 @@ namespace Engine {
 		Error Failure;
 	};
 
+	// §13.2 "Progress": how often a running operation's $/progress reaches its client at most.
+	inline constexpr std::chrono::milliseconds DefaultProgressInterval{ 1000 };
+
 	struct DispatcherSpecification
 	{
 		size_t OffloadThresholdBytes = DefaultOffloadThresholdBytes;
+		// The least time between two $/progress notifications of one pending operation that report the same stage and step
+		// (§13.2 "Progress"); zero sends one after every Poll that leaves it running. The first is sent when the handler
+		// returns the operation, before its first Poll, and a new stage or step is sent after the Poll that reached it.
+		std::chrono::milliseconds ProgressInterval = DefaultProgressInterval;
+		// The clock ProgressInterval is measured with; empty: std::chrono::steady_clock::now. Tests pass their own, so no
+		// passing outcome depends on how long anything takes.
+		std::function<std::chrono::steady_clock::time_point()> TimeSource{};
 		// Empty: a std::system_error is handled like any other exception.
 		SystemErrorHandler SystemErrors{};
 		// Main-thread events, borrowed for the call. Sequences are nonzero, increasing per dispatcher and independent of
@@ -140,6 +150,18 @@ namespace Engine {
 		// Optional protocol-level admission, once after Started and before method lookup/parameter decoding. A rejection
 		// uses its explicit RPC code; pending requests are never readmitted. Empty hooks preserve existing host behavior.
 		std::function<std::optional<DispatcherRequestRejection>(const RequestInfo&)> RequestAdmission{};
+	};
+
+	// What a client gets besides its responses (Dispatcher::AddClient).
+	struct DispatcherClientOptions
+	{
+		// Results over the offload threshold are written to a file the response names (§13.4). In-process clients that
+		// consume the results themselves (BatchRunner's "$ref" substitution) pass false; TCP clients always offload.
+		bool OffloadLargeResults = true;
+		// The $/progress notifications of its pending operations that report progress (PendingOperation::GetProgress;
+		// §13.2 "Progress"). TCP clients get them; in-process clients only when they ask, since they read their messages
+		// as responses.
+		bool Progress = false;
 	};
 
 	// Per-client request queues, the pending operations and response building (results, errors, "_meta", offloading).
@@ -167,9 +189,9 @@ namespace Engine {
 		Dispatcher& operator=(const Dispatcher&) = delete;
 
 		// A new client (TCP after its session.hello, or in-process); asserts an unused id. `name` goes into RequestInfo.
-		// With `offloadLargeResults` false every result stays inline whatever its size: in-process clients that consume the
-		// results themselves (BatchRunner's "$ref" substitution) pass false; TCP clients always offload (§13.4).
-		void AddClient(ClientId client, std::string name, bool offloadLargeResults = true);
+		// With options.OffloadLargeResults false every result stays inline whatever its size; with options.Progress its
+		// pending operations' progress reaches it as $/progress notifications (DispatcherClientOptions).
+		void AddClient(ClientId client, std::string name, DispatcherClientOptions options = {});
 
 		// The client is gone (§13.2 "Disconnect"). Each of its pending operations gets PendingOperation::Cancel between
 		// EnterInvocation and LeaveInvocation, then FinishRequest, and is destroyed without a response; Cancel always runs and
@@ -184,7 +206,12 @@ namespace Engine {
 		// Does the frame's automation work and returns the messages to send, in completion order: first every pending
 		// operation is polled once (in the order they started), then queued requests run, clients in round-robin order, until
 		// none is runnable or `budget` (wall time, measured with the steady clock) is spent; at least one request runs when
-		// one is runnable, so a slow method still progresses. Heartbeats the watchdog between requests.
+		// one is runnable, so a slow method still progresses. Heartbeats the watchdog between requests. A handler that returns
+		// an operation, and each Poll that leaves it running, are followed by its $/progress notification
+		// (MakeProgressNotification) when its client asked for progress (DispatcherClientOptions::Progress) and the
+		// operation reports it (PendingOperation::GetProgress): the first at once, then whenever its stage or step changed
+		// or ProgressInterval has passed since the last one. The watchdog's request (Watchdog::ExchangeRequest) names the
+		// method around every handler, Poll and Cancel.
 		[[nodiscard]] std::vector<OutboundMessage> Pump(std::chrono::microseconds budget);
 
 		// True when a request is queued or an operation pending, for any client.

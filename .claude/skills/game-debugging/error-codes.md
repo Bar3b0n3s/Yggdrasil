@@ -16,9 +16,9 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 | -32002 | InvalidState | Not allowed now (no project or scene open, a test run owns the editor, another client owns lockstep, not playing): reach the needed state first. |
 | -32003 | ValidationFailed | The input breaks a rule: fix each issue, then retry. |
 | -32004 | Conflict | `ifRevision` no longer matches: re-read the state and retry with the current revision. |
-| -32005 | Timeout | The call exceeded its deadline: bound the work (fewer ticks per `play.step`) or retry. |
+| -32005 | Timeout | The call exceeded its deadline: bound the work (fewer ticks per `play.step`) or retry. A `test_run`, `input_record` or `input_replay` waits as long as its progress advances: its `Timeout` means the work stopped advancing (a frozen editor: `editor_status`, `log_read`). |
 | -32006 | ScriptError | A script raised during the call: read the located error and fix the script. |
-| -32007 | Busy | The editor is in a long operation: retry after it ends. |
+| -32007 | Busy | The editor's main thread has not answered for 5 s: `data.request` names the request whose step holds it (a `test.run` collecting its suites, an export's step) and `data.phase` what it does; retry in a few seconds, once that step ends (a refused `editor_attach`, too). |
 | -32008 | Unauthorized | Mutations are denied (read-only project or the deny switch): open a writable project or allow automation. |
 | -32009 | Unsupported | Not available here (`dryRun` on a method without it, screenshots with `renderer: "none"`). |
 | -32010 | Cancelled | The request was cancelled (client disconnect, project closed): repeat it if still needed. |
@@ -65,7 +65,7 @@ Every error response carries `error.data.errorCode` (the engine `ErrorCode` belo
 | `LockUnavailable` | `editor_launch` waited 25 min while a gate (`CI.py`) ran or, for `renderer: "vulkan"`, another GPU run held the machine-wide GPU lock (the result names the lock and its holders' pid, worktree and command, as the call's progress notifications did while it waited; `python Scripts/Locks.py` lists the holders): call `editor_launch` again to keep waiting, or launch with `renderer: "none"` when no screenshot or smoke test is needed and no gate runs (the `hint` says which applies). |
 | `NotConnected` | Call `editor_launch` or `editor_attach` first; unconnected, `editor_status` lists the editors running with automation (pid, project, renderer) that `editor_attach {pid}` reaches. |
 | `ConnectionClosed` | The editor closed the connection: check `editor_status`, then relaunch or reattach. |
-| `Timeout` | The call exceeded the method's `timeoutSeconds`: retry with less work. |
+| `Timeout` | The call exceeded the method's `timeoutSeconds`: retry with less work. For `test_run`, `input_record` and `input_replay` the bound counts only a stretch without progress, so the run's work stopped advancing: the message names its last progress; check the editor (`editor_status`, `log_read`). |
 | `UnknownTool` | Use a tool the bridge lists; reach any other method through `engine_call {method, params}`. |
 | `InvalidParams` / `InvalidState` | Fix the bridge tool's arguments, or `editor_shutdown` before launching another editor. |
 | A missing editor binary | Build it: `python Scripts/Build.py --config Release --project Editor`. |

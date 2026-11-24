@@ -36,8 +36,10 @@ sys.path.insert(0, str(REPOSITORY_ROOT / "Tools" / "Automation"))
 sys.path.insert(0, str(REPOSITORY_ROOT / "Tests" / "Automation"))
 
 import engine_client  # noqa: E402
+import fake_editor  # noqa: E402
 import lock_holder  # noqa: E402
 from engine_mcp import launcher, server, transcript  # noqa: E402
+from engine_mcp.connection import EditorConnection  # noqa: E402
 from engine_mcp.launcher import Launcher  # noqa: E402
 from Lib import locks  # noqa: E402  (engine_mcp puts Scripts/ on sys.path)
 
@@ -361,6 +363,39 @@ class ProgressTests(unittest.TestCase):
                     self.assertNotIn("lock", message)
                 values = [progress for progress, _ in recorder.notifications]
                 self.assertEqual(values, sorted(set(values)), "the progress increases")
+
+    def test_a_long_run_reports_what_the_editor_says_it_is_doing(self) -> None:
+        # Skerries' brief S20: the heartbeat said only how long a test_run had run. It now carries the editor's latest
+        # $/progress report: the suite or replay, its tick and which of a recording's three runs it is in.
+        report = "recording Record.Hops, run 2 of 3 (replayed strictly with its input): tick 120 of 480"
+        for mode in MODES:
+            with self.subTest(mode=mode):
+                recorder = ProgressRecorder(report)
+                editor = fake_editor.FakeEditor()
+                editor.__enter__()
+                self.addCleanup(editor.stop)
+
+                def record(params: dict[str, Any]) -> dict[str, Any]:
+                    editor.send_progress(3, report, stage="verify", subject="Record.Hops", tick=120, finalTick=480)
+                    # Answers once the client heard the report in a heartbeat (bounded).
+                    if not recorder.heard.wait(WAIT_SECONDS):
+                        raise AssertionError("the heartbeat never carried the editor's report")
+                    return {"passed": True}
+
+                editor.handlers["test.run"] = record
+                catalog = [server.CatalogTool(name="test_run", method="test.run", description="Runs the tests.",
+                                              input_schema={"type": "object"}, mutates=False, supports_dry_run=False,
+                                              timeout_seconds=900)]
+                self.bridge = server.Bridge(REPOSITORY_ROOT, catalog, self.launcher)
+                client = engine_client.EngineClient.connect(editor.port, editor.token, client_name="engine-mcp")
+                self.addCleanup(client.close)
+                self.bridge.connection = EditorConnection(self.project, supervised=False, client=client)
+                result = self.call(mode, "test_run", {"record": "Assets/Tests/Replays/Hops.replay"}, recorder)
+                self.assertFalse(result.is_error, result.content)
+                heard = [message for _, message in recorder.notifications if report in message]
+                self.assertRegex(heard[0], r"^test_run running for \d+ s: ")
+                self.assertTrue(heard[0].endswith(report), heard[0])
+                self.assertEqual(self.bridge.editor_progress.read(), "", "the report ends with its call")
 
     def test_a_call_queued_behind_a_running_call_reports_that_it_waits(self) -> None:
         # Calls run one at a time: a call that arrives while another runs (a long export or test run) reports, while it

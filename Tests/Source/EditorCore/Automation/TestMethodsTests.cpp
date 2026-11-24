@@ -74,6 +74,48 @@ namespace Engine {
 			return std::move(*parsed);
 		}
 
+		// The responses and $/progress notifications of an in-process client that asked for progress (Architecture §13.2
+		// "Progress"), after it submits `method` with `params` on `server`: pumps until the response arrives (at most 2000
+		// pumps) and returns the notifications' params in order, with the response in `response`.
+		std::vector<Json> CallNotingProgress(AutomationServer& server, std::string_view method, const Json& params, Json& response)
+		{
+			const ClientId client = server.ConnectInProcess("agent", { .OffloadLargeResults = true, .Progress = true });
+			server.SubmitInProcess(client, RpcRequest{ .Id = Json(1), .IsNotification = false, .Method = std::string(method), .Params = params, .TranscriptLine = std::nullopt });
+			std::vector<Json> progress;
+			for (uint32_t pump = 0; pump < 2000 && response.is_null(); ++pump)
+			{
+				server.Pump();
+				for (Json& message : server.TakeInProcessResponses(client))
+				{
+					if (message.contains("id"))
+						response = std::move(message);
+					else
+					{
+						CHECK(message["method"] == Json("$/progress"));
+						CHECK(message["params"]["id"] == Json(1));
+						CHECK(message["params"]["method"] == Json(std::string(method)));
+						progress.push_back(std::move(message["params"]));
+					}
+				}
+			}
+			REQUIRE_MESSAGE(response.contains("result"), response.dump());
+			server.DisconnectInProcess(client);
+			return progress;
+		}
+
+		// The "stage" of each notification in order, each once where it repeats.
+		std::vector<std::string> StagesOf(const std::vector<Json>& progress)
+		{
+			std::vector<std::string> stages;
+			for (const Json& params : progress)
+			{
+				std::string stage = JsonReader(params["stage"]).ReadString().value_or(std::string());
+				if (stages.empty() || stages.back() != stage)
+					stages.push_back(std::move(stage));
+			}
+			return stages;
+		}
+
 		template<typename TClient>
 		void WriteSuite(TClient& fixture, std::string_view source)
 		{
@@ -616,6 +658,56 @@ namespace Engine {
 			const auto reportDocument = JsonReader::Parse(*report);
 			REQUIRE(reportDocument.has_value());
 			CHECK((*reportDocument)["recording"] == recording);
+		}
+
+		// Skerries' brief S20: a long recording ran past the MCP bridge's fixed timeout with nothing to show it still worked. Its
+		// client now hears the suite, the tick and which of the recording's three runs it is in; each run begins in a frame of
+		// its own, so every client hears all three, at whatever interval the server sends progress.
+		TEST_CASE("TestMethods: test.run reports the recorded suite, its tick and each of a recording's three runs")
+		{
+			Test::AutomationFixture fixture("TestRunProgress");
+			CallTestMethod(fixture, "script.write", Json{ { "path", "Assets/Scripts/Paddle.luau" }, { "source", "local Paddle = {}\n"
+																												"function Paddle.OnFixedUpdate(self: any, dt: number)\n"
+																												"\tif Input.IsKeyDown(\"Space\") then self.Entity.Transform:Translate(vector.create(1, 0, 0)) end\n"
+																												"end\n"
+																												"return Script.Define(\"Paddle\", Paddle)\n" } });
+			CallTestMethod(fixture, "entity.create", Json{ { "name", "Paddle" }, { "components", Json{ { "Script", Json{ { "Scripts", Json::array({ Json{ { "Script", "Assets/Scripts/Paddle.luau" } } }) } } } } } });
+			CallTestMethod(fixture, "scene.save", Json::object());
+			WriteSuite(fixture, "return Test.Suite('Record.Paddle', function()\n"
+								"Test.Case('slide', function()\n"
+								"Test.InjectKey('Space', 'Down'); Test.WaitTicks(70)\n"
+								"Test.InjectKey('Space', 'Up'); Test.WaitTicks(9)\n"
+								"end)\nend)");
+			CallTestMethod(fixture, "project.setSettings", Json{ { "patch", Json{ { "Testing", Json{ { "Suites", Json::array({ Json{ { "Script", "Assets/Tests/Contract.test.luau" }, { "Scene", "Assets/Scenes/Main.scene" } } }) } } } } } });
+
+			Json response;
+			const std::vector<Json> progress = CallNotingProgress(fixture.GetClient().GetServer(), "test.run", Json{ { "record", "Assets/Tests/Replays/Paddle.replay" } }, response);
+			const Json result = ReadRunResult(response);
+			REQUIRE(result["passed"] == Json(true));
+			const Json finalTick = result["recording"]["ticks"];
+			CHECK(StagesOf(progress) == std::vector<std::string>{ "record", "verify", "inputCheck" });
+			// The first came as the run began: the suite at tick 0, with nothing done yet.
+			REQUIRE_FALSE(progress.empty());
+			CHECK(progress.front()["subject"] == Json("Record.Paddle"));
+			CHECK(progress.front()["tick"] == Json(0));
+			CHECK(progress.front()["work"] == Json(0));
+			CHECK_FALSE(JsonReader(progress.front()["message"]).ReadString().value_or(std::string()).empty());
+			uint64_t work = 0;
+			for (size_t index = 0; index < progress.size(); ++index)
+			{
+				const Json& params = progress[index];
+				INFO(params.dump());
+				CHECK((params["step"] == Json(1) && params["steps"] == Json(1)));
+				const uint64_t done = JsonReader(params["work"]).ReadUInt64().value_or(0);
+				if (index != 0)
+					CHECK(done > work);
+				work = done;
+				if (params["stage"] != Json("record"))
+				{
+					CHECK(params["subject"] == Json("Record.Paddle"));
+					CHECK(params["finalTick"] == finalTick);
+				}
+			}
 		}
 
 		// ADR 0038, friction F20: re-recording gave no sign of whether the new replay differed from the file it replaced (Rolling

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine/Automation/Protocol/PendingOperation.h"
 #include "Engine/Core/Base.h"
 #include "Engine/Core/BuildId.h"
 #include "Engine/Core/Error.h"
@@ -144,7 +145,21 @@ namespace Engine {
 	[[nodiscard]] Json MakeErrorResponse(const Json& id, const Error& error, const Json& extraData, const Json& meta);
 
 	// The watchdog's answer (§13.2): code Busy, data {"errorCode": "Busy", "detail": ..., "phase": <the main thread's
-	// phase marker>, "stalledMilliseconds": <how long it has not pumped>, "issues": []}. No "_meta".
-	[[nodiscard]] Json MakeBusyResponse(const Json& id, std::string_view phase, uint64_t stalledMilliseconds);
+	// phase marker>, "request": <the method whose handler, Poll or Cancel holds the main thread, Watchdog::GetRequest; ""
+	// for none>, "stalledMilliseconds": <how long it has not pumped>, "hint" (with a request only), "issues": []}. No
+	// "_meta". With a request, the message names it and says to retry once its current step ends (the main thread then
+	// answers again, while the request may run on), and the hint how a refused session.hello is retried; without one, to
+	// retry later.
+	[[nodiscard]] Json MakeBusyResponse(const Json& id, std::string_view phase, uint64_t stalledMilliseconds, std::string_view request = {});
+
+	// The $/progress notification of request `id` of `method` (§13.2 "Progress"): {"jsonrpc": "2.0", "method":
+	// "$/progress", "params": {"id", "method", "work", "stage" (PendingProgressStageToString), "subject", "tick",
+	// "finalTick", "step", "steps", "message" (DescribePendingProgress)}}.
+	[[nodiscard]] Json MakeProgressNotification(const Json& id, std::string_view method, const PendingProgress& progress);
+
+	// One line saying what `progress` reports: the stage, its subject, a recording's run (1 to 3 of 3) and the tick, such as
+	// "recording Hops, run 2 of 3 (replayed strictly with its input): tick 120 of 480" or "suite 2 of 5, Board/clears a line:
+	// tick 60".
+	[[nodiscard]] std::string DescribePendingProgress(const PendingProgress& progress);
 
 }

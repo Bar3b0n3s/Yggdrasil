@@ -2684,6 +2684,125 @@ end))");
 			CHECK(everything->Replays == std::vector<std::string>{ "Assets/Tests/Replays/Other.replay", "Assets/Tests/Replays/Pilot.replay" });
 			runner.Cancel();
 		}
+
+		// The stages of `seen` in order, each once where it repeats.
+		[[nodiscard]] static std::vector<FeatureTestStage> StagesOf(const std::vector<FeatureTestProgress>& seen)
+		{
+			std::vector<FeatureTestStage> stages;
+			for (const FeatureTestProgress& progress : seen)
+			{
+				if (stages.empty() || stages.back() != progress.Stage)
+					stages.push_back(progress.Stage);
+			}
+			return stages;
+		}
+
+		// Begins `runner` on `host` with `options` and advances it to its end, noting its progress before the first Advance
+		// and after each one that left it running (what test.run's $/progress reports; Skerries' brief S20).
+		[[nodiscard]] static std::vector<FeatureTestProgress> RunNotingProgress(RunnerHost & host, FeatureTestRunner & runner, const FeatureTestRunOptions& options)
+		{
+			std::vector<FeatureTestProgress> seen;
+			CHECK_FALSE(runner.GetProgress().has_value());
+			REQUIRE(runner.Begin(host, options));
+			for (uint32_t step = 0; step < 1000 && runner.IsRunning(); ++step)
+			{
+				const std::optional<FeatureTestProgress> progress = runner.GetProgress();
+				REQUIRE(progress.has_value());
+				CHECK(runner.GetStage() == progress->Stage);
+				seen.push_back(*progress);
+				REQUIRE(runner.Advance());
+			}
+			CHECK_FALSE(runner.IsRunning());
+			CHECK_FALSE(runner.GetProgress().has_value());
+			CHECK_FALSE(runner.GetStage().has_value());
+			return seen;
+		}
+
+		TEST_CASE("TestRunner: a recording run reports its suite, its tick and each of its three runs")
+		{
+			RunnerHost host;
+			host.InputDriven();
+			host.Suite(InputSuite);
+			FeatureTestRunner runner;
+			const std::vector<FeatureTestProgress> seen = RunNotingProgress(host, runner, { .Record = true });
+			const Result<ReplayDocument> recording = runner.TakeRecording();
+			REQUIRE(recording);
+			REQUIRE(recording->FinalTick > 0);
+
+			// Recorded, replayed strictly with its input, then without it.
+			CHECK(StagesOf(seen) == std::vector<FeatureTestStage>{ FeatureTestStage::Record, FeatureTestStage::Verify, FeatureTestStage::InputCheck });
+			// Work counts every Advance from the first.
+			for (size_t index = 0; index < seen.size(); ++index)
+				CHECK(seen[index].Units == index);
+			// Before anything ran: the suite, tick 0.
+			CHECK(seen.front().Subject == "Pilot");
+			CHECK(seen.front().Tick == 0);
+			CHECK((seen.front().Step == 1 && seen.front().Steps == 1));
+			bool sawCase = false;
+			uint64_t verifiedTo = 0;
+			uint64_t checkedTo = 0;
+			for (const FeatureTestProgress& progress : seen)
+			{
+				INFO(progress.Subject << " tick " << progress.Tick);
+				CHECK((progress.Step == 1 && progress.Steps == 1));
+				if (progress.Stage == FeatureTestStage::Record)
+				{
+					sawCase = sawCase || (progress.Subject == "Pilot/drive" && progress.Tick > 0);
+					CHECK(progress.FinalTick == 0);
+					continue;
+				}
+				// The recording's runs name the recorded suite and the recording's final tick.
+				CHECK(progress.Subject == "Pilot");
+				CHECK(progress.FinalTick == recording->FinalTick);
+				CHECK(progress.Tick <= recording->FinalTick);
+				uint64_t& reached = progress.Stage == FeatureTestStage::Verify ? verifiedTo : checkedTo;
+				CHECK(progress.Tick >= reached);
+				reached = progress.Tick;
+			}
+			CHECK(sawCase);
+			CHECK(verifiedTo > 0);
+			CHECK(checkedTo > 0);
+		}
+
+		TEST_CASE("TestRunner: a run reports each selected suite, then each replay with its place among them")
+		{
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("First",function() Test.Case("body",function() Test.WaitTicks(2) end) end))");
+			ReplayHeader header;
+			header.Scene = { UUID(401), "Assets/Scenes/Start.scene" };
+			header.Seed = host.Settings.Simulation.Seed;
+			header.EngineVersion = "1";
+			header.Config = "Debug";
+			auto session = host.CreateReplaySession(header, TestSuiteSettings::Mode::Editor);
+			REQUIRE(session);
+			auto data = CreateRef<ReplayData>();
+			data->Header = header;
+			data->FinalStateHash = UUID((*session)->ComputeStateHash()).ToString();
+			session->reset();
+			host.ReplayAssets["Assets/A.replay"] = data;
+			host.ReplayGlobs = { "Assets/A.replay" };
+			FeatureTestRunner runner;
+			const std::vector<FeatureTestProgress> seen = RunNotingProgress(host, runner, {});
+			CHECK(StagesOf(seen) == std::vector<FeatureTestStage>{ FeatureTestStage::Suite, FeatureTestStage::Replay });
+			for (const FeatureTestProgress& progress : seen)
+			{
+				INFO(progress.Subject << " tick " << progress.Tick);
+				CHECK(progress.Steps == 2);
+				if (progress.Stage == FeatureTestStage::Suite)
+				{
+					CHECK(progress.Step == 1);
+					CHECK((progress.Subject == "First" || progress.Subject == "First/body"));
+				}
+				else
+				{
+					CHECK(progress.Step == 2);
+					CHECK(progress.Subject == "Assets/A.replay");
+				}
+			}
+			const Result<TestRunResult> result = runner.GetResult();
+			REQUIRE(result);
+			CHECK(result->Passed);
+		}
 	}
 
 }

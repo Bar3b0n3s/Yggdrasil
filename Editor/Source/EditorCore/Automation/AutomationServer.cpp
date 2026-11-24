@@ -332,7 +332,7 @@ namespace Engine {
 				const ClientId client = state.NextClientId++;
 				state.Clients[client] = State::ClientRecord{ .Name = event.Name, .Version = event.Version, .InProcess = false, .Connection = event.Client };
 				state.Connections[event.Client] = client;
-				state.Calls->AddClient(client, event.Name, true);
+				state.Calls->AddClient(client, event.Name, { .OffloadLargeResults = true, .Progress = true });
 				ENGINE_INFO("Automation client '{}' {} connected ({})", event.Name, event.Version, client);
 			}
 			for (InboundRequest& request : requests)
@@ -469,13 +469,13 @@ namespace Engine {
 		return clients;
 	}
 
-	ClientId AutomationServer::ConnectInProcess(std::string name, bool offloadLargeResults)
+	ClientId AutomationServer::ConnectInProcess(std::string name, DispatcherClientOptions options)
 	{
 		State& state = *m_State;
 		const ClientId client = state.NextClientId++;
 		state.Clients[client] = State::ClientRecord{ .Name = name, .Version = {}, .InProcess = true, .Connection = NoClient };
 		state.InProcessResponses[client];
-		state.Calls->AddClient(client, std::move(name), offloadLargeResults);
+		state.Calls->AddClient(client, std::move(name), options);
 		return client;
 	}
 

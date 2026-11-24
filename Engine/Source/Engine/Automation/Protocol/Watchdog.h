@@ -56,6 +56,13 @@ namespace Engine {
 		// Any thread: the current phase: the script phase while one is set, else the base phase ("Idle" when none is set).
 		[[nodiscard]] std::string GetPhase() const;
 
+		// Main thread: sets the method whose request or pending operation the main thread runs (empty: none) and returns the
+		// previous one, for WatchdogRequestScope: the Dispatcher sets it around every handler, Poll and Cancel, so a Busy answer
+		// says which request holds the main thread and that it ends (MakeBusyResponse; Skerries' brief S20).
+		[[nodiscard]] std::string ExchangeRequest(std::string_view method);
+		// Any thread: that method; empty while the main thread runs no request.
+		[[nodiscard]] std::string GetRequest() const;
+
 		// Any thread: how long the main thread has not beaten when that exceeds the stall threshold; nullopt while alive.
 		[[nodiscard]] std::optional<std::chrono::milliseconds> GetStall(std::chrono::steady_clock::time_point now) const;
 
@@ -86,6 +93,21 @@ namespace Engine {
 	private:
 		Watchdog* m_Watchdog = nullptr; // documented back-reference: outlives the scope; null for none
 		std::string m_PreviousPhase;    // restored by the destructor; empty for Idle
+	};
+
+	// Sets the request (Watchdog::ExchangeRequest) for the lifetime of the scope and restores the previous one afterwards
+	// (main thread). `watchdog` may be null, which makes the scope do nothing.
+	class WatchdogRequestScope
+	{
+	public:
+		WatchdogRequestScope(Watchdog* watchdog, std::string_view method);
+		~WatchdogRequestScope();
+
+		WatchdogRequestScope(const WatchdogRequestScope&) = delete;
+		WatchdogRequestScope& operator=(const WatchdogRequestScope&) = delete;
+	private:
+		Watchdog* m_Watchdog = nullptr; // documented back-reference: outlives the scope; null for none
+		std::string m_PreviousRequest;  // restored by the destructor; empty for none
 	};
 
 }

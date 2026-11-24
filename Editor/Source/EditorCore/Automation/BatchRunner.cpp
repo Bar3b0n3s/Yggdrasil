@@ -158,7 +158,7 @@ namespace Engine {
 		if (state.Client == NoClient)
 		{
 			// Results stay inline, so a "$ref" into a large result finds the data rather than an offload summary.
-			state.Client = server.ConnectInProcess(m_Options.ClientName, false);
+			state.Client = server.ConnectInProcess(m_Options.ClientName, { .OffloadLargeResults = false });
 		}
 
 		if (state.InFlight)

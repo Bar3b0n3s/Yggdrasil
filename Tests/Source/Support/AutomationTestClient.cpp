@@ -24,7 +24,7 @@ namespace Engine {
 			Result<Scope<AutomationServer>> server = AutomationServer::Create(editor, specification);
 			REQUIRE_MESSAGE(server.has_value(), (server ? "" : server.error().ToString()));
 			m_Server = std::move(*server);
-			m_Client = m_Server->ConnectInProcess("test", offloadLargeResults);
+			m_Client = m_Server->ConnectInProcess("test", { .OffloadLargeResults = offloadLargeResults });
 			REQUIRE(m_Client != NoClient);
 		}
 

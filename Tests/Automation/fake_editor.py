@@ -32,6 +32,20 @@ PYTHON = Path(getattr(sys, "_base_executable", sys.executable))
 MAX_AUTH_FAILURES = 3
 
 
+class FakeClock:
+    """A client's clock (EngineClient.clock) that moves only when the test moves it, so no passing outcome depends on
+    how long anything takes."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class FakeError(Exception):
     """Raised by a handler: answered as a JSON-RPC error with data {errorCode, detail, issues, **extra, _meta}."""
 
@@ -77,6 +91,9 @@ class FakeEditor:
         self.lock = threading.Lock()
         self.stopping = threading.Event()
         self.accepter = threading.Thread(target=self.accept_loop, daemon=True, name="fake-editor-accept")
+        # The connection and request id whose handler runs on this thread (handlers run on their connection's thread),
+        # for send_progress.
+        self.current = threading.local()
 
     def __enter__(self) -> FakeEditor:
         self.accepter.start()
@@ -145,6 +162,7 @@ class FakeEditor:
                     continue
                 with self.lock:
                     self.requests.append(ReceivedRequest(client_name, method, params, request_id))
+                self.current.connection, self.current.request_id = connection, request_id
                 response = self.dispatch(method, params, request_id)
                 if response is not None and request_id is not None:
                     for notification in self.notifications:
@@ -195,6 +213,12 @@ class FakeEditor:
             data["_meta"] = self.meta()
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": error.code, "message": error.detail,
                                                              "data": data}}
+
+    def send_progress(self, work: int, message: str = "", **members: Any) -> None:
+        """From a handler: sends the $/progress notification of the request it answers, as a pending operation's are
+        sent while it runs (Docs/Architecture.md §13.2 "Progress"): {"id", "work", "message", **members}."""
+        params = {"id": self.current.request_id, "work": work, "message": message, **members}
+        self.send(self.current.connection, {"jsonrpc": "2.0", "method": "$/progress", "params": params})
 
     @staticmethod
     def send(connection: socket.socket, message: dict[str, Any]) -> None:

@@ -194,14 +194,17 @@ namespace Engine {
 
 		// In-process clients (--batch, --upgrade, the Tests): a new client named `name` ("batch", "cli", "test") whose requests
 		// run through the same Dispatcher as TCP requests, so in-process tests exercise the real dispatch path (§15.2
-		// "an in-process round trip for every method"). No handshake. With `offloadLargeResults` false its results stay
-		// inline whatever their size (BatchRunner, whose "$ref" substitution reads them; Dispatcher::AddClient).
-		[[nodiscard]] ClientId ConnectInProcess(std::string name, bool offloadLargeResults = true);
+		// "an in-process round trip for every method"). No handshake. With options.OffloadLargeResults false its results stay
+		// inline whatever their size (BatchRunner, whose "$ref" substitution reads them); with options.Progress its responses
+		// are preceded by the $/progress notifications of its pending operations (Dispatcher::AddClient). TCP clients get
+		// both.
+		[[nodiscard]] ClientId ConnectInProcess(std::string name, DispatcherClientOptions options = {});
 		// Removes the client like a TCP disconnect (pending operations cancelled, AutomationClientDisconnected appended).
 		void DisconnectInProcess(ClientId client);
 		// Queues a request of an in-process client (asserted); it runs at the next Pump.
 		void SubmitInProcess(ClientId client, RpcRequest request);
-		// The responses for an in-process client since the last call, in completion order.
+		// The responses for an in-process client since the last call, in completion order, with its $/progress notifications
+		// when it asked for them.
 		[[nodiscard]] std::vector<Json> TakeInProcessResponses(ClientId client);
 
 		// Writes a method's output file, such as a screenshot's PNG or a test report, as "<serverTag>-<sequence>.<extension>"

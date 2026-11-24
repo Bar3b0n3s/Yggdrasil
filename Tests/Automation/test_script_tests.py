@@ -200,6 +200,47 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual(recording["finalStateHash"], recorded["FinalStateHash"])
         self.assertEqual(recording["inputCheck"], {"ran": True, "divergedAtTick": recorded["FinalTick"]})
 
+    def test_a_recording_reports_its_suite_tick_and_three_runs_and_a_replay_its_tick(self) -> None:
+        # Skerries' brief S20: a long recording ran past the MCP bridge's fixed timeout with nothing to show it still
+        # worked. test.run's $/progress names the recorded suite, its tick and which of the recording's three runs it is
+        # in; each run begins in a frame of its own, so a client hears all three. input.replay's names the replay.
+        client, root = self.open_editor_with_scene()
+        client.call("script.write", {"path": "Assets/Scripts/Hopper.luau", "source":
+                    "local Hopper = {}\nfunction Hopper.OnFixedUpdate(self: any, dt: number)\n"
+                    "\tif Input.IsKeyDown(\"A\") then\n\t\tself.Entity.Transform:Translate(vector.create(0, 1, 0))\n"
+                    "\tend\nend\nreturn Script.Define(\"Hopper\", Hopper)\n"})
+        client.call("entity.create", {"name": "Hopper", "components": {
+            "Script": {"Scripts": [{"Script": "Assets/Scripts/Hopper.luau"}]}}})
+        self.configure_suite(client, 'return Test.Suite("Record.Hops", function()\n'
+                             'Test.Case("hop", function()\n'
+                             'Test.InjectKey("A", "Down"); Test.WaitTicks(70)\n'
+                             'Test.InjectKey("A", "Up"); Test.WaitTicks(9)\nend)\nend)')
+        path = "Assets/Tests/Replays/Hops.replay"
+        reports: list[dict] = []
+        result = engine_client.load_offloaded(client.call("test.run", {"record": path}, timeout=120.0,
+                                                          progress=reports.append))
+        self.assertTrue(result["passed"], result)
+        stages = [report["stage"] for report in reports]
+        self.assertEqual([stage for index, stage in enumerate(stages) if index == 0 or stages[index - 1] != stage],
+                         ["record", "verify", "inputCheck"])
+        first = reports[0]
+        self.assertEqual((first["method"], first["subject"], first["tick"], first["step"], first["steps"]),
+                         ("test.run", "Record.Hops", 0, 1, 1))
+        work = [report["work"] for report in reports]
+        self.assertEqual(work, sorted(set(work)), "the work grows with every report")
+        for report in reports[stages.index("verify"):]:
+            self.assertEqual((report["subject"], report["finalTick"]), ("Record.Hops", result["recording"]["ticks"]))
+            self.assertTrue(report["message"])
+        self.assertTrue((root / path).is_file())
+
+        reports.clear()
+        playback = client.call("input.replay", {"path": path, "verify": True, "strictHash": True},
+                               progress=reports.append)
+        self.assertTrue(playback["passed"])
+        self.assertEqual({report["stage"] for report in reports}, {"replay"})
+        self.assertEqual((reports[0]["subject"], reports[0]["tick"], reports[0]["finalTick"]),
+                         (path, 0, result["recording"]["ticks"]))
+
     def test_record_over_an_existing_replay_reports_whether_it_equals_the_replaced_file(self) -> None:
         # ADR 0038, friction F20: re-recording gave no sign of whether the new replay differed from the file it
         # replaced; the recording block's replaced says it.

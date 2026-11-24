@@ -24,6 +24,8 @@
 
 namespace Engine {
 
+	class Watchdog;
+
 	namespace Test {
 
 		// Registry enum "TestShape".
@@ -89,6 +91,8 @@ namespace Engine {
 			std::vector<std::pair<std::string, std::string>> Offloaded{}; // (file name, text)
 			// What the contexts return from GetAssetReferenceResolver (MethodRegistry.h convention 13); null: none.
 			IAssetReferenceResolver* AssetReferenceResolver = nullptr;
+			// The dispatcher's watchdog, which a test's operations read (DispatcherTests); null: none.
+			const Watchdog* PhaseMarker = nullptr;
 		};
 
 		// The host context of the test methods.

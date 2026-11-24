@@ -3,7 +3,9 @@
 #include "Engine/Automation/Protocol/Dispatcher.h"
 
 #include "Engine/Automation/Protocol/MethodRegistry.h"
+#include "Engine/Automation/Protocol/Watchdog.h"
 #include "Engine/Core/FatalError.h"
+#include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Core/RingBufferSink.h"
 #include "Support/DeathTest.h"
 #include "Support/ProtocolTestTypes.h"
@@ -73,6 +75,76 @@ namespace Engine {
 			return Scope<PendingOperation>(CreateScope<DispatcherOutcomeOperation>(params.Polls));
 		}
 
+		// A pending operation that reports its progress (§13.2 "Progress"): it resolves at its poll `polls`, its work counts its
+		// polls, and its stage turns from Suite to Replay at its fourth poll.
+		class DispatcherProgressOperation final : public PendingOperation
+		{
+		public:
+			explicit DispatcherProgressOperation(uint32_t polls)
+				: m_Polls(polls)
+			{
+			}
+			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext& context) override
+			{
+				++m_Done;
+				if (m_Done < m_Polls)
+					return std::nullopt;
+				return context.SerializeResult(Test::PendResult{ .Polls = m_Done });
+			}
+			[[nodiscard]] std::optional<PendingProgress> GetProgress() const override
+			{
+				return PendingProgress{ .Work = m_Done, .Stage = m_Done < 4 ? PendingProgressStage::Suite : PendingProgressStage::Replay, .Subject = "Board/clears a line", .Tick = 10ULL * m_Done, .FinalTick = 0, .Step = 1, .Steps = 2 };
+			}
+		private:
+			uint32_t m_Polls = 0;
+			uint32_t m_Done = 0;
+		};
+
+		[[nodiscard]] static Result<Scope<PendingOperation>> BeginDispatcherProgress(Test::TestHostContext&, const Test::PendParams& params)
+		{
+			return Scope<PendingOperation>(CreateScope<DispatcherProgressOperation>(params.Polls));
+		}
+
+		// Notes the request the host's watchdog names ("request <method>", "request" for none) in the host's calls.
+		static void NoteWatchdogRequest(MethodContext& context)
+		{
+			Test::TestHostState& state = static_cast<Test::TestHostContext&>(context).GetState();
+			REQUIRE(state.PhaseMarker != nullptr);
+			state.Calls.push_back(std::format("request {}", state.PhaseMarker->GetRequest()));
+		}
+
+		// A pending operation that never resolves and notes the watchdog's request on every Poll and on Cancel.
+		class RequestObservingOperation final : public PendingOperation
+		{
+		public:
+			[[nodiscard]] std::optional<Result<Json>> Poll(MethodContext& context) override
+			{
+				NoteWatchdogRequest(context);
+				return std::nullopt;
+			}
+			void Cancel(MethodContext& context) override { NoteWatchdogRequest(context); }
+		};
+
+		[[nodiscard]] static Result<Scope<PendingOperation>> BeginRequestObserving(Test::TestHostContext& context, const Test::PendParams&)
+		{
+			NoteWatchdogRequest(context);
+			return Scope<PendingOperation>(CreateScope<RequestObservingOperation>());
+		}
+
+		// The test's own clock for DispatcherSpecification::TimeSource: it moves only when the test advances it.
+		struct ManualClock
+		{
+			std::chrono::steady_clock::time_point Now{};
+
+			[[nodiscard]] std::function<std::chrono::steady_clock::time_point()> GetFunction()
+			{
+				return [this]()
+				{
+					return Now;
+				};
+			}
+		};
+
 		// The test types, methods and host, a ring of the test's own and a dispatcher over them, with clients 1 and 2.
 		struct DispatcherSetup
 		{
@@ -83,14 +155,20 @@ namespace Engine {
 			RingBufferSink Log{ 256 };
 			Scope<Dispatcher> Calls;
 
-			explicit DispatcherSetup(DispatcherSpecification specification = {})
+			// `watchdog` (may be null): the dispatcher's, which the test host's operations read too (TestHostState::PhaseMarker).
+			explicit DispatcherSetup(DispatcherSpecification specification = {}, Watchdog* watchdog = nullptr)
 			{
+				State.PhaseMarker = watchdog;
 				Methods = CreateScope<MethodRegistry>(*Types);
 				Test::RegisterProtocolTestMethods(*Methods);
 				Methods->AddPending<Test::TestHostContext, Test::PendParams, Test::PendResult>(
 					{ .Name = "test.observedOutcome", .Description = "Exercises pending result failure reporting.", .Examples = { { .Description = "Fail during Poll.", .Params = Json{ { "polls", 0 } } } } }, &BeginDispatcherOutcome);
+				Methods->AddPending<Test::TestHostContext, Test::PendParams, Test::PendResult>(
+					{ .Name = "test.progress", .Description = "A pending operation that reports its progress.", .Examples = { { .Description = "Resolve at the fifth poll.", .Params = Json{ { "polls", 5 } } } } }, &BeginDispatcherProgress);
+				Methods->AddPending<Test::TestHostContext, Test::PendParams, Test::PendResult>(
+					{ .Name = "test.observeRequest", .Description = "A pending operation that notes the watchdog's request.", .Examples = { { .Description = "Never resolves.", .Params = Json::object() } } }, &BeginRequestObserving);
 				Methods->Freeze();
-				Calls = CreateScope<Dispatcher>(*Methods, Host, Log, nullptr, specification);
+				Calls = CreateScope<Dispatcher>(*Methods, Host, Log, watchdog, specification);
 				Calls->AddClient(1, "first");
 				Calls->AddClient(2, "second");
 			}
@@ -633,7 +711,7 @@ namespace Engine {
 		TEST_CASE("Dispatcher: a client added without offloading keeps large results inline")
 		{
 			DispatcherSetup setup(DispatcherSpecification{ .OffloadThresholdBytes = 1024 });
-			setup.Calls->AddClient(3, "batch", false);
+			setup.Calls->AddClient(3, "batch", { .OffloadLargeResults = false });
 			setup.Calls->Enqueue(3, Test::MakeTestRequest(1, "test.large", Json{ { "count", 100 } }));
 			std::vector<OutboundMessage> messages = setup.PumpAll();
 			REQUIRE(messages.size() == 1);
@@ -684,6 +762,132 @@ namespace Engine {
 			CHECK(setup.Calls->Pump(std::chrono::seconds(1)).empty());
 			CHECK(setup.Calls->GetPendingCount(1) == 1);
 			REQUIRE(setup.PumpAll().size() == 1);
+		}
+
+		// §13.2 "Progress" (Skerries' brief S20): a long operation's progress reaches the client that asked for it, so the
+		// client bounds the call by whether its work advances rather than by a fixed deadline.
+		TEST_CASE("Dispatcher: a pending operation's progress reaches its client at once, then per interval or new stage")
+		{
+			ManualClock clock;
+			DispatcherSetup setup(DispatcherSpecification{ .ProgressInterval = std::chrono::milliseconds(1000), .TimeSource = clock.GetFunction() });
+			setup.Calls->AddClient(3, "agent", { .OffloadLargeResults = true, .Progress = true });
+			const auto pump = [&setup]()
+			{
+				return setup.Calls->Pump(std::chrono::seconds(1));
+			};
+			setup.Calls->Enqueue(3, Test::MakeTestRequest(7, "test.progress", Json{ { "polls", 6 } }));
+
+			// The handler returned it: one notification before its first Poll, with nothing done yet; that Poll sends none.
+			std::vector<OutboundMessage> first = pump();
+			REQUIRE(first.size() == 1);
+			CHECK(first[0].Client == 3);
+			const Json& notification = first[0].Message;
+			CHECK(notification["jsonrpc"] == Json("2.0"));
+			CHECK(notification["method"] == Json("$/progress"));
+			CHECK_FALSE(notification.contains("id"));
+			const Json& params = notification["params"];
+			CHECK(params["id"] == Json(7));
+			CHECK(params["method"] == Json("test.progress"));
+			CHECK(params["work"] == Json(0));
+			CHECK(params["stage"] == Json("suite"));
+			CHECK(params["subject"] == Json("Board/clears a line"));
+			CHECK((params["tick"] == Json(0) && params["finalTick"] == Json(0)));
+			CHECK((params["step"] == Json(1) && params["steps"] == Json(2)));
+			CHECK(params["message"] == Json(DescribePendingProgress({ .Work = 0, .Stage = PendingProgressStage::Suite, .Subject = "Board/clears a line", .Tick = 0, .FinalTick = 0, .Step = 1, .Steps = 2 })));
+
+			// Within the interval, the same stage sends nothing; once it has passed, the next Poll sends.
+			clock.Now += std::chrono::milliseconds(999);
+			CHECK(pump().empty());
+			clock.Now += std::chrono::milliseconds(1);
+			std::vector<OutboundMessage> interval = pump();
+			REQUIRE(interval.size() == 1);
+			CHECK(interval[0].Message["params"]["work"] == Json(3));
+			CHECK(interval[0].Message["params"]["stage"] == Json("suite"));
+
+			// A new stage is sent at once; the same stage again only after the interval; then the response, with no
+			// notification after it.
+			std::vector<OutboundMessage> stage = pump();
+			REQUIRE(stage.size() == 1);
+			CHECK(stage[0].Message["params"]["work"] == Json(4));
+			CHECK(stage[0].Message["params"]["stage"] == Json("replay"));
+			CHECK(pump().empty());
+			std::vector<OutboundMessage> last = pump();
+			REQUIRE(last.size() == 1);
+			CHECK(last[0].Message["id"] == Json(7));
+			CHECK(last[0].Message["result"]["polls"] == Json(6));
+		}
+
+		TEST_CASE("Dispatcher: a new stage is sent after the Poll that reached it, whatever the interval")
+		{
+			ManualClock clock;
+			DispatcherSetup setup(DispatcherSpecification{ .ProgressInterval = std::chrono::milliseconds(1000), .TimeSource = clock.GetFunction() });
+			setup.Calls->AddClient(3, "agent", { .OffloadLargeResults = true, .Progress = true });
+			setup.Calls->Enqueue(3, Test::MakeTestRequest(8, "test.progress", Json{ { "polls", 6 } }));
+			std::vector<std::string> stages;
+			std::vector<uint64_t> work;
+			bool answered = false;
+			for (int pump = 0; pump < 10 && !answered; ++pump)
+			{
+				for (const OutboundMessage& message : setup.Calls->Pump(std::chrono::seconds(1)))
+				{
+					if (message.Message.contains("id"))
+					{
+						answered = true;
+						continue;
+					}
+					stages.push_back(JsonReader(message.Message["params"]["stage"]).ReadString().value_or(std::string()));
+					work.push_back(JsonReader(message.Message["params"]["work"]).ReadUInt64().value_or(0));
+				}
+			}
+			CHECK(answered);
+			// The clock never moved: the first notification, then the Poll that turned the stage.
+			CHECK(stages == std::vector<std::string>{ "suite", "replay" });
+			CHECK(work == std::vector<uint64_t>{ 0, 4 });
+		}
+
+		TEST_CASE("Dispatcher: progress reaches only a client that asked for it, from an operation that reports it")
+		{
+			DispatcherSetup setup(DispatcherSpecification{ .ProgressInterval = std::chrono::milliseconds(0) });
+			setup.Calls->AddClient(3, "agent", { .OffloadLargeResults = true, .Progress = true });
+			// Client 1 asked for none.
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.progress", Json{ { "polls", 3 } }));
+			// test.pend reports none.
+			setup.Calls->Enqueue(3, Test::MakeTestRequest(2, "test.pend", Json{ { "polls", 3 } }));
+			std::vector<OutboundMessage> messages = setup.PumpAll();
+			REQUIRE(messages.size() == 2);
+			for (const OutboundMessage& message : messages)
+				CHECK(message.Message.contains("id"));
+
+			// With a zero interval, every Poll that leaves it running is followed by one.
+			setup.Calls->Enqueue(3, Test::MakeTestRequest(3, "test.progress", Json{ { "polls", 3 } }));
+			std::vector<uint64_t> work;
+			for (const OutboundMessage& message : setup.PumpAll())
+			{
+				if (!message.Message.contains("id"))
+					work.push_back(JsonReader(message.Message["params"]["work"]).ReadUInt64().value_or(0));
+			}
+			CHECK(work == std::vector<uint64_t>{ 0, 1, 2 });
+
+			// A notification request gets neither a response nor progress.
+			setup.Calls->Enqueue(3, RpcRequest{ .Id = Json(), .IsNotification = true, .Method = "test.progress", .Params = Json{ { "polls", 3 } }, .TranscriptLine = std::nullopt });
+			CHECK(setup.PumpAll().empty());
+			CHECK(setup.Calls->GetPendingCount(3) == 0);
+		}
+
+		// Skerries' brief S20: a Busy answer names the request whose handler, Poll or Cancel holds the main thread.
+		TEST_CASE("Dispatcher: the watchdog names the request whose handler, Poll or Cancel runs, and none between them")
+		{
+			Watchdog watchdog(DefaultWatchdogStallThreshold, std::chrono::steady_clock::now());
+			DispatcherSetup setup({}, &watchdog);
+			setup.Calls->Enqueue(1, Test::MakeTestRequest(1, "test.observeRequest", Json::object()));
+			CHECK(setup.Calls->Pump(std::chrono::seconds(1)).empty()); // the handler and the first Poll
+			CHECK(watchdog.GetRequest().empty());
+			CHECK(setup.Calls->Pump(std::chrono::seconds(1)).empty()); // the second Poll
+			CHECK(watchdog.GetRequest().empty());
+			setup.Calls->RemoveClient(1); // Cancel
+			CHECK(watchdog.GetRequest().empty());
+			const std::vector<std::string> observed = setup.CallsOf("test.observeRequest");
+			CHECK(std::count(observed.begin(), observed.end(), "request") == 4);
 		}
 	}
 

@@ -374,10 +374,14 @@ namespace Engine {
 			watchdog.SetPhase("Automation:debug.stall");
 			Scope<ProtocolServer> server = StartTestServer(token, watchdog);
 			TestConnection connection(server->GetPort());
+			const WatchdogRequestScope request(&watchdog, "debug.stall");
 			const Result<Json> busy = connection.SayHello(token);
 			REQUIRE(busy.has_value());
 			CHECK((*busy)["error"]["code"] == Json(-32007));
 			CHECK((*busy)["error"]["data"]["phase"] == Json("Automation:debug.stall"));
+			// Skerries' brief S20: it names the request whose step holds the main thread, and to retry once that step ends.
+			CHECK((*busy)["error"]["data"]["request"] == Json("debug.stall"));
+			CHECK(JsonReader((*busy)["error"]["data"]["detail"]).ReadString().value_or(std::string()).contains("retry once that step ends"));
 			CHECK(server->TakeClientEvents().empty()); // still unauthenticated, and not a failure
 
 			// The main thread recovers; the same hello now authenticates (a fourth Busy hello would not have closed it).
