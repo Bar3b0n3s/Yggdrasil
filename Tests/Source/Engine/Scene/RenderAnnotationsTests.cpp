@@ -18,10 +18,12 @@
 #include "Engine/Scene/Components/RigidBody2DComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/Physics2DSystem.h"
 #include "Engine/Scene/RenderExtraction.h"
+#include "Engine/Scene/RenderStaticCache.h"
 #include "Engine/Scene/TransformSystem.h"
 #include "Support/InMemoryAssetManager.h"
 #include "Support/SceneTestFixture.h"
@@ -308,6 +310,34 @@ namespace Engine {
 			other.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
 			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 			other.SetActive(false);
+			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a static entity's mesh, which the snapshot holds in its
+		// static set rather than its Meshes, still needs lighting when it emits nothing.
+		TEST_CASE("RenderSceneValidation: a static mesh without emission or light needs lighting")
+		{
+			Test::SceneTestFixture fixture;
+			Test::InMemoryAssetManager assets;
+			Scene& scene = fixture.GetScene();
+			Entity environment = scene.CreateEntity("Environment");
+			environment.AddComponent<EnvironmentComponent>().Intensity = 0;
+			Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			Entity rock = scene.CreateEntity("Rock", island);
+			rock.AddComponent<MeshRendererComponent>().Mesh.SetHandle(BuiltinAssetHandles::CubeMesh);
+			CHECK(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
+			REQUIRE(scene.GetStaticCache() != nullptr);
+			CHECK(scene.GetStaticCache()->HoldsItem(rock.GetHandle()));
+			auto emission = CreateRef<MaterialData>();
+			emission->Emissive = { 1, 0, 0 };
+			emission->EmissiveStrength = 2;
+			assets.Publish(AssetHandle(2002), emission);
+			rock.Patch<MeshRendererComponent>([](MeshRendererComponent& r)
+			{
+				r.Materials.resize(1);
+				r.Materials[0].SetHandle(AssetHandle(2002));
+			});
 			CHECK_FALSE(EvaluateRenderSceneValidation(scene, assets)->NoLighting);
 		}
 

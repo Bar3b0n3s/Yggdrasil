@@ -9,6 +9,7 @@
 #include "Engine/Renderer/DebugRenderer.h"
 #include "Engine/Renderer/GpuResourceCache.h"
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/SceneRenderer.h"
 #include "Shared/ViewConstants.h"
 #include "Support/ExpectLog.h"
@@ -435,6 +436,43 @@ namespace Engine {
 			DebugDrawList small;
 			REQUIRE(AppendWireframeOverlay(snapshot, assets, small).has_value());
 			CHECK(small.GetSize() == 3); // Nonzero triangles retain edges regardless of world scale.
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's items draw their edges after the
+		// dynamic items', culled and checked as they are.
+		TEST_CASE("Wireframe: static set items draw their edges after the dynamic ones, with the same cull")
+		{
+			Test::InMemoryAssetManager assets;
+			RenderSnapshot snapshot = Utils::WireframeTestSnapshot(assets, false, false, false);
+			Ref<RenderStaticCell> cell = CreateRef<RenderStaticCell>();
+			cell->Items = { snapshot.Meshes[0] };
+			cell->Items[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+			cell->Items[0].PickId = 0;
+			cell->Items[0].Entity = UUID(43);
+			cell->PickTable = { UUID(43) };
+			Ref<RenderStaticSet> set = CreateRef<RenderStaticSet>();
+			set->Cells = { cell };
+			snapshot.StaticSet = set;
+			DebugDrawList both;
+			REQUIRE(AppendWireframeOverlay(snapshot, assets, both).has_value());
+			REQUIRE(both.GetSize() == 6);
+			CHECK(std::get<DebugLine>(both.GetCommands()[0].Shape).From.z == -2.0f);
+			CHECK(std::get<DebugLine>(both.GetCommands()[3].Shape).From.z == -3.0f);
+
+			// The static set alone, and its item culled behind the camera as a dynamic one is.
+			snapshot.Meshes.clear();
+			snapshot.PickTable.clear();
+			DebugDrawList alone;
+			REQUIRE(AppendWireframeOverlay(snapshot, assets, alone).has_value());
+			CHECK(alone.GetSize() == 3);
+			cell->Items[0].World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 4.0f));
+			DebugDrawList behind;
+			REQUIRE(AppendWireframeOverlay(snapshot, assets, behind).has_value());
+			CHECK(behind.IsEmpty());
+			// A non-finite static matrix is an error that leaves the output unchanged.
+			cell->Items[0].World[0][0] = std::numeric_limits<float>::quiet_NaN();
+			CHECK_FALSE(AppendWireframeOverlay(snapshot, assets, behind).has_value());
+			CHECK(behind.IsEmpty());
 		}
 
 		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27, stream C): a deformed item's edges

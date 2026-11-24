@@ -24,8 +24,10 @@ namespace Engine {
 
 	class ConstEntity;
 	class Entity;
+	class RenderStaticCache;
 	class TypeRegistry;
 	class UUIDGenerator;
+	struct RenderStaticSet;
 
 	struct SceneSpecification
 	{
@@ -225,6 +227,18 @@ namespace Engine {
 		[[nodiscard]] uint64_t GetEntitiesVisited() const { return m_EntitiesVisited; }
 		void AddEntitiesVisited(size_t count) { m_EntitiesVisited += count; }
 
+		// --- M43: the render static set (W43.2; Docs/Decisions/0061-m43-static-scenery.md decision 3) ----------------------
+		// The scene's RenderStaticCache (Scene/RenderStaticCache.h): created at the scene's first Static component and kept
+		// for the scene's life (its set empty once no entity qualifies); null before.
+		[[nodiscard]] const RenderStaticCache* GetStaticCache() const { return m_StaticCache.get(); }
+		// The cache's set brought up to date (RenderStaticCache::Refresh), or null while the scene has no cache. A const
+		// reader, as GetCanonicalOrder is: the cache is kept beside the registry and refreshed lazily, so render extraction,
+		// which holds a const Scene&, refreshes it.
+		[[nodiscard]] Ref<const RenderStaticSet> RefreshStaticSet() const;
+		// The cells the cache rebuilt or removed over the scene's life (RenderStaticCache::GetStaticCellRebuilds), 0 without
+		// one: monotonic, so a play session counts those of a tick.
+		[[nodiscard]] uint64_t GetStaticCellRebuilds() const;
+
 		// XXH64 (seed 0) of the scene's minified canonical serialization (SceneSerializer, JsonStyle::Minified): equal for
 		// equal scene content in every configuration (§1.3, §9.1); play sessions add physics state (M7, M11). Implemented
 		// with the serializer (Scene/SceneStateHash.cpp). Returns 0 only if the scene cannot be serialized (a non-finite
@@ -265,8 +279,8 @@ namespace Engine {
 		// child order of each parent whose child list changes (ChangeTracker::RecordChildOrder). CommitComponentChange runs
 		// after: it records the component's registry name (DisabledTag as the entity key "Active"); for a hierarchy change it
 		// invalidates the canonical order, makes every segment again and moves the structure revision (M43); for DisabledTag
-		// it refreshes the subtree's HierarchyDisabledTag and moves the structure revision; for Static (M43) it refreshes the
-		// subtree's HierarchyStaticTag.
+		// it refreshes the subtree's HierarchyDisabledTag and moves the structure revision; for Static (M43) it creates the
+		// render static cache at the scene's first one and refreshes the subtree's HierarchyStaticTag.
 		void PrepareEntityChange(entt::entity entity, TypeKey component);
 		void CommitComponentChange(entt::entity entity, TypeKey component, ComponentChangeKind kind);
 
@@ -370,6 +384,9 @@ namespace Engine {
 		uint64_t m_StructureRevision = 0;
 		uint64_t m_TransformsUpdated = 0;
 		uint64_t m_EntitiesVisited = 0;
+		// M43 (W43.2): the render static cache, a cache beside the registry refreshed from const readers (RefreshStaticSet);
+		// null until the first Static. Destroyed first (~Scene), while the registry and the world-change lists live.
+		mutable Scope<RenderStaticCache> m_StaticCache;
 		ChangeTracker m_ChangeTracker;
 		SceneSpecification m_Specification; // its Registry and IdGenerator are back-references that outlive the scene
 		uint64_t m_Revision = 0;

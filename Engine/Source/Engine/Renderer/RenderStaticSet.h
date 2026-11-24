@@ -27,8 +27,10 @@ namespace Engine {
 
 	// One cell of the static set: the items whose world origin lies in the XZ square Key * StaticCellSize to (Key + 1) *
 	// StaticCellSize, in canonical order of their entities. Immutable once published: a change makes a new cell with a new
-	// Version (copy on write), so a renderer keys what it prepared from a cell by its Version. The renderer derives the
-	// cell's bounds from its items' meshes, so a large item enlarges its cell (a loose grid).
+	// Version (copy on write). Version is unique only within one scene's set and serves change detection within it (the
+	// edit scene and its play copy hand out the same versions); a renderer keys what it prepared from a cell by the cell
+	// object, the Ref<const RenderStaticCell> it holds while the preparation is cached. The renderer derives the cell's
+	// bounds from its items' meshes, so a large item enlarges its cell (a loose grid).
 	struct RenderStaticCell
 	{
 		glm::ivec2 Key = glm::ivec2(0);
@@ -40,10 +42,13 @@ namespace Engine {
 		std::vector<MeshDrawItem> Items{};
 		// The entity of each item, by item index: what a static pick id resolves to.
 		std::vector<UUID> PickTable{};
+		// Whether any item dissolves (its Parameters.DissolveAmount above 0), computed once per cell, so a renderer that
+		// looks up the dissolve noise only while something dissolves scans cells, not items.
+		bool Dissolving = false;
 	};
 
 	// The static set of a scene: its cells in key order (x, then z), and a Version that moves whenever a cell is added,
-	// removed or replaced.
+	// removed or replaced: unique only within the scene, for change detection within it, as a cell's.
 	struct RenderStaticSet
 	{
 		std::vector<Ref<const RenderStaticCell>> Cells{};

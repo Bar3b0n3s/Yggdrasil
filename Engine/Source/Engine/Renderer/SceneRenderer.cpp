@@ -38,6 +38,7 @@
 #include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderStage.h"
+#include "Engine/Renderer/RenderStaticSet.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SsrPass.h"
@@ -1897,10 +1898,19 @@ namespace Engine {
 		// M31 (decision 6): the dissolve noise, a procedural built-in every asset manager serves, looked up only while an item
 		// dissolves, so a snapshot without a dissolve never asks for it.
 		frame.DissolveNoise = Pipelines->WhiteAo;
-		const bool dissolves = std::ranges::any_of(snapshot.Meshes, [](const MeshDrawItem& item)
+		bool dissolves = std::ranges::any_of(snapshot.Meshes, [](const MeshDrawItem& item)
 		{
 			return item.Parameters.DissolveAmount > 0.0f;
 		});
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the static set's items dissolve too, known per cell
+		// (RenderStaticCell::Dissolving).
+		if (!dissolves && snapshot.StaticSet != nullptr)
+		{
+			dissolves = std::ranges::any_of(snapshot.StaticSet->Cells, [](const Ref<const RenderStaticCell>& cell)
+			{
+				return cell->Dissolving;
+			});
+		}
 		if (dissolves)
 		{
 			const GpuTexture& noise = Cache->GetTexture(BuiltinAssetHandles::DissolveNoiseTexture);

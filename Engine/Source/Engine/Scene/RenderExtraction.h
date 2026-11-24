@@ -66,9 +66,21 @@
 // follows the glass between ticks; without a drawn mesh the component gives none (RENDER_REFLECTION_INVALID,
 // Scene/PlanarReflectionValidation.h).
 //
+// Static scenery (M43, Docs/Decisions/0061-m43-static-scenery.md decision 3, W43.2). Extraction visits, in canonical order,
+// only the entities that hold a component it draws or lights from (the holders of MeshRenderer, the three lights, Text,
+// Environment, PostProcess, Fog, SpriteRenderer, Light2D, TilemapRenderer, ParticleEmitter, IrradianceVolume,
+// ReflectionProbe, PlanarReflection and Terrain, each once), not every entity: the whole-scene walk's order of the
+// entities that draw, so a scene without Static extracts exactly as before. A scene that holds a Static has a render static
+// cache (Scene/RenderStaticCache.h), which each extraction refreshes (Scene::RefreshStaticSet) and hands every view as the
+// snapshot's StaticSet: the MeshRenderer of an entity the set holds gives no item in Meshes and no PickTable entry, and
+// such an entity is not visited at all unless it holds another of those components (a light, a text, a terrain), which
+// extracts as before. A static item renders at its entity's current world matrix, without interpolation (decision 1's
+// accepted limit).
+//
 // Pure function of the scene's components and the request: no asset access, no clock, no randomness; vectors in canonical
 // order (§5.1), so a deterministic scene gives an identical snapshot in every configuration. Only IEEE-exact operations and
-// Core/DetMath (Scene is on the simulation path's lint scope, §4.12). Main thread, like the scene (§4.11).
+// Core/DetMath (Scene is on the simulation path's lint scope, §4.12). Main thread, like the scene (§4.11). The one state it
+// changes is the scene's static cache, a cache beside the registry.
 
 namespace Engine {
 
@@ -176,7 +188,11 @@ namespace Engine {
 	//   - Meshes: every effectively enabled entity with a MeshRendererComponent whose Visible is set and whose Mesh is not
 	//     null, at its rendered world matrix, with its Materials, CastShadows and ReceiveShadows; M31 (decision 3): with its
 	//     MaterialParametersComponent resolved into Parameters (ResolveMaterialParameters at request.SimulationTime), neutral
-	//     without one.
+	//     without one. M43: except the MeshRenderers the scene's static set holds (StaticSet below).
+	//   - StaticSet (M43, Docs/Decisions/0061-m43-static-scenery.md decision 3): the scene's static set refreshed
+	//     (Scene::RefreshStaticSet; Scene/RenderStaticCache.h), the same Ref for every view until the scene changes it; null
+	//     for a scene that never held a Static. Its items are the static entities' meshes at their current world matrices,
+	//     with no PickId (the renderer gives static items theirs, StaticPickIdBase).
 	//   - Lights: every effectively enabled DirectionalLight, PointLight and SpotLight, at its rendered world pose (position
 	//     from the matrix's translation, direction its normalized -Z axis), with the component's fields.
 	//   - Environment and Post: the first effectively enabled EnvironmentComponent and PostProcessComponent in canonical
@@ -212,8 +228,9 @@ namespace Engine {
 	//   - Terrains (M26, decision 22): every effectively enabled entity's Terrain whose Heightfield is set, in canonical order,
 	//     at its rendered world matrix, with Heightfield, Size, HeightScale, SplatMap, ReceiveShadows and LodBias as they are
 	//     and its first MaxTerrainLayers Layers (their maps' handles, Tint, Tiling, Roughness, Metallic); each is pickable, its
-	//     PickId after the meshes' (the entity's mesh PickId when its MeshRenderer has one, else a PickTable entry appended
-	//     after every mesh's, in the terrains' order), in every view and every scene, edit scenes included.
+	//     PickId after the meshes' (the entity's mesh PickId when its MeshRenderer gave an item in Meshes, else a PickTable
+	//     entry appended after every mesh's, in the terrains' order: M43, also for a static entity's terrain), in every view
+	//     and every scene, edit scenes included.
 	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
 	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
 	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's

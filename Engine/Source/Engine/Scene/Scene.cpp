@@ -14,6 +14,7 @@
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Engine/Scene/RenderStaticCache.h"
 #include "Engine/Scene/TransformSystem.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
@@ -245,6 +246,8 @@ namespace Engine {
 
 	Scene::~Scene()
 	{
+		// The static cache disconnects its signals and closes its world-change list, so it goes first.
+		m_StaticCache.reset();
 		m_Registry.on_construct<TransformComponent>().disconnect(this);
 		m_Registry.on_update<TransformComponent>().disconnect(this);
 	}
@@ -665,6 +668,17 @@ namespace Engine {
 		return true;
 	}
 
+	Ref<const RenderStaticSet> Scene::RefreshStaticSet() const
+	{
+		AssertMainThread();
+		return m_StaticCache != nullptr ? m_StaticCache->Refresh() : nullptr;
+	}
+
+	uint64_t Scene::GetStaticCellRebuilds() const
+	{
+		return m_StaticCache != nullptr ? m_StaticCache->GetStaticCellRebuilds() : 0;
+	}
+
 	size_t Scene::GetEntityCount() const
 	{
 		return m_EntityIndex.size();
@@ -723,7 +737,13 @@ namespace Engine {
 			++m_StructureRevision;
 		}
 		if (component == TypeKeyOf<StaticComponent>())
+		{
+			// M43 (W43.2): the render static cache exists from the scene's first Static on. It is made before the tags are, so
+			// its first refresh, which builds every cell, covers them.
+			if (m_StaticCache == nullptr && kind == ComponentChangeKind::Added)
+				m_StaticCache = CreateScope<RenderStaticCache>(*this);
 			RefreshHierarchyStatic(entity);
+		}
 	}
 
 	void Scene::AssertMainThread() const

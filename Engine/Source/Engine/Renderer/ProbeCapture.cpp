@@ -291,6 +291,8 @@ namespace Engine {
 			snapshot.Camera.DeltaTime = 0.0f;
 			for (MeshDrawItem& mesh : snapshot.Meshes)
 				mesh.PreviousWorld.reset();
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): StaticSet stays, shared: a capture draws the static
+			// scenery too, whose items carry no previous matrix.
 			snapshot.Post.AntiAliasing = RenderAntiAliasing::None;
 			snapshot.Post.SsrEnabled = false;
 			snapshot.Quality.Probes = false;
