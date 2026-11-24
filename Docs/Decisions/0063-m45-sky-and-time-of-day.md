@@ -1,0 +1,356 @@
+# 0063 — M45 Sky and time of day
+
+- **Status:** accepted, the milestone's plan and record, in phase 8 of the Skerries program (`Docs/Decisions/0060-skerries-engine-program.md`). M45's builder amends this record on `milestone/m45` as each wave lands, in "The W45.1 record" to "The W45.4 record", making decision 3 exact where it leaves a choice. Lead-owned.
+- **Date:** 2026-11-24.
+- **Decided by:** the lead (the milestone, its design defaults, its ledger needs and the research's questions, decision 4), on the product owner's answers to ADR 0060's questions 6 and 8.
+- **Base:** main `3aaf4b10`, engine 0.8.0. Every value this record calls today's was read from the code and data at that commit.
+- **Authority:**
+  - Roadmap "Rules for every milestone"; ADR 0023; ADR 0028 decisions 2, 10, 11 and 17; ADR 0051;
+  - ADR 0060: decision 2's phase 8 rows, decision 4's M45 default, decision 6's M45 row, decision 7, decision 9's S03 corrections, the owner's answers 6 and 8;
+  - ADR 0013 decision 9 (M8's environment contract); ADR 0029 (M18's stages, recovery, out of memory); ADR 0037 decisions 8, 9 and 16 (probes); ADR 0047 decisions 3 to 5 (fog); ADR 0059 (M42's mirror views);
+  - Architecture §5.3, §6.8, §8.2 to §8.7, §8.13, §8.14, §13.7 and §15.
+- **Brief:** Skerries' S03 (`Projects/Skerries/Design/EngineTasks/S03-SkyAndTimeOfDay.md`, high priority, the vertical slice). Design source: `bin/Reviews/P8/research/sky.md`, its S03 section and "Across the group".
+
+## Context
+
+- **The brief.** A day of about 24 minutes, a camp time-lapse and a night lit by beacons need:
+  - a procedural, physically based sky driven by the sun light's direction, with a sun disc, a moon (direction, phase), stars that turn, haze and overcast, and a welcome cloud layer;
+  - image-based light regenerated from that sky at run time, cheaply, presentation only;
+  - probes that keep a cave mouth dark at night and lit at noon without a bake per frame;
+  - optionally the sun's colour from the atmosphere, so a script only moves the sun.
+- **What the engine has today** (each read at `3aaf4b10`):
+  - **Environment.** `EnvironmentComponent {Environment, Intensity, Rotation, ShowSkybox, SkyboxBlur, FallbackColor}` (`Scene/Components/EnvironmentComponent.h:13-21`), version 1, `UniquePerScene`, default flags, so script-writable (`Scene/Registration/RenderingRegistration.cpp:275-288`; `Resources/Scripting/Engine.d.luau:884-897`). Extraction keeps the first enabled one (`Scene/RenderExtraction.cpp:850-861`) as `RenderEnvironment` (`Renderer/RenderSnapshot.h:398-406`).
+  - **IBL is baked at import only** (Architecture §8.6). `EnvironmentBaker` makes the skybox cube, the GGX prefilter (256² × 7, `Asset/EnvironmentData.h:128-129`) and the SH9 by a GPU reduction, then reads them back on the main thread (`Renderer/EnvironmentBaker.h:12-35`, `:100-107`). Its push constants carry each dispatch's sample count (`Shared/EnvironmentBakeConstants.h:23-35`).
+  - **How the IBL reaches the shaders.** `MakeEnvironmentConstants` writes `SH9 × Intensity` into `EnvironmentConstants` (b2, 192 bytes, M8-frozen; `Renderer/Private/LightingInputs.cpp:48-78`, `Shared/EnvironmentConstants.h:23-45`). Prepare picks the map's specular cube for t3 (`Renderer/SceneRenderer.cpp:1864-1873`), and `RecordViewSetup` writes b2 and b5 every frame (`:1559-1560`). `SkyboxPass` draws the depth-0 pixels after `TerrainForward` (`:2447-2460`; `Renderer/SkyboxPass.h:14-31`), in mirror views too (`Renderer/SceneRendererReflections.cpp:440-449`).
+  - **Fog.** `FogConstants.Color` is `Fog.Color` tinted by the SH9's mean, and the glow follows the light list's first directional light (`Renderer/Fog.h:23-32`; `Shared/FogConstants.h:22-37`).
+  - **Cascades.** Prepare gives them to the first visible shadow-casting directional light in snapshot (hierarchy) order that the planner accepts (`SceneRenderer.cpp:1691-1730`; Architecture §8.7).
+  - **Probes.** `IrradianceVolumeData` is format 1, SH9 per probe (`Asset/IrradianceVolumeData.h:17-37`, `:88-93`), imported by importer version 1 (`AssetPipeline/Importers/IrradianceVolumeImporter.h:24`). `lighting.bake` captures six faces per probe through `ProbeCapture` with `Quality.Probes` false and projects them on the CPU in a fixed order (`Renderer/ProbeCapture.h:14-39`, `:65-70`; `Editor/Source/EditorCore/Lighting/LightingBake.cpp:171-191`). A view copies its volumes' coefficients to t13 only when they change, and writes b4 every frame (`Renderer/Private/ProbeShading.cpp:301-333`). Probes are baked, never dynamic (`Docs/Backlog.md:272`); dynamic GI is cut (ADR 0028 decision 2, `0028-backlog-program.md:57`; `Docs/Backlog.md:347`).
+  - **Time.** `RenderExtractionRequest::SimulationTime` reaches extraction, 0 in edit scenes (`Scene/RenderExtraction.h:111-116`); `PlaySession::MaxTimeScale` is 100 (`Session/PlaySession.h:450`).
+  - **Buffers.** Constant buffers are static (`SceneRenderer.cpp:1641-1646`). The engine records `copyBuffer` into structured buffers (`ProbeShading.cpp:312`, `EnvironmentBaker.cpp:591`, `SceneRenderer.cpp:2609`), never into a constant buffer.
+  - **Shipping.** An export ships every compiled shader in `Engine.pak` (`Editor/Source/EditorCore/Export/Exporter.cpp:239-247`), so the editor's `EnvironmentBake` program is in an exported game.
+- **Corrections to the brief** (to the Skerries session through the product owner at the phase's end):
+  - **Environment fields** (ADR 0060 decision 9): every field is script-writable; what is missing is a tint or blend for a map (§2).
+  - **Fog glow and cascades** (ADR 0060 decision 9): both follow the first directional light in hierarchy order, so a moon placed above the sun takes them. With a Sky, its `Sun` and `Moon` take these roles.
+  - **The Sky is component data.** It is serialized and hashed like Fog; only its rendering is presentation. No engine hash moves, but a game scene that gains a Sky takes new hashes and its replays are recorded again.
+  - **The moon's phase is not a field.** It follows the Moon's placement against the Sun (their elongation).
+  - **The sun's colour from the atmosphere** tints the rendered colour only: the light's `Color` and `Intensity` stay as authored, and scripts read them.
+  - **The time-lapse.** A raised time scale multiplies the ticks per frame (at most 100), so the tick cost grows, not the sky's. Turning the sun faster in the game's script keeps the tick rate.
+  - **No spreading over frames.** The sky's lighting is regenerated in the frame its inputs change; its cost is measured (decision 3, "Perf").
+  - **Probes** (the owner's answer 6): relit by the sky, they lack the light the sun and the sky bounce off surfaces.
+  - **Clouds** (the owner's answer 6): one 2D layer, casting no shadows; volumetric clouds stay out (ADR 0060 decision 1).
+
+## Decisions
+
+### 1. Scope
+
+S03, as one milestone M45, in phase 8. It delivers:
+- a `Sky` component with a physically based atmosphere (Hillaire's LUTs), a sun disc, a procedural moon with its phase, turning stars, haze, overcast and a 2D cloud layer;
+- run-time image-based light from the sky in the existing environment slots, with its fog colour;
+- named Sun and Moon roles (fog glow, cascades, driven colours);
+- sky-relit irradiance volumes (format 2) and reflection probes scaled with them;
+- validation, stats, goldens, perf metrics and FeatureTest coverage in every mode.
+
+**Out** (`Docs/Backlog.md` §2 rows at landing):
+- volumetric clouds (ADR 0060 decision 1), cloud shadows on the ground;
+- aerial perspective (Hillaire's froxel LUT): distance haze stays the Fog's;
+- an HDRI or textured night sky, a moon texture;
+- a tint or cross-fade for an Environment map;
+- time-of-day keyframed probe bakes, which would carry the bounce;
+- a solar-position script helper and dates or ephemerides;
+- a player-facing sky quality setting.
+
+**Accepted at landing** (§6 rows; `Docs/Backlog.md:272` amended for relit volumes):
+- relit probes lack the light the sun and the sky bounce off surfaces;
+- the sky's image-based light is taken at sea level, whatever the camera's altitude;
+- a reflection probe is relit only by the ratio of the relit volume around its centre, and outside every relit volume it keeps its bake;
+- the image-based light follows the clouds' drift in steps of `SkyCloudLightingStep` (1 s);
+- the discs and stars are not in the image-based light (the lights carry the discs);
+- with an Environment beside a Sky, the Environment is unused.
+
+### 2. Structure: one milestone, four waves
+
+| Phase | # | Name | Brief | Lands | Gate | Size (builder-sessions) |
+|---|---|---|---|---|---|---|
+| 8 | M45 | Sky and time of day | S03 | third in phase 8's fixed train order (M43, M44, M45, M46, M47, M48), after M43 and M44 (ADR 0060 decision 2) | phase 8's batch gate, `CI.py --require-clang-cl` | ~11.5 (W45.1 ~2.5, W45.2 ~4 +1 at risk, W45.3 ~3, W45.4 ~2) |
+
+One builder, on `milestone/m45` in `D:/Engine/.claude/worktrees/m45`, works the waves in order. No contract (ADR 0060 decision 7).
+- **W45.1, the component and the CPU half:** `Sky`, its registration and extraction; the Sun and Moon roles; `Renderer/SkyAtmosphere` (transmittance, moon phase, star frame, light driving, the cascade order); `SKY_LIGHT_INVALID` and `SKY_ENVIRONMENT_IGNORED` with fixtures; `RENDER_NO_LIGHTING`'s Sky rule; the unit cases; and the copy's GPU proof (decision 3, "The copy"), the wave's one GPU run. Its first checkpoint fixes what a contract would freeze, M34's way: the component, `RenderSky`, `SkyConstants`, the two declarations with their rows and pipeline counts, `RenderStats`' fields and the format-2 layout.
+- **W45.2, the sky on the GPU:** the LUTs, the Sky pass (disc, moon, stars, clouds), the run-time IBL and its copies, the t3 swap, the roles in Prepare, mirror views and captures, device loss and out of memory, the gpu cases, `GoldenSky.jsonl`'s cove scene and two goldens.
+- **W45.3, probes under a moving sun:** the relightable bake, `IrradianceVolumeData` format 2, the cache's relight mirror, `ProbeRelight`, the reflection scaling, `PROBE_NOT_RELIGHTABLE`, `lighting.bake`'s `relightable`, the probes scene and golden.
+- **W45.4, coverage, tools and documents:** `stats.get`'s fields, the Stats panel and the readout; FeatureTest's suite and replay; `test_sky.py`; Perf.py's metrics; Architecture, the Backlog, the skills and the generated references.
+
+### 3. Design defaults: M45 Sky and time of day
+
+**What M45 adds:** a component and a `RenderSnapshot` member; two pass declarations (11 pipelines, one program, four rows); three validation codes; a format version; a readout member, two `RenderStats` fields and a result field; three goldens and two perf metrics. **What it does not add:** a namespace, a script function or callback, an automation method, a settings section, an `AssetType`, a built-in handle, a `PlaySessionPhase`, a state-hash block, a fuzz target, a render stage, a device feature, a module or a vendored library.
+
+- **The component.** `Sky`, version 1, category Rendering, after `Environment` in `RenderingRegistration.cpp` and in `BuiltinComponents.h`'s list; `UniquePerScene`, default flags, so its generated proxy reads and writes every field. Each field is checked on every write path:
+
+  | Field | Type, default | Range | Meaning |
+  |---|---|---|---|
+  | `Sun` | EntityRef (`UUID`, as `HingeJointComponent.h:28`), null | | the sun's `DirectionalLight`; null: the first in canonical order |
+  | `Moon` | EntityRef, null | | an entity turned as a `DirectionalLight` is, the moon along its +Z; normally a dim `DirectionalLight` (the moonlight); null: no moon |
+  | `Intensity` | float 1 | [0, 65504] | scales the sky's radiance and its image-based light |
+  | `DriveLights` | bool true | | the Sun's and Moon light's rendered colour × the atmosphere's transmittance (the moon's also × its illuminated fraction) |
+  | `Haze` | float 1 | [0, 10] | aerosol (Mie) density scale |
+  | `Overcast` | float 0 | [0, 1] | toward a grey overcast; dims the discs and, with `DriveLights`, the sun |
+  | `GroundAlbedo` | Color 0.3 | [0, 1] | the atmosphere's ground |
+  | `SunDisc` | float 1 | [0, 1000] | the disc's radiance, 1 physical (the light's illuminance over its solid angle); its size is the Sun's `LightAngle` |
+  | `MoonSize` | float 0.52 deg | [0.1, 10] | the moon disc's angular diameter |
+  | `Stars` | float 1 | [0, 100] | star brightness, faded by the sky's luminance |
+  | `Latitude` | float 45 deg | [-90, 90] | the celestial pole's elevation |
+  | `NorthAngle` | float 0 deg | [-360, 360] | north's direction about +Y (0: -Z) |
+  | `Clouds` | float 0 | [0, 1] | the cloud layer's coverage |
+  | `CloudSpeed` | vec2 (5, 0) m/s | each [-100, 100] | the layer's drift in world XZ |
+
+- **Extraction** (`Scene/SkyExtraction.{h,cpp}`, called once after the canonical loop beside `snapshot.Fog`, `RenderExtraction.cpp:947-949`).
+  - **The item.** The scene's one effectively enabled Sky (a component view; unique per scene) becomes `RenderSky` (`RenderSnapshot.h`, before `RenderSnapshot`): the fields, `Enabled`, `SimulationTime` (the request's), `Entity`, and the resolved roles: `SunLight` (index into `Lights`, by the light's `Entity`, or the first directional entry for a null `Sun`), `SunLightColor` (its authored `Color`; with its `Intensity`, the sun's illuminance the atmosphere scatters), `MoonLight`, `MoonLightColor`, `HasMoon` and `MoonDirection` (from the Moon's rendered matrix, `ComputeRenderedWorldMatrix`, when it holds no light).
+  - **The member.** `RenderSnapshot::Sky`, appended last (after M42's `PlanarReflections`, `RenderSnapshot.h:874-877`, and after M43's `StaticSet`; M46's `Wind` and M47's `Waters` follow): a frozen-header change.
+  - **Driving.** With `DriveLights`, `ApplySkyLightDriving(RenderSnapshot&)` sets the Sun's `LightData::Color` to `SunLightColor × T(sun)` and the Moon light's to `MoonLightColor × T(moon) × k` (k its illuminated fraction), T the transmittance from the camera's altitude. It is declared in `RenderSnapshot.h` beside `ComputeReverseZProjection` (`:912-921`) and implemented in `Renderer/SkyAtmosphere.cpp` with DetMath, so Scene may call it. It is idempotent (from the authored colours `RenderSky` keeps), so a golden can move the sun in a snapshot and drive again. Every consumer of the light list (shading, culling, fog, mirror views, captures) sees the driven colours with no renderer change, and the components keep theirs.
+  - **Every view** extracts it, edit scenes included at `SimulationTime` 0. A scene without a Sky extracts exactly as before.
+- **The atmosphere on the CPU** (`Renderer/SkyAtmosphere.{h,cpp}`, pure, double precision, DetMath, fixed steps):
+  - Hillaire's (EGSR 2020) Earth constants: radii 6360 and 6460 km, Rayleigh, Mie and ozone coefficients, scaled by `Haze` and `Overcast`. The ground is world Y 0 under the camera; the camera's altitude is `max(Position.y, 0) + 1 m`.
+  - `ComputeSkyTransmittance(altitude, direction, haze, overcast)`: analytic optical depth by fixed steps, 0 below the horizon.
+  - `ComputeMoonIlluminatedFraction(sun, moon)` = (1 - cos ψ) / 2 of their elongation ψ.
+  - `ComputeSkyStarFrame(sun, latitude, northAngle)`: the pole from `Latitude` and `NorthAngle`, turned about it by the sun's hour angle, so the stars turn with the sun and no time state exists.
+  - `OrderShadowCandidates(snapshot)`: the Sun first while above the horizon, else the Moon light, then the rest in snapshot order; without a Sky, snapshot order (today's rule).
+  - `GetSkyGlowLight(snapshot)`: the Sun's index with a Sky, else the first directional light. `MakeFogConstants` gains it as a parameter (`Fog.h:40-41`), so the glow follows the Sun.
+- **The GPU, per view** (`Renderer/SkyLighting.{h,cpp}`, its stage functions in a new `Renderer/SceneRendererSky.cpp`, as M42's `SceneRendererReflections.cpp`):
+  - **LUTs:** transmittance 256 × 64 and multiple scattering 32 × 32, rebuilt when `Haze`, `Overcast` or `GroundAlbedo` change; the sky-view LUT (192 × 108) every frame from the camera's altitude, and a sea-level one with each lighting update, scattering the Sun's light and the Moon light's (its colour × illuminated fraction). RGBA16F.
+  - **The Sky pass** (`Renderer/SkyPass.{h,cpp}`, `Passes/Sky.slang`, `Shared/SkyConstants.h`): a fullscreen triangle at depth 0, as `SkyboxPass`, for a Lit view whose camera clears to the skybox. Each pixel adds the sky-view LUT, the sun disc (limb-darkened, `LightAngle` wide), the moon (phase-lit toward the sun, procedural maria from a seeded noise, no texture), stars from a seeded hash in the star frame (generated in code, as the blue noise), and the cloud layer: fbm coverage on a plane at 2,000 m (`SkyCloudHeight`), offset by `CloudSpeed × SimulationTime` in double (wrapped to the noise's period), lit by the sun's transmittance and the sky's ambient. It fogs with `FogSkybox` as the skybox does (ADR 0047 decision 5). `SkyboxPass` is unchanged and still draws an Environment's map without a Sky.
+  - **Run-time IBL** (`SkyViewResources` in `SceneRenderer::State`, the placement rule's place 2): only when its key changes (the fields, the Sun's and Moon's directions and authored colours, and the clouds' offset at `SkyCloudLightingStep`), it renders the sea-level atmosphere and clouds (no discs, no stars) into a 256² RGBA16F cube with mips, prefilters it into a 256² × 7 specular cube (the asset's sizes, so `SpecularMaxLod` keeps its meaning) and projects its radiance SH9. It reuses the `EnvironmentBake` program's `CSDownsampleCube`, `CSPrefilterSpecular` (16 to 64 samples), `CSProjectIrradiance` and `CSReduceIrradiance` with `EnvironmentBaker::GetLayoutDescriptions()`, the same SPIR-V, so every import bake stays byte-identical. W45.2's first GPU run confirms each entry takes the sky cube as it takes a skybox, or the Sky program gains the entry it needs.
+  - **Every frame a Sky lights the view,** `CSSkyFinalize` turns the persistent radiance SH9 into the cosine-convolved, windowed `SH9 × Intensity` (§8.6 step 4) and the fog's tinted colour (`MakeFogConstants`' rule on that SH9), then the copies below place them.
+  - **Binding.** With a Sky, Prepare's environment block makes `EnvironmentConstants` with `HasEnvironment` 1, `Intensity` the Sky's, rotation 0 and the sky's mip counts (a new `MakeSkyEnvironmentConstants`, `LightingInputs`), and binds the sky's specular cube at t3. The forward, terrain, SSR, probe and fog shaders do not change, so M47's water reflects the sky for free.
+  - **Mirror views** draw the Sky with their scissor and fog start, sampling the main view's sky-view LUT (world directions). **Probe captures** draw it from the probe's altitude. A capture of a frame is a pure function of that frame: nothing temporal is added (§8.3).
+- **The copy into constant buffers** (the research's UNVERIFIED, decided: a GPU copy).
+  - **What is copied,** by `nvrhi::ICommandList::copyBuffer` from the view's `SkyResults` buffer (UAV, written by `CSSkyFinalize` and `CSProbeRelight`), after `RecordViewSetup`'s CPU writes:
+    - the SH9 to offset 0 of `EnvironmentConstants` (144 bytes, `EnvironmentConstants.h:28`);
+    - the tinted colour to offset 0 of the view's and each mirror slot's `FogConstants` (12 bytes, `FogConstants.h:24`);
+    - each relit reflection probe's `AxisScale.w` in `ProbeConstants` (4 bytes at 896 + 192 i + 156, `ProbeConstants.h:46-75`).
+
+    No layout changes.
+  - **Why it works.** In the vendored NVRHI (`6b96fb03`), every Vulkan buffer has `TRANSFER_SRC | TRANSFER_DST` (`Vendor/NVRHI/src/vulkan/vulkan-buffer.cpp:48-49`). `copyBuffer` moves the destination to `CopyDest` under automatic barriers (`:225-261`). `writeBuffer` on a static constant buffer already takes that state every frame (`vkCmdUpdateBuffer`, or a `copyBuffer` from the upload manager above 64 KiB, `:444-497`).
+  - **The one trap.** Unlike `writeBuffer`, `copyBuffer` ends a render pass only when a barrier is pending (`vulkan-state-tracking.cpp:296-304`). So the copies are recorded in the Ambient stage, right after the sky's compute dispatches, outside every render pass.
+  - **W45.1's proof,** before anything in W45.2 depends on it: the gpu case "SkyLighting: a buffer copied into a view's constant buffers after their CPU writes reaches the passes that read them".
+    - Two frames running, it CPU-writes static constant buffers made as the renderer makes them (`SceneRenderer.cpp:1641-1646`), copies at the three offsets from a buffer a compute wrote, then reads them in a compute into a read-back buffer.
+    - It checks the copied bytes, the untouched neighbours (`Density`, `AmbientColor`, a reflection's `Lookup`) and the second frame.
+    - It runs under validation and synchronization validation, at API 1.4 and 1.3.
+  - **The fallback,** only if that case cannot pass: no copy into a constant buffer. The results come back through a ring of `GetFramesInFlight()` read-back buffers, and the CPU applies the newest completed ones in `MakeEnvironmentConstants`, `MakeFogConstants` and the probe constants. A capture (`ViewportCapture`, `ProbeCapture`) and a render that resets the view's history wait for the current values, so captures and goldens stay exact, while a live view lags a changing sky by up to the frames in flight. The W45.1 record says which was taken.
+- **Relit probes** (the owner's answer 6; inside ADR 0028 decision 2's cut, decision 4).
+  - **The bake.** In a scene with an enabled Sky, `lighting.bake` captures each irradiance probe from a snapshot with the Sky's `Intensity` 0 and its Sun and Moon lights off (`MakeRelightCaptureSnapshot`, after `MakeCaptureSnapshot`, `ProbeCapture.cpp:282-319`). `ProbeCubeCapture` gains `Visibility`, read back from `SceneDepth` (D32, 1 where depth is 0), through a new `SceneRenderer::GetSceneDepthTexture` (beside `:427`). The D32 read-back is UNVERIFIED: W45.3's first GPU run confirms it, else a compute writes the visibility to an R8 target.
+  - **What it projects,** on the CPU in double and DetMath, in a fixed order as `ProjectCubeToIrradianceSH9`:
+    - the local term L (lamps, fires, emission) by that function;
+    - the sky transfer T_ij = ∫ V Y_i Y_j dω, 45 floats of a symmetric 9 × 9 matrix (`ProjectCubeToSkyTransfer`);
+    - once per bake, the sky's radiance SH9 S_bake, from a sky-only capture of the snapshot with no meshes, terrains or lights and with discs and stars at 0 (`ProjectCubeToRadianceSH9`).
+  - **Format 2.** The probes' coefficients are `L + conv(T S_bake)` (`Renderer/ProbeRelight.h`'s `RelightIrradianceSH9`: the cosine lobe and the Hanning window of §8.6 step 4), what a renderer without relighting shows. An optional relight block follows: `uint32 HasRelight`, then per probe `{9 × f32x3 Local; 45 × f32 Transfer}`.
+    - Version 1 files still read.
+    - A volume without the block is written as version 1, byte for byte today's, so FeatureTest's committed bakes (`Docs/Backlog.md:285`) and `Scaffold.py --check` hold.
+    - The cooked payload is always format 2. A cached version-1 artifact is rebuilt by the payload-version rule (Architecture §7.5, `Architecture.md:1056`; ADR 0034 decision 20), so `IrradianceVolumeImporter::Version` stays 1 and no `.meta` moves.
+    - The reader is the fuzzed `IrradianceVolumeData` target, whose seed payload gains a block.
+  - **At render.** `GpuIrradianceVolume` (`GpuResourceCache`, place 3) gains the block as a structured buffer. When the sky key or the view's probe uploads changed, `CSProbeRelight` writes each relit volume's `L + conv(T S_now)` into the view's t13 copy (now UAV-capable, `ProbeShading.cpp:245-257`). Every frame, it also writes each reflection probe's `Intensity ×` the ratio of the relit to the baked luminance of the DC term at the nearest probe of the relit volume around its centre, clamped to [0, 4], for the copy above. `Common/Probes.slang` is unchanged.
+- **Where it runs: two declarations, no stage.**
+  - **`SkyLighting`,** at the end of the Ambient stage after `LightClusters` (`RenderPassDeclaration.h:189`): rows `SkyLuts`, `SkyIbl` and `ProbeRelight`; 10 pipelines (the Sky program's six computes and `EnvironmentBake`'s four).
+  - **`Sky`,** in the Forward stage directly after `Skybox` (`:204`): row `Sky`, 1 pipeline, target `SceneColor`. M47's `Water` follows it (decision 8).
+  - **Recording.** `RecordAmbientStage` ends with `RecordSkyLighting(frame)` after `RecordLightClusters` (`SceneRenderer.cpp:2325`). `RecordForwardStage`'s sky block (`:2447-2460`) draws the Sky in the Skybox's place when the snapshot's Sky is enabled.
+  - **Rows.** `SkyLuts` records whenever a Sky lights a Lit view; `SkyIbl` records the finalize and copies every frame and the update when the key changed; `ProbeRelight` records only when it runs.
+  - **Comments.** `RenderStage.h`'s Ambient comment names the sky's lighting (comment only).
+- **Device loss, trim and out of memory.** The LUTs, cubes and buffers live in `SkyViewResources` (place 2) and are rebuilt lazily after Release and Recreate. The relight block lives in the cache (place 3), the pipelines in the set; no registration of their own. A cube or LUT that cannot be created: the view lights with the Environment as without a Sky, Render returns its partial error, and the host trims and renders again (M18 decision 44).
+- **Validation** (`Scene/SkyValidation.{h,cpp}`, its own code array, `SkyDiagnosticCodes`, holding all three codes, called by a new `CheckSky` after M43's `CheckStaticScenery`, with `PROBE_NOT_RELIGHTABLE` from `CheckProbes`; appended to both of `ProjectValidator.cpp`'s tables after M42's `RENDER_REFLECTION_INVALID`, `:224`, and after M43's and M44's codes; the count line adds `+ SkyDiagnosticCodes.size()`):
+  - `SKY_LIGHT_INVALID` (Warning, not fixable): `Sun` names an entity without an enabled `DirectionalLight`; `Sun` is null and the scene has none; or `Moon` is the Sun's entity. Dangling references stay `ENTITY_DANGLING_REFERENCE`'s (`ProjectValidator.cpp:920-940`).
+  - `SKY_ENVIRONMENT_IGNORED` (Warning, not fixable): an enabled Environment beside an enabled Sky.
+  - `PROBE_NOT_RELIGHTABLE` (Warning, not fixable; in `SkyDiagnosticCodes`, checked by `Scene/ProbeValidation.cpp`): under a Sky, an IrradianceVolume whose data has no relight block, or a ReflectionProbe outside every relit volume. The hint is `lighting.bake`.
+  - `RENDER_NO_LIGHTING` counts a Sky of positive `Intensity` as illumination (`Scene/RenderAnnotations.cpp`'s illumination block, `:160-173`; M43's mesh loop, `:175-193`, reads the static set).
+  - The three fixtures come from `MakeValidationFixtures.py` (`COMPONENT_ORDER` gains `Sky` after `Environment`, `:75`), with the `validation-codes` rows and §13.7's.
+- **Scripts, automation, editor and stats.**
+  - **Scripts:** the generated `Sky` proxy; no function, method or callback. `PerformanceStats` appends `SkyUpdates`, after M43's five members.
+  - **Automation:** no method (126 methods, 86 tools stay). `lighting.bake`'s `LightingBakeProbe` gains `relightable` (`EditorCore/Automation/LightingMethods.h:36-42`, M26's frozen wire format, a reviewed change).
+  - **Stats.** `RenderStats` appends `SkyUpdates` (0 or 1, the render regenerated the sky's lighting) and `RelitIrradianceVolumes`, after M42's fields (`Renderer/RenderStats.h:98-101`) and M43's. `stats.get`'s view summary appends `skyUpdates` and `relitIrradianceVolumes` after M43's fields, described; the Stats panel gains "Sky: updates / relit volumes" after M43's row.
+  - **Editor:** the generic inspector in Rendering, with the EntityRef pickers M37's joints use. `ClearMode::Skybox`'s description becomes "The scene's Sky, or its Environment skybox (its fallback colour when none is shown)."
+- **FeatureTest** (IdSeeds 4201 to 4203, in M45's block 4200-4299 of phase 8's ledger; every gate in each mode the feature supports):
+  - **`Sky.jsonl`** (4201) makes `Sky.scene` and the `Sky` suite. The scene holds a Sky with every field leaf non-default, `Sun` and `Moon` naming two DirectionalLights, and no Environment (no finding). The suite:
+    - reads and writes every field through the proxy (gate 4);
+    - turns the sun from a task;
+    - where `Application.GetStats().RenderAvailable` holds, checks `SkyUpdates` 1 while the sun turns and 0 when it stops.
+  - **`SkyReplay.jsonl`** (4202) records `Sky.replay` on `Sky.scene`: a held action quickens the sun's turn (the time-lapse), so the replay needs its input.
+  - **`GoldenSky.jsonl`** (4203, `Renderer` vulkan for its bake; `GoldenDirectories` `Assets/Lighting/Scenes/GoldenSky`, `Assets/Materials/GoldenSky`, `Assets/Scenes/GoldenSky`) makes two edit scenes:
+    - `Cove.scene`: ground, a glossy floor standing in for water, a rock, a hut, a Sky with Sun and Moon, fog and manual exposure;
+    - `Probes.scene`: a room with a window and a cave mouth, a relightable volume, a reflection probe and a lamp.
+  - **Gates:** 1, `Sky` with every field leaf non-default; 4, its proxy; 6, the three fixtures; 7, every description (the component, its fields, the `stats.get` fields, the readout member). 1b, 2, 3, 5, 8 and 9: nothing new.
+- **Perf** (Perf.py's look part, the headless game view at 1920 × 1080; warning-only budgets in `Scripts/Lib/perf.py`'s `BUDGETS`, `:49-50`, with `test_perf.py` cases):
+  - `sky/Static/gpuMs` ≤ 0.3 ms: the `SkyLuts`, `SkyIbl` and `Sky` rows of a generated `Assets/Perf/Sky.scene` whose sun stands still;
+  - `sky/Turning/gpuMs` ≤ 0.6 ms: the same rows and `ProbeRelight`, the sun turned every tick by the scene's script, with one relightable 8 × 4 × 8 volume baked at the part's start (the brief's time-lapse cost).
+- **Documents:**
+  - Architecture: §5.3 (the row); §6.8 (irradiance volume 2); §8.2 (`RenderSky`); §8.3 (the declarations, a "Sky" paragraph); §8.4 (the Sky layout); §8.6 (run-time sky lighting, relit probes, the copies); §8.7 (the cascade owner with a Sky); the Fog paragraph (the glow light); §8.13 and §8.14; §13.7 (the codes, the fields);
+  - the Roadmap's M45 section; `Docs/Backlog.md` §2 and §6;
+  - the header comments of `RenderSnapshot.h`, `RenderPassDeclaration.h`, `SceneRenderer.h`, `ProbeCapture.h`, `IrradianceVolumeData.h` and `Fog.h`;
+  - the skills: game-building's `look` (the day recipe: a Sky naming a sun and a moon light, auto-exposure, the sun turned by the game's script, a relit bake), game-debugging (fields, codes), golden-images (scenes);
+  - the generated references.
+
+### 4. The research's questions, decided by the lead
+
+1. **Probes under a moving sun (research Q1): sky-relit**, as the owner answered (ADR 0060 question 6): one bake, continuous, no keyframe steps in a time-lapse. The missing bounce is §6's.
+2. **Inside ADR 0028 decision 2's cut (Q2): yes** (ADR 0060 question 8). There are no lightmaps, SSGI, DDGI or ray tracing: it is a baked transfer re-evaluated against the sky. Recorded in Architecture §8.6 and beside `Docs/Backlog.md:347`.
+3. **The cloud layer (Q5): in M45,** as one 2D procedural layer (~0.5 session in W45.2): the storm's overcast reads poorly without it.
+4. **The moon (Q8): procedural.** Nothing is downloaded; a texture field may follow (§2).
+5. **The Sun and Moon roles (Q11): yes.** With a Sky, its Sun owns the fog glow and the cascades by day and its Moon the cascades by night. Without a Sky, nothing changes.
+6. **Irradiance volume 2 writing (Q12): version 1 when the volume has no relight block,** that is, when its scene has no Sky.
+7. **The copy into constant buffers (UNVERIFIED in the research):** a GPU copy, proved by W45.1's case, with the read-back ring as the fallback (decision 3).
+8. **Spreading the update over frames:** rejected as the default, since it adds state captures must clear. It stays the fallback if `sky/Turning/gpuMs` misses its budget, with lower sample counts and a 128² cube tried first.
+9. **Departures from the research's design,** each for a reason:
+   - **Driving at extraction, not in Prepare:** every consumer of the light list sees one colour, and M43's Prepare is untouched by it.
+   - **One `SKY_LIGHT_INVALID`** for the Sun and the Moon, as M42 has one code per component; dangling references are already reported.
+   - **No discs or stars in the image-based light:** the lights carry the discs (no double count), and stars alias at 256².
+   - **Clouds in the image-based light at 1 s steps,** so a drifting layer does not regenerate it every frame.
+   - **Two perf metrics:** the relight's cost is in `sky/Turning/gpuMs`.
+
+### 5. Approvals
+
+None. Hillaire's method needs physical constants only; the moon and stars are procedural. Nothing is downloaded or vendored.
+
+### 6. Determinism, platforms and goldens
+
+- **Determinism.** The Sky is component data, hashed like Fog. Nothing the renderer computes is hashed, and nothing in the simulation reads it: driving changes only the snapshot.
+  - No hash block is added, no committed hash moves, no `project.upgrade` is needed (ADR 0060 decision 6's row).
+  - `Sky.replay` verifies at one hash in the `--renderer none` Debug and Release editors and the rendering Release and Dist exports.
+  - The bake's CPU steps stay pure (double, DetMath, fixed order), so two bakes of one scene write byte-identical files.
+- **Platforms.** Only Windows is verified (ADR 0028 decision 10). M45 adds no platform capability and no device feature.
+- **Goldens.** Three new on `nvidia-62x`, each also rendered twice to the same bytes:
+  - `SkyDay`: six tiles of `Cove.scene` (the sun at dawn, morning, noon, afternoon and dusk, and night with the moon and stars), the sun moved in the snapshot and driven again;
+  - `SkyOvercast`: two tiles (haze with clouds, the storm's full overcast);
+  - `SkyProbes`: two tiles of `Probes.scene`, noon and midnight with no bake between.
+
+  The 56 existing goldens stay byte-identical: no existing shader changes and the `EnvironmentBake` program is reused unchanged. A drift is a bug, never a golden update. `SkyProbes` depends on its bake's device class (`Docs/Backlog.md:285`).
+- **Fuzzing.** No new target. The `IrradianceVolumeData` target mutates format-2 payloads; its 10,000-mutation case runs at the gate, and the 1,000,000-iteration run waits for the program's hardened gate (ADR 0060 decision 7).
+
+### 7. Process
+
+As ADR 0060 decision 7:
+- **One builder,** in its own worktree, works the waves in order. The lead runs one independent review per wave and has every confirmed finding fixed, nits included.
+- **Frozen headers.** `RenderSnapshot.h`, `RenderPassDeclaration.h`, `ProbeCapture.h`, `LightingMethods.h` and the shared shader structs change only as decision 3 names, as reviewed changes to a frozen interface.
+- **GPU discipline.** Filtered gpu, golden and automation runs only, through `Test.py` under the machine locks.
+- **Checkpoint commits** run their targeted checks. Agents never run `PreCommit.py` or `CI.py`.
+- **The landing.** Phase 8's one batch in the fixed train order M43, M44, M45, M46, M47, M48: M45 merges third. At its merge, M45 adapts its hunks in M43's files, appends after M43's and M44's entries, and regenerates FeatureTest and the references on the merged tree. `EngineVersionString` is M48's, the last lander's (0.9.0).
+- **The gate:** phase 8's batch gate, `CI.py --require-clang-cl`. The hardening runs only at the program's last phase.
+
+### 8. The milestone's reservation needs
+
+Phase 8's reservation ledger, committed in `Docs/Decisions/0060-skerries-engine-program.md` as its section "Phase 8 reservation ledger", is the rule: the rows below are M45's rows there, with its values, orders and owners, in the fixed train order M43, M44, M45, M46, M47, M48. A deviation needs a ledger amendment on main. Today's values are read at `3aaf4b10`; "at its merge" counts M43's and M44's entries, which land first.
+
+| Allocation | Today | M45 |
+|---|---|---|
+| ADR numbers | 0059 the last committed; 0060 the program | 0063, this record |
+| Components, categories | 64 in 16 categories | `Sky` in Rendering after `Environment`, before `PostProcess` (mid-list): 69 at its merge (65 on its branch); no category, no registration function; `COMPONENT_ORDER` gains it after `Environment` |
+| Validation codes | 75, the last `RENDER_REFLECTION_INVALID` | +3 after M44's: `SKY_LIGHT_INVALID`, `SKY_ENVIRONMENT_IGNORED`, `PROBE_NOT_RELIGHTABLE` (Warnings), appended in that order: 81 at its merge (78 on its branch); the array `SkyDiagnosticCodes` (3, `Scene/SkyValidation.h`) joins the count line; `CheckSky` after M43's `CheckStaticScenery`, and `PROBE_NOT_RELIGHTABLE` inside `CheckProbes` |
+| Settings sections, script namespaces | as today; 22 namespaces | none; the `Sky` proxy (generated) |
+| `IScriptHost`, readout | `IScriptHost` ends with `GetMusic`; `PerformanceStats` 24 members (`Scripting/ScriptPerformanceStats.h:15-50`) | no host member; `SkyUpdates` appended after M43's five: 30 at its merge (25 on its branch) |
+| Automation methods, MCP tools | 126 and 86 | unchanged; `lighting.bake`'s `LightingBakeProbe` +`relightable` (M26's frozen wire format, a reviewed change); `stats.get`'s view summary +2 fields after M43's four (38 at its merge) |
+| Stats rows, `RenderStats` | 41 rows; fields end with M42's `PlanarReflectionEntities` | 45 (`SkyLuts`, `SkyIbl` and `ProbeRelight` after `LightClusters`, `Sky` after `Skybox`); `RenderStats` +2 fields after M43's four |
+| Declarations, pipelines, programs, stages | 34, 77 (`SceneRendererTests.cpp:475`), 34 programs, 13 stages | 36 (`SkyLighting` after `LightClusters`, `Sky` directly after `Skybox`), 88, 35 (`Sky`, sorted between `Skinning` and `Skybox`), 13; M47's declarations follow |
+| Shared structs, draw flags | `ViewConstants` 512, `DrawConstants` 16, `InstanceRecord` 208; flags 1 to 16; `EnvironmentConstants` 192, `FogConstants` 128, `ProbeConstants` 2448 | all unchanged; new `Shared/SkyConstants.h`, in `ShadersTests.cpp`'s list after M43's `InstanceIndex` |
+| Goldens | 56 on `nvidia-62x` | 59 (`SkyDay`, `SkyOvercast`, `SkyProbes`, `GoldenSky.jsonl`), the first of phase 8's |
+| Perf metrics | `BUDGETS` holds 4 | +2 in the `look` part (`sky/Static/gpuMs` 0.3, `sky/Turning/gpuMs` 0.6): 7 at its merge, after M43's (6 on its branch) |
+| Fuzz targets | 53 (`Tests/Data/Fuzz/Targets.json`) | 53; `IrradianceVolumeData`'s reader changes |
+| FeatureTest | 101 scaffolds, the highest IdSeed 3902; 116 suites, 26 replays, 104 scenes | +3 scaffolds, `Sky.jsonl` 4201, `SkyReplay.jsonl` 4202 and `GoldenSky.jsonl` 4203 (M45's block 4200-4299), after M43's and M44's and before `Suites.jsonl` (1515) and `Replays.jsonl` (1516); +1 suite, +1 replay, +3 scenes |
+| Formats | `IrradianceVolumeData` 1, importer 1; replay 5 | `IrradianceVolumeData` 2 (1 written without a block); importer 1; `Sky` 1 |
+| `AssetType`, built-in handles, `PlaySessionPhase`, hash blocks, device features | as ADR 0059's ledger left them | none |
+| `EngineVersionString` | 0.8.0 (`Core/BuildId.h:38`) | none: M48, the last lander, sets 0.9.0 |
+
+**M45's own files.**
+- **New:** `SkyComponent.h`; `Scene/SkyExtraction.{h,cpp}`, `Scene/SkyValidation.{h,cpp}`; `Renderer/SkyAtmosphere.{h,cpp}`, `SkyLighting.{h,cpp}`, `SkyPass.{h,cpp}`, `ProbeRelight.{h,cpp}`, `SceneRendererSky.cpp`; `Passes/Sky.slang`, `Common/Atmosphere.slang`, `Shared/SkyConstants.h`; the tests (`SkyAtmosphereTests.cpp`, `SkyLightingTests.cpp`, `ProbeRelightTests.cpp`, `SkyGoldenTests.cpp`, `test_sky.py`), the scaffolds, goldens and fixtures.
+- **Changed, M45's alone in phase 8:** `SkyboxPass` (comment), `Fog.{h,cpp}`, `Private/LightingInputs.{h,cpp}`, `Private/ProbeShading.{h,cpp}`, `IrradianceVolumeData.{h,cpp}`, `LightingBake.{h,cpp}`, `LightingMethods.{h,cpp}`, `ProbeValidation.{h,cpp}`, `RenderingRegistration.cpp` (`Sky` after `Environment`; `ClearMode::Skybox`'s description), `RenderStage.h` (comment).
+
+**Contended files and M45's regions in each.**
+- **M43's, which lands first** (ADR 0060 decision 2):
+  - `RenderSnapshot.h`: `RenderSky` before `RenderSnapshot`; the `Sky` member appended after M43's `StaticSet`; the two driving declarations beside `ComputeReverseZProjection` (`:912-921`).
+  - `RenderExtraction.{h,cpp}`: one call after the canonical loop M43 rewrites (`:754-945`), beside `snapshot.Fog` (`:947-949`), and a header paragraph. Nothing inside the loop.
+  - `SceneRenderer.cpp`'s Prepare: the cascade loop (`:1691-1730`, outside M43's regions) changes only the order it visits directional lights, through `OrderShadowCandidates`. The forward set (`:2378-2384`, where M43 appends t21 and t22) gains no binding from M45: t3 takes the sky's cube.
+- **M45's regions in M43's renderer files** (the Forward stage's sky and the environment binding):
+  - in Prepare, the environment block (`:1864-1873`) and the probe preparation (`:1874-1877`);
+  - the end of `RecordAmbientStage` (`:2325`);
+  - `RecordForwardStage`'s sky block (`:2447-2460`);
+  - `SceneRendererReflections.cpp`'s slot fog (`:251`) and mirror sky (`:440-449`);
+  - `Private/SceneRendererState.h`'s sky members beside `DrawsSkybox` (`:404`, `:428-429`).
+- **M45's for the phase, with the others' regions in train order:**
+  - `Scene/RenderAnnotations.cpp`: M45's region is the illumination block (`:160-173`); M43's mesh loop (`:175-193`) lands first, M44's vehicle call goes after `:135`, and M47's outline after M45's region;
+  - `Renderer/RenderPassDeclaration.h` (frozen): `SkyLighting` after `LightClusters` (`:189`), `Sky` directly after `Skybox` (`:204`), and the comment; M47's `Water` follows `Sky`, and its `Underwater` goes first in HdrPost;
+  - `Renderer/ProbeCapture.{h,cpp}` (frozen header): M43's static set in captures (`MakeCaptureSnapshot`, `:282-319`) lands first; M45 adds `MakeRelightCaptureSnapshot` after it and the visibility read-back; M47 clears `Waters` after the planar clear (`:317`);
+  - `Renderer/SceneRenderer.h`: `GetSceneDepthTexture` beside `:427`.
+- **M47's Water, which follows the sky:**
+  - `RenderPassDeclaration.h`: M47's `Water` after `Sky` (above), since M47 lands after M45;
+  - `SceneRenderer.cpp`: M47's water record follows M45's sky block;
+  - set 0's t3, b2 and b5 keep their layouts, so the water reads them unchanged.
+- **Append-only, in train order:**
+  - the declarations' and pipelines' totals (`RenderPassDeclarationTests.cpp`, `SceneRendererTests.cpp`: M45's counts, then M47's) and `SceneRenderer.cpp`'s set creation (`:137-140`, `:608-632`);
+  - `Shaders.json` (`Sky` between `Skinning` and `Skybox`) and `ShadersTests.cpp` (`SkyConstants` after M43's `InstanceIndex`);
+  - `RenderStats.{h,cpp}`, `StatsMethods`, `StatsPanel`, `ScriptPerformanceStats.h`, `SessionStatistics.cpp`, `Bindings/Application.cpp`, after M43's entries;
+  - `GpuResourceCache.{h,cpp}` (M43's file; the volume mirror, `:132-139`);
+  - `Scripts/Perf.py`, `Scripts/Lib/perf.py` and `test_perf.py`, after M43's entries.
+- **Conflicts by construction**, M45 adapting:
+  - `BuiltinComponents.h` (M43's Core, M44's Physics and the later categories); `RenderingRegistration.cpp` is M45's alone;
+  - `ProjectValidator.cpp`'s two tables and its tests' count;
+  - `MakeValidationFixtures.py`;
+  - FeatureTest's `Scaffolds.json` and `Suites.jsonl`;
+  - Architecture, the Backlog, the skills;
+  - the generated references, regenerated and never merged.
+
+## Acceptance
+
+The Roadmap's M45 acceptance, each a named test or check:
+- "SkyAtmosphere: the transmittance toward the sun falls with the zenith angle, reddens at the horizon and is zero below it"
+- "SkyAtmosphere: the moon's illuminated fraction follows its elongation from the sun"
+- "SkyAtmosphere: the stars turn about the celestial pole by the sun's hour angle"
+- "SkyAtmosphere: driving the lights is idempotent and leaves the components' colours as authored"
+- "SkyAtmosphere: the cascades go to the Sun above the horizon and to the Moon below it"
+- "Fog: with a Sky, the glow follows its Sun"
+- "RenderExtraction: a Sky is extracted with its Sun and Moon in every view, and a scene without one extracts as before"
+- "SkyValidation: a Sun or Moon that names no usable light, and an Environment beside a Sky, are reported"
+- "SkyLighting: a buffer copied into a view's constant buffers after their CPU writes reaches the passes that read them" (gpu, W45.1)
+- "SkyLighting: the transmittance and multiple-scattering LUTs match their CPU reference" (gpu)
+- "SkyLighting: the run-time prefilter of a cube matches the environment bake's" (gpu)
+- "SkyLighting: a constant sky gives a constant irradiance" (gpu)
+- "SkyLighting: the view's ambient light, reflections and fog colour follow the sun" (gpu)
+- "SkyLighting: the sky's lighting is regenerated only when its key changes" (gpu)
+- "SkyPass: a mirror view and a probe capture draw the sky" (gpu)
+- "SkyLighting: a sky scene renders the same bytes after a device loss" (gpu)
+- "SkyLighting: a sky whose cubes cannot be created lights with the Environment and the render returns its error" (gpu)
+- "IrradianceVolumeData: a relightable payload round-trips, a version 1 source still reads, and a volume without a relight block writes version 1"
+- "ProbeCapture: an open probe's sky transfer is the identity and a closed one's is zero"
+- "ProbeRelight: an open probe relights to the sky's irradiance and a closed one to its local light"
+- "ProbeRelight: the GPU relight matches its CPU reference" (gpu)
+- "LightingBake: a volume baked under a Sky is relightable, bakes byte-identically twice, and relights to its bake at the bake's sky" (gpu)
+- "ProbeRelight: a cave darkens at night and lights at noon with no bake between" (gpu)
+- "ProbeRelight: a reflection probe inside a relit volume dims with it" (gpu)
+- "ProbeValidation: a volume without a relight block under a Sky is reported"
+- `Golden: SkyDay`, `Golden: SkyOvercast` and `Golden: SkyProbes`, with every existing golden byte-identical.
+- `test_sky.py`: entity updates of the Sky, Scene-view screenshots that differ between dawn and noon, `stats.get`'s `skyUpdates` (1 after a turn, 0 when still), `lighting.bake`'s `relightable`, `SKY_ENVIRONMENT_IGNORED` from `project.validate`.
+- The `Sky` suite passes in the editor, Release and Dist; `Sky.replay` verifies at one hash in Debug, Release and Dist and fails without its input.
+- The frozen-layout cases: `RenderPassDeclarationTests`' rows (45), the pipeline count (88), "Shaders: SharedStructsMatchReflection" with `SkyConstants`, and the existing `IrradianceVolumeData` fuzz case on its new seed.
+- Perf.py's `sky/Static/gpuMs` within 0.3 ms and `sky/Turning/gpuMs` within 0.6 ms (warning-only), from the builder's `Perf.py --config Release --only look` at W45.4's end, and again at the program's hardened gate.
+
+**S03's "How the game will check it":**
+- **Six screenshots of Landfall's cove across a day agree** (sky, sun light, ambient, water's reflections): `Golden: SkyDay` (its glossy floor reflects the sky's cube, as M47's water will) and "SkyLighting: the view's ambient light, reflections and fog colour follow the sun". The cove itself is the game's check.
+- **The ranger station and the cave mouth darken at night with no bake between:** `Golden: SkyProbes`, "ProbeRelight: a cave darkens at night and lights at noon with no bake between" and "a reflection probe inside a relit volume dims with it". The game bakes once with its Sky in the scene; `PROBE_NOT_RELIGHTABLE` names any older bake.
+- **The time-lapse runs without hitches, its per-frame cost at 1080p measured:** `sky/Turning/gpuMs` and `stats.get`'s `SkyLuts`, `SkyIbl`, `ProbeRelight` and `Sky` rows. The game turns its sun in its script (the corrections).
+- **Replays still verify:** `Sky.replay` at one hash in renderer-none editors and rendering exports; no committed hash moves. The Sky is hashed component data, the sky's rendering is not.
+
+## Risks
+
+- **The copy into constant buffers.** W45.1 proves it on the device before W45.2 builds on it. The fallback lags a live view by the frames in flight.
+- **Cost.** A time-lapse regenerates the lighting every frame, and the editor's two views double it. The metrics measure it; the fallbacks are fewer samples, a 128² cube, then spreading over frames.
+- **Look tuning.** Night needs auto-exposure; the disc's physical radiance, the stars and the moon need art direction against the goldens.
+- **The M43 merge.** Prepare and extraction change under M43. M45 keeps its hunks there to single calls, with its code in its own files.
+- **Byte identity.** The t3 swap, the copies and the reused bake program reach only views with a Sky. The filtered golden run of W45.2 and the gate check all 56.
+- **Approximation.** Relit probes lack the bounce, so a noon interior reads darker and bluer than a static noon bake. This is §6's row and the look skill's advice (fill lights).
+- **Hidden driving.** `DriveLights` is invisible to scripts' reads, as documented.
+- **Relit-bake goldens** depend on the bake's device class (`Docs/Backlog.md:285`).
+- **The changed fuzzed reader** waits for the program's hardened gate (ADR 0060 decision 7).
+- **Phase 8's GPU lock.** Four renderer builders queue on one GPU, so every run stays filtered.
+
+## Before milestone completion
+
+- [ ] W45.1 committed, the copy's case passing (or the fallback recorded); [ ] the lead's review pass taken and every finding fixed.
+- [ ] W45.2 committed; [ ] the lead's review pass taken and every finding fixed.
+- [ ] W45.3 committed; [ ] the lead's review pass taken and every finding fixed.
+- [ ] W45.4 committed; [ ] the lead's review pass taken and every finding fixed.
+- [ ] The landing: phase 8's batch in train order, third after M43 and M44, M45's hunks adapted in M43's files, M47's `Water` after `Sky`, FeatureTest regenerated, the gate `CI.py --require-clang-cl` green.
+- [ ] Architecture, the Roadmap, the skills, `Docs/Backlog.md` §2 and §6, and the generated references describe what landed.
+- [ ] S03's "How the game will check it" met in the goldens, the gpu cases, FeatureTest and Perf.py, and reported to the Skerries session through the product owner, with the corrections above.
