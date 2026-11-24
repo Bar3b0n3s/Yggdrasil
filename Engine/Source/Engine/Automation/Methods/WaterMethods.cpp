@@ -12,7 +12,6 @@
 #include "Engine/Scene/WaterQueries.h"
 #include "Engine/Session/PlaySession.h"
 
-#include <cmath>
 #include <format>
 #include <optional>
 #include <utility>
@@ -60,7 +59,7 @@ namespace Engine {
 			for (size_t index = 0; index < params.Points.size(); ++index)
 			{
 				const glm::vec3& point = params.Points[index];
-				if (std::abs(point.x) > MaxPhysicsCoordinate || std::abs(point.y) > MaxPhysicsCoordinate || std::abs(point.z) > MaxPhysicsCoordinate)
+				if (!IsWithinPhysicsRange(point))
 				{
 					return std::unexpected(Utils::MakeParamError(ErrorCode::InvalidArgument, std::format("/points/{}", index),
 						std::format("point {} lies outside the world (each coordinate within {:g} m)", index, MaxPhysicsCoordinate),

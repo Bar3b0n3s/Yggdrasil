@@ -65,9 +65,10 @@ namespace Engine {
 	//   - WATER_WAVES_TOO_STEEP: a Water whose ComputeWaterSteepnessSum at its WaveScale exceeds MaxWaterSteepnessSum
 	//     (Water.Waves), naming the factor MaxWaterSteepnessSum / sum every Steepness is scaled by;
 	//   - PHYSICS_BUOYANCY_INVALID: a Buoyancy whose Water names no live entity holding a Water (Buoyancy.Water); else, with
-	//     `layers`, one whose RigidBody is not Dynamic (RigidBody.Type), or whose body the composition (ComposePhysicsBodies)
-	//     does not make or makes with no solid collider (no field). Without `layers` (a project whose physics settings do not
-	//     load) the body is not checked.
+	//     `layers`, one whose RigidBody is not Dynamic (RigidBody.Type), whose body the composition (ComposePhysicsBodies)
+	//     does not make or makes with no solid collider (no field), or whose RigidBody locks every translation axis
+	//     (RigidBody.LockTranslation), in that order, as PhysicsSystem's PreStep item 4c reports the same causes on the same
+	//     component and field. Without `layers` (a project whose physics settings do not load) the body is not checked.
 	// Pure function of its inputs; main thread.
 	[[nodiscard]] std::vector<WaterSceneIssue> FindWaterIssues(const Scene& scene, const PhysicsLayerTable* layers);
 

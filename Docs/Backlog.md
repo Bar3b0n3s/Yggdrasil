@@ -325,6 +325,11 @@ Limits accepted for v1. A limit that names a milestone is scheduled by ADR 0028 
   - A mirror at the cap of 4 switches between its planar reflection and its fallback as the ranks change (no hysteresis).
   - Geometry on a mirror's reflecting side within the clip bias (1 cm) of its plane is clipped from its reflection.
   - A mirror's blur margin follows the view's `SsrMaxRoughness`, not its glass's own roughness (W42.3's review, the lead's decision): every slot's chain reaches the level of `SsrMaxRoughness`, and its cull and rasterization rectangle widens by two texels of the chain's last level, so even a polished mirror culls and renders about 29% of its reflection's width as margin on each side (276 of 960 pixels at 1080p's default half resolution and `SsrMaxRoughness` 0.6). The measured cost stays far within the budget: Perf.py's room of three mirrors, a median of 0.188 ms at 1920 x 1080 against 2 ms. Sizing the chain and the margin from the glass's roughness is §2's row for later.
+- M47's water (`Docs/Decisions/0065-m47-water.md` decision 3; Skerries' brief S01), accepted at its landing (its buoyancy's limits; W47.3 adds the rendering's):
+  - Each collider floats on the plane under its world bounds' centre, so a collider longer than the swell does not follow it: give a hull several colliders to ride a short swell.
+  - Jolt's drag uses the whole body's local bounds, whatever is submerged, so a boat with spread pontoons is damped as its whole box.
+  - A capsule floats as its bounding box (Jolt 5.6.0's `CapsuleShape` keeps `ConvexShape`'s box volume): 53 % more volume than a capsule whose half height equals its radius, so it floats higher; boxes, spheres and convex meshes are exact.
+  - A buoyant body on calm, unchanged water may sleep, and one asleep is skipped: woken by a contact, it gets its buoyancy from the next tick, so it dips by up to one tick's fall.
 
 ## 7. Non-goals for v1
 

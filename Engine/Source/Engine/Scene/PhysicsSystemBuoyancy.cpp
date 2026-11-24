@@ -2,6 +2,7 @@
 #include "Engine/Scene/PhysicsSystem.h"
 
 #include "Engine/Scene/Components/BuoyancyComponent.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -11,18 +12,21 @@
 #include "Engine/Scene/WaterValidation.h"
 
 #include <algorithm>
+#include <bit>
 #include <format>
 #include <map>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 // PhysicsSystem's buoyancy (M47, Docs/Decisions/0065-m47-water.md decision 3; Architecture §9.12; PhysicsSystem.h's item 4c):
 // each effectively enabled Buoyancy whose owner holds a created Dynamic body takes, per collider, the plane of its water's
 // surface under the collider's world bounds centre at the tick's world time, and PhysicsWorld::ApplyBuoyancy floats the body
-// on them. A body whose planes are bit-identical to its last tick's may sleep and is skipped while asleep; one whose planes
-// changed is woken. The planes are runtime state: nothing here is hashed, and a scene without a Buoyancy runs none of it.
+// on them. A body whose planes and settings are bit-identical to its last tick's may sleep and is skipped while asleep; one
+// whose planes or settings changed is woken. The planes are runtime state: nothing here is hashed, and a scene without a
+// Buoyancy runs none of it.
 
 namespace Engine {
 
@@ -57,13 +61,26 @@ namespace Engine {
 			return owners;
 		}
 
-		// Whether two planes are bit-identical (the wake rule).
-		static bool AreSamePlanes(std::span<const PhysicsFluidPlane> a, std::span<const PhysicsFluidPlane> b)
+		static bool SameBits(float a, float b)
 		{
-			return std::ranges::equal(a, b, [](const PhysicsFluidPlane& x, const PhysicsFluidPlane& y)
+			return std::bit_cast<uint32_t>(a) == std::bit_cast<uint32_t>(b);
+		}
+
+		static bool SameBits(const glm::vec3& a, const glm::vec3& b)
+		{
+			return SameBits(a.x, b.x) && SameBits(a.y, b.y) && SameBits(a.z, b.z);
+		}
+
+		// Whether a body is applied with the planes and settings of its last application, bit for bit (the wake rule): a
+		// sleeping body that is sleeps on; any change wakes it.
+		static bool IsSameApplication(std::span<const PhysicsFluidPlane> planes, const PhysicsBuoyancySettings& settings, const PhysicsBuoyancyEntry& entry)
+		{
+			const bool samePlanes = std::ranges::equal(planes, entry.Planes, [](const PhysicsFluidPlane& x, const PhysicsFluidPlane& y)
 			{
-				return x.InWater == y.InWater && x.Point == y.Point && x.Normal == y.Normal && x.Velocity == y.Velocity;
+				return x.InWater == y.InWater && SameBits(x.Point, y.Point) && SameBits(x.Normal, y.Normal) && SameBits(x.Velocity, y.Velocity);
 			});
+			return samePlanes && SameBits(settings.Density, entry.Settings.Density) && SameBits(settings.BuoyancyScale, entry.Settings.BuoyancyScale)
+				&& SameBits(settings.LinearDrag, entry.Settings.LinearDrag) && SameBits(settings.AngularDrag, entry.Settings.AngularDrag);
 		}
 
 	}
@@ -89,38 +106,59 @@ namespace Engine {
 			if (const auto previous = Buoyancy.find(id); previous != Buoyancy.end())
 				entry = std::move(previous->second);
 
-			// The body: the owner's RigidBody's, created and Dynamic.
-			const auto handle = BodiesByOwner.find({ id, PhysicsBodyOrigin::RigidBody });
-			const auto body = handle != BodiesByOwner.end() ? Bodies.find(handle->second) : Bodies.end();
-			const auto invalid = [this, &owner, id, &applied](std::string message)
+			// A Buoyancy that cannot float is reported once (RaiseDiagnostic), on the component and field project.validate names
+			// for the same cause (Scene/WaterValidation.h), and keeps a zero report.
+			const auto invalid = [this, &owner, id, &applied](std::string_view component, std::string_view field, std::string_view cause, std::string_view hint)
 			{
 				RaiseDiagnostic(PhysicsDiagnostic{ .Code = std::string(PhysicsBuoyancyInvalidCode),
 					.Severity = DiagnosticSeverity::Warning,
 					.Entity = id,
-					.Component = "Buoyancy",
-					.Message = std::format("the Buoyancy of '{}' ({}) floats nothing: {}", owner.GetName(), id, message),
-					.Hint = "give the entity a Dynamic RigidBody with a solid collider, and set Water to an entity with a Water or to null" });
+					.Component = std::string(component),
+					.Field = std::string(field),
+					.Message = std::format("the Buoyancy of '{}' ({}) floats nothing: {}", owner.GetName(), id, cause),
+					.Hint = std::string(hint) });
 				applied.emplace(id, PhysicsBuoyancyEntry{});
 			};
-			if (body == Bodies.end() || body->second.Plan.MotionType != PhysicsMotionType::Dynamic)
-			{
-				invalid("its RigidBody makes no Dynamic body");
-				continue;
-			}
-			const PhysicsBodyEntry& bodyEntry = body->second;
 
-			// The water the Buoyancy names, when it names one.
+			// The water the Buoyancy names, when it names one, checked first, as project.validate checks it. A named water that
+			// is effectively disabled exists for no query: it holds no point, so every plane is out of water and the body falls.
 			std::optional<ResolvedWater> named;
+			bool namedEnabled = false;
 			if (buoyancy.Water.IsValid())
 			{
 				const ConstEntity water = scene.FindEntityByID(buoyancy.Water);
 				if (!water.IsValid() || !water.HasComponent<WaterComponent>())
 				{
-					invalid("its Water names no entity with a Water");
+					invalid("Buoyancy", "Water", "its Water names no entity with a Water",
+						"set Water to an entity with a Water component, or to null for the water that holds each collider");
 					continue;
 				}
 				named = ResolveWater(water);
+				namedEnabled = !water.HasComponent<HierarchyDisabledTag>();
 			}
+
+			// The body: the owner's RigidBody's, created, Dynamic and free to translate.
+			const RigidBodyComponent* rigidBody = owner.TryGetComponent<RigidBodyComponent>();
+			if (rigidBody != nullptr && rigidBody->Type != BodyType::Dynamic)
+			{
+				invalid("RigidBody", "Type", "its RigidBody is not Dynamic", "make the RigidBody Dynamic, or remove the Buoyancy");
+				continue;
+			}
+			const auto handle = BodiesByOwner.find({ id, PhysicsBodyOrigin::RigidBody });
+			const auto body = handle != BodiesByOwner.end() ? Bodies.find(handle->second) : Bodies.end();
+			if (rigidBody == nullptr || body == Bodies.end() || body->second.Plan.MotionType != PhysicsMotionType::Dynamic)
+			{
+				invalid("Buoyancy", "", "its RigidBody makes no body with a solid collider",
+					"give the entity (or a descendant it gathers) a box, sphere, capsule or convex mesh collider that is not a trigger");
+				continue;
+			}
+			if (glm::all(rigidBody->LockTranslation))
+			{
+				invalid("RigidBody", "LockTranslation", "its RigidBody locks every translation axis, so it cannot rise or sink",
+					"unlock at least one axis of LockTranslation (Y to float), or remove the Buoyancy");
+				continue;
+			}
+			const PhysicsBodyEntry& bodyEntry = body->second;
 
 			// Each collider's plane, at its world bounds' centre, and the water it came from.
 			std::vector<PhysicsFluidPlane> planes(bodyEntry.Colliders.size());
@@ -134,7 +172,7 @@ namespace Engine {
 				std::optional<SceneWaterSample> sample;
 				if (named.has_value())
 				{
-					if (IsInWaterVolume(*named, center))
+					if (namedEnabled && IsInWaterVolume(*named, center))
 						sample = SampleWater(*named, center, step.Time);
 				}
 				else
@@ -148,11 +186,27 @@ namespace Engine {
 				planeWaters[collider] = sample->Water;
 			}
 
-			// The wake rule: unchanged planes let a sleeping body sleep on with its last report; changed ones wake it.
-			const bool unchanged = Utils::AreSamePlanes(planes, entry.Planes);
+			// The density of the named water, else of the water of the first collider in water (a body out of water takes the
+			// default and displaces nothing).
+			UUID densityWater = named.has_value() ? named->Entity : UUID();
+			if (!densityWater.IsValid())
+			{
+				if (const auto first = std::ranges::find_if(planeWaters, &UUID::IsValid); first != planeWaters.end())
+					densityWater = *first;
+			}
+			float density = PhysicsBuoyancySettings{}.Density;
+			if (const ConstEntity water = scene.FindEntityByID(densityWater); water.IsValid() && water.HasComponent<WaterComponent>())
+				density = water.GetComponent<WaterComponent>().Density;
+			const PhysicsBuoyancySettings settings{ .Density = density,
+				.BuoyancyScale = buoyancy.BuoyancyScale,
+				.LinearDrag = buoyancy.LinearDrag,
+				.AngularDrag = buoyancy.AngularDrag };
+
+			// The wake rule: a sleeping body applied as last time sleeps on with its last report; a change of its planes (waves,
+			// a tide) or of its settings (a BuoyancyScale or drag write, its water's Density) wakes it.
 			if (World->IsSleeping(bodyEntry.Handle))
 			{
-				if (unchanged)
+				if (Utils::IsSameApplication(planes, settings, entry))
 				{
 					applied.emplace(id, std::move(entry));
 					continue;
@@ -160,26 +214,11 @@ namespace Engine {
 				World->WakeUp(bodyEntry.Handle);
 			}
 
-			// The density of the named water, else of the water of the first collider in water (a body out of water takes the
-			// component's default and displaces nothing).
-			UUID densityWater = named.has_value() ? named->Entity : UUID();
-			if (!densityWater.IsValid())
-			{
-				if (const auto first = std::ranges::find_if(planeWaters, &UUID::IsValid); first != planeWaters.end())
-					densityWater = *first;
-			}
-			float density = WaterComponent{}.Density;
-			if (const ConstEntity water = scene.FindEntityByID(densityWater); water.IsValid() && water.HasComponent<WaterComponent>())
-				density = water.GetComponent<WaterComponent>().Density;
-
-			const PhysicsBuoyancySettings settings{ .Density = density,
-				.BuoyancyScale = buoyancy.BuoyancyScale,
-				.LinearDrag = buoyancy.LinearDrag,
-				.AngularDrag = buoyancy.AngularDrag };
 			const Result<PhysicsBuoyancyResult> result = World->ApplyBuoyancy(bodyEntry.Handle, planes, settings, deltaTime);
 			if (!result.has_value())
 			{
-				invalid(std::format("its body cannot float ({})", result.error().GetMessageText()));
+				invalid("Buoyancy", "", std::format("its body cannot float ({})", result.error().GetMessageText()),
+					"give the entity a Dynamic RigidBody with a solid collider that can translate");
 				continue;
 			}
 
@@ -212,6 +251,7 @@ namespace Engine {
 				}
 			}
 			entry.Planes = std::move(planes);
+			entry.Settings = settings;
 			entry.Report = report;
 			applied.emplace(id, std::move(entry));
 		}

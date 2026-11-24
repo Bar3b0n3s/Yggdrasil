@@ -16,6 +16,7 @@ time: scripts, the physics and the renderer sample the same surface, so a boat f
   other waters' masks aside; a `Rectangle`'s are nil outside its footprint.
 - `time` defaults to `Time.GetTime()`: the world's time, held by `Time.PauseWorld`, and 0 in an edit scene. Read in
   `OnFixedUpdate`, a sample is the surface the physics floats bodies on that tick.
+- A position beyond 1e9 m in any coordinate is an error, as for the physics queries; a disabled `Water` holds no point.
 
 ## The tide and the storm
 
@@ -50,12 +51,16 @@ return Script.Define("Tide", Tide)
 ## Floating
 
 A `Buoyancy` on an entity with a Dynamic `RigidBody` floats its body: each solid collider is submerged against the water
-plane under its centre at the tick's world time, through Jolt's exact submerged volume, with the water's `Density` and
-the component's drags. `BuoyancyScale` 1 is physical (a body floats at the draft its mass and volume give); `Water` names
-the water to float on (a `Rectangle` only within its volume), null takes the water that holds each collider. Give a boat
-four pontoon colliders on child entities to make it pitch and roll on a swell shorter than its hull; one hull collider
-floats on the plane under its centre. A buoyant body on calm, unchanged water may sleep; a tide or a storm wakes it.
-`physics.bodyInfo` (through `engine_call`) reports its `buoyancy {water, submergedVolume, totalVolume}`.
+plane under its centre at the tick's world time, through Jolt's submerged volume, with the water's `Density` and the
+component's drags (`LinearDrag` 2 by default settles a dropped hull at its draft within 2 cm in 5 s). `BuoyancyScale` 1
+is physical (a body floats at the draft its mass and volume give); `Water` names the water to float on (a `Rectangle`
+only within its volume; a disabled one holds no water, so the body falls), null takes the water that holds each
+collider. Give a boat four pontoon colliders on child entities to make it pitch and roll on a swell shorter than its
+hull; one hull collider floats on the plane under its centre. A capsule floats as its bounding box (Jolt's volume for
+it), so use box, sphere or convex mesh colliders for a hull. A body whose `RigidBody` locks every translation axis
+cannot float (`PHYSICS_BUOYANCY_INVALID`). A buoyant body on calm, unchanged water may sleep; a tide, a storm, or a
+write of its `BuoyancyScale` or drags or of the water's `Density` wakes it. `physics.bodyInfo` (through `engine_call`)
+reports its `buoyancy {water, submergedVolume, totalVolume}`.
 
 A custom floater (a duck that bobs at a point, a buoy with a rope) can push itself instead, with `Physics.SampleWater`
 and `RigidBody:AddForceAtPosition` per float point in `OnFixedUpdate`:

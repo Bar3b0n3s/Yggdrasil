@@ -2,6 +2,7 @@
 #include "Engine/Scene/Components/BuiltinComponents.h"
 
 #include "Engine/Core/Random.h"
+#include "Engine/Physics/PhysicsBuoyancy.h"
 #include "Engine/Physics/WaterWaves.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Reflection/ValidationContext.h"
@@ -19,6 +20,12 @@
 namespace Engine {
 
 	static_assert(MaxWaterWaves == MaxWaterSurfaceWaves, "the component's and the wave function's wave counts are one bound");
+	static_assert(MinWaterDensity == MinBuoyancyFluidDensity && MaxWaterDensity == MaxBuoyancyFluidDensity && MaxBuoyancyScale == MaxBuoyancySettingScale
+			&& MaxBuoyancyDrag == MaxBuoyancySettingDrag,
+		"the Water's and the Buoyancy's bounds are the ones PhysicsWorld::ApplyBuoyancy takes");
+	static_assert(BuoyancyComponent{}.BuoyancyScale == PhysicsBuoyancySettings{}.BuoyancyScale && BuoyancyComponent{}.LinearDrag == PhysicsBuoyancySettings{}.LinearDrag
+			&& BuoyancyComponent{}.AngularDrag == PhysicsBuoyancySettings{}.AngularDrag,
+		"a Buoyancy's defaults are the physics settings' defaults");
 
 	namespace Utils {
 

@@ -7116,7 +7116,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: Water, position: vector, time: number?) -> boolean`
 
-Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside.
+Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. A position beyond 1e9 m in any coordinate is an error.
 
 All modes; Runtime|Test; pure/read.
 
@@ -7148,7 +7148,7 @@ All modes; Runtime|Test; pure/read; setter mutates.
 
 `(self: Water, position: vector, time: number?) -> number?`
 
-Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint.
+Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. A position beyond 1e9 m in any coordinate is an error.
 
 All modes; Runtime|Test; pure/read.
 
@@ -7156,7 +7156,7 @@ All modes; Runtime|Test; pure/read.
 
 `(self: Water, position: vector, time: number?) -> vector?`
 
-Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil.
+Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error.
 
 All modes; Runtime|Test; pure/read.
 
@@ -7164,7 +7164,7 @@ All modes; Runtime|Test; pure/read.
 
 `(self: Water, position: vector, time: number?) -> vector?`
 
-Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil.
+Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error.
 
 All modes; Runtime|Test; pure/read.
 

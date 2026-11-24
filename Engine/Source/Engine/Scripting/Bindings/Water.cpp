@@ -13,7 +13,6 @@
 #include "Engine/Scripting/ScriptProxy.h"
 
 #include <algorithm>
-#include <cmath>
 #include <format>
 #include <optional>
 
@@ -47,7 +46,7 @@ namespace Engine {
 		static glm::vec3 CheckWaterPosition(ScriptCall& call, int index)
 		{
 			const glm::vec3 position = Lua::Check<glm::vec3>(call, index);
-			if (std::abs(position.x) > MaxPhysicsCoordinate || std::abs(position.y) > MaxPhysicsCoordinate || std::abs(position.z) > MaxPhysicsCoordinate)
+			if (!IsWithinPhysicsRange(position))
 				Lua::RaiseError(call, std::format("position lies outside the world (each coordinate within {:g} m)", MaxPhysicsCoordinate));
 			return position;
 		}
@@ -162,19 +161,20 @@ namespace Engine {
 			api.Type("Water")
 				.Method("SampleHeight", Utils::WaterSampleHeight, "(self: Water, position: vector, time: number?) -> number?",
 					"Read the world height of this water's own surface under the world point position at time seconds of world time (default "
-					"Time.GetTime()), masking aside; nil outside a Rectangle's footprint.",
+					"Time.GetTime()), masking aside; nil outside a Rectangle's footprint. A position beyond 1e9 m in any coordinate is an error.",
 					read)
 				.Method("SampleNormal", Utils::WaterSampleNormal, "(self: Water, position: vector, time: number?) -> vector?",
 					"Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil "
-					"where SampleHeight is nil.",
+					"where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error.",
 					read)
 				.Method("SampleVelocity", Utils::WaterSampleVelocity, "(self: Water, position: vector, time: number?) -> vector?",
 					"Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion "
-					"there plus the water's Current, in metres per second; nil where SampleHeight is nil.",
+					"there plus the water's Current, in metres per second; nil where SampleHeight is nil. A position beyond 1e9 m in any "
+					"coordinate is an error.",
 					read)
 				.Method("IsUnderwater", Utils::WaterIsUnderwater, "(self: Water, position: vector, time: number?) -> boolean",
 					"Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a "
-					"Rectangle's volume; other waters' masks aside.",
+					"Rectangle's volume; other waters' masks aside. A position beyond 1e9 m in any coordinate is an error.",
 					read);
 			ENGINE_TRY(api.RegisterAlias("WaterSample", "{Water: Entity, Height: number, Normal: vector, Velocity: vector, Depth: number}",
 				"The surface of the water that holds a point: the Water's entity, the surface's world height, unit normal and velocity (with the "

@@ -5,6 +5,7 @@
 #include "Engine/Core/Random.h"
 #include "Engine/Scene/Components/CharacterControllerComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Core/Json/JsonReader.h"
 #include "Engine/Scene/PhysicsSystem.h"
@@ -89,8 +90,14 @@ namespace Engine {
 			AddFuzzFamily(cases, "RigidBody:Teleport", "dynamic:Teleport(@)", invalidVectors, std::array<std::string_view, 1>{ "vector.create(10,2,0)" });
 			AddFuzzFamily(cases, "RigidBody:MoveKinematic", "kinematic:MoveKinematic(@, Quat.Identity())", invalidVectors, std::array<std::string_view, 1>{ "vector.create(20,2,0)" });
 			AddFuzzFamily(cases, "CharacterController:Move", "character:Move(@)", invalidVectors, finiteVectors);
-			// M47 (Docs/Decisions/0065-m47-water.md decision 6): the water query's point (phase 8's ledger: before M48's MoveFree).
+			// M47 (Docs/Decisions/0065-m47-water.md decision 6): the water queries' point and time, through Physics.SampleWater
+			// and the Pool's Water proxy (phase 8's ledger: before M48's MoveFree). A time is any finite number, nil the world's.
+			const std::array<std::string_view, 6> invalidTimes = { "0/0", "math.huge", "-math.huge", "'1'", "{}", "true" };
+			const std::array<std::string_view, 4> finiteTimes = { "0", "1", "-1", "nil" };
 			AddFuzzFamily(cases, "Physics.SampleWater", "Physics.SampleWater(@)", invalidVectors, finiteVectors);
+			AddFuzzFamily(cases, "Physics.SampleWater", "Physics.SampleWater(vector.zero, @)", invalidTimes, finiteTimes);
+			AddFuzzFamily(cases, "Water:SampleHeight", "water:SampleHeight(@)", invalidVectors, finiteVectors);
+			AddFuzzFamily(cases, "Water:IsUnderwater", "water:IsUnderwater(vector.zero, @)", invalidTimes, finiteTimes);
 			AddFuzzFamily(cases, "Time.SetTimeScale", "Time.SetTimeScale(@); assert(Time.GetTimeScale() == @)", invalidNumbers, durations);
 			AddFuzzFamily(cases, "Task.Delay", "local task = Task.Delay(@, function() end); Task.Cancel(task)", invalidNumbers, durations);
 			AddFuzzFamily(cases, "Input.IsGamepadConnected", "Input.IsGamepadConnected(@)", invalidNumbers, durations);
@@ -144,7 +151,7 @@ namespace Engine {
 							   "local kinematic = Scene.FindByName('Kinematic').RigidBody\n"
 							   "local fixed = Scene.FindByName('Fixed').RigidBody\n"
 							   "local character = Scene.FindByName('Character').CharacterController\n"
-							   "local saved = Scene.FindByName('Keeper'):GetScript(); local k = {} / 4\n"
+							   "local saved = Scene.FindByName('Keeper'):GetScript(); local k = {} / 4; local water = Scene.FindByName('Pool').Water\n"
 							   "{}\nreturn true",
 				magnitude, item.Statement);
 		}
@@ -329,6 +336,8 @@ return true
 				transform.Translation = glm::vec3(3e38f, 0, 0);
 			});
 			Test::AddSphereBody(edit, "Ball", glm::vec3(100, 0, 0), 0.5f, BodyType::Dynamic);
+			// M47: the water proxy's receiver, a Rectangle far from the bodies (it floats nothing: no Buoyancy).
+			edit.CreateEntity("Pool").AddComponent<WaterComponent>(WaterComponent{ .Shape = WaterShape::Rectangle });
 			Test::AddBoxBody(edit, "FuzzBody", glm::vec3(120, 0, 0), glm::vec3(0.5f), BodyType::Dynamic);
 			REQUIRE(fixture.Call("prefab.create", Json{ { "entity", "/FuzzBody" }, { "path", "Assets/Prefabs/FuzzBody.prefab" }, { "replaceWithInstance", false } }));
 			REQUIRE(fixture.Call("entity.destroy", Json{ { "entities", Json::array({ "/FuzzBody" }) } }));

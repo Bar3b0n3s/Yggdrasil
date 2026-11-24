@@ -238,9 +238,9 @@ namespace Engine {
 				"The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty "
 				"when it is not squeezed, for other bodies, and when that entity is disabled or destroyed.")
 			.Field("buoyancy", &PhysicsBodyInfoResult::Buoyancy,
-				"For a body whose owner holds a Buoyancy, what the physics last floated it with: {water (the water its colliders' planes "
-				"came from, as {id, name, path}, null when nothing was submerged), submergedVolume, totalVolume (m^3)}, kept while it sleeps "
-				"and 0 while it is skipped as invalid; null for any other body.")
+				"For a body whose owner holds a Buoyancy, what the physics last floated it with: {water (the Buoyancy's Water when set; else "
+				"the water whose planes held the most of the submerged volume, null when nothing was submerged; as {id, name, path}), "
+				"submergedVolume, totalVolume (m^3)}, kept while it sleeps and 0 while it is skipped as invalid; null for any other body.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).

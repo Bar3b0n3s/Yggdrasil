@@ -30,7 +30,7 @@ namespace Engine {
 				return true;
 			if (!Detail::IsFinite(plane.Point) || !Detail::IsFinite(plane.Normal) || !Detail::IsFinite(plane.Velocity))
 				return false;
-			if (std::abs(plane.Point.x) > MaxPhysicsCoordinate || std::abs(plane.Point.y) > MaxPhysicsCoordinate || std::abs(plane.Point.z) > MaxPhysicsCoordinate)
+			if (!IsWithinPhysicsRange(plane.Point))
 				return false;
 			const float lengthSquared = glm::dot(plane.Normal, plane.Normal);
 			return std::abs(lengthSquared - 1.0f) <= PhysicsUnitRotationTolerance;
@@ -114,8 +114,8 @@ namespace Engine {
 	{
 		if (!Detail::IsFinite(deltaTime) || !(deltaTime > 0.0f))
 			return MakeError(ErrorCode::InvalidArgument, "buoyancy needs a finite, positive time step, got {}", deltaTime);
-		if (!Utils::IsWithin(settings.Density, 1.0f, 20000.0f) || !Utils::IsWithin(settings.BuoyancyScale, 0.0f, 10.0f)
-			|| !Utils::IsWithin(settings.LinearDrag, 0.0f, 100.0f) || !Utils::IsWithin(settings.AngularDrag, 0.0f, 100.0f))
+		if (!Utils::IsWithin(settings.Density, MinBuoyancyFluidDensity, MaxBuoyancyFluidDensity) || !Utils::IsWithin(settings.BuoyancyScale, 0.0f, MaxBuoyancySettingScale)
+			|| !Utils::IsWithin(settings.LinearDrag, 0.0f, MaxBuoyancySettingDrag) || !Utils::IsWithin(settings.AngularDrag, 0.0f, MaxBuoyancySettingDrag))
 		{
 			return MakeError(ErrorCode::InvalidArgument, "buoyancy settings out of their bounds: density {}, scale {}, drags {} and {}", settings.Density,
 				settings.BuoyancyScale, settings.LinearDrag, settings.AngularDrag);
@@ -138,6 +138,11 @@ namespace Engine {
 		if (!lock.Succeeded())
 			return MakeError(ErrorCode::InvalidArgument, "body {} is not a live body of this world", body.GetValue());
 		JPH::Body& joltBody = lock.GetBody();
+		// A body with every translation axis locked has Jolt's inverse mass 0 (MotionProperties::SetMassProperties): Jolt's
+		// buoyancy divides by it (its fluid density, its angular drag), which would put NaN into the body's velocities.
+		const float inverseMass = joltBody.GetMotionProperties()->GetInverseMass();
+		if (!(inverseMass > 0.0f))
+			return MakeError(ErrorCode::InvalidArgument, "body {} cannot translate: every translation axis is locked, so it cannot float", body.GetValue());
 
 		PhysicsBuoyancyResult result;
 		result.PlaneSubmergedVolumes.assign(planes.size(), 0.0f);
@@ -152,7 +157,6 @@ namespace Engine {
 			return result;
 
 		// Jolt's fluid density is B / (V_total * invMass): B = scale * density * V_total * invMass makes it the water's, scaled.
-		const float inverseMass = joltBody.GetMotionProperties()->GetInverseMass();
 		const float buoyancy = settings.BuoyancyScale * settings.Density * walk.Total * inverseMass;
 		const JPH::Vec3 centerOfBuoyancy = walk.CenterOfBuoyancy / walk.Submerged;
 		const JPH::Vec3 fluidVelocity = walk.FluidVelocity / walk.Submerged;

@@ -634,7 +634,7 @@ namespace Engine {
 			const BuoyancyComponent buoyancy;
 			CHECK_FALSE(buoyancy.Water.IsValid());
 			CHECK(buoyancy.BuoyancyScale == 1.0f);
-			CHECK(buoyancy.LinearDrag == 0.5f);
+			CHECK(buoyancy.LinearDrag == 2.0f);
 			CHECK(buoyancy.AngularDrag == 0.05f);
 		}
 

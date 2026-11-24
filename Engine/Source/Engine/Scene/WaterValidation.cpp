@@ -171,6 +171,19 @@ namespace Engine {
 						.Hint = "give the entity (or a descendant it gathers) a box, sphere, capsule or convex mesh collider that is not a trigger",
 					});
 				}
+				else if (body != nullptr && glm::all(body->LockTranslation))
+				{
+					// Jolt gives a body that cannot translate an inverse mass of 0, which its buoyancy cannot divide by.
+					issues.push_back(WaterSceneIssue{
+						.Code = std::string(PhysicsBuoyancyInvalidCode),
+						.Entity = id,
+						.Component = "RigidBody",
+						.Field = "LockTranslation",
+						.Message = std::format("Buoyancy on {} floats nothing: its RigidBody locks every translation axis, so it cannot rise or sink",
+							Utils::DescribeWaterEntity(entity)),
+						.Hint = "unlock at least one axis of LockTranslation (Y to float), or remove the Buoyancy",
+					});
+				}
 			}
 		});
 		return issues;

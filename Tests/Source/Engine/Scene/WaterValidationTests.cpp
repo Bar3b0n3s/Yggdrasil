@@ -6,6 +6,7 @@
 #include "Engine/Physics/WaterWaves.h"
 #include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/BuoyancyComponent.h"
+#include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -136,7 +137,7 @@ namespace Engine {
 			CHECK(FindWaterIssues(scene, nullptr).empty());
 		}
 
-		TEST_CASE("WaterValidation: a Buoyancy on no Dynamic body with a solid collider, or naming no Water, is PHYSICS_BUOYANCY_INVALID")
+		TEST_CASE("WaterValidation: a Buoyancy on no Dynamic body with a solid collider that can translate, or naming no Water, is PHYSICS_BUOYANCY_INVALID")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -168,10 +169,29 @@ namespace Engine {
 			{
 				buoyancy.Water = boat.GetUUID(); // an entity, but no Water
 			});
+			// Kinematic and naming no Water: the Water first, as PreStep reports it.
+			const Entity stray = addFloater("Stray", 15.0f, BodyType::Kinematic);
+			stray.Patch<BuoyancyComponent>([&boat](BuoyancyComponent& buoyancy)
+			{
+				buoyancy.Water = boat.GetUUID();
+			});
+			// A buoy that may only rock: Jolt's inverse mass is 0 for it.
+			const Entity buoy = addFloater("Buoy", 18.0f, BodyType::Dynamic);
+			Test::PatchRigidBody(buoy, [](RigidBodyComponent& body)
+			{
+				body.LockTranslation = glm::bvec3(true);
+			});
+			// One locked axis leaves it free to rise and sink.
+			const Entity keel = addFloater("Keel", 21.0f, BodyType::Dynamic);
+			Test::PatchRigidBody(keel, [](RigidBodyComponent& body)
+			{
+				body.LockTranslation = glm::bvec3(true, false, true);
+			});
 
 			const std::vector<WaterSceneIssue> issues = FindWaterIssues(scene, &layers);
 			CHECK(IssuesOf(issues, boat).empty());
 			CHECK(IssuesOf(issues, aimed).empty());
+			CHECK(IssuesOf(issues, keel).empty());
 			const auto expect = [&issues](ConstEntity entity, std::string_view component, std::string_view field)
 			{
 				CAPTURE(entity.GetName());
@@ -186,11 +206,14 @@ namespace Engine {
 			expect(ghost, "Buoyancy", "");
 			expect(bare, "Buoyancy", "");
 			expect(lost, "Buoyancy", "Water");
-			CHECK(issues.size() == 4);
-			// Without the project's layers, the bodies are not composed: only the Water reference is checked.
+			expect(stray, "Buoyancy", "Water");
+			expect(buoy, "RigidBody", "LockTranslation");
+			CHECK(issues.size() == 6);
+			// Without the project's layers, the bodies are not composed: only the Water references are checked.
 			const std::vector<WaterSceneIssue> unlayered = FindWaterIssues(scene, nullptr);
-			REQUIRE(unlayered.size() == 1);
+			REQUIRE(unlayered.size() == 2);
 			CHECK(unlayered[0].Entity == lost.GetUUID());
+			CHECK(unlayered[1].Entity == stray.GetUUID());
 		}
 	}
 

@@ -271,7 +271,6 @@ class PhysicsTests(AutomationTestCase):
         self.assertEqual(no_joint.exception.issues[0]["pointer"], "/entity")
         client.call("play.stop")
 
-
     def test_body_info_reports_buoyancy(self) -> None:
         """M47 (Docs/Decisions/0065-m47-water.md decision 3): a floating body reports its water and its volumes; the
         others report null."""

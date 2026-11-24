@@ -96,10 +96,12 @@ namespace Engine {
 		bool HasSurfaces = false;
 	};
 
-	// M47: one buoyant owner's runtime state (PhysicsSystem::State::Buoyancy).
+	// M47: one buoyant owner's runtime state (PhysicsSystem::State::Buoyancy): the planes and settings its body was last
+	// applied with (the wake rule compares both bit for bit) and that application's report.
 	struct PhysicsBuoyancyEntry
 	{
 		std::vector<PhysicsFluidPlane> Planes{};
+		PhysicsBuoyancySettings Settings{};
 		PhysicsBuoyancyReport Report{};
 	};
 
@@ -453,8 +455,9 @@ namespace Engine {
 		// Destroys every live joint (the session's end, before the bodies); the world's destructor would too.
 		void DestroyAllJoints();
 		// --- Buoyancy (M47, Docs/Decisions/0065-m47-water.md decision 3; Scene/PhysicsSystemBuoyancy.cpp) -----------------
-		// Per owner holding a Buoyancy, by UUID: the fluid planes its body was last applied with (runtime state, never hashed;
-		// the wake rule compares them bit for bit) and the report of that application (physics.bodyInfo's buoyancy).
+		// Per owner holding a Buoyancy, by UUID: the fluid planes and settings its body was last applied with (runtime state,
+		// never hashed; the wake rule compares them bit for bit) and the report of that application (physics.bodyInfo's
+		// buoyancy).
 		std::map<UUID, PhysicsBuoyancyEntry> Buoyancy;
 
 		// PreStep item 4c: floats every effectively enabled Buoyancy's Dynamic body, in canonical order of the owners, on the

@@ -4,14 +4,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <span>
 #include <string>
 #include <vector>
 
 // The world's buoyancy (M47, Docs/Decisions/0065-m47-water.md decision 3; Physics/PhysicsBuoyancy.h): each collider of a
-// Dynamic body is submerged against its own fluid plane through Jolt's exact submerged volumes, and the body takes the
-// physical buoyancy of the water's density with Jolt's drag; each plane's submerged volume is reported; refusals change
-// nothing.
+// Dynamic body is submerged against its own fluid plane through Jolt's submerged volumes (exact for a box; a capsule's is its
+// bounding box's), and the body takes the physical buoyancy of the water's density with Jolt's drag; each plane's submerged
+// volume is reported; refusals change nothing.
 
 namespace Engine {
 
@@ -31,14 +32,22 @@ namespace Engine {
 			return std::move(*world);
 		}
 
-		// A Dynamic body of `mass` kg at `position` made of `colliders` (each a box), sleeping disallowed.
-		BodyHandle CreateFloater(PhysicsWorld& world, const std::vector<ColliderShapeDescription>& colliders, float mass, const glm::vec3& position)
+		// A body of `mass` kg at `position` made of `colliders`, sleeping disallowed: Dynamic and free unless told otherwise.
+		BodyHandle CreateFloater(PhysicsWorld& world, const std::vector<ColliderShapeDescription>& colliders, float mass, const glm::vec3& position,
+			PhysicsMotionType motion = PhysicsMotionType::Dynamic, PhysicsDofs dofs = PhysicsDofs::All)
 		{
 			Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = colliders });
 			REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
-			Result<BodyHandle> body = world.CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Dynamic, .Pose = { .Position = position }, .Mass = mass, .AllowSleeping = false });
+			Result<BodyHandle> body = world.CreateBody(
+				{ .Shape = *shape, .MotionType = motion, .Pose = { .Position = position }, .AllowedDofs = dofs, .Mass = mass, .AllowSleeping = false });
 			REQUIRE_MESSAGE(body.has_value(), body.error().ToString());
 			return *body;
+		}
+
+		// Whether `result` is ApplyBuoyancy's refusal.
+		bool IsRefused(const Result<PhysicsBuoyancyResult>& result)
+		{
+			return !result.has_value() && result.error().GetCode() == ErrorCode::InvalidArgument;
 		}
 
 		// A level plane of still water at height `height`.
@@ -60,33 +69,35 @@ namespace Engine {
 			const BodyHandle box = CreateFloater(*world,
 				{ ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(1.0f, 0.25f, 0.5f) } } }, 400.0f, glm::vec3(0.0f, 0.5f, 0.0f));
 			const std::array<PhysicsFluidPlane, 1> planes = { StillWater(0.0f) };
-			const PhysicsBuoyancySettings settings{ .Density = 1000.0f };
-			// Dropped from 0.45 m above its draft, it bobs about its draft under Jolt's quadratic drag: the mean height over the
-			// last 5 s (about five and a half periods of 0.9 s, 2 pi sqrt(m / (rho g A))) is the draft's.
+			// The Buoyancy component's defaults: density 1000 and Jolt's quadratic drag at LinearDrag 2, which settles it.
+			const PhysicsBuoyancySettings settings{};
+			// Dropped from 0.45 m above its draft, it bobs about its draft (periods of 0.9 s, 2 pi sqrt(m / (rho g A))) and settles:
+			// from 5 s on it stays within 2 cm of its draft (S01's "within 2 cm after 5 s"), at 10 s it lies within 1 cm, and over
+			// 5 to 10 s its mean height is the draft's.
 			double sum = 0.0;
 			double submerged = 0.0;
-			float lowest = 1.0f;
-			float highest = -1.0f;
-			for (int step = 0; step < 900; ++step)
+			float farthest = 0.0f;
+			float height = 0.0f;
+			for (int step = 0; step < 600; ++step)
 			{
 				const Result<PhysicsBuoyancyResult> result = world->ApplyBuoyancy(box, planes, settings, BuoyancyStep);
 				REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
 				CHECK(result->TotalVolume == doctest::Approx(1.0f).epsilon(1e-5));
-				if (step >= 600)
-					submerged += result->SubmergedVolume;
 				REQUIRE(world->Step(BuoyancyStep, 1));
-				if (step >= 600)
+				height = world->GetPose(box).Position.y;
+				if (step >= 300)
 				{
-					const float height = world->GetPose(box).Position.y;
+					submerged += result->SubmergedVolume;
 					sum += height;
-					lowest = std::min(lowest, height);
-					highest = std::max(highest, height);
+					farthest = std::max(farthest, std::abs(height - 0.05f));
 				}
 			}
 			const double mean = sum / 300.0;
 			CAPTURE(mean);
-			CAPTURE(lowest);
-			CAPTURE(highest);
+			CAPTURE(farthest);
+			CAPTURE(height);
+			CHECK(farthest < 0.02f);
+			CHECK(std::abs(height - 0.05f) < 0.01f);
 			CHECK(std::abs(mean - 0.05) < 0.01);
 			// On average the submerged volume carries the weight: rho V_sub = m.
 			CHECK(std::abs(submerged / 300.0 - 0.4) < 0.02);
@@ -139,6 +150,98 @@ namespace Engine {
 			const Result<PhysicsBuoyancyResult> none = world->ApplyBuoyancy(raft, dry, settings, BuoyancyStep);
 			REQUIRE(none.has_value());
 			CHECK_FALSE(none->Submerged);
+		}
+
+		// A Dynamic body with every translation axis locked and its rotation free (a buoy that rocks in place) has Jolt's inverse
+		// mass 0, which Jolt's buoyancy divides by: it is refused with nothing applied, and stepping it leaves it finite.
+		TEST_CASE("PhysicsWorld: a body that cannot translate is refused and stays finite")
+		{
+			Scope<PhysicsWorld> world = CreateBuoyancyWorld();
+			const BodyHandle buoy = CreateFloater(*world, { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) } } }, 100.0f,
+				glm::vec3(0.0f), PhysicsMotionType::Dynamic, PhysicsDofs::RotationX | PhysicsDofs::RotationY | PhysicsDofs::RotationZ);
+			world->SetAngularVelocity(buoy, glm::vec3(0.0f, 0.0f, 0.5f));
+			const glm::vec3 spin = world->GetAngularVelocity(buoy);
+			const std::array<PhysicsFluidPlane, 1> planes = { StillWater(0.0f) };
+			const Result<PhysicsBuoyancyResult> result = world->ApplyBuoyancy(buoy, planes, PhysicsBuoyancySettings{}, BuoyancyStep);
+			CHECK(IsRefused(result));
+			CHECK(world->GetAngularVelocity(buoy) == spin);
+			REQUIRE(world->Step(BuoyancyStep, 1));
+			const glm::vec3 after = world->GetAngularVelocity(buoy);
+			const PhysicsPose pose = world->GetPose(buoy);
+			for (int axis = 0; axis < 3; ++axis)
+			{
+				CHECK(std::isfinite(after[axis]));
+				CHECK(std::isfinite(pose.Position[axis]));
+			}
+			for (int axis = 0; axis < 4; ++axis)
+				CHECK(std::isfinite(pose.Rotation[axis]));
+		}
+
+		// Every refusal returns InvalidArgument and applies nothing: the body's velocities are unchanged by the call.
+		TEST_CASE("PhysicsWorld: buoyancy refuses settings out of bounds, a body that is not Dynamic and planes beyond the world or not unit")
+		{
+			Scope<PhysicsWorld> world = CreateBuoyancyWorld();
+			const std::vector<ColliderShapeDescription> cube = { ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) } } };
+			const BodyHandle box = CreateFloater(*world, cube, 100.0f, glm::vec3(0.0f));
+			world->SetLinearVelocity(box, glm::vec3(0.5f, -1.0f, 0.25f));
+			world->SetAngularVelocity(box, glm::vec3(0.0f, 0.5f, 0.0f));
+			const glm::vec3 velocity = world->GetLinearVelocity(box);
+			const glm::vec3 spin = world->GetAngularVelocity(box);
+			const std::array<PhysicsFluidPlane, 1> planes = { StillWater(0.0f) };
+			const auto unchanged = [&world, box, velocity, spin]()
+			{
+				return world->GetLinearVelocity(box) == velocity && world->GetAngularVelocity(box) == spin;
+			};
+			// Settings out of their bounds, each alone.
+			const std::array<PhysicsBuoyancySettings, 8> outOfBounds = {
+				PhysicsBuoyancySettings{ .Density = 0.5f },
+				PhysicsBuoyancySettings{ .Density = 20001.0f },
+				PhysicsBuoyancySettings{ .BuoyancyScale = -0.1f },
+				PhysicsBuoyancySettings{ .BuoyancyScale = 10.5f },
+				PhysicsBuoyancySettings{ .LinearDrag = -1.0f },
+				PhysicsBuoyancySettings{ .LinearDrag = 101.0f },
+				PhysicsBuoyancySettings{ .AngularDrag = std::nanf("") },
+				PhysicsBuoyancySettings{ .AngularDrag = 100.5f },
+			};
+			for (const PhysicsBuoyancySettings& settings : outOfBounds)
+			{
+				CHECK(IsRefused(world->ApplyBuoyancy(box, planes, settings, BuoyancyStep)));
+				CHECK(unchanged());
+			}
+			// A plane in water beyond the world, and one whose normal is not unit; out of water, the same plane is ignored.
+			const std::array<PhysicsFluidPlane, 1> far = { PhysicsFluidPlane{ .InWater = true, .Point = glm::vec3(0.0f, 0.0f, 2.0e9f) } };
+			CHECK(IsRefused(world->ApplyBuoyancy(box, far, PhysicsBuoyancySettings{}, BuoyancyStep)));
+			CHECK(unchanged());
+			const std::array<PhysicsFluidPlane, 1> stretched = { PhysicsFluidPlane{ .InWater = true, .Normal = glm::vec3(0.0f, 2.0f, 0.0f) } };
+			CHECK(IsRefused(world->ApplyBuoyancy(box, stretched, PhysicsBuoyancySettings{}, BuoyancyStep)));
+			CHECK(unchanged());
+			const std::array<PhysicsFluidPlane, 1> farDry = { PhysicsFluidPlane{ .InWater = false, .Point = glm::vec3(0.0f, 0.0f, 2.0e9f) } };
+			CHECK(world->ApplyBuoyancy(box, farDry, PhysicsBuoyancySettings{}, BuoyancyStep).has_value());
+			// A body that is not Dynamic.
+			const BodyHandle lift = CreateFloater(*world, cube, 100.0f, glm::vec3(5.0f, 0.0f, 0.0f), PhysicsMotionType::Kinematic);
+			world->SetLinearVelocity(lift, glm::vec3(0.0f, 1.0f, 0.0f));
+			const std::array<PhysicsFluidPlane, 1> liftPlanes = { PhysicsFluidPlane{ .InWater = true, .Point = glm::vec3(5.0f, 0.0f, 0.0f) } };
+			CHECK(IsRefused(world->ApplyBuoyancy(lift, liftPlanes, PhysicsBuoyancySettings{}, BuoyancyStep)));
+			CHECK(world->GetLinearVelocity(lift) == glm::vec3(0.0f, 1.0f, 0.0f));
+			// The same box with valid inputs is applied: the refusals above were the inputs', not the body's.
+			CHECK(world->ApplyBuoyancy(box, planes, PhysicsBuoyancySettings{}, BuoyancyStep).has_value());
+			CHECK_FALSE(unchanged());
+		}
+
+		// Jolt 5.6.0 takes a capsule's volume as its bounding box's (CapsuleShape keeps ConvexShape::GetSubmergedVolume), an
+		// accepted limit (Docs/Backlog.md §6): a capsule of radius r and half height h counts 8 r^2 (h + r), not
+		// pi r^2 2h + 4/3 pi r^3.
+		TEST_CASE("PhysicsWorld: a capsule floats as its bounding box")
+		{
+			Scope<PhysicsWorld> world = CreateBuoyancyWorld();
+			const BodyHandle capsule = CreateFloater(*world,
+				{ ColliderShapeDescription{ .Geometry = CapsuleShapeGeometry{ .HalfHeight = 0.5f, .Radius = 0.5f } } }, 100.0f, glm::vec3(0.0f));
+			const std::array<PhysicsFluidPlane, 1> planes = { StillWater(10.0f) };
+			const Result<PhysicsBuoyancyResult> result = world->ApplyBuoyancy(capsule, planes, PhysicsBuoyancySettings{}, BuoyancyStep);
+			REQUIRE_MESSAGE(result.has_value(), result.error().ToString());
+			// The bounding box: 1 m x 2 m x 1 m.
+			CHECK(result->TotalVolume == doctest::Approx(2.0f).epsilon(1e-4));
+			CHECK(result->SubmergedVolume == doctest::Approx(2.0f).epsilon(1e-4));
 		}
 	}
 

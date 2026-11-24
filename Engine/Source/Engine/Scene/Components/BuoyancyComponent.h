@@ -12,10 +12,12 @@ namespace Engine {
 	// Registry name "Buoyancy", version 1, category Water (M47, Docs/Decisions/0065-m47-water.md decision 3; Architecture §9.12):
 	// floats the Dynamic body its entity owns on water. Requires RigidBody; script-visible through its generated proxy.
 	//   - The force: each solid collider of the body is submerged against the water plane under its world bounds' centre (the
-	//     surface point there, its normal and its velocity) at the tick's world time, through Jolt's exact submerged volume,
-	//     and the body takes the physical buoyancy rho g V_submerged of the water's Density, times BuoyancyScale, with Jolt's
-	//     drag (LinearDrag, AngularDrag) against the water's velocity (Physics/PhysicsBuoyancy.h). So one hull pitches with the
-	//     local slope, and four pontoon colliders ride a swell shorter than the boat.
+	//     surface point there, its normal and its velocity) at the tick's world time, through Jolt's submerged volume (exact
+	//     for a box, a sphere and a convex mesh; a capsule floats as its bounding box), and the body takes the physical
+	//     buoyancy rho g V_submerged of the water's Density, times BuoyancyScale, with Jolt's drag (LinearDrag, AngularDrag)
+	//     against the water's velocity (Physics/PhysicsBuoyancy.h). So one hull pitches with the local slope, and four pontoon
+	//     colliders ride a swell shorter than the boat. LinearDrag's default 2 settles a dropped hull within 2 cm of its draft
+	//     in 5 s.
 	//   - The water: null takes, per collider, the water that holds its centre (Scene/WaterQueries.h's rule); an entity with a
 	//     Water takes that water's own surface (a Rectangle's only within its footprint and volume).
 	//   - Where it runs: PhysicsSystem's PreStep item 4c, in Play and Simulate, for an effectively enabled Buoyancy whose owner
@@ -26,7 +28,7 @@ namespace Engine {
 	{
 		UUID Water{};               // EntityRef; null: the water that holds each collider
 		float BuoyancyScale = 1.0f; // [0, MaxBuoyancyScale]; 1 is physical
-		float LinearDrag = 0.5f;    // [0, MaxBuoyancyDrag], Jolt's linear drag coefficient
+		float LinearDrag = 2.0f;    // [0, MaxBuoyancyDrag], Jolt's linear drag coefficient
 		float AngularDrag = 0.05f;  // [0, MaxBuoyancyDrag], Jolt's angular drag coefficient
 	};
 

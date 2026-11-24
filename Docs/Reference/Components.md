@@ -2158,13 +2158,13 @@ Script members of `Water`:
 | `FoamAmount` | proxy field | `number` | read/write | All | How much foam the crests and the shallows show: 0 none. |
 | `FoamTexture` | proxy field | `AssetRef?` | read/write | All | The foam's texture; null takes the built-in WaterFoam. |
 | `Headroom` | proxy field | `number` | read/write | All | How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. |
-| `IsUnderwater` | method | `(self: Water, position: vector, time: number?) -> boolean` |  | All | Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. |
+| `IsUnderwater` | method | `(self: Water, position: vector, time: number?) -> boolean` |  | All | Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. A position beyond 1e9 m in any coordinate is an error. |
 | `NormalMap` | proxy field | `AssetRef?` | read/write | All | The detail normal map; null takes the built-in WaterNormal. |
 | `RefractionStrength` | proxy field | `number` | read/write | All | How far the waves bend the view of what lies under the surface. |
 | `Roughness` | proxy field | `number` | read/write | All | The surface's perceptual roughness: low is a sharp sun glint and clear reflections. |
-| `SampleHeight` | method | `(self: Water, position: vector, time: number?) -> number?` |  | All | Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. |
-| `SampleNormal` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. |
-| `SampleVelocity` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. |
+| `SampleHeight` | method | `(self: Water, position: vector, time: number?) -> number?` |  | All | Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. A position beyond 1e9 m in any coordinate is an error. |
+| `SampleNormal` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. |
+| `SampleVelocity` | method | `(self: Water, position: vector, time: number?) -> vector?` |  | All | Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. |
 | `ShallowColor` | proxy field | `Color` | read/write | All | The linear colour of shallow water, over the bottom it shows. |
 | `Shape` | proxy field | `WaterShape` | read/write | All | Ocean (unbounded, one a scene) or Rectangle (a box; it masks the Ocean inside its volume, so a cave lake below the sea is dry above its surface). |
 | `ShoreFoamDepth` | proxy field | `number` | read/write | All | The water column, in metres, under which foam gathers where the surface meets the ground or an object. |
@@ -2188,7 +2188,7 @@ Floats the Dynamic body of the entity's RigidBody on water: each solid collider 
 |---|---|---|---|---|---|---|
 | `Water` | `EntityRef` | `null` |  |  |  | The entity whose Water floats the body (a Rectangle only within its footprint and volume); null takes, per collider, the water that holds its centre. |
 | `BuoyancyScale` | `Float` | `1` | 0 to 10 |  |  | Multiplies the buoyant force: 1 is physical, 0 none. |
-| `LinearDrag` | `Float` | `0.5` | 0 to 100 |  |  | The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). |
+| `LinearDrag` | `Float` | `2` | 0 to 100 |  |  | The water's drag on the body's motion relative to the water (Jolt's linear drag coefficient). |
 | `AngularDrag` | `Float` | `0.05` | 0 to 100 |  |  | The water's drag on the body's turning (Jolt's angular drag coefficient). |
 
 Script members of `Buoyancy`:

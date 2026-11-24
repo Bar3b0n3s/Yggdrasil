@@ -1961,7 +1961,7 @@ declare extern type Water with
 	FoamTexture: AssetRef?
 	-- How far a Rectangle's volume reaches above its base, in metres; reach a cave's ceiling so the Ocean is masked in the cave. [All modes; Runtime|Test; pure/read; setter mutates]
 	Headroom: number
-	-- Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. [All modes; Runtime|Test; pure/read]
+	-- Whether the world point position lies under this water's own surface at time (default Time.GetTime()), and within a Rectangle's volume; other waters' masks aside. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
 	IsUnderwater: (self: Water, position: vector, time: number?) -> boolean
 	-- The detail normal map; null takes the built-in WaterNormal. [All modes; Runtime|Test; pure/read; setter mutates]
 	NormalMap: AssetRef?
@@ -1969,11 +1969,11 @@ declare extern type Water with
 	RefractionStrength: number
 	-- The surface's perceptual roughness: low is a sharp sun glint and clear reflections. [All modes; Runtime|Test; pure/read; setter mutates]
 	Roughness: number
-	-- Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. [All modes; Runtime|Test; pure/read]
+	-- Read the world height of this water's own surface under the world point position at time seconds of world time (default Time.GetTime()), masking aside; nil outside a Rectangle's footprint. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
 	SampleHeight: (self: Water, position: vector, time: number?) -> number?
-	-- Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. [All modes; Runtime|Test; pure/read]
+	-- Read the world unit normal of this water's own surface under the world point position at time (default Time.GetTime()); nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
 	SampleNormal: (self: Water, position: vector, time: number?) -> vector?
-	-- Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. [All modes; Runtime|Test; pure/read]
+	-- Read the velocity of this water's surface under the world point position at time (default Time.GetTime()): the waves' motion there plus the water's Current, in metres per second; nil where SampleHeight is nil. A position beyond 1e9 m in any coordinate is an error. [All modes; Runtime|Test; pure/read]
 	SampleVelocity: (self: Water, position: vector, time: number?) -> vector?
 	-- The linear colour of shallow water, over the bottom it shows. [All modes; Runtime|Test; pure/read; setter mutates]
 	ShallowColor: Color
