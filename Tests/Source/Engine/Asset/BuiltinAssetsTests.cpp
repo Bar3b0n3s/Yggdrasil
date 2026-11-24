@@ -21,6 +21,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -95,8 +96,8 @@ namespace Engine {
 		{
 			const std::span<const BuiltinAssetEntry> entries = GetProceduralBuiltinEntries();
 			// M6's 15 (7 meshes, 2 materials, 5 textures, the silent clip), M21's four sprite textures, M26's particle texture and
-			// its identity LUT, and M31's dissolve noise.
-			REQUIRE(entries.size() == 22);
+			// its identity LUT, M31's dissolve noise, and M47's water normal and foam maps.
+			REQUIRE(entries.size() == 24);
 			std::set<std::string> paths;
 			for (size_t index = 0; index < entries.size(); ++index)
 			{
@@ -171,6 +172,25 @@ namespace Engine {
 			const AssetRef<TextureData> noiseTexture = AssetCast<TextureData>(*createdNoise);
 			REQUIRE(noiseTexture != nullptr);
 			CHECK(std::ranges::equal(noiseTexture->Pixels, GenerateBuiltinDissolveNoiseTexture().Pixels));
+
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3): the water's normal and foam maps at their reserved handles (phase
+			// 8's ledger's 0x018d and 0x018e), generated in code.
+			for (const auto& [handle, value, path] : { std::tuple{ BuiltinAssetHandles::WaterNormalTexture, 0x018dull, "engine://Textures/WaterNormal" },
+					 std::tuple{ BuiltinAssetHandles::WaterFoamTexture, 0x018eull, "engine://Textures/WaterFoam" } })
+			{
+				CAPTURE(path);
+				const auto entry = std::ranges::find(entries, handle, &BuiltinAssetEntry::Handle);
+				REQUIRE(entry != entries.end());
+				CHECK(entry->Handle == AssetHandle(value));
+				CHECK(entry->Path == path);
+				CHECK(entry->Type == AssetType::Texture);
+				const Result<AssetRef<Asset>> createdMap = CreateProceduralBuiltinAsset(handle);
+				REQUIRE_MESSAGE(createdMap.has_value(), createdMap.error().ToString());
+				const AssetRef<TextureData> map = AssetCast<TextureData>(*createdMap);
+				REQUIRE(map != nullptr);
+				const TextureData expected = handle == BuiltinAssetHandles::WaterNormalTexture ? GenerateBuiltinWaterNormalTexture() : GenerateBuiltinWaterFoamTexture();
+				CHECK(std::ranges::equal(map->Pixels, expected.Pixels));
+			}
 		}
 
 		TEST_CASE("BuiltinAssets: EngineAssets.json names exactly the compiled-in handles")
@@ -244,8 +264,8 @@ namespace Engine {
 				CHECK_FALSE(GetTextureBlockCodec(texture->Format).has_value());
 			}
 			// White, Black, FlatNormal, Checker, Missing, M21's SpriteSquare, SpriteRounded, SpriteBevel and SpriteCircle, M26's
-			// Particle and M31's DissolveNoise.
-			CHECK(procedural == 11);
+			// Particle, M31's DissolveNoise and M47's WaterNormal and WaterFoam.
+			CHECK(procedural == 13);
 			const BuiltinAssetEntry* font = catalog->Find(BuiltinAssetHandles::DefaultFont);
 			REQUIRE(font != nullptr);
 			CHECK(font->Type == AssetType::Font);

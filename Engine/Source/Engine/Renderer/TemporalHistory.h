@@ -6,6 +6,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -23,17 +24,20 @@
 // deltaTime) is called on each extracted snapshot right before its Render:
 //   - when the history is empty or Reset was called since its last Apply, the snapshot has no camera, or the camera changed
 //     its projection kind, its viewport size or its entity (a cut), the snapshot's history is reset:
-//     CameraData::PreviousViewProjection, every MeshDrawItem::PreviousWorld and every ParticleItem::Previous are emptied and
-//     DeltaTime is 0;
+//     CameraData::PreviousViewProjection, every MeshDrawItem::PreviousWorld, every ParticleItem::Previous and every
+//     WaterItem::PreviousWorld and PreviousPhases (M47) are emptied and DeltaTime is 0;
 //   - otherwise PreviousViewProjection is the previous Apply's unjittered Projection * View, each mesh item's PreviousWorld
 //     is the previous Apply's World of the item with the same Entity (empty for an item it did not see, or whose previous
 //     World is not finite; items of one entity matched in order), each particle's Previous is how the previous Apply drew the
 //     particle with the same emitter entity and incarnation and the same Serial: its position, size, angle and velocity (M33,
 //     Docs/Decisions/0048-m33-particle-look.md decision 6: empty for a particle it did not see, or whose recorded values are
-//     not all finite), and DeltaTime is `deltaTime` (0 when it is negative or not finite);
+//     not all finite), each water's PreviousWorld and PreviousPhases are the previous Apply's World and wave phases
+//     (WaterWaveItem::Phase, all MaxWaterWaves of them) of the water with the same Entity (M47,
+//     Docs/Decisions/0065-m47-water.md decision 3: both empty for a water it did not see, or whose recorded values are not all
+//     finite), and DeltaTime is `deltaTime` (0 when it is negative or not finite);
 //   - Jitter is GetTaaJitter(frame) when the snapshot's Post.AntiAliasing is Taa and its Output is not PixelArt, else (0, 0),
 //     where frame counts the Applies since the last reset (0 at the reset);
-//   - then it records the snapshot's camera, items and particles as the next Apply's previous frame.
+//   - then it records the snapshot's camera, items, particles and waters as the next Apply's previous frame.
 // Deterministic: it reads only the snapshot and its own state, never the wall clock; its matching is by Entity through a
 // sorted vector (never an unordered container's iteration).
 //
@@ -92,6 +96,14 @@ namespace Engine {
 			ParticleDrawState Draw{};
 		};
 		std::vector<ParticleRecord> m_Particles{};
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the previous Apply's waters, sorted by Entity (stable).
+		struct WaterHistoryRecord
+		{
+			UUID Entity{};
+			glm::mat4 World = glm::mat4(1.0f);
+			std::array<float, MaxWaterWaves> Phases{};
+		};
+		std::vector<WaterHistoryRecord> m_Waters{};
 		uint32_t m_Frame = 0;
 		bool m_ResetPending = true;
 	};

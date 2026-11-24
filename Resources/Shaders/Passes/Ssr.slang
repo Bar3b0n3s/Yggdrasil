@@ -34,7 +34,9 @@
 //     specular term (Passes/Scene.slang's ShadeForward) is the prefiltered radiance at the reflection direction (the
 //     environment's cube, or the constant ambient, with the reflection probes over it: Common/Probes.slang) times
 //     multiScatter * HorizonOcclusion (SceneRoughness word 0's rgb) times SpecularOcclusion(n.v, min(material occlusion, GTAO),
-//     alpha) (word 1's x, GTAO sampled as the forward pass samples it); the composite evaluates it from SceneNormals'
+//     alpha) (word 1's x, GTAO sampled as the forward pass samples it; M47, Docs/Decisions/0065-m47-water.md decision 3: on a
+//     water pixel, whose word 1's y is not 0, word 1's x alone, the water's own occlusion, since GTAO describes the opaque
+//     surface under it); the composite evaluates it from SceneNormals'
 //     normal and word 0's roughness, and adds (traced - prefiltered) times that factor times the confidence times
 //     Intensity: in proportion to the confidence the traced radiance replaces the probes' reflection, and where a ray missed
 //     (confidence 0) the composite adds 0, so the probes' reflection stays (the probe fallback). At half resolution the
@@ -428,7 +430,10 @@ float4 PSComposite(CompositeVaryings input) : SV_Target0
 		prefiltered = EnvSpecular.SampleLevel(LinearClamp, lookup, roughness * Env.SpecularMaxLod).rgb * Env.Intensity;
 	}
 	prefiltered = ShadeProbeSpecular(worldPosition, reflection, roughness, prefiltered);
-	const float occlusion = min(UnpackUnorm8(inputs.y).x, SampleGtao(AmbientOcclusion, LinearViewDepth, SceneNormals, pixel));
+	// M47 (Docs/Decisions/0065-m47-water.md decision 3): a water pixel (word 1's y byte, Passes/Water.slang) takes its own
+	// occlusion: GTAO describes the opaque surface under the water.
+	const float4 material = UnpackUnorm8(inputs.y);
+	const float occlusion = material.y != 0.0 ? material.x : min(material.x, SampleGtao(AmbientOcclusion, LinearViewDepth, SceneNormals, pixel));
 	const float3 factor = specular.rgb * (SpecularOcclusion(nDotV, occlusion, alpha) * weight);
 	const float3 added = (traced.rgb - prefiltered) * factor;
 	if (Fog.Enabled != 0)

@@ -470,9 +470,10 @@ namespace Engine {
 			// terrain 3 (M26: the prepass, the picking prepass and the forward pass, ADR 0037 decision 22) + SSR classification 1
 			// (M32: the tile classification, ADR 0047 decisions 10 and 14) + particles 3 (M33: the colour pipelines and the motion
 			// vectors', ADR 0048 decision 4; M26's quads' HdrAdditive 1 for the additive particles was removed at M33's merge,
-			// decision 10) + planar reflections 1 (M42: the mip chain, ADR 0059 decision 3). Each material debug view adds its 9
-			// forward variants the first time it renders, 45 for the five.
-			static_assert(SceneRendererPipelines::StartupPipelineCount == 77);
+			// decision 10) + planar reflections 1 (M42: the mip chain, ADR 0059 decision 3) + water 2 (M47: the surface and the
+			// surface with EntityId, ADR 0065 decision 3). Each material debug view adds its 9 forward variants the first time it
+			// renders, 45 for the five.
+			static_assert(SceneRendererPipelines::StartupPipelineCount == 79);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Test::AssetTestFixture assets;
@@ -480,8 +481,8 @@ namespace Engine {
 				GpuResourceCache cache(gpu.GetDevice(), assets.GetManager());
 				Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());
 				REQUIRE_MESSAGE(pipelines.has_value(), pipelines.error().ToString());
-				CHECK((*pipelines)->GetPipelineCount() == 77);
-				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 77);
+				CHECK((*pipelines)->GetPipelineCount() == 79);
+				CHECK(SceneRendererPipelines::GetLayoutDescriptions().size() == 79);
 				Result<Scope<SceneRenderer>> renderer = SceneRenderer::Create(gpu.GetDevice(), **pipelines, cache, assets.GetManager(),
 					{ .Width = 16, .Height = 16 });
 				REQUIRE_MESSAGE(renderer.has_value(), renderer.error().ToString());
@@ -492,13 +493,13 @@ namespace Engine {
 					snapshot.DebugView = view;
 					static_cast<void>(RenderToImage(gpu.GetDevice(), **renderer, snapshot));
 				}
-				CHECK((*pipelines)->GetPipelineCount() == 77 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 79 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 				// EnsureDebugView, which Render called, has no effect for Lit or for a view that exists.
 				const Status lit = (*pipelines)->EnsureDebugView(RenderDebugView::Lit);
 				const Status existing = (*pipelines)->EnsureDebugView(RenderDebugView::Albedo);
 				CHECK(lit.has_value());
 				CHECK(existing.has_value());
-				CHECK((*pipelines)->GetPipelineCount() == 77 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
+				CHECK((*pipelines)->GetPipelineCount() == 79 + 5 * SceneRendererPipelines::DebugViewPipelineCount);
 			}
 			gpu.GetDevice().RunGarbageCollection();
 		}

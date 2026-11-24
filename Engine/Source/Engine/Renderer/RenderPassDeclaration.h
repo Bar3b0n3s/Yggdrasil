@@ -38,7 +38,7 @@
 // declaration's pipelines (Wireframe and Overlays share the debug lines' pipelines, Labels the Text pipelines, Letterbox the
 // Upscale pipelines, Ui the QuadBatcher's and the Text pipelines). M47's contract (C47, Docs/Decisions/0065-m47-water.md
 // decision 2) declares Water (after Skybox, before Ssr) and Underwater (first in HdrPost, before Taa) M26's way, with their
-// rows and without pipelines until W47.2's render stream and W47.3 set them.
+// rows and without pipelines until W47.2's render stream (Water's two) and W47.3 (Underwater's one) set them.
 
 namespace Engine {
 
@@ -100,6 +100,7 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> SkyboxRows = { "Skybox" };
 		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water pass's rows (the copy of SceneColor, then the surfaces)
 		// and its target, and the Underwater pass's row.
+		inline constexpr std::array<std::string_view, 1> WaterPrograms = { "Water" };
 		inline constexpr std::array<std::string_view, 2> WaterRows = { "WaterRefraction", "Water" };
 		inline constexpr std::array<std::string_view, 1> WaterTargets = { "WaterRefraction" };
 		inline constexpr std::array<std::string_view, 1> UnderwaterRows = { "Underwater" };
@@ -213,9 +214,9 @@ namespace Engine {
 		// waters in a Lit view with a camera outside the wireframe, after a copy of SceneColor into WaterRefraction (row
 		// WaterRefraction), each surface drawn into SceneColor, SceneNormals, SceneVelocity and SceneRoughness (and EntityId with
 		// picking), SceneDepth tested and written, so SSR traces over it (row Water; Renderer/WaterPass.h). Its contract (C47)
-		// declares it with its rows and target and without pipelines, so nothing records it and no stats.get output changes;
-		// W47.2's render stream sets its two pipelines of the program Water (the surface, and the surface with EntityId).
-		{ .Name = "Water", .Stage = RenderStage::Forward, .StatsRows = Detail::WaterRows, .Targets = Detail::WaterTargets },
+		// declared it with its rows and target and without pipelines; W47.2's render stream set its two pipelines of the program
+		// Water (the surface, and the surface with EntityId).
+		{ .Name = "Water", .Stage = RenderStage::Forward, .PipelineCount = 2, .Programs = Detail::WaterPrograms, .StatsRows = Detail::WaterRows, .Targets = Detail::WaterTargets },
 		// M26 (C26.1, R-SSR; decisions 13 and 18): glossy reflections traced over the opaque image with the depth pyramid into
 		// SsrColor, falling back to the probes, composited into SceneColor before the transparent pass draws over them;
 		// recorded only with PostProcess's SsrEnabled. SsrPass's three pipelines of the program Ssr (stream X-D's trace and

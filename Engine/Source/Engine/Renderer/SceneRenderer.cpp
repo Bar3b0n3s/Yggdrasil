@@ -140,7 +140,7 @@ namespace Engine {
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
 			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount
 			+ ExposurePass::PipelineCount + TaaPass::PipelineCount + SsrPass::PipelineCount + TerrainPass::PipelineCount
-			+ ParticlePass::PipelineCount + PlanarReflectionPass::PipelineCount);
+			+ ParticlePass::PipelineCount + PlanarReflectionPass::PipelineCount + WaterPass::PipelineCount);
 	// M42: the forward set binds one planar reflection per slot (Private/ForwardPipelines.h).
 	static_assert(Utils::PlanarReflectionSlotCount == MaxPlanarReflectionsPerView);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
@@ -626,13 +626,16 @@ namespace Engine {
 		// neutral black reflection.
 		ENGINE_TRY_ASSIGN(created.PlanarReflections, PlanarReflectionPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.EmptyPlanarReflection, Utils::CreateSceneNeutralTexture(device, SceneColorFormat, false, 0.0f));
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the Water pass, whose set 0 is the mesh forward passes'.
+		ENGINE_TRY_ASSIGN(created.Water, WaterPass::Create(device, pipelines, *created.Layouts.ForwardView));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
 			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
 			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount()
 			+ created.Exposure->GetPipelineCount() + created.Taa->GetPipelineCount() + created.Ssr->GetPipelineCount()
-			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount() + PlanarReflectionPass::PipelineCount;
+			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount() + PlanarReflectionPass::PipelineCount
+			+ created.Water->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -675,6 +678,7 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, TerrainPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, ParticlePass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, PlanarReflectionPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, WaterPass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -830,6 +834,7 @@ namespace Engine {
 		SsrBindings.Clear();
 		TaaBindings.Clear();
 		ReflectionBindings.Clear();
+		WaterResources.Bindings.Clear(); // M47: its sets bind WaterRefraction and the depth pyramid
 	}
 
 	void SceneRenderer::State::ClearBindings()
@@ -869,6 +874,7 @@ namespace Engine {
 		SsrBindings.ReleaseUnused();
 		TaaBindings.ReleaseUnused();
 		ReflectionBindings.ReleaseUnused();
+		WaterResources.Bindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 		UiQuadBindings.ReleaseUnused();
 		ParticleBindings.ReleaseUnused();
@@ -1450,6 +1456,13 @@ namespace Engine {
 		state.ReleaseUnusedBindings();
 		state.ReleaseUnusedDeforms();
 		state.ReleaseUnusedReflections();
+		// M47 (decision 3): a render that draws no water gives WaterRefraction back to the pool.
+		if (!frame.Water)
+		{
+			state.Targets.WaterRefraction = nullptr;
+			state.Targets.WaterFramebuffer = nullptr;
+			state.Targets.WaterPickingFramebuffer = nullptr;
+		}
 		std::set<size_t> visibleMeshes;
 		for (const auto& draw : state.OpaqueDraws)
 			visibleMeshes.insert(draw.SnapshotIndex);
@@ -1473,6 +1486,8 @@ namespace Engine {
 		stats.DroppedPlanarReflections = frame.DroppedPlanarReflections;
 		stats.CulledPlanarReflections = frame.CulledPlanarReflections;
 		stats.PlanarReflectionEntities = std::move(frame.PlanarReflectionEntities);
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the waters the Water pass drew.
+		stats.WaterSurfaces = frame.WaterSurfaces;
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1621,6 +1636,8 @@ namespace Engine {
 		// M26 (stream X-D, decision 18): SSR in the Lit view's shaded image only.
 		frame.Ssr = hasCamera && frame.IsLit && !frame.Wireframe && post.SsrEnabled;
 		frame.HalfSsr = snapshot.Quality.SsrHalfResolution;
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the waters in the Lit view's shaded image only (SSR's condition).
+		frame.Water = hasCamera && frame.IsLit && !frame.Wireframe && !snapshot.Waters.empty();
 		const bool shadows = hasCamera && ((frame.IsLit && !frame.Wireframe) || frame.DebugView == RenderDebugView::ShadowCascades);
 		// The Lit view follows Post; the debug views and the 2D colour path (decision 7) fix exposure 1 and no dither.
 		const bool tonemapped = frame.IsLit && !frame.PixelArt;
@@ -2303,13 +2320,22 @@ namespace Engine {
 			frame.KeepFirstError(ensured);
 			frame.Ssr = ensured.has_value();
 		}
-		if (frame.Ao || frame.Ssr)
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the water reads the pyramid's linear depth for its column, so the
+		// pyramid records for it too; its targets fail alone (their error kept), and the render draws no water then.
+		if (frame.Water)
+		{
+			const Status ensured = EnsureWaterTargets(frame.Picking);
+			frame.KeepFirstError(ensured);
+			frame.Water = ensured.has_value();
+		}
+		if (frame.Ao || frame.Ssr || frame.Water)
 		{
 			nvrhi::ICommandList& commandList = *frame.CommandList;
 			RenderRecordingContext& recording = *frame.Recording;
 			const Status depth = Pipelines->DepthPyramid->Record(commandList, recording, DepthBindings, { .SceneDepth = Targets.SceneDepth, .ViewDepth = Targets.ViewDepth, .Camera = frame.Camera });
 			frame.KeepFirstError(depth);
 			frame.Ssr = frame.Ssr && depth.has_value();
+			frame.Water = frame.Water && depth.has_value();
 			if (depth && frame.Ao)
 			{
 				auto result = Pipelines->Gtao->Record(commandList, recording, GtaoBindings, { .Camera = frame.Camera, .Post = frame.Snapshot->Post, .HalfResolution = frame.HalfAo, .ViewDepth = Targets.ViewDepth, .SceneNormals = Targets.SceneNormals, .Occlusion = Targets.Occlusion, .Scratch = Targets.AoScratch });
@@ -2460,6 +2486,10 @@ namespace Engine {
 					recording.EndPass({ .DrawCalls = drawn ? 1U : 0U, .Triangles = drawn ? 1U : 0U });
 					frame.KeepFirstError(drawn);
 				}
+				// M47 (Docs/Decisions/0065-m47-water.md decision 3): the waters over the opaque image and the sky, before SSR, which
+				// traces over them.
+				if (frame.Water)
+					RecordWater(frame, desc);
 				// M26 (stream X-D, decision 18): SSR over the opaque image and the skybox, before the transparent pass.
 				if (frame.Ssr)
 					RecordSsr(frame);
@@ -2533,6 +2563,82 @@ namespace Engine {
 			ENGINE_TRY_ASSIGN(SsrArguments, Device->CreateBuffer(SsrPass::GetArgumentsBufferDesc()));
 		}
 		return {};
+	}
+
+	Status SceneRenderer::State::EnsureWaterTargets(bool picking)
+	{
+		const uint32_t width = Targets.Width;
+		const uint32_t height = Targets.Height;
+		if (Targets.ViewDepth == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.ViewDepth, TargetPool->Acquire(DepthPyramidPass::GetTargetDesc(width, height)));
+		}
+		if (Targets.WaterRefraction == nullptr)
+		{
+			// SceneColor's kind of target, which the copy writes and the water samples.
+			ENGINE_TRY_ASSIGN(Targets.WaterRefraction,
+				Utils::CreateTarget(*TargetPool, width, height, SceneColorFormat, Utils::TargetUsage::Attachment, "WaterRefraction"));
+		}
+		// SceneTargetFormats.h's formats in the Water pass's order: SceneColor, SceneNormals, SceneVelocity, SceneRoughness, then
+		// EntityId when picking.
+		const auto makeFramebuffer = [this](bool withEntityId) -> Result<nvrhi::FramebufferHandle>
+		{
+			nvrhi::FramebufferDesc desc;
+			desc.addColorAttachment(Targets.SceneColor).addColorAttachment(Targets.SceneNormals).addColorAttachment(Targets.SceneVelocity).addColorAttachment(Targets.SceneRoughness);
+			if (withEntityId)
+				desc.addColorAttachment(Targets.EntityId);
+			desc.setDepthAttachment(Targets.SceneDepth);
+			return Device->CreateFramebuffer(desc);
+		};
+		if (!picking && Targets.WaterFramebuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.WaterFramebuffer, makeFramebuffer(false));
+		}
+		if (picking && Targets.WaterPickingFramebuffer == nullptr)
+		{
+			ENGINE_TRY_ASSIGN(Targets.WaterPickingFramebuffer, makeFramebuffer(true));
+		}
+		return {};
+	}
+
+	void SceneRenderer::State::RecordWater(Detail::SceneRendererFrame& frame, const nvrhi::BindingSetDesc& forwardDesc)
+	{
+		nvrhi::ICommandList& commandList = *frame.CommandList;
+		RenderRecordingContext& recording = *frame.Recording;
+		// The water writes SceneNormals, and GTAO describes the opaque surface under it: its set 0 binds the neutral textures in
+		// their places, as the transparent set swaps the occlusion and the depth.
+		nvrhi::BindingSetDesc desc = forwardDesc;
+		for (nvrhi::BindingSetItem& item : desc.bindings)
+		{
+			if (item.type == nvrhi::ResourceType::Texture_SRV && item.slot == Utils::AmbientOcclusionRegister)
+				item.resourceHandle = Pipelines->WhiteAo;
+			else if (item.type == nvrhi::ResourceType::Texture_SRV && item.slot == Utils::SceneNormalsRegister)
+				item.resourceHandle = Pipelines->FarDepth;
+		}
+		auto set = ViewBindings.GetOrCreate(*Device, desc, *Pipelines->Layouts.ForwardView);
+		if (!set)
+		{
+			frame.KeepFirstError(std::unexpected(std::move(set).error()));
+			return;
+		}
+		recording.BeginPass("WaterRefraction", &commandList);
+		commandList.copyTexture(Targets.WaterRefraction, nvrhi::TextureSlice(), Targets.SceneColor, nvrhi::TextureSlice());
+		recording.EndPass({});
+		recording.BeginPass("Water", &commandList);
+		RenderPassCounters counters;
+		const WaterSurfaceInputs inputs{
+			.Snapshot = frame.Snapshot,
+			.Camera = &frame.Camera,
+			.Framebuffer = frame.Picking ? Targets.WaterPickingFramebuffer.Get() : Targets.WaterFramebuffer.Get(),
+			.ViewSet = *set,
+			.Refraction = Targets.WaterRefraction,
+			.ViewDepth = Targets.ViewDepth,
+			.Picking = frame.Picking,
+		};
+		const Status recorded = Pipelines->Water->RecordSurface(commandList, *Cache, WaterResources, inputs, counters);
+		recording.EndPass(counters);
+		frame.WaterSurfaces = recorded ? static_cast<uint32_t>(frame.Snapshot->Waters.size()) : 0U;
+		frame.KeepFirstError(recorded);
 	}
 
 	std::optional<RenderSsrAreaSample> SceneRenderer::State::CollectSsrArea(uint32_t slot)

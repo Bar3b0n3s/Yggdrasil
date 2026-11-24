@@ -282,6 +282,60 @@ namespace Engine {
 			REQUIRE(after.Particles[1].Previous.has_value());
 			CHECK(after.Particles[1].Previous->Position == glm::vec3(-3.0f, 1.0f, 0.0f));
 		}
+
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): each water's previous World and wave phases are those of the
+		// previous Apply's water of the same entity, whatever their order in the snapshot; a water the previous frame did not
+		// have, or whose recorded values are not finite, has none; a reset empties them all.
+		TEST_CASE("TemporalHistory: a water takes its previous world and wave phases by entity, and a reset empties them")
+		{
+			const auto makeWater = [](uint64_t entity, float height, float phase)
+			{
+				WaterItem water;
+				water.Entity = UUID(entity);
+				water.World = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, height, 0.0f));
+				water.WaveCount = 2;
+				water.Waves[0].Phase = phase;
+				water.Waves[1].Phase = phase + 1.0f;
+				return water;
+			};
+			RenderViewHistory history;
+			RenderSnapshot first = MakeSnapshot(0.0f, 0.0f);
+			first.Waters.push_back(makeWater(0xC3, 1.0f, 0.25f));
+			first.Waters.push_back(makeWater(0xA1, 2.0f, 0.5f));
+			first.Waters.push_back(makeWater(0xD4, std::numeric_limits<float>::quiet_NaN(), 0.75f));
+			history.Apply(first, 0.016f);
+			for (const WaterItem& water : first.Waters)
+			{
+				CHECK_FALSE(water.PreviousWorld.has_value());
+				CHECK_FALSE(water.PreviousPhases.has_value());
+			}
+
+			RenderSnapshot second = MakeSnapshot(0.0f, 0.0f);
+			second.Waters.push_back(makeWater(0xA1, 2.5f, 1.5f));
+			second.Waters.push_back(makeWater(0xC3, 1.5f, 1.25f));
+			second.Waters.push_back(makeWater(0xE5, 3.0f, 2.0f));
+			second.Waters.push_back(makeWater(0xD4, 4.0f, 2.25f));
+			history.Apply(second, 0.016f);
+			REQUIRE(second.Waters[0].PreviousWorld.has_value());
+			CHECK((*second.Waters[0].PreviousWorld)[3].y == 2.0f);
+			REQUIRE(second.Waters[0].PreviousPhases.has_value());
+			CHECK((*second.Waters[0].PreviousPhases)[0] == 0.5f);
+			CHECK((*second.Waters[0].PreviousPhases)[1] == 1.5f);
+			REQUIRE(second.Waters[1].PreviousWorld.has_value());
+			CHECK((*second.Waters[1].PreviousWorld)[3].y == 1.0f);
+			CHECK((*second.Waters[1].PreviousPhases)[0] == 0.25f);
+			CHECK_FALSE(second.Waters[2].PreviousWorld.has_value());
+			CHECK_FALSE(second.Waters[2].PreviousPhases.has_value());
+			CHECK_FALSE(second.Waters[3].PreviousWorld.has_value());
+			CHECK_FALSE(second.Waters[3].PreviousPhases.has_value());
+
+			history.Reset();
+			RenderSnapshot third = MakeSnapshot(0.0f, 0.0f);
+			third.Waters.push_back(makeWater(0xA1, 3.0f, 2.5f));
+			history.Apply(third, 0.016f);
+			CHECK_FALSE(third.Waters[0].PreviousWorld.has_value());
+			CHECK_FALSE(third.Waters[0].PreviousPhases.has_value());
+		}
 	}
 
 }
