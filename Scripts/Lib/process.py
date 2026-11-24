@@ -386,6 +386,17 @@ def run_streamed(
     )
 
 
+def start_to_file(command: Sequence[str], output: Path, cwd: Path | None = None,
+                  env: Mapping[str, str] | None = None) -> subprocess.Popen:
+    """Start `command` with its standard output and standard error written to the file `output` (replaced), standard
+    input the null device and, like every run here, in a process group of its own, so terminate_tree ends its tree. The
+    caller waits for it, and ends it with terminate_tree. Raises ToolNotFoundError if it cannot be started, OSError if
+    `output` cannot be written."""
+    with output.open("wb") as stream:
+        return _start(command, cwd=cwd, env=dict(env) if env is not None else None, stdin=subprocess.DEVNULL,
+                      stdout=stream, stderr=subprocess.STDOUT, **_popen_options())
+
+
 @dataclasses.dataclass(frozen=True)
 class ProcessMemory:
     """The memory of a running process (Docs/Decisions/0024-m15-contract.md decision 15): the soak stage's rule and the

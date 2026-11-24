@@ -85,6 +85,18 @@ FUZZ_MAX_PROCESSES = 32
 # largest image its bytes allow) briefly raises one process to about 2.8 GB; those spikes last under a second and do not
 # coincide across shards, so they are not counted (the machine kept more than 5 GB free throughout).
 FUZZ_PEAK_PROCESS_BYTES = 1 << 30
+# The sanitized unit run's processes at a time (unit_process_count; Scripts/Hardening.py asan-unit, Test.py --parallel,
+# Lib/shards.py): at most one per two logical CPUs, since many cases start worker threads and child processes (editors,
+# exported Runtimes, Tests children) beside their process's own thread, and at most UNIT_MAX_PROCESSES; and as many as
+# the available memory holds at UNIT_PEAK_PROCESS_BYTES each. A sanitized process keeps the memory its work took (its
+# allocator and stack depot never shrink), so its peak follows the work it ran: in the first sharded run (8 shards of
+# equal case counts, setup of phase 8), a shard that ran 1,075 s held 5.9 GB and one that ran 269 s 0.7 GB, about 5 MB a
+# second of work, while a plain Release process over the same cases stayed below 160 MB. Test.py's shards hold about
+# 120 s of measured work each (Lib/shards.py SHARD_SECONDS): in the setup's second run, 38 of them 12 at a time, the
+# largest held 1,257 MB of private memory, and UNIT_PEAK_PROCESS_BYTES is that with a margin for the children its cases
+# start (editors, exported Runtimes and Tests children, each a few hundred MB for a moment).
+UNIT_MAX_PROCESSES = 16
+UNIT_PEAK_PROCESS_BYTES = 3 << 29
 # The reference fuzz run (Docs/Decisions/0024-m15-contract.md "Budgets and timeouts"): FUZZ_REFERENCE_PROCESSES shards
 # of FUZZ_HARDENING_ITERATIONS iterations of each of M15's FUZZ_REFERENCE_TARGETS targets took FUZZ_REFERENCE_SECONDS in
 # a step whose timeout was FUZZ_REFERENCE_TIMEOUT_SECONDS, with each case's limit scaled by FUZZ_REFERENCE_TIMEOUT_SCALE
@@ -359,6 +371,17 @@ def fuzz_process_count(logical_cpus: int, available_bytes: int, peak_bytes_per_p
         raise ValueError(f"fuzz_process_count needs positive values, got {logical_cpus} CPUs, {available_bytes} "
                          f"available bytes and {peak_bytes_per_process} bytes per process")
     return max(1, min(logical_cpus, FUZZ_MAX_PROCESSES, available_bytes // peak_bytes_per_process))
+
+
+def unit_process_count(logical_cpus: int, available_bytes: int, peak_bytes_per_process: int) -> int:
+    """How many sanitized unit shards run at a time (Scripts/Hardening.py asan-unit, Test.py --parallel):
+    min(logical_cpus // 2, UNIT_MAX_PROCESSES, available_bytes // peak_bytes_per_process), at least 1. The stage passes
+    the machine's logical CPUs, its available physical memory and UNIT_PEAK_PROCESS_BYTES. Raises ValueError for a count
+    or size below 1."""
+    if logical_cpus < 1 or available_bytes < 1 or peak_bytes_per_process < 1:
+        raise ValueError(f"unit_process_count needs positive values, got {logical_cpus} CPUs, {available_bytes} "
+                         f"available bytes and {peak_bytes_per_process} bytes per process")
+    return max(1, min(logical_cpus // 2, UNIT_MAX_PROCESSES, available_bytes // peak_bytes_per_process))
 
 
 def fuzz_target_case_name(target: FuzzTarget) -> str:
