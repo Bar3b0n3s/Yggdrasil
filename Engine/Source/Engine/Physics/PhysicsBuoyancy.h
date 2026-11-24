@@ -4,6 +4,8 @@
 
 #include <glm/glm.hpp>
 
+#include <vector>
+
 // The vocabulary of the physics world's buoyancy (M47, Docs/Decisions/0065-m47-water.md decision 3; Architecture §9.12):
 // PhysicsWorld::ApplyBuoyancy (PhysicsWorld.h; Physics/PhysicsWorldBuoyancy.cpp) submerges each collider of a Dynamic body
 // against a fluid plane of its own through Jolt's exact submerged volumes and applies Jolt's buoyancy and drag impulse;
@@ -35,12 +37,14 @@ namespace Engine {
 	};
 
 	// What ApplyBuoyancy found: the body's total volume and the volume submerged under its planes (m^3, the sums over its
-	// colliders), and whether any of it was submerged, so an impulse was applied.
+	// colliders), whether any of it was submerged, so an impulse was applied, and the volume submerged under each plane, indexed
+	// like the planes (0 for a plane out of water or one no collider uses), so the caller can attribute it to the planes' waters.
 	struct PhysicsBuoyancyResult
 	{
 		float SubmergedVolume = 0.0f;
 		float TotalVolume = 0.0f;
 		bool Submerged = false;
+		std::vector<float> PlaneSubmergedVolumes{};
 	};
 
 }

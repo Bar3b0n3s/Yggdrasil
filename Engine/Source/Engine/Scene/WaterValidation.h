@@ -58,7 +58,8 @@ namespace Engine {
 	// WaterFrameTolerance: its X and Z columns level, perpendicular and right-handed about +Y, its Y column vertical.
 	[[nodiscard]] bool IsLevelWaterFrame(const glm::mat4& world);
 
-	// The water checks over `scene` (effectively enabled entities, canonical order; at most one finding of each code an entity):
+	// The water checks over `scene` (effectively enabled entities, canonical order; at most one finding of each code and field an
+	// entity, so a pitched second Ocean has two WATER_INVALID findings):
 	//   - WATER_INVALID: a Water whose world matrix fails IsLevelWaterFrame (no field); an Ocean after the first effectively
 	//     enabled one (Water.Shape, naming the first);
 	//   - WATER_WAVES_TOO_STEEP: a Water whose ComputeWaterSteepnessSum at its WaveScale exceeds MaxWaterSteepnessSum

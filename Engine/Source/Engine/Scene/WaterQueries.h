@@ -63,7 +63,8 @@ namespace Engine {
 	// `water` of entity `id` at world matrix `world`: its frame (MakeWaterFrame), its waves resolved at its WaveScale
 	// (ResolveWaterSurface) and its volume.
 	[[nodiscard]] ResolvedWater ResolveWater(const WaterComponent& water, const glm::mat4& world, UUID id);
-	// The Water of `entity` (readable, so live or pending destruction, and holding one, asserted) at its current world matrix (TransformSystem::ComputeWorldMatrix).
+	// The Water of `entity` (readable, so live or pending destruction, and holding one, asserted) at its current world matrix
+	// (TransformSystem::ComputeWorldMatrix).
 	[[nodiscard]] ResolvedWater ResolveWater(ConstEntity entity);
 
 	// The scene's waters at their current world matrices: every effectively enabled Rectangle in canonical order, and the
@@ -81,7 +82,7 @@ namespace Engine {
 	[[nodiscard]] std::optional<SceneWaterSample> SampleWater(const ResolvedWater& water, const glm::dvec3& point, double time);
 	// Whether the world point lies under `water`'s own surface at `time`, masking aside: under the surface there, and for a
 	// Rectangle within its volume.
-	[[nodiscard]] bool IsUnderWater(const ResolvedWater& water, const glm::dvec3& point, double time);
+	[[nodiscard]] bool IsUnderwater(const ResolvedWater& water, const glm::dvec3& point, double time);
 
 	// The water that holds the world point at `time` by the rule above, or null; a pointer into `waters`.
 	[[nodiscard]] const ResolvedWater* FindWaterAt(const SceneWaters& waters, const glm::dvec3& point, double time);

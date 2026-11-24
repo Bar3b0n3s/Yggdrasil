@@ -24,10 +24,17 @@
 // horizontal map's Jacobian is I - sum_i Q_i A_i k_i sin(th_i) D_i D_i^T; ResolveWaterSurface scales every Q_i by one factor
 // so that sum_i Q_i k_i A_i <= MaxWaterSteepnessSum < 1, so the map is a diffeomorphism and the surface never folds.
 //
-// Sampling under a world point (EvaluateWaterSurface) inverts the horizontal map: WaterContractionSteps fixed-point steps
-// (x0 <- x - (H(x0) - x0), a contraction of factor sum_i Q_i k_i A_i), then WaterInversionSteps Newton steps on the analytic
-// 2 x 2 Jacobian, from x0 = x. Every input runs the same operations. The normal and the particle's velocity are analytic at
-// the x0 found; the velocity adds the water's Current, a horizontal flow that moves no wave.
+// Sampling under a world point (EvaluateWaterSurface) inverts the horizontal map H. H is the gradient of the potential
+// |x0|^2 / 2 + sum_i (Q_i A_i / k_i) sin(th_i), whose Hessian, H's Jacobian, has eigenvalues in [0.1, 1.9] under the fold
+// limit: the potential is strongly convex and H(x0) = x has exactly one solution. From x0 = x, each step solves the analytic
+// 2 x 2 Jacobian for Newton's step and halves it (down to WaterInversionMinStep) until the squared residual |H(x0) - x|^2 falls
+// by Armijo's rule (factor 1 - 2 WaterInversionArmijo t for step fraction t), which converges from any start where plain
+// Newton steps fall into cycles (a short wave riding a long, high one; Docs/Decisions/0065-m47-water.md, the W47.1 record).
+// The inversion stops when the residual is at most WaterInversionTolerance or after WaterInversionMaxEvaluations evaluations
+// of the waves. The number of steps depends on the inputs alone, through the same double arithmetic in every configuration,
+// so the result is bit-identical in Debug, Release and Dist. The normal and the particle's velocity are analytic at the x0
+// found, from the last evaluation's sines and cosines; the velocity adds the water's Current, a horizontal flow that moves no
+// wave.
 
 namespace Engine {
 
@@ -36,13 +43,16 @@ namespace Engine {
 	inline constexpr uint32_t MaxWaterSurfaceWaves = 8;
 	// The gravity of the deep-water dispersion relation w = sqrt(g k), m/s^2.
 	inline constexpr double WaterGravity = 9.81;
-	// The largest sum_i Q_i k_i A_i: the horizontal map's Jacobian keeps a determinant of at least 1 - 0.9 everywhere.
+	// The largest sum_i Q_i k_i A_i: the horizontal map's Jacobian keeps eigenvalues in [0.1, 1.9] and a determinant of at least
+	// 0.1 everywhere.
 	inline constexpr double MaxWaterSteepnessSum = 0.9;
-	// The fixed-point steps before the Newton steps: they bring x0 within the Newton steps' reach from any start, which Newton
-	// alone does not on a sum of short steep waves over long ones (Docs/Decisions/0065-m47-water.md, the W47.1 record).
-	inline constexpr uint32_t WaterContractionSteps = 8;
-	// The Newton steps that finish the inversion.
-	inline constexpr uint32_t WaterInversionSteps = 4;
+	// The inversion's bounds: at most this many evaluations of the waves a sample (each one SinCos a wave), and the residual,
+	// in metres, below which it stops.
+	inline constexpr uint32_t WaterInversionMaxEvaluations = 32;
+	inline constexpr double WaterInversionTolerance = 1.0e-9;
+	// Armijo's sufficient-decrease constant, and the smallest fraction of a Newton step the halving tries.
+	inline constexpr double WaterInversionArmijo = 1.0e-4;
+	inline constexpr double WaterInversionMinStep = 1.0 / 1024.0;
 	// The authored bounds of a wave (the Water component's registry ranges).
 	inline constexpr double MinWaterWavelength = 0.1;
 	inline constexpr double MaxWaterWavelength = 2000.0;

@@ -358,9 +358,11 @@ namespace Engine {
 		// the total and submerged volumes and the centres of buoyancy are summed (CompoundShape::GetSubmergedVolume's loop, one
 		// plane each). Then Jolt's Body::ApplyBuoyancyImpulse overload that takes those volumes, under the body's lock, with
 		// the buoyancy B = BuoyancyScale * Density * V_total * invMass, so that Jolt's fluid density B / (V_total * invMass) is
-		// the water's scaled and the force is BuoyancyScale * rho * g * V_submerged against the world's gravity; the fluid
-		// velocity is the planes' velocities weighted by their colliders' submerged volumes. A body with nothing submerged
-		// gets no impulse. It wakes no body: the caller wakes one whose water changed (PreStep's wake rule).
+		// the water's scaled and the force is BuoyancyScale * rho * g * V_submerged against the world's gravity, times the body's
+		// GravityFactor as Jolt scales it (as it scales the body's weight, so a body's draft does not depend on its
+		// GravityFactor, and a body with GravityFactor 0 feels no buoyancy); the fluid velocity is the planes' velocities
+		// weighted by their colliders' submerged volumes. The result gives the volumes, each plane's among them. A body with
+		// nothing submerged gets no impulse. It wakes no body: the caller wakes one whose water changed (PreStep's wake rule).
 		// Errors, with nothing applied: InvalidArgument for a handle that names no live body, a body that is not Dynamic, a
 		// plane in water with a non-finite member or a normal that is not unit, settings outside their bounds, or a
 		// non-finite or non-positive deltaTime.

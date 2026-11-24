@@ -2,11 +2,15 @@
 
 #include "Engine/Physics/WaterWaves.h"
 
+#include "Engine/Core/Random.h"
+
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <numbers>
+#include <utility>
 #include <vector>
 
 // The water's wave function (M47, Docs/Decisions/0065-m47-water.md decision 3): a calm surface is its base plane; the
@@ -93,12 +97,22 @@ namespace Engine {
 
 		TEST_CASE("WaterWaves: a Gerstner surface's sampled height lies on the displaced surface within 1 mm")
 		{
+			double worst = 0.0;
+			uint32_t samples = 0;
+			// The height EvaluateWaterSurface finds over the displaced position of rest point `rest`, against the displaced height.
+			const auto check = [&worst, &samples](const WaterSurfaceDesc& surface, const glm::dvec2& rest, double time)
+			{
+				const glm::dvec3 displaced = DisplaceWaterSurfacePoint(surface, rest, time);
+				const WaterSurfaceSample sample = EvaluateWaterSurface(surface, glm::dvec2(displaced.x, displaced.z), time);
+				worst = std::max(worst, std::abs(sample.Height - displaced.y));
+				++samples;
+			};
+
 			// The swell at the fold limit, and a storm far from the origin, late in a session.
 			const std::array<WaterSurfaceDesc, 2> surfaces = { ResolveWaterSurface(MakeSteepSwell(), 1.0, glm::dvec2(0.0), MakeYawFrame(glm::dvec3(0.0, 1.0, 0.0), 0.0)),
 				ResolveWaterSurface(MakeStorm(), 2.5, glm::dvec2(0.3, 0.0), MakeYawFrame(glm::dvec3(2400.0, -3.0, -1800.0), 205.0)) };
 			CHECK(SteepnessSum(surfaces[0]) == doctest::Approx(MaxWaterSteepnessSum).epsilon(1e-12));
 			CHECK(SteepnessSum(surfaces[1]) == doctest::Approx(MaxWaterSteepnessSum).epsilon(1e-12));
-			double worst = 0.0;
 			for (const WaterSurfaceDesc& surface : surfaces)
 			{
 				const glm::dvec2 origin(surface.Frame.Origin.x, surface.Frame.Origin.z);
@@ -107,15 +121,70 @@ namespace Engine {
 					for (int x = -12; x <= 12; ++x)
 					{
 						for (int z = -12; z <= 12; ++z)
-						{
-							const glm::dvec2 rest = origin + glm::dvec2(x * 1.37, z * 2.11);
-							const glm::dvec3 displaced = DisplaceWaterSurfacePoint(surface, rest, time);
-							const WaterSurfaceSample sample = EvaluateWaterSurface(surface, glm::dvec2(displaced.x, displaced.z), time);
-							worst = std::max(worst, std::abs(sample.Height - displaced.y));
-						}
+							check(surface, origin + glm::dvec2(x * 1.37, z * 2.11), time);
 					}
 				}
 			}
+
+			// W47.1's review (finding 1): a long high wave carrying most of the steepness sum with a short chop riding it, where
+			// Newton steps alone fall into a 2-cycle. A storm sea within every bound (sum 0.899, unscaled), and the same pair 40
+			// times the size at the component's bounds (WaveScale 10). 8 contraction steps then 4 Newton steps missed by up to
+			// 23 mm on the first and 0.92 m on the second.
+			const std::vector<WaterWave> stormPair = { WaterWave{ .Direction = 72.57f, .Wavelength = 22.0f, .Amplitude = 2.68f, .Steepness = 1.0f, .Phase = 258.9f },
+				WaterWave{ .Direction = 247.85f, .Wavelength = 0.1565f, .Amplitude = 0.00333f, .Steepness = 1.0f, .Phase = 192.3f } };
+			const std::vector<WaterWave> boundsPair = { WaterWave{ .Direction = 72.57f, .Wavelength = 879.94f, .Amplitude = 10.734f, .Steepness = 1.0f, .Phase = 258.9f },
+				WaterWave{ .Direction = 247.85f, .Wavelength = 6.2579f, .Amplitude = 0.013303f, .Steepness = 1.0f, .Phase = 192.3f } };
+			const WaterFrame level = MakeYawFrame(glm::dvec3(0.0), 0.0);
+			const std::array<std::pair<WaterSurfaceDesc, double>, 2> pairs = { std::pair{ ResolveWaterSurface(stormPair, 1.0, glm::dvec2(0.0), level), 1.0 },
+				std::pair{ ResolveWaterSurface(boundsPair, 10.0, glm::dvec2(0.0), level), 40.0 } };
+			for (const auto& [surface, size] : pairs)
+			{
+				for (const double time : { 0.0, 1.5 * size })
+				{
+					for (int x = 0; x < 400; ++x)
+					{
+						for (int z = 0; z < 39; ++z)
+							check(surface, glm::dvec2(-60.0 + 0.3 * x, -55.0 + 0.27 * z) * size, time);
+					}
+				}
+			}
+
+			// A seeded search at the bounds: two to eight waves, the first long and high and carrying most of the sum, the others
+			// down to a 20,000th of its wavelength, all of the steepest, at WaveScale 10, under a turned frame far from the origin.
+			Random random(4701);
+			const auto uniform = [&random](double low, double high)
+			{
+				return low + (high - low) * random.NextDouble();
+			};
+			for (int set = 0; set < 240; ++set)
+			{
+				const int count = static_cast<int>(random.RangeInt(2, 8));
+				const double longest = uniform(5.0, 2000.0);
+				double share = uniform(0.5, 0.97);
+				double rest = 1.0 - share;
+				std::vector<WaterWave> waves;
+				for (int index = 0; index < count; ++index)
+				{
+					if (index > 0)
+					{
+						share = index + 1 < count ? rest * random.NextDouble() : rest;
+						rest -= share;
+					}
+					const double wavelength = index == 0 ? longest : std::max(0.1, longest / std::exp2(uniform(1.6, 14.3)));
+					const double amplitude = std::min(MaxWaterSteepnessSum * share * wavelength / (2.0 * std::numbers::pi) / 10.0, 20.0);
+					waves.push_back(WaterWave{ .Direction = static_cast<float>(uniform(0.0, 360.0)),
+						.Wavelength = static_cast<float>(wavelength),
+						.Amplitude = static_cast<float>(amplitude),
+						.Steepness = 1.0f,
+						.Speed = set % 2 == 0 ? 0.0f : static_cast<float>(uniform(0.0, 200.0)),
+						.Phase = static_cast<float>(uniform(0.0, 360.0)) });
+				}
+				const WaterSurfaceDesc surface = ResolveWaterSurface(waves, 10.0, glm::dvec2(0.0),
+					MakeYawFrame(glm::dvec3(uniform(-2500.0, 2500.0), 0.0, uniform(-2500.0, 2500.0)), uniform(0.0, 360.0)));
+				for (int point = 0; point < 12; ++point)
+					check(surface, glm::dvec2(uniform(-3000.0, 3000.0), uniform(-3000.0, 3000.0)), uniform(0.0, 7200.0));
+			}
+			CAPTURE(samples);
 			CAPTURE(worst);
 			CHECK(worst < 1.0e-3);
 		}

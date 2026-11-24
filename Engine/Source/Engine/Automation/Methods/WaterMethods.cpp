@@ -89,7 +89,7 @@ namespace Engine {
 				if (own.has_value())
 				{
 					sample = SampleWater(*own, position, time);
-					underwater = IsUnderWater(*own, position, time);
+					underwater = IsUnderwater(*own, position, time);
 				}
 				else
 				{

@@ -164,7 +164,7 @@ namespace Engine {
 		return Utils::MakeSample(water, point, time);
 	}
 
-	bool IsUnderWater(const ResolvedWater& water, const glm::dvec3& point, double time)
+	bool IsUnderwater(const ResolvedWater& water, const glm::dvec3& point, double time)
 	{
 		return IsInWaterVolume(water, point) && Utils::MakeSample(water, point, time).Depth > 0.0;
 	}

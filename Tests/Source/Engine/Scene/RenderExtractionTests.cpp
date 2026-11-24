@@ -1737,6 +1737,9 @@ namespace Engine {
 			off.SetActive(false);
 			Entity ground = scene.CreateEntity("Ground");
 			ground.AddComponent<MeshRendererComponent>(MakeMeshRenderer(BuiltinAssetHandles::PlaneMesh));
+			// A terrain after the waters in canonical order: its PickId still comes before theirs (extraction loads no asset).
+			Entity island = scene.CreateEntity("Island");
+			island.AddComponent<TerrainComponent>(TerrainComponent{ .Heightfield = TypedAssetHandle<AssetType::Heightfield>(AssetHandle(0x7e47000000000001ull)) });
 			TransformSystem::Update(scene);
 
 			for (const double time : { 0.0, 7.5 })
@@ -1773,11 +1776,13 @@ namespace Engine {
 				CHECK(item.UnderwaterVisibility == 22.0f);
 				CHECK_FALSE(item.PreviousWorld.has_value());
 				CHECK_FALSE(item.PreviousPhases.has_value());
-				// PickIds after the meshes' (the ground's) in the waters' order.
-				REQUIRE(snapshot->PickTable.size() == 3);
-				CHECK(item.PickId == 2);
-				CHECK(snapshot->PickTable[1] == sea.GetUUID());
-				CHECK(snapshot->Waters[1].PickId == 3);
+				// PickIds after the meshes' (the ground's) and the terrains' (the island's), in the waters' order.
+				REQUIRE(snapshot->PickTable.size() == 4);
+				REQUIRE(snapshot->Terrains.size() == 1);
+				CHECK(snapshot->Terrains[0].PickId == 2);
+				CHECK(item.PickId == 3);
+				CHECK(snapshot->PickTable[2] == sea.GetUUID());
+				CHECK(snapshot->Waters[1].PickId == 4);
 			}
 			// An edit view (SimulationTime 0, the default) shows the phases at time 0.
 			const Result<RenderSnapshot> editView = ExtractRenderSnapshot(scene, { .Camera = RenderCameraSource::Explicit, .Width = 8, .Height = 8 });

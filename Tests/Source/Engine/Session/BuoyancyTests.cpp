@@ -122,8 +122,8 @@ namespace Engine {
 	{
 		TEST_CASE("Buoyancy: two pontoons pitch with a swell's slope" * doctest::skip(true))
 		{
-			// On calm water the raft settles level; on a 6 m swell, shorter than the raft's 4 m span plus its pontoons, each
-			// pontoon rides the surface under it, so the raft pitches with the slope between them.
+			// On calm water the raft settles level. On a 6 m swell the pontoons, 3 m apart, are half a wavelength apart: one rides
+			// a crest while the other sits in a trough, each on the surface under it, so the raft pitches with the slope between them.
 			const auto pitchRange = [](float waveScale)
 			{
 				Test::SceneTestFixture fixture;
@@ -179,12 +179,13 @@ namespace Engine {
 			CHECK_FALSE(report->IsSleeping);
 			Test::RunTicks(play, 600);
 			CHECK(Test::GetWorldPosition(play, "/Raft").y == doctest::Approx(restHeight + 0.5f).epsilon(0.02));
-			// The buoyancy block of physics.bodyInfo: the sea, the raft's 0.5 m^3, the 200 kg's 0.2 m^3 submerged.
+			// The buoyancy block of physics.bodyInfo: the sea; the raft's two 1 m x 0.5 m x 1 m pontoons (half extents 0.5, 0.25,
+			// 0.5), 0.5 m^3 each, so 1 m^3 in all; and rho V_sub = m, so the 200 kg raft keeps 200 / 1000 = 0.2 m^3 submerged.
 			report = play.GetPhysics().GetBodyInfo(raft);
 			REQUIRE(report.has_value());
 			REQUIRE(report->Buoyancy.has_value());
 			CHECK(report->Buoyancy->Water == Test::GetEntityId(play.GetScene(), "/Sea"));
-			CHECK(report->Buoyancy->TotalVolume == doctest::Approx(0.5f).epsilon(1e-4));
+			CHECK(report->Buoyancy->TotalVolume == doctest::Approx(1.0f).epsilon(1e-4));
 			CHECK(report->Buoyancy->SubmergedVolume == doctest::Approx(0.2f).epsilon(0.05));
 		}
 

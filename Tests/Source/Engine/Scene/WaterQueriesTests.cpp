@@ -115,8 +115,8 @@ namespace Engine {
 			CHECK(cave->Depth == doctest::Approx(-5.0));
 			const SceneWaters waters = CollectSceneWaters(scene);
 			REQUIRE(waters.Ocean.has_value());
-			CHECK_FALSE(IsUnderWater(waters.Rectangles.front(), air, 0.0));
-			CHECK(IsUnderWater(*waters.Ocean, air, 0.0)); // the sea's own surface, masking aside
+			CHECK_FALSE(IsUnderwater(waters.Rectangles.front(), air, 0.0));
+			CHECK(IsUnderwater(*waters.Ocean, air, 0.0)); // the sea's own surface, masking aside
 			// In the lake: under its surface.
 			const std::optional<SceneWaterSample> swim = SampleSceneWater(scene, glm::dvec3(104.0, -31.0, 47.0), 0.0);
 			REQUIRE(swim.has_value());

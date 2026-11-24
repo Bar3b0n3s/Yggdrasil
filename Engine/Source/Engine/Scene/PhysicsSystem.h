@@ -382,10 +382,12 @@ namespace Engine {
 		UUID SqueezedBy{};
 	};
 
-	// M47 (Docs/Decisions/0065-m47-water.md decision 3; physics.bodyInfo's buoyancy): what the last PreStep's buoyancy item
-	// (4c) found for a body whose owner holds a Buoyancy: the water its planes came from (the Buoyancy's Water when set, else
-	// the water that held the most of the body's submerged volume; the null UUID when nothing was submerged) and the body's
-	// submerged and total volumes (m^3; 0 before the first tick it was applied, and while it is skipped).
+	// M47 (Docs/Decisions/0065-m47-water.md decision 3; physics.bodyInfo's buoyancy): what PreStep's buoyancy item (4c) found
+	// the last time it applied a body whose owner holds a Buoyancy: the water its planes came from (the Buoyancy's Water when
+	// set, else the water whose planes held the most of the body's submerged volume, PhysicsBuoyancyResult's per-plane volumes
+	// summed by water, ties to the lowest collider index; the null UUID when nothing was submerged) and the body's submerged and
+	// total volumes (m^3). A body skipped while asleep keeps the values of the last tick it was applied; one skipped as invalid
+	// (PHYSICS_BUOYANCY_INVALID), and one never applied yet, reports 0 and the null UUID.
 	struct PhysicsBuoyancyReport
 	{
 		UUID Water{};
@@ -434,7 +436,8 @@ namespace Engine {
 		std::vector<PhysicsContactInfo> Contacts{};
 		// Characters only.
 		std::optional<PhysicsCharacterState> Character{};
-		// M47 (decision 3): bodies whose owner holds a Buoyancy only (empty otherwise); filled by W47.2's physics stream.
+		// M47 (decision 3): bodies whose owner holds a Buoyancy only (empty otherwise). C47 leaves it empty until W47.2's
+		// physics stream fills it.
 		std::optional<PhysicsBuoyancyReport> Buoyancy{};
 	};
 

@@ -66,6 +66,12 @@
 // follows the glass between ticks; without a drawn mesh the component gives none (RENDER_REFLECTION_INVALID,
 // Scene/PlanarReflectionValidation.h).
 //
+// Waters (M47, Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger): every effectively enabled Water but an Ocean
+// after the scene's first gives one WaterItem, in canonical order, in every view (an edit scene's included), at its rendered
+// world matrix, so a tide written in the fixed step moves smoothly; its waves are resolved as the queries resolve them
+// (Scene/WaterQueries.h's ResolveWater, Physics/WaterWaves.h), with their phases at request.SimulationTime (0 in an edit view,
+// so an edit scene shows the waves at time 0), and its detail drift at that time wrapped by its DetailScale.
+//
 // Pure function of the scene's components and the request: no asset access, no clock, no randomness; vectors in canonical
 // order (§5.1), so a deterministic scene gives an identical snapshot in every configuration. Only IEEE-exact operations and
 // Core/DetMath (Scene is on the simulation path's lint scope, §4.12). Main thread, like the scene (§4.11).
@@ -214,6 +220,12 @@ namespace Engine {
 	//     and its first MaxTerrainLayers Layers (their maps' handles, Tint, Tiling, Roughness, Metallic); each is pickable, its
 	//     PickId after the meshes' (the entity's mesh PickId when its MeshRenderer has one, else a PickTable entry appended
 	//     after every mesh's, in the terrains' order), in every view and every scene, edit scenes included.
+	//   - Waters (M47, Docs/Decisions/0065-m47-water.md decision 3): every effectively enabled entity's Water but an Ocean
+	//     after the first, in canonical order, by the rule of the file comment's Waters paragraph, with Shape, Size, Depth,
+	//     Headroom and the look as they are, and NormalMap and FoamTexture as handles; each is pickable, its PickId after the
+	//     terrains' (the entity's existing PickTable entry when it has one, else one appended after every terrain's, in the
+	//     waters' order), in every view and every scene, edit scenes included. PreviousWorld and PreviousPhases stay empty: the
+	//     view's RenderViewHistory fills them.
 	//   - PixelPerfectCamera (M21, decision 6): for the Primary and Entity sources, when the camera entity holds a
 	//     PixelPerfectCameraComponent, Output, the camera's position and its orthographic projection come from
 	//     ComputePixelPerfectView (Scene/PixelPerfectCamera.h), at the reference resolution's aspect, whatever the Camera's

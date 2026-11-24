@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
+#include "Engine/Core/UUID.h"
 #include "Engine/Graphics/PipelineFactory.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/RenderSnapshot.h"
@@ -10,6 +11,7 @@
 #include <nvrhi/nvrhi.h>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 // The Water pass (M47, Docs/Decisions/0065-m47-water.md decision 3; Architecture §8.3 "Water"): the snapshot's waters
@@ -45,6 +47,9 @@ namespace Engine {
 	// scene resolution); the framebuffer of the surfaces (SceneColor, SceneNormals, SceneVelocity, SceneRoughness, and EntityId
 	// when Picking, with SceneDepth); the forward view set's variant (set 0); Refraction, the copy of SceneColor the caller
 	// made under the WaterRefraction row before the draws; and the depth pyramid (ViewDepth). None of the pointers is null.
+	// PlanarReflectionSlots (W47.3's planar opt-in) is the entity of each drawn planar reflection slot, in slot order (the
+	// frame's PlanarReflectionEntities): a water whose entity is listed samples that slot (set 0's b7 and t17 to t20) in place of
+	// its probe term; empty, every water reflects the environment, the probes and SSR. The span outlives the call only.
 	struct WaterSurfaceInputs
 	{
 		const RenderSnapshot* Snapshot = nullptr;
@@ -54,6 +59,7 @@ namespace Engine {
 		nvrhi::ITexture* Refraction = nullptr; // WaterRefraction: SceneColorFormat at the scene resolution, from the target pool
 		nvrhi::ITexture* ViewDepth = nullptr;
 		bool Picking = false;
+		std::span<const UUID> PlanarReflectionSlots{};
 	};
 
 	class WaterPass
@@ -77,9 +83,11 @@ namespace Engine {
 		WaterPass(const WaterPass&) = delete;
 		WaterPass& operator=(const WaterPass&) = delete;
 
-		// Creates the pass's pipelines, its ring geometry and its procedural textures (place 1 of §8.14 item 10:
-		// SceneRendererPipelines::CreatePipelines), its set 0 laid out as `forwardViewLayout`. Errors: those of the pipeline
-		// factory and of the buffer and texture creations.
+		// Creates the pass's pipelines and its ring geometry (place 1 of §8.14 item 10: SceneRendererPipelines::CreatePipelines),
+		// its set 0 laid out as `forwardViewLayout`; the built-in WaterNormal and WaterFoam are texture assets (Asset/
+		// BuiltinTextures) that RecordSurface's `cache` resolves. `device` is a documented back-reference that outlives the pass:
+		// RecordSurface creates the view's records buffer and its binding sets with it. Errors: those of the pipeline factory and
+		// of the buffer creations.
 		[[nodiscard]] static Result<Scope<WaterPass>> Create(GraphicsDevice& device, PipelineFactory& pipelines, nvrhi::IBindingLayout& forwardViewLayout);
 
 		// The binding layouts of the pass's own sets, for the pipeline set's layout table.
@@ -89,7 +97,8 @@ namespace Engine {
 
 		// Draws every water of the snapshot in its order under the caller's Water row, counting its draws in `counters`, after
 		// writing the view's records into `resources`. A water whose NormalMap or FoamTexture does not resolve through `cache`
-		// draws with the built-in one. Errors: those of a record buffer's or a binding set's creation, with nothing drawn.
+		// draws with the built-in one. On success every water of the snapshot was drawn (RenderStats::WaterSurfaces counts
+		// them). Errors: those of a record buffer's or a binding set's creation, with nothing drawn.
 		[[nodiscard]] Status RecordSurface(nvrhi::ICommandList& commandList, GpuResourceCache& cache, WaterViewResources& resources,
 			const WaterSurfaceInputs& inputs, RenderPassCounters& counters);
 	private:

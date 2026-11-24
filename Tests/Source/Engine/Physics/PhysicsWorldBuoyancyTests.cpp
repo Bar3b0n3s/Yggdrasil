@@ -52,8 +52,9 @@ namespace Engine {
 	{
 		TEST_CASE("PhysicsWorld: a box of known mass floats at its analytic draft within 1 cm" * doctest::skip(true))
 		{
-			// A 2 m x 0.5 m x 1 m box of 400 kg on fresh water: its draft is m / (rho A) = 400 / (1000 x 2) = 0.2 m, so its centre
-			// rests 0.25 - 0.2 = 0.05 m above the bottom's draft line: at y = -0.05 for a surface at 0.
+			// A 2 m x 0.5 m x 1 m box of 400 kg on fresh water. At rest the displaced water weighs as much as the box:
+			// rho V_sub = m, so V_sub = 400 / 1000 = 0.4 m^3, and over its 2 m x 1 m base the draft is V_sub / A = 0.4 / 2 = 0.2 m.
+			// Its bottom lies 0.2 m below the surface at 0, at y = -0.2, and its centre 0.25 m above the bottom: y = +0.05.
 			Scope<PhysicsWorld> world = CreateBuoyancyWorld();
 			const BodyHandle box = CreateFloater(*world,
 				{ ColliderShapeDescription{ .Geometry = BoxShapeGeometry{ .HalfExtents = glm::vec3(1.0f, 0.25f, 0.5f) } } }, 400.0f, glm::vec3(0.0f, 0.5f, 0.0f));
@@ -68,7 +69,7 @@ namespace Engine {
 			}
 			const float height = world->GetPose(box).Position.y;
 			CAPTURE(height);
-			CHECK(std::abs(height - -0.05f) < 0.01f);
+			CHECK(std::abs(height - 0.05f) < 0.01f);
 			// At rest the submerged volume carries the weight: rho V_sub = m.
 			const Result<PhysicsBuoyancyResult> rest = world->ApplyBuoyancy(box, planes, settings, BuoyancyStep);
 			REQUIRE(rest.has_value());

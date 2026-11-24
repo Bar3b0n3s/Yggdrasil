@@ -56,6 +56,40 @@ namespace Engine {
 			return WaterWaveAngle{ .Sin = sinCos.Sin, .Cos = sinCos.Cos };
 		}
 
+		// One evaluation of the waves at rest point `Rest` for the inversion over `point`: each wave's sine and cosine there, the
+		// residual H(Rest) - point and its squared length (the merit the steps decrease), and H's symmetric Jacobian.
+		struct WaterInversionPoint
+		{
+			glm::dvec2 Rest = glm::dvec2(0.0);
+			std::array<WaterWaveAngle, MaxWaterSurfaceWaves> Angles{};
+			glm::dvec2 Residual = glm::dvec2(0.0);
+			double Merit = 0.0;
+			double Jxx = 1.0;
+			double Jxz = 0.0;
+			double Jzz = 1.0;
+		};
+
+		static WaterInversionPoint EvaluateInversionPoint(const WaterSurfaceDesc& surface, const glm::dvec2& rest, const glm::dvec2& point, double time)
+		{
+			WaterInversionPoint evaluated;
+			evaluated.Rest = rest;
+			evaluated.Residual = rest - point;
+			for (uint32_t index = 0; index < surface.WaveCount; ++index)
+			{
+				const WaterSurfaceWave& wave = surface.Waves[index];
+				const WaterWaveAngle angle = EvaluateWaveAngle(surface, wave, rest, time);
+				evaluated.Angles[index] = angle;
+				const double horizontal = wave.Steepness * wave.Amplitude;
+				evaluated.Residual += wave.Direction * (horizontal * angle.Cos);
+				const double slope = horizontal * wave.WaveNumber * angle.Sin;
+				evaluated.Jxx -= slope * wave.Direction.x * wave.Direction.x;
+				evaluated.Jxz -= slope * wave.Direction.x * wave.Direction.y;
+				evaluated.Jzz -= slope * wave.Direction.y * wave.Direction.y;
+			}
+			evaluated.Merit = evaluated.Residual.x * evaluated.Residual.x + evaluated.Residual.y * evaluated.Residual.y;
+			return evaluated;
+		}
+
 	}
 
 	WaterFrame MakeWaterFrame(const glm::dmat4& world)
@@ -136,38 +170,29 @@ namespace Engine {
 
 	WaterSurfaceSample EvaluateWaterSurface(const WaterSurfaceDesc& surface, const glm::dvec2& point, double time)
 	{
-		// The contraction steps: x0 <- point - D(x0), D the horizontal displacement.
-		glm::dvec2 rest = point;
-		for (uint32_t step = 0; step < WaterContractionSteps; ++step)
+		// Damped Newton steps on H(x0) = point from x0 = point (the file comment of WaterWaves.h).
+		constexpr double ToleranceSquared = WaterInversionTolerance * WaterInversionTolerance;
+		Utils::WaterInversionPoint current = Utils::EvaluateInversionPoint(surface, point, point, time);
+		uint32_t evaluations = 1;
+		while (evaluations < WaterInversionMaxEvaluations && current.Merit > ToleranceSquared)
 		{
-			const glm::dvec3 displaced = DisplaceWaterSurfacePoint(surface, rest, time);
-			rest -= glm::dvec2(displaced.x, displaced.z) - point;
-		}
-		// The Newton steps on the horizontal map's analytic Jacobian.
-		for (uint32_t step = 0; step < WaterInversionSteps; ++step)
-		{
-			glm::dvec2 residual = rest - point;
-			double jxx = 1.0;
-			double jxz = 0.0;
-			double jzz = 1.0;
-			for (uint32_t index = 0; index < surface.WaveCount; ++index)
+			// The determinant is at least 1 - MaxWaterSteepnessSum, so Newton's step is always defined.
+			const double determinant = current.Jxx * current.Jzz - current.Jxz * current.Jxz;
+			const glm::dvec2 step(-(current.Jzz * current.Residual.x - current.Jxz * current.Residual.y) / determinant,
+				-(current.Jxx * current.Residual.y - current.Jxz * current.Residual.x) / determinant);
+			double fraction = 1.0;
+			Utils::WaterInversionPoint candidate = Utils::EvaluateInversionPoint(surface, current.Rest + step * fraction, point, time);
+			++evaluations;
+			while (candidate.Merit > (1.0 - 2.0 * WaterInversionArmijo * fraction) * current.Merit && fraction > WaterInversionMinStep
+				&& evaluations < WaterInversionMaxEvaluations)
 			{
-				const WaterSurfaceWave& wave = surface.Waves[index];
-				const Utils::WaterWaveAngle angle = Utils::EvaluateWaveAngle(surface, wave, rest, time);
-				const double horizontal = wave.Steepness * wave.Amplitude;
-				residual += wave.Direction * (horizontal * angle.Cos);
-				const double slope = horizontal * wave.WaveNumber * angle.Sin;
-				jxx -= slope * wave.Direction.x * wave.Direction.x;
-				jxz -= slope * wave.Direction.x * wave.Direction.y;
-				jzz -= slope * wave.Direction.y * wave.Direction.y;
+				fraction *= 0.5;
+				candidate = Utils::EvaluateInversionPoint(surface, current.Rest + step * fraction, point, time);
+				++evaluations;
 			}
-			// The determinant is at least 1 - MaxWaterSteepnessSum, so the step is always defined.
-			const double determinant = jxx * jzz - jxz * jxz;
-			rest.x -= (jzz * residual.x - jxz * residual.y) / determinant;
-			rest.y -= (jxx * residual.y - jxz * residual.x) / determinant;
+			current = candidate;
 		}
-
-		// The analytic height, tangents and particle velocity at the rest point found.
+		// The analytic height, tangents and particle velocity at the rest point found, from its evaluation's angles.
 		WaterSurfaceSample sample;
 		double height = surface.Frame.Origin.y;
 		glm::dvec3 tangentX(1.0, 0.0, 0.0);
@@ -176,7 +201,7 @@ namespace Engine {
 		for (uint32_t index = 0; index < surface.WaveCount; ++index)
 		{
 			const WaterSurfaceWave& wave = surface.Waves[index];
-			const Utils::WaterWaveAngle angle = Utils::EvaluateWaveAngle(surface, wave, rest, time);
+			const Utils::WaterWaveAngle& angle = current.Angles[index];
 			const glm::dvec2& direction = wave.Direction;
 			height += wave.Amplitude * angle.Sin;
 			// d/dx0 and d/dz0 of the displaced point.

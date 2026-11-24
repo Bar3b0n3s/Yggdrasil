@@ -108,7 +108,7 @@ namespace Engine {
 			const ConstEntity entity = WaterSelf(call);
 			const glm::vec3 position = Lua::Check<glm::vec3>(call, 2);
 			const double time = WaterTimeArgument(call, 3);
-			Lua::Push(call, IsUnderWater(ResolveWater(entity), glm::dvec3(position), time));
+			Lua::Push(call, IsUnderwater(ResolveWater(entity), glm::dvec3(position), time));
 			return 1;
 		}
 

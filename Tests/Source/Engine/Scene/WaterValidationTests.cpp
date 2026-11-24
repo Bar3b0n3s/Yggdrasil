@@ -77,6 +77,9 @@ namespace Engine {
 			REQUIRE(scene.SetParent(sheared, parent, std::nullopt, false));
 			SetPose(sheared, glm::angleAxis(glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f)), glm::vec3(1.0f));
 			const Entity second = AddWater(scene, "Second", WaterShape::Ocean);
+			// A pitched third Ocean: both of its causes, one finding each (no field, and Shape).
+			const Entity third = AddWater(scene, "Third", WaterShape::Ocean);
+			SetPose(third, glm::angleAxis(glm::radians(-15.0f), glm::vec3(0.0f, 0.0f, 1.0f)), glm::vec3(1.0f));
 			// A disabled third Ocean is not reported.
 			const Entity off = AddWater(scene, "Off", WaterShape::Ocean);
 			off.SetActive(false);
@@ -98,8 +101,14 @@ namespace Engine {
 			CHECK(extra[0].Code == WaterInvalidCode);
 			CHECK(extra[0].Field == "Shape");
 			CHECK(extra[0].Message.find("'Sea'") != std::string::npos);
+			const std::vector<WaterSceneIssue> both = IssuesOf(issues, third);
+			REQUIRE(both.size() == 2);
+			CHECK(both[0].Code == WaterInvalidCode);
+			CHECK(both[0].Field.empty());
+			CHECK(both[1].Code == WaterInvalidCode);
+			CHECK(both[1].Field == "Shape");
 			CHECK(IssuesOf(issues, off).empty());
-			CHECK(issues.size() == 4);
+			CHECK(issues.size() == 6);
 		}
 
 		TEST_CASE("WaterValidation: waves that would fold the surface are WATER_WAVES_TOO_STEEP, naming the factor")
