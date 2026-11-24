@@ -115,6 +115,54 @@ namespace Engine {
 		uint32_t Tick = 0;                          // the session's tick when read
 	};
 
+	// physics.vehicleInfo {entity} (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): the WheeledVehicle an entity
+	// of the play scene holds, or that it is a wheel of (a VehicleWheel's, the nearest WheeledVehicle above it), as the session
+	// holds it (PhysicsSystem::GetVehicleInfo): its body, whether it is in force, its speed and drivetrain, and each wheel's
+	// contact, suspension, spin, steer and slip after the last physics step. Vehicles are in force only in a play session (Play
+	// or Simulate), so the method always reads the play scene.
+	struct PhysicsVehicleInfoParams
+	{
+		std::string Entity{}; // an EntityRef of the play scene (§13.4)
+	};
+
+	// Registry struct "PhysicsVehicleWheelSummary": one wheel of a vehicle, after the last physics step (its readings 0 while
+	// the vehicle is not in force).
+	struct PhysicsVehicleWheelSummary
+	{
+		EntitySummary Entity{}; // the wheel's entity
+		bool Touching = false;
+		glm::vec3 Point = glm::vec3(0.0f);  // world, m; zero in the air
+		glm::vec3 Normal = glm::vec3(0.0f); // the ground's; zero in the air
+		// The collider entity the wheel stands on as {id, name, path}, null in the air or when that collider or its body's owner
+		// is disabled or destroyed. A VariantValue, as the registry has no optional struct field.
+		VariantValue Collider{};
+		float SuspensionLength = 0.0f; // m, from the attachment point to the wheel's centre
+		float SuspensionForce = 0.0f;  // N
+		float Rotation = 0.0f;         // degrees, [0, 360)
+		float SteerAngle = 0.0f;       // degrees, positive to the right
+		float AngularVelocity = 0.0f;  // degrees per second, positive rolling forward
+		float LongitudinalSlip = 0.0f; // the slip ratio
+		float LateralSlip = 0.0f;      // the slip angle, degrees
+	};
+
+	struct PhysicsVehicleInfoResult
+	{
+		EntitySummary Entity{}; // the vehicle's entity (the WheeledVehicle's), whichever of its entities was asked about
+		// The owner of the vehicle's body (its own entity) as an EntitySummary's {id, name, path}, null when its RigidBody makes no
+		// Dynamic body. A VariantValue, as the registry has no optional struct field.
+		VariantValue Body{};
+		bool Created = false; // in force: false for a refused, disabled or not yet created vehicle
+		// While Created, the reading after the last physics step; 0 otherwise.
+		float Speed = 0.0f;     // m/s along its forward (local -Z), signed
+		float EngineRpm = 0.0f; // revolutions per minute
+		int32_t Gear = 0;       // negative reverse, 0 neutral
+		float Clutch = 0.0f;    // the clutch's friction, [0, 1]
+		bool Shifting = false;  // a gear change in progress
+		// Its wheels in the world's wheel order (canonical order below the vehicle).
+		std::vector<PhysicsVehicleWheelSummary> Wheels{};
+		uint32_t Tick = 0; // the session's tick when read
+	};
+
 	namespace Automation {
 
 		// physics.bodyInfo. Errors: InvalidState "not playing" without a play session (the hint names play.start {mode:
@@ -128,14 +176,19 @@ namespace Engine {
 		// holds no HingeJoint, SliderJoint, DistanceJoint or FixedJoint.
 		[[nodiscard]] Result<PhysicsJointInfoResult> PhysicsJointInfo(AutomationMethodContext& context, const PhysicsJointInfoParams& params);
 
+		// physics.vehicleInfo (M44). Errors: InvalidState "not playing" without a play session (the hint names play.start); the
+		// errors of AutomationMethodContext::ResolveEntity at /entity; NotFound at /entity "entity '<name>' (<id>) is neither a
+		// vehicle nor a wheel" when it holds no WheeledVehicle and no VehicleWheel below one.
+		[[nodiscard]] Result<PhysicsVehicleInfoResult> PhysicsVehicleInfo(AutomationMethodContext& context, const PhysicsVehicleInfoParams& params);
+
 	}
 
 	// Registers the enum "PhysicsBodyOrigin" and the structs above (the joint result's enums, "JointType" and "JointMotorMode",
 	// are the Joints category's, registered with the components).
 	void RegisterPhysicsMethodTypes(TypeRegistry& registry);
 
-	// Registers physics.bodyInfo and (M37) physics.jointInfo: read-only, AllowedInBatch, available in the Runtime; not tools
-	// (§13.8 lists none for the physics domain), so agents reach them through engine_call.
+	// Registers physics.bodyInfo, (M37) physics.jointInfo and (M44) physics.vehicleInfo: read-only, AllowedInBatch, available in
+	// the Runtime; not tools (§13.8 lists none for the physics domain), so agents reach them through engine_call.
 	void RegisterPhysicsMethods(MethodRegistry& methods);
 
 }

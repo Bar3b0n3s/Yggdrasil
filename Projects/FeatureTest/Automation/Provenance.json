@@ -643,6 +643,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Heightfields/Vehicles/Hill.heightfield",
+			"XXH64": "5ab73a0b201122bc",
+			"Method": "terrain.importHeightmap",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Heightfields/Vehicles/Hill.heightfield.meta",
+			"XXH64": "5d1c6f68d8e1b098",
+			"Method": "terrain.importHeightmap",
+			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Lighting/Scenes/GoldenProbes/Probes/48ef89721215f626.hdr",
 			"XXH64": "40d611efdb3967e0",
 			"Method": "lighting.bake",
@@ -4531,6 +4547,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Scenes/Vehicles.scene",
+			"XXH64": "dc6cd29adde05e03",
+			"Method": "scene.save",
+			"RequestId": 5,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scenes/Vehicles.scene.meta",
+			"XXH64": "e9b8e45c5ab237ff",
+			"Method": "edit.batch",
+			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Scenes/WorldPause.scene",
 			"XXH64": "df8002ff41eac06a",
 			"Method": "scene.save",
@@ -5663,6 +5695,22 @@
 			"XXH64": "fe7dcca0326b5372",
 			"Method": "script.write",
 			"RequestId": 1,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Vehicles/VehicleDriver.luau",
+			"XXH64": "c7b280426b9970c0",
+			"Method": "script.write",
+			"RequestId": 2,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Scripts/Vehicles/VehicleDriver.luau.meta",
+			"XXH64": "2b00b3098a3ad4ce",
+			"Method": "script.write",
+			"RequestId": 2,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -7795,6 +7843,22 @@
 			"TranscriptLine": null
 		},
 		{
+			"Path": "Assets/Tests/Replays/Vehicles.replay",
+			"XXH64": "b39d1648b09da008",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Replays/Vehicles.replay.meta",
+			"XXH64": "e726766bc43e4e40",
+			"Method": "input.record",
+			"RequestId": 3,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
 			"Path": "Assets/Tests/Replays/WorldPause.replay",
 			"XXH64": "cdb020a7d248e832",
 			"Method": "input.record",
@@ -8015,6 +8079,22 @@
 			"XXH64": "53d060d8560a1797",
 			"Method": "script.write",
 			"RequestId": 4,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Vehicles/Vehicles.test.luau",
+			"XXH64": "6e3a027c06137aea",
+			"Method": "script.write",
+			"RequestId": 6,
+			"Client": "batch",
+			"TranscriptLine": null
+		},
+		{
+			"Path": "Assets/Tests/Vehicles/Vehicles.test.luau.meta",
+			"XXH64": "497dbbdaa9169ca8",
+			"Method": "script.write",
+			"RequestId": 6,
 			"Client": "batch",
 			"TranscriptLine": null
 		},
@@ -8532,7 +8612,7 @@
 		},
 		{
 			"Path": "FeatureTest.eproj",
-			"XXH64": "a7ffeb5069b91268",
+			"XXH64": "bfbbb66d7a2b2553",
 			"Method": "project.setSettings",
 			"RequestId": 1,
 			"Client": "batch",

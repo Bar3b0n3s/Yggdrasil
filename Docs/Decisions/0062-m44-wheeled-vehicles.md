@@ -580,11 +580,49 @@ Architecture §5.3 (the two rows), §5.7 (steps 5 and 7) and §13.7 (the code); 
 12. The subcase is "a destroyed wheel a differential names makes its vehicle invalid", and "a destroyed wheel nothing names leaves its vehicle made again on the other wheels" is added.
 13. Lint on the changed sources, `Format.py --check` and `MakeValidationFixtures.py --check` ran on the final code, their logs kept in the scratch folder (`w2fix-*.log`).
 
+## The W44.3 record
+
+W44.3 adds the vehicles' script reads, `physics.vehicleInfo`, the debug view, FeatureTest's coverage in every mode with a replay, Architecture §9.11 and the skills. It is M44's last wave.
+
+### Scripts (`Scripting/Bindings/Vehicles.cpp`)
+
+- `ScriptBindings::RegisterVehicles`, one line after `RegisterJoints` in `RegisterBindings.cpp` (the first of phase 8's three), declared in `Scripting/Private/BindingRegistration.h`. Twelve methods, `RunModes::All`, `Mutates = false`, each reading `PhysicsSystem::GetVehicleInfo` of its receiver as the last physics step left it: `WheeledVehicle:GetSpeed`, `GetEngineRpm`, `GetGear` and `IsShifting`; `VehicleWheel:IsTouching`, `GetContact -> (vector?, vector?, Entity?)` (three nils in the air, the collider nil when it or its body's owner is disabled or leaving), `GetSuspensionLength`, `GetSuspensionForce`, `GetRotation`, `GetSteerAngle`, `GetAngularVelocity` and `GetSlip -> (number, number)`.
+- Errors as the joints' (ADR 0054 decision 8): the receiver's; "physics is unavailable" without the session's physics; "entity has no vehicle in force" for a vehicle not created, and (a precision; the W44.2 review's follow-up "reading a blocked wheel") for a wheel that is not among its vehicle's wheels in force, a wheel under another `RigidBody` among them.
+- `GetSlip`'s ratio is Jolt's, a magnitude (0 rolling freely, larger as the wheel spins or locks), and its angle is in [0, 90] degrees; the descriptions say so.
+- Tests: `Tests/Source/Engine/Scripting/Bindings/VehiclesTests.cpp`, the two acceptance cases, and its coverage scenario `RunVehiclesBindingsCoverage` in "ScriptApi: every registered function, method, property, operator and constructor has a test".
+
+### Automation (`physics.vehicleInfo`)
+
+- The 127th method, registered by `RegisterPhysicsMethods` and its types by `RegisterPhysicsMethodTypes` (`PhysicsVehicleInfoParams`, `PhysicsVehicleWheelSummary`, `PhysicsVehicleInfoResult`): observe domain, read-only, batch-allowed, in the Runtime subset, not an MCP tool. `entity` is the vehicle's, whichever of its entities was asked; `body` and a wheel's `collider` are `{id, name, path}` or null (VariantValues, as `physics.jointInfo`'s `body`), a choice the decision leaves. Errors: `InvalidState` "not playing: vehicles exist only in a play session", `ResolveEntity`'s at `/entity`, `NotFound` at `/entity` "entity '<name>' (<id>) is neither a vehicle nor a wheel". `SceneRelation::None`, `SceneTargetTests.cpp`'s first phase-8 row.
+- Tests: "PhysicsMethods: physics.vehicleInfo reports a vehicle's drivetrain and wheels in play", its errors' and flags' cases, "RuntimeAutomationServer: physics.vehicleInfo reports a vehicle of the Runtime's session", the method lists of `RegisterMethodsTests.cpp` and the Runtime subset, and `test_physics.py`'s `test_vehicle_info_reads_a_vehicle_in_play` (gate 5). As M37's `physics.jointInfo`, no call in `test_runtime.py`: the handler is shared and the in-process Runtime case runs it through the Runtime host.
+
+### The debug view (`Scene/VehicleDebugDraw.{h,cpp}`)
+
+- `VehicleDebugState {InForce, Refused}` in pink (0.95, 0.35, 0.8) and rust (0.7, 0.25, 0.05), none a collider category's or a joint state's; `VehicleWheelDebugShape {Vehicle, Wheel, State, Center, Axle, Up, Radius, Attachment, SuspensionEnd, Touching, ContactPoint, ContactNormal}`; `BuildVehicleDebugDraw(scene, layers, physics, alpha)` over `ComposePhysicsVehicles`, and `AppendVehicleDebugDraw`: per wheel 16 circle lines, a spoke (which turns with the spin), the suspension's travel and, in play while touching, a 0.5 m normal, all `OnTop` lines. In an edit scene every wheel hangs at its authored centre (`MakePhysicsVehicleWheelFrame`); in play a vehicle in force is drawn where the session placed its wheel entities, at the rendered pose, and any other as refused at its components' places.
+- One call in `RenderAnnotations.cpp` after the joints' (M44's region of M45's file) and its include.
+- Tests: `Tests/Source/Engine/Scene/VehicleDebugDrawTests.cpp`, the acceptance case, the colours, the edit records (a refused vehicle turned with its body), a scene without vehicles, the lines and the Colliders flag's hook.
+
+### FeatureTest
+
+- `Scaffold/Vehicles.jsonl` (IdSeed 4101) and `Scaffold/VehiclesReplay.jsonl` (IdSeed 4102) in M44's block, before `Suites.jsonl` in `Scaffolds.json` (M43's entries land before them at the merge); `Suites.jsonl` gains the `Vehicles` suite (`Isolation: Case`, every mode) after the last suite (M43's after it at the merge, in the ledger's order).
+- **The scene** (`Assets/Scenes/Vehicles.scene`): a static `Track` of four box colliders (a 120 × 500 m `Ground`, a 2 m `Ledge`, the `Slick` and `Rough` strips with `ColliderSurface` 0.3 and 1.0, none overlapping another); the `Hill` terrain (`Scaffold/Sources/Heightmaps/Ramp16.png` imported again as `Assets/Heightfields/Vehicles/Hill.heightfield`, `HeightScale` 6: about 10 degrees along +X, `TerrainCollider` Friction 0.9); the `Buggy` (1000 kg, Auto, `Cylinder`, `MassProperties` (0, -0.6, 0) and (1.1, 1, 1.1), a rev-limiting torque curve, two differentials at 0.5 and two bars, `VehicleDriver.luau`) on the ledge; the `Cart` (400 kg, Manual in gear 1 with its clutch open and its throttle at 0.5, `Ray`, two reverse gears); the `Rig` (800 kg, `Sphere`, parked across the hill's slope nose downhill, its brakes and hand brake on, its wheels turned, `MaxPitchRollAngle` 60, custom tyre curves). Every field of the three components, the list elements' included, is non-default somewhere; both enums' values are used.
+- **The suite** (`Assets/Tests/Vehicles/Vehicles.test.luau`, nine cases): the Cart's four wheels at rest within 1 cm of the analytic rest length with a quarter of the weight each, and the Buggy's touching level (a precision: the 1 cm check runs on the ray-cast Cart, since a cylinder's contact lies off the wheel's plane, the W44.1 review's note; the `vehicles` page says which cast meets it); the analytic top speed held within 2 % in the top gear at `MaxRpm`; a full-lock turn at 15 m/s on all four wheels without rolling; the drive off the 2 m ledge at full throttle onto its wheels (the brief's drop, driven); the slick-against-rough stop; Manual's gears, clamping, neutral and reverse; the hand brake holding the Rig on the slope and the Rig rolling downhill once released; every read with its errors (a vehicle a write leaves without a differential raises, its `PHYSICS_VEHICLE_INVALID` claimed with `Test.ExpectScriptError`); every field of the three components through the proxies, with the registry's ranges refused. `VehicleDriver.luau` writes the input only while W, S, A, D or Space is held (and once at the release), so the cases drive by writing the fields.
+- **The replay** (`Assets/Tests/Replays/Vehicles.replay`, 900 ticks of planned keys: W from tick 30 off the ledge, D from 300 to 400, S from 570 to 690 and Space from 700 to 890 to stop), with expectations at ticks 260 (landed below the ledge, moving), 420 (turned, upright) and 900 (stopped, its driver's top speed above 10 m/s); it fails without its input.
+- **Gates** in every mode: 1 (the three components and every field leaf), 1b (both enums' values), 2 (the twelve methods), 4 (every field through a proxy); 5 (`physics.vehicleInfo`, `test_physics.py`); 6 (W44.1's and W44.2's fixtures); 7 (every description).
+
+### Documents
+
+Architecture §9.11 (new), §9.2 (a vehicle on its body), §9.7 (the vehicle cases), §11.5 (the two proxies), §13.5 (`physics.vehicleInfo`, 127 methods, the observe domain and the Runtime subset), §15.5 (`Vehicles.scene`); luau-gameplay's `vehicles` page (a `DocExamples`-checked driver, the trailer recipe, the rev limiter, the rest formula and which cast meets it, rollover, grip by surface, disabling rather than destroying a wheel, a parked vehicle's spinning wheels) and its index line; game-building's vehicle line and `prefabs-and-levels`' vehicle prefab recipe; game-debugging's `physics.vehicleInfo` line; add-automation-method's Runtime list; the regenerated references (`Methods.json`, `Automation.md`, `ScriptAPI.md`, `Engine.d.luau` and `catalog.json`). The Backlog is unchanged by this wave: it defers nothing.
+
+### Stats and perf
+
+None: M44 adds no metric (decision 4.3), so `Perf.py` has no part of M44's to run.
+
 ## Before milestone completion
 
 - [x] W44.1 committed: its first checkpoint `MassProperties`, then the world's vehicles. [x] The lead's review pass taken and every finding fixed.
 - [x] W44.2 committed. [x] The lead's review pass taken and every finding fixed.
-- [ ] W44.3 committed. [ ] The lead's review pass taken and every finding fixed.
+- [x] W44.3 committed. [ ] The lead's review pass taken and every finding fixed.
 - [ ] The milestone end: `milestone/m44` merged current main, and one independent review of the milestone diff, with every finding fixed.
 - [ ] The landing:
   - phase 8's batch, second in train order, merged over M43's regions;

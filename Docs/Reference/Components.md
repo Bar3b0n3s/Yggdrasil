@@ -2185,7 +2185,11 @@ Script members of `WheeledVehicle`:
 | `EngineInertia` | proxy field | `number` | read/write | All | The moment of inertia of the engine's turning parts. |
 | `Gear` | proxy field | `number` | read/write | All | Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has. |
 | `GearRatios` | proxy field | `{number}` | read/write | All | The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears. |
+| `GetEngineRpm` | method | `(self: WheeledVehicle) -> number` |  | All | The engine's revolutions per minute after the last physics step, between MinRpm and MaxRpm. |
+| `GetGear` | method | `(self: WheeledVehicle) -> number` |  | All | The gear the transmission is in after the last physics step: 1 and up forward, -1 and down reverse, 0 neutral. In Manual it follows Gear (clamped to the ratios); in Auto the transmission chooses it. |
+| `GetSpeed` | method | `(self: WheeledVehicle) -> number` |  | All | The body's speed along its forward (local -Z) in metres per second after the last physics step, negative while it rolls backward. |
 | `HandBrake` | proxy field | `number` | read/write | All | The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque. |
+| `IsShifting` | method | `(self: WheeledVehicle) -> boolean` |  | All | Whether a gear change is in progress after the last physics step (an Auto shift's SwitchTime and ClutchReleaseTime). |
 | `MaxPitchRollAngle` | proxy field | `number` | read/write | All | How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it. |
 | `MaxRpm` | proxy field | `number` | read/write | All | The engine's largest RPM, which it never exceeds. |
 | `MaxTorque` | proxy field | `number` | read/write | All | The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM. |
@@ -2233,7 +2237,15 @@ Script members of `VehicleWheel`:
 | Member | Kind | Signature | Access | Modes | Description |
 |---|---|---|---|---|---|
 | `AngularDamping` | proxy field | `number` | read/write | All | How quickly the wheel's spin slows down by itself, per second. |
+| `GetAngularVelocity` | method | `(self: VehicleWheel) -> number` |  | All | The wheel's spin speed about its axle in degrees per second after the last physics step, positive rolling forward. |
+| `GetContact` | method | `(self: VehicleWheel) -> (vector?, vector?, Entity?)` |  | All | Where the wheel touched the ground in the last physics step: the world point, the ground's normal and the collider entity (nil when that collider or its body's owner is disabled or destroyed); three nils while the wheel is in the air. Physics.GetSurface reads that collider's friction. |
+| `GetRotation` | method | `(self: VehicleWheel) -> number` |  | All | The wheel's spin about its axle in degrees, in [0, 360), after the last physics step. |
+| `GetSlip` | method | `(self: VehicleWheel) -> (number, number)` |  | All | The tyre's slip in the last physics step, 0 and 0 in the air: the longitudinal slip ratio (how far the tread's speed differs from the ground's, relative to it: 0 rolling freely, larger as the wheel spins or locks) and the lateral slip angle in degrees, in [0, 90], which LongitudinalFriction and LateralFriction turn into grip. |
+| `GetSteerAngle` | method | `(self: VehicleWheel) -> number` |  | All | The wheel's steer angle in degrees after the last physics step, positive to the right as Steering is (Steering times MaxSteerAngle). |
+| `GetSuspensionForce` | method | `(self: VehicleWheel) -> number` |  | All | The force the suspension pushed the body with in the last physics step, in newtons (0 in the air). |
+| `GetSuspensionLength` | method | `(self: VehicleWheel) -> number` |  | All | The suspension's length in metres after the last physics step, from its attachment point to the wheel's centre: SuspensionMaxLength in the air, shorter as the spring compresses, never below SuspensionMinLength. |
 | `Inertia` | proxy field | `number` | read/write | All | The wheel's moment of inertia about its axle. |
+| `IsTouching` | method | `(self: VehicleWheel) -> boolean` |  | All | Whether the wheel's cast found ground within its suspension in the last physics step. |
 | `LateralFriction` | proxy field | `{{X: number, Y: number}}` | read/write | All | The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys. |
 | `LongitudinalFriction` | proxy field | `{{X: number, Y: number}}` | read/write | All | The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys. |
 | `MaxBrakeTorque` | proxy field | `number` | read/write | All | The brake's torque at a full Brake, in newton metres. |

@@ -8,7 +8,9 @@ test_belt_carries_a_character_that_reports_its_ground_collider covers M36's Coll
 0053-m36-contact-surfaces.md): physics.bodyInfo's groundCollider, a surface velocity written through entity.update, and
 PHYSICS_SURFACE_UNUSED; test_body_info_reports_a_squeezed_character covers its W36.2 squeeze (physics.bodyInfo's
 squeezed and squeezedBy). test_joint_info_reads_a_joint_in_play reads physics.jointInfo (M37,
-Docs/Decisions/0054-m37-joints.md decision 10) and its errors.
+Docs/Decisions/0054-m37-joints.md decision 10) and its errors. test_vehicle_info_reads_a_vehicle_in_play reads
+physics.vehicleInfo (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), through a vehicle and a wheel,
+and its errors.
 """
 
 from __future__ import annotations
@@ -268,6 +270,74 @@ class PhysicsTests(AutomationTestCase):
             client.call("physics.jointInfo", {"entity": "/Plain"})
         self.assert_engine_error(no_joint.exception, engine_client.NOT_FOUND, "NotFound")
         self.assertEqual(no_joint.exception.issues[0]["pointer"], "/entity")
+        client.call("play.stop")
+
+    def test_vehicle_info_reads_a_vehicle_in_play(self) -> None:
+        client, _ = self.open_editor_with_scene()
+        wheels = {"FL": [-0.9, -0.5, -1.4], "FR": [0.9, -0.5, -1.4], "RL": [-0.9, -0.5, 1.4], "RR": [0.9, -0.5, 1.4]}
+        ops = [
+            {"method": "entity.create", "params": {"name": "Ground", "components": {
+                "Transform": {"Translation": [0, -0.5, 0]}, "RigidBody": {"Type": "Static"},
+                "BoxCollider": {"HalfExtents": [100, 0.5, 100]}}}},
+            {"method": "entity.create", "params": {"name": "Buggy", "components": {
+                "Transform": {"Translation": [0, 1, 0]}, "RigidBody": {"Type": "Dynamic", "Mass": 1200},
+                "BoxCollider": {"HalfExtents": [0.9, 0.25, 2]}}}},
+        ]
+        for name, position in wheels.items():
+            ops.append({"method": "entity.create", "params": {"name": name, "parent": "/Buggy", "components": {
+                "Transform": {"Translation": position},
+                "VehicleWheel": {"Radius": 0.4, "Width": 0.3, "MaxSteerAngle": 35 if name.startswith("F") else 0}}}})
+        # Full throttle with half a right lock, the rear wheels driven.
+        ops.append({"method": "entity.update", "params": {"entity": "/Buggy", "components": {"WheeledVehicle": {
+            "Throttle": 1, "Steering": 0.5,
+            "Differentials": [{"LeftWheel": "/Buggy/RL", "RightWheel": "/Buggy/RR"}]}}}})
+        ops.append({"method": "entity.create", "params": {"name": "Plain"}})
+        client.call("edit.batch", {"label": "Vehicles", "ops": ops})
+
+        # Vehicles are in force only in a play session.
+        with self.assertRaises(engine_client.EngineError) as not_playing:
+            client.call("physics.vehicleInfo", {"entity": "/Buggy"})
+        self.assert_engine_error(not_playing.exception, engine_client.INVALID_STATE, "InvalidState")
+
+        client.call("play.start", {"mode": "simulate", "lockstep": True})
+        client.call("play.step", {"ticks": 90, "render": "none"})
+        info = client.call("physics.vehicleInfo", {"entity": "/Buggy"})
+        self.assertEqual(info["entity"]["name"], "Buggy")
+        self.assertEqual(info["body"]["name"], "Buggy")
+        self.assertTrue(info["created"])
+        self.assertGreater(info["speed"], 1.0)
+        self.assertGreaterEqual(info["engineRpm"], 1000.0)
+        self.assertGreaterEqual(info["gear"], 1)
+        self.assertGreaterEqual(info["clutch"], 0.0)
+        self.assertLessEqual(info["clutch"], 1.0)
+        self.assertIsInstance(info["shifting"], bool)
+        self.assertEqual(info["tick"], 90)
+        self.assertEqual([wheel["entity"]["name"] for wheel in info["wheels"]], list(wheels))
+        for wheel in info["wheels"]:
+            self.assertTrue(wheel["touching"])
+            self.assertAlmostEqual(wheel["point"][1], 0.0, delta=0.05)
+            self.assertGreater(wheel["normal"][1], 0.99)
+            self.assertEqual(wheel["collider"]["name"], "Ground")
+            self.assertLess(wheel["suspensionLength"], 0.5)
+            self.assertGreater(wheel["suspensionForce"], 1000.0)
+            self.assertGreaterEqual(wheel["rotation"], 0.0)
+            self.assertLess(wheel["rotation"], 360.0)
+            self.assertGreater(wheel["angularVelocity"], 0.0)
+            self.assertGreaterEqual(wheel["longitudinalSlip"], 0.0)
+            self.assertGreaterEqual(wheel["lateralSlip"], 0.0)
+        # The steer reads positive to the right, as Steering does.
+        self.assertAlmostEqual(info["wheels"][0]["steerAngle"], 17.5, delta=0.01)
+        self.assertEqual(info["wheels"][2]["steerAngle"], 0.0)
+
+        # A wheel names its vehicle.
+        by_wheel = client.call("physics.vehicleInfo", {"entity": "/Buggy/RR"})
+        self.assertEqual(by_wheel["entity"]["name"], "Buggy")
+
+        # An entity that is neither a vehicle nor a wheel has no vehicle.
+        with self.assertRaises(engine_client.EngineError) as no_vehicle:
+            client.call("physics.vehicleInfo", {"entity": "/Plain"})
+        self.assert_engine_error(no_vehicle.exception, engine_client.NOT_FOUND, "NotFound")
+        self.assertEqual(no_vehicle.exception.issues[0]["pointer"], "/entity")
         client.call("play.stop")
 
 

@@ -18253,6 +18253,211 @@
 			]
 		},
 		{
+			"name": "physics.vehicleInfo",
+			"domain": "physics",
+			"description": "Reports the vehicle (WheeledVehicle) an entity of the play scene holds or is a wheel of: its body, whether it is in force, its speed, engine RPM, gear, clutch and shifting, and each wheel's contact (point, normal, collider), suspension length and force, spin, steer and slip after the last physics step. Needs a play session.",
+			"exposeAsTool": false,
+			"mutates": false,
+			"supportsDryRun": false,
+			"availableInRuntime": true,
+			"availableInLauncher": false,
+			"pending": false,
+			"timeoutSeconds": 60,
+			"requiredParams": ["entity"],
+			"params": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PhysicsVehicleInfoParams",
+				"description": "The params of physics.vehicleInfo.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "An entity of the play scene holding a WheeledVehicle, or a VehicleWheel below one: 16 hex digits, a unique id prefix or a path.",
+						"type": "string"
+					},
+					"ifRevision": {
+						"description": "Optimistic concurrency: fail with Conflict unless the revision (_meta.revision) of the scene the request addresses (in the editor, the open scene its scene target names, else the active one) still equals this value.",
+						"type": "integer",
+						"minimum": 0
+					}
+				},
+				"additionalProperties": false,
+				"required": ["entity"],
+				"$defs": {}
+			},
+			"result": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"title": "PhysicsVehicleInfoResult",
+				"description": "The vehicle an entity of the play scene holds or is a wheel of, as the play session holds it.",
+				"type": "object",
+				"properties": {
+					"entity": {
+						"description": "The vehicle's entity (its WheeledVehicle's), whether the vehicle or one of its wheels was asked about.",
+						"$ref": "#/$defs/EntitySummary"
+					},
+					"body": {
+						"description": "The owner of the vehicle's body (its own entity) as {id, name, path}; null when its RigidBody makes no Dynamic body."
+					},
+					"created": {
+						"description": "Whether the vehicle is in force; false for one refused (PHYSICS_VEHICLE_INVALID), disabled or not made yet, whose readings are 0.",
+						"type": "boolean"
+					},
+					"speed": {
+						"description": "The body's speed along its forward (local -Z) in metres per second after the last physics step, negative backward.",
+						"type": "number"
+					},
+					"engineRpm": {
+						"description": "The engine's revolutions per minute after the last physics step.",
+						"type": "number"
+					},
+					"gear": {
+						"description": "The transmission's gear after the last physics step: positive forward, negative reverse, 0 neutral.",
+						"type": "integer",
+						"minimum": -2147483648,
+						"maximum": 2147483647
+					},
+					"clutch": {
+						"description": "The clutch's friction after the last physics step, in [0, 1] (1 engaged).",
+						"type": "number"
+					},
+					"shifting": {
+						"description": "Whether a gear change is in progress after the last physics step.",
+						"type": "boolean"
+					},
+					"wheels": {
+						"description": "The vehicle's wheels in its wheel order (canonical order below the vehicle).",
+						"type": "array",
+						"items": {
+							"$ref": "#/$defs/PhysicsVehicleWheelSummary"
+						}
+					},
+					"tick": {
+						"description": "The play session's tick when the vehicle was read.",
+						"type": "integer",
+						"minimum": 0,
+						"maximum": 4294967295
+					},
+					"_meta": {
+						"description": "The diagnostics delta every response carries: revision, dirty, undoLabel, tick, playState, diagnostics. The editor's revision advances with every change to the open scene or the project settings; asset and script files are outside it, so writing one alone leaves it unchanged. The Runtime's is its play scene's.",
+						"type": "object"
+					},
+					"dryRun": {
+						"description": "Present and true when the call was a dry run.",
+						"type": "boolean"
+					}
+				},
+				"additionalProperties": false,
+				"$defs": {
+					"EntitySummary": {
+						"description": "An entity's canonical id with its readable name and path.",
+						"type": "object",
+						"properties": {
+							"id": {
+								"description": "The entity's id: 16 lowercase hex digits.",
+								"type": "string"
+							},
+							"name": {
+								"description": "The entity's name.",
+								"type": "string"
+							},
+							"path": {
+								"description": "The entity's path from the scene root, such as \"/Game/Board\".",
+								"type": "string"
+							}
+						},
+						"additionalProperties": false
+					},
+					"PhysicsVehicleWheelSummary": {
+						"description": "One wheel of a vehicle, after the last physics step.",
+						"type": "object",
+						"properties": {
+							"entity": {
+								"description": "The wheel's entity (its VehicleWheel's).",
+								"$ref": "#/$defs/EntitySummary"
+							},
+							"touching": {
+								"description": "Whether the wheel's cast found ground within its suspension.",
+								"type": "boolean"
+							},
+							"point": {
+								"description": "Where the wheel touches the ground, in world space and metres; zero in the air.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"normal": {
+								"description": "The ground's normal at that point; zero in the air.",
+								"type": "array",
+								"prefixItems": [
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									},
+									{
+										"type": "number"
+									}
+								],
+								"minItems": 3,
+								"maxItems": 3
+							},
+							"collider": {
+								"description": "The collider entity the wheel stands on, as {id, name, path}; null in the air, and when that collider or its body's owner is disabled or destroyed."
+							},
+							"suspensionLength": {
+								"description": "The suspension's length in metres, from its attachment point to the wheel's centre (SuspensionMaxLength in the air).",
+								"type": "number"
+							},
+							"suspensionForce": {
+								"description": "The force the suspension pushed the body with, in newtons.",
+								"type": "number"
+							},
+							"rotation": {
+								"description": "The wheel's spin about its axle in degrees, in [0, 360).",
+								"type": "number"
+							},
+							"steerAngle": {
+								"description": "The wheel's steer angle in degrees, positive to the right as Steering is.",
+								"type": "number"
+							},
+							"angularVelocity": {
+								"description": "The wheel's spin speed about its axle in degrees per second, positive rolling forward.",
+								"type": "number"
+							},
+							"longitudinalSlip": {
+								"description": "The longitudinal slip ratio: how far the tread's speed differs from the ground's, relative to it (0 rolling freely).",
+								"type": "number"
+							},
+							"lateralSlip": {
+								"description": "The lateral slip angle in degrees, in [0, 90].",
+								"type": "number"
+							}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"examples": [
+				{
+					"description": "Check that the buggy's four wheels touch the ground.",
+					"params": {
+						"entity": "/Buggy"
+					}
+				}
+			]
+		},
+		{
 			"name": "physics2d.bodyInfo",
 			"domain": "physics2d",
 			"description": "Reports the 2D physics body of an entity of the play scene (the body it owns, or the compound its colliders belong to): type, layer, colliders, position and angle in the XY plane, velocities, sleeping state, bounds and active contacts. Needs a play session.",

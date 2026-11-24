@@ -597,6 +597,16 @@
 			]
 		},
 		{
+			"File": "Vehicles.jsonl",
+			"IdSeed": 4101,
+			"Renderer": "none"
+		},
+		{
+			"File": "VehiclesReplay.jsonl",
+			"IdSeed": 4102,
+			"Renderer": "none"
+		},
+		{
 			"File": "Suites.jsonl",
 			"IdSeed": 1515,
 			"Renderer": "none"

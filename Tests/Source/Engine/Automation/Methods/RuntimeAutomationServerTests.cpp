@@ -34,6 +34,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <format>
 #include <functional>
@@ -627,7 +628,7 @@ namespace Engine {
 			const MethodRegistry& methods = fixture.GetServer().GetMethods();
 			for (const char* name : { "session.hello", "session.info", "session.shutdown", "rpc.discover", "scene.tree", "scene.query", "scene.get",
 					 "entity.get", "entity.bounds", "log.read", "events.read", "play.pause", "play.resume", "play.step", "play.state",
-					 "play.setTimeScale", "play.setWorldPaused", "input.inject", "viewport.screenshot", "physics.bodyInfo", "physics.jointInfo", "audio.stats", "stats.get",
+					 "play.setTimeScale", "play.setWorldPaused", "input.inject", "viewport.screenshot", "physics.bodyInfo", "physics.jointInfo", "physics.vehicleInfo", "audio.stats", "stats.get",
 					 "script.eval", "script.errors", "play.waitFor", "input.record", "input.replay", "physics2d.raycast", "physics2d.overlap", "physics2d.bodyInfo",
 					 "ui.tree" })
 			{
@@ -859,6 +860,60 @@ namespace Engine {
 			const Json post = fixture.Call("physics.jointInfo", Json{ { "entity", "/Post" } });
 			CHECK(RuntimeServerFixture::GetErrorCode(post) == static_cast<int64_t>(RpcErrorCode::NotFound));
 			CHECK(post["error"]["data"]["issues"][0]["pointer"] == Json("/entity"));
+		}
+
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): physics.vehicleInfo is in the Runtime subset and reads the
+		// Runtime's own session, through its host's context: a cart on two wheels, which the session made at tick 0, asked about
+		// through itself and through a wheel, and the ground, which is neither a vehicle nor a wheel.
+		TEST_CASE("RuntimeAutomationServer: physics.vehicleInfo reports a vehicle of the Runtime's session")
+		{
+			RuntimeServerFixture fixture({ .GameName = "Tiny" }, [](Scene& scene)
+			{
+				Entity ground = scene.CreateEntity("Ground");
+				ground.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, -0.5f, 0.0f);
+				});
+				ground.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+				ground.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(10.0f, 0.5f, 10.0f) });
+				Entity cart = scene.CreateEntity("Cart");
+				cart.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 1.0f, 0.0f);
+				});
+				cart.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
+				cart.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(0.5f, 0.25f, 1.0f) });
+				std::array<UUID, 2> wheels{};
+				for (size_t index = 0; index < wheels.size(); ++index)
+				{
+					Entity wheel = scene.CreateEntity(index == 0 ? "Left" : "Right", cart);
+					wheel.Patch<TransformComponent>([index](TransformComponent& transform)
+					{
+						transform.Translation = glm::vec3(index == 0 ? -0.6f : 0.6f, -0.5f, 0.0f);
+					});
+					wheel.AddComponent<VehicleWheelComponent>();
+					wheels[index] = wheel.GetUUID();
+				}
+				cart.AddComponent<WheeledVehicleComponent>(WheeledVehicleComponent{ .Differentials = { VehicleDifferential{ .LeftWheel = wheels[0], .RightWheel = wheels[1] } } });
+			});
+			const Json info = fixture.Call("physics.vehicleInfo", Json{ { "entity", "/Cart" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(info) == 0, info.dump());
+			const Json& result = info["result"];
+			CHECK(result["entity"]["name"] == Json("Cart"));
+			CHECK(result["body"]["name"] == Json("Cart"));
+			CHECK(result["created"] == Json(true));
+			CHECK(JsonReader(result["engineRpm"]).ReadFloat().value_or(0.0f) == doctest::Approx(1000.0f));
+			REQUIRE(result["wheels"].size() == 2);
+			CHECK(result["wheels"][0]["entity"]["path"] == Json("/Cart/Left"));
+			CHECK(result["wheels"][1]["entity"]["path"] == Json("/Cart/Right"));
+			CHECK(result["tick"] == Json(0));
+			// A wheel's entity names its vehicle.
+			const Json byWheel = fixture.Call("physics.vehicleInfo", Json{ { "entity", "/Cart/Right" } });
+			REQUIRE_MESSAGE(RuntimeServerFixture::GetErrorCode(byWheel) == 0, byWheel.dump());
+			CHECK(byWheel["result"]["entity"]["name"] == Json("Cart"));
+			const Json ground = fixture.Call("physics.vehicleInfo", Json{ { "entity", "/Ground" } });
+			CHECK(RuntimeServerFixture::GetErrorCode(ground) == static_cast<int64_t>(RpcErrorCode::NotFound));
+			CHECK(ground["error"]["data"]["issues"][0]["pointer"] == Json("/entity"));
 		}
 
 		// M21's milestone review (Docs/Decisions/0032-m21-contract.md decisions 15 and 27): physics2d.raycast, physics2d.overlap

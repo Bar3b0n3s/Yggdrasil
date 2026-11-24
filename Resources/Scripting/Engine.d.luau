@@ -1940,8 +1940,24 @@ end
 declare extern type VehicleWheel with
 	-- How quickly the wheel's spin slows down by itself, per second. [All modes; Runtime|Test; pure/read; setter mutates]
 	AngularDamping: number
+	-- The wheel's spin speed about its axle in degrees per second after the last physics step, positive rolling forward. [All modes; Runtime|Test; pure/read]
+	GetAngularVelocity: (self: VehicleWheel) -> number
+	-- Where the wheel touched the ground in the last physics step: the world point, the ground's normal and the collider entity (nil when that collider or its body's owner is disabled or destroyed); three nils while the wheel is in the air. Physics.GetSurface reads that collider's friction. [All modes; Runtime|Test; pure/read]
+	GetContact: (self: VehicleWheel) -> (vector?, vector?, Entity?)
+	-- The wheel's spin about its axle in degrees, in [0, 360), after the last physics step. [All modes; Runtime|Test; pure/read]
+	GetRotation: (self: VehicleWheel) -> number
+	-- The tyre's slip in the last physics step, 0 and 0 in the air: the longitudinal slip ratio (how far the tread's speed differs from the ground's, relative to it: 0 rolling freely, larger as the wheel spins or locks) and the lateral slip angle in degrees, in [0, 90], which LongitudinalFriction and LateralFriction turn into grip. [All modes; Runtime|Test; pure/read]
+	GetSlip: (self: VehicleWheel) -> (number, number)
+	-- The wheel's steer angle in degrees after the last physics step, positive to the right as Steering is (Steering times MaxSteerAngle). [All modes; Runtime|Test; pure/read]
+	GetSteerAngle: (self: VehicleWheel) -> number
+	-- The force the suspension pushed the body with in the last physics step, in newtons (0 in the air). [All modes; Runtime|Test; pure/read]
+	GetSuspensionForce: (self: VehicleWheel) -> number
+	-- The suspension's length in metres after the last physics step, from its attachment point to the wheel's centre: SuspensionMaxLength in the air, shorter as the spring compresses, never below SuspensionMinLength. [All modes; Runtime|Test; pure/read]
+	GetSuspensionLength: (self: VehicleWheel) -> number
 	-- The wheel's moment of inertia about its axle. [All modes; Runtime|Test; pure/read; setter mutates]
 	Inertia: number
+	-- Whether the wheel's cast found ground within its suspension in the last physics step. [All modes; Runtime|Test; pure/read]
+	IsTouching: (self: VehicleWheel) -> boolean
 	-- The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys. [All modes; Runtime|Test; pure/read; setter mutates]
 	LateralFriction: {{X: number, Y: number}}
 	-- The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys. [All modes; Runtime|Test; pure/read; setter mutates]
@@ -1992,8 +2008,16 @@ declare extern type WheeledVehicle with
 	Gear: number
 	-- The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears. [All modes; Runtime|Test; pure/read; setter mutates]
 	GearRatios: {number}
+	-- The engine's revolutions per minute after the last physics step, between MinRpm and MaxRpm. [All modes; Runtime|Test; pure/read]
+	GetEngineRpm: (self: WheeledVehicle) -> number
+	-- The gear the transmission is in after the last physics step: 1 and up forward, -1 and down reverse, 0 neutral. In Manual it follows Gear (clamped to the ratios); in Auto the transmission chooses it. [All modes; Runtime|Test; pure/read]
+	GetGear: (self: WheeledVehicle) -> number
+	-- The body's speed along its forward (local -Z) in metres per second after the last physics step, negative while it rolls backward. [All modes; Runtime|Test; pure/read]
+	GetSpeed: (self: WheeledVehicle) -> number
 	-- The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque. [All modes; Runtime|Test; pure/read; setter mutates]
 	HandBrake: number
+	-- Whether a gear change is in progress after the last physics step (an Auto shift's SwitchTime and ClutchReleaseTime). [All modes; Runtime|Test; pure/read]
+	IsShifting: (self: WheeledVehicle) -> boolean
 	-- How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it. [All modes; Runtime|Test; pure/read; setter mutates]
 	MaxPitchRollAngle: number
 	-- The engine's largest RPM, which it never exceeds. [All modes; Runtime|Test; pure/read; setter mutates]

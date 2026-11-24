@@ -16,9 +16,10 @@
 #include <format>
 #include <utility>
 
-// physics.bodyInfo (Docs/Decisions/0014-m11-decisions.md decision 18) and physics.jointInfo (M37,
-// Docs/Decisions/0054-m37-joints.md decision 10): reads of the play session's PhysicsSystem, mapped to the reflected results.
-// Shared by the Editor and the Runtime.
+// physics.bodyInfo (Docs/Decisions/0014-m11-decisions.md decision 18), physics.jointInfo (M37,
+// Docs/Decisions/0054-m37-joints.md decision 10) and physics.vehicleInfo (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md
+// decision 3): reads of the play session's PhysicsSystem, mapped to the reflected results. Shared by the Editor and the
+// Runtime.
 
 namespace Engine {
 
@@ -182,6 +183,51 @@ namespace Engine {
 			return result;
 		}
 
+		Result<PhysicsVehicleInfoResult> PhysicsVehicleInfo(AutomationMethodContext& context, const PhysicsVehicleInfoParams& params)
+		{
+			ENGINE_TRY_ASSIGN(PlaySession* const session, Utils::RequirePhysicsSession(context, "vehicles"));
+			Scene& scene = session->GetScene();
+			ENGINE_TRY_ASSIGN(const Entity entity, context.ResolveEntity(scene, params.Entity, "/entity"));
+			const std::optional<PhysicsVehicleReport> report = session->GetPhysics().GetVehicleInfo(entity.GetUUID());
+			if (!report.has_value())
+			{
+				return std::unexpected(Utils::MakeParamError(ErrorCode::NotFound, "/entity",
+					std::format("entity '{}' ({}) is neither a vehicle nor a wheel", entity.GetName(), entity.GetUUID().ToString()),
+					"a vehicle is a WheeledVehicle on a body's entity and its wheels are VehicleWheel entities below it; physics.bodyInfo "
+					"reports bodies"));
+			}
+
+			PhysicsVehicleInfoResult result;
+			result.Entity = Utils::SummarizeEntityId(context, scene, report->Entity);
+			result.Body = Utils::SummarizeNullableEntityId(context, scene, report->Body);
+			result.Created = report->Created;
+			result.Speed = report->Speed;
+			result.EngineRpm = report->EngineRpm;
+			result.Gear = report->Gear;
+			result.Clutch = report->Clutch;
+			result.Shifting = report->Shifting;
+			result.Wheels.reserve(report->Wheels.size());
+			for (const PhysicsVehicleWheelReport& wheel : report->Wheels)
+			{
+				result.Wheels.push_back(PhysicsVehicleWheelSummary{
+					.Entity = Utils::SummarizeEntityId(context, scene, wheel.Entity),
+					.Touching = wheel.Touching,
+					.Point = wheel.Point,
+					.Normal = wheel.Normal,
+					.Collider = Utils::SummarizeNullableEntityId(context, scene, wheel.Collider),
+					.SuspensionLength = wheel.SuspensionLength,
+					.SuspensionForce = wheel.SuspensionForce,
+					.Rotation = wheel.Rotation,
+					.SteerAngle = wheel.SteerAngle,
+					.AngularVelocity = wheel.AngularVelocity,
+					.LongitudinalSlip = wheel.LongitudinalSlip,
+					.LateralSlip = wheel.LateralSlip,
+				});
+			}
+			result.Tick = ToAutomationCounter(session->GetTick());
+			return result;
+		}
+
 	}
 
 	void RegisterPhysicsMethodTypes(TypeRegistry& registry)
@@ -264,6 +310,46 @@ namespace Engine {
 				"The torque the joint applied over the last collision step, in newton metres; 0 for a distance joint and while not in force.")
 			.Field("motor", &PhysicsJointInfoResult::Motor, "A hinge's or slider's motor; Off for distance and fixed joints.")
 			.Field("tick", &PhysicsJointInfoResult::Tick, "The play session's tick when the joint was read.");
+
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3).
+		registry.Struct<PhysicsVehicleInfoParams>("PhysicsVehicleInfoParams", "The params of physics.vehicleInfo.")
+			.Field("entity", &PhysicsVehicleInfoParams::Entity,
+				"An entity of the play scene holding a WheeledVehicle, or a VehicleWheel below one: 16 hex digits, a unique id prefix or a "
+				"path.");
+
+		registry.Struct<PhysicsVehicleWheelSummary>("PhysicsVehicleWheelSummary", "One wheel of a vehicle, after the last physics step.")
+			.Field("entity", &PhysicsVehicleWheelSummary::Entity, "The wheel's entity (its VehicleWheel's).")
+			.Field("touching", &PhysicsVehicleWheelSummary::Touching, "Whether the wheel's cast found ground within its suspension.")
+			.Field("point", &PhysicsVehicleWheelSummary::Point, "Where the wheel touches the ground, in world space and metres; zero in the air.")
+			.Field("normal", &PhysicsVehicleWheelSummary::Normal, "The ground's normal at that point; zero in the air.")
+			.Field("collider", &PhysicsVehicleWheelSummary::Collider,
+				"The collider entity the wheel stands on, as {id, name, path}; null in the air, and when that collider or its body's owner is "
+				"disabled or destroyed.")
+			.Field("suspensionLength", &PhysicsVehicleWheelSummary::SuspensionLength,
+				"The suspension's length in metres, from its attachment point to the wheel's centre (SuspensionMaxLength in the air).")
+			.Field("suspensionForce", &PhysicsVehicleWheelSummary::SuspensionForce, "The force the suspension pushed the body with, in newtons.")
+			.Field("rotation", &PhysicsVehicleWheelSummary::Rotation, "The wheel's spin about its axle in degrees, in [0, 360).")
+			.Field("steerAngle", &PhysicsVehicleWheelSummary::SteerAngle, "The wheel's steer angle in degrees, positive to the right as Steering is.")
+			.Field("angularVelocity", &PhysicsVehicleWheelSummary::AngularVelocity,
+				"The wheel's spin speed about its axle in degrees per second, positive rolling forward.")
+			.Field("longitudinalSlip", &PhysicsVehicleWheelSummary::LongitudinalSlip,
+				"The longitudinal slip ratio: how far the tread's speed differs from the ground's, relative to it (0 rolling freely).")
+			.Field("lateralSlip", &PhysicsVehicleWheelSummary::LateralSlip, "The lateral slip angle in degrees, in [0, 90].");
+
+		registry.Struct<PhysicsVehicleInfoResult>("PhysicsVehicleInfoResult", "The vehicle an entity of the play scene holds or is a wheel of, as the play session holds it.")
+			.Field("entity", &PhysicsVehicleInfoResult::Entity, "The vehicle's entity (its WheeledVehicle's), whether the vehicle or one of its wheels was asked about.")
+			.Field("body", &PhysicsVehicleInfoResult::Body,
+				"The owner of the vehicle's body (its own entity) as {id, name, path}; null when its RigidBody makes no Dynamic body.")
+			.Field("created", &PhysicsVehicleInfoResult::Created,
+				"Whether the vehicle is in force; false for one refused (PHYSICS_VEHICLE_INVALID), disabled or not made yet, whose readings are 0.")
+			.Field("speed", &PhysicsVehicleInfoResult::Speed,
+				"The body's speed along its forward (local -Z) in metres per second after the last physics step, negative backward.")
+			.Field("engineRpm", &PhysicsVehicleInfoResult::EngineRpm, "The engine's revolutions per minute after the last physics step.")
+			.Field("gear", &PhysicsVehicleInfoResult::Gear, "The transmission's gear after the last physics step: positive forward, negative reverse, 0 neutral.")
+			.Field("clutch", &PhysicsVehicleInfoResult::Clutch, "The clutch's friction after the last physics step, in [0, 1] (1 engaged).")
+			.Field("shifting", &PhysicsVehicleInfoResult::Shifting, "Whether a gear change is in progress after the last physics step.")
+			.Field("wheels", &PhysicsVehicleInfoResult::Wheels, "The vehicle's wheels in its wheel order (canonical order below the vehicle).")
+			.Field("tick", &PhysicsVehicleInfoResult::Tick, "The play session's tick when the vehicle was read.");
 	}
 
 	void RegisterPhysicsMethods(MethodRegistry& methods)
@@ -297,6 +383,22 @@ namespace Engine {
 				.Examples = { { .Description = "Read how far the trap door has opened.", .Params = jointExample } },
 			},
 			&Automation::PhysicsJointInfo);
+
+		// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3).
+		Json vehicleExample = Json::object();
+		vehicleExample["entity"] = "/Buggy";
+		methods.Add(
+			{
+				.Name = "physics.vehicleInfo",
+				.Description = "Reports the vehicle (WheeledVehicle) an entity of the play scene holds or is a wheel of: its body, whether it is "
+							   "in force, its speed, engine RPM, gear, clutch and shifting, and each wheel's contact (point, normal, collider), "
+							   "suspension length and force, spin, steer and slip after the last physics step. Needs a play session.",
+				.RequiredParams = { "entity" },
+				.AvailableInRuntime = true,
+				.AllowedInBatch = true,
+				.Examples = { { .Description = "Check that the buggy's four wheels touch the ground.", .Params = vehicleExample } },
+			},
+			&Automation::PhysicsVehicleInfo);
 	}
 
 }
