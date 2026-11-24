@@ -40,8 +40,8 @@
 // SkyLighting at the end of Ambient after LightClusters (the sky's LUTs, its run-time image-based light and the probes' relight,
 // rows SkyLuts, SkyIbl and ProbeRelight) and its Sky directly after Skybox in Forward (the procedural sky in the skybox's place,
 // row Sky; Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), declared by its W45.1 with their rows and target and
-// without pipelines, as M26's contract declared its passes, so nothing records them; W45.2 sets their PipelineCount and
-// Programs with the passes. M47's Water follows Sky.
+// without pipelines, as M26's contract declared its passes; W45.2 set their PipelineCount (9 and 1) and Programs with the
+// passes (87 pipelines), and W45.3 the relight's. M47's Water follows Sky.
 
 namespace Engine {
 
@@ -90,6 +90,7 @@ namespace Engine {
 		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger): the sky's lighting at the end
 		// of Ambient: its LUTs, its image-based light (the update when its key changed, the finalize and copies every frame) and
 		// the irradiance volumes' relight (Renderer/SkyLighting.h).
+		inline constexpr std::array<std::string_view, 2> SkyLightingPrograms = { "Sky", "EnvironmentBake" };
 		inline constexpr std::array<std::string_view, 3> SkyLightingRows = { "SkyLuts", "SkyIbl", "ProbeRelight" };
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger): one row per reflection slot, in rank order,
 		// each timing that slot's whole mirror view; the slots' reflections and the mirror views' prepass scratch; the program of
@@ -106,6 +107,7 @@ namespace Engine {
 		inline constexpr std::array<std::string_view, 1> SkyboxPrograms = { "Skybox" };
 		inline constexpr std::array<std::string_view, 1> SkyboxRows = { "Skybox" };
 		// M45 (decision 3): the procedural sky, drawn into SceneColor in the Skybox's place (Renderer/SkyPass.h).
+		inline constexpr std::array<std::string_view, 1> SkyPrograms = { "Sky" };
 		inline constexpr std::array<std::string_view, 1> SkyRows = { "Sky" };
 		// M26 (C26.1, R-SSR; decision 18, stream X-D): the Ssr program (Passes/Ssr.slang, Renderer/SsrPass.h).
 		inline constexpr std::array<std::string_view, 1> SsrPrograms = { "Ssr" };
@@ -202,8 +204,10 @@ namespace Engine {
 		// lighting for a Lit view, recorded after the light clusters and before the forward passes read it: the transmittance,
 		// multiple-scattering and sky-view LUTs (SkyLuts), the run-time image-based light and the copies of its results into the
 		// view's constant buffers (SkyIbl), and the relit irradiance volumes (ProbeRelight); no target (the LUTs, cubes and
-		// buffers are the view's SkyViewResources). Its pipelines land with W45.2.
-		{ .Name = "SkyLighting", .Stage = RenderStage::Ambient, .StatsRows = Detail::SkyLightingRows },
+		// buffers are the view's SkyViewResources). SkyLightingPass's pipelines: the Sky program's five computes and EnvironmentBake's
+		// four (CSDownsampleCube, CSPrefilterSpecular, CSProjectIrradiance, CSReduceIrradiance; the same SPIR-V as the import
+		// bake's); W45.3 adds the relight's.
+		{ .Name = "SkyLighting", .Stage = RenderStage::Ambient, .PipelineCount = 9, .Programs = Detail::SkyLightingPrograms, .StatsRows = Detail::SkyLightingRows },
 		// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger: first in the Forward stage, before
 		// ForwardOpaque): the planar reflections a Lit view draws (Renderer/PlanarReflections.h), each a mirror view of the
 		// scene rendered from the camera mirrored in its plane into its slot's PlanarReflectionColor, whose mips the main view's
@@ -220,9 +224,9 @@ namespace Engine {
 		{ .Name = "TerrainForward", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::TerrainPrograms, .StatsRows = Detail::TerrainForwardRows },
 		{ .Name = "Skybox", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::SkyboxPrograms, .StatsRows = Detail::SkyboxRows, .Targets = Detail::SceneColorTargets },
 		// M45 (decision 3; its ledger: directly after Skybox): the procedural sky (Renderer/SkyPass.h), one fullscreen triangle at
-		// depth 0 into SceneColor as the Skybox's, drawn in its place when the snapshot's Sky is enabled. Its pipeline lands with
-		// W45.2. M47's Water follows it.
-		{ .Name = "Sky", .Stage = RenderStage::Forward, .StatsRows = Detail::SkyRows, .Targets = Detail::SceneColorTargets },
+		// depth 0 into SceneColor as the Skybox's, drawn in its place when the snapshot's Sky lights the view and its camera clears
+		// to the skybox, in mirror views too. SkyPass's one pipeline of the program Sky. M47's Water follows it.
+		{ .Name = "Sky", .Stage = RenderStage::Forward, .PipelineCount = 1, .Programs = Detail::SkyPrograms, .StatsRows = Detail::SkyRows, .Targets = Detail::SceneColorTargets },
 		// M26 (C26.1, R-SSR; decisions 13 and 18): glossy reflections traced over the opaque image with the depth pyramid into
 		// SsrColor, falling back to the probes, composited into SceneColor before the transparent pass draws over them;
 		// recorded only with PostProcess's SsrEnabled. SsrPass's three pipelines of the program Ssr (stream X-D's trace and

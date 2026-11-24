@@ -40,6 +40,8 @@
 #include "Engine/Renderer/RenderStage.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Engine/Renderer/SkyAtmosphere.h"
+#include "Engine/Renderer/SkyLighting.h"
+#include "Engine/Renderer/SkyPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SsrPass.h"
 #include "Engine/Renderer/TaaPass.h"
@@ -141,7 +143,7 @@ namespace Engine {
 			+ ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount + GtaoPass::PipelineCount + LightClusterPass::PipelineCount
 			+ SelectionPass::PipelineCount + 1 + QuadBatcher::PipelineCount + UpscalePass::PipelineCount + SkinningPass::PipelineCount + Lights2DPass::PipelineCount
 			+ ExposurePass::PipelineCount + TaaPass::PipelineCount + SsrPass::PipelineCount + TerrainPass::PipelineCount
-			+ ParticlePass::PipelineCount + PlanarReflectionPass::PipelineCount);
+			+ ParticlePass::PipelineCount + PlanarReflectionPass::PipelineCount + SkyLightingPass::PipelineCount + SkyPass::PipelineCount);
 	// M42: the forward set binds one planar reflection per slot (Private/ForwardPipelines.h).
 	static_assert(Utils::PlanarReflectionSlotCount == MaxPlanarReflectionsPerView);
 	static_assert(SceneRendererPipelines::MeshPipelineCount == 2 * Utils::PrepassVariantCount + Utils::ForwardVariantCount + Utils::MeshCullModeCount);
@@ -627,13 +629,17 @@ namespace Engine {
 		// neutral black reflection.
 		ENGINE_TRY_ASSIGN(created.PlanarReflections, PlanarReflectionPass::Create(device, pipelines));
 		ENGINE_TRY_ASSIGN(created.EmptyPlanarReflection, Utils::CreateSceneNeutralTexture(device, SceneColorFormat, false, 0.0f));
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's lighting computes and its pass.
+		ENGINE_TRY_ASSIGN(created.SkyLighting, SkyLightingPass::Create(device, pipelines));
+		ENGINE_TRY_ASSIGN(created.Sky, SkyPass::Create(device, pipelines));
 		created.PipelineCount = MeshPipelineCount + created.Skybox->GetPipelineCount() + created.Bloom->GetPipelineCount()
 			+ created.Tonemap->GetPipelineCount() + created.Fxaa->GetPipelineCount() + created.Debug->GetPipelineCount()
 			+ created.Text->GetPipelineCount() + created.DfgLut->GetPipelineCount() + ShadowPass::PipelineCount + DepthPyramidPass::PipelineCount
 			+ GtaoPass::PipelineCount + LightClusterPass::PipelineCount + SkinningPass::PipelineCount + SelectionPass::PipelineCount + 1
 			+ created.Quads->GetPipelineCount() + created.Upscale->GetPipelineCount() + created.Lights2D->GetPipelineCount()
 			+ created.Exposure->GetPipelineCount() + created.Taa->GetPipelineCount() + created.Ssr->GetPipelineCount()
-			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount() + PlanarReflectionPass::PipelineCount;
+			+ created.Terrain->GetPipelineCount() + created.Particles->GetPipelineCount() + PlanarReflectionPass::PipelineCount
+			+ created.SkyLighting->GetPipelineCount() + created.Sky->GetPipelineCount();
 
 		// Every creation succeeded: the new passes replace the current ones, and the set keeps its back-references and its
 		// registration (moving an empty registration over another calls nothing on the registry, so this also runs inside a
@@ -676,6 +682,8 @@ namespace Engine {
 		Utils::AppendDescriptions(descriptions, TerrainPass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, ParticlePass::GetLayoutDescriptions());
 		Utils::AppendDescriptions(descriptions, PlanarReflectionPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, SkyLightingPass::GetLayoutDescriptions());
+		Utils::AppendDescriptions(descriptions, SkyPass::GetLayoutDescriptions());
 		descriptions.push_back(Utils::GetSceneDataViewLayout());
 		return descriptions;
 	}
@@ -831,12 +839,15 @@ namespace Engine {
 		SsrBindings.Clear();
 		TaaBindings.Clear();
 		ReflectionBindings.Clear();
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the Sky pass's sets (the view's targets and constants).
+		SkyBindings.Clear();
 	}
 
 	void SceneRenderer::State::ClearBindings()
 	{
 		ClearTargetBindings();
 		LightClusterBindings.Clear();
+		SkyLightingBindings.Clear(); // M45: made for the sky's computes' layouts
 		// M42: the mirror views' terrain sets, made for the terrain pass's set-1 layout.
 		for (Detail::SceneRendererReflectionSlot& slot : ReflectionSlots)
 			slot.TerrainResources.Bindings.Clear();
@@ -870,6 +881,8 @@ namespace Engine {
 		SsrBindings.ReleaseUnused();
 		TaaBindings.ReleaseUnused();
 		ReflectionBindings.ReleaseUnused();
+		SkyLightingBindings.ReleaseUnused();
+		SkyBindings.ReleaseUnused();
 		UpscaleBindings.ReleaseUnused();
 		UiQuadBindings.ReleaseUnused();
 		ParticleBindings.ReleaseUnused();
@@ -1474,6 +1487,7 @@ namespace Engine {
 		stats.DroppedPlanarReflections = frame.DroppedPlanarReflections;
 		stats.CulledPlanarReflections = frame.CulledPlanarReflections;
 		stats.PlanarReflectionEntities = std::move(frame.PlanarReflectionEntities);
+		stats.SkyUpdates = frame.SkyUpdates; // M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3)
 		for (const RenderPassStats& pass : stats.Passes)
 			if (pass.Name == "DirectionalShadows" || pass.Name == "SpotShadows" || pass.Name == "PointShadows")
 				stats.ShadowDraws += pass.DrawCalls;
@@ -1864,18 +1878,22 @@ namespace Engine {
 				sources[selected[position]] = selectedSources[position];
 			frame.SelectionDraws = SelectionPass::PrepareDraws(*Cache, snapshot, snapshot.Quality.Instancing, Instances, sources);
 		}
-		const GpuEnvironment* environment = hasCamera && frame.IsLit && !frame.Wireframe ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
-		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
+		const bool environmentLit = hasCamera && frame.IsLit && !frame.Wireframe;
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; SceneRendererSky.cpp): an enabled Sky lights the view in
+		// the Environment's place: its constants (the SH9 the sky's GPU copy fills) and its specular cube at t3.
+		PrepareSky(frame, snapshot, camera, environmentLit);
+		const GpuEnvironment* environment = environmentLit && !frame.Sky ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
+		frame.Environment = frame.Sky ? Utils::MakeSkyEnvironmentConstants(snapshot.Sky) : Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog, in the views that light with the environment.
-		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the glow follows a Sky's Sun.
-		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, GetSkyGlowLight(snapshot), frame.Environment,
-			hasCamera && frame.IsLit && !frame.Wireframe);
-		frame.EnvironmentSpecular = environment != nullptr ? environment->Specular : Pipelines->BlackCube;
+		// M45: the glow follows a Sky's Sun (with a Sky, the fog's tinted colour is the sky's GPU copy's).
+		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, GetSkyGlowLight(snapshot), frame.Environment, environmentLit);
+		frame.EnvironmentSpecular = frame.Sky ? SkyResources->Specular : (environment != nullptr ? environment->Specular : Pipelines->BlackCube);
 		frame.EnvironmentSkybox = environment != nullptr ? environment->Skybox : nvrhi::TextureHandle();
 		// M32's milestone review: a view whose cleared pixels no skybox draws over has its clear colour for a sky, which the
-		// skybox pass fogs as the sky when the fog has FogSkybox.
+		// skybox pass fogs as the sky when the fog has FogSkybox. M45: the Sky pass draws them in a view the Sky lights.
 		frame.DrawsSkybox = frame.IsLit && frame.Camera.ClearToSkybox && frame.EnvironmentSkybox != nullptr && snapshot.Environment.ShowSkybox;
-		frame.Fog.SkyIsClearColor = frame.DrawsSkybox ? 0U : 1U;
+		frame.DrawsSky = frame.Sky && frame.Camera.ClearToSkybox;
+		frame.Fog.SkyIsClearColor = frame.DrawsSkybox || frame.DrawsSky ? 0U : 1U;
 		// M26 (C26.1, R-GI-PROBE; Docs/Decisions/0037-m26-contract.md decision 16; stream Q-B): the view's probes, in the views
 		// that light with the environment, never in a bake's captures (RenderQualitySettings::Probes false: one bounce).
 		frame.Probes = Utils::PrepareProbeShading(*Cache, snapshot, camera, hasCamera && frame.IsLit && !frame.Wireframe && snapshot.Quality.Probes);
@@ -2328,6 +2346,8 @@ namespace Engine {
 			}
 		}
 		RecordLightClusters(frame);
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the sky's LUTs, its image-based light and its copies.
+		RecordSkyLighting(frame);
 	}
 
 	Status SceneRenderer::State::EnsureLightClusterBuffers(uint32_t clusterCount, uint32_t wordCount)
@@ -2451,9 +2471,17 @@ namespace Engine {
 					recording.EndPass(counters);
 				}
 				// The skybox, or (M32's milestone review) in a view fogged with FogSkybox whose sky is its clear colour, the same pass
-				// drawing that colour fogged as the sky (the black cube bound in the skybox's place, unread).
-				const bool fogsClearSky = !frame.DrawsSkybox && frame.Fog.Enabled != 0 && frame.Fog.FogSkybox != 0;
-				if (frame.DrawsSkybox || fogsClearSky)
+				// drawing that colour fogged as the sky (the black cube bound in the skybox's place, unread). M45
+				// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the Sky in their place in a view it lights.
+				const bool fogsClearSky = !frame.DrawsSkybox && !frame.DrawsSky && frame.Fog.Enabled != 0 && frame.Fog.FogSkybox != 0;
+				if (frame.DrawsSky)
+				{
+					recording.BeginPass("Sky", &commandList);
+					const Status drawn = RecordSky(commandList, *Targets.ForwardFramebuffer, *ViewConstantsBuffer, *FogConstantsBuffer, std::nullopt);
+					recording.EndPass({ .DrawCalls = drawn ? 1U : 0U, .Triangles = drawn ? 1U : 0U });
+					frame.KeepFirstError(drawn);
+				}
+				else if (frame.DrawsSkybox || fogsClearSky)
 				{
 					recording.BeginPass("Skybox", &commandList);
 					const Status drawn = Pipelines->Skybox->Record(commandList, SkyboxBindings,

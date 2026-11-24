@@ -18,7 +18,9 @@ namespace Engine {
 			layout.visibility = nvrhi::ShaderType::Compute;
 			layout.registerSpace = 0;
 			layout.registerSpaceIsDescriptorSet = true;
-			layout.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(1), nvrhi::BindingLayoutItem::StructuredBuffer_UAV(6) };
+			// Every entry's reflection lists the program's push constants (SkyDispatchConstants), read or not.
+			layout.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(1), nvrhi::BindingLayoutItem::StructuredBuffer_UAV(6),
+				nvrhi::BindingLayoutItem::PushConstants(0, sizeof(SkyDispatchConstants)) };
 			return {
 				.Name = "SkyCopyWrite",
 				.Program = "Sky",
@@ -35,7 +37,7 @@ namespace Engine {
 			layout.registerSpace = 0;
 			layout.registerSpaceIsDescriptorSet = true;
 			layout.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(2), nvrhi::BindingLayoutItem::ConstantBuffer(4), nvrhi::BindingLayoutItem::ConstantBuffer(5),
-				nvrhi::BindingLayoutItem::StructuredBuffer_UAV(7) };
+				nvrhi::BindingLayoutItem::StructuredBuffer_UAV(7), nvrhi::BindingLayoutItem::PushConstants(0, sizeof(SkyDispatchConstants)) };
 			return {
 				.Name = "SkyCopyRead",
 				.Program = "Sky",

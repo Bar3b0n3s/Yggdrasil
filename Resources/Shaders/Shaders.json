@@ -393,6 +393,34 @@
 			"File": "Passes/Sky.slang",
 			"Entries": [
 				{
+					"Name": "CSTransmittanceLut",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSMultipleScatteringLut",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSSkyViewLut",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSSkyCube",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSSkyFinalize",
+					"Stage": "compute"
+				},
+				{
+					"Name": "VSMain",
+					"Stage": "vertex"
+				},
+				{
+					"Name": "PSMain",
+					"Stage": "fragment"
+				},
+				{
 					"Name": "CSTestCopyWrite",
 					"Stage": "compute"
 				},

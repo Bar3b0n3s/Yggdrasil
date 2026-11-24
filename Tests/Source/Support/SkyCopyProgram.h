@@ -12,13 +12,14 @@ namespace Engine {
 
 	namespace Test {
 
-		// Set 0: b1 SkyConstants (its Intensity seeds the values) and u6 the RWStructuredBuffer<float4> TestResults, which
-		// CSTestCopyWrite fills as the sky's computes fill a SkyResults buffer (Shared/SkyConstants.h).
+		// Set 0: b1 SkyConstants (its Intensity seeds the values), u6 the RWStructuredBuffer<float4> TestResults, which
+		// CSTestCopyWrite fills as the sky's computes fill a SkyResults buffer (Shared/SkyConstants.h), and the program's push
+		// constants (SkyDispatchConstants), which its reflection lists and it does not read.
 		[[nodiscard]] PipelineLayoutDescription MakeSkyCopyWriteLayoutDescription();
 
 		// Set 0: b2 EnvironmentConstants, b4 ProbeConstants and b5 FogConstants, the forward view's registers, and u7 the
 		// RWStructuredBuffer<float4> TestReadback, which CSTestCopyRead fills with what it reads of them (SkyCopyReadbackCount
-		// elements).
+		// elements), and the program's push constants, unread.
 		[[nodiscard]] PipelineLayoutDescription MakeSkyCopyReadLayoutDescription();
 
 		// The float4 elements CSTestCopyRead writes: EnvironmentConstants' twelve, FogConstants' first two, then each reflection

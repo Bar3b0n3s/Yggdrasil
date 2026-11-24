@@ -2,19 +2,39 @@
 
 #include "Engine/Renderer/SkyLighting.h"
 
+#include "Engine/Asset/EnvironmentData.h"
+#include "Engine/Asset/IEnvironmentBaker.h"
 #include "Engine/Graphics/FramePacer.h"
 #include "Engine/Graphics/GraphicsDevice.h"
+#include "Engine/Graphics/Image.h"
+#include "Engine/Graphics/Readback.h"
+#include "Engine/Renderer/EnvironmentBaker.h"
+#include "Engine/Renderer/PassBindingCache.h"
+#include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
+#include "Engine/Renderer/RenderSnapshot.h"
+#include "Engine/Renderer/RenderStats.h"
+#include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/SkyAtmosphere.h"
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/FogConstants.h"
 #include "Shared/ProbeConstants.h"
 #include "Shared/SkyConstants.h"
+#include "Support/BufferReadback.h"
 #include "Support/HeadlessGpuFixture.h"
+#include "Support/RenderReference.h"
 #include "Support/SkyCopyProgram.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/packing.hpp>
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <numbers>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -121,6 +141,164 @@ namespace Engine {
 			}
 		}
 
+		// The texels of level `mip`, layer `layer` of an RGBA16F `texture`, as linear values.
+		std::vector<glm::dvec4> ReadHalfTexels(GraphicsDevice& device, nvrhi::ITexture& texture, uint32_t mip = 0, uint32_t layer = 0)
+		{
+			Readback readback(device);
+			const Result<Image> image = readback.ReadTexture(texture, mip, layer);
+			REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+			std::vector<glm::dvec4> texels;
+			for (uint32_t y = 0; y < image->Height; ++y)
+			{
+				const std::span<const std::byte> row = image->GetRow(y);
+				for (uint32_t x = 0; x < image->Width; ++x)
+				{
+					std::array<uint16_t, 4> halves{};
+					std::memcpy(halves.data(), row.data() + static_cast<size_t>(x) * sizeof(halves), sizeof(halves));
+					texels.emplace_back(Test::HalfToDouble(halves[0]), Test::HalfToDouble(halves[1]), Test::HalfToDouble(halves[2]), Test::HalfToDouble(halves[3]));
+				}
+			}
+			return texels;
+		}
+
+		std::vector<glm::vec4> ReadVectors(GraphicsDevice& device, nvrhi::IBuffer& buffer, uint32_t count)
+		{
+			const Result<std::vector<std::byte>> bytes = Test::ReadBufferBytes(device, buffer, count * sizeof(glm::vec4));
+			REQUIRE_MESSAGE(bytes.has_value(), bytes.error().ToString());
+			std::vector<glm::vec4> vectors(count);
+			std::memcpy(vectors.data(), bytes->data(), count * sizeof(glm::vec4));
+			return vectors;
+		}
+
+		// The transmittance LUT's texel (x, y) on the CPU: Bruneton's mapping inverted at x / (width - 1), y / (height - 1), then
+		// the transmittance to the top in double (the ray of a texel never meets the ground; the last column grazes the horizon,
+		// so its cosine is raised past the ground's by 1e-9).
+		glm::dvec3 ComputeTransmittanceTexel(const SkyAtmosphere& atmosphere, uint32_t x, uint32_t y)
+		{
+			const double h = std::sqrt(SkyTopRadius * SkyTopRadius - SkyBottomRadius * SkyBottomRadius);
+			const double rho = h * (static_cast<double>(y) / (SkyTransmittanceLutHeight - 1));
+			const double r = std::sqrt(rho * rho + SkyBottomRadius * SkyBottomRadius);
+			const double dMin = SkyTopRadius - r;
+			const double dMax = rho + h;
+			const double d = dMin + (static_cast<double>(x) / (SkyTransmittanceLutWidth - 1)) * (dMax - dMin);
+			double mu = d == 0.0 ? 1.0 : std::clamp((h * h - rho * rho - d * d) / (2.0 * r * d), -1.0, 1.0);
+			const double horizon = -std::sqrt(std::max(1.0 - SkyBottomRadius * SkyBottomRadius / (r * r), 0.0));
+			mu = std::max(mu, horizon + 1e-9);
+			return ComputeSkyTransmittance(atmosphere, r, mu);
+		}
+
+		// CSMultipleScatteringLut's texel (x, y) in double, with the sun's transmittance exact rather than from the LUT.
+		glm::dvec3 ComputeMultipleScatteringTexel(const SkyAtmosphere& atmosphere, uint32_t x, uint32_t y)
+		{
+			const double pi = std::numbers::pi;
+			const double cosSun = static_cast<double>(x) / (SkyMultipleScatteringLutSize - 1) * 2.0 - 1.0;
+			const double unitHeight = std::clamp(static_cast<double>(y) / (SkyMultipleScatteringLutSize - 1), 0.0005, 0.9995);
+			const double r = SkyBottomRadius + unitHeight * (SkyTopRadius - SkyBottomRadius);
+			const glm::dvec3 sun(std::sqrt(std::max(1.0 - cosSun * cosSun, 0.0)), cosSun, 0.0);
+			const glm::dvec3 origin(0.0, r, 0.0);
+			const auto scatteringAt = [&atmosphere](double height)
+			{
+				return atmosphere.RayleighScattering * std::exp(-height / SkyRayleighScaleHeight) + glm::dvec3(atmosphere.MieScattering * std::exp(-height / SkyMieScaleHeight));
+			};
+			glm::dvec3 second(0.0);
+			glm::dvec3 transfer(0.0);
+			constexpr uint32_t Directions = 8;
+			constexpr uint32_t Steps = 20;
+			for (uint32_t i = 0; i < Directions; ++i)
+			{
+				for (uint32_t j = 0; j < Directions; ++j)
+				{
+					const double cosTheta = 1.0 - 2.0 * (i + 0.5) / Directions;
+					const double sinTheta = std::sqrt(std::max(1.0 - cosTheta * cosTheta, 0.0));
+					const double phi = 2.0 * pi * (j + 0.5) / Directions;
+					const glm::dvec3 direction(sinTheta * std::cos(phi), cosTheta, sinTheta * std::sin(phi));
+					const double groundDiscriminant = r * r * (cosTheta * cosTheta - 1.0) + SkyBottomRadius * SkyBottomRadius;
+					const bool ground = cosTheta < 0.0 && groundDiscriminant >= 0.0;
+					const double distance = ground ? std::max(-r * cosTheta - std::sqrt(std::max(groundDiscriminant, 0.0)), 0.0)
+												   : std::max(-r * cosTheta + std::sqrt(std::max(r * r * (cosTheta * cosTheta - 1.0) + SkyTopRadius * SkyTopRadius, 0.0)), 0.0);
+					const double step = distance / Steps;
+					glm::dvec3 throughput(1.0);
+					for (uint32_t k = 0; k < Steps; ++k)
+					{
+						const glm::dvec3 position = origin + direction * ((k + 0.5) * step);
+						const double radius = glm::length(position);
+						const double height = radius - SkyBottomRadius;
+						const glm::dvec3 scattering = scatteringAt(height);
+						const glm::dvec3 extinction = ComputeSkyExtinction(atmosphere, height);
+						const glm::dvec3 stepTransmittance(std::exp(-extinction.x * step), std::exp(-extinction.y * step), std::exp(-extinction.z * step));
+						const glm::dvec3 sunTransmittance = ComputeSkyTransmittance(atmosphere, radius, glm::dot(position / radius, sun));
+						const glm::dvec3 inScattered = scattering * sunTransmittance / (4.0 * pi);
+						const glm::dvec3 safe = glm::max(extinction, glm::dvec3(1e-6));
+						second += throughput * (inScattered - inScattered * stepTransmittance) / safe;
+						transfer += throughput * (scattering - scattering * stepTransmittance) / safe;
+						throughput *= stepTransmittance;
+					}
+					if (ground)
+					{
+						const glm::dvec3 position = origin + direction * distance;
+						const glm::dvec3 normal = glm::normalize(position);
+						const glm::dvec3 sunTransmittance = ComputeSkyTransmittance(atmosphere, glm::length(position), glm::dot(normal, sun));
+						second += throughput * sunTransmittance * std::max(glm::dot(normal, sun), 0.0) * atmosphere.GroundAlbedo / pi;
+					}
+				}
+			}
+			second /= static_cast<double>(Directions * Directions);
+			transfer /= static_cast<double>(Directions * Directions);
+			return second / glm::max(glm::dvec3(1.0) - transfer, glm::dvec3(1e-3));
+		}
+
+		// A Sky lit by one sun `elevation` degrees above the horizon toward -Z, for the CPU-side constants of the pass tests.
+		RenderSnapshot MakeSkySnapshot(float elevation)
+		{
+			RenderSnapshot snapshot;
+			snapshot.HasCamera = true;
+			const float radians = glm::radians(elevation);
+			snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional,
+				.Color = glm::vec3(1.0f, 0.95f, 0.9f),
+				.Intensity = 6.0f,
+				.Direction = -glm::vec3(0.0f, std::sin(radians), -std::cos(radians)),
+				.LightAngle = 0.53f,
+				.Entity = UUID(77) });
+			snapshot.Sky.Enabled = true;
+			snapshot.Sky.Sun = UUID(77);
+			snapshot.Sky.DriveLights = false;
+			ResolveSkyLights(snapshot);
+			return snapshot;
+		}
+
+		// The sky's pass and resources on `gpu`'s device, with `constants` written.
+		struct SkyPassSetup
+		{
+			Scope<SkyLightingPass> Pass{};
+			SkyViewResources Resources{};
+			PassBindingCache Bindings{};
+		};
+
+		SkyPassSetup MakeSkyPassSetup(Test::HeadlessGpuFixture& gpu)
+		{
+			SkyPassSetup setup;
+			Result<Scope<SkyLightingPass>> pass = SkyLightingPass::Create(gpu.GetDevice(), gpu.GetPipelines());
+			REQUIRE_MESSAGE(pass.has_value(), pass.error().ToString());
+			setup.Pass = std::move(*pass);
+			Result<SkyViewResources> resources = CreateSkyViewResources(gpu.GetDevice());
+			REQUIRE_MESSAGE(resources.has_value(), resources.error().ToString());
+			setup.Resources = std::move(*resources);
+			return setup;
+		}
+
+		// Records `record` on a command list of its own, after writing `constants`, and waits for it.
+		template<typename Record>
+		void RunSkyCommands(GraphicsDevice& device, SkyPassSetup& setup, const SkyConstants& constants, const Record& record)
+		{
+			Result<nvrhi::CommandListHandle> commandList = device.CreateCommandList();
+			REQUIRE_MESSAGE(commandList.has_value(), commandList.error().ToString());
+			(*commandList)->open();
+			(*commandList)->writeBuffer(setup.Resources.Constants, &constants, sizeof(constants));
+			record(**commandList);
+			(*commandList)->close();
+			WaitForSubmission(device, device.ExecuteCommandList(**commandList), "the sky test");
+		}
+
 	}
 
 	TEST_SUITE("Renderer")
@@ -151,7 +329,9 @@ namespace Engine {
 			const nvrhi::BufferHandle results = CreateVectorBuffer(device, SkyResultsCount, "SkyCopy.Results");
 
 			Result<nvrhi::BindingSetHandle> writeSet = device.CreateBindingSet(
-				{ .bindings = { nvrhi::BindingSetItem::ConstantBuffer(1, sky), nvrhi::BindingSetItem::StructuredBuffer_UAV(6, results) } }, *write->BindingLayouts[0]);
+				{ .bindings = { nvrhi::BindingSetItem::ConstantBuffer(1, sky), nvrhi::BindingSetItem::StructuredBuffer_UAV(6, results),
+					  nvrhi::BindingSetItem::PushConstants(0, sizeof(SkyDispatchConstants)) } },
+				*write->BindingLayouts[0]);
 			REQUIRE_MESSAGE(writeSet.has_value(), writeSet.error().ToString());
 
 			const std::array<SkyCopyFrame, 2> frames = { MakeSkyCopyFrame(1000.0f, 100.0f), MakeSkyCopyFrame(2000.0f, 200.0f) };
@@ -172,7 +352,7 @@ namespace Engine {
 					Result<nvrhi::BindingSetHandle> set = device.CreateBindingSet({ .bindings = { nvrhi::BindingSetItem::ConstantBuffer(2, environment),
 																						nvrhi::BindingSetItem::ConstantBuffer(4, probes),
 																						nvrhi::BindingSetItem::ConstantBuffer(5, view == 0 ? fog : mirrorFog),
-																						nvrhi::BindingSetItem::StructuredBuffer_UAV(7, outputs[frameIndex][view]) } },
+																						nvrhi::BindingSetItem::StructuredBuffer_UAV(7, outputs[frameIndex][view]), nvrhi::BindingSetItem::PushConstants(0, sizeof(SkyDispatchConstants)) } },
 						*read->BindingLayouts[0]);
 					REQUIRE_MESSAGE(set.has_value(), set.error().ToString());
 					readSets[frameIndex][view] = std::move(*set);
@@ -195,6 +375,8 @@ namespace Engine {
 				writeState.pipeline = write->Pipeline;
 				writeState.bindings = { *writeSet };
 				list.setComputeState(writeState);
+				const SkyDispatchConstants unused{};
+				list.setPushConstants(&unused, sizeof(unused));
 				list.dispatch(1);
 				const std::array<nvrhi::IBuffer*, 2> fogs = { fog.Get(), mirrorFog.Get() };
 				RecordSkyResultCopies(list, results, environment, fogs, probes, CopiedReflectionProbes);
@@ -204,6 +386,7 @@ namespace Engine {
 					readState.pipeline = read->Pipeline;
 					readState.bindings = { readSets[frameIndex][view] };
 					list.setComputeState(readState);
+					list.setPushConstants(&unused, sizeof(unused));
 					list.dispatch(1);
 					list.copyBuffer(readbacks[frameIndex][view], 0, outputs[frameIndex][view], 0, Test::SkyCopyReadbackCount * sizeof(glm::vec4));
 				}
@@ -254,6 +437,277 @@ namespace Engine {
 					}
 				}
 			}
+		}
+
+		TEST_CASE("SkyLighting: the transmittance and multiple-scattering LUTs match their CPU reference" * doctest::test_suite(Test::GpuSuite))
+		{
+			// The LUTs in float on the GPU against their definitions in double (Renderer/SkyAtmosphere.h), on a hazy, slightly
+			// overcast atmosphere: every transmittance texel, and every fourth multiple-scattering texel in each direction (the GPU
+			// reads the sun's transmittance from the LUT, the reference computes it).
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			SkyPassSetup setup = MakeSkyPassSetup(gpu);
+			RenderSnapshot snapshot = MakeSkySnapshot(30.0f);
+			snapshot.Sky.Haze = 2.0f;
+			snapshot.Sky.Overcast = 0.1f;
+			snapshot.Sky.GroundAlbedo = glm::vec3(0.4f, 0.3f, 0.2f);
+			const SkyConstants constants = MakeSkyConstants(snapshot.Sky, snapshot.Lights, snapshot.Camera, snapshot.Fog);
+			RunSkyCommands(gpu.GetDevice(), setup, constants, [&setup](nvrhi::ICommandList& commandList)
+			{
+				const Result<uint32_t> recorded = setup.Pass->RecordLuts(commandList, setup.Bindings, setup.Resources, true, 0.001f);
+				REQUIRE_MESSAGE(recorded.has_value(), recorded.error().ToString());
+				CHECK(*recorded == 3U);
+			});
+			const SkyAtmosphere atmosphere = MakeSkyAtmosphere(2.0f, 0.1f, glm::vec3(0.4f, 0.3f, 0.2f));
+			const std::vector<glm::dvec4> transmittance = ReadHalfTexels(gpu.GetDevice(), *setup.Resources.Transmittance);
+			REQUIRE(transmittance.size() == size_t{ SkyTransmittanceLutWidth } * SkyTransmittanceLutHeight);
+			double worst = 0.0;
+			for (uint32_t y = 0; y < SkyTransmittanceLutHeight; ++y)
+				for (uint32_t x = 0; x < SkyTransmittanceLutWidth; ++x)
+				{
+					const glm::dvec3 expected = ComputeTransmittanceTexel(atmosphere, x, y);
+					const glm::dvec3 actual(transmittance[y * SkyTransmittanceLutWidth + x]);
+					for (glm::length_t channel = 0; channel < 3; ++channel)
+						worst = std::max(worst, std::abs(actual[channel] - expected[channel]) / std::max(expected[channel], 1e-3));
+				}
+			CHECK(worst < 0.01);
+			const std::vector<glm::dvec4> multiple = ReadHalfTexels(gpu.GetDevice(), *setup.Resources.MultipleScattering);
+			REQUIRE(multiple.size() == size_t{ SkyMultipleScatteringLutSize } * SkyMultipleScatteringLutSize);
+			double worstMultiple = 0.0;
+			for (uint32_t y = 0; y < SkyMultipleScatteringLutSize; y += 4)
+				for (uint32_t x = 0; x < SkyMultipleScatteringLutSize; x += 4)
+				{
+					const glm::dvec3 expected = ComputeMultipleScatteringTexel(atmosphere, x, y);
+					const glm::dvec3 actual(multiple[y * SkyMultipleScatteringLutSize + x]);
+					for (glm::length_t channel = 0; channel < 3; ++channel)
+						worstMultiple = std::max(worstMultiple, std::abs(actual[channel] - expected[channel]) / std::max(expected[channel], 1e-4));
+				}
+			CHECK(worstMultiple < 0.05);
+		}
+
+		TEST_CASE("SkyLighting: the run-time prefilter of a cube matches the environment bake's" * doctest::test_suite(Test::GpuSuite))
+		{
+			// The environment bake of a 512 x 256 gradient with a bright spot, at the sky cube's size and sample counts, then its
+			// skybox's level 0 as the sky cube's: the sky's RecordCubeLighting reuses the bake's four entries, so its specular cube
+			// holds the bake's bytes, and its finalized SH9 the bake's coefficients.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			Result<Scope<EnvironmentBaker>> baker = EnvironmentBaker::Create(device, gpu.GetPipelines());
+			REQUIRE_MESSAGE(baker.has_value(), baker.error().ToString());
+			EnvironmentBakeInput input;
+			input.Width = 512;
+			input.Height = 256;
+			input.Texels.resize(static_cast<size_t>(input.Width) * input.Height * 3);
+			for (uint32_t y = 0; y < input.Height; ++y)
+				for (uint32_t x = 0; x < input.Width; ++x)
+				{
+					const size_t texel = (static_cast<size_t>(y) * input.Width + x) * 3;
+					const float spot = (x > 100 && x < 110 && y > 60 && y < 70) ? 40.0f : 0.0f;
+					input.Texels[texel + 0] = 0.2f + 0.6f * static_cast<float>(y) / input.Height + spot;
+					input.Texels[texel + 1] = 0.3f + 0.2f * static_cast<float>(x) / input.Width + spot;
+					input.Texels[texel + 2] = 0.9f - 0.5f * static_cast<float>(y) / input.Height + spot;
+				}
+			const Result<EnvironmentData> baked = (*baker)->BakeWithOptions(input, { .SkyboxFaceSize = SkyCubeSize, .MinSamples = SkySpecularMinSamples, .MaxSamples = SkySpecularMaxSamples });
+			REQUIRE_MESSAGE(baked.has_value(), baked.error().ToString());
+
+			SkyPassSetup setup = MakeSkyPassSetup(gpu);
+			SkyConstants constants{};
+			constants.Intensity = 1.0f;
+			RunSkyCommands(device, setup, constants, [&setup, &baked](nvrhi::ICommandList& commandList)
+			{
+				const size_t faceBytes = static_cast<size_t>(SkyCubeSize) * SkyCubeSize * CubeMapData::BytesPerTexel;
+				for (uint32_t face = 0; face < 6; ++face)
+					commandList.writeTexture(setup.Resources.Cube, face, 0, baked->Skybox.Texels.data() + face * faceBytes, static_cast<size_t>(SkyCubeSize) * CubeMapData::BytesPerTexel);
+				const Result<uint32_t> lighting = setup.Pass->RecordCubeLighting(commandList, setup.Bindings, setup.Resources);
+				REQUIRE_MESSAGE(lighting.has_value(), lighting.error().ToString());
+				const Status finalized = setup.Pass->RecordFinalize(commandList, setup.Bindings, setup.Resources);
+				REQUIRE_MESSAGE(finalized.has_value(), finalized.error().ToString());
+			});
+			size_t offset = 0;
+			for (uint32_t mip = 0; mip < EnvironmentData::SpecularMipCount; ++mip)
+			{
+				const uint32_t size = SkyCubeSize >> mip;
+				const size_t faceBytes = static_cast<size_t>(size) * size * CubeMapData::BytesPerTexel;
+				for (uint32_t face = 0; face < 6; ++face)
+				{
+					CAPTURE(mip);
+					CAPTURE(face);
+					Readback readback(device);
+					const Result<Image> image = readback.ReadTexture(*setup.Resources.Specular, mip, face);
+					REQUIRE_MESSAGE(image.has_value(), image.error().ToString());
+					REQUIRE(image->Pixels.size() == faceBytes);
+					CHECK(std::memcmp(image->Pixels.data(), baked->Specular.Texels.data() + offset, faceBytes) == 0);
+					offset += faceBytes;
+				}
+			}
+			const std::vector<glm::vec4> results = ReadVectors(device, *setup.Resources.Results, SkyResultsCount);
+			for (uint32_t index = 0; index < 9; ++index)
+			{
+				CAPTURE(index);
+				for (glm::length_t channel = 0; channel < 3; ++channel)
+					CHECK(results[SkyResultsIrradiance + index][channel] == doctest::Approx(baked->IrradianceSH9[index][channel]).epsilon(1e-3).scale(1.0));
+			}
+		}
+
+		TEST_CASE("SkyLighting: a constant sky gives a constant irradiance" * doctest::test_suite(Test::GpuSuite))
+		{
+			// The furnace: a cube of a uniform radiance of 2 prefilters to 2 in every mip and projects to the SH9 of a constant
+			// irradiance (the constant term 2 / Y00, the others zero), times Intensity; the fog's colour takes its tint.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			GraphicsDevice& device = gpu.GetDevice();
+			SkyPassSetup setup = MakeSkyPassSetup(gpu);
+			SkyConstants constants{};
+			constants.Intensity = 1.5f;
+			constants.FogColor = glm::vec3(0.5f, 0.25f, 1.0f);
+			constants.FogAmbientTint = 1.0f;
+			const std::vector<uint16_t> face(static_cast<size_t>(SkyCubeSize) * SkyCubeSize * 4, static_cast<uint16_t>(glm::packHalf1x16(2.0f)));
+			RunSkyCommands(device, setup, constants, [&setup, &face](nvrhi::ICommandList& commandList)
+			{
+				for (uint32_t layer = 0; layer < 6; ++layer)
+					commandList.writeTexture(setup.Resources.Cube, layer, 0, face.data(), static_cast<size_t>(SkyCubeSize) * 4 * sizeof(uint16_t));
+				const Result<uint32_t> lighting = setup.Pass->RecordCubeLighting(commandList, setup.Bindings, setup.Resources);
+				REQUIRE_MESSAGE(lighting.has_value(), lighting.error().ToString());
+				const Status finalized = setup.Pass->RecordFinalize(commandList, setup.Bindings, setup.Resources);
+				REQUIRE_MESSAGE(finalized.has_value(), finalized.error().ToString());
+			});
+			for (uint32_t mip = 0; mip < EnvironmentData::SpecularMipCount; ++mip)
+			{
+				CAPTURE(mip);
+				for (const glm::dvec4& texel : ReadHalfTexels(device, *setup.Resources.Specular, mip, 3))
+					CHECK(texel.r == doctest::Approx(2.0).epsilon(0.01));
+			}
+			const std::vector<glm::vec4> results = ReadVectors(device, *setup.Resources.Results, SkyResultsCount);
+			const double constantTerm = 2.0 * 1.5 / 0.282094791773878;
+			CHECK(results[SkyResultsIrradiance].r == doctest::Approx(constantTerm).epsilon(0.002));
+			for (uint32_t index = 1; index < 9; ++index)
+			{
+				CAPTURE(index);
+				CHECK(std::abs(results[SkyResultsIrradiance + index].g) < 0.002 * constantTerm);
+			}
+			// The fog's colour: Color times the irradiance's mean (3), clamped at nothing.
+			CHECK(results[SkyResultsFogColor].r == doctest::Approx(0.5 * 3.0).epsilon(0.002));
+			CHECK(results[SkyResultsFogColor].b == doctest::Approx(1.0 * 3.0).epsilon(0.002));
+		}
+
+		// The fixture's snapshot of its quad 3 m ahead, with a Sky lit by a sun `elevation` degrees up toward -Z (behind the quad,
+		// whose face toward the camera faces +Z, so it is lit by the sky's image-based light alone), clearing to the sky.
+		RenderSnapshot MakeSkyViewSnapshot(Test::SceneRendererIntegrationFixture & fixture, float elevation)
+		{
+			RenderSnapshot snapshot = fixture.Snapshot();
+			snapshot.Camera.ClearToSkybox = true;
+			snapshot.Camera.FarClip = 1000.0f;
+			const RenderSnapshot sky = MakeSkySnapshot(elevation);
+			snapshot.Lights = sky.Lights;
+			snapshot.Sky = sky.Sky;
+			ResolveSkyLights(snapshot);
+			return snapshot;
+		}
+
+		// The mean linear radiance of SceneColor's pixels inside (`inside`) or outside the centre square of half its size.
+		glm::dvec3 MeanSceneColor(const std::vector<glm::dvec4>& texels, uint32_t width, uint32_t height, bool inside)
+		{
+			glm::dvec3 sum(0.0);
+			uint32_t count = 0;
+			for (uint32_t y = 0; y < height; ++y)
+				for (uint32_t x = 0; x < width; ++x)
+				{
+					const bool centre = x >= width * 3 / 8 && x < width * 5 / 8 && y >= height * 3 / 8 && y < height * 5 / 8;
+					const bool corner = y < height / 8;
+					if ((inside && centre) || (!inside && corner))
+					{
+						sum += glm::dvec3(texels[static_cast<size_t>(y) * width + x]);
+						++count;
+					}
+				}
+			return count > 0 ? sum / static_cast<double>(count) : sum;
+		}
+
+		TEST_CASE("SkyLighting: the view's ambient light, reflections and fog colour follow the sun" * doctest::test_suite(Test::GpuSuite))
+		{
+			// One scene at noon and at dusk, the quad lit by the sky alone: its image-based light (the diffuse SH9 and the specular
+			// cube's reflection, both the sky's), the sky above it and the fog's colour (a dense fog tinted by the sky's ambient light
+			// over the quad) all dim, and the sky reddens, as the sun sets.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 32, 32);
+			const auto render = [&gpu, &fixture](const RenderSnapshot& snapshot)
+			{
+				fixture.Submit(snapshot);
+				return ReadHalfTexels(gpu.GetDevice(), *fixture.Renderer().GetSceneColorTexture());
+			};
+			struct Measured
+			{
+				glm::dvec3 Ambient{};
+				glm::dvec3 Sky{};
+				glm::dvec3 Fogged{};
+			};
+			const auto measure = [&fixture, &render](float elevation)
+			{
+				Measured measured;
+				RenderSnapshot snapshot = MakeSkyViewSnapshot(fixture, elevation);
+				std::vector<glm::dvec4> texels = render(snapshot);
+				measured.Ambient = MeanSceneColor(texels, 32, 32, true);
+				measured.Sky = MeanSceneColor(texels, 32, 32, false);
+				CHECK(fixture.Renderer().GetRenderStats().SkyUpdates == 1U);
+				snapshot.Fog = RenderFog{ .Enabled = true, .Color = glm::vec3(1.0f), .AmbientTint = 1.0f, .Density = 10.0f, .MaxOpacity = 1.0f, .FogSkybox = false };
+				texels = render(snapshot);
+				measured.Fogged = MeanSceneColor(texels, 32, 32, true);
+				return measured;
+			};
+			const Measured noon = measure(80.0f);
+			const Measured dusk = measure(2.0f);
+			INFO("noon ambient " << noon.Ambient.r << " " << noon.Ambient.b << ", dusk " << dusk.Ambient.r << " " << dusk.Ambient.b);
+			CHECK(noon.Ambient.g > 0.0);
+			CHECK(noon.Ambient.g > 2.0 * dusk.Ambient.g);
+			CHECK(noon.Sky.g > 2.0 * dusk.Sky.g);
+			CHECK(noon.Fogged.g > 2.0 * dusk.Fogged.g);
+			// At dusk the light is redder relative to its blue than at noon.
+			CHECK(dusk.Sky.r / dusk.Sky.b > noon.Sky.r / noon.Sky.b);
+		}
+
+		TEST_CASE("SkyLighting: the sky's lighting is regenerated only when its key changes" * doctest::test_suite(Test::GpuSuite))
+		{
+			// RenderStats::SkyUpdates: 1 on the view's first render with a Sky, 0 for the same sky, a moved camera, a turned Moon
+			// without a light or the clouds' drift within a SkyCloudLightingStep, and 1 for a turned Sun, a new Intensity or a drift
+			// across a step.
+			Test::HeadlessGpuFixture gpu;
+			ENGINE_REQUIRE_GPU(gpu);
+			Test::SceneRendererIntegrationFixture fixture(gpu, 16, 16);
+			RenderSnapshot snapshot = MakeSkyViewSnapshot(fixture, 30.0f);
+			snapshot.Sky.Clouds = 0.5f;
+			snapshot.Sky.SimulationTime = 10.2;
+			const auto updates = [&fixture](const RenderSnapshot& rendered)
+			{
+				fixture.Submit(rendered);
+				return fixture.Renderer().GetRenderStats().SkyUpdates;
+			};
+			CHECK(updates(snapshot) == 1U);
+			CHECK(updates(snapshot) == 0U);
+			snapshot.Camera.View = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -2.0f, 0.0f));
+			snapshot.Camera.Position = glm::vec3(0.0f, 2.0f, 0.0f);
+			CHECK(updates(snapshot) == 0U);
+			snapshot.Sky.SimulationTime = 10.9;
+			CHECK(updates(snapshot) == 0U);
+			snapshot.Sky.SimulationTime = 11.05;
+			CHECK(updates(snapshot) == 1U);
+			snapshot.Lights[0].Direction = glm::normalize(glm::vec3(0.3f, -0.6f, 0.4f));
+			CHECK(updates(snapshot) == 1U);
+			CHECK(updates(snapshot) == 0U);
+			snapshot.Sky.Intensity = 2.0f;
+			CHECK(updates(snapshot) == 1U);
+			// The passes' rows: SkyLuts and SkyIbl every frame (the finalize and the copies), the Sky pass where it draws.
+			const RenderStats& stats = fixture.Renderer().GetRenderStats();
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "SkyLuts") != nullptr);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "SkyIbl") != nullptr);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "Sky") != nullptr);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(stats, "Skybox") == nullptr);
+			// Without a Sky, none of them.
+			snapshot.Sky.Enabled = false;
+			fixture.Submit(snapshot);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "SkyLuts") == nullptr);
+			CHECK(Test::SceneRendererIntegrationFixture::FindPass(fixture.Renderer().GetRenderStats(), "Sky") == nullptr);
 		}
 	}
 

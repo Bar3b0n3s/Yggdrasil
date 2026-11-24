@@ -438,8 +438,20 @@ namespace Engine {
 				RecordMeshPass(commandList, Detail::SceneRendererMeshPass::ForwardOpaque, slot.OpaqueDraws, **forwardSet, frame.DebugView, counters, &forwardTarget);
 				if (!slot.TerrainResources.Draws.empty())
 					Pipelines->Terrain->RecordForward(commandList, slot.TerrainResources, *slot.ForwardFramebuffer, **forwardSet, counters, slot.Scissor);
-				const bool fogsClearSky = !frame.DrawsSkybox && slot.Fog.Enabled != 0 && slot.Fog.FogSkybox != 0;
-				if (frame.DrawsSkybox || fogsClearSky)
+				// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the Sky in the skybox's place, with the slot's
+				// scissor and fog, sampling the main view's sky-view LUT (world directions).
+				const bool fogsClearSky = !frame.DrawsSkybox && !frame.DrawsSky && slot.Fog.Enabled != 0 && slot.Fog.FogSkybox != 0;
+				if (frame.DrawsSky)
+				{
+					const Status sky = RecordSky(commandList, *slot.ForwardFramebuffer, *slot.ViewConstantsBuffer, *slot.FogConstantsBuffer, slot.Scissor);
+					if (sky)
+					{
+						++counters.DrawCalls;
+						++counters.Triangles;
+					}
+					frame.KeepFirstError(sky);
+				}
+				else if (frame.DrawsSkybox || fogsClearSky)
 				{
 					const Status sky = Pipelines->Skybox->Record(commandList, SkyboxBindings,
 						{ .Framebuffer = slot.ForwardFramebuffer,

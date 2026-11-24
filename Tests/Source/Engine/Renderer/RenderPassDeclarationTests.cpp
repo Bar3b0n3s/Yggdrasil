@@ -22,6 +22,8 @@
 #include "Engine/Renderer/SelectionPass.h"
 #include "Engine/Renderer/ShadowPass.h"
 #include "Engine/Renderer/SkinningPass.h"
+#include "Engine/Renderer/SkyLighting.h"
+#include "Engine/Renderer/SkyPass.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/TerrainPass.h"
 #include "Engine/Renderer/TextRenderer.h"
@@ -146,6 +148,9 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("LightClusters") == LightClusterPass::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("BrdfLut") == BrdfLut::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("Skybox") == SkyboxPass::PipelineCount);
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+			CHECK(GetDeclaredPipelineCountOf("SkyLighting") == SkyLightingPass::PipelineCount);
+			CHECK(GetDeclaredPipelineCountOf("Sky") == SkyPass::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == QuadBatcher::PipelineCount);
 			CHECK(GetDeclaredPipelineCountOf("Bloom") == BloomPass::PipelineCount);
 			// The tonemap pass and the data views' composite.
@@ -285,8 +290,9 @@ namespace Engine {
 			// and 73 with its Taa, Ssr and terrain passes (decisions 13 and 22); 74 with M32's Ssr classification
 			// (Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14), 77 with M33's Particles pass
 			// (Docs/Decisions/0048-m33-particle-look.md decision 4) and 76 without M26's HdrAdditive, which M33's merge removed
-			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			CHECK(GetDeclaredPipelineCount() == 77);
+			// (decision 10); 77 with M42's planar reflections' mip chain (Docs/Decisions/0059-m42-planar-reflections.md decision 3); 87
+			// with M45's sky (its lighting 9, its pass 1; Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3).
+			CHECK(GetDeclaredPipelineCount() == 87);
 		}
 
 		// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 22): the Lights2D declaration has its pipeline of the Lights2D
@@ -316,7 +322,7 @@ namespace Engine {
 			CHECK(GetDeclaredPipelineCountOf("QuadBatcher") == 5);
 			CHECK(QuadBatcher::PipelineCount == 5);
 			// 76 since M33's merge (Docs/Decisions/0048-m33-particle-look.md decisions 4 and 10), 77 with M42's mip chain.
-			CHECK(GetDeclaredPipelineCount() == 77);
+			CHECK(GetDeclaredPipelineCount() == 87);
 			CHECK(GetDeclaredPipelineCountOf("Lights2D") == Lights2DPass::PipelineCount);
 			CHECK(Lights2DPass::GetLayoutDescriptions().size() == Lights2DPass::PipelineCount);
 			CHECK(QuadBatcher::GetLayoutDescriptions().size() == QuadBatcher::PipelineCount);
@@ -349,7 +355,7 @@ namespace Engine {
 			// Docs/Decisions/0047-m32-fog-ssr.md decisions 10 and 14) and M33's 3 (the Particles pass,
 			// Docs/Decisions/0048-m33-particle-look.md decision 4), less the QuadBatcher's HdrAdditive, which M33's merge removed
 			// (decision 10), and M42's 1 (the planar reflections' mip chain, Docs/Decisions/0059-m42-planar-reflections.md decision 3).
-			static_assert(GetDeclaredPipelineCount() == 77);
+			static_assert(GetDeclaredPipelineCount() == 87);
 			Test::HeadlessGpuFixture gpu;
 			ENGINE_REQUIRE_GPU(gpu);
 			Result<Scope<SceneRendererPipelines>> pipelines = SceneRendererPipelines::Create(gpu.GetDevice(), gpu.GetPipelines());

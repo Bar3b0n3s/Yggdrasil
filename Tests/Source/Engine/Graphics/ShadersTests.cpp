@@ -771,6 +771,22 @@ namespace Engine {
 				.Program = "Sky",
 				.Entry = "CSTestCopyWrite",
 			},
+			// M45 (W45.2): the sky's computes' push constants.
+			{
+				.Name = "SkyDispatchConstants",
+				.Size = sizeof(SkyDispatchConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, CloudOffset),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Altitude),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Face),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Count),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Mode),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(SkyDispatchConstants, Padding1),
+				},
+				.Program = "Sky",
+				.Entry = "CSSkyCube",
+			},
 		};
 	}
 
