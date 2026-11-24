@@ -73,10 +73,12 @@ namespace Engine {
 	inline constexpr std::string_view AssetBakeDeferredCode = "ASSET_BAKE_DEFERRED";
 	// Warning, an import diagnostic (M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3I): a level of
 	// detail the glTF importer dropped, the import still succeeding (GltfImporter.h's version 4 paragraph): an authored
-	// level whose submeshes or materials differ from level 0's, a fifth level or later, a gap in the _LOD<n> names, an
-	// authored level of a skinned or morphed mesh, a generated level that keeps more than 90 % of the triangles before it,
-	// or FromGltf under MergeMeshes. Subject names the level ("nodes[4]", "meshes[2].lods[1]"). Recorded in
-	// ImportResult::Diagnostics, so a reimport replaces it.
+	// level whose submeshes or materials differ from level 0's, a fifth level or later (or one without a switch size), a gap
+	// in the _LOD<n> names, a level node or level 0 node without a mesh, an authored level of a skinned or morphed mesh or of
+	// a mesh an earlier group already gave levels, a generated level that keeps more than 90 % of the triangles before it or
+	// none, or FromGltf under MergeMeshes; also a malformed MSFT_lod extension or id, and an unusable MSFT_screencoverage.
+	// Subject names the level ("nodes[4]", "meshes[2].lods[1]") or the extension ("nodes[0].extensions.MSFT_lod.ids[1]").
+	// Recorded in ImportResult::Diagnostics, so a reimport replaces it.
 	inline constexpr std::string_view AssetLodInvalidCode = "ASSET_LOD_INVALID";
 
 	// One asset diagnostic. Plain value; thread-compatible.

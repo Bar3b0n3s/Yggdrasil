@@ -115,6 +115,49 @@ return true
 )",
 										 FormatVector(expected)));
 		}
+
+		// W46.1's review: without a time, Sample reads the world's clock (Time.GetTime: the world's tick, the session's less
+		// the ticks a world pause held it, times the fixed delta), so neither 0 nor the session's time, and a world pause
+		// holds it across ticks.
+		TEST_CASE("ScriptWind: Sample without a time reads the world's clock, which a world pause holds")
+		{
+			Test::ScriptTestFixture fixture;
+			Entity entity = fixture.GetScene().CreateEntity("Weather");
+			const WindComponent breeze = MakeBreeze();
+			entity.AddComponent<WindComponent>(breeze);
+			REQUIRE(fixture.Start());
+			const glm::dvec3 point(4.0, 1.0, -25.0);
+			// The sample at the world's clock after `tick` session ticks of which a world pause held `heldTicks`, checked against
+			// `expected` (rounded to the script's single-precision vector) and against Sample at Time.GetTime.
+			const auto checkSample = [&fixture, &point](uint64_t tick, uint64_t heldTicks, const glm::dvec3& expected)
+			{
+				fixture.Frame.Tick = tick;
+				fixture.Frame.WorldHeldTicks = heldTicks;
+				fixture.Frame.FixedDeltaTime = 1.0 / 60.0;
+				CheckWindScript(fixture, std::format(R"(
+local wind = Scene.FindByName("Weather").Wind
+local sample = wind:Sample({})
+assert(vector.magnitude(sample - {}) < 1e-5)
+assert(vector.magnitude(sample - wind:Sample({}, Time.GetTime())) < 1e-6)
+return true
+)",
+											 FormatVector(point), FormatVector(expected), FormatVector(point)));
+			};
+
+			// 600 session ticks of which a world pause held 135: the world's clock reads 465 / 60 s, not 0 and not 600 / 60 s
+			// (each of which gives another velocity here).
+			const glm::dvec3 world = SampleWind(breeze, point, 465.0 / 60.0);
+			REQUIRE(glm::length(world - SampleWind(breeze, point, 0.0)) > 1e-3);
+			REQUIRE(glm::length(world - SampleWind(breeze, point, 600.0 / 60.0)) > 1e-3);
+			checkSample(600, 135, world);
+			// 30 more ticks, all held by the pause: the sample holds.
+			checkSample(630, 165, world);
+			// 30 more after the world resumes: the clock moves on from where it held.
+			const glm::dvec3 resumed = SampleWind(breeze, point, 495.0 / 60.0);
+			REQUIRE(glm::length(resumed - world) > 1e-3);
+			checkSample(660, 165, resumed);
+			CHECK(fixture.Errors.empty());
+		}
 	}
 
 }

@@ -2600,6 +2600,161 @@ namespace Engine {
 			CHECK(one->Indices.size() == 36);
 		}
 
+		// W46.1's review: every other reason a level is dropped (GltfImporter.h's version 4 paragraph), each in a document
+		// derived from a fixture. The import succeeds, reports each dropped level, id or extension once as a Warning, and the
+		// mesh keeps its other levels.
+		TEST_CASE("GltfImporter: every level the importer cannot keep is dropped with ASSET_LOD_INVALID and the import succeeds")
+		{
+			Test::AssetTestFixture fixture;
+			CopyGltfFixtures(fixture);
+			const auto readFixture = [&fixture](std::string_view name)
+			{
+				Result<Json> parsed = JsonReader::Parse(AsStringView(fixture.ReadProjectFile("Assets/Models/" + std::string(name))));
+				REQUIRE(parsed.has_value());
+				return std::move(*parsed);
+			};
+			const auto importLevels = [&fixture](std::string_view name, const Json& document, const AssetMetadata& metadata)
+			{
+				const std::string relative = "Assets/Models/" + std::string(name);
+				fixture.WriteProjectText(relative, document.dump());
+				return ImportGltf(fixture, relative, metadata);
+			};
+			// The subjects of the import's ASSET_LOD_INVALID diagnostics, sorted, each checked to be a Warning.
+			const auto droppedSubjects = [](const ImportResult& result)
+			{
+				for (const AssetDiagnostic& diagnostic : result.Diagnostics)
+				{
+					if (diagnostic.Code == AssetLodInvalidCode)
+						CHECK(diagnostic.Severity == DiagnosticSeverity::Warning);
+				}
+				std::vector<std::string> subjects = GetDiagnosticSubjects(result, AssetLodInvalidCode);
+				std::ranges::sort(subjects);
+				return subjects;
+			};
+
+			SUBCASE("a fifth level or later")
+			{
+				// Rock_LOD3 to Rock_LOD5 draw the coarsest sphere: levels 3 and 4 are kept, level 5 is dropped.
+				Json document = readFixture("LodRock.gltf");
+				for (size_t number = 3; number <= 5; ++number)
+				{
+					document["nodes"].push_back(Json{ { "name", std::format("Rock_LOD{}", number) }, { "mesh", 2 } });
+					document["scenes"][0]["nodes"].push_back(document["nodes"].size() - 1);
+				}
+				Result<ImportResult> imported = importLevels("FifthLevel.gltf", document, MakeLodMetadata(AssetHandle(0x10e0), "FromGltf"));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(droppedSubjects(*imported) == std::vector<std::string>{ "nodes[5]" });
+				CHECK(GetScreenSizes(*LoadMesh(FindArtifact(*imported, "mesh:0:Rock0"))) == std::vector<float>{ 0.5f, 0.25f, 0.125f, 0.0625f });
+				CHECK(GetEntityNames(LoadPrefabDocument(*imported)) == std::vector<std::string>{ "FifthLevel", "Rock" });
+			}
+			SUBCASE("a level the LodScreenSizes setting gives no switch size")
+			{
+				Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/LodRock.gltf",
+					MakeLodMetadata(AssetHandle(0x10e1), "FromGltf", { { "LodScreenSizes", Json::array({ 0.5 }) } }));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(droppedSubjects(*imported) == std::vector<std::string>{ "nodes[2]" });
+				const AssetRef<MeshData> rock = LoadMesh(FindArtifact(*imported, "mesh:0:Rock0"));
+				REQUIRE(rock->Lods.size() == 1);
+				CHECK(rock->Lods[0].ScreenSize == 0.5f);
+				CHECK(rock->Lods[0].Submeshes[0].IndexCount == 32 * 3);
+			}
+			SUBCASE("a level node without a mesh")
+			{
+				// Rock_LOD1 is dropped; Rock_LOD2 stays level 2's, at its own switch size.
+				Json document = readFixture("LodRock.gltf");
+				document["nodes"][1].erase("mesh");
+				Result<ImportResult> imported = importLevels("LevelWithoutMesh.gltf", document, MakeLodMetadata(AssetHandle(0x10e2), "FromGltf"));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(droppedSubjects(*imported) == std::vector<std::string>{ "nodes[1]" });
+				const AssetRef<MeshData> rock = LoadMesh(FindArtifact(*imported, "mesh:0:Rock0"));
+				REQUIRE(rock->Lods.size() == 1);
+				CHECK(rock->Lods[0].ScreenSize == 0.25f);
+				CHECK(rock->Lods[0].Submeshes[0].IndexCount == 8 * 3);
+				CHECK(GetEntityNames(LoadPrefabDocument(*imported)) == std::vector<std::string>{ "LevelWithoutMesh", "Rock" });
+			}
+			SUBCASE("a level 0 node without a mesh")
+			{
+				Json document = readFixture("LodRock.gltf");
+				document["nodes"][0].erase("mesh");
+				Result<ImportResult> imported = importLevels("BaseWithoutMesh.gltf", document, MakeLodMetadata(AssetHandle(0x10e3), "FromGltf"));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(droppedSubjects(*imported) == std::vector<std::string>{ "nodes[1]", "nodes[2]" });
+				CHECK(LoadMesh(FindArtifact(*imported, "mesh:0:Rock0"))->Lods.empty());
+				CHECK(GetEntityNames(LoadPrefabDocument(*imported)) == std::vector<std::string>{ "BaseWithoutMesh", "Rock" });
+			}
+			SUBCASE("a mesh an earlier group already gave levels")
+			{
+				// Tree2 draws the tree's mesh too, and names TreeFar2 its level by MSFT_lod: the tree's group came first.
+				Json document = readFixture("LodTree.gltf");
+				document["nodes"].push_back(Json{ { "name", "TreeFar2" }, { "mesh", 2 } });
+				document["nodes"].push_back(Json{ { "name", "Tree2" }, { "mesh", 0 }, { "extensions", Json{ { "MSFT_lod", Json{ { "ids", Json::array({ 3 }) } } } } } });
+				document["scenes"][0]["nodes"].push_back(4);
+				Result<ImportResult> imported = importLevels("TakenMesh.gltf", document, MakeLodMetadata(AssetHandle(0x10e4), "FromGltf"));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(droppedSubjects(*imported) == std::vector<std::string>{ "nodes[3]" });
+				CHECK(GetScreenSizes(*LoadMesh(FindArtifact(*imported, "mesh:0:Tree"))) == std::vector<float>{ 0.4f, 0.15f });
+				CHECK(GetEntityNames(LoadPrefabDocument(*imported)) == std::vector<std::string>{ "TakenMesh", "Tree", "Tree2" });
+			}
+			SUBCASE("an authored level of a skinned or morphed mesh")
+			{
+				// Skinned.gltf's Body (skinned, with morph targets) gets a sibling Body_LOD1: the level is dropped and the mesh
+				// imports without levels.
+				Json document = readFixture("Skinned.gltf");
+				document["nodes"][3]["name"] = "Body_LOD0";
+				document["nodes"].push_back(Json{ { "name", "Body_LOD1" }, { "mesh", 0 } });
+				document["nodes"][0]["children"].push_back(4);
+				Result<ImportResult> imported = importLevels("SkinnedLevels.gltf", document, MakeLodMetadata(AssetHandle(0x10e5), "FromGltf"));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(droppedSubjects(*imported) == std::vector<std::string>{ "nodes[4]" });
+				const AssetRef<MeshData> strip = LoadMesh(FindArtifact(*imported, "mesh:0:Strip"));
+				CHECK(strip->Lods.empty());
+				CHECK(strip->LodVertices.empty());
+				CHECK(strip->SkinJointCount > 0);
+			}
+			SUBCASE("a malformed MSFT_lod extension")
+			{
+				// An extension without an "ids" array of node indices is ignored; an id out of range, naming its own node or
+				// a node of another group is skipped, the group keeping its other levels.
+				struct Malformed
+				{
+					std::string_view Name{};
+					size_t Node = 0;
+					Json Ids{};
+					std::string_view Subject{};
+					size_t Levels = 0;
+				};
+				const std::array<Malformed, 5> cases = { {
+					{ "IdsNotArray.gltf", 0, Json("x"), "nodes[0].extensions.MSFT_lod", 0 },
+					{ "IdsFraction.gltf", 0, Json::array({ 1.5 }), "nodes[0].extensions.MSFT_lod", 0 },
+					{ "IdOutOfRange.gltf", 0, Json::array({ 1, 99 }), "nodes[0].extensions.MSFT_lod.ids[1]", 1 },
+					{ "IdOwnNode.gltf", 0, Json::array({ 0, 1 }), "nodes[0].extensions.MSFT_lod.ids[0]", 1 },
+					{ "IdOtherGroup.gltf", 3, Json::array({ 2 }), "nodes[3].extensions.MSFT_lod.ids[0]", 2 },
+				} };
+				for (const Malformed& malformed : cases)
+				{
+					CAPTURE(std::string(malformed.Name));
+					Json document = readFixture("LodTree.gltf");
+					// Bush, a node after the tree's group, names the tree's TreeFar.
+					if (malformed.Node == 3)
+						document["nodes"].push_back(Json{ { "name", "Bush" }, { "mesh", 1 } });
+					document["nodes"][malformed.Node]["extensions"]["MSFT_lod"] = Json{ { "ids", malformed.Ids } };
+					Result<ImportResult> imported = importLevels(malformed.Name, document, MakeLodMetadata(AssetHandle(0x10e6), "FromGltf"));
+					REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+					CHECK(droppedSubjects(*imported) == std::vector<std::string>{ std::string(malformed.Subject) });
+					CHECK(LoadMesh(FindArtifact(*imported, "mesh:0:Tree"))->Lods.size() == malformed.Levels);
+				}
+			}
+			SUBCASE("a generated level that keeps no triangle")
+			{
+				// LodMaxError 1 (the mesh's whole extent) lets the closed sphere collapse past its last triangle.
+				Result<ImportResult> imported = ImportGltf(fixture, "Assets/Models/LodSphere.gltf",
+					MakeLodMetadata(AssetHandle(0x10e7), "Generate", { { "LodTriangleRatios", Json::array({ 0.001 }) }, { "LodMaxError", 1.0 } }));
+				REQUIRE_MESSAGE(imported.has_value(), imported.error().ToString());
+				CHECK(droppedSubjects(*imported) == std::vector<std::string>{ "meshes[0].lods[1]" });
+				CHECK(LoadMesh(FindArtifact(*imported, "mesh:0:Sphere"))->Lods.empty());
+			}
+		}
+
 		// M46: LodSphere.gltf's sphere of 512 triangles, simplified at the default LodTriangleRatios within LodMaxError 0.2.
 		// The checksum is committed and checked in the Debug and the Release unit runs (meshoptimizer's precise floating
 		// point, Vendor/meshoptimizer/VENDOR.md).

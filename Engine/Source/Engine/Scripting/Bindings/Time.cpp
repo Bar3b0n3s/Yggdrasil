@@ -5,7 +5,6 @@
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Scripting/ScriptHost.h"
 
-#include <algorithm>
 #include <chrono>
 #include <utility>
 
@@ -25,23 +24,16 @@ namespace Engine {
 			return 1;
 		}
 
-		// M35 (Docs/Decisions/0050-m35-pause-entity-state.md decision 2): the world's tick, which holds while the world is
-		// paused: the session's tick less the ticks the world pause held it.
-		static uint64_t WorldTick(const ScriptFrameState& frame)
-		{
-			return frame.Tick - std::min(frame.WorldHeldTicks, frame.Tick);
-		}
-
 		static int TimeSimulation(ScriptCall& call)
 		{
 			const auto frame = call.Engine->GetHost().GetFrameState();
-			Lua::Push(call, static_cast<double>(WorldTick(frame)) * frame.FixedDeltaTime);
+			Lua::Push(call, static_cast<double>(GetWorldTick(frame)) * frame.FixedDeltaTime);
 			return 1;
 		}
 
 		static int TimeTick(ScriptCall& call)
 		{
-			Lua::Push(call, static_cast<double>(WorldTick(call.Engine->GetHost().GetFrameState())));
+			Lua::Push(call, static_cast<double>(GetWorldTick(call.Engine->GetHost().GetFrameState())));
 			return 1;
 		}
 

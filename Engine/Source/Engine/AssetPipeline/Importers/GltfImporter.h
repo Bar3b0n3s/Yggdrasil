@@ -181,10 +181,14 @@ namespace Engine {
 	//         ASSET_LOD_INVALID (subject "nodes[<level node>]" for an authored level, "meshes[<i>].lods[<k>]" or
 	//         "mesh:merged.lods[<k>]" for a generated one), the import still succeeding, when its submesh count or a
 	//         submesh's material differs from level 0's; it is a fifth level or later, or the settings give no switch size
-	//         for it; it leaves a gap in the _LOD<n> names; it is an authored level of a skinned or morphed mesh, or of a
-	//         mesh an earlier group already gave levels; it is generated and keeps more than 90 % of the triangles of the
-	//         level before it, or none; or FromGltf meets MergeMeshes (the merged mesh has no authored level). An
-	//         MSFT_screencoverage that is not such a list is ignored with ASSET_LOD_INVALID too. Without levels and _WIND,
+	//         for it; it leaves a gap in the _LOD<n> names; its level node, or its level 0 node, has no mesh; it is an
+	//         authored level of a skinned or morphed mesh, or of a mesh an earlier group already gave levels; it is
+	//         generated and keeps more than 90 % of the triangles of the level before it, or none; or FromGltf meets
+	//         MergeMeshes (the merged mesh has no authored level). ASSET_LOD_INVALID also reports, the import still
+	//         succeeding, an MSFT_lod extension that is not an object with an "ids" array of node indices (subject
+	//         "nodes[<i>].extensions.MSFT_lod", the group ignored), an id out of range, naming its own node or a node of
+	//         another group ("nodes[<i>].extensions.MSFT_lod.ids[<k>]", the id skipped), and an MSFT_screencoverage that
+	//         is not such a list ("nodes[<i>].extras.MSFT_screencoverage", LodScreenSizes used). Without levels and _WIND,
 	//         every mesh's level 0 is version 3's import byte for byte, and sub-asset keys are unchanged.
 	//   Names in keys are the glTF names with every character outside [A-Za-z0-9_-] replaced by '_' (empty: no name part).
 	//

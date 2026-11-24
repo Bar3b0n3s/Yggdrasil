@@ -85,6 +85,13 @@ runtime ("Importers: importing twice gives identical hashes"); cross-C-runtime e
 only meshoptimizer's own preconditions, which `MeshSimplifier.cpp` meets before every call (an index count a multiple of
 three, indices below the vertex count, a position stride of 12 bytes).
 
+Process-level state (Architecture §3 rule 5's rule for vendored libraries): the library keeps one, the allocation hooks
+`meshopt_Allocator::storage()` (a function-local static in `meshoptimizer.h`, defined in `allocator.cpp`), which only
+`meshopt_setAllocator` writes. The engine never calls `meshopt_setAllocator`, so the hooks keep their defaults
+(`::operator new` and `::operator delete`) and are constant after their thread-safe initialization: import workers call
+`meshopt_simplify` concurrently without synchronization, and no result depends on the state. Never call
+`meshopt_setAllocator`; a caller would race with running imports. Every other piece of state is local to a call.
+
 ## Consumer usage
 
 - `UseMeshOptimizer()` in `Dependencies.lua`: `externalincludedirs { Vendor/meshoptimizer/src }` and, for linking

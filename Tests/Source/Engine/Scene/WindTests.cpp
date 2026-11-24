@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <format>
 #include <string>
+#include <string_view>
 
 // The scene's wind (M46; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3F): SampleWind in double
 // precision with IEEE-exact operations, floor and sqrt, so its bits are committed and the Debug and Release unit runs both
@@ -109,6 +110,36 @@ namespace Engine {
 			first.SetActive(false);
 			REQUIRE(first.HasComponent<HierarchyDisabledTag>());
 			CHECK(FindSceneWind(scene) == nullptr);
+
+			// W46.1's review: with several Winds (a hand-edited file, SCENE_DUPLICATE_UNIQUE_COMPONENT), the effectively enabled
+			// one on the lowest entity UUID blows, whatever order the entities were created or re-created in.
+			const auto addWind = [&scene](uint64_t id, std::string_view name, float strength)
+			{
+				Entity entity = scene.CreateEntityWithID(UUID(id), std::string(name));
+				WindComponent wind = MakeGale();
+				wind.Strength = strength;
+				entity.AddComponent<WindComponent>(wind);
+				return entity;
+			};
+			Entity late = addWind(0x20, "Late", 4.0f);
+			Entity early = addWind(0x10, "Early", 2.0f);
+			REQUIRE(FindSceneWind(scene) != nullptr);
+			CHECK(FindSceneWind(scene)->Strength == 2.0f);
+			early.SetActive(false);
+			REQUIRE(FindSceneWind(scene) != nullptr);
+			CHECK(FindSceneWind(scene)->Strength == 4.0f);
+			early.SetActive(true);
+			scene.DestroyEntity(late);
+			late = addWind(0x20, "Late", 4.0f);
+			REQUIRE(FindSceneWind(scene) != nullptr);
+			CHECK(FindSceneWind(scene)->Strength == 2.0f);
+			// The Winds' pool order puts 0x20 before 0x10 now (destroyed and re-added after it); the choice does not follow it.
+			early.RemoveComponent<WindComponent>();
+			WindComponent again = MakeGale();
+			again.Strength = 2.0f;
+			early.AddComponent<WindComponent>(again);
+			REQUIRE(FindSceneWind(scene) != nullptr);
+			CHECK(FindSceneWind(scene)->Strength == 2.0f);
 		}
 	}
 

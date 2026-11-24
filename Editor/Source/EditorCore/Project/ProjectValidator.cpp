@@ -502,10 +502,12 @@ namespace Engine {
 				"faces +Z, the Plane +Y)." },
 			ValidationCodeInfo{ AssetLodInvalidCode, "Warning", false,
 				"The glTF importer dropped a level of detail, the import still succeeding: an authored level whose submesh count or materials differ "
-				"from level 0's, a fifth level or later (or one the LodScreenSizes setting gives no switch size), a gap in the <name>_LOD<n> names, an "
-				"authored level of a skinned or morphed mesh, a generated level that keeps more than 90 % of the triangles before it, or authored "
-				"levels under MergeMeshes. An MSFT_screencoverage that is not decreasing screen sizes is ignored under it too. The subject names the "
-				"level node or the generated level.",
+				"from level 0's, a fifth level or later (or one the LodScreenSizes setting gives no switch size), a gap in the <name>_LOD<n> names, a "
+				"level node or level 0 node without a mesh, an authored level of a skinned or morphed mesh or of a mesh an earlier group already gave "
+				"levels, a generated level that keeps more than 90 % of the triangles before it or none, or authored levels under MergeMeshes. An "
+				"MSFT_lod extension that is not an object with an \"ids\" array of node indices, an id out of range or naming its own node or a node of "
+				"another group, and an MSFT_screencoverage that is not decreasing screen sizes are reported under it too, the rest of the file still "
+				"importing. The subject names the level node, the generated level, or the extension or id.",
 				"Author each level with level 0's primitives and materials, number <name>_LOD0, _LOD1, ... without gaps, at most four after level 0; "
 				"author a skinned mesh's or a leaf card tree's far levels instead of generating them (or Generate with a larger LodMaxError), then "
 				"reimport." },

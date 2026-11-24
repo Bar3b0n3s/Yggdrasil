@@ -11,8 +11,6 @@
 #include "Engine/Scripting/ScriptHost.h"
 #include "Engine/Scripting/ScriptProxy.h"
 
-#include <algorithm>
-
 // The Wind proxy's method (M46; Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3J): Wind:Sample, the
 // wind's velocity at a world point and time (Scene/Wind.h's SampleWind), at the world's clock by default. Reads only: it
 // works in read-only evaluations and on an entity pending destruction, and changes no state. Only IEEE-exact operations,
@@ -45,8 +43,7 @@ namespace Engine {
 			if (Lua::IsNoneOrNil(call, 3))
 			{
 				const ScriptFrameState frame = call.Engine->GetHost().GetFrameState();
-				const uint64_t worldTick = frame.Tick - std::min(frame.WorldHeldTicks, frame.Tick);
-				time = static_cast<double>(worldTick) * frame.FixedDeltaTime;
+				time = static_cast<double>(GetWorldTick(frame)) * frame.FixedDeltaTime;
 			}
 			else
 			{
