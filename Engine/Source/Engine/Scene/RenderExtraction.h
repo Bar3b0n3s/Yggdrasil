@@ -66,6 +66,11 @@
 // follows the glass between ticks; without a drawn mesh the component gives none (RENDER_REFLECTION_INVALID,
 // Scene/PlanarReflectionValidation.h).
 //
+// The sky (M45, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): after the canonical loop, the scene's one
+// effectively enabled Sky gives RenderSnapshot::Sky in every view (an edit scene's included), its Sun and Moon resolved against
+// the extracted lights and, with DriveLights, their rendered colours driven by the atmosphere (Scene/SkyExtraction.h); a scene
+// without a Sky extracts exactly as before.
+//
 // Pure function of the scene's components and the request: no asset access, no clock, no randomness; vectors in canonical
 // order (§5.1), so a deterministic scene gives an identical snapshot in every configuration. Only IEEE-exact operations and
 // Core/DetMath (Scene is on the simulation path's lint scope, §4.12). Main thread, like the scene (§4.11).

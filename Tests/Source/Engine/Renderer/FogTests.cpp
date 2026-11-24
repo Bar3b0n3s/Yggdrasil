@@ -11,6 +11,7 @@
 #include "Engine/Renderer/Private/SceneRendererIntegrationFixture.h"
 #include "Engine/Renderer/RenderSnapshot.h"
 #include "Engine/Renderer/SceneRenderer.h"
+#include "Engine/Renderer/SkyAtmosphere.h"
 #include "Shared/EnvironmentConstants.h"
 #include "Shared/FogConstants.h"
 #include "Support/DeviceLossTest.h"
@@ -180,7 +181,7 @@ namespace Engine {
 				LightData{ .Type = RenderLightType::Directional, .Color = glm::vec3(1.0f), .Intensity = 1.0f, .Direction = glm::vec3(1.0f, 0.0f, 0.0f) },
 			};
 
-			FogConstants constants = MakeFogConstants(fog, camera, lights, environment, true);
+			FogConstants constants = MakeFogConstants(fog, camera, lights, 1, environment, true);
 			CHECK(constants.Enabled == 1U);
 			CHECK(constants.FogSkybox == 1U);
 			CHECK(constants.Orthographic == 0U);
@@ -199,30 +200,80 @@ namespace Engine {
 			CHECK(glm::length(constants.SunColor - glm::vec3(0.5f, 1.0f, 1.0f) * 4.0f * fog.SunGlow) < 1e-6f);
 
 			// Not a fogged view, or no fog: disabled, every other member filled.
-			CHECK(MakeFogConstants(fog, camera, lights, environment, false).Enabled == 0U);
+			CHECK(MakeFogConstants(fog, camera, lights, 1, environment, false).Enabled == 0U);
 			RenderFog none = fog;
 			none.Enabled = false;
-			constants = MakeFogConstants(none, camera, lights, environment, true);
+			constants = MakeFogConstants(none, camera, lights, 1, environment, true);
 			CHECK(constants.Enabled == 0U);
 			CHECK(constants.Density == fog.Density);
 
 			// The ambient tint: the constant ambient without a map, the SH9's mean with one.
 			RenderFog tinted = fog;
 			tinted.AmbientTint = 0.5f;
-			constants = MakeFogConstants(tinted, camera, lights, environment, true);
+			constants = MakeFogConstants(tinted, camera, lights, 1, environment, true);
 			CHECK(glm::length(constants.Color - fog.Color * glm::mix(glm::vec3(1.0f), environment.AmbientColor, 0.5f)) < 1e-6f);
 			environment.HasEnvironment = 1;
 			environment.IrradianceSH9[0] = glm::vec4(2.0f, 1.0f, 0.5f, 0.0f);
-			constants = MakeFogConstants(tinted, camera, lights, environment, true);
+			constants = MakeFogConstants(tinted, camera, lights, 1, environment, true);
 			const glm::vec3 shMean = glm::vec3(2.0f, 1.0f, 0.5f) * 0.282094791773878f;
 			CHECK(glm::length(constants.Color - fog.Color * glm::mix(glm::vec3(1.0f), shMean, 0.5f)) < 1e-6f);
 
-			// No directional light: no glow. An orthographic camera is flagged.
+			// M45: the glow follows the light it is given, here the second directional light.
+			constants = MakeFogConstants(fog, camera, lights, 2, environment, true);
+			CHECK(glm::length(constants.SunDirection - glm::vec3(-1.0f, 0.0f, 0.0f)) < 1e-6f);
+			CHECK(glm::length(constants.SunColor - glm::vec3(1.0f) * fog.SunGlow) < 1e-6f);
+
+			// No glow light, one that is not directional, or an index outside the list: no glow. An orthographic camera is flagged.
 			camera.ProjectionKind = RenderProjection::Orthographic;
-			constants = MakeFogConstants(fog, camera, std::span<const LightData>(lights).first(1), environment, true);
-			CHECK(constants.SunColor == glm::vec3(0.0f));
-			CHECK(constants.SunDirection == glm::vec3(0.0f, 1.0f, 0.0f));
-			CHECK(constants.Orthographic == 1U);
+			for (const std::optional<size_t> glow : { std::optional<size_t>(), std::optional<size_t>(0), std::optional<size_t>(3) })
+			{
+				constants = MakeFogConstants(fog, camera, lights, glow, environment, true);
+				CHECK(constants.SunColor == glm::vec3(0.0f));
+				CHECK(constants.SunDirection == glm::vec3(0.0f, 1.0f, 0.0f));
+				CHECK(constants.Orthographic == 1U);
+			}
+		}
+
+		TEST_CASE("Fog: with a Sky, the glow follows its Sun")
+		{
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a moon placed above the sun in the hierarchy took the
+			// glow before; with a Sky, its Sun owns it (GetSkyGlowLight), and without one the first directional light still does.
+			RenderSnapshot snapshot;
+			snapshot.HasCamera = true;
+			snapshot.Camera.View = glm::lookAt(glm::vec3(0.0f), glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+			snapshot.Fog = MakeTestFog();
+			const UUID moon(11);
+			const UUID sun(22);
+			snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional, .Color = glm::vec3(0.2f, 0.2f, 0.3f), .Intensity = 0.1f, .Direction = glm::vec3(0.0f, -1.0f, 0.0f), .Entity = moon });
+			snapshot.Lights.push_back(LightData{ .Type = RenderLightType::Directional, .Color = glm::vec3(1.0f, 0.9f, 0.8f), .Intensity = 5.0f, .Direction = glm::normalize(glm::vec3(1.0f, -1.0f, 0.0f)), .Entity = sun });
+
+			REQUIRE(GetSkyGlowLight(snapshot) == std::optional<size_t>(0));
+			FogConstants constants = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
+			CHECK(glm::length(constants.SunDirection - glm::vec3(0.0f, 1.0f, 0.0f)) < 1e-6f);
+
+			snapshot.Sky.Enabled = true;
+			snapshot.Sky.Sun = sun;
+			snapshot.Sky.Moon = moon;
+			snapshot.Sky.DriveLights = false;
+			ResolveSkyLights(snapshot);
+			REQUIRE(GetSkyGlowLight(snapshot) == std::optional<size_t>(1));
+			constants = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
+			CHECK(glm::length(constants.SunDirection - glm::normalize(glm::vec3(-1.0f, 1.0f, 0.0f))) < 1e-6f);
+			CHECK(glm::length(constants.SunColor - glm::vec3(1.0f, 0.9f, 0.8f) * 5.0f * snapshot.Fog.SunGlow) < 1e-5f);
+
+			// With DriveLights, the glow takes the Sun's driven colour: dimmer than authored, and redder (the transmittance).
+			snapshot.Sky.DriveLights = true;
+			ApplySkyLightDriving(snapshot);
+			constants = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
+			const glm::vec3 authored = glm::vec3(1.0f, 0.9f, 0.8f) * 5.0f * snapshot.Fog.SunGlow;
+			CHECK(constants.SunColor.r < authored.r);
+			CHECK(constants.SunColor.b / authored.b < constants.SunColor.r / authored.r);
+			CHECK(constants.SunColor.b > 0.0f);
+
+			// A Sky whose Sun names no light leaves the glow to the first directional light.
+			snapshot.Sky.Sun = UUID(33);
+			ResolveSkyLights(snapshot);
+			CHECK(GetSkyGlowLight(snapshot) == std::optional<size_t>(0));
 		}
 
 		TEST_CASE("Fog: MakeFogConstants makes non-finite and out-of-range values usable")
@@ -245,7 +296,7 @@ namespace Engine {
 				.SunGlow = -1.0f,
 				.SunGlowExponent = 1e9f };
 			const std::array<LightData, 1> lights = { LightData{ .Type = RenderLightType::Directional, .Intensity = nan, .Direction = glm::vec3(0.0f) } };
-			const FogConstants constants = MakeFogConstants(broken, camera, lights, EnvironmentConstants{}, true);
+			const FogConstants constants = MakeFogConstants(broken, camera, lights, 0, EnvironmentConstants{}, true);
 			CHECK(constants.Color == glm::vec3(0.0f, 0.0f, 0.5f));
 			CHECK(constants.Density == 10.0f);
 			CHECK(constants.StartDistance == 0.0f);
@@ -272,7 +323,7 @@ namespace Engine {
 				const RenderSnapshot snapshot = MakeFogSnapshot(fixture, projection, MakeTestFog());
 				fixture.Submit(snapshot);
 				const std::vector<glm::dvec4> texels = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
-				const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+				const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
 				REQUIRE(fog.Enabled == 1U);
 				size_t compared = 0;
 				size_t mismatched = 0;
@@ -320,7 +371,7 @@ namespace Engine {
 				snapshot.Camera.View = glm::lookAt(snapshot.Camera.Position, glm::vec3(0.0f, 0.0f, -3.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 				fixture.Submit(snapshot);
 				const std::vector<glm::dvec4> texels = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
-				const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+				const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
 				size_t compared = 0;
 				size_t mismatched = 0;
 				double mostFog = 0.0;
@@ -360,7 +411,7 @@ namespace Engine {
 			snapshot.Meshes.push_back(pane);
 			fixture.Submit(snapshot);
 			const std::vector<glm::dvec4> texels = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
-			const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+			const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
 			size_t compared = 0;
 			size_t mismatched = 0;
 			for (uint32_t y = 0; y < snapshot.Camera.ViewportHeight; ++y)
@@ -423,7 +474,7 @@ namespace Engine {
 
 			fixture.Submit(snapshot);
 			std::vector<glm::dvec4> texels = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
-			const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+			const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
 			size_t mismatched = 0;
 			for (uint32_t y = 0; y < snapshot.Camera.ViewportHeight; ++y)
 			{
@@ -444,7 +495,7 @@ namespace Engine {
 			snapshot.Fog.Density = 0.05f;
 			fixture.Submit(snapshot);
 			texels = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
-			const glm::dvec4 dense = Test::EvaluateSkyFog(MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true),
+			const glm::dvec4 dense = Test::EvaluateSkyFog(MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true),
 				glm::dvec3(0.0, 0.0, -1.0), glm::dvec3(0.0));
 			CHECK(dense.a == doctest::Approx(0.9));
 			CHECK(IsNear(glm::dvec3(texels[32 * 64 + 32]), SkyRadiance * 0.1 + glm::dvec3(dense) * 0.9, 5e-3));
@@ -478,7 +529,7 @@ namespace Engine {
 				snapshot.Fog.HeightDensity = 0.3f;
 				fixture.Submit(snapshot);
 				const std::vector<glm::dvec4> fogged = ReadSceneColor(gpu.GetDevice(), fixture.Renderer());
-				const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, EnvironmentConstants{}, true);
+				const FogConstants fog = MakeFogConstants(snapshot.Fog, snapshot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), EnvironmentConstants{}, true);
 				size_t compared = 0;
 				size_t mismatched = 0;
 				for (uint32_t y = 0; y < snapshot.Camera.ViewportHeight; ++y)

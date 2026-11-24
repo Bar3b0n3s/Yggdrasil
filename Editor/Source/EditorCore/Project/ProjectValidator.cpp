@@ -69,6 +69,7 @@
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/SkyValidation.h"
 #include "Engine/Scene/SpriteValidation.h"
 #include "Engine/Scene/TerrainValidation.h"
 #include "Engine/Scripting/ScriptAssetLoads.h"
@@ -222,6 +223,10 @@ namespace Engine {
 			// landing order (its ledger: after M41's ANIMATION_ATTACHMENT_INVALID), an array of its own
 			// (PlanarReflectionDiagnosticCodes).
 			RenderReflectionInvalidCode,
+			// M45 (Scene/SkyValidation.h, Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3), appended in train order (ADR
+			// 0060's phase-8 ledger: after M44's codes), an array of its own (SkyDiagnosticCodes).
+			SkyLightInvalidCode,
+			SkyEnvironmentIgnoredCode,
 		};
 
 		// The documentation of every code, in ValidatorCodes order (M14, ADR 0022 decision 10): Docs/Reference/Validation.md, the
@@ -235,7 +240,7 @@ namespace Engine {
 				"Several cameras of one scene are Primary, but a scene renders through exactly one.",
 				"Clear Primary on all but one camera; the fix keeps the first Primary camera in scene order." },
 			ValidationCodeInfo{ SceneDuplicateUniqueComponentCode, "Error", false,
-				"A scene file holds more than one component that is unique per scene (Environment, PostProcess).",
+				"A scene file holds more than one component that is unique per scene (Environment, PostProcess, Sky).",
 				"Open the scene with scene.open {repair: true}, which keeps the first in canonical order, then scene.save." },
 			ValidationCodeInfo{ SceneNonCanonicalOrderCode, "Warning", false,
 				"A scene file lists a child entity before its parent, which is not the canonical order.",
@@ -497,6 +502,16 @@ namespace Engine {
 				"Put the PlanarReflection on the entity whose MeshRenderer draws a flat glass, and set its Normal to the glass's facing axis and "
 				"Offset to its surface (the finding names the axis along which the mesh is thinnest and that face's Offset; the built-in Quad "
 				"faces +Z, the Plane +Y)." },
+			ValidationCodeInfo{ SkyLightInvalidCode, "Warning", false,
+				"A Sky's Sun or Moon names no usable light: its Sun names an entity without a DirectionalLight or a disabled one, its Sun is "
+				"null in a scene without an enabled DirectionalLight (the sky then has no sun), or its Moon is its Sun's entity (no moon is "
+				"drawn). A Sun or Moon naming no entity is ENTITY_DANGLING_REFERENCE's.",
+				"Set Sun to the entity of the scene's sun DirectionalLight (or null for the first DirectionalLight in the scene), and Moon to "
+				"a second entity, normally a dim DirectionalLight turned toward the moon (or null for no moon)." },
+			ValidationCodeInfo{ SkyEnvironmentIgnoredCode, "Warning", false,
+				"An Environment is beside a Sky in one scene: the Sky lights the scene and draws its sky, so the Environment is unused.",
+				"Remove the Environment (or disable its entity) to light the scene with the Sky, or remove the Sky to light it with the "
+				"Environment's map." },
 		};
 
 		// The code documentation lists exactly the codes, in order.
@@ -1370,6 +1385,21 @@ namespace Engine {
 			}
 		}
 
+		// The sky checks of §13.7 (M45, Scene/SkyValidation.h): SKY_LIGHT_INVALID on a Sky whose Sun or Moon names no usable
+		// light and SKY_ENVIRONMENT_IGNORED on each Environment beside a Sky. Not fixable.
+		static void CheckSky(const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
+		{
+			for (SkySceneIssue& issue : FindSkyIssues(*checked.Target))
+			{
+				DiagnosticSite site;
+				site.File = checked.File;
+				site.Entity = FormatOptionalUUID(issue.Entity);
+				site.Component = issue.Component;
+				site.Field = issue.Field;
+				diagnostics.push_back(MakeDiagnostic(issue.Code, issue.Severity, std::move(issue.Message), site, std::move(issue.Hint), false));
+			}
+		}
+
 		static Status CheckRenderScene(const EditorContext& editor, const CheckedScene& checked, std::vector<CollectedDiagnostic>& diagnostics)
 		{
 			const auto render = EvaluateRenderSceneValidation(*checked.Target, *editor.GetEngine().GetAssetManager());
@@ -1668,6 +1698,8 @@ namespace Engine {
 			CheckTerrain(editor, checked, diagnostics);
 			CheckNavigation(editor, checked, diagnostics);
 			CheckPlanarReflections(editor, checked, diagnostics);
+			// M45 (ADR 0060's phase-8 ledger: after M43's CheckStaticScenery).
+			CheckSky(checked, diagnostics);
 			return CheckRenderScene(editor, checked, diagnostics);
 		}
 

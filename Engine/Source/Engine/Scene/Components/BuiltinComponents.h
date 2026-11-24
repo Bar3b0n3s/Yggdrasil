@@ -43,6 +43,7 @@
 #include "Engine/Scene/Components/RigidBodyComponent.h"
 #include "Engine/Scene/Components/ScriptComponent.h"
 #include "Engine/Scene/Components/SkinnedMeshComponent.h"
+#include "Engine/Scene/Components/SkyComponent.h"
 #include "Engine/Scene/Components/SliderJointComponent.h"
 #include "Engine/Scene/Components/SphereColliderComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
@@ -79,9 +80,10 @@ namespace Engine {
 		// Core (Registration/CoreRegistration.cpp)
 		IDComponent, NameComponent, TagsComponent, RelationshipComponent, TransformComponent, PrefabInstanceComponent,
 		PrefabLinkComponent,
-		// Rendering (Registration/RenderingRegistration.cpp)
+		// Rendering (Registration/RenderingRegistration.cpp). M45's Sky follows the Environment
+		// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger, the components row).
 		MeshRendererComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent,
-		EnvironmentComponent, PostProcessComponent, TextComponent,
+		EnvironmentComponent, SkyComponent, PostProcessComponent, TextComponent,
 		// Physics (Registration/PhysicsRegistration.cpp). M36's ColliderSurface follows CharacterController
 		// (Docs/Decisions/0053-m36-contact-surfaces.md decision 1; ADR 0052's phase-6 ledger, the categories row).
 		RigidBodyComponent, BoxColliderComponent, SphereColliderComponent, CapsuleColliderComponent, MeshColliderComponent,

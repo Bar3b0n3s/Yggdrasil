@@ -47,6 +47,48 @@ namespace Engine {
 			}
 		}
 
+		TEST_CASE("RenderingRegistration: the Sky follows the Environment, unique per scene, with its fields' kinds and ranges")
+		{
+			// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3; ADR 0060's phase-8 ledger).
+			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();
+			const ComponentInfo& sky = FindRenderingComponent(*registry, "Sky");
+			CHECK(sky.GetCategory() == "Rendering");
+			CHECK(sky.GetVersion() == 1);
+			CHECK(sky.HasFlag(ComponentFlags::UniquePerScene));
+			CHECK(sky.HasFlag(ComponentFlags::ScriptVisible));
+			CHECK(sky.FindField("Sun")->GetKind() == FieldType::EntityRef);
+			CHECK(sky.FindField("Moon")->GetKind() == FieldType::EntityRef);
+			CHECK(sky.FindField("GroundAlbedo")->GetKind() == FieldType::Color3);
+			CHECK(sky.FindField("CloudSpeed")->GetKind() == FieldType::Vec2);
+			const auto range = [&sky](std::string_view field, double min, double max)
+			{
+				INFO(std::string(field));
+				const FieldInfo* info = sky.FindField(field);
+				REQUIRE(info != nullptr);
+				CHECK(info->GetMeta().Min == min);
+				CHECK(info->GetMeta().Max == max);
+			};
+			range("Intensity", 0.0, 65504.0);
+			range("Haze", 0.0, 10.0);
+			range("Overcast", 0.0, 1.0);
+			range("GroundAlbedo", 0.0, 1.0);
+			range("SunDisc", 0.0, 1000.0);
+			range("MoonSize", 0.1, 10.0);
+			range("Stars", 0.0, 100.0);
+			range("Latitude", -90.0, 90.0);
+			range("NorthAngle", -360.0, 360.0);
+			range("Clouds", 0.0, 1.0);
+			range("CloudSpeed", -100.0, 100.0);
+			// Out-of-range writes are refused.
+			SkyComponent component;
+			component.Latitude = 91.0f;
+			component.CloudSpeed = glm::vec2(0.0f, -101.0f);
+			const std::vector<std::string> errors = ValidateRendering(*registry, sky, &component);
+			REQUIRE(errors.size() == 2);
+			CHECK(errors[0] == "/Latitude");
+			CHECK(errors[1].starts_with("/CloudSpeed"));
+		}
+
 		TEST_CASE("RenderingRegistration: colours are Color fields and ranges follow the table")
 		{
 			const Scope<TypeRegistry> registry = Test::CreateBuiltinRegistry();

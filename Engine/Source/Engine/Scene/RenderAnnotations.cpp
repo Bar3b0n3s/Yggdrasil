@@ -171,6 +171,9 @@ namespace Engine {
 		if (!Utils::IsFiniteAnnotationVector(ambient) || !Utils::IsFiniteAnnotationVector(ambient * environment.Intensity))
 			return MakeError(ErrorCode::InvalidArgument, "environment irradiance must be finite");
 		illumination = illumination || (environment.Intensity > 0 && Utils::HasPositiveComponent(ambient));
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a Sky of positive Intensity lights the scene in the
+		// Environment's place.
+		illumination = illumination || (snapshot.Sky.Enabled && snapshot.Sky.Intensity > 0.0f);
 		bool needsLighting = false;
 		for (const MeshDrawItem& item : snapshot.Meshes)
 		{

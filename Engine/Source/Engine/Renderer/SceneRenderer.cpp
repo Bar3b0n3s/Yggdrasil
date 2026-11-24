@@ -39,6 +39,7 @@
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/RenderStage.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Engine/Renderer/SkyAtmosphere.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/SsrPass.h"
 #include "Engine/Renderer/TaaPass.h"
@@ -1692,10 +1693,12 @@ namespace Engine {
 		{
 			// Choose in snapshot order, independently of CullLights' importance ordering. Uploaded indices are remapped. A light
 			// the planner rejects (data the schemas accept that cannot be shadowed, such as a ShadowDistance within the camera's
-			// near plane) stays lit without shadows and the next eligible light is tried; it is not a render error.
+			// near plane) stays lit without shadows and the next eligible light is tried; it is not a render error. M45
+			// (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): with a Sky, its Sun is offered first while above the
+			// horizon, else its Moon light (OrderShadowCandidates, Renderer/SkyAtmosphere.h).
 			uint32_t rejectedLights = 0;
 			std::string rejection;
-			for (uint32_t index = 0; index < snapshot.Lights.size(); ++index)
+			for (const uint32_t index : OrderShadowCandidates(snapshot))
 			{
 				const LightData& light = snapshot.Lights[index];
 				// M29 (the review): the type first, so a view of thousands of point lights searches its list for none of them.
@@ -1864,7 +1867,9 @@ namespace Engine {
 		const GpuEnvironment* environment = hasCamera && frame.IsLit && !frame.Wireframe ? Cache->GetEnvironment(snapshot.Environment.Environment) : nullptr;
 		frame.Environment = Utils::MakeEnvironmentConstants(snapshot.Environment, environment);
 		// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog, in the views that light with the environment.
-		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, frame.Environment, hasCamera && frame.IsLit && !frame.Wireframe);
+		// M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): the glow follows a Sky's Sun.
+		frame.Fog = MakeFogConstants(snapshot.Fog, camera, snapshot.Lights, GetSkyGlowLight(snapshot), frame.Environment,
+			hasCamera && frame.IsLit && !frame.Wireframe);
 		frame.EnvironmentSpecular = environment != nullptr ? environment->Specular : Pipelines->BlackCube;
 		frame.EnvironmentSkybox = environment != nullptr ? environment->Skybox : nvrhi::TextureHandle();
 		// M32's milestone review: a view whose cleared pixels no skybox draws over has its clear colour for a sky, which the

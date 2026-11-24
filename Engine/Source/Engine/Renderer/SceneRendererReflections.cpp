@@ -16,6 +16,7 @@
 #include "Engine/Renderer/RenderPassDeclaration.h"
 #include "Engine/Renderer/RenderPrepare.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
+#include "Engine/Renderer/SkyAtmosphere.h"
 #include "Engine/Renderer/SkyboxPass.h"
 #include "Engine/Renderer/TerrainPass.h"
 #include "Shared/DrawConstants.h"
@@ -248,7 +249,7 @@ namespace Engine {
 		slot.View.ReflectionView = 1;
 		slot.View.ClipPlane = clipPlane;
 		slot.View.CascadeDepthPlane = ComputeCascadeDepthPlane(frame.Camera);
-		slot.Fog = MakeFogConstants(snapshot.Fog, slot.Camera, snapshot.Lights, frame.Environment, frame.Fog.Enabled != 0);
+		slot.Fog = MakeFogConstants(snapshot.Fog, slot.Camera, snapshot.Lights, GetSkyGlowLight(snapshot), frame.Environment, frame.Fog.Enabled != 0);
 		slot.Fog.SkyIsClearColor = frame.Fog.SkyIsClearColor;
 		return {};
 	}

@@ -72,9 +72,9 @@ PLANE_MESH = "0000000000000103"
 # The registry's canonical component order (BuiltinComponents, then the validator test components).
 COMPONENT_ORDER = [
     "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
-    "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
-    "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface", "AudioSource",
-    "AudioListener",
+    "DirectionalLight", "PointLight", "SpotLight", "Environment", "Sky", "PostProcess", "Text", "RigidBody",
+    "BoxCollider", "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface",
+    "AudioSource", "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
@@ -1061,6 +1061,15 @@ return Script.Define("Jumper", Jumper)
     item = fixture("RENDER_REFLECTION_INVALID")
     item.entities.append(entity("e000000000000042", "Mirror", {
         "Transform": transform(0, 0, -20), "MeshRenderer": {"Mesh": CUBE_MESH}, "PlanarReflection": {}}))
+
+    # M45 (Docs/Decisions/0063-m45-sky-and-time-of-day.md decision 3): a Sky whose Sun names the camera, which holds no
+    # DirectionalLight; and a Sky (its Sun the baseline's light) beside an Environment, which it leaves unused.
+    item = fixture("SKY_LIGHT_INVALID")
+    item.entities.append(entity("e000000000000042", "Sky", {
+        "Transform": transform(), "Sky": {"Sun": "e000000000000001"}}))
+    item = fixture("SKY_ENVIRONMENT_IGNORED")
+    item.entities.append(entity("e000000000000042", "Sky", {"Transform": transform(), "Sky": {}}))
+    item.entities.append(entity("e000000000000043", "Environment", {"Transform": transform(), "Environment": {}}))
 
     return fixtures
 

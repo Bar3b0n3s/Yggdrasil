@@ -541,6 +541,122 @@
 			},
 			"additionalProperties": false
 		},
+		"Sky": {
+			"description": "The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud layer; it lights the scene in the Environment's place.",
+			"type": "object",
+			"properties": {
+				"Sun": {
+					"description": "The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Moon": {
+					"description": "The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: no moon.",
+					"type": ["string", "null"],
+					"pattern": "^[0-9a-fA-F]{16}$"
+				},
+				"Intensity": {
+					"description": "The unitless strength of the sky's radiance and of the image-based light it gives.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 65504
+				},
+				"DriveLights": {
+					"description": "Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read.",
+					"type": "boolean"
+				},
+				"Haze": {
+					"description": "The density of the atmosphere's aerosols, a multiple of a clear day's (1).",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 10
+				},
+				"Overcast": {
+					"description": "How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, with DriveLights, the sun.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"GroundAlbedo": {
+					"description": "The linear albedo of the atmosphere's ground, which brightens the sky above it.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						},
+						{
+							"type": "number",
+							"minimum": 0,
+							"maximum": 1
+						}
+					],
+					"minItems": 3,
+					"maxItems": 3
+				},
+				"SunDisc": {
+					"description": "The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its size is the Sun light's LightAngle; 0 draws no disc.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1000
+				},
+				"MoonSize": {
+					"description": "The angular diameter of the moon's disc, in degrees.",
+					"type": "number",
+					"minimum": 0.1,
+					"maximum": 10
+				},
+				"Stars": {
+					"description": "The brightness of the stars, faded by the sky's own brightness; 0 draws none.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 100
+				},
+				"Latitude": {
+					"description": "The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun.",
+					"type": "number",
+					"minimum": -90,
+					"maximum": 90
+				},
+				"NorthAngle": {
+					"description": "The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above).",
+					"type": "number",
+					"minimum": -360,
+					"maximum": 360
+				},
+				"Clouds": {
+					"description": "The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows.",
+					"type": "number",
+					"minimum": 0,
+					"maximum": 1
+				},
+				"CloudSpeed": {
+					"description": "How fast the cloud layer drifts, in metres per second of simulation time along world X and Z.",
+					"type": "array",
+					"prefixItems": [
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						},
+						{
+							"type": "number",
+							"minimum": -100,
+							"maximum": 100
+						}
+					],
+					"minItems": 2,
+					"maxItems": 2
+				}
+			},
+			"additionalProperties": false
+		},
 		"PostProcess": {
 			"description": "The scene's exposure (manual or automatic), tone mapping and grading, ambient occlusion, reflections, bloom and anti-aliasing (one per scene).",
 			"type": "object",
@@ -4203,6 +4319,9 @@
 						},
 						"Environment": {
 							"$ref": "#/$defs/Environment"
+						},
+						"Sky": {
+							"$ref": "#/$defs/Sky"
 						},
 						"PostProcess": {
 							"$ref": "#/$defs/PostProcess"

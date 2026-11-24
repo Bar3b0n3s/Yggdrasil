@@ -718,6 +718,7 @@ declare extern type Entity with
 	function GetComponent(self, name: "PointLight"): PointLight?
 	function GetComponent(self, name: "SpotLight"): SpotLight?
 	function GetComponent(self, name: "Environment"): Environment?
+	function GetComponent(self, name: "Sky"): Sky?
 	function GetComponent(self, name: "PostProcess"): PostProcess?
 	function GetComponent(self, name: "Text"): Text?
 	function GetComponent(self, name: "RigidBody"): RigidBody?
@@ -833,6 +834,8 @@ declare extern type Entity with
 	SetParent: (self: Entity, parent: Entity?, keepWorld: boolean?) -> ()
 	-- The entity's SkinnedMesh component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SkinnedMesh: SkinnedMesh?
+	-- The entity's Sky component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Sky: Sky?
 	-- The entity's SliderJoint component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SliderJoint: SliderJoint?
 	-- The entity's SphereCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -1467,6 +1470,38 @@ declare extern type SkinnedMesh with
 	MorphWeights: {number}
 	-- Set the weight of the mesh's morph target named target, growing MorphWeights with the targets' default weights; an error names the target when the mesh has no such target, and a weight outside [-1, 1] raises one. [All modes; Runtime|Test; mutates]
 	SetMorphWeight: (self: SkinnedMesh, target: string, weight: number) -> ()
+end
+
+-- The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud layer; it lights the scene in the Environment's place.
+declare extern type Sky with
+	-- How fast the cloud layer drifts, in metres per second of simulation time along world X and Z. [All modes; Runtime|Test; pure/read; setter mutates]
+	CloudSpeed: vector
+	-- The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows. [All modes; Runtime|Test; pure/read; setter mutates]
+	Clouds: number
+	-- Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read. [All modes; Runtime|Test; pure/read; setter mutates]
+	DriveLights: boolean
+	-- The linear albedo of the atmosphere's ground, which brightens the sky above it. [All modes; Runtime|Test; pure/read; setter mutates]
+	GroundAlbedo: Color
+	-- The density of the atmosphere's aerosols, a multiple of a clear day's (1). [All modes; Runtime|Test; pure/read; setter mutates]
+	Haze: number
+	-- The unitless strength of the sky's radiance and of the image-based light it gives. [All modes; Runtime|Test; pure/read; setter mutates]
+	Intensity: number
+	-- The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun. [All modes; Runtime|Test; pure/read; setter mutates]
+	Latitude: number
+	-- The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: no moon. [All modes; Runtime|Test; pure/read; setter mutates]
+	Moon: Entity?
+	-- The angular diameter of the moon's disc, in degrees. [All modes; Runtime|Test; pure/read; setter mutates]
+	MoonSize: number
+	-- The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above). [All modes; Runtime|Test; pure/read; setter mutates]
+	NorthAngle: number
+	-- How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, with DriveLights, the sun. [All modes; Runtime|Test; pure/read; setter mutates]
+	Overcast: number
+	-- The brightness of the stars, faded by the sky's own brightness; 0 draws none. [All modes; Runtime|Test; pure/read; setter mutates]
+	Stars: number
+	-- The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon. [All modes; Runtime|Test; pure/read; setter mutates]
+	Sun: Entity?
+	-- The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its size is the Sun light's LightAngle; 0 draws no disc. [All modes; Runtime|Test; pure/read; setter mutates]
+	SunDisc: number
 end
 
 -- Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking.

@@ -2962,7 +2962,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "Sky") -> Sky?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?)`
 
 Get a component proxy, or nil when absent.
 
@@ -3229,6 +3229,14 @@ All modes; Runtime|Test; mutates.
 `SkinnedMesh?`
 
 The entity's SkinnedMesh component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.Sky
+
+`Sky?`
+
+The entity's Sky component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -5456,6 +5464,122 @@ Set the weight of the mesh's morph target named target, growing MorphWeights wit
 
 All modes; Runtime|Test; mutates.
 
+## Sky
+
+The scene's procedural sky (one per scene): an atmosphere lit by its Sun light, with the sun's disc, a moon, stars and a cloud layer; it lights the scene in the Environment's place.
+
+### Sky.CloudSpeed
+
+`vector`
+
+How fast the cloud layer drifts, in metres per second of simulation time along world X and Z.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Clouds
+
+`number`
+
+The cloud layer's coverage, from 0 (none) to 1 (all); the layer casts no shadows.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.DriveLights
+
+`boolean`
+
+Whether the Sun's and the Moon light's rendered colours take the atmosphere's transmittance (reddening at dusk, dark below the horizon; the moon's also its illuminated fraction). The components keep their authored Color, which scripts read.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.GroundAlbedo
+
+`Color`
+
+The linear albedo of the atmosphere's ground, which brightens the sky above it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Haze
+
+`number`
+
+The density of the atmosphere's aerosols, a multiple of a clear day's (1).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Intensity
+
+`number`
+
+The unitless strength of the sky's radiance and of the image-based light it gives.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Latitude
+
+`number`
+
+The elevation of the celestial pole above the northern horizon, in degrees: the stars turn about it with the Sun.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Moon
+
+`Entity?`
+
+The moon: an entity turned as a DirectionalLight is, the moon toward its local +Z, normally a dim DirectionalLight (the moonlight), which owns the shadow cascades while the Sun is below the horizon; its phase follows its angle from the Sun. Null: no moon.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.MoonSize
+
+`number`
+
+The angular diameter of the moon's disc, in degrees.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.NorthAngle
+
+`number`
+
+The direction of north, in degrees about +Y from -Z (counter-clockwise seen from above).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Overcast
+
+`number`
+
+How far the sky turns toward a grey overcast, from 0 (clear) to 1 (a storm's); it dims the sun's and the moon's discs and, with DriveLights, the sun.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Stars
+
+`number`
+
+The brightness of the stars, faded by the sky's own brightness; 0 draws none.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.Sun
+
+`Entity?`
+
+The sun: an entity with a DirectionalLight, whose direction, Color and Intensity light the atmosphere; null takes the scene's first DirectionalLight. It owns the fog's glow, and the shadow cascades while it is above the horizon.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### Sky.SunDisc
+
+`number`
+
+The brightness of the sun's disc, a multiple of its physical radiance (1: the Sun light's illuminance over the disc); its size is the Sun light's LightAngle; 0 draws no disc.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## SliderJoint
 
 Joins the body of the RigidBody at or above the entity to another body or the world so it only moves along an axis without turning, like a piston or a rail, with optional limits, motor and breaking.
@@ -7136,7 +7260,7 @@ How a rigid body moves.
 
 What a camera draws behind the scene's geometry.
 
-- `Skybox`: The scene's Environment skybox (its fallback colour when none is shown).
+- `Skybox`: The scene's Sky, or its Environment skybox (its fallback colour when none is shown).
 
 - `Color`: The camera's ClearColor.
 

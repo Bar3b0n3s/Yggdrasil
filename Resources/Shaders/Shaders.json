@@ -389,6 +389,20 @@
 			]
 		},
 		{
+			"Name": "Sky",
+			"File": "Passes/Sky.slang",
+			"Entries": [
+				{
+					"Name": "CSTestCopyWrite",
+					"Stage": "compute"
+				},
+				{
+					"Name": "CSTestCopyRead",
+					"Stage": "compute"
+				}
+			]
+		},
+		{
 			"Name": "Skybox",
 			"File": "Passes/Skybox.slang",
 			"Entries": [
