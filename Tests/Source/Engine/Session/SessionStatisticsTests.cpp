@@ -81,6 +81,8 @@ namespace Engine {
 			view.SkinnedMeshes = 5;
 			view.PlanarReflections = 3; // M42
 			view.DroppedPlanarReflections = 2;
+			view.LodCrossFades = 6; // M46
+			view.DistanceCulledMeshes = 8;
 			view.Passes.push_back({ .Name = "Forward", .CpuMilliseconds = 1.0, .GpuMilliseconds = 2.0, .GpuAvailable = true, .DrawCalls = 10, .Dispatches = 0, .Triangles = 300 });
 			view.Passes.push_back({ .Name = "Shadows", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.5, .GpuAvailable = false, .DrawCalls = 4, .Dispatches = 0, .Triangles = 120 });
 			view.Passes.push_back({ .Name = "Skinning", .CpuMilliseconds = 1.0, .GpuMilliseconds = 0.25, .GpuAvailable = true, .DrawCalls = 0, .Dispatches = 5, .Triangles = 0 });
@@ -93,6 +95,8 @@ namespace Engine {
 			CHECK(stats.SkinnedMeshes == 5);
 			CHECK(stats.PlanarReflections == 3);
 			CHECK(stats.DroppedPlanarReflections == 2);
+			CHECK(stats.LodCrossFades == 6);
+			CHECK(stats.DistanceCulledMeshes == 8);
 			CHECK(stats.DrawCalls == 14);
 			CHECK(stats.Triangles == 420);
 			// Only the passes with a GPU sample add to the GPU time.

@@ -44,6 +44,8 @@ namespace Engine {
 		stats.CachedSpotShadows = view.CachedSpotShadows;
 		stats.PlanarReflections = view.PlanarReflections;
 		stats.DroppedPlanarReflections = view.DroppedPlanarReflections;
+		stats.LodCrossFades = view.LodCrossFades;
+		stats.DistanceCulledMeshes = view.DistanceCulledMeshes;
 		if (view.SsrAreaAvailable)
 		{
 			stats.SsrTiles = view.SsrTiles;

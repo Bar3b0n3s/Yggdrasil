@@ -30845,6 +30845,27 @@
 								"items": {
 									"type": "string"
 								}
+							},
+							"meshLodDraws": {
+								"description": "The frame's mesh draws per level of detail, levels 0 to 4 (5 counts): one per submesh and level drawn, a mesh without levels counting at level 0 and an item inside a fade band once at each of its two levels.",
+								"type": "array",
+								"items": {
+									"type": "integer",
+									"minimum": 0,
+									"maximum": 4294967295
+								}
+							},
+							"lodCrossFades": {
+								"description": "Mesh items the frame drew inside a fade band, cross-fading two levels of detail with complementary dither.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"distanceCulledMeshes": {
+								"description": "Mesh items the frame did not draw because the camera is at or beyond their RenderDistance's CullDistance.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
 							}
 						},
 						"additionalProperties": false

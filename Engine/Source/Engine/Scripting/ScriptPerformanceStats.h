@@ -47,6 +47,11 @@ namespace Engine {
 		// DroppedPlanarReflections).
 		uint32_t PlanarReflections = 0;
 		uint32_t DroppedPlanarReflections = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K; ADR 0060's phase-8 ledger: appended after
+		// M45's SkyUpdates): the mesh items the frame drew cross-fading two levels of detail and those it culled by their
+		// RenderDistance's CullDistance (RenderStats' LodCrossFades and DistanceCulledMeshes).
+		uint32_t LodCrossFades = 0;
+		uint32_t DistanceCulledMeshes = 0;
 	};
 
 }

@@ -49,6 +49,11 @@ namespace Engine {
 			stats.DroppedPlanarReflections = 1;
 			stats.CulledPlanarReflections = 6;
 			stats.PlanarReflectionEntities = { UUID(0x2a), UUID(0x17) };
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): the draws per level, the cross-fades
+			// and the items culled by distance.
+			stats.MeshLodDraws = { 12, 7, 0, 2, 1 };
+			stats.LodCrossFades = 4;
+			stats.DistanceCulledMeshes = 9;
 			stats.Passes.push_back({ .Name = "Prepare", .CpuMilliseconds = 2.5, .GpuMilliseconds = 7.0, .GpuAvailable = false });
 			stats.Passes.push_back({ .Name = "Opaque", .CpuMilliseconds = 1.5, .GpuMilliseconds = 3.0, .GpuAvailable = true, .DrawCalls = 9 });
 			const auto summary = MakeStatsViewSummary("scene", stats);
@@ -73,6 +78,9 @@ namespace Engine {
 			CHECK(summary.DroppedPlanarReflections == 1);
 			CHECK(summary.CulledPlanarReflections == 6);
 			CHECK(summary.PlanarReflectionEntities == std::vector<std::string>{ UUID(0x2a).ToString(), UUID(0x17).ToString() });
+			CHECK(summary.MeshLodDraws == std::vector<uint32_t>{ 12, 7, 0, 2, 1 });
+			CHECK(summary.LodCrossFades == 4);
+			CHECK(summary.DistanceCulledMeshes == 9);
 			REQUIRE(summary.Passes.size() == 2);
 			CHECK_FALSE(summary.Passes[0].GpuAvailable);
 			CHECK(summary.Passes[0].GpuMilliseconds == 0.0f);

@@ -106,6 +106,9 @@ namespace Engine {
 		result.CulledPlanarReflections = stats.CulledPlanarReflections;
 		for (const UUID& entity : stats.PlanarReflectionEntities)
 			result.PlanarReflectionEntities.push_back(entity.ToString());
+		result.MeshLodDraws.assign(stats.MeshLodDraws.begin(), stats.MeshLodDraws.end());
+		result.LodCrossFades = stats.LodCrossFades;
+		result.DistanceCulledMeshes = stats.DistanceCulledMeshes;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -189,7 +192,14 @@ namespace Engine {
 				"Planar reflections the frame did not consider: out of view, seen from behind their reflecting side, or in a view that draws "
 				"none (a debug view or the wireframe); they cost nothing.")
 			.Field("planarReflectionEntities", &StatsViewSummary::PlanarReflectionEntities,
-				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.");
+				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.")
+			.Field("meshLodDraws", &StatsViewSummary::MeshLodDraws,
+				"The frame's mesh draws per level of detail, levels 0 to 4 (5 counts): one per submesh and level drawn, a mesh without "
+				"levels counting at level 0 and an item inside a fade band once at each of its two levels.")
+			.Field("lodCrossFades", &StatsViewSummary::LodCrossFades,
+				"Mesh items the frame drew inside a fade band, cross-fading two levels of detail with complementary dither.")
+			.Field("distanceCulledMeshes", &StatsViewSummary::DistanceCulledMeshes,
+				"Mesh items the frame did not draw because the camera is at or beyond their RenderDistance's CullDistance.");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

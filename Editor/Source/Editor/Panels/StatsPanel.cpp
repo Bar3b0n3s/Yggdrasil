@@ -170,6 +170,9 @@ namespace Engine {
 				Utils::DrawSupportingMetric("Skinned meshes", std::to_string(view.SkinnedMeshes));
 				// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
 				Utils::DrawSupportingMetric("Planar reflections", std::format("{} drawn / {} dropped", view.PlanarReflections, view.DroppedPlanarReflections));
+				// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): the draws per level, the items
+				// cross-fading two levels and those beyond their cull distance.
+				Utils::DrawSupportingMetric("Mesh LODs", std::format("{} / {} / {} / {} / {} draws / {} cross-fades / {} distance-culled", view.MeshLodDraws[0], view.MeshLodDraws[1], view.MeshLodDraws[2], view.MeshLodDraws[3], view.MeshLodDraws[4], view.LodCrossFades, view.DistanceCulledMeshes));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));
