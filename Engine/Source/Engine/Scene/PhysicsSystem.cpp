@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstddef>
 #include <format>
+#include <span>
 #include <tuple>
 #include <utility>
 #include <variant>
@@ -295,6 +296,20 @@ namespace Engine {
 			return { transform.Translation, transform.Rotation };
 		}
 
+		// M44: writes each wheel entity's local Translation and Rotation from its wheel's pose (PhysicsSystem.h's M44 paragraph)
+		// directly (a runtime write, §5.1), only where a bit differs.
+		static void WriteWheelPoses(Scene& scene, std::span<const PhysicsWheelPose> poses)
+		{
+			for (const PhysicsWheelPose& pose : poses)
+			{
+				TransformComponent& transform = scene.FindEntityByID(pose.Entity).GetComponent<TransformComponent>();
+				if (SameBits(transform.Translation, pose.Translation) && SameBits(transform.Rotation, pose.Rotation))
+					continue;
+				transform.Translation = pose.Translation;
+				transform.Rotation = pose.Rotation;
+			}
+		}
+
 		// The body settings of `plan` (BodyDescription without its shape, pose and velocities, §9.2 "Body settings").
 		static BodyDescription MakeBodySettings(const PhysicsBodyPlan& plan, ConstEntity owner)
 		{
@@ -529,6 +544,8 @@ namespace Engine {
 		registry.on_construct<HierarchyDisabledTag>().connect<&State::OnEntityLeavingPlay>(*this);
 		// M37: the joint components mark the joints, never the bodies (PhysicsSystemJoints.cpp).
 		ConnectJointSignals(registry);
+		// M44: the vehicle components mark the vehicles, never the bodies (PhysicsSystemVehicles.cpp).
+		ConnectVehicleSignals(registry);
 	}
 
 	void PhysicsSystem::State::DisconnectSignals()
@@ -550,6 +567,7 @@ namespace Engine {
 		registry.on_construct<PendingDestroyTag>().disconnect(this);
 		registry.on_construct<HierarchyDisabledTag>().disconnect(this);
 		DisconnectJointSignals(registry);
+		DisconnectVehicleSignals(registry);
 	}
 
 	void PhysicsSystem::State::OnComponentChanged(entt::registry& registry, entt::entity entity)
@@ -1083,8 +1101,10 @@ namespace Engine {
 		AssignPlan(created, plan);
 		// M36: the new body's collider surfaces (PhysicsSystemSurfaces.cpp).
 		SendSurfaces(created);
-		// M37: a new body may complete a joint.
+		// M37: a new body may complete a joint; M44: or a vehicle.
 		JointsChanged = true;
+		VehiclesChanged = true;
+		VehicleBodiesChanged = true;
 		return true;
 	}
 
@@ -1183,7 +1203,8 @@ namespace Engine {
 			return;
 		const PhysicsBodyEntry& entry = found->second;
 		PurgeBodyContacts(handle, woken);
-		// M37: its joints before the body (a Jolt constraint holds raw body pointers).
+		// M44: its vehicle, then (M37) its joints before the body (a Jolt constraint holds raw body pointers).
+		RemoveBodyVehicles(entry.Handle);
 		RemoveBodyJoints(entry.Handle);
 		World->DestroyBody(entry.Handle);
 		BodiesByOwner.erase({ entry.Owner, entry.Origin });
@@ -1399,8 +1420,10 @@ namespace Engine {
 		}
 		MeshShapes.Prune();
 
-		// M37: the joints after every body of the pass, over this composition (PhysicsSystemJoints.cpp).
+		// M37: the joints after every body of the pass, over this composition (PhysicsSystemJoints.cpp); M44: then the vehicles
+		// (PhysicsSystemVehicles.cpp).
 		SynchronizeJointsAfterRebuild(composition);
+		SynchronizeVehiclesAfterRebuild();
 	}
 
 	void PhysicsSystem::State::RefreshShapes(const std::set<UUID>& owners, std::set<UUID>& woken)
@@ -1431,11 +1454,12 @@ namespace Engine {
 		State& state = *m_State;
 		if (state.Specification.RuntimeScene != nullptr && state.World != nullptr)
 			state.DisconnectSignals();
-		// Characters first (their inner bodies live in the world), then (M37) the joints, then the bodies, then the world; no
-		// events.
+		// Characters first (their inner bodies live in the world), then (M44) the vehicles and (M37) the joints, then the
+		// bodies, then the world; no events.
 		state.Characters.clear();
 		if (state.World != nullptr)
 		{
+			state.DestroyAllVehicles();
 			state.DestroyAllJoints();
 			for (const auto& [handle, entry] : state.Bodies)
 				state.World->DestroyBody(entry.Handle);
@@ -1509,8 +1533,10 @@ namespace Engine {
 		state.ChangedEntities.clear();
 		// M36: the collider surfaces written since the last PreStep (PhysicsSystemSurfaces.cpp).
 		state.RefreshSurfaces();
-		// M37: the joints, when a joint component changed or a body was created or removed (a rebuild did it already).
+		// M37: the joints, when a joint component changed or a body was created or removed (a rebuild did it already); M44: then
+		// the vehicles.
 		state.SynchronizeJoints();
+		state.SynchronizeVehicles();
 
 		// 3-4. Kinematic moves and teleports, in canonical order of the owners; entities pending destruction or disabled keep
 		// their bodies as they are until FlushDestroyed.
@@ -1598,6 +1624,9 @@ namespace Engine {
 		}
 		state.WakeOwners(woken);
 
+		// 4b. M44: the vehicles' driver input, in canonical order (PhysicsSystemVehicles.cpp).
+		state.ApplyVehicleInput(order);
+
 		// 5. Characters: a Transform write teleports them, then each runs its update with the velocity of its last
 		// MoveCharacter, which the update consumes.
 		const glm::vec3 gravity = state.World->GetGravity();
@@ -1654,7 +1683,7 @@ namespace Engine {
 	{
 		State& state = *m_State;
 		ENGINE_CORE_ASSERT(!state.Dispatching, "PhysicsSystem::SynchronizeBodies was called from a physics listener callback");
-		if (!state.ComponentsChanged && !state.JointsChanged)
+		if (!state.ComponentsChanged && !state.JointsChanged && !state.VehiclesChanged)
 			return;
 		// PreStep's items 1 and 2: a hierarchy change seen here is consumed with the rebuild, as PreStep consumes it.
 		std::set<UUID> woken;
@@ -1662,8 +1691,9 @@ namespace Engine {
 			state.Rebuild(state.HasHierarchyChanged(), woken);
 		state.ComponentsChanged = false;
 		state.ChangedEntities.clear();
-		// M37: a joint change alone is synchronized here too (a rebuild did it already).
+		// M37: a joint change alone is synchronized here too (a rebuild did it already); M44: and a vehicle change.
 		state.SynchronizeJoints();
+		state.SynchronizeVehicles();
 		state.WakeOwners(woken);
 		state.DeliverPendingDiagnostics();
 	}
@@ -1738,6 +1768,8 @@ namespace Engine {
 				std::tie(entry.WrittenTranslation, entry.WrittenRotation) = Utils::WriteWorldPose(entity, entry.Controller->GetPose());
 			}
 		}
+		// M44: the wheels' poses, after their vehicles' write-back (PhysicsSystemVehicles.cpp).
+		Utils::WriteWheelPoses(scene, state.CollectWheelPoses());
 
 		// §9.4 steps 1 to 4: map, collapse into pairs, sort, dispatch.
 		const auto resolve = [&state](BodyHandle handle, uint32_t collider) -> std::optional<ResolvedBody>
@@ -2161,7 +2193,8 @@ namespace Engine {
 			std::vector<UUID> gone;
 			const std::set<UUID> candidates = std::move(state.FlushCandidates);
 			state.FlushCandidates.clear();
-			// M37: the joints of entities that left play go now; a body's go with it below (RemoveBody).
+			// M44 and M37: the vehicles and joints of entities that left play go now; a body's go with it below (RemoveBody).
+			state.RemoveLeavingVehicles(candidates);
 			state.RemoveLeavingJoints(candidates);
 			for (const UUID candidate : candidates)
 			{
@@ -2552,8 +2585,9 @@ namespace Engine {
 	void PhysicsSystem::AppendStateHash(XXH64Hasher& hasher) const
 	{
 		const State& state = *m_State;
-		// M37: kept joint frames outlive their bodies while an entity is disabled, so they alone keep the block.
-		if (state.Bodies.empty() && state.Characters.empty() && !state.HasKeptJointFrames())
+		// M37: kept joint frames outlive their bodies while an entity is disabled, so they alone keep the block; M44: kept wheel
+		// frames too.
+		if (state.Bodies.empty() && state.Characters.empty() && !state.HasKeptJointFrames() && !state.HasKeptVehicleFrames())
 			return;
 
 		const Scene& scene = *state.Specification.RuntimeScene;
@@ -2588,8 +2622,9 @@ namespace Engine {
 				append(id, controller.GetPose(), controller.GetVelocity(), glm::vec3(0.0f), false);
 			}
 		}
-		// M37: the joint part, after the bodies and characters.
+		// M37: the joint part, after the bodies and characters; M44: the vehicle part after it.
 		state.AppendJointHash(bytes);
+		state.AppendVehicleHash(bytes);
 		hasher.Update(bytes);
 	}
 

@@ -266,6 +266,12 @@ export type UiWidgetKind = "Canvas" | "Panel" | "Image" | "Text" | "Button" | "T
 -- What project.validate checks.
 export type ValidationScope = "Project" | "Scene"
 
+-- Whether a WheeledVehicle's gears change by themselves.
+export type VehicleTransmissionMode = "Auto" | "Manual"
+
+-- How a WheeledVehicle's wheels find the ground under them.
+export type VehicleWheelCast = "Ray" | "Sphere" | "Cylinder"
+
 -- Which view viewport.screenshot renders.
 export type ViewportView = "Scene" | "Game"
 
@@ -768,6 +774,8 @@ declare extern type Entity with
 	function GetComponent(self, name: "SliderJoint"): SliderJoint?
 	function GetComponent(self, name: "DistanceJoint"): DistanceJoint?
 	function GetComponent(self, name: "FixedJoint"): FixedJoint?
+	function GetComponent(self, name: "WheeledVehicle"): WheeledVehicle?
+	function GetComponent(self, name: "VehicleWheel"): VehicleWheel?
 	-- Get the parent, or nil for a root. [All modes; Runtime|Test; pure/read]
 	GetParent: (self: Entity) -> Entity?
 	-- Get the instance of the first script slot whose behaviour has this name, or of the first slot without a name; nil when there is none. [All modes; Runtime|Test; pure/read]
@@ -880,6 +888,10 @@ declare extern type Entity with
 	UiTextInput: UiTextInput?
 	-- The entity's UiToggle component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	UiToggle: UiToggle?
+	-- The entity's VehicleWheel component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	VehicleWheel: VehicleWheel?
+	-- The entity's WheeledVehicle component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	WheeledVehicle: WheeledVehicle?
 	-- Compare UUIDs; equality does not authorize access to an expired scene. [All modes; Runtime|Test; pure/read]
 	__eq: (self: Entity, other: Entity) -> boolean
 end
@@ -1922,6 +1934,94 @@ declare extern type UiToggle with
 	Interactable: boolean
 	-- Whether the toggle is on. [All modes; Runtime|Test; pure/read; setter mutates]
 	IsOn: boolean
+end
+
+-- Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.
+declare extern type VehicleWheel with
+	-- How quickly the wheel's spin slows down by itself, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	AngularDamping: number
+	-- The wheel's moment of inertia about its axle. [All modes; Runtime|Test; pure/read; setter mutates]
+	Inertia: number
+	-- The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys. [All modes; Runtime|Test; pure/read; setter mutates]
+	LateralFriction: {{X: number, Y: number}}
+	-- The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys. [All modes; Runtime|Test; pure/read; setter mutates]
+	LongitudinalFriction: {{X: number, Y: number}}
+	-- The brake's torque at a full Brake, in newton metres. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxBrakeTorque: number
+	-- The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxHandBrakeTorque: number
+	-- The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxSteerAngle: number
+	-- The wheel's radius, in metres (never scaled). [All modes; Runtime|Test; pure/read; setter mutates]
+	Radius: number
+	-- The suspension's damping ratio: 0 bounces, 1 is critically damped. [All modes; Runtime|Test; pure/read; setter mutates]
+	SpringDamping: number
+	-- The suspension spring's natural frequency, in hertz, above 0: higher is stiffer. [All modes; Runtime|Test; pure/read; setter mutates]
+	SpringFrequency: number
+	-- The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length. [All modes; Runtime|Test; pure/read; setter mutates]
+	SuspensionMaxLength: number
+	-- The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength. [All modes; Runtime|Test; pure/read; setter mutates]
+	SuspensionMinLength: number
+	-- How far the spring is compressed at full droop, in metres, so it pushes already there. [All modes; Runtime|Test; pure/read; setter mutates]
+	SuspensionPreload: number
+	-- The wheel's width, in metres (never scaled); a Cylinder cast uses it. [All modes; Runtime|Test; pure/read; setter mutates]
+	Width: number
+end
+
+-- Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.
+declare extern type WheeledVehicle with
+	-- The anti-roll bars between pairs of wheels, at most eight. [All modes; Runtime|Test; pure/read; setter mutates]
+	AntiRollBars: {{LeftWheel: Entity?, RightWheel: Entity?, Stiffness: number}}
+	-- The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque. [All modes; Runtime|Test; pure/read; setter mutates]
+	Brake: number
+	-- Manual only: the clutch, from 0 (released) to 1 (engaged). [All modes; Runtime|Test; pure/read; setter mutates]
+	Clutch: number
+	-- Auto: how long the clutch takes to engage after a gear change. [All modes; Runtime|Test; pure/read; setter mutates]
+	ClutchReleaseTime: number
+	-- How strongly the engaged clutch couples the engine to the wheels, above 0. [All modes; Runtime|Test; pure/read; setter mutates]
+	ClutchStrength: number
+	-- Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's. [All modes; Runtime|Test; pure/read; setter mutates]
+	DifferentialLimitedSlipRatio: number
+	-- The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0. [All modes; Runtime|Test; pure/read; setter mutates]
+	Differentials: {{LeftWheel: Entity?, RightWheel: Entity?, Ratio: number, LeftRightSplit: number, LimitedSlipRatio: number, EngineTorqueRatio: number}}
+	-- How quickly the engine slows down by itself, per second. [All modes; Runtime|Test; pure/read; setter mutates]
+	EngineDamping: number
+	-- The moment of inertia of the engine's turning parts. [All modes; Runtime|Test; pure/read; setter mutates]
+	EngineInertia: number
+	-- Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has. [All modes; Runtime|Test; pure/read; setter mutates]
+	Gear: number
+	-- The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears. [All modes; Runtime|Test; pure/read; setter mutates]
+	GearRatios: {number}
+	-- The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque. [All modes; Runtime|Test; pure/read; setter mutates]
+	HandBrake: number
+	-- How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxPitchRollAngle: number
+	-- The engine's largest RPM, which it never exceeds. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxRpm: number
+	-- The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM. [All modes; Runtime|Test; pure/read; setter mutates]
+	MaxTorque: number
+	-- The engine's idle RPM, the least it turns at; at most MaxRpm. [All modes; Runtime|Test; pure/read; setter mutates]
+	MinRpm: number
+	-- The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses. [All modes; Runtime|Test; pure/read; setter mutates]
+	ReverseGearRatios: {number}
+	-- Auto: the RPM below which it shifts down; above 0. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShiftDownRpm: number
+	-- Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm. [All modes; Runtime|Test; pure/read; setter mutates]
+	ShiftUpRpm: number
+	-- The steering, from -1 (full left lock) to 1 (full right lock). [All modes; Runtime|Test; pure/read; setter mutates]
+	Steering: number
+	-- Auto: the least time between two gear changes, in seconds. [All modes; Runtime|Test; pure/read; setter mutates]
+	SwitchLatency: number
+	-- Auto: how long a gear change takes, in seconds. [All modes; Runtime|Test; pure/read; setter mutates]
+	SwitchTime: number
+	-- The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step. [All modes; Runtime|Test; pure/read; setter mutates]
+	Throttle: number
+	-- The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear. [All modes; Runtime|Test; pure/read; setter mutates]
+	TorqueCurve: {{X: number, Y: number}}
+	-- Whether the gears change by themselves (Auto) or as Gear says (Manual). [All modes; Runtime|Test; pure/read; setter mutates]
+	Transmission: VehicleTransmissionMode
+	-- How the wheels find the ground under them. [All modes; Runtime|Test; pure/read; setter mutates]
+	WheelCast: VehicleWheelCast
 end
 
 -- Application identity, window state and deferred quit requests.

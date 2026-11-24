@@ -67,6 +67,8 @@
 #include "Engine/Scene/Components/UiTextComponent.h"
 #include "Engine/Scene/Components/UiTextInputComponent.h"
 #include "Engine/Scene/Components/UiToggleComponent.h"
+#include "Engine/Scene/Components/VehicleWheelComponent.h"
+#include "Engine/Scene/Components/WheeledVehicleComponent.h"
 
 namespace Engine {
 
@@ -128,7 +130,10 @@ namespace Engine {
 		NavigationComponent, NavModifierComponent,
 		// Joints (Registration/JointsRegistration.cpp; M37, Docs/Decisions/0054-m37-joints.md decision 1). ADR 0052's phase-6
 		// ledger: a sixteenth category after Navigation, in landing order.
-		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent>;
+		HingeJointComponent, SliderJointComponent, DistanceJointComponent, FixedJointComponent,
+		// Vehicles (Registration/VehiclesRegistration.cpp; M44, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3). ADR
+		// 0060's phase-8 ledger: a seventeenth category after Joints, the first of phase 8's four new categories.
+		WheeledVehicleComponent, VehicleWheelComponent>;
 
 	// The category registration functions, each registering its enums, structs and components in BuiltinComponents order
 	// through RegisterComponent<T> (Scene/ComponentRegistration.h). Each is called exactly once per registry, in this
@@ -158,8 +163,10 @@ namespace Engine {
 	void RegisterNavigationComponents(TypeRegistry& registry);
 	// M37 (Docs/Decisions/0054-m37-joints.md decision 1), after Navigation, in ADR 0052's phase-6 ledger's landing order.
 	void RegisterJointsComponents(TypeRegistry& registry);
+	// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), after Joints, in ADR 0060's phase-8 ledger's order.
+	void RegisterVehiclesComponents(TypeRegistry& registry);
 
-	// Registers every built-in component (the sixteen functions above, in order) into a registry that is not frozen yet, then
+	// Registers every built-in component (the seventeen functions above, in order) into a registry that is not frozen yet, then
 	// asserts that every BuiltinComponents type is registered and that the registration order equals the list order
 	// (the startup check of §5.4). The caller adds its own types (project settings, automation structs) and then freezes
 	// the registry.

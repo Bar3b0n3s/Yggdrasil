@@ -2962,7 +2962,7 @@ All modes; Runtime|Test; pure/read.
 
 ### Entity.GetComponent
 
-`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "MassProperties") -> MassProperties?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?)`
+`((self: Entity, name: "Transform") -> Transform?) & ((self: Entity, name: "MeshRenderer") -> MeshRenderer?) & ((self: Entity, name: "Camera") -> Camera?) & ((self: Entity, name: "DirectionalLight") -> DirectionalLight?) & ((self: Entity, name: "PointLight") -> PointLight?) & ((self: Entity, name: "SpotLight") -> SpotLight?) & ((self: Entity, name: "Environment") -> Environment?) & ((self: Entity, name: "PostProcess") -> PostProcess?) & ((self: Entity, name: "Text") -> Text?) & ((self: Entity, name: "RigidBody") -> RigidBody?) & ((self: Entity, name: "BoxCollider") -> BoxCollider?) & ((self: Entity, name: "SphereCollider") -> SphereCollider?) & ((self: Entity, name: "CapsuleCollider") -> CapsuleCollider?) & ((self: Entity, name: "MeshCollider") -> MeshCollider?) & ((self: Entity, name: "CharacterController") -> CharacterController?) & ((self: Entity, name: "ColliderSurface") -> ColliderSurface?) & ((self: Entity, name: "MassProperties") -> MassProperties?) & ((self: Entity, name: "AudioSource") -> AudioSource?) & ((self: Entity, name: "AudioListener") -> AudioListener?) & ((self: Entity, name: "Script") -> Script?) & ((self: Entity, name: "SpriteRenderer") -> SpriteRenderer?) & ((self: Entity, name: "SpriteAnimator") -> SpriteAnimator?) & ((self: Entity, name: "PixelPerfectCamera") -> PixelPerfectCamera?) & ((self: Entity, name: "Light2D") -> Light2D?) & ((self: Entity, name: "TilemapRenderer") -> TilemapRenderer?) & ((self: Entity, name: "RigidBody2D") -> RigidBody2D?) & ((self: Entity, name: "BoxCollider2D") -> BoxCollider2D?) & ((self: Entity, name: "CircleCollider2D") -> CircleCollider2D?) & ((self: Entity, name: "PolygonCollider2D") -> PolygonCollider2D?) & ((self: Entity, name: "TilemapCollider") -> TilemapCollider?) & ((self: Entity, name: "UiCanvas") -> UiCanvas?) & ((self: Entity, name: "UiRect") -> UiRect?) & ((self: Entity, name: "UiImage") -> UiImage?) & ((self: Entity, name: "UiText") -> UiText?) & ((self: Entity, name: "UiLayout") -> UiLayout?) & ((self: Entity, name: "UiLayoutElement") -> UiLayoutElement?) & ((self: Entity, name: "UiButton") -> UiButton?) & ((self: Entity, name: "UiToggle") -> UiToggle?) & ((self: Entity, name: "UiSlider") -> UiSlider?) & ((self: Entity, name: "UiScrollView") -> UiScrollView?) & ((self: Entity, name: "UiTextInput") -> UiTextInput?) & ((self: Entity, name: "Animator") -> Animator?) & ((self: Entity, name: "SkinnedMesh") -> SkinnedMesh?) & ((self: Entity, name: "BoneAttachment") -> BoneAttachment?) & ((self: Entity, name: "ParticleEmitter") -> ParticleEmitter?) & ((self: Entity, name: "ParticleLook") -> ParticleLook?) & ((self: Entity, name: "IrradianceVolume") -> IrradianceVolume?) & ((self: Entity, name: "ReflectionProbe") -> ReflectionProbe?) & ((self: Entity, name: "PlanarReflection") -> PlanarReflection?) & ((self: Entity, name: "Terrain") -> Terrain?) & ((self: Entity, name: "TerrainCollider") -> TerrainCollider?) & ((self: Entity, name: "MaterialParameters") -> MaterialParameters?) & ((self: Entity, name: "Fog") -> Fog?) & ((self: Entity, name: "HingeJoint") -> HingeJoint?) & ((self: Entity, name: "SliderJoint") -> SliderJoint?) & ((self: Entity, name: "DistanceJoint") -> DistanceJoint?) & ((self: Entity, name: "FixedJoint") -> FixedJoint?) & ((self: Entity, name: "WheeledVehicle") -> WheeledVehicle?) & ((self: Entity, name: "VehicleWheel") -> VehicleWheel?)`
 
 Get a component proxy, or nil when absent.
 
@@ -3413,6 +3413,22 @@ All modes; Runtime|Test; pure/read.
 `UiToggle?`
 
 The entity's UiToggle component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.VehicleWheel
+
+`VehicleWheel?`
+
+The entity's VehicleWheel component, or nil when absent.
+
+All modes; Runtime|Test; pure/read.
+
+### Entity.WheeledVehicle
+
+`WheeledVehicle?`
+
+The entity's WheeledVehicle component, or nil when absent.
 
 All modes; Runtime|Test; pure/read.
 
@@ -6988,6 +7004,334 @@ Whether the toggle is on.
 
 All modes; Runtime|Test; pure/read; setter mutates.
 
+## VehicleWheel
+
+Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.
+
+### VehicleWheel.AngularDamping
+
+`number`
+
+How quickly the wheel's spin slows down by itself, per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.Inertia
+
+`number`
+
+The wheel's moment of inertia about its axle.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.LateralFriction
+
+`{{X: number, Y: number}}`
+
+The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.LongitudinalFriction
+
+`{{X: number, Y: number}}`
+
+The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.MaxBrakeTorque
+
+`number`
+
+The brake's torque at a full Brake, in newton metres.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.MaxHandBrakeTorque
+
+`number`
+
+The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.MaxSteerAngle
+
+`number`
+
+The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.Radius
+
+`number`
+
+The wheel's radius, in metres (never scaled).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.SpringDamping
+
+`number`
+
+The suspension's damping ratio: 0 bounces, 1 is critically damped.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.SpringFrequency
+
+`number`
+
+The suspension spring's natural frequency, in hertz, above 0: higher is stiffer.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.SuspensionMaxLength
+
+`number`
+
+The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.SuspensionMinLength
+
+`number`
+
+The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.SuspensionPreload
+
+`number`
+
+How far the spring is compressed at full droop, in metres, so it pushes already there.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### VehicleWheel.Width
+
+`number`
+
+The wheel's width, in metres (never scaled); a Cylinder cast uses it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+## WheeledVehicle
+
+Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.
+
+### WheeledVehicle.AntiRollBars
+
+`{{LeftWheel: Entity?, RightWheel: Entity?, Stiffness: number}}`
+
+The anti-roll bars between pairs of wheels, at most eight.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.Brake
+
+`number`
+
+The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.Clutch
+
+`number`
+
+Manual only: the clutch, from 0 (released) to 1 (engaged).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.ClutchReleaseTime
+
+`number`
+
+Auto: how long the clutch takes to engage after a gear change.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.ClutchStrength
+
+`number`
+
+How strongly the engaged clutch couples the engine to the wheels, above 0.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.DifferentialLimitedSlipRatio
+
+`number`
+
+Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.Differentials
+
+`{{LeftWheel: Entity?, RightWheel: Entity?, Ratio: number, LeftRightSplit: number, LimitedSlipRatio: number, EngineTorqueRatio: number}}`
+
+The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.EngineDamping
+
+`number`
+
+How quickly the engine slows down by itself, per second.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.EngineInertia
+
+`number`
+
+The moment of inertia of the engine's turning parts.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.Gear
+
+`number`
+
+Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.GearRatios
+
+`{number}`
+
+The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.HandBrake
+
+`number`
+
+The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.MaxPitchRollAngle
+
+`number`
+
+How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.MaxRpm
+
+`number`
+
+The engine's largest RPM, which it never exceeds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.MaxTorque
+
+`number`
+
+The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.MinRpm
+
+`number`
+
+The engine's idle RPM, the least it turns at; at most MaxRpm.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.ReverseGearRatios
+
+`{number}`
+
+The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.ShiftDownRpm
+
+`number`
+
+Auto: the RPM below which it shifts down; above 0.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.ShiftUpRpm
+
+`number`
+
+Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.Steering
+
+`number`
+
+The steering, from -1 (full left lock) to 1 (full right lock).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.SwitchLatency
+
+`number`
+
+Auto: the least time between two gear changes, in seconds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.SwitchTime
+
+`number`
+
+Auto: how long a gear change takes, in seconds.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.Throttle
+
+`number`
+
+The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.TorqueCurve
+
+`{{X: number, Y: number}}`
+
+The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.Transmission
+
+`VehicleTransmissionMode`
+
+Whether the gears change by themselves (Auto) or as Gear says (Manual).
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
+### WheeledVehicle.WheelCast
+
+`VehicleWheelCast`
+
+How the wheels find the ground under them.
+
+All modes; Runtime|Test; pure/read; setter mutates.
+
 ## AlphaMode
 
 How a material's base colour alpha is used (the glTF 2.0 alpha modes).
@@ -8329,6 +8673,24 @@ What project.validate checks.
 - `Project`: The settings and every scene file under Assets/ (each open scene as it is in memory).
 
 - `Scene`: The scene the request addresses only (the active scene without a scene target).
+
+## VehicleTransmissionMode
+
+Whether a WheeledVehicle's gears change by themselves.
+
+- `Auto`: Shifts up above ShiftUpRpm and down below ShiftDownRpm, and into reverse for a negative Throttle, releasing the clutch on its own.
+
+- `Manual`: Drives in the component's Gear with its Clutch, as a script or graph sets them.
+
+## VehicleWheelCast
+
+How a WheeledVehicle's wheels find the ground under them.
+
+- `Ray`: One ray down each suspension: the cheapest, and a wheel drops into a crack narrower than it.
+
+- `Sphere`: A sphere of the vehicle's smallest wheel Radius swept down each suspension.
+
+- `Cylinder`: Each wheel's own cylinder, its Radius and Width, swept down its suspension: the wide tyre.
 
 ## ViewportView
 

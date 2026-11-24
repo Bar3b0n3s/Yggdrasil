@@ -81,7 +81,8 @@ COMPONENT_ORDER = [
     "Animator", "SkinnedMesh", "BoneAttachment", "ParticleEmitter", "ParticleLook", "IrradianceVolume",
     "ReflectionProbe", "PlanarReflection", "Terrain", "TerrainCollider", "MaterialParameters", "Fog", "Navigation",
     "NavModifier",
-    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "ValidatorTarget", "ValidatorFollower",
+    "HingeJoint", "SliderJoint", "DistanceJoint", "FixedJoint", "WheeledVehicle", "VehicleWheel", "ValidatorTarget",
+    "ValidatorFollower",
 ]
 
 # The registered version of each component above 1 ("ComponentVersions"); every other component is at version 1.
@@ -1069,6 +1070,14 @@ return Script.Define("Jumper", Jumper)
     wall["Components"]["MassProperties"] = {"CenterOfMassOffset": [0, -0.25, 0], "InertiaScale": [1, 1, 1]}
     wall["Components"] = {key: wall["Components"][key] for key in COMPONENT_ORDER if key in wall["Components"]}
     item.entities.append(wall)
+
+    # M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a sled, a Dynamic body with a WheeledVehicle and no
+    # VehicleWheel below it.
+    item = fixture("PHYSICS_VEHICLE_INVALID")
+    sled = body("e000000000000042", "Sled", 0, "Dynamic")
+    sled["Components"]["WheeledVehicle"] = {}
+    sled["Components"] = {key: sled["Components"][key] for key in COMPONENT_ORDER if key in sled["Components"]}
+    item.entities.append(sled)
 
     return fixtures
 

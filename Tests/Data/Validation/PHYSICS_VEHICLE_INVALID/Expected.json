@@ -1,0 +1,9 @@
+{
+	"Format": "ValidationFixture",
+	"Version": 1,
+	"Scope": "Project",
+	"Codes": ["PHYSICS_VEHICLE_INVALID"],
+	"TestComponents": false,
+	"Expand": [],
+	"NonCanonical": []
+}

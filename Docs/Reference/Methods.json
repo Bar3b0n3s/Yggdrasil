@@ -3674,6 +3674,12 @@
 							},
 							"FixedJoint": {
 								"$ref": "#/$defs/FixedJoint"
+							},
+							"WheeledVehicle": {
+								"$ref": "#/$defs/WheeledVehicle"
+							},
+							"VehicleWheel": {
+								"$ref": "#/$defs/VehicleWheel"
 							}
 						},
 						"additionalProperties": false
@@ -7488,6 +7494,263 @@
 						},
 						"additionalProperties": false
 					},
+					"WheeledVehicle": {
+						"description": "Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.",
+						"type": "object",
+						"properties": {
+							"Throttle": {
+								"description": "The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step.",
+								"type": "number",
+								"minimum": -1,
+								"maximum": 1
+							},
+							"Steering": {
+								"description": "The steering, from -1 (full left lock) to 1 (full right lock).",
+								"type": "number",
+								"minimum": -1,
+								"maximum": 1
+							},
+							"Brake": {
+								"description": "The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"HandBrake": {
+								"description": "The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Gear": {
+								"description": "Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has.",
+								"type": "integer",
+								"minimum": -8,
+								"maximum": 8
+							},
+							"Clutch": {
+								"description": "Manual only: the clutch, from 0 (released) to 1 (engaged).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"MaxTorque": {
+								"description": "The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"MinRpm": {
+								"description": "The engine's idle RPM, the least it turns at; at most MaxRpm.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"MaxRpm": {
+								"description": "The engine's largest RPM, which it never exceeds.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"EngineInertia": {
+								"description": "The moment of inertia of the engine's turning parts.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
+							},
+							"EngineDamping": {
+								"description": "How quickly the engine slows down by itself, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"TorqueCurve": {
+								"description": "The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							},
+							"Transmission": {
+								"description": "Whether the gears change by themselves (Auto) or as Gear says (Manual).",
+								"enum": ["Auto", "Manual"]
+							},
+							"GearRatios": {
+								"description": "The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears.",
+								"type": "array",
+								"items": {
+									"type": "number"
+								}
+							},
+							"ReverseGearRatios": {
+								"description": "The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses.",
+								"type": "array",
+								"items": {
+									"type": "number"
+								}
+							},
+							"SwitchTime": {
+								"description": "Auto: how long a gear change takes, in seconds.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"ClutchReleaseTime": {
+								"description": "Auto: how long the clutch takes to engage after a gear change.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SwitchLatency": {
+								"description": "Auto: the least time between two gear changes, in seconds.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"ShiftUpRpm": {
+								"description": "Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"ShiftDownRpm": {
+								"description": "Auto: the RPM below which it shifts down; above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"ClutchStrength": {
+								"description": "How strongly the engaged clutch couples the engine to the wheels, above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Differentials": {
+								"description": "The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleDifferential"
+								}
+							},
+							"DifferentialLimitedSlipRatio": {
+								"description": "Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"AntiRollBars": {
+								"description": "The anti-roll bars between pairs of wheels, at most eight.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleAntiRollBar"
+								}
+							},
+							"MaxPitchRollAngle": {
+								"description": "How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 180
+							},
+							"WheelCast": {
+								"description": "How the wheels find the ground under them.",
+								"enum": ["Ray", "Sphere", "Cylinder"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleWheel": {
+						"description": "Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The wheel's radius, in metres (never scaled).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100
+							},
+							"Width": {
+								"description": "The wheel's width, in metres (never scaled); a Cylinder cast uses it.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionMinLength": {
+								"description": "The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionMaxLength": {
+								"description": "The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionPreload": {
+								"description": "How far the spring is compressed at full droop, in metres, so it pushes already there.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SpringFrequency": {
+								"description": "The suspension spring's natural frequency, in hertz, above 0: higher is stiffer.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"SpringDamping": {
+								"description": "The suspension's damping ratio: 0 bounces, 1 is critically damped.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"MaxSteerAngle": {
+								"description": "The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 90
+							},
+							"MaxBrakeTorque": {
+								"description": "The brake's torque at a full Brake, in newton metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"MaxHandBrakeTorque": {
+								"description": "The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Inertia": {
+								"description": "The wheel's moment of inertia about its axle.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
+							},
+							"AngularDamping": {
+								"description": "How quickly the wheel's spin slows down by itself, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"LongitudinalFriction": {
+								"description": "The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							},
+							"LateralFriction": {
+								"description": "The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -7906,6 +8169,89 @@
 								"type": "number",
 								"minimum": 0,
 								"maximum": 10
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleCurveKey": {
+						"description": "One key of a vehicle's curve: Y at X, linear between keys and constant beyond the ends.",
+						"type": "object",
+						"properties": {
+							"X": {
+								"description": "Where the key is on the curve; a curve's keys have strictly increasing X.",
+								"type": "number",
+								"minimum": -1000,
+								"maximum": 1000
+							},
+							"Y": {
+								"description": "The curve's value at X.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleDifferential": {
+						"description": "A differential through which a WheeledVehicle's engine drives two of its wheels.",
+						"type": "object",
+						"properties": {
+							"LeftWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RightWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Ratio": {
+								"description": "The gear box's rotation over the wheels' (the final drive), above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"LeftRightSplit": {
+								"description": "The engine torque's share of the right wheel: 0 all left, 1 all right.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LimitedSlipRatio": {
+								"description": "0 for an open differential, else above 1: the largest ratio of the faster side's speed to the slower's before the torque goes to the slower one.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"EngineTorqueRatio": {
+								"description": "This differential's share of the engine torque; the shares of a vehicle's differentials that name a wheel sum to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleAntiRollBar": {
+						"description": "An anti-roll bar between two wheels of a WheeledVehicle, which keeps it from leaning.",
+						"type": "object",
+						"properties": {
+							"LeftWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RightWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Stiffness": {
+								"description": "How strongly the bar pushes the less compressed wheel's suspension down, in newtons per metre of difference.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -8671,6 +9017,12 @@
 							},
 							"FixedJoint": {
 								"$ref": "#/$defs/FixedJoint"
+							},
+							"WheeledVehicle": {
+								"$ref": "#/$defs/WheeledVehicle"
+							},
+							"VehicleWheel": {
+								"$ref": "#/$defs/VehicleWheel"
 							}
 						},
 						"additionalProperties": false
@@ -12492,6 +12844,263 @@
 						},
 						"additionalProperties": false
 					},
+					"WheeledVehicle": {
+						"description": "Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.",
+						"type": "object",
+						"properties": {
+							"Throttle": {
+								"description": "The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step.",
+								"type": "number",
+								"minimum": -1,
+								"maximum": 1
+							},
+							"Steering": {
+								"description": "The steering, from -1 (full left lock) to 1 (full right lock).",
+								"type": "number",
+								"minimum": -1,
+								"maximum": 1
+							},
+							"Brake": {
+								"description": "The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"HandBrake": {
+								"description": "The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Gear": {
+								"description": "Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has.",
+								"type": "integer",
+								"minimum": -8,
+								"maximum": 8
+							},
+							"Clutch": {
+								"description": "Manual only: the clutch, from 0 (released) to 1 (engaged).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"MaxTorque": {
+								"description": "The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"MinRpm": {
+								"description": "The engine's idle RPM, the least it turns at; at most MaxRpm.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"MaxRpm": {
+								"description": "The engine's largest RPM, which it never exceeds.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"EngineInertia": {
+								"description": "The moment of inertia of the engine's turning parts.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
+							},
+							"EngineDamping": {
+								"description": "How quickly the engine slows down by itself, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"TorqueCurve": {
+								"description": "The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							},
+							"Transmission": {
+								"description": "Whether the gears change by themselves (Auto) or as Gear says (Manual).",
+								"enum": ["Auto", "Manual"]
+							},
+							"GearRatios": {
+								"description": "The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears.",
+								"type": "array",
+								"items": {
+									"type": "number"
+								}
+							},
+							"ReverseGearRatios": {
+								"description": "The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses.",
+								"type": "array",
+								"items": {
+									"type": "number"
+								}
+							},
+							"SwitchTime": {
+								"description": "Auto: how long a gear change takes, in seconds.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"ClutchReleaseTime": {
+								"description": "Auto: how long the clutch takes to engage after a gear change.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SwitchLatency": {
+								"description": "Auto: the least time between two gear changes, in seconds.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"ShiftUpRpm": {
+								"description": "Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"ShiftDownRpm": {
+								"description": "Auto: the RPM below which it shifts down; above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"ClutchStrength": {
+								"description": "How strongly the engaged clutch couples the engine to the wheels, above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Differentials": {
+								"description": "The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleDifferential"
+								}
+							},
+							"DifferentialLimitedSlipRatio": {
+								"description": "Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"AntiRollBars": {
+								"description": "The anti-roll bars between pairs of wheels, at most eight.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleAntiRollBar"
+								}
+							},
+							"MaxPitchRollAngle": {
+								"description": "How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 180
+							},
+							"WheelCast": {
+								"description": "How the wheels find the ground under them.",
+								"enum": ["Ray", "Sphere", "Cylinder"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleWheel": {
+						"description": "Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The wheel's radius, in metres (never scaled).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100
+							},
+							"Width": {
+								"description": "The wheel's width, in metres (never scaled); a Cylinder cast uses it.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionMinLength": {
+								"description": "The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionMaxLength": {
+								"description": "The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionPreload": {
+								"description": "How far the spring is compressed at full droop, in metres, so it pushes already there.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SpringFrequency": {
+								"description": "The suspension spring's natural frequency, in hertz, above 0: higher is stiffer.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"SpringDamping": {
+								"description": "The suspension's damping ratio: 0 bounces, 1 is critically damped.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"MaxSteerAngle": {
+								"description": "The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 90
+							},
+							"MaxBrakeTorque": {
+								"description": "The brake's torque at a full Brake, in newton metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"MaxHandBrakeTorque": {
+								"description": "The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Inertia": {
+								"description": "The wheel's moment of inertia about its axle.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
+							},
+							"AngularDamping": {
+								"description": "How quickly the wheel's spin slows down by itself, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"LongitudinalFriction": {
+								"description": "The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							},
+							"LateralFriction": {
+								"description": "The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -12910,6 +13519,89 @@
 								"type": "number",
 								"minimum": 0,
 								"maximum": 10
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleCurveKey": {
+						"description": "One key of a vehicle's curve: Y at X, linear between keys and constant beyond the ends.",
+						"type": "object",
+						"properties": {
+							"X": {
+								"description": "Where the key is on the curve; a curve's keys have strictly increasing X.",
+								"type": "number",
+								"minimum": -1000,
+								"maximum": 1000
+							},
+							"Y": {
+								"description": "The curve's value at X.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleDifferential": {
+						"description": "A differential through which a WheeledVehicle's engine drives two of its wheels.",
+						"type": "object",
+						"properties": {
+							"LeftWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RightWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Ratio": {
+								"description": "The gear box's rotation over the wheels' (the final drive), above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"LeftRightSplit": {
+								"description": "The engine torque's share of the right wheel: 0 all left, 1 all right.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LimitedSlipRatio": {
+								"description": "0 for an open differential, else above 1: the largest ratio of the faster side's speed to the slower's before the torque goes to the slower one.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"EngineTorqueRatio": {
+								"description": "This differential's share of the engine torque; the shares of a vehicle's differentials that name a wheel sum to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleAntiRollBar": {
+						"description": "An anti-roll bar between two wheels of a WheeledVehicle, which keeps it from leaning.",
+						"type": "object",
+						"properties": {
+							"LeftWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RightWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Stiffness": {
+								"description": "How strongly the bar pushes the less compressed wheel's suspension down, in newtons per metre of difference.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false
@@ -20062,6 +20754,12 @@
 							},
 							"FixedJoint": {
 								"$ref": "#/$defs/FixedJoint"
+							},
+							"WheeledVehicle": {
+								"$ref": "#/$defs/WheeledVehicle"
+							},
+							"VehicleWheel": {
+								"$ref": "#/$defs/VehicleWheel"
 							}
 						},
 						"additionalProperties": false
@@ -23872,6 +24570,263 @@
 						},
 						"additionalProperties": false
 					},
+					"WheeledVehicle": {
+						"description": "Makes the entity's Dynamic RigidBody a wheeled vehicle, driven by an engine through a transmission and differentials on the VehicleWheel entities below it; scripts or graphs set its Throttle, Steering, Brake and HandBrake every tick.",
+						"type": "object",
+						"properties": {
+							"Throttle": {
+								"description": "The accelerator, from -1 to 1. In Auto a negative Throttle reverses (with a reverse gear); in Manual it counts from 0 to 1 and the Gear gives the direction. Applies at the next physics step.",
+								"type": "number",
+								"minimum": -1,
+								"maximum": 1
+							},
+							"Steering": {
+								"description": "The steering, from -1 (full left lock) to 1 (full right lock).",
+								"type": "number",
+								"minimum": -1,
+								"maximum": 1
+							},
+							"Brake": {
+								"description": "The brake pedal, from 0 to 1, on every wheel's MaxBrakeTorque.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"HandBrake": {
+								"description": "The hand brake, from 0 to 1, on every wheel's MaxHandBrakeTorque.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"Gear": {
+								"description": "Manual only: the selected gear, negative for a reverse gear and 0 for neutral, clamped to the gears the vehicle has.",
+								"type": "integer",
+								"minimum": -8,
+								"maximum": 8
+							},
+							"Clutch": {
+								"description": "Manual only: the clutch, from 0 (released) to 1 (engaged).",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"MaxTorque": {
+								"description": "The engine's largest torque, in newton metres, which TorqueCurve scales by its RPM.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"MinRpm": {
+								"description": "The engine's idle RPM, the least it turns at; at most MaxRpm.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"MaxRpm": {
+								"description": "The engine's largest RPM, which it never exceeds.",
+								"type": "number",
+								"minimum": 1,
+								"maximum": 100000
+							},
+							"EngineInertia": {
+								"description": "The moment of inertia of the engine's turning parts.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
+							},
+							"EngineDamping": {
+								"description": "How quickly the engine slows down by itself, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"TorqueCurve": {
+								"description": "The fraction of MaxTorque by the engine's RPM over MaxRpm (X from 0 to 1, at most eight keys). The torque at X = 1 stays in force at MaxRpm, so a curve that falls to 0 there is a rev limiter, which caps the speed in each gear.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							},
+							"Transmission": {
+								"description": "Whether the gears change by themselves (Auto) or as Gear says (Manual).",
+								"enum": ["Auto", "Manual"]
+							},
+							"GearRatios": {
+								"description": "The forward gears' ratios of the engine's rotation over the gear box's, each above 0, first gear first: one to eight gears.",
+								"type": "array",
+								"items": {
+									"type": "number"
+								}
+							},
+							"ReverseGearRatios": {
+								"description": "The reverse gears' ratios, each below 0: at most eight; none, and an Auto vehicle never reverses.",
+								"type": "array",
+								"items": {
+									"type": "number"
+								}
+							},
+							"SwitchTime": {
+								"description": "Auto: how long a gear change takes, in seconds.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"ClutchReleaseTime": {
+								"description": "Auto: how long the clutch takes to engage after a gear change.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SwitchLatency": {
+								"description": "Auto: the least time between two gear changes, in seconds.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"ShiftUpRpm": {
+								"description": "Auto: the RPM above which it shifts up; above ShiftDownRpm and below MaxRpm.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"ShiftDownRpm": {
+								"description": "Auto: the RPM below which it shifts down; above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100000
+							},
+							"ClutchStrength": {
+								"description": "How strongly the engaged clutch couples the engine to the wheels, above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"Differentials": {
+								"description": "The differentials the engine drives wheels through, at most eight, at least one naming a wheel; a vehicle that drives none (a trailer) has one, in Manual at Gear 0.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleDifferential"
+								}
+							},
+							"DifferentialLimitedSlipRatio": {
+								"description": "Between the differentials: 0 open, else above 1, the largest ratio of the fastest differential's speed to the slowest's.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"AntiRollBars": {
+								"description": "The anti-roll bars between pairs of wheels, at most eight.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleAntiRollBar"
+								}
+							},
+							"MaxPitchRollAngle": {
+								"description": "How far the vehicle may tilt from upright, in degrees, before it is held there; 180 never holds it.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 180
+							},
+							"WheelCast": {
+								"description": "How the wheels find the ground under them.",
+								"enum": ["Ray", "Sphere", "Cylinder"]
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleWheel": {
+						"description": "Makes the entity a wheel of the nearest WheeledVehicle above it: in play the engine writes its pose at each step, so its mesh rides the suspension, steers and spins.",
+						"type": "object",
+						"properties": {
+							"Radius": {
+								"description": "The wheel's radius, in metres (never scaled).",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 100
+							},
+							"Width": {
+								"description": "The wheel's width, in metres (never scaled); a Cylinder cast uses it.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionMinLength": {
+								"description": "The suspension's shortest length, fully compressed, in metres; at most SuspensionMaxLength.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionMaxLength": {
+								"description": "The suspension's longest length, at full droop, in metres: the wheel hangs at its authored place at this length.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SuspensionPreload": {
+								"description": "How far the spring is compressed at full droop, in metres, so it pushes already there.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"SpringFrequency": {
+								"description": "The suspension spring's natural frequency, in hertz, above 0: higher is stiffer.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"SpringDamping": {
+								"description": "The suspension's damping ratio: 0 bounces, 1 is critically damped.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"MaxSteerAngle": {
+								"description": "The wheel's steer at full lock, in degrees; 0 for a wheel that does not steer.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 90
+							},
+							"MaxBrakeTorque": {
+								"description": "The brake's torque at a full Brake, in newton metres.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"MaxHandBrakeTorque": {
+								"description": "The hand brake's torque at a full HandBrake, in newton metres; 0 for a wheel without one.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
+							},
+							"Inertia": {
+								"description": "The wheel's moment of inertia about its axle.",
+								"type": "number",
+								"minimum": 0.001,
+								"maximum": 1000000
+							},
+							"AngularDamping": {
+								"description": "How quickly the wheel's spin slows down by itself, per second.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"LongitudinalFriction": {
+								"description": "The tyre's grip forward and back by its slip ratio (X), which the ground's friction scales; at most eight keys.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							},
+							"LateralFriction": {
+								"description": "The tyre's grip sideways by its slip angle in degrees (X), which the ground's friction scales; at most eight keys.",
+								"type": "array",
+								"items": {
+									"$ref": "#/$defs/VehicleCurveKey"
+								}
+							}
+						},
+						"additionalProperties": false
+					},
 					"PrefabOverride": {
 						"description": "One recorded difference between an outermost prefab instance and its prefab.",
 						"type": "object",
@@ -24290,6 +25245,89 @@
 								"type": "number",
 								"minimum": 0,
 								"maximum": 10
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleCurveKey": {
+						"description": "One key of a vehicle's curve: Y at X, linear between keys and constant beyond the ends.",
+						"type": "object",
+						"properties": {
+							"X": {
+								"description": "Where the key is on the curve; a curve's keys have strictly increasing X.",
+								"type": "number",
+								"minimum": -1000,
+								"maximum": 1000
+							},
+							"Y": {
+								"description": "The curve's value at X.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleDifferential": {
+						"description": "A differential through which a WheeledVehicle's engine drives two of its wheels.",
+						"type": "object",
+						"properties": {
+							"LeftWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RightWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Ratio": {
+								"description": "The gear box's rotation over the wheels' (the final drive), above 0.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 100
+							},
+							"LeftRightSplit": {
+								"description": "The engine torque's share of the right wheel: 0 all left, 1 all right.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							},
+							"LimitedSlipRatio": {
+								"description": "0 for an open differential, else above 1: the largest ratio of the faster side's speed to the slower's before the torque goes to the slower one.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000
+							},
+							"EngineTorqueRatio": {
+								"description": "This differential's share of the engine torque; the shares of a vehicle's differentials that name a wheel sum to 1.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1
+							}
+						},
+						"additionalProperties": false
+					},
+					"VehicleAntiRollBar": {
+						"description": "An anti-roll bar between two wheels of a WheeledVehicle, which keeps it from leaning.",
+						"type": "object",
+						"properties": {
+							"LeftWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"RightWheel": {
+								"description": "A VehicleWheel entity of this vehicle, the nearest WheeledVehicle above it; null for none.",
+								"type": ["string", "null"],
+								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							},
+							"Stiffness": {
+								"description": "How strongly the bar pushes the less compressed wheel's suspension down, in newtons per metre of difference.",
+								"type": "number",
+								"minimum": 0,
+								"maximum": 1000000
 							}
 						},
 						"additionalProperties": false

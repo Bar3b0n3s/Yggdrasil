@@ -8,11 +8,14 @@
 #include "Engine/Physics/PhysicsLayers.h"
 #include "Engine/Physics/PhysicsShape.h"
 #include "Engine/Physics/PhysicsTypes.h"
+#include "Engine/Physics/PhysicsVehicle.h"
 #include "Engine/Physics/PhysicsWorld.h"
 #include "Engine/Scene/Components/TransformComponent.h"
+#include "Engine/Scene/Components/WheeledVehicleComponent.h"
 #include "Engine/Scene/PhysicsComposition.h"
 #include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSystem.h"
+#include "Engine/Scene/PhysicsVehicles.h"
 
 #include <entt/entity/entity.hpp>
 #include <entt/entity/fwd.hpp>
@@ -25,6 +28,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -34,7 +38,8 @@
 // The state of a PhysicsSystem (Architecture §9.2 to §9.6), shared by the system's .cpp files: PhysicsSystem.cpp
 // (composition, sync, events, exits, body control, observability, and the characters' lifecycle within the step),
 // PhysicsSystemQueries.cpp (queries and bounds), PhysicsSystemCharacters.cpp (MoveCharacter and GetCharacterState), from
-// M36 PhysicsSystemSurfaces.cpp (the collider surfaces) and from M37 PhysicsSystemJoints.cpp (joints).
+// M36 PhysicsSystemSurfaces.cpp (the collider surfaces), from M37 PhysicsSystemJoints.cpp (joints) and from M44
+// PhysicsSystemVehicles.cpp (vehicles).
 // Private to Scene, so it changes without the contract owner's review (Docs/Decisions/0014-m11-decisions.md decision 17).
 // The entry structs are at namespace scope, not nested: Clang with libstdc++ cannot default-construct a nested struct with
 // default member initializers inside its enclosing class (ADR 0012 decision 24).
@@ -229,6 +234,50 @@ namespace Engine {
 		PhysicsJointFrame Frame{};
 		PhysicsJointFrame ConnectedFrame{};
 		PhysicsJointFormation Formation{};
+	};
+
+	// M44: a wheel's kept frame (PhysicsSystem.h's M44 paragraph) and the chain of entities from the wheel up to its vehicle it
+	// was formed through.
+	struct PhysicsVehicleKeptFrame
+	{
+		PhysicsVehicleWheelFrame Frame{};
+		std::vector<UUID> Chain{};
+	};
+
+	// M44: one vehicle entity the session knows (Scene/PhysicsSystemVehicles.cpp): its last plan, its live vehicle, what that was
+	// made of, and its wheels' kept frames.
+	struct PhysicsVehicleEntry
+	{
+		UUID Entity{};
+		// The plan the last vehicle composition gave it, and the WheeledVehicle it read, without its driver input
+		// (StripPhysicsVehicleInput).
+		PhysicsVehiclePlan Plan{};
+		WheeledVehicleComponent PlannedVehicle{};
+		// The live vehicle (invalid while it is not in force), its body, its wheels' entities in the world's wheel order, and
+		// the description it was made of (the wheels with their frames, the settings in force and the cast).
+		VehicleHandle Handle{};
+		BodyHandle Body{};
+		std::vector<UUID> WheelEntities{};
+		std::vector<PhysicsVehicleWheelDescription> Wheels{};
+		PhysicsVehicleSettings Settings{};
+		PhysicsVehicleCast Cast = PhysicsVehicleCast::Cylinder;
+		// The driver input applied at the last PreStep (item 4b); unset until the first after a creation.
+		std::optional<PhysicsVehicleInput> LastInput{};
+		// The kept frames by wheel entity, set only by a creation that succeeded.
+		std::map<UUID, PhysicsVehicleKeptFrame> Frames{};
+		// The motion of the live vehicle the session destroyed with its body in this pass (a RigidBody change creating the body
+		// again), for its creation again on the new body (PhysicsWorld::RestoreVehicleMotion), with its wheels' entities;
+		// dropped at the end of every synchronization.
+		std::vector<UUID> CarriedWheels{};
+		std::optional<PhysicsVehicleState> Carried{};
+	};
+
+	// M44: a wheel entity's local Translation and Rotation from its wheel's pose (PostStep writes them, in PhysicsSystem.cpp).
+	struct PhysicsWheelPose
+	{
+		UUID Entity{};
+		glm::vec3 Translation = glm::vec3(0.0f);
+		glm::quat Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 	};
 
 	struct PhysicsPair
@@ -448,6 +497,52 @@ namespace Engine {
 		[[nodiscard]] bool HasKeptJointFrames() const;
 		// Destroys every live joint (the session's end, before the bodies); the world's destructor would too.
 		void DestroyAllJoints();
+
+		// --- Vehicles (M44, Scene/PhysicsSystemVehicles.cpp; PhysicsSystem.h's M44 paragraph) --------------------------------
+		// The vehicle entities by UUID (every walk in UUID order) and what changed since the vehicles were last synchronized.
+		std::map<UUID, PhysicsVehicleEntry> Vehicles;
+		// A WheeledVehicle or VehicleWheel changed, a body was created or removed, or a vehicle left play: SynchronizeVehicles
+		// has work.
+		bool VehiclesChanged = false;
+		// The bodies were composed again, or a vehicle component was added or removed: the vehicle plan is composed again.
+		bool VehiclePlansStale = false;
+		// A body was created or removed, or a vehicle left play: the vehicles in force are checked against their bodies.
+		bool VehicleBodiesChanged = false;
+		// The entities whose vehicle components changed: a vehicle whose fields beyond its driver input are as planned
+		// changes nothing but its input; any other change composes the plan again.
+		std::set<UUID> ChangedVehicles;
+
+		void OnVehicleChanged(entt::registry& registry, entt::entity entity);
+		void OnVehicleAddedOrRemoved(entt::registry& registry, entt::entity entity);
+		void ConnectVehicleSignals(entt::registry& registry);
+		void DisconnectVehicleSignals(entt::registry& registry);
+		// Brings the vehicles in step with the scene and the bodies (PhysicsSystem.h's M44 paragraph); nothing unless
+		// VehiclesChanged, and nothing beyond the comparison for a write of driver input alone.
+		void SynchronizeVehicles();
+		// Rebuild's hook, after the joints': synchronizes every vehicle over the pass's body composition (Composition).
+		void SynchronizeVehiclesAfterRebuild();
+		// Destroys the live vehicle of the body `handle` (RemoveBody, before its joints and the body), keeping its motion for a
+		// creation again in the same pass, and marks the vehicles for the next synchronization.
+		void RemoveBodyVehicles(BodyHandle handle);
+		// PreStep's item 4b: each live vehicle's driver input from its WheeledVehicle, in `order` (canonical), waking a sleeping
+		// body whose Throttle is not 0 or whose input differs from the last applied one.
+		void ApplyVehicleInput(std::span<const UUID> order);
+		// PostStep's wheel poses: each present wheel entity of a live vehicle, in canonical order of the vehicles and then wheel
+		// order, with the local Translation and Rotation its wheel's pose gives it (PhysicsSystem.cpp writes those that differ
+		// bit for bit).
+		[[nodiscard]] std::vector<PhysicsWheelPose> CollectWheelPoses() const;
+		// FlushDestroyed's part: the vehicles of `candidates` that left play (a destroyed entity's entry goes, a disabled one's
+		// keeps its frames), and the plans composed again at the next synchronization (a wheel may have left).
+		void RemoveLeavingVehicles(const std::set<UUID>& candidates);
+		// The vehicle part of the state hash (AppendStateHash), after the joint part.
+		void AppendVehicleHash(std::vector<std::byte>& bytes) const;
+		// Whether any vehicle has kept frames (the hash's vehicle part is not empty).
+		[[nodiscard]] bool HasKeptVehicleFrames() const;
+		// Destroys every live vehicle (the session's end, before the joints and the bodies); the world's destructor would too.
+		void DestroyAllVehicles();
+		// The solver priorities of every constraint in force (§9.10, §9.11): the joints take their entities' ranks in UUID order
+		// from 0, then the vehicles theirs, so no two share a priority; called whenever either set in force changes.
+		void RankConstraints();
 	};
 
 }

@@ -69,6 +69,7 @@
 //          A pose that is not IsPlaceablePhysicsPose (a Transform written beyond MaxPhysicsCoordinate) is not applied:
 //          the entity's local Translation and Rotation go back to the body's (the values PostStep last wrote, or those
 //          the body was placed from; a Kinematic body's current pose, where it then stops).
+//       4b. M44: vehicles (the M44 paragraph) take their driver input, in canonical order of their entities.
 //       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes.
 //     M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 3): between items 1-2 and 3, the collider surfaces. A
 //     ColliderSurface's signals mark its entity (never ComponentsChanged, so a surface write never recomposes the scene), and
@@ -153,6 +154,48 @@
 //   - FlushDestroyed removes the joints of entities that left play: a destroyed entity's joint and frames go; a disabled
 //     one's joint goes and its frames stay for its return.
 //
+// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3; Architecture §9.11; the work in Scene/PhysicsSystemVehicles.cpp):
+// wheeled vehicles.
+//   - Synchronization. After the bodies and joints of every rebuild, and in PreStep and SynchronizeBodies whenever a vehicle
+//     component changed or a body was created or removed, the vehicles are brought in step with ComposePhysicsVehicles (Scene/
+//     PhysicsVehicles.h): a vehicle whose plan is creatable and whose body exists is created (PhysicsWorld::CreateVehicle) or,
+//     when it lives on the same body with the same wheels, wheel fields, cast and anti-roll bars' wheels, has its engine,
+//     transmission, differentials, bar stiffness and MaxPitchRollAngle applied in place (PhysicsWorld::SetVehicleSettings,
+//     keeping its motion); a change of a wheel's field, the wheel set, the cast or the bars' wheels (a bar added, removed or
+//     moved: Jolt keeps a wheel's last anti-roll impulse while no bar covers it), or its body made again, makes it again on
+//     the body, carrying over its RPM, gear, clutch and each kept wheel's spin and angle (PhysicsWorld::RestoreVehicleMotion,
+//     by wheel entity). Any other is not in force. The two components' signals mark the vehicles, never the bodies, and the plan is
+//     composed again only when the bodies were rebuilt, a vehicle component was added or removed, a VehicleWheel changed, or
+//     a WheeledVehicle's fields beyond its driver input differ from what the last plan read, so a script writing Throttle
+//     every tick composes nothing. Its PHYSICS_VEHICLE_INVALID diagnostics are raised as the body composition's are, and a
+//     description the world refuses raises one with Subject "refused". A vehicle whose entity or one of whose wheels is
+//     leaving play keeps what it has until FlushDestroyed, and a reason its plan has then is raised after the flush.
+//   - Kept frames. Each wheel's neutral frame (its centre, up and forward in the body's space, Scene/PhysicsVehicles.h's
+//     PhysicsVehicleWheelFrame) is formed from the scene's local transforms when its vehicle is first created with it, and
+//     kept once the creation succeeds, so a vehicle made again mid-play (a RigidBody change, a re-enabled entity, a wheel
+//     added) gets each kept wheel back where it was authored, although the engine has since written the wheels' Transforms.
+//     A wheel's frame is formed again when the chain of entities from it up to its vehicle changes (a reparent: from its pose
+//     of that moment); a wheel that is disabled keeps its frame for its return; a destroyed wheel, a removed VehicleWheel
+//     and a wheel that is no longer the vehicle's drop it, and the vehicle's own entity destroyed or its WheeledVehicle
+//     removed drops them all.
+//   - Driver input (PreStep item 4b, after the kinematic moves, teleports and wakes and before the characters): each vehicle
+//     in force, in canonical order, takes its WheeledVehicle's Throttle, Steering, Brake, HandBrake, Gear and Clutch
+//     (PhysicsWorld::SetVehicleInput); a sleeping body wakes when Throttle is not 0 or the input differs from the last one
+//     applied, since Jolt keeps a vehicle awake only while its wheels spin. Simulate runs no script, so a vehicle keeps its
+//     authored input.
+//   - Wheel poses (PostStep, after the write-back and before the pair events): each wheel entity of a vehicle in force gets
+//     its wheel's pose (suspension, steer and spin; PhysicsVehicleWheelState::LocalPose) as its local Translation and
+//     Rotation, through the chain of local matrices from the vehicle's entity (its scale included), written directly and
+//     only when they differ bit for bit, so collision callbacks see the wheels placed and render interpolation draws them in
+//     the rendered pose. A wheel's Scale stays its own.
+//   - Bodies first. RemoveBody destroys the body's vehicle before its joints and the body (the world would too), on every
+//     removal path: a RigidBody change, a refusal, the disable and destroy flushes and the session's end. FlushDestroyed
+//     removes the vehicles of entities that left play: a destroyed entity's vehicle and frames go; a disabled one's vehicle
+//     goes and its frames stay for its return.
+//   - Priorities. Every joint in force solves at its entity's rank in UUID order among the joints, and every vehicle in force
+//     after them at its entity's rank among the vehicles, so no two constraints share a priority; both are refreshed whenever
+//     either set in force changes.
+//
 // Determinism (§9.1): bodies, characters, write-back, events and the state hash all follow canonical order or UUID order;
 // nothing iterates an unordered container to produce output; results do not depend on the worker thread count.
 //
@@ -163,8 +206,8 @@
 // phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md); M36 adds the collider surfaces (the
 // step's M36 paragraph), PhysicsCharacterState's GroundCollider, IsSqueezed and SqueezedBy, PhysicsSurfaceInfo and GetSurface
 // (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), M37 appends its joints (the M37 paragraph
-// above), and M44 appends PhysicsBodyReport::CenterOfMass and its vehicles (Docs/Decisions/0062-m44-wheeled-vehicles.md
-// decision 3), each reviewed as a change to a frozen interface.
+// above), and M44 appends PhysicsBodyReport::CenterOfMass and its vehicles (the M44 paragraph above; Docs/Decisions/
+// 0062-m44-wheeled-vehicles.md decision 3), each reviewed as a change to a frozen interface.
 
 namespace Engine {
 
@@ -304,6 +347,50 @@ namespace Engine {
 		glm::vec3 Point = glm::vec3(0.0f);
 		glm::vec3 ConnectedPoint = glm::vec3(0.0f);
 		glm::vec3 Axis = glm::vec3(0.0f);
+	};
+
+	// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): one wheel of a PhysicsVehicleReport, after the last step.
+	struct PhysicsVehicleWheelReport
+	{
+		UUID Entity{}; // the wheel's entity
+		// While its vehicle is Created: whether it found ground in the last step, where (world space; zero otherwise) and the
+		// collider entity it stands on (the null UUID without one, or when that collider or its body's owner is disabled or
+		// pending destruction now).
+		bool Touching = false;
+		glm::vec3 Point = glm::vec3(0.0f);
+		glm::vec3 Normal = glm::vec3(0.0f);
+		UUID Collider{};
+		// Metres from the suspension's attachment point to the wheel's centre, and the suspension's force in newtons.
+		float SuspensionLength = 0.0f;
+		float SuspensionForce = 0.0f;
+		// Degrees: the spin in [0, 360), the steer (positive to the right, as Steering), the spin's speed in degrees per second
+		// (positive rolling forward) and the slip angle; the slip ratio.
+		float Rotation = 0.0f;
+		float SteerAngle = 0.0f;
+		float AngularVelocity = 0.0f;
+		float LongitudinalSlip = 0.0f;
+		float LateralSlip = 0.0f;
+	};
+
+	// M44 (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): what scripts and physics.vehicleInfo read of a vehicle
+	// (PhysicsSystem::GetVehicleInfo).
+	struct PhysicsVehicleReport
+	{
+		UUID Entity{}; // the vehicle's entity (the WheeledVehicle's)
+		// The owner of its body as the vehicle composition resolved it (its own entity), invalid when it has none.
+		UUID Body{};
+		// Whether the vehicle is in force: false for a refused, disabled or not yet created vehicle.
+		bool Created = false;
+		// While Created, the reading after the last step: its speed along its forward (local -Z) in m/s, signed; the engine's
+		// RPM; the gear (negative reverse, 0 neutral); the clutch's friction in [0, 1]; whether a gear change is in progress.
+		// Zero otherwise.
+		float Speed = 0.0f;
+		float EngineRpm = 0.0f;
+		int32_t Gear = 0;
+		float Clutch = 0.0f;
+		bool Shifting = false;
+		// Its wheels in the world's wheel order (the plan's while not Created, with zero readings).
+		std::vector<PhysicsVehicleWheelReport> Wheels{};
 	};
 
 	// Receives the sorted events and the run-time diagnostics (the interface scripting consumes in M13: the ScriptEngine
@@ -580,7 +667,11 @@ namespace Engine {
 		// endian) and its sleeping flag. A scene without bodies appends nothing, so its hash stays that of M7. M37 (Docs/
 		// Decisions/0054-m37-joints.md decision 5): then the joint part, for every joint whose frames the session keeps, in
 		// canonical order of its entity: the entity's UUID and the bits of its two kept frames (point, axis and normal on the
-		// joint's body, then on the connected body); nothing without one, so a scene without joints hashes as before.
+		// joint's body, then on the connected body); nothing without one, so a scene without joints hashes as before. M44
+		// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): then the vehicle part, for every vehicle whose wheel frames
+		// the session keeps, in canonical order of its entity: the entity's UUID, each kept frame in UUID order of its wheel (the
+		// wheel's UUID and the bits of its centre, up and forward), and while it is in force its engine's, transmission's and
+		// wheels' state (PhysicsWorld::AppendVehicleState); nothing without one, so a scene without vehicles hashes as before.
 		void AppendStateHash(XXH64Hasher& hasher) const;
 
 		// --- Joints (M37, Docs/Decisions/0054-m37-joints.md; Scene/PhysicsSystemJoints.cpp) ---------------------------------
@@ -590,6 +681,12 @@ namespace Engine {
 		// The joints that broke at the last PostStep, in UUID order of their entities (cleared at the start of each PostStep;
 		// what tests and observability read).
 		[[nodiscard]] std::span<const PhysicsJointBreak> GetLastJointBreaks() const;
+
+		// --- Vehicles (M44, Docs/Decisions/0062-m44-wheeled-vehicles.md; Scene/PhysicsSystemVehicles.cpp) --------------------
+		// The vehicle `entity` is (its WheeledVehicle's entity) or is a wheel of (a VehicleWheel's, its vehicle the nearest
+		// WheeledVehicle above it), as scripts (WheeledVehicle:GetSpeed, VehicleWheel:GetContact and the others) and
+		// physics.vehicleInfo read it; nullopt when the entity does not exist or is neither.
+		[[nodiscard]] std::optional<PhysicsVehicleReport> GetVehicleInfo(UUID entity) const;
 	private:
 		// The world, the body and character tables, the contact pairs, the events and the diagnostics
 		// (Scene/Private/PhysicsSystemState.h, shared by the system's .cpp files).

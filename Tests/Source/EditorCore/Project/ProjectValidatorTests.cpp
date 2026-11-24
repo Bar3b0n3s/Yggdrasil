@@ -46,6 +46,7 @@
 #include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsMassValidation.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
+#include "Engine/Scene/PhysicsVehicles.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -1384,10 +1385,11 @@ end
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
 			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
 			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes), and phase 8's (M44's
-			// PhysicsMassDiagnosticCodes).
+			// PhysicsMassDiagnosticCodes and PhysicsVehicleDiagnosticCodes).
 			CHECK(codes.size()
 				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
-					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size() + PhysicsMassDiagnosticCodes.size());
+					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size() + PhysicsMassDiagnosticCodes.size()
+					+ PhysicsVehicleDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1448,14 +1450,15 @@ end
 			// PHYSICS_JOINT_INVALID (Docs/Decisions/0054-m37-joints.md decision 9), which lands after M36. Phase 7's follow (ADR 0058's
 			// ledger): M41's ANIMATION_ATTACHMENT_INVALID (Docs/Decisions/0058-m41-bone-attachments.md decision 3), then M42's
 			// RENDER_REFLECTION_INVALID (Docs/Decisions/0059-m42-planar-reflections.md, its ledger's validation row), which lands after
-			// M41. Phase 8's follow (ADR 0060's ledger): M44's PHYSICS_MASS_UNUSED (Docs/Decisions/0062-m44-wheeled-vehicles.md
-			// decision 3), which ends the list on M44's branch.
+			// M41. Phase 8's follow (ADR 0060's ledger): M44's PHYSICS_MASS_UNUSED, then its PHYSICS_VEHICLE_INVALID
+			// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3), which ends the list on M44's branch.
 			CHECK(position(NavMeshStaleCode) + 1 == position(PhysicsSurfaceUnusedCode));
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
 			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
 			CHECK(position(AnimationAttachmentInvalidCode) + 1 == position(RenderReflectionInvalidCode));
 			CHECK(position(RenderReflectionInvalidCode) + 1 == position(PhysicsMassUnusedCode));
-			CHECK(codes.back() == PhysicsMassUnusedCode);
+			CHECK(position(PhysicsMassUnusedCode) + 1 == position(PhysicsVehicleInvalidCode));
+			CHECK(codes.back() == PhysicsVehicleInvalidCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -2413,6 +2416,74 @@ end
 				CHECK(diagnostic->Severity == DiagnosticSeverity::Warning);
 				CHECK_FALSE(diagnostic->AutoFixable);
 				CHECK(diagnostic->Component == "MassProperties");
+				CHECK(diagnostic->File == "Assets/Scenes/Main.scene");
+			}
+		}
+
+		// M44 (Scene/PhysicsVehicles.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): a vehicle on a Static body, one
+		// without wheels and one with a collider on a wheel are reported, one each; a valid one and a disabled one are not.
+		TEST_CASE("ProjectValidator: PHYSICS_VEHICLE_INVALID reports a vehicle without a Dynamic body, without wheels or with a collider on a wheel")
+		{
+			Test::EditorTestFixture fixture("ValidatorVehicles");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto addVehicle = [&editor](std::string_view name, std::string_view body, int wheels, bool wheelCollider)
+			{
+				Entity entity = editor.GetScene().CreateEntity(name);
+				const Json bodyValue = ParseValidatorJson(body);
+				REQUIRE(ComponentAccess::AddComponent(entity, "RigidBody", &bodyValue).has_value());
+				REQUIRE(ComponentAccess::AddComponent(entity, "BoxCollider", nullptr).has_value());
+				std::vector<std::string> ids;
+				for (int index = 0; index < wheels; ++index)
+				{
+					Entity wheel = editor.GetScene().CreateEntity(std::format("Wheel{}", index), entity);
+					REQUIRE(ComponentAccess::AddComponent(wheel, "VehicleWheel", nullptr).has_value());
+					if (wheelCollider)
+						REQUIRE(ComponentAccess::AddComponent(wheel, "SphereCollider", nullptr).has_value());
+					ids.push_back(wheel.GetUUID().ToString());
+				}
+				// The first two wheels driven through one differential.
+				const Json vehicle = ParseValidatorJson(ids.size() < 2 ? std::string("{}")
+																	   : std::format(R"({{"Differentials":[{{"LeftWheel":"{}","RightWheel":"{}"}}]}})", ids[0], ids[1]));
+				REQUIRE(ComponentAccess::AddComponent(entity, "WheeledVehicle", &vehicle).has_value());
+				return entity;
+			};
+			{
+				SceneEdit edit(editor, "Vehicles");
+				static_cast<void>(addVehicle("Buggy", R"({"Type":"Dynamic"})", 4, false));
+				static_cast<void>(addVehicle("Statue", R"({"Type":"Static"})", 4, false));
+				static_cast<void>(addVehicle("Sled", R"({"Type":"Dynamic"})", 0, false));
+				static_cast<void>(addVehicle("Bumpy", R"({"Type":"Dynamic"})", 4, true));
+				Entity parked = addVehicle("Parked", R"({"Type":"Static"})", 0, false);
+				parked.SetActive(false);
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> vehicles;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == PhysicsVehicleInvalidCode)
+					CHECK(vehicles.emplace(diagnostic.Entity, &diagnostic).second);
+			}
+			// Each reason's Subject is the composition's (PhysicsVehiclesTests.cpp); here, which vehicles are reported.
+			const auto reported = [&editor, &vehicles](std::string_view path)
+			{
+				return vehicles.contains(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+			};
+			CHECK(vehicles.size() == 3);
+			CHECK(reported("/Statue"));
+			CHECK(reported("/Sled"));
+			CHECK(reported("/Bumpy"));
+			CHECK_FALSE(reported("/Buggy"));
+			CHECK_FALSE(reported("/Parked"));
+			for (const auto& [entity, diagnostic] : vehicles)
+			{
+				CHECK(diagnostic->Severity == DiagnosticSeverity::Error);
+				CHECK_FALSE(diagnostic->AutoFixable);
+				CHECK(diagnostic->Component == "WheeledVehicle");
 				CHECK(diagnostic->File == "Assets/Scenes/Main.scene");
 			}
 		}
