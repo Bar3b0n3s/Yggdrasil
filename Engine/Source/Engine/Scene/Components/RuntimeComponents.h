@@ -14,7 +14,8 @@ namespace Engine {
 	// script runtime components of §5.3 are defined by the milestones that own their contents (M11, M12, M13;
 	// Docs/Decisions/0006-m3-decisions.md, decision 8).
 
-	// The entity's world matrix, recomputed for every entity by TransformSystem::Update in canonical order.
+	// The entity's world matrix, kept by TransformSystem::Update: recomputed for the subtrees whose transforms were written
+	// since the last update (M43's change tracking, §5.2), parents before children.
 	struct WorldTransformComponent
 	{
 		glm::mat4 Matrix = glm::mat4(1.0f);
@@ -36,6 +37,13 @@ namespace Engine {
 	// The entity is effectively disabled: it or an ancestor has DisabledTag (§5.2). Render extraction, physics, audio and
 	// script updates skip it.
 	struct HierarchyDisabledTag
+	{
+	};
+
+	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the entity is effectively static (§5.2): walking up from it,
+	// the first Static component met is its own with a Scope other than NotStatic, or an ancestor's with Scope Subtree
+	// (EntityOnly is passed by). Kept by the scene on every structural change and Static write, as HierarchyDisabledTag is.
+	struct HierarchyStaticTag
 	{
 	};
 

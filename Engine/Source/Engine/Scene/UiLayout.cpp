@@ -1,7 +1,6 @@
 #include "EnginePCH.h"
 #include "Engine/Scene/UiLayout.h"
 
-#include "Engine/Scene/Components/RelationshipComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
 #include "Engine/Scene/Components/UiLayoutComponent.h"
@@ -25,13 +24,15 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
-// UI layout (UiLayout.h; Docs/Decisions/0033-m22-contract.md decision 4). Two passes: a scan of the scene in canonical order
-// finds the effectively enabled canvases and each one's elements (a parent before its children, siblings in order), then each
-// canvas, in draw order, places its elements in that order, so a parent's rectangle and a container's placement of its
-// children are known before the children are placed.
+// UI layout (UiLayout.h; Docs/Decisions/0033-m22-contract.md decision 4). Two passes: a scan finds the effectively enabled
+// canvases in canonical order and each one's elements in canonical order (a parent before its children, siblings in order),
+// then each canvas, in draw order, places its elements in that order, so a parent's rectangle and a container's placement of
+// its children are known before the children are placed. Since M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3)
+// the scan visits only the canvases' trees, never the rest of the scene.
 //
 // The arithmetic is the file comment's rule in scene pixels: the rectangle rule of UiRectComponent.h is linear in its lengths,
 // so placing an element in canvas units and multiplying by the canvas's scale is placing it in its parent's rectangle in
@@ -65,13 +66,20 @@ namespace Engine {
 			std::vector<UiScannedElement> Elements{};
 		};
 
-		// What the scan hands an entity's descendants: the canvas they belong to and their parent element.
-		struct UiScanFrame
+		// An entity of a canvas's tree that the scan has still to visit, with what its parent hands it: its parent element.
+		struct UiScanStep
 		{
 			UUID Entity{};
-			uint32_t Canvas = NoUiElement;        // the index of the canvas in the scan's list; NoUiElement: none
 			uint32_t ParentElement = NoUiElement; // NoUiElement: the canvas
 			uint32_t ParentDepth = 0;             // the parent element's depth, 0 for the canvas
+		};
+
+		// What the scan found, and how many entities it iterated (the canvases and the entities of their trees it reached),
+		// which the play session's UI phases count in the scene's EntitiesVisited (M43).
+		struct UiScan
+		{
+			std::vector<UiScannedCanvas> Canvases{};
+			size_t VisitedEntities = 0;
 		};
 
 		// The clip an element hands its descendants.
@@ -121,61 +129,68 @@ namespace Engine {
 			return glm::vec2(std::floor(v.x + 0.5f), std::floor(v.y + 0.5f));
 		}
 
-		// The scan: every effectively enabled canvas in canonical order, each with its elements in canonical order. The
-		// canonical order is depth first, so the frames of an entity's ancestors are on `ancestors` when it is reached: the
-		// ones that are not are popped, down to its parent's.
-		static std::vector<UiScannedCanvas> ScanUiCanvases(const Scene& scene)
+		// The scan: every effectively enabled canvas in canonical order (the UiCanvas view, Scene::CollectCanonical), each with
+		// its elements in canonical order: its tree depth first, children in sibling order, without the effectively disabled
+		// entities (whose subtrees are disabled too) and down to the nested canvases, each of which starts a tree of its own
+		// (and is in the view). That is the canonical order restricted to the canvas's tree, so the canvases, their element
+		// lists and the lists' links are those a walk of the whole scene in canonical order makes.
+		static UiScan ScanUiCanvases(const Scene& scene)
 		{
-			std::vector<UiScannedCanvas> canvases;
-			std::vector<UiScanFrame> ancestors;
-			for (const UUID id : scene.GetCanonicalOrder())
+			UiScan scan;
+			std::vector<entt::entity> canvases;
+			scene.CollectCanonical<UiCanvasComponent>(canvases);
+			scan.VisitedEntities = canvases.size();
+			std::vector<UiScanStep> pending;
+			const auto pushChildren = [&pending](ConstEntity entity, uint32_t parentElement, uint32_t parentDepth)
 			{
-				const ConstEntity entity = scene.FindEntityByID(id);
-				if (!entity.IsValid())
+				const std::span<const UUID> children = entity.GetChildren();
+				for (auto child = children.rbegin(); child != children.rend(); ++child)
+					pending.push_back(UiScanStep{ .Entity = *child, .ParentElement = parentElement, .ParentDepth = parentDepth });
+			};
+			for (const entt::entity handle : canvases)
+			{
+				const ConstEntity canvas(handle, &scene);
+				if (canvas.HasComponent<HierarchyDisabledTag>())
 					continue;
-				const UUID parent = entity.GetComponent<RelationshipComponent>().Parent;
-				while (!ancestors.empty() && ancestors.back().Entity != parent)
-					ancestors.pop_back();
-				const UiScanFrame inherited = ancestors.empty() ? UiScanFrame{} : ancestors.back();
-
-				UiScanFrame frame{ .Entity = id };
-				if (entity.HasComponent<HierarchyDisabledTag>())
+				scan.Canvases.push_back(UiScannedCanvas{ .Entity = canvas, .SortOrder = canvas.GetComponent<UiCanvasComponent>().SortOrder });
+				// The canvas list does not grow while its tree is walked (nested canvases are passed by), so this stays valid.
+				std::vector<UiScannedElement>& elements = scan.Canvases.back().Elements;
+				pushChildren(canvas, NoUiElement, 0);
+				while (!pending.empty())
 				{
+					const UiScanStep step = pending.back();
+					pending.pop_back();
+					const ConstEntity entity = scene.FindEntityByID(step.Entity);
+					// A nested canvas, enabled or not, starts a UI tree of its own.
+					if (!entity.IsValid() || entity.HasComponent<UiCanvasComponent>())
+						continue;
+					++scan.VisitedEntities;
 					// Effectively disabled: neither it nor its subtree, which is disabled too, is laid out.
-				}
-				else if (const UiCanvasComponent* canvas = entity.TryGetComponent<UiCanvasComponent>())
-				{
-					// A canvas, nested or not, starts a UI tree of its own.
-					frame.Canvas = static_cast<uint32_t>(canvases.size());
-					canvases.push_back(UiScannedCanvas{ .Entity = entity, .SortOrder = canvas->SortOrder });
-				}
-				else if (inherited.Canvas != NoUiElement)
-				{
-					frame.Canvas = inherited.Canvas;
-					frame.ParentElement = inherited.ParentElement;
-					frame.ParentDepth = inherited.ParentDepth;
+					if (entity.HasComponent<HierarchyDisabledTag>())
+						continue;
+					uint32_t parentElement = step.ParentElement;
+					uint32_t parentDepth = step.ParentDepth;
 					if (entity.HasComponent<UiRectComponent>())
 					{
-						std::vector<UiScannedElement>& elements = canvases[inherited.Canvas].Elements;
 						const auto index = static_cast<uint32_t>(elements.size());
-						elements.push_back(UiScannedElement{ .Entity = entity, .Parent = inherited.ParentElement, .Depth = inherited.ParentDepth + 1 });
-						if (inherited.ParentElement != NoUiElement)
+						elements.push_back(UiScannedElement{ .Entity = entity, .Parent = step.ParentElement, .Depth = step.ParentDepth + 1 });
+						if (step.ParentElement != NoUiElement)
 						{
-							UiScannedElement& parentElement = elements[inherited.ParentElement];
-							if (parentElement.LastChild == NoUiElement)
-								parentElement.FirstChild = index;
+							UiScannedElement& parent = elements[step.ParentElement];
+							if (parent.LastChild == NoUiElement)
+								parent.FirstChild = index;
 							else
-								elements[parentElement.LastChild].NextSibling = index;
-							parentElement.LastChild = index;
+								elements[parent.LastChild].NextSibling = index;
+							parent.LastChild = index;
 						}
-						frame.ParentElement = index;
-						frame.ParentDepth = inherited.ParentDepth + 1;
+						parentElement = index;
+						parentDepth = step.ParentDepth + 1;
 					}
 					// Without a UiRect the entity is transparent: its descendants keep its parent element.
+					pushChildren(entity, parentElement, parentDepth);
 				}
-				ancestors.push_back(frame);
 			}
-			return canvases;
+			return scan;
 		}
 
 		// UiRectComponent.h's rule in scene pixels: the parent's rectangle [parentMin, parentMax] is in scene pixels, and the
@@ -446,17 +461,19 @@ namespace Engine {
 
 	}
 
-	UiLayoutTable ComputeUiLayout(const Scene& scene, glm::uvec2 sceneSize)
+	UiLayoutPass ComputeUiLayoutPass(const Scene& scene, glm::uvec2 sceneSize)
 	{
 		ENGINE_CORE_ASSERT(sceneSize.x >= 1 && sceneSize.y >= 1, "ComputeUiLayout needs a scene resolution of at least 1 x 1, got {} x {}", sceneSize.x,
 			sceneSize.y);
-		UiLayoutTable table{ .SceneSize = sceneSize };
+		UiLayoutPass pass{ .Table = UiLayoutTable{ .SceneSize = sceneSize } };
 		// A scene without a canvas (every scene without UI) is not scanned.
 		const auto* canvasStorage = scene.GetRegistry().storage<UiCanvasComponent>();
 		if (canvasStorage == nullptr || canvasStorage->empty())
-			return table;
+			return pass;
 
-		const std::vector<UiScannedCanvas> canvases = Utils::ScanUiCanvases(scene);
+		const UiScan scan = Utils::ScanUiCanvases(scene);
+		pass.VisitedEntities = scan.VisitedEntities;
+		const std::vector<UiScannedCanvas>& canvases = scan.Canvases;
 		// Draw order: ascending SortOrder, ties in canonical order (the scan's).
 		std::vector<uint32_t> order(canvases.size());
 		for (uint32_t index = 0; index < order.size(); ++index)
@@ -465,10 +482,15 @@ namespace Engine {
 		{
 			return canvases[a].SortOrder < canvases[b].SortOrder;
 		});
-		table.Canvases.reserve(canvases.size());
+		pass.Table.Canvases.reserve(canvases.size());
 		for (const uint32_t index : order)
-			Utils::LayoutUiCanvas(canvases[index], sceneSize, table);
-		return table;
+			Utils::LayoutUiCanvas(canvases[index], sceneSize, pass.Table);
+		return pass;
+	}
+
+	UiLayoutTable ComputeUiLayout(const Scene& scene, glm::uvec2 sceneSize)
+	{
+		return ComputeUiLayoutPass(scene, sceneSize).Table;
 	}
 
 	UiClipRect ComputeUiClipRect(glm::vec2 min, glm::vec2 max)

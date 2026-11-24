@@ -413,7 +413,10 @@ namespace Engine {
 			REQUIRE(fixture.CallPending("play.step", Json{ { "ticks", 70 }, { "render", "none" }, { "input", tap } }).contains("result"));
 			Entity ball = fixture.GetSession().GetScene().FindEntityByPath("/Game/Ball");
 			REQUIRE(ball.IsValid());
-			ball.GetComponent<TransformComponent>().Translation.x += 5.0f;
+			ball.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.x += 5.0f;
+			});
 			const Json diverged = fixture.CallPending("input.record", Json{ { "action", "stop" }, { "path", "Moved.replay" } });
 			REQUIRE_MESSAGE(diverged.contains("error"), diverged.dump());
 			const Json& data = diverged["error"]["data"];

@@ -13,6 +13,7 @@ Every component of the type registry, in canonical component order: the order of
 | `Transform` | Core | Serializable, ScriptVisible, EditorVisible, Required | Positions, rotates and scales the entity relative to its parent. |
 | `Prefab` | Core | Serializable, ScriptVisible, Hidden | Marks the root of a prefab instance; an outermost one records the overrides of its instance and of the instances nested in it. |
 | `PrefabLink` | Core | Serializable, ScriptVisible, Hidden | Links an entity of a prefab instance, its root included, to its entity in the prefab of its innermost instance. |
+| `Static` | Core | Serializable, ScriptVisible, EditorVisible, Removable | Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation. |
 | `MeshRenderer` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Draws a mesh asset with one material per submesh. |
 | `Camera` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | Renders the scene from the entity, looking down its local -Z axis. |
 | `DirectionalLight` | Rendering | Serializable, ScriptVisible, EditorVisible, Removable | A sun-like light shining down the entity's local -Z axis. |
@@ -204,6 +205,26 @@ Links an entity of a prefab instance, its root included, to its entity in the pr
 | `PrefabEntityID` | `EntityRef` | `null` |  |  |  | The entity's ID in the prefab of its innermost instance. |
 | `InstanceRoot` | `EntityRef` | `null` |  |  |  | The root of the entity's innermost instance (an instance root names itself), which has the Prefab component. |
 | `OuterPrefabEntityID` | `EntityRef` | `null` |  |  |  | On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity. |
+
+## Static
+
+Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.
+
+- Category: Core
+- Version: 1
+- Flags: Serializable, ScriptVisible, EditorVisible, Removable
+- Requires: none
+- Excludes: none
+
+| Field | Type | Default | Range | Unit | Notes | Description |
+|---|---|---|---|---|---|---|
+| `Scope` | `StaticScope` | `"Subtree"` |  |  |  | What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree). |
+
+Script members of `Static`:
+
+| Member | Kind | Signature | Access | Modes | Description |
+|---|---|---|---|---|---|
+| `Scope` | proxy field | `StaticScope` | read/write | All | What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree). |
 
 ## MeshRenderer
 
@@ -2398,6 +2419,16 @@ The sample count of screen-space ambient occlusion (GTAO).
 | `Low` | Fewest samples: fastest, noisiest. |
 | `Medium` | Balanced sample count (the default). |
 | `High` | Most samples: smoothest, slowest. |
+
+### StaticScope
+
+The part of the hierarchy a Static component covers.
+
+| Value | Description |
+|---|---|
+| `Subtree` | The entity and its descendants are static. |
+| `EntityOnly` | The entity alone is static; its descendants follow the Static components above it. |
+| `NotStatic` | The entity and its descendants are not static, even below a static ancestor. |
 
 ### TextAlignment
 

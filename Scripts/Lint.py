@@ -364,6 +364,7 @@ class Rules:
     abi_macro_files: GlobSet
     new_delete_files: GlobSet
     output_files: GlobSet
+    transform_write_files: GlobSet
     contract_stub_definition_files: GlobSet
     contract_test_files: GlobSet
     contract_python_stub_files: GlobSet
@@ -531,6 +532,7 @@ def parse_rules(document: dict[str, Any], path: Path) -> Rules:
         abi_macro_files=GlobSet(_strings(banned.get("AbiMacroFiles", []), "Banned.AbiMacroFiles")),
         new_delete_files=GlobSet(_strings(banned.get("NewDeleteFiles", []), "Banned.NewDeleteFiles")),
         output_files=GlobSet(_strings(banned.get("OutputFiles", []), "Banned.OutputFiles")),
+        transform_write_files=GlobSet(_strings(banned.get("TransformWriteFiles", []), "Banned.TransformWriteFiles")),
         contract_stub_definition_files=GlobSet(
             _strings(contract["StubDefinitionFiles"], "Contract.StubDefinitionFiles")
         ),
@@ -1894,6 +1896,36 @@ OUTPUT_PATTERN = re.compile(
     + r"(?:::)?(?:printf|fprintf|puts|putchar|vprintf|vfprintf|wprintf)\s*\("
 )
 NEW_DELETE_PATTERN = re.compile(r"\b(new|delete)\b")
+# A TransformComponent access that returns a mutable reference or pointer (Entity::GetComponent and TryGetComponent,
+# entt::registry::get and try_get), up to the opening parenthesis of its arguments. WorldTransformComponent and
+# PreviousWorldTransformComponent are other types.
+TRANSFORM_ACCESS_PATTERN = re.compile(
+    r"\b(GetComponent|TryGetComponent|get|try_get)\s*<\s*(?:::\s*)?(?:Engine\s*::\s*)?TransformComponent\s*>\s*\("
+)
+# The members named after an access: .Translation.x, ->Rotation, .Values[i].
+TRANSFORM_MEMBER_CHAIN = r"(?:\s*(?:\.|->)\s*[A-Za-z_]\w*(?:\s*\[[^\[\]]*\])*)*"
+# After an access: an assignment, compound assignment, increment or decrement of it or of one of its members.
+TRANSFORM_WRITE_PATTERN = re.compile(TRANSFORM_MEMBER_CHAIN + r"\s*(?:(?:<<|>>|[-+*/%&|^])?=(?!=)|\+\+|--)")
+# After an access: the end of an initializer that is the access or one of its members (a declaration, an if or for
+# initializer, a branch of a conditional expression).
+TRANSFORM_INITIALIZER_END_PATTERN = re.compile(TRANSFORM_MEMBER_CHAIN + r"\s*(?:[;,):]|$)")
+# Before an access, from the start of its statement: a declaration whose initializer the access starts (after an
+# address-of or a dereference, or as a branch of a conditional expression), with its type and its reference or pointer
+# declarator. A parenthesized group in the condition or the first branch is one level deep at most.
+TRANSFORM_BINDING_PATTERN = re.compile(
+    r"(?:^|[(,])\s*(?P<type>[A-Za-z_:][\w:<>,\s]*?)(?:\s*(?P<declarator>&&|&|\*)\s*|\s+)(?:const\s+)?"
+    r"(?:[A-Za-z_]\w*|\[[^\[\]]*\])\s*=\s*"
+    r"(?:(?:[^;{}()?]|\([^;{}()]*\))*\?(?:(?:[^;{}()?:]|\([^;{}()]*\))*:)?\s*)?(?P<operator>[&*]?)\s*$"
+)
+# A view or group over a mutable TransformComponent (EnTT's registry view<...>): its elements are references through
+# which a write fires no signal. A view of const TransformComponent reads only.
+TRANSFORM_VIEW_PATTERN = re.compile(r"\bview\s*<(?P<types>[^<>;{}()]*)>\s*\(")
+TRANSFORM_MUTABLE_TYPE_PATTERN = re.compile(r"(?:::\s*)?(?:Engine\s*::\s*)?TransformComponent")
+TRANSFORM_WRITE_MESSAGE = (
+    "a TransformComponent written directly bypasses change tracking (Architecture section 5.2, "
+    "Docs/Decisions/0061-m43-static-scenery.md): write it through Entity::Patch or a reflected setter, or, in "
+    "Banned.TransformWriteFiles, call Scene::MarkTransformWritten after the write"
+)
 BANNED_HEADERS = {
     "cassert": (
         "banned-assert",
@@ -1938,6 +1970,77 @@ def balanced_arguments(code: str, open_index: int) -> tuple[list[str], int]:
             current_start = index + 1
         index += 1
     return arguments, len(code)
+
+
+def opening_bracket(code: str, close_index: int) -> int:
+    """The index of the bracket that the ")", "]" or ">" at close_index closes, scanning backwards; -1 when there is
+    none. A template argument list ends at its statement, since ">" may be a comparison."""
+    closing = code[close_index]
+    opening = {")": "(", "]": "[", ">": "<"}[closing]
+    depth = 0
+    for index in range(close_index, -1, -1):
+        character = code[index]
+        if character == closing and not (closing == ">" and index > 0 and code[index - 1] == "-"):
+            depth += 1
+        elif character == opening:
+            depth -= 1
+            if depth == 0:
+                return index
+        elif closing == ">" and character in ";{}":
+            return -1
+    return -1
+
+
+def postfix_expression_start(code: str, name_index: int) -> int:
+    """Where the postfix expression whose member or qualified name starts at name_index begins: back over each object or
+    qualifier before ".", "->" or "::" (a name, a call, a subscript, a template argument list, a parenthesized
+    expression)."""
+    start = name_index
+    while True:
+        cursor = start
+        while cursor > 0 and code[cursor - 1].isspace():
+            cursor -= 1
+        if code[max(0, cursor - 2) : cursor] in ("->", "::"):
+            cursor -= 2
+        elif cursor > 0 and code[cursor - 1] == ".":
+            cursor -= 1
+        else:
+            return start
+        while cursor > 0 and code[cursor - 1].isspace():
+            cursor -= 1
+        operand_end = cursor
+        while cursor > 0 and code[cursor - 1] in ")]>" and code[max(0, cursor - 2) : cursor] != "->":
+            cursor = opening_bracket(code, cursor - 1)
+            if cursor < 0:
+                return start
+            while cursor > 0 and code[cursor - 1].isspace():
+                cursor -= 1
+        while cursor > 0 and (code[cursor - 1].isalnum() or code[cursor - 1] == "_"):
+            cursor -= 1
+        if cursor == operand_end:
+            return start
+        start = cursor
+
+
+def transform_write_kind(code: str, access: re.Match[str]) -> str | None:
+    """How the TransformComponent access matched by TRANSFORM_ACCESS_PATTERN writes the component: "written" (an
+    assignment, compound assignment, increment or decrement of it or of one of its members), "bound to a reference or
+    pointer that is not const" (it or one of its members), or None for a read (a const reference or pointer, a copy, a
+    comparison, an argument)."""
+    _, closing = balanced_arguments(code, access.end() - 1)
+    end = closing + 1
+    start = postfix_expression_start(code, access.start())
+    if TRANSFORM_WRITE_PATTERN.match(code, end) or re.search(r"(?:\+\+|--)\s*$", code[max(0, start - 16) : start]):
+        return "written"
+    statement_start = max(code.rfind(delimiter, 0, start) for delimiter in ";{}") + 1
+    binding = TRANSFORM_BINDING_PATTERN.search(code[statement_start:start])
+    if binding is None or re.search(r"\bconst\b", binding.group("type")):
+        return None  # not a declaration, or a const one
+    if binding.group("declarator") is None and binding.group("operator") != "&":
+        return None  # a copy
+    if not TRANSFORM_INITIALIZER_END_PATTERN.match(code, end):
+        return None  # the initializer goes on: the access is an operand
+    return "bound to a reference or pointer that is not const"
 
 
 def own_header(tree: Tree, source: SourceFile) -> SourceFile | None:
@@ -2013,6 +2116,9 @@ class BannedChecker:
                         f"dedicated allocator (CodeStyle section 7)"
                     ),
                 )
+        if not self.rules.transform_write_files.matches(relative):
+            for offset, message in self.transform_writes(code):
+                report(offset, "banned-transform-write", message)
         for directive in source.directives:
             if directive.name == "if" and re.fullmatch(r"0+", directive.argument.strip()):
                 report(
@@ -2078,6 +2184,28 @@ class BannedChecker:
                 end = source.code.find("\n", directive.offset)
                 _blank(code, directive.offset, len(code) if end < 0 else end)
         return "".join(code)
+
+    @staticmethod
+    def transform_writes(code: str) -> list[tuple[int, str]]:
+        """The writes through a mutable TransformComponent access, which bypass the change tracking of world transforms
+        (Architecture section 5.2, Docs/Decisions/0061-m43-static-scenery.md decision 3), each at its access."""
+        results: list[tuple[int, str]] = []
+        for match in TRANSFORM_ACCESS_PATTERN.finditer(code):
+            kind = transform_write_kind(code, match)
+            if kind is not None:
+                access = f"{match.group(1)}<TransformComponent>"
+                results.append((match.start(), f"'{access}' is {kind}: {TRANSFORM_WRITE_MESSAGE}"))
+        for match in TRANSFORM_VIEW_PATTERN.finditer(code):
+            types = [part.strip() for part in match.group("types").split(",")]
+            if any(TRANSFORM_MUTABLE_TYPE_PATTERN.fullmatch(part) for part in types):
+                results.append(
+                    (
+                        match.start(),
+                        "'view<TransformComponent>' is a view of a mutable TransformComponent (use view<const "
+                        f"TransformComponent> to read): {TRANSFORM_WRITE_MESSAGE}",
+                    )
+                )
+        return results
 
     def is_simulation_path(self, relative: str) -> bool:
         if self.tree.native_module(relative) is not None:

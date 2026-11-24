@@ -27,8 +27,10 @@ namespace Engine {
 		// raised and logged once.
 		std::vector<SpriteSceneIssue> Diagnostics{};
 		std::set<std::pair<UUID, std::string>, std::less<>> RaisedClips{};
-		// The entities the current step animates, in canonical order (kept to reuse its capacity).
+		// The entities the current step animates, in canonical order, and the entities holding a SpriteAnimator and a
+		// SpriteRenderer in canonical order (M43: Scene::CollectCanonical), both kept to reuse their capacity.
 		std::vector<Entity> Animated{};
+		std::vector<entt::entity> Candidates{};
 
 		void RaiseUnknownClip(Entity entity, const std::string& clip, const Detail::SpriteClipLookup& lookup);
 	};
@@ -104,15 +106,17 @@ namespace Engine {
 			return;
 
 		// The playing animators of effectively enabled entities, gathered first so the writes below never run while the
-		// canonical order is being read.
+		// view is being read (M43: the SpriteAnimator and SpriteRenderer view in canonical order, counted in EntitiesVisited).
 		state.Animated.clear();
-		for (const UUID id : scene.GetCanonicalOrder())
+		scene.CollectCanonical<SpriteAnimatorComponent, SpriteRendererComponent>(state.Candidates);
+		scene.AddEntitiesVisited(state.Candidates.size());
+		for (const entt::entity handle : state.Candidates)
 		{
-			const Entity entity = scene.FindEntityByID(id);
-			if (!entity.IsValid() || entity.HasComponent<HierarchyDisabledTag>() || !entity.HasComponent<SpriteRendererComponent>())
+			const Entity entity(handle, &scene);
+			if (entity.HasComponent<HierarchyDisabledTag>())
 				continue;
-			const SpriteAnimatorComponent* animator = entity.TryGetComponent<SpriteAnimatorComponent>();
-			if (animator != nullptr && animator->Playing && !animator->Clip.empty())
+			const SpriteAnimatorComponent& animator = entity.GetComponent<SpriteAnimatorComponent>();
+			if (animator.Playing && !animator.Clip.empty())
 				state.Animated.push_back(entity);
 		}
 

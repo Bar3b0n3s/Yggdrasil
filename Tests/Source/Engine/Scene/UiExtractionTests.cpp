@@ -591,7 +591,10 @@ namespace Engine {
 			hud.AddComponent<UiCanvasComponent>(UiCanvasComponent{});
 			AddElement(scene, "Score", hud, glm::vec2(0.0f), glm::vec2(8.0f)).AddComponent<UiImageComponent>(UiImageComponent{});
 			Entity board = scene.CreateEntity("Board");
-			board.GetComponent<TransformComponent>().Translation = glm::vec3(4.0f, 0.0f, 0.0f);
+			board.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(4.0f, 0.0f, 0.0f);
+			});
 			board.AddComponent<UiCanvasComponent>(
 				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 64, .WorldHeight = 32, .PixelsPerUnit = 32.0f });
 			Entity sign = AddElement(scene, "Sign", board, glm::vec2(8.0f), glm::vec2(16.0f));

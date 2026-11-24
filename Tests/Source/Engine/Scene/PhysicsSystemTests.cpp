@@ -5,6 +5,7 @@
 #include "Engine/Asset/AssetManager.h"
 #include "Engine/Asset/BuiltinAssets.h"
 #include "Engine/Asset/MeshData.h"
+#include "Engine/Core/Hash.h"
 #include "Engine/Core/Jobs/JobSystem.h"
 #include "Engine/Core/Jobs/MainThreadQueue.h"
 #include "Engine/Core/Random.h"
@@ -26,7 +27,10 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <map>
 #include <optional>
@@ -419,7 +423,14 @@ namespace Engine {
 			else if (action == 13)
 				entity.SetActive(!entity.IsActiveSelf());
 			else if (action == 14)
-				entity.GetComponent<TransformComponent>().Translation = fuzzer.Vector(20.0f); // a script's Transform write: a teleport
+			{
+				// A script's Transform write: a teleport.
+				const glm::vec3 position = fuzzer.Vector(20.0f);
+				entity.Patch<TransformComponent>([position](TransformComponent& transform)
+				{
+					transform.Translation = position;
+				});
+			}
 			else if (action == 15)
 			{
 				const Entity parent = fuzzer.Chance(20) ? Entity() : scene.FindEntityByID(order[static_cast<size_t>(fuzzer.Pick(static_cast<int>(order.size())))]);
@@ -830,7 +841,10 @@ namespace Engine {
 			PhaseAction writer(PlaySessionPhase::FixedUpdate, 30, 30, [](PlaySession& session, uint64_t /*tick*/)
 			{
 				Entity ball = session.GetScene().FindEntityByPath("/Ball");
-				ball.GetComponent<TransformComponent>().Translation = glm::vec3(5.0f, 20.0f, 0.0f);
+				ball.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(5.0f, 20.0f, 0.0f);
+				});
 			});
 			Scope<PlaySession> session = StartSession(fixture, nullptr, &writer);
 			Test::RunTicks(*session, 30);
@@ -853,7 +867,10 @@ namespace Engine {
 			// A script writes a Transform far beyond the range in the fixed update of tick 5.
 			PhaseAction writer(PlaySessionPhase::FixedUpdate, 5, 5, [](PlaySession& session, uint64_t /*tick*/)
 			{
-				session.GetScene().FindEntityByPath("/Ball").GetComponent<TransformComponent>().Translation = glm::vec3(1.0e30f, 0.0f, 0.0f);
+				session.GetScene().FindEntityByPath("/Ball").Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(1.0e30f, 0.0f, 0.0f);
+				});
 			});
 			Test::ExpectLog refused(LogLevel::Error, "PHYSICS_INVALID_SHAPE");
 			Scope<PlaySession> session = StartSession(fixture, nullptr, &writer);
@@ -1215,7 +1232,10 @@ namespace Engine {
 			PhaseAction teleporter(PlaySessionPhase::FixedUpdate, 60, 60, [](PlaySession& session, uint64_t /*tick*/)
 			{
 				Entity platform = session.GetScene().FindEntityByPath("/Platform");
-				platform.GetComponent<TransformComponent>().Translation = glm::vec3(50.0f, 1.0f, 0.0f);
+				platform.Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(50.0f, 1.0f, 0.0f);
+				});
 				session.MarkTeleported(platform);
 			});
 			Scope<PlaySession> session = StartSession(fixture, nullptr, &teleporter);
@@ -1691,7 +1711,10 @@ namespace Engine {
 			});
 			// A Dynamic cart whose only collider is its scripted child's, falling through the zone.
 			Entity cart = scene.CreateEntity("Cart");
-			cart.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 3.0f, 0.0f);
+			cart.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 3.0f, 0.0f);
+			});
 			cart.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Dynamic });
 			Entity seat = Test::AddBoxBody(scene, "Seat", glm::vec3(0.5f, 0.0f, 0.0f), glm::vec3(0.25f), std::nullopt, cart);
 			seat.AddComponent<ScriptComponent>().Scripts.push_back(ScriptSlot{ .Script = ColliderScript, .Fields = {}, .ExecutionOrder = 0 });
@@ -1917,7 +1940,10 @@ namespace Engine {
 			CHECK(before->Max.y == doctest::Approx(5.5f).epsilon(1.0e-3));
 
 			// A script moves the box piece: the compound follows at the next PreStep.
-			runtime.FindEntityByPath("/Level/Piece").GetComponent<TransformComponent>().Translation = glm::vec3(-5.0f, 0.0f, 0.0f);
+			runtime.FindEntityByPath("/Level/Piece").Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(-5.0f, 0.0f, 0.0f);
+			});
 			session->Tick();
 			const std::optional<Aabb> moved = physics.GetBodyBounds(levelId);
 			REQUIRE(moved.has_value());
@@ -2130,7 +2156,10 @@ namespace Engine {
 			UUID mover;
 			SUBCASE("a Transform write")
 			{
-				runtime.FindEntityByID(wall).GetComponent<TransformComponent>().Translation = glm::vec3(0.8f, 2.0f, 0.0f);
+				runtime.FindEntityByID(wall).Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.8f, 2.0f, 0.0f);
+				});
 				mover = wall;
 			}
 			SUBCASE("Teleport")
@@ -2142,7 +2171,10 @@ namespace Engine {
 			{
 				Result<Entity> spawned = session->CreateEntity("Spawned");
 				REQUIRE(spawned.has_value());
-				spawned->GetComponent<TransformComponent>().Translation = glm::vec3(0.8f, 2.0f, 0.0f);
+				spawned->Patch<TransformComponent>([](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.8f, 2.0f, 0.0f);
+				});
 				spawned->AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(0.5f, 2.0f, 2.0f) });
 				spawned->AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
 				mover = spawned->GetUUID();
@@ -2197,13 +2229,21 @@ namespace Engine {
 				Entity platform = session.GetScene().FindEntityByPath("/Platform");
 				if (tick == 260)
 				{
-					platform.GetComponent<TransformComponent>().Translation = glm::vec3(2.0f * MaxPhysicsCoordinate, 3.0f, 0.0f);
+					platform.Patch<TransformComponent>([](TransformComponent& transform)
+					{
+						transform.Translation = glm::vec3(2.0f * MaxPhysicsCoordinate, 3.0f, 0.0f);
+					});
 					return;
 				}
 				const glm::vec3 target(10.0f + static_cast<float>(tick - 239) / 60.0f, 3.0f, 0.0f);
 				REQUIRE(session.GetPhysics().MoveKinematic(platform.GetUUID(), target, glm::quat(1.0f, 0.0f, 0.0f, 0.0f)).has_value());
 				if (tick == 250)
-					session.GetScene().FindEntityByPath("/Sleeper").GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, -3.0e9f, 0.0f);
+				{
+					session.GetScene().FindEntityByPath("/Sleeper").Patch<TransformComponent>([](TransformComponent& transform)
+					{
+						transform.Translation = glm::vec3(0.0f, -3.0e9f, 0.0f);
+					});
+				}
 			});
 			Scope<PlaySession> session = StartSession(fixture, nullptr, &script);
 			PhysicsSystem& physics = session->GetPhysics();
@@ -2247,9 +2287,11 @@ namespace Engine {
 			for (int index = 0; index < 24; ++index)
 			{
 				CAPTURE(index);
-				TransformComponent& transform = parent.GetComponent<TransformComponent>();
-				transform.Scale = glm::vec3(1.0f + 0.37f * static_cast<float>(index));
-				transform.Rotation = glm::angleAxis(glm::radians(7.0f * static_cast<float>(index)), glm::normalize(glm::vec3(0.0f, 0.3f, 1.0f)));
+				parent.Patch<TransformComponent>([index](TransformComponent& transform)
+				{
+					transform.Scale = glm::vec3(1.0f + 0.37f * static_cast<float>(index));
+					transform.Rotation = glm::angleAxis(glm::radians(7.0f * static_cast<float>(index)), glm::normalize(glm::vec3(0.0f, 0.3f, 1.0f)));
+				});
 				const TransformComponent before = ball.GetComponent<TransformComponent>();
 				const Status teleported = physics.Teleport(ball.GetUUID(), glm::vec3(MaxPhysicsCoordinate, 0.0f, 0.0f), std::nullopt);
 				if (teleported.has_value())
@@ -2369,6 +2411,200 @@ namespace Engine {
 				}
 				session->GetPhysics().SetEventListener(nullptr);
 			}
+		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a pre-step visits the owners of kinematic bodies and the
+		// owners whose transforms changed since the last one, then the characters, its shape check the bodies that bake a
+		// written entity in, and the write-back the owners of dynamic bodies and characters, whatever static scenery the
+		// scene holds; a Transform written outside the steps (a script's Entity::Patch, a teleport) still places its body, and
+		// a world-change list that overflowed visits every body owner, as every pre-step did before.
+		TEST_CASE("PhysicsSystem: a tick visits only the moving bodies and the bodies whose transforms changed")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			// Static scenery, Static RigidBodies and implicit static bodies, and props without a body, away from the moving
+			// bodies.
+			std::vector<Entity> walls;
+			const auto addWall = [&scene, &walls](int index)
+			{
+				std::optional<BodyType> type;
+				if (index % 2 == 0)
+					type = BodyType::Static;
+				walls.push_back(Test::AddBoxBody(scene, "Wall", glm::vec3(3.0f * static_cast<float>(index), -10.0f, 0.0f), glm::vec3(0.5f), type));
+			};
+			for (int index = 0; index < 12; ++index)
+				addWall(index);
+			std::vector<Entity> props;
+			for (int index = 0; index < 8; ++index)
+			{
+				Entity prop = scene.CreateEntity("Prop");
+				prop.Patch<TransformComponent>([index](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(3.0f * static_cast<float>(index), 20.0f, 0.0f);
+				});
+				props.push_back(prop);
+			}
+			static_cast<void>(Test::AddBoxBody(scene, "Platform", glm::vec3(0.0f, 10.0f, 0.0f), glm::vec3(1.0f, 0.25f, 1.0f), BodyType::Kinematic));
+			// A ball that never stops, so it writes its pose back every step.
+			Entity ball = Test::AddSphereBody(scene, "Ball", glm::vec3(-20.0f, 0.0f, 0.0f), 0.25f, BodyType::Dynamic);
+			Test::PatchRigidBody(ball, [](RigidBodyComponent& body)
+			{
+				body.LinearDamping = 0.0f;
+				body.GravityFactor = 0.0f;
+				body.AllowSleeping = false;
+				body.InitialLinearVelocity = glm::vec3(1.0f, 0.0f, 0.0f);
+			});
+			TransformSystem::Update(scene);
+			PhysicsSystemSpecification specification;
+			specification.RuntimeScene = &scene;
+			specification.Gravity = glm::vec3(0.0f);
+			Result<Scope<PhysicsSystem>> created = PhysicsSystem::Create(specification);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PhysicsSystem& physics = **created;
+			REQUIRE(physics.GetStats().BodyCount == 14);
+			// The transform update, then one step: the entities the step's passes visited.
+			const auto stepVisits = [&scene, &physics](uint64_t tick)
+			{
+				TransformSystem::Update(scene);
+				const uint64_t visited = scene.GetEntitiesVisited();
+				const SimStep step = SimStep::FromTick(tick, 1.0 / 60.0);
+				physics.PreStep(step);
+				physics.Step(step);
+				physics.PostStep(step);
+				return scene.GetEntitiesVisited() - visited;
+			};
+			const auto positionOf = [&physics](const Entity entity)
+			{
+				const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(entity.GetUUID());
+				REQUIRE(report.has_value());
+				return report->Pose.Position;
+			};
+
+			// The first step: the platform's move and the ball's write-back. From then on the Transform the ball wrote back adds
+			// its shape check and its pre-step visit: four visits a step, none for the walls and the props.
+			CHECK(stepVisits(0) == 2);
+			uint64_t tick = 1;
+			for (; tick < 4; ++tick)
+				CHECK(stepVisits(tick) == 4);
+			// Thirty more walls: the step that creates their bodies visits them (their Transforms are new), the next ones four
+			// entities again.
+			for (int index = 12; index < 42; ++index)
+				addWall(index);
+			static_cast<void>(stepVisits(tick++));
+			REQUIRE(physics.GetStats().BodyCount == 44);
+			CHECK(stepVisits(tick++) == 4);
+
+			// A script's write of a wall's Transform: the wall's shape check and pre-step visit, which places it.
+			walls[3].Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = -5.0f;
+			});
+			CHECK(stepVisits(tick++) == 6);
+			CHECK(positionOf(walls[3]).x == doctest::Approx(9.0f));
+			CHECK(positionOf(walls[3]).y == doctest::Approx(-5.0f));
+			CHECK(stepVisits(tick++) == 4);
+
+			// A teleport of another wall, and a write that teleports the ball: each body is where its Transform is.
+			REQUIRE(physics.Teleport(walls[6].GetUUID(), glm::vec3(18.0f, -2.0f, 0.0f), std::nullopt).has_value());
+			ball.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = 4.0f;
+			});
+			CHECK(stepVisits(tick++) == 6);
+			CHECK(positionOf(walls[6]).x == doctest::Approx(18.0f));
+			CHECK(positionOf(walls[6]).y == doctest::Approx(-2.0f));
+			CHECK(positionOf(ball).y == doctest::Approx(4.0f));
+			CHECK(stepVisits(tick++) == 4);
+
+			// Transform updates without a step that change more world matrices than the list holds (eight props each, past
+			// 4,096 entries): the next pre-step checks every body's shape (44) and visits every body owner (44), the ball's
+			// write-back one more, and still places the wall written meanwhile.
+			for (int update = 0; update < 600; ++update)
+			{
+				for (const Entity prop : props)
+				{
+					prop.Patch<TransformComponent>([update](TransformComponent& transform)
+					{
+						transform.Translation.z = static_cast<float>(update);
+					});
+				}
+				TransformSystem::Update(scene);
+			}
+			walls[9].Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = -3.0f;
+			});
+			CHECK(stepVisits(tick++) == 89);
+			CHECK(positionOf(walls[9]).y == doctest::Approx(-3.0f));
+			CHECK(stepVisits(tick++) == 4);
+		}
+
+		// M43: the physics hash block lists the bodies in canonical order of their owners (a parent before its children, then
+		// the next root), whatever the order of their UUIDs.
+		TEST_CASE("PhysicsSystem: the state hash block lists the bodies in canonical order of their owners")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			// Canonical order First, Child, Second; their UUIDs in the reverse order.
+			Entity first = scene.CreateEntityWithID(UUID(300), "First");
+			Entity second = scene.CreateEntityWithID(UUID(100), "Second");
+			Entity child = scene.CreateEntityWithID(UUID(200), "Child", first);
+			const auto addStaticBox = [](const Entity entity, const glm::vec3& position)
+			{
+				entity.Patch<TransformComponent>([&position](TransformComponent& transform)
+				{
+					transform.Translation = position;
+				});
+				entity.AddComponent<RigidBodyComponent>(RigidBodyComponent{ .Type = BodyType::Static });
+				entity.AddComponent<BoxColliderComponent>(BoxColliderComponent{ .HalfExtents = glm::vec3(0.5f) });
+			};
+			addStaticBox(first, glm::vec3(0.0f));
+			addStaticBox(second, glm::vec3(-6.0f, 0.0f, 0.0f));
+			addStaticBox(child, glm::vec3(6.0f, 0.0f, 0.0f));
+			TransformSystem::Update(scene);
+			PhysicsSystemSpecification specification;
+			specification.RuntimeScene = &scene;
+			Result<Scope<PhysicsSystem>> created = PhysicsSystem::Create(specification);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			const PhysicsSystem& physics = **created;
+			REQUIRE(physics.GetStats().BodyCount == 3);
+
+			// One body's entry of the block (PhysicsSystem::AppendStateHash): the owner's UUID, then the pose, the velocities
+			// and the sleeping flag the body reports.
+			const auto appendBody = [&physics](std::vector<std::byte>& bytes, const Entity entity)
+			{
+				const std::optional<PhysicsBodyReport> report = physics.GetBodyInfo(entity.GetUUID());
+				REQUIRE(report.has_value());
+				const uint64_t owner = entity.GetUUID().GetValue();
+				for (uint32_t shift = 0; shift < 64; shift += 8)
+					bytes.push_back(static_cast<std::byte>((owner >> shift) & 0xffu));
+				const std::array<float, 13> values = { report->Pose.Position.x, report->Pose.Position.y, report->Pose.Position.z, report->Pose.Rotation.x,
+					report->Pose.Rotation.y, report->Pose.Rotation.z, report->Pose.Rotation.w, report->LinearVelocity.x, report->LinearVelocity.y,
+					report->LinearVelocity.z, report->AngularVelocity.x, report->AngularVelocity.y, report->AngularVelocity.z };
+				for (const float value : values)
+				{
+					const auto bits = std::bit_cast<uint32_t>(value);
+					for (uint32_t shift = 0; shift < 32; shift += 8)
+						bytes.push_back(static_cast<std::byte>((bits >> shift) & 0xffu));
+				}
+				bytes.push_back(static_cast<std::byte>(report->IsSleeping ? 1 : 0));
+			};
+			std::vector<std::byte> canonical;
+			appendBody(canonical, first);
+			appendBody(canonical, child);
+			appendBody(canonical, second);
+			std::vector<std::byte> byUuid;
+			appendBody(byUuid, second);
+			appendBody(byUuid, child);
+			appendBody(byUuid, first);
+			XXH64Hasher block(0);
+			physics.AppendStateHash(block);
+			XXH64Hasher expected(0);
+			expected.Update(canonical);
+			XXH64Hasher reversed(0);
+			reversed.Update(byUuid);
+			CHECK(block.Digest() == expected.Digest());
+			CHECK(block.Digest() != reversed.Digest());
 		}
 	}
 

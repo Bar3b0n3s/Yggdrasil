@@ -467,7 +467,7 @@ namespace Engine {
 				.Size = sizeof(DrawConstants),
 				.Fields = {
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, FirstInstance),
-					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(DrawConstants, Flags),
 					ENGINE_TEST_SHARED_FIELD(DrawConstants, Padding1),
 				},
 				.Program = "Scene",

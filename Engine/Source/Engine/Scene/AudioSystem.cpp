@@ -17,6 +17,7 @@
 #include <cmath>
 #include <format>
 #include <utility>
+#include <vector>
 
 // Scene is a simulation-path module (§4.12): nothing here uses a CRT transcendental function. Audio is not simulated
 // state, so nothing here reaches the state hash either; AudioSourceRuntime is a runtime-only component.
@@ -174,6 +175,9 @@ namespace Engine {
 		// added), and the one-shot requests admitted since the last Update (MaxAudioOneShotsPerFrame).
 		std::vector<AudioVoiceHandle> OneShots;
 		uint32_t OneShotRequests = 0;
+		// The sources of the current Start or Update, in canonical order (M43: the AudioSource view, Scene::CollectCanonical),
+		// kept to reuse its capacity.
+		std::vector<entt::entity> Sources;
 		// SetPaused (play-mode pause).
 		bool Paused = false;
 		// SetWorldPaused (M35, Docs/Decisions/0050-m35-pause-entity-state.md decision 3): the world's voices are held, every
@@ -405,18 +409,19 @@ namespace Engine {
 	AudioListenerSelection SelectAudioListener(const Scene& scene)
 	{
 		AudioListenerSelection selection;
-		for (const UUID id : scene.GetCanonicalOrder())
+		// M43: the AudioListener view in canonical order, collected at each call (a handful of entities), so the selection is
+		// never stale and costs nothing in a scene without listeners.
+		std::vector<entt::entity> listeners;
+		scene.CollectCanonical<AudioListenerComponent>(listeners);
+		for (const entt::entity handle : listeners)
 		{
-			const ConstEntity entity = scene.FindEntityByID(id);
-			if (!entity.IsValid() || !Utils::IsEffectivelyEnabled(entity))
-				continue;
-			const AudioListenerComponent* listener = entity.TryGetComponent<AudioListenerComponent>();
-			if (listener == nullptr || !listener->Primary)
+			const ConstEntity entity(handle, &scene);
+			if (!Utils::IsEffectivelyEnabled(entity) || !entity.GetComponent<AudioListenerComponent>().Primary)
 				continue;
 			if (selection.PrimaryListenerCount == 0)
 			{
 				selection.Source = AudioListenerSource::Listener;
-				selection.Entity = id;
+				selection.Entity = entity.GetUUID();
 			}
 			++selection.PrimaryListenerCount;
 		}
@@ -437,19 +442,24 @@ namespace Engine {
 		std::vector<ConstEntity> primaries;
 		ConstEntity firstSpatial;
 		uint32_t spatialCount = 0;
-		for (const UUID id : scene.GetCanonicalOrder())
+		// M43: the AudioListener and AudioSource views, each in canonical order.
+		std::vector<entt::entity> holders;
+		scene.CollectCanonical<AudioListenerComponent>(holders);
+		for (const entt::entity handle : holders)
 		{
-			const ConstEntity entity = scene.FindEntityByID(id);
-			if (!entity.IsValid() || !Utils::IsEffectivelyEnabled(entity))
-				continue;
-			if (const AudioListenerComponent* listener = entity.TryGetComponent<AudioListenerComponent>(); listener != nullptr && listener->Primary)
+			const ConstEntity entity(handle, &scene);
+			if (Utils::IsEffectivelyEnabled(entity) && entity.GetComponent<AudioListenerComponent>().Primary)
 				primaries.push_back(entity);
-			if (const AudioSourceComponent* source = entity.TryGetComponent<AudioSourceComponent>(); source != nullptr && source->Spatial)
-			{
-				if (spatialCount == 0)
-					firstSpatial = entity;
-				++spatialCount;
-			}
+		}
+		scene.CollectCanonical<AudioSourceComponent>(holders);
+		for (const entt::entity handle : holders)
+		{
+			const ConstEntity entity(handle, &scene);
+			if (!Utils::IsEffectivelyEnabled(entity) || !entity.GetComponent<AudioSourceComponent>().Spatial)
+				continue;
+			if (spatialCount == 0)
+				firstSpatial = entity;
+			++spatialCount;
 		}
 
 		for (size_t index = 1; index < primaries.size(); ++index)
@@ -578,28 +588,31 @@ namespace Engine {
 		state.Started = true;
 		state.UpdateListener(0.0);
 
-		// §5.6 "PlayOnStart audio starts", in canonical order.
-		state.TargetScene->ForEachCanonical([&state](Entity entity)
+		// §5.6 "PlayOnStart audio starts", in canonical order (M43: over the AudioSource view; starting a voice changes no
+		// entity).
+		state.TargetScene->CollectCanonical<AudioSourceComponent>(state.Sources);
+		for (const entt::entity handle : state.Sources)
 		{
-			const AudioSourceComponent* source = entity.TryGetComponent<AudioSourceComponent>();
+			const Entity entity(handle, state.TargetScene);
+			const AudioSourceComponent* source = entity.IsValid() ? entity.TryGetComponent<AudioSourceComponent>() : nullptr;
 			if (source == nullptr)
-				return;
+				continue;
 			AudioSourceRuntime& runtime = state.GetRuntime(entity);
 			runtime.Enabled = Utils::IsEffectivelyEnabled(entity);
 			if (!runtime.Enabled)
-				return;
+				continue;
 			const glm::mat4 world = Utils::GetHeardWorldMatrix(entity);
 			runtime.Position = glm::vec3(world[3]);
 			runtime.HasPosition = Utils::IsFiniteVector(runtime.Position);
 			runtime.PoseReset = Utils::HasInterpolationReset(entity);
 			if (!source->PlayOnStart)
-				return;
+				continue;
 			if (const Status started = state.StartSourceVoice(entity, *source, runtime, State::MakeSourceTransform(world, glm::vec3(0.0f))); !started)
 			{
 				ENGINE_CORE_WARN("AudioSystem: the AudioSource of '{}' cannot play: {}", state.TargetScene->GetEntityPath(entity),
 					started.error().ToString());
 			}
-		});
+		}
 	}
 
 	void AudioSystem::Update(double deltaSeconds)
@@ -609,11 +622,16 @@ namespace Engine {
 		state.UpdateListener(deltaSeconds);
 		state.PruneOneShots();
 		state.OneShotRequests = 0;
-		state.TargetScene->ForEachCanonical([&state, deltaSeconds](Entity entity)
+		// M43: the AudioSource view in canonical order, counted in the scene's EntitiesVisited; a source's update changes no
+		// entity, so the list taken first is the order the whole-scene walk visited.
+		state.TargetScene->CollectCanonical<AudioSourceComponent>(state.Sources);
+		state.TargetScene->AddEntitiesVisited(state.Sources.size());
+		for (const entt::entity handle : state.Sources)
 		{
-			if (AudioSourceComponent* source = entity.TryGetComponent<AudioSourceComponent>())
+			const Entity entity(handle, state.TargetScene);
+			if (AudioSourceComponent* source = entity.IsValid() ? entity.TryGetComponent<AudioSourceComponent>() : nullptr)
 				state.UpdateSource(entity, *source, deltaSeconds);
-		});
+		}
 	}
 
 	void AudioSystem::State::ApplyPauses()

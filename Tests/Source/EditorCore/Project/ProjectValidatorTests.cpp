@@ -46,6 +46,7 @@
 #include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
+#include "Engine/Scene/StaticScenery.h"
 #include "Engine/Scene/ProbeValidation.h"
 #include "Engine/Scene/RenderAnnotations.h"
 #include "Engine/Scene/SceneSerializer.h"
@@ -69,6 +70,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1382,10 +1384,11 @@ end
 			// RENDER_POINT_SHADOW_BUDGET and two animation codes, M24's two graph codes, M26's PROBE_NOT_BAKED and two terrain
 			// codes, M34's INPUT_INVALID_ACTION, M33's PARTICLE_FRAME_OUT_OF_RANGE and M30's two navigation codes; phase 6's
 			// arrays of their own (M36's PhysicsSurfaceDiagnosticCodes, then M37's PhysicsJointDiagnosticCodes), and phase 7's (M41's
-			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes).
+			// BoneAttachmentDiagnosticCodes, then M42's PlanarReflectionDiagnosticCodes), and phase 8's (M43's
+			// StaticSceneryDiagnosticCodes first).
 			CHECK(codes.size()
 				== 59 + PhysicsDiagnosticCodes.size() + Physics2DDiagnosticCodes.size() + PhysicsSurfaceDiagnosticCodes.size() + PhysicsJointDiagnosticCodes.size()
-					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size());
+					+ BoneAttachmentDiagnosticCodes.size() + PlanarReflectionDiagnosticCodes.size() + StaticSceneryDiagnosticCodes.size());
 			std::vector<std::string_view> sorted(codes.begin(), codes.end());
 			std::sort(sorted.begin(), sorted.end());
 			CHECK(std::adjacent_find(sorted.begin(), sorted.end()) == sorted.end());
@@ -1451,7 +1454,9 @@ end
 			CHECK(position(PhysicsSurfaceUnusedCode) + 1 == position(PhysicsJointInvalidCode));
 			CHECK(position(PhysicsJointInvalidCode) + 1 == position(AnimationAttachmentInvalidCode));
 			CHECK(position(AnimationAttachmentInvalidCode) + 1 == position(RenderReflectionInvalidCode));
-			CHECK(codes.back() == RenderReflectionInvalidCode);
+			// Phase 8's codes in train order (Docs/Decisions/0060-skerries-engine-program.md's ledger): M43's first.
+			CHECK(position(RenderReflectionInvalidCode) + 1 == position(SceneStaticMovesCode));
+			CHECK(codes.back() == SceneStaticMovesCode);
 			CHECK(position(AudioNoListenerCode) + 1 == position(AudioMultiplePrimaryListenersCode));
 			CHECK(position(AudioMultiplePrimaryListenersCode) < position(RenderLightLimitExceededCode));
 			CHECK(position(RenderLightLimitExceededCode) < position(BuildStartSceneMissingCode));
@@ -2354,6 +2359,68 @@ end
 		// drawn mesh, and one whose plane misses its glass, with the axis the glass is thinnest along and its face's Offset,
 		// which clears the finding; a mesh too thick for any plane is named so; a glass within 5 cm of its plane after the
 		// entity's scale is not reported; a hidden MeshRenderer is checked as a shown one, and a disabled mirror is not.
+		TEST_CASE("ProjectValidator: SCENE_STATIC_MOVES reports a static entity that moves every tick")
+		{
+			// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): one Warning an effectively static entity that a component
+			// moves every tick, naming the first such component; Static bodies, NotStatic parts and entities outside every static
+			// subtree are not reported.
+			Test::EditorTestFixture fixture("ValidatorStaticScenery");
+			fixture.CreateAndOpenProject();
+			fixture.CreateAndOpenScene();
+			EditorContext& editor = fixture.GetEditor();
+			const auto add = [&editor](std::string_view name, std::string_view parent, std::string_view component, std::string_view value)
+			{
+				const Entity entity = parent.empty() ? editor.GetScene().CreateEntity(name)
+													 : editor.GetScene().CreateEntity(name, editor.GetScene().FindEntityByPath(parent));
+				if (!component.empty())
+				{
+					const Json json = ParseValidatorJson(value);
+					REQUIRE(ComponentAccess::AddComponent(entity, component, &json).has_value());
+				}
+				return entity;
+			};
+			{
+				SceneEdit edit(editor, "Island");
+				add("Island", "", "Static", "{}");
+				add("Rock", "/Island", "RigidBody", R"({"Type":"Static"})");
+				add("Crate", "/Island", "RigidBody", R"({"Type":"Dynamic"})");
+				add("Lift", "/Island", "RigidBody", R"({"Type":"Kinematic"})");
+				add("Walker", "/Island", "CharacterController", "{}");
+				add("Dancer", "/Island", "Animator", R"({"RootMotion":"Apply"})");
+				add("Statue", "/Island", "Animator", R"({"RootMotion":"None"})");
+				// The opt-out: a NotStatic mill whose sail is Kinematic is not reported.
+				add("Mill", "/Island", "Static", R"({"Scope":"NotStatic"})");
+				add("Sail", "/Island/Mill", "RigidBody", R"({"Type":"Kinematic"})");
+				// Outside every static subtree.
+				add("Ball", "", "RigidBody", R"({"Type":"Dynamic"})");
+				REQUIRE(edit.Commit().has_value());
+			}
+			const Result<ValidationReport> report = ProjectValidator::Validate(editor, ValidationScope::Scene);
+			REQUIRE(report.has_value());
+			INFO(DescribeDiagnostics(*report));
+			std::map<std::string, const ProjectDiagnostic*> moving;
+			for (const ProjectDiagnostic& diagnostic : report->Diagnostics)
+			{
+				if (diagnostic.Code == SceneStaticMovesCode)
+					CHECK(moving.emplace(diagnostic.Entity, &diagnostic).second);
+			}
+			CHECK(moving.size() == 4);
+			for (const auto& [path, component, field] : { std::tuple<std::string_view, std::string_view, std::string_view>{ "/Island/Crate", "RigidBody", "Type" },
+					 { "/Island/Lift", "RigidBody", "Type" }, { "/Island/Walker", "CharacterController", "" }, { "/Island/Dancer", "Animator", "RootMotion" } })
+			{
+				CAPTURE(path);
+				const auto found = moving.find(editor.GetScene().FindEntityByPath(path).GetUUID().ToString());
+				REQUIRE(found != moving.end());
+				const ProjectDiagnostic& diagnostic = *found->second;
+				CHECK(diagnostic.Severity == DiagnosticSeverity::Warning);
+				CHECK_FALSE(diagnostic.AutoFixable);
+				CHECK(diagnostic.Component == component);
+				CHECK(diagnostic.Field == field);
+				CHECK(diagnostic.File == "Assets/Scenes/Main.scene");
+				CHECK_FALSE(diagnostic.Hint.empty());
+			}
+		}
+
 		TEST_CASE("ProjectValidator: RENDER_REFLECTION_INVALID reports a mirror without a mesh or off its glass, with the glass's axis")
 		{
 			Test::EditorTestFixture fixture("ValidatorPlanarReflections");

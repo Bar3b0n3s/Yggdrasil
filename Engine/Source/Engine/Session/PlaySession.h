@@ -337,6 +337,18 @@ namespace Engine {
 		Ref<const NativeModuleTypes> Native{};
 	};
 
+	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the work of the last tick, deterministic counters of what a
+	// tick costs (PlaySession::GetLastTickWork).
+	struct PlaySessionTickWork
+	{
+		// The world matrices TransformSystem::Update recomputed in the tick and the frame phase after it.
+		uint64_t TransformsUpdated = 0;
+		// The entities the per-entity passes of the tick and its frame phase iterated, summed (Scene::AddEntitiesVisited:
+		// physics, audio, UI layout, animation, particles, sprite animation, bone attachments, script instance
+		// synchronization; render extraction is counted by the snapshot's static and dynamic item counts instead).
+		uint64_t EntitiesVisited = 0;
+	};
+
 	// One play session. Not copyable or movable; main thread only (§4.11).
 	//
 	// Creation (Create, CreateFromScene): the scene document is loaded strictly (LoadOptions Strict: any error fails, §6) into a
@@ -522,6 +534,9 @@ namespace Engine {
 		[[nodiscard]] PlayMode GetMode() const;
 		// The tick the next FixedStep runs: the number of ticks run so far.
 		[[nodiscard]] uint64_t GetTick() const;
+		// M43: the work of the last tick that ran with its frame phase: from the start of the last FixedStep to the end of the
+		// frame phase after it (zeros before the first). Deterministic: it depends only on what the tick changed.
+		[[nodiscard]] PlaySessionTickWork GetLastTickWork() const;
 		// 1 / Project.Simulation.FixedHz.
 		[[nodiscard]] double GetFixedDelta() const;
 		// The specification's copy of the project's settings.

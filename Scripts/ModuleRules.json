@@ -377,7 +377,8 @@
 			"Headers": [
 				"Engine/Source/Engine/Renderer/RenderSnapshot.h",
 				"Engine/Source/Engine/Renderer/DebugDrawList.h",
-				"Engine/Source/Engine/Renderer/UiDrawList.h"
+				"Engine/Source/Engine/Renderer/UiDrawList.h",
+				"Engine/Source/Engine/Renderer/RenderStaticSet.h"
 			],
 			"ThirdParty": {
 				"Public": [
@@ -505,11 +506,12 @@
 		]
 	],
 	"SnapshotHeaders": {
-		"Notes": "Renderer/RenderSnapshot.h, Renderer/DebugDrawList.h and Renderer/UiDrawList.h (M22, Docs/Decisions/0033-m22-contract.md decision 7), the only Renderer headers Scene may include, include nothing beyond Core, Asset, glm and the standard library, directly or transitively; in particular no NVRHI (section 3 rule 3). Transitively, the third-party headers that Core and Asset public headers may include are accepted.",
+		"Notes": "Renderer/RenderSnapshot.h, Renderer/DebugDrawList.h and Renderer/UiDrawList.h (M22, Docs/Decisions/0033-m22-contract.md decision 7), with M43's Renderer/RenderStaticSet.h (Docs/Decisions/0061-m43-static-scenery.md decision 3), the only Renderer headers Scene may include, include nothing beyond Core, Asset, glm and the standard library, directly or transitively; in particular no NVRHI (section 3 rule 3). Transitively, the third-party headers that Core and Asset public headers may include are accepted.",
 		"Files": [
 			"Engine/Source/Engine/Renderer/RenderSnapshot.h",
 			"Engine/Source/Engine/Renderer/DebugDrawList.h",
-			"Engine/Source/Engine/Renderer/UiDrawList.h"
+			"Engine/Source/Engine/Renderer/UiDrawList.h",
+			"Engine/Source/Engine/Renderer/RenderStaticSet.h"
 		],
 		"AllowedModules": [
 			"Core",
@@ -720,7 +722,7 @@
 		]
 	},
 	"Banned": {
-		"Notes": "Path scopes of the banned-API step. SimulationPathModules may not call CRT transcendental functions (section 4.12); SimulationPathExceptions lists files of those modules that do not affect simulated state. TryCatchFiles are the boundary files of section 4.6 (Scripting needs none: lua_pcall catches Luau errors inside the VM and bindings are exception-neutral). JsonAccessFiles may call nlohmann json at()/get<>(). AbiMacroFiles may #define the ABI-relevant configuration macros the step otherwise bans: only EnTT's configuration header (section 4.5).",
+		"Notes": "Path scopes of the banned-API step. SimulationPathModules may not call CRT transcendental functions (section 4.12); SimulationPathExceptions lists files of those modules that do not affect simulated state. TryCatchFiles are the boundary files of section 4.6 (Scripting needs none: lua_pcall catches Luau errors inside the VM and bindings are exception-neutral). JsonAccessFiles may call nlohmann json at()/get<>(). AbiMacroFiles may #define the ABI-relevant configuration macros the step otherwise bans: only EnTT's configuration header (section 4.5). TransformWriteFiles may write a TransformComponent through a mutable GetComponent, TryGetComponent, get or try_get access, which the step otherwise bans (banned-transform-write) because such a write bypasses the change tracking of world transforms: the systems that write transforms directly and call Scene::MarkTransformWritten after the write (section 5.2, Docs/Decisions/0061-m43-static-scenery.md decision 3); every other writer goes through Entity::Patch or a reflected setter.",
 		"SimulationPathModules": [
 			"Core",
 			"Scene",
@@ -752,7 +754,12 @@
 			"Engine/Config/entt/ext/config.h"
 		],
 		"NewDeleteFiles": [],
-		"OutputFiles": []
+		"OutputFiles": [],
+		"TransformWriteFiles": [
+			"Engine/Source/Engine/Scene/TransformSystem.cpp",
+			"Engine/Source/Engine/Scene/PhysicsSystem.cpp",
+			"Engine/Source/Engine/Scene/Physics2DSystem.cpp"
+		]
 	},
 	"SourceIncludes": {
 		"Notes": "The vendored source files a first-party file may include, which the include step otherwise rejects (never include a .cpp file, CodeStyle section 4.4): the implementation translation units of section 2.2 that compile a vendored .cpp in the engine's own project, with its include paths and without the precompiled header (Vendor/imgui/VENDOR.md, 'GLFW platform backend').",

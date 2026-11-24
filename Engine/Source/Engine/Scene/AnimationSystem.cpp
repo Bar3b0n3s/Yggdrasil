@@ -186,8 +186,10 @@ namespace Engine {
 		std::set<UUID> EventDropsLogged{};
 		// M23's milestone review: the Animators whose pose or root motion was not finite, each logged once.
 		std::set<UUID> NonFiniteLogged{};
-		// The step's scratch, kept to reuse its capacity: the Animators in canonical order and the events collected.
+		// The step's scratch, kept to reuse its capacity: the Animators in canonical order and the events collected, and a
+		// component view in canonical order (M43: Scene::CollectCanonical).
 		std::vector<UUID> Animators{};
+		std::vector<entt::entity> Holders{};
 		std::vector<AnimationEventRecord> Events{};
 		// M41 (Docs/Decisions/0058-m41-bone-attachments.md decision 3): the attaching pass (Scene/BoneAttachments.h), with its
 		// joint cache and reported entities, and the step's scratch of its new findings.
@@ -325,13 +327,14 @@ namespace Engine {
 	{
 		if (Assets == nullptr || Diagnostics.size() >= MaxAnimationSystemDiagnostics)
 			return;
+		// M43: the SkinnedMesh view in canonical order (raising an issue changes no entity), counted in EntitiesVisited.
+		RuntimeScene->CollectCanonical<SkinnedMeshComponent>(Holders);
+		RuntimeScene->AddEntitiesVisited(Holders.size());
 		const Scene& scene = *RuntimeScene;
-		const std::span<const UUID> current = scene.GetCanonicalOrder();
-		const std::vector<UUID> order(current.begin(), current.end());
-		for (const UUID id : order)
+		for (const entt::entity handle : Holders)
 		{
-			const ConstEntity entity = scene.FindEntityByID(id);
-			if (!entity.IsValid() || !entity.HasComponent<SkinnedMeshComponent>() || entity.HasComponent<HierarchyDisabledTag>())
+			const ConstEntity entity(handle, &scene);
+			if (entity.HasComponent<HierarchyDisabledTag>())
 				continue;
 			if (std::optional<AnimationSceneIssue> issue = Detail::FindSkinnedMeshIssue(entity, *Assets))
 				RaiseIssue(std::move(*issue));
@@ -373,12 +376,11 @@ namespace Engine {
 		state.Animators.clear();
 		if (animators)
 		{
-			for (const UUID id : scene.GetCanonicalOrder())
-			{
-				const Entity entity = scene.FindEntityByID(id);
-				if (entity.IsValid() && entity.HasComponent<AnimatorComponent>())
-					state.Animators.push_back(id);
-			}
+			// M43: the Animator view in canonical order, counted in EntitiesVisited.
+			scene.CollectCanonical<AnimatorComponent>(state.Holders);
+			scene.AddEntitiesVisited(state.Holders.size());
+			for (const entt::entity handle : state.Holders)
+				state.Animators.push_back(ConstEntity(handle, &scene).GetUUID());
 			for (const UUID id : state.Animators)
 			{
 				// An Animator stepped earlier cannot destroy or disable another (events wait for the dispatch), so this only

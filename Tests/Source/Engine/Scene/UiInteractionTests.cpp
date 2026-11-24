@@ -276,7 +276,10 @@ namespace Engine {
 			// A perspective camera at (0, 0, 10) with a 90 degree field of view on a 200 x 100 image (aspect 2): the image's
 			// centre looks down -Z; its top-right corner along (2, 1, -1), normalized.
 			Entity camera = scene.CreateEntity("Camera");
-			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			});
 			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .Primary = true });
 			TransformSystem::Update(scene);
 			std::optional<UiPointerRay> ray = ComputeUiPointerRay(scene, glm::vec2(100.0f, 50.0f), glm::uvec2(200, 100));
@@ -290,7 +293,10 @@ namespace Engine {
 			CHECK(ray->Direction.z == doctest::Approx(-1.0f / 2.4494897f));
 
 			// The simulated pose, not a later one: moving the camera without a transform update leaves the ray as it was.
-			camera.GetComponent<TransformComponent>().Translation = glm::vec3(5.0f, 0.0f, 10.0f);
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(5.0f, 0.0f, 10.0f);
+			});
 			CHECK(ComputeUiPointerRay(scene, glm::vec2(100.0f, 50.0f), glm::uvec2(200, 100))->Origin == glm::vec3(0.0f, 0.0f, 10.0f));
 
 			// An orthographic camera's rays are parallel, from the near plane: OrthographicSize 5 is the half height.
@@ -315,7 +321,10 @@ namespace Engine {
 			// half height is 120 / 32 = 3.75 and its half width 6.25, and the snapped position is (0, 0, 10), since
 			// round((0.03 - 6.25) 16) / 16 + 6.25 = 0 and round((0.02 - 3.75) 16) / 16 + 3.75 = 0.
 			Entity camera = scene.CreateEntity("Camera");
-			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.03f, 0.02f, 10.0f);
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.03f, 0.02f, 10.0f);
+			});
 			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .NearClip = 1.0f, .FarClip = 50.0f, .Primary = true });
 			camera.AddComponent<PixelPerfectCameraComponent>(PixelPerfectCameraComponent{ .ReferenceWidth = 200, .ReferenceHeight = 120, .PixelsPerUnit = 16.0f });
 			TransformSystem::Update(scene);
@@ -352,7 +361,10 @@ namespace Engine {
 			far.AddComponent<UiCanvasComponent>(world);
 			Entity farButton = AddInteractionButton(scene, "Button", far, glm::vec2(0.0f), glm::vec2(100.0f));
 			Entity near = scene.CreateEntity("Near");
-			near.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 2.0f);
+			near.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 2.0f);
+			});
 			near.AddComponent<UiCanvasComponent>(world);
 			Entity nearButton = AddInteractionButton(scene, "Button", near, glm::vec2(25.0f), glm::vec2(50.0f));
 			TransformSystem::Update(scene);
@@ -436,7 +448,10 @@ namespace Engine {
 			// A perspective camera at (0, 0, 10) looking down -Z with NearClip 1 and FarClip 5, a 90 degree field of view on a
 			// 200 x 100 image; a World canvas of 100 x 100 canvas pixels at 10 pixels per unit, all one button, facing it.
 			Entity camera = scene.CreateEntity("Camera");
-			camera.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			camera.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 10.0f);
+			});
 			camera.AddComponent<CameraComponent>(CameraComponent{ .VerticalFov = 90.0f, .NearClip = 1.0f, .FarClip = 5.0f, .Primary = true });
 			Entity board = scene.CreateEntity("Board");
 			board.AddComponent<UiCanvasComponent>(
@@ -446,7 +461,10 @@ namespace Engine {
 			const glm::vec2 centre(100.0f, 50.0f);
 			const auto hitAt = [&scene, &board, image, centre](float z)
 			{
-				board.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, z);
+				board.Patch<TransformComponent>([z](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(0.0f, 0.0f, z);
+				});
 				TransformSystem::Update(scene);
 				const UiLayoutTable table = ComputeUiLayout(scene, image);
 				return HitTestUiPointer(scene, table, centre, ComputeUiPointerRay(scene, centre, image)).Hit.Target;
@@ -483,7 +501,10 @@ namespace Engine {
 
 			// MapUiPointerToCanvas applies a hand-made ray's range alike, and a farther canvas within it still takes the pointer
 			// that a nearer, clipped one leaves.
-			board.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f);
+			board.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f);
+			});
 			TransformSystem::Update(scene);
 			const UiLayoutTable table = ComputeUiLayout(scene, image);
 			const UiCanvasLayout* layout = FindUiCanvasLayout(table, board.GetUUID());
@@ -493,7 +514,10 @@ namespace Engine {
 			CHECK_FALSE(MapUiPointerToCanvas(*layout, centre, UiPointerRay{ .Origin = down.Origin, .Direction = down.Direction, .MinDistance = 10.5f }).has_value());
 			CHECK_FALSE(MapUiPointerToCanvas(*layout, centre, UiPointerRay{ .Origin = down.Origin, .Direction = down.Direction, .MaxDistance = 9.5f }).has_value());
 			Entity near = scene.CreateEntity("Near");
-			near.GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 9.5f);
+			near.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 9.5f);
+			});
 			near.AddComponent<UiCanvasComponent>(
 				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = 100, .WorldHeight = 100, .PixelsPerUnit = 10.0f });
 			static_cast<void>(AddInteractionButton(scene, "Blocked", near, glm::vec2(0.0f), glm::vec2(100.0f)));

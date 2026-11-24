@@ -5,9 +5,12 @@
 #include "Engine/Asset/DocumentData.h"
 #include "Engine/Core/FixedStepScheduler.h"
 #include "Engine/Core/Json/Json.h"
+#include "Engine/Scene/Components/BoxColliderComponent.h"
 #include "Engine/Scene/Components/CameraComponent.h"
+#include "Engine/Scene/Components/DirectionalLightComponent.h"
 #include "Engine/Scene/Components/PixelPerfectCameraComponent.h"
 #include "Engine/Scene/Components/RuntimeComponents.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/UiButtonComponent.h"
 #include "Engine/Scene/Components/UiCanvasComponent.h"
@@ -20,6 +23,7 @@
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/SceneSerializer.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Engine/Scene/UiSystem.h"
 #include "Engine/Scripting/ScriptEngine.h"
 #include "Engine/Session/ReplayRecorder.h"
@@ -181,7 +185,10 @@ namespace Engine {
 		Entity AddWorldButtonCanvas(Scene& scene, std::string_view name, glm::vec3 position, uint32_t pixels)
 		{
 			Entity canvas = scene.CreateEntity(name);
-			canvas.GetComponent<TransformComponent>().Translation = position;
+			canvas.Patch<TransformComponent>([position](TransformComponent& transform)
+			{
+				transform.Translation = position;
+			});
 			canvas.AddComponent<UiCanvasComponent>(
 				UiCanvasComponent{ .RenderMode = UiCanvasRenderMode::World, .WorldWidth = pixels, .WorldHeight = pixels, .PixelsPerUnit = 4.0f });
 			Entity button = scene.CreateEntity("Button", canvas);
@@ -249,6 +256,101 @@ namespace Engine {
 			CHECK((*firstSession)->GetLastExtraction().Quality.SsaoHalfResolution);
 			CHECK((*secondSession)->GetLastExtraction().Quality.ShadowMapSize == 4096);
 			CHECK_FALSE((*secondSession)->GetLastExtraction().Quality.SsaoHalfResolution);
+		}
+
+		TEST_CASE("PlaySession: an unchanged static scene visits no entity in a tick")
+		{
+			// M43: a static island of 40 pieces, each with a static collider, a camera and a sun: once its first tick has
+			// placed everything, a tick in which nothing moves recomputes no matrix and visits no entity.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity island = scene.CreateEntity("Island");
+			island.AddComponent<StaticComponent>();
+			for (int index = 0; index < 40; ++index)
+			{
+				Entity piece = scene.CreateEntity("Piece", island);
+				piece.Patch<TransformComponent>([index](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(2.0f * static_cast<float>(index % 8), 0.0f, 2.0f * static_cast<float>(index / 8));
+				});
+				piece.AddComponent<BoxColliderComponent>();
+			}
+			Entity camera = scene.CreateEntity("Camera");
+			camera.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			Entity sun = scene.CreateEntity("Sun");
+			sun.AddComponent<DirectionalLightComponent>();
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			CHECK(session.GetLastTickWork().TransformsUpdated == 0);
+			CHECK(session.GetLastTickWork().EntitiesVisited == 0);
+			for (int tick = 0; tick < 3; ++tick)
+				session.Tick();
+			CHECK(session.GetLastTickWork().TransformsUpdated == 0);
+			CHECK(session.GetLastTickWork().EntitiesVisited == 0);
+
+			// A write to one piece (as a script's in the frame phase): its matrix recomputed, its body placed again (its shape
+			// check and its pre-step visit); then nothing again.
+			Entity piece = session.GetScene().FindEntityByPath("/Island/Piece[5]");
+			piece.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = 3.0f;
+			});
+			session.Tick();
+			CHECK(session.GetLastTickWork().TransformsUpdated == 1);
+			CHECK(session.GetLastTickWork().EntitiesVisited == 2);
+			const std::optional<PhysicsBodyReport> body = session.GetPhysics().GetBodyInfo(piece.GetUUID());
+			REQUIRE(body.has_value());
+			CHECK(body->Pose.Position.y == doctest::Approx(3.0f));
+			session.Tick();
+			CHECK(session.GetLastTickWork().TransformsUpdated == 0);
+			CHECK(session.GetLastTickWork().EntitiesVisited == 0);
+		}
+
+		TEST_CASE("PlaySession: an entity written to the same bits in the frame phase is not tagged")
+		{
+			// M43 keeps §5.2's semantics over the changed list: a write outside the fixed steps that changes the world matrix
+			// renders without interpolation (InterpolationResetTag), and one that leaves its bits as they were does not.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity mover = scene.CreateEntity("Mover");
+			mover.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			});
+			static_cast<void>(scene.CreateEntity("Bystander"));
+			Result<Scope<PlaySession>> created = PlaySession::CreateFromScene(MakeSpecification(fixture), scene);
+			REQUIRE_MESSAGE(created.has_value(), created.error().ToString());
+			PlaySession& session = **created;
+			session.Tick();
+			session.Tick();
+			Entity runtime = session.GetScene().FindEntityByPath("/Mover");
+			const Entity bystander = session.GetScene().FindEntityByPath("/Bystander");
+
+			session.FixedStep();
+			runtime.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(1.0f, 2.0f, 3.0f);
+			});
+			session.FrameUpdate(FrameTime{ .DeltaTime = session.GetFixedDelta(), .Alpha = 0.5 });
+			CHECK_FALSE(runtime.HasComponent<InterpolationResetTag>());
+			CHECK_FALSE(bystander.HasComponent<InterpolationResetTag>());
+
+			session.FixedStep();
+			runtime.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(4.0f, 2.0f, 3.0f);
+			});
+			session.FrameUpdate(FrameTime{ .DeltaTime = session.GetFixedDelta(), .Alpha = 0.5 });
+			CHECK(runtime.HasComponent<InterpolationResetTag>());
+			CHECK_FALSE(bystander.HasComponent<InterpolationResetTag>());
+			CHECK(TransformSystem::GetRenderPosition(runtime) == glm::vec3(4.0f, 2.0f, 3.0f));
+
+			// The next step's snapshot clears the tag, and the write is the previous pose of the step after.
+			session.FixedStep();
+			CHECK_FALSE(runtime.HasComponent<InterpolationResetTag>());
+			REQUIRE(runtime.HasComponent<PreviousWorldTransformComponent>());
+			CHECK(runtime.GetComponent<PreviousWorldTransformComponent>().Matrix[3].x == 4.0f);
 		}
 
 		TEST_CASE("PlaySession: explicit capture quality does not replace game-view quality or advance simulation")

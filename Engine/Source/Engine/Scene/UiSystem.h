@@ -55,11 +55,13 @@ namespace Engine {
 		UiSystem& operator=(const UiSystem&) = delete;
 
 		// The UiLayout phase, the session's start and its scene replacements (see the file comment): ComputeUiLayout(scene,
-		// sceneSize) becomes the step's layout and the current one.
-		void LayoutStep(const Scene& scene, glm::uvec2 sceneSize);
+		// sceneSize) becomes the step's layout and the current one. M43: the entities its scan iterated are added to the
+		// scene's EntitiesVisited (ComputeUiLayoutPass), which is all it changes in `scene`.
+		void LayoutStep(Scene& scene, glm::uvec2 sceneSize);
 		// The FrameUiLayout phase: ComputeUiLayout(scene, sceneSize) becomes the frame's layout and the current one; a
-		// presentation text whose element `scene` no longer holds, or no longer holds a UiText, is dropped (M28).
-		void LayoutFrame(const Scene& scene, glm::uvec2 sceneSize);
+		// presentation text whose element `scene` no longer holds, or no longer holds a UiText, is dropped (M28). M43: counted
+		// as LayoutStep is.
+		void LayoutFrame(Scene& scene, glm::uvec2 sceneSize);
 
 		// The current layout (see the file comment); an empty table before the first layout (a session's: its Activate).
 		[[nodiscard]] const UiLayoutTable& GetLayout() const;

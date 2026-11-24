@@ -205,6 +205,17 @@
 			},
 			"additionalProperties": false
 		},
+		"Static": {
+			"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+			"type": "object",
+			"properties": {
+				"Scope": {
+					"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+					"enum": ["Subtree", "EntityOnly", "NotStatic"]
+				}
+			},
+			"additionalProperties": false
+		},
 		"MeshRenderer": {
 			"description": "Draws a mesh asset with one material per submesh.",
 			"type": "object",
@@ -4184,6 +4195,9 @@
 						},
 						"PrefabLink": {
 							"$ref": "#/$defs/PrefabLink"
+						},
+						"Static": {
+							"$ref": "#/$defs/Static"
 						},
 						"MeshRenderer": {
 							"$ref": "#/$defs/MeshRenderer"

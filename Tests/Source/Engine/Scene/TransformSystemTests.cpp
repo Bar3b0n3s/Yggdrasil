@@ -2,13 +2,18 @@
 
 #include "Engine/Scene/TransformSystem.h"
 
+#include "Engine/Core/Random.h"
+
 #include "Engine/Scene/Components/RuntimeComponents.h"
 #include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Entity.h"
+#include "Support/DeathTest.h"
 #include "Support/GlmApprox.h"
 #include "Support/SceneTestFixture.h"
 
+#include <cstring>
 #include <limits>
+#include <vector>
 
 namespace Engine {
 
@@ -55,6 +60,51 @@ namespace Engine {
 			transform.Scale = scale;
 		});
 	}
+
+	// M43: every entity's cached world matrix holds the bits of a fresh chain walk (ComputeWorldMatrix takes the full pass's
+	// products in its order). Returns the number of entities checked.
+	static size_t CheckWorldMatricesBitIdentical(Scene& scene)
+	{
+		size_t checked = 0;
+		for (const UUID id : scene.GetCanonicalOrder())
+		{
+			const Entity entity = scene.FindEntityByID(id);
+			REQUIRE(entity.HasComponent<WorldTransformComponent>());
+			const glm::mat4 expected = TransformSystem::ComputeWorldMatrix(entity);
+			const glm::mat4& cached = entity.GetComponent<WorldTransformComponent>().Matrix;
+			CAPTURE(entity.GetName());
+			CHECK(std::memcmp(&cached, &expected, sizeof(glm::mat4)) == 0);
+			++checked;
+		}
+		return checked;
+	}
+
+	// A random local transform with a non-trivial rotation and scale.
+	static void WriteRandomLocal(Random& random, Entity entity)
+	{
+		const glm::vec3 translation(static_cast<float>(random.RangeDouble(-50.0, 50.0)), static_cast<float>(random.RangeDouble(-50.0, 50.0)),
+			static_cast<float>(random.RangeDouble(-50.0, 50.0)));
+		const glm::quat rotation = glm::normalize(glm::quat(static_cast<float>(random.RangeDouble(0.1, 1.0)), static_cast<float>(random.RangeDouble(-1.0, 1.0)),
+			static_cast<float>(random.RangeDouble(-1.0, 1.0)), static_cast<float>(random.RangeDouble(-1.0, 1.0))));
+		const glm::vec3 scale(static_cast<float>(random.RangeDouble(0.5, 2.0)), static_cast<float>(random.RangeDouble(0.5, 2.0)),
+			static_cast<float>(random.RangeDouble(0.5, 2.0)));
+		SetLocal(entity, translation, rotation, scale);
+	}
+
+#if defined(ENGINE_DEBUG)
+	// M43: a Transform written past change tracking after an update fails the next update's full-recompute check.
+	ENGINE_DEATH_TEST("Scene/TransformWrittenPastChangeTracking")
+	{
+		Test::SceneTestFixture fixture;
+		Scene& scene = fixture.GetScene();
+		const Entity entity = scene.CreateEntity("Bypassed");
+		TransformSystem::Update(scene);
+		// Deliberately past the tracking: a write through the component's storage fires no on_update signal (the escape the
+		// Lint rule banned-transform-write leaves to tests).
+		scene.GetRegistry().storage<TransformComponent>().get(entity.GetHandle()).Translation.x = 1.0f;
+		TransformSystem::Update(scene);
+	}
+#endif
 
 	static bool SameRotation(const glm::quat& a, const glm::quat& b, float epsilon)
 	{
@@ -131,6 +181,142 @@ namespace Engine {
 			REQUIRE(scene.SetParent(child, Entity{}, {}, false).has_value());
 			TransformSystem::Update(scene);
 			CHECK(Test::ApproxEqual(glm::vec3(child.GetComponent<WorldTransformComponent>().Matrix[3]), glm::vec3(0.0f, 1.0f, 0.0f)));
+		}
+
+		TEST_CASE("TransformSystem: an incremental update equals the full recompute bit for bit after any sequence of edits")
+		{
+			// M43: a seeded fuzz of writes, reparents (keeping the world transform or the local one), sibling moves, spawns,
+			// destroys and disables over about 2,000 entities, in an edit scene and a runtime one (pending destruction), each
+			// batch followed by an incremental update that must equal a fresh chain walk for every entity.
+			for (const bool runtime : { false, true })
+			{
+				CAPTURE(runtime);
+				Test::SceneTestFixture fixture(7, runtime);
+				Scene& scene = fixture.GetScene();
+				Random random(0x4d43u + (runtime ? 1u : 0u));
+				std::vector<UUID> ids;
+				const auto pick = [&random, &ids, &scene]() -> Entity
+				{
+					while (!ids.empty())
+					{
+						const auto index = static_cast<size_t>(random.RangeInt(0, static_cast<int64_t>(ids.size()) - 1));
+						if (const Entity entity = scene.FindEntityByID(ids[index]); entity.IsValid())
+							return entity;
+						ids[index] = ids.back();
+						ids.pop_back();
+					}
+					return Entity{};
+				};
+				const auto spawn = [&random, &ids, &scene, &pick]()
+				{
+					const Entity parent = random.NextBool(0.8) ? pick() : Entity{};
+					const Entity entity = parent.IsValid() ? scene.CreateEntity("Node", parent) : scene.CreateEntity("Node");
+					WriteRandomLocal(random, entity);
+					ids.push_back(entity.GetUUID());
+				};
+				for (int index = 0; index < 1500; ++index)
+					spawn();
+				TransformSystem::Update(scene);
+				CHECK(CheckWorldMatricesBitIdentical(scene) == scene.GetEntityCount());
+
+				for (int batch = 0; batch < 40; ++batch)
+				{
+					CAPTURE(batch);
+					for (int operation = 0; operation < 25; ++operation)
+					{
+						const Entity entity = pick();
+						if (!entity.IsValid())
+							break;
+						switch (random.RangeInt(0, 6))
+						{
+							case 0:
+							case 1:
+								WriteRandomLocal(random, entity);
+								break;
+							case 2:
+							{
+								const Entity parent = random.NextBool(0.7) ? pick() : Entity{};
+								static_cast<void>(scene.SetParent(entity, parent, {}, random.NextBool()));
+								break;
+							}
+							case 3:
+								static_cast<void>(scene.SetParent(entity, entity.GetParent(), static_cast<uint32_t>(random.RangeInt(0, 3))));
+								break;
+							case 4:
+								spawn();
+								break;
+							case 5:
+								if (random.NextBool(0.3))
+									scene.DestroyEntity(entity);
+								break;
+							default:
+								entity.SetActive(!entity.IsActiveSelf());
+								break;
+						}
+					}
+					TransformSystem::Update(scene);
+					if (runtime && batch % 5 == 4)
+						scene.FlushPendingDestroys();
+					CHECK(CheckWorldMatricesBitIdentical(scene) == scene.GetEntityCount());
+				}
+				CHECK(scene.GetEntityCount() > 1000);
+			}
+		}
+
+		TEST_CASE("TransformSystem: an update of a scene where nothing changed recomputes no matrix")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity parent = scene.CreateEntity("Parent");
+			std::vector<Entity> children;
+			for (int index = 0; index < 3; ++index)
+				children.push_back(scene.CreateEntity("Child", parent));
+			const Entity other = scene.CreateEntity("Other");
+			CHECK(TransformSystem::Update(scene).size() == 5);
+			CHECK(scene.GetTransformsUpdated() == 5);
+
+			// Nothing written: nothing recomputed, nothing reported.
+			CHECK(TransformSystem::Update(scene).empty());
+			CHECK(scene.GetTransformsUpdated() == 5);
+
+			// A leaf: itself alone. A parent: its subtree, reported with every matrix that changed.
+			SetLocal(other, glm::vec3(1.0f, 0.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f));
+			const std::span<const entt::entity> leaf = TransformSystem::Update(scene);
+			REQUIRE(leaf.size() == 1);
+			CHECK(leaf[0] == other.GetHandle());
+			CHECK(scene.GetTransformsUpdated() == 6);
+			SetLocal(parent, glm::vec3(0.0f, 2.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f));
+			CHECK(TransformSystem::Update(scene).size() == 4);
+			CHECK(scene.GetTransformsUpdated() == 10);
+
+			// A write of the same bits recomputes the subtree but reports only the written entity, whose bits stayed.
+			SetLocal(parent, glm::vec3(0.0f, 2.0f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f));
+			const std::span<const entt::entity> same = TransformSystem::Update(scene);
+			REQUIRE(same.size() == 1);
+			CHECK(same[0] == parent.GetHandle());
+			CHECK(scene.GetTransformsUpdated() == 14);
+			CHECK(TransformSystem::Update(scene).empty());
+			CHECK(scene.GetTransformsUpdated() == 14);
+		}
+
+		TEST_CASE("TransformSystem: a Transform written past change tracking fails the Debug full-recompute check")
+		{
+#if defined(ENGINE_DEBUG)
+			ENGINE_CHECK_DEATH("Scene/TransformWrittenPastChangeTracking", "Stale world matrix of entity '/Bypassed'");
+#else
+			// Without the check (Release, Dist) the incremental update does not see the write: the matrix stays stale, which is
+			// why Debug runs check every update.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			const Entity entity = scene.CreateEntity("Bypassed");
+			TransformSystem::Update(scene);
+			scene.GetRegistry().storage<TransformComponent>().get(entity.GetHandle()).Translation.x = 1.0f;
+			CHECK(TransformSystem::Update(scene).empty());
+			CHECK(entity.GetComponent<WorldTransformComponent>().Matrix[3].x == 0.0f);
+			scene.MarkTransformWritten(entity);
+			CHECK(TransformSystem::Update(scene).size() == 1);
+			CHECK(entity.GetComponent<WorldTransformComponent>().Matrix[3].x == 1.0f);
+#endif
 		}
 
 		TEST_CASE("Transform: WorldPosition and WorldRotation setters round-trip through the parent inverse")

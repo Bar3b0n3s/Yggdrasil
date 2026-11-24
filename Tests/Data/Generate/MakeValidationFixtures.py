@@ -71,10 +71,10 @@ PLANE_MESH = "0000000000000103"
 
 # The registry's canonical component order (BuiltinComponents, then the validator test components).
 COMPONENT_ORDER = [
-    "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "MeshRenderer", "Camera",
-    "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody", "BoxCollider",
-    "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface", "AudioSource",
-    "AudioListener",
+    "ID", "Name", "Tags", "Relationship", "Transform", "Prefab", "PrefabLink", "Static", "MeshRenderer",
+    "Camera", "DirectionalLight", "PointLight", "SpotLight", "Environment", "PostProcess", "Text", "RigidBody",
+    "BoxCollider", "SphereCollider", "CapsuleCollider", "MeshCollider", "CharacterController", "ColliderSurface",
+    "AudioSource", "AudioListener",
     "Script", "SpriteRenderer", "SpriteAnimator", "PixelPerfectCamera", "Light2D", "TilemapRenderer", "RigidBody2D",
     "BoxCollider2D", "CircleCollider2D", "PolygonCollider2D", "TilemapCollider", "UiCanvas", "UiRect", "UiImage",
     "UiText", "UiLayout", "UiLayoutElement", "UiButton", "UiToggle", "UiSlider", "UiScrollView", "UiTextInput",
@@ -1061,6 +1061,11 @@ return Script.Define("Jumper", Jumper)
     item = fixture("RENDER_REFLECTION_INVALID")
     item.entities.append(entity("e000000000000042", "Mirror", {
         "Transform": transform(0, 0, -20), "MeshRenderer": {"Mesh": CUBE_MESH}, "PlanarReflection": {}}))
+
+    # M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a Dynamic body under a Static scenery root.
+    item = fixture("SCENE_STATIC_MOVES")
+    item.entities.append(entity("e000000000000043", "Scenery", {"Transform": transform(0, 0, -20), "Static": {}}))
+    item.entities.append(body("e000000000000044", "Crate", 0, "Dynamic", parent="e000000000000043"))
 
     return fixtures
 

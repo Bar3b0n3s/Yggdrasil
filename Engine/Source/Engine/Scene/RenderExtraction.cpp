@@ -608,20 +608,17 @@ namespace Engine {
 
 	ConstEntity FindPrimaryCamera(const Scene& scene)
 	{
-		ConstEntity primary;
-		for (const UUID id : scene.GetCanonicalOrder())
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the Camera view in canonical order, collected at each call
+		// (a handful of entities), so the first match is the whole-scene walk's and is never stale.
+		std::vector<entt::entity> cameras;
+		scene.CollectCanonical<CameraComponent>(cameras);
+		for (const entt::entity handle : cameras)
 		{
-			const ConstEntity entity = scene.FindEntityByID(id);
-			if (!entity.IsValid() || !Utils::IsEffectivelyEnabled(entity))
-				continue;
-			const CameraComponent* camera = entity.TryGetComponent<CameraComponent>();
-			if (camera != nullptr && camera->Primary)
-			{
-				primary = entity;
-				break;
-			}
+			const ConstEntity entity(handle, &scene);
+			if (Utils::IsEffectivelyEnabled(entity) && entity.GetComponent<CameraComponent>().Primary)
+				return entity;
 		}
-		return primary;
+		return {};
 	}
 
 	RenderOutputSettings GetCameraOutputSettings(ConstEntity camera)

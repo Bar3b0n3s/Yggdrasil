@@ -325,6 +325,10 @@ Limits accepted for v1. A limit that names a milestone is scheduled by ADR 0028 
   - A mirror at the cap of 4 switches between its planar reflection and its fallback as the ranks change (no hysteresis).
   - Geometry on a mirror's reflecting side within the clip bias (1 cm) of its plane is clipped from its reflection.
   - A mirror's blur margin follows the view's `SsrMaxRoughness`, not its glass's own roughness (W42.3's review, the lead's decision): every slot's chain reaches the level of `SsrMaxRoughness`, and its cull and rasterization rectangle widens by two texels of the chain's last level, so even a polished mirror culls and renders about 29% of its reflection's width as margin on each side (276 of 960 pixels at 1080p's default half resolution and `SsrMaxRoughness` 0.6). The measured cost stays far within the budget: Perf.py's room of three mirrors, a median of 0.188 ms at 1920 x 1080 against 2 ms. Sizing the chain and the margin from the glass's roughness is §2's row for later.
+- M43's static scenery (`Docs/Decisions/0061-m43-static-scenery.md` decisions 1 and 3; Skerries' brief S16), accepted as its waves land:
+  - A structural change under one root rebuilds that root's canonical segment (W43.1): a spawn, destruction or reparenting under a flat root of 8,000 children costs that root's segment, not the scene.
+  - A structural change (a spawn, a destruction, a reparent, an enable or disable) still makes the physics systems record every entity's parent, and a change of a physics component or of the hierarchy recomposes their bodies over the scene (W43.1): a game that spawns or destroys an entity every tick pays that per tick, as before M43; data writes no longer do.
+  - Debug builds recompute every world matrix after each incremental transform update and verify it equals the cached one (W43.1), so a Debug run pays about the cost of the full pass the change tracking removed; Release and Dist pay nothing.
 
 ## 7. Non-goals for v1
 

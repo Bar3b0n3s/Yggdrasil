@@ -6,6 +6,7 @@
 #include "Engine/Core/UUID.h"
 #include "Engine/Reflection/TypeInfo.h"
 #include "Engine/Scene/ChangeTracker.h"
+#include "Engine/Scene/Components/RuntimeComponents.h"
 
 #include <entt/entity/registry.hpp>
 
@@ -36,6 +37,17 @@ namespace Engine {
 		UUIDGenerator* IdGenerator = nullptr;
 		// A play or exported-game scene: DestroyEntity defers to FlushPendingDestroys (§5.7). Edit scenes destroy at once.
 		bool Runtime = false;
+	};
+
+	// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): an entity's place in the canonical order (§5.1): the ordinal
+	// of its root among the root entities, then its index in its root's segment (the root's subtree in depth-first pre-order,
+	// the root at 0). Keys compare as canonical positions.
+	struct CanonicalKey
+	{
+		uint32_t Root = 0;
+		uint32_t Index = 0;
+
+		[[nodiscard]] auto operator<=>(const CanonicalKey&) const = default;
 	};
 
 	// How a component changed, for the change tracker and the revision counter (Entity's component templates).
@@ -155,8 +167,21 @@ namespace Engine {
 		[[nodiscard]] std::span<const UUID> GetRootEntities() const { return m_RootEntities; }
 
 		// Every entity in canonical order (§5.1), cached and rebuilt lazily after a structural change (creation,
-		// destruction, reparenting). The span is invalidated by the next structural change.
+		// destruction, reparenting): since M43 the concatenation of the segments, one per root, each rebuilt alone when a
+		// change touches its tree. The span is invalidated by the next structural change.
 		[[nodiscard]] std::span<const UUID> GetCanonicalOrder() const;
+
+		// M43: the canonical key of a valid entity of this scene (asserted), from the segments, rebuilt lazily as the order is.
+		[[nodiscard]] CanonicalKey GetCanonicalKey(ConstEntity entity) const;
+
+		// M43: `out` set to the live entities (pending destruction excluded) that hold every component of T..., in canonical
+		// order: the EnTT view of T... sorted by canonical key, O(k log k) for k such entities, so a per-tick pass over a
+		// component visits only its holders and keeps today's order (§5.1). Defined in Entity.h.
+		template<typename... T>
+		void CollectCanonical(std::vector<entt::entity>& out) const;
+
+		// M43: sorts `entities` (live, distinct handles of this scene; asserted) into canonical order.
+		void SortCanonical(std::vector<entt::entity>& entities) const;
 
 		// Calls `func(Entity)` (the const overload: `func(ConstEntity)`) for every entity in canonical order, over a snapshot
 		// of the order taken at the call (entities created during the iteration are not visited, destroyed ones are
@@ -168,6 +193,37 @@ namespace Engine {
 
 		// Increments on every mutation made through the scene, Entity or ComponentAccess (§5.1, automation ifRevision).
 		[[nodiscard]] uint64_t GetRevision() const { return m_Revision; }
+
+		// M43: increments only with structural changes: creation, destruction, reparenting, sibling order, enabling or
+		// disabling (DisabledTag) and Clear. A data write never moves it, so a system that caches the hierarchy (the physics
+		// hierarchy record, the scripts' lifecycle order, the name and tag index) keys on it instead of GetRevision.
+		[[nodiscard]] uint64_t GetStructureRevision() const { return m_StructureRevision; }
+
+		// --- M43: change-tracked transforms (§5.2; Docs/Decisions/0061-m43-static-scenery.md decision 3) -------------------
+		// TransformComponent's on_construct and on_update (every write through Entity::Patch, the reflected setters,
+		// SetParent and EnTT's patch or replace) mark the entity written, and TransformSystem::Update recomputes the written
+		// entities' subtrees only. A system that writes a TransformComponent directly calls MarkTransformWritten after the
+		// write; only the files of ModuleRules.json's Banned.TransformWriteFiles may (Lint banned-transform-write), and Debug
+		// builds' full-recompute check (TransformSystem::Update) fails on a write it missed. Asserts a readable entity of
+		// this scene.
+		void MarkTransformWritten(Entity entity);
+
+		// A consumer's list of world-matrix changes: every TransformSystem::Update appends to every open list the entities
+		// whose world matrix it changed, and the written ones whose matrix kept its bits. Ids are reused after
+		// CloseWorldChangeList.
+		[[nodiscard]] uint32_t OpenWorldChangeList();
+		void CloseWorldChangeList(uint32_t list);
+		// Appends to `entities` what the open list `list` (asserted) collected since its last take, and empties it: in no
+		// particular order, possibly repeated, possibly destroyed since (callers check the handle). Returns false instead,
+		// appending nothing, when the list overflowed (more than four entries an entity of the scene, at least 4,096, since
+		// its last take): the consumer then treats every entity as changed, as it did before change tracking.
+		[[nodiscard]] bool TakeWorldChanges(uint32_t list, std::vector<entt::entity>& entities);
+
+		// M43's work counters, monotonic over the scene's life: the world matrices TransformSystem::Update recomputed, and the
+		// entities the per-entity passes of the play session's systems iterated (each pass adds its count).
+		[[nodiscard]] uint64_t GetTransformsUpdated() const { return m_TransformsUpdated; }
+		[[nodiscard]] uint64_t GetEntitiesVisited() const { return m_EntitiesVisited; }
+		void AddEntitiesVisited(size_t count) { m_EntitiesVisited += count; }
 
 		// XXH64 (seed 0) of the scene's minified canonical serialization (SceneSerializer, JsonStyle::Minified): equal for
 		// equal scene content in every configuration (§1.3, §9.1); play sessions add physics state (M7, M11). Implemented
@@ -207,8 +263,10 @@ namespace Engine {
 		// PrepareEntityChange runs before the entity's data changes: it increments the revision and, while tracking,
 		// records the entity's snapshot on its first touch (CaptureEntitySnapshot) and, before a hierarchy change, the
 		// child order of each parent whose child list changes (ChangeTracker::RecordChildOrder). CommitComponentChange runs
-		// after: it records the component's registry name (DisabledTag as the entity key "Active"), invalidates the
-		// canonical order when the hierarchy changed and, for DisabledTag, refreshes the subtree's HierarchyDisabledTag.
+		// after: it records the component's registry name (DisabledTag as the entity key "Active"); for a hierarchy change it
+		// invalidates the canonical order, makes every segment again and moves the structure revision (M43); for DisabledTag
+		// it refreshes the subtree's HierarchyDisabledTag and moves the structure revision; for Static (M43) it refreshes the
+		// subtree's HierarchyStaticTag.
 		void PrepareEntityChange(entt::entity entity, TypeKey component);
 		void CommitComponentChange(entt::entity entity, TypeKey component, ComponentChangeKind kind);
 
@@ -238,17 +296,80 @@ namespace Engine {
 		[[nodiscard]] std::vector<entt::entity> CollectSubtreeForDestruction(entt::entity root) const;
 		// While tracking: records the child orders, snapshots and destruction of `entities` (all still intact).
 		void RecordDestruction(std::span<const entt::entity> entities);
-		// Rebuilds m_CanonicalOrder from the root list and the child lists (iteratively; hierarchies may be deep).
+		// Rebuilds m_CanonicalOrder: the segments, each rebuilt when dirty (RefreshCanonicalSegments, iteratively, since
+		// hierarchies may be deep), concatenated in root order.
 		void RebuildCanonicalOrder() const;
 		// Makes the runtime-only HierarchyDisabledTag of `root` and its subtree match their effective active state (§5.2),
 		// given that the tag of `root`'s parent is current. Neither counted nor tracked.
 		void RefreshHierarchyDisabled(entt::entity root);
+		// M43: makes HierarchyStaticTag of `root` and its subtree match the Static rule (StaticComponent.h), from the Static
+		// components of `root`'s ancestors. Nothing to do while the scene holds neither a Static nor the tag.
+		void RefreshHierarchyStatic(entt::entity root);
+
+		// M43: the segments (one per root entity) and the canonical keys. A key lives in m_CanonicalKeys at the entity's
+		// index (entt::to_entity) with its handle, so a destroyed entity's stale entry is never read for its successor.
+		struct CanonicalSegment
+		{
+			UUID Root{};
+			std::vector<UUID> Order{}; // the root's subtree in depth-first pre-order, current when !Dirty
+			uint32_t Ordinal = 0;      // the root's index in m_RootEntities, current when !m_SegmentOrdinalsDirty
+			bool Dirty = true;
+			bool Live = false;
+		};
+		struct CanonicalKeySlot
+		{
+			entt::entity Handle{ entt::null };
+			uint32_t Segment = 0;
+			uint32_t Index = 0;
+			bool TransformWritten = false; // in m_TransformWrites since the last TransformSystem::Update
+		};
+		struct WorldChangeList
+		{
+			std::vector<entt::entity> Entities{};
+			bool Open = false;
+			bool Overflowed = false;
+		};
+		// The key slot of `entity`, (re)claimed for it when it held another entity's or none.
+		[[nodiscard]] CanonicalKeySlot& ClaimKeySlot(entt::entity entity) const;
+		// The root of the tree that holds `entity` (the entity itself for a root).
+		[[nodiscard]] entt::entity FindRootHandle(entt::entity entity) const;
+		// A new segment for the root `root`; `appended` when `root` was just appended to the root list.
+		void AllocateSegment(entt::entity root, bool appended);
+		// Frees the segment of the root `root`.
+		void ReleaseSegment(entt::entity root);
+		// Marks the segment of the tree that holds `entity` for rebuilding.
+		void MarkSegmentDirty(entt::entity entity);
+		// Every segment made again from the root list: for a hierarchy change the scene cannot attribute to one tree.
+		void ResetSegments();
+		// Rebuilds the root ordinals, the dirty segments and their keys; lazily, from const readers too (the segments and
+		// keys are caches beside the registry, as m_CanonicalOrder is).
+		void RefreshCanonicalSegments() const;
+		// on_construct and on_update of TransformComponent.
+		void OnTransformWritten(entt::registry& registry, entt::entity entity);
+		void RecordTransformWrite(entt::entity entity);
+		// TransformSystem::Update's report: `changed` appended to every open world-change list, `recomputed` counted.
+		void PublishWorldChanges(std::span<const entt::entity> changed, size_t recomputed);
 	private:
 		entt::registry m_Registry;
 		std::unordered_map<UUID, entt::entity> m_EntityIndex; // lookup only, never iterated to produce output (§5.1)
 		std::vector<UUID> m_RootEntities;
-		mutable std::vector<UUID> m_CanonicalOrder; // cache, rebuilt lazily when m_CanonicalOrderDirty
+		mutable std::vector<UUID> m_CanonicalOrder; // cache, the segments concatenated lazily when m_CanonicalOrderDirty
 		mutable bool m_CanonicalOrderDirty = true;  // cache flag, see m_CanonicalOrder
+		// M43: the segments by slot (free slots reused), the key slots by entity index (see CanonicalKeySlot), and whether a
+		// segment or the root ordinals need rebuilding.
+		mutable std::vector<CanonicalSegment> m_Segments;
+		std::vector<uint32_t> m_FreeSegments;
+		mutable std::vector<CanonicalKeySlot> m_CanonicalKeys;
+		mutable bool m_SegmentsDirty = false;
+		mutable bool m_SegmentOrdinalsDirty = false;
+		// M43: the entities written since the last TransformSystem::Update, each once (CanonicalKeySlot::TransformWritten),
+		// and the consumers' world-change lists.
+		std::vector<entt::entity> m_TransformWrites;
+		std::vector<WorldChangeList> m_WorldChangeLists;
+		std::vector<entt::entity> m_LastWorldChanges; // TransformSystem::Update's result, until the next update
+		uint64_t m_StructureRevision = 0;
+		uint64_t m_TransformsUpdated = 0;
+		uint64_t m_EntitiesVisited = 0;
 		ChangeTracker m_ChangeTracker;
 		SceneSpecification m_Specification; // its Registry and IdGenerator are back-references that outlive the scene
 		uint64_t m_Revision = 0;
@@ -262,6 +383,7 @@ namespace Engine {
 		std::thread::id m_MainThread; // the creating thread (§4.11)
 	private:
 		friend class Entity;
+		friend class TransformSystem; // M43: reads and clears m_TransformWrites and publishes the world changes
 	};
 
 }

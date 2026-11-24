@@ -287,6 +287,78 @@ return Scene.GetEntityCount() == 1
 			CHECK(result->Value.Get() == Json(true));
 			CHECK(fixture.GetScene().GetEntityCount() == 1);
 		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the finds read an index that a structural change, a Name
+		// write or a Tags write refreshes, and FindAllWithComponent and GetPrimaryCamera read the component's view, so each
+		// still returns what a walk of the scene in canonical order finds: renamed and retagged entities at once, disabled
+		// entities included, destroyed ones not, and the order a reparent or a sibling move makes.
+		TEST_CASE("SceneBindings: the finds follow renames, tag writes, reparenting and sibling moves in canonical order")
+		{
+			Test::ScriptTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity first = scene.CreateEntity("First");
+			Entity second = scene.CreateEntity("Second");
+			Entity third = scene.CreateEntity("Third");
+			first.AddTag("Group");
+			third.AddTag("Group");
+			// Components added against the canonical order, so a view's storage order is not the answer.
+			third.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			first.AddComponent<CameraComponent>(CameraComponent{ .Primary = false });
+			second.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			REQUIRE(fixture.Start().has_value());
+			const auto firstPass = fixture.Evaluate(R"(
+local first, second, third = Scene.FindByName("First"), Scene.FindByName("Second"), Scene.FindByName("Third")
+assert(first ~= nil and second ~= nil and third ~= nil)
+assert(Scene.FindByName("Target") == nil and Scene.FindByTag("Group") == first)
+local cameras = Scene.FindAllWithComponent("Camera")
+assert(#cameras == 3 and cameras[1] == first and cameras[2] == second and cameras[3] == third)
+assert(Scene.GetPrimaryCamera() == second)
+-- A rename and tag writes move no structure; the next find sees them.
+third.Name = "Target"
+assert(Scene.FindByName("Target") == third and Scene.FindByName("Third") == nil)
+second.Name = "Target"
+local named = Scene.FindAllByName("Target")
+assert(#named == 2 and named[1] == second and named[2] == third)
+first:RemoveTag("Group")
+second:AddTag("Group")
+local tagged = Scene.FindAllByTag("Group")
+assert(#tagged == 2 and tagged[1] == second and tagged[2] == third)
+-- Below First, Third comes before Second in canonical order.
+third:SetParent(first)
+named = Scene.FindAllByName("Target")
+assert(#named == 2 and named[1] == third and named[2] == second)
+assert(Scene.FindByTag("Group") == third)
+cameras = Scene.FindAllWithComponent("Camera")
+assert(#cameras == 3 and cameras[1] == first and cameras[2] == third and cameras[3] == second)
+assert(Scene.GetPrimaryCamera() == third)
+-- A disabled entity is still found by name and tag, but is no primary camera.
+first:SetActive(false)
+assert(Scene.FindByName("Target") == third and Scene.FindByTag("Group") == third)
+assert(Scene.GetPrimaryCamera() == second)
+first:SetActive(true)
+return true
+)");
+			REQUIRE_MESSAGE(firstPass.has_value(), (firstPass ? "" : firstPass.error().ToString()));
+			CHECK(firstPass->Value.Get() == Json(true));
+
+			// Host writes reach the next find too: a rename, a tag, a sibling move to the front of the roots and a destruction.
+			second.SetName("Moved");
+			second.AddTag("Late");
+			REQUIRE(scene.SetParent(second, Entity{}, 0u).has_value());
+			scene.DestroyEntity(third);
+			const auto secondPass = fixture.Evaluate(R"(
+local moved = Scene.FindByName("Moved")
+assert(moved ~= nil and Scene.FindByName("Target") == nil and Scene.FindByTag("Late") == moved)
+assert(#Scene.FindAllByTag("Group") == 1 and Scene.FindByTag("Group") == moved)
+local cameras = Scene.FindAllWithComponent("Camera")
+assert(#cameras == 2 and cameras[1] == moved and cameras[2] == Scene.FindByName("First"))
+assert(Scene.GetPrimaryCamera() == moved)
+return true
+)");
+			REQUIRE_MESSAGE(secondPass.has_value(), (secondPass ? "" : secondPass.error().ToString()));
+			CHECK(secondPass->Value.Get() == Json(true));
+			CHECK(fixture.Errors.empty());
+		}
 	}
 
 }

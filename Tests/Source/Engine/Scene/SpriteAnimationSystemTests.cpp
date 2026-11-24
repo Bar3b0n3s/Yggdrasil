@@ -222,6 +222,44 @@ namespace Engine {
 			CHECK(limit.GetMatchCount() == 1);
 		}
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the phase reads the SpriteAnimator and SpriteRenderer view
+		// sorted by canonical key, so it reports in canonical order whatever order the components were added in, and a step
+		// visits the entities holding both only.
+		TEST_CASE("SpriteAnimation: the phase visits only the entities with an animator and a renderer, in canonical order")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			Test::InMemoryAssetManager assets;
+			const AssetHandle sheetHandle(0x5a1d0c77e3b14f2a);
+			assets.Publish(sheetHandle, MakeAnimatedSheet(), "Assets/Sheets/Hero.spritesheet");
+			const TypedAssetHandle<AssetType::SpriteSheet> sheet(sheetHandle);
+			const Entity first = scene.CreateEntity("First");
+			const Entity second = scene.CreateEntity("Second");
+			const Entity still = scene.CreateEntity("Still");
+			for (int index = 0; index < 8; ++index)
+				static_cast<void>(scene.CreateEntity("Prop"));
+			// Second's components first, so the view's storage order is not the canonical order.
+			second.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = sheet });
+			second.AddComponent<SpriteAnimatorComponent>(SpriteAnimatorComponent{ .Clip = "Fly" });
+			first.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = sheet });
+			first.AddComponent<SpriteAnimatorComponent>(SpriteAnimatorComponent{ .Clip = "Swim" });
+			still.AddComponent<SpriteRendererComponent>(SpriteRendererComponent{ .Sheet = sheet });
+
+			Result<Scope<SpriteAnimationSystem>> system = SpriteAnimationSystem::Create({ .RuntimeScene = &scene, .Assets = &assets });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			const uint64_t visited = scene.GetEntitiesVisited();
+			{
+				Test::ExpectLog warned(LogLevel::Warn, std::string(SpriteUnknownClipCode));
+				(*system)->Step(SimStep::FromTick(0, 1.0 / 60.0));
+				CHECK(warned.GetMatchCount() == 2);
+			}
+			CHECK(scene.GetEntitiesVisited() - visited == 2);
+			const std::span<const SpriteSceneIssue> issues = (*system)->GetDiagnostics();
+			REQUIRE(issues.size() == 2);
+			CHECK(issues[0].Entity == first.GetUUID());
+			CHECK(issues[1].Entity == second.GetUUID());
+		}
+
 		// Decision 10: the session creates the system with its asset manager and enters the SpriteAnimation phase every tick,
 		// in Play and Simulate alike; a Scene.Load replaces the system with one over the loaded scene.
 		TEST_CASE("SpriteAnimation: a play session advances its animators in Play and Simulate and in the scene a Scene.Load starts")

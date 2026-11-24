@@ -36,14 +36,23 @@ namespace Engine {
 			ordered.push_back(entities.front());
 		else
 		{
-			// Visit the requested entities in canonical order without copying the whole scene's order per creation.
+			// Visit the requested entities in canonical order without walking the scene's order per creation (M43): their live
+			// entities with a Script, once each, sorted by canonical key, which is the canonical order restricted to them (the
+			// others make no instance below).
 			std::vector<UUID> selected(entities.begin(), entities.end());
 			std::sort(selected.begin(), selected.end());
-			for (const UUID id : scene.GetCanonicalOrder())
+			selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
+			std::vector<entt::entity> handles;
+			handles.reserve(selected.size());
+			for (const UUID id : selected)
 			{
-				if (std::binary_search(selected.begin(), selected.end(), id))
-					ordered.push_back(id);
+				if (const Entity entity = scene.FindEntityByID(id); entity && entity.HasComponent<ScriptComponent>())
+					handles.push_back(entity.GetHandle());
 			}
+			scene.SortCanonical(handles);
+			ordered.reserve(handles.size());
+			for (const entt::entity handle : handles)
+				ordered.push_back(Entity(handle, &scene).GetUUID());
 		}
 		std::vector<InstanceKey> result;
 		for (const UUID id : ordered)

@@ -48,6 +48,7 @@
 #include "Engine/Scene/Components/SpotLightComponent.h"
 #include "Engine/Scene/Components/SpriteAnimatorComponent.h"
 #include "Engine/Scene/Components/SpriteRendererComponent.h"
+#include "Engine/Scene/Components/StaticComponent.h"
 #include "Engine/Scene/Components/TagsComponent.h"
 #include "Engine/Scene/Components/TerrainColliderComponent.h"
 #include "Engine/Scene/Components/TerrainComponent.h"
@@ -78,7 +79,7 @@ namespace Engine {
 	using BuiltinComponents = TypeList<
 		// Core (Registration/CoreRegistration.cpp)
 		IDComponent, NameComponent, TagsComponent, RelationshipComponent, TransformComponent, PrefabInstanceComponent,
-		PrefabLinkComponent,
+		PrefabLinkComponent, StaticComponent,
 		// Rendering (Registration/RenderingRegistration.cpp)
 		MeshRendererComponent, CameraComponent, DirectionalLightComponent, PointLightComponent, SpotLightComponent,
 		EnvironmentComponent, PostProcessComponent, TextComponent,

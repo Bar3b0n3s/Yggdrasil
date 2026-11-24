@@ -645,6 +645,20 @@ namespace Engine {
 				"The root of the entity's innermost instance (an instance root names itself), which has the Prefab component.")
 			.Field("OuterPrefabEntityID", &PrefabLinkComponent::OuterPrefabEntityID,
 				"On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.");
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): after PrefabLink, the last of Core.
+		registry.Enum<StaticScope>("StaticScope", "The part of the hierarchy a Static component covers.")
+			.Entry(StaticScope::Subtree, "Subtree", "The entity and its descendants are static.")
+			.Entry(StaticScope::EntityOnly, "EntityOnly", "The entity alone is static; its descendants follow the Static components above it.")
+			.Entry(StaticScope::NotStatic, "NotStatic", "The entity and its descendants are not static, even below a static ancestor.");
+
+		RegisterComponent<StaticComponent>(registry, "Static",
+			"Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; "
+			"moving a static entity is correct but rebuilds its cell and renders it without interpolation.")
+			.Category("Core")
+			.Version(1)
+			.Field("Scope", &StaticComponent::Scope,
+				"What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).");
 	}
 
 }

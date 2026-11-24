@@ -413,6 +413,23 @@ namespace Engine {
 		// The scene's revision at the session's last TransformSystem::Update: a different revision means a transform may
 		// have been written since (automation at the safe point), so the world matrices are refreshed before they are read.
 		uint64_t TransformRevision = 0;
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): the runtime scene's world-change list
+		// (Scene::OpenWorldChangeList), and the entities whose world matrix changed since the last interpolation snapshot and
+		// since the references were last recorded (repeats allowed). `...All` stands for every entity: a new scene, or a list
+		// that overflowed.
+		uint32_t WorldChanges = 0;
+		std::vector<entt::entity> SnapshotChanges;
+		std::vector<entt::entity> ReferenceChanges;
+		bool SnapshotChangesAll = true;
+		bool ReferenceChangesAll = true;
+		// The structure revision when SessionDisabledAtSnapshotTag was last recorded (none for a new scene).
+		std::optional<uint64_t> DisabledSnapshotStructure{};
+		// M43: the tick counters (PlaySession::GetLastTickWork): the scene's counters at the start of the last fixed step,
+		// whether a frame phase has closed that tick's window, and the last closed window.
+		uint64_t TickWorkTransformsStart = 0;
+		uint64_t TickWorkVisitsStart = 0;
+		bool TickWorkOpen = false;
+		PlaySessionTickWork LastTickWork{};
 		// Run state.
 		bool Paused = false;
 		bool Lockstep = false;
@@ -735,6 +752,11 @@ namespace Engine {
 		[[nodiscard]] uint64_t GetWorldHeldTicks() const { return Tick - WorldTick; }
 		// TransformSystem::Update, remembering the revision it saw.
 		void UpdateTransforms();
+		// M43: the runtime scene's world-change list opened for a new scene, which every entity's first snapshot and
+		// reference then cover.
+		void TrackWorldChanges();
+		// M43: the world changes collected since the last pull, appended to SnapshotChanges and ReferenceChanges.
+		void PullWorldChanges();
 		// §5.7 step 0 (see PlaySessionPhase::InterpolationSnapshot).
 		void TakeInterpolationSnapshot();
 		// Records every entity's world matrix as the reference of TagWritesOutsideSteps.
@@ -1149,6 +1171,7 @@ namespace Engine {
 		Physics2D.reset();
 		Physics.reset();
 		RuntimeScene = std::move(PendingScene);
+		TrackWorldChanges();
 		Physics = std::move(*physics);
 		Physics2D = std::move(*physics2D);
 		SpriteAnimation = std::move(*spriteAnimation);
@@ -1217,41 +1240,141 @@ namespace Engine {
 
 	void PlaySession::State::UpdateTransforms()
 	{
-		TransformSystem::Update(*RuntimeScene);
+		static_cast<void>(TransformSystem::Update(*RuntimeScene));
 		TransformRevision = RuntimeScene->GetRevision();
+	}
+
+	void PlaySession::State::TrackWorldChanges()
+	{
+		WorldChanges = RuntimeScene->OpenWorldChangeList();
+		SnapshotChanges.clear();
+		ReferenceChanges.clear();
+		SnapshotChangesAll = true;
+		ReferenceChangesAll = true;
+		DisabledSnapshotStructure.reset();
+	}
+
+	void PlaySession::State::PullWorldChanges()
+	{
+		const size_t start = SnapshotChanges.size();
+		if (!RuntimeScene->TakeWorldChanges(WorldChanges, SnapshotChanges))
+		{
+			SnapshotChanges.clear();
+			ReferenceChanges.clear();
+			SnapshotChangesAll = true;
+			ReferenceChangesAll = true;
+			return;
+		}
+		ReferenceChanges.insert(ReferenceChanges.end(), SnapshotChanges.begin() + static_cast<std::ptrdiff_t>(start), SnapshotChanges.end());
+		// The scene's own bound (Scene::TakeWorldChanges): a paused session whose views still refresh (ExtractView) collects
+		// changes it consumes at the next step only, so a list longer than four entries an entity, at least 4,096, stands for
+		// every entity instead.
+		const size_t capacity = std::max<size_t>(4096, 4 * RuntimeScene->GetEntityCount());
+		if (SnapshotChanges.size() > capacity)
+		{
+			SnapshotChanges.clear();
+			SnapshotChangesAll = true;
+		}
+		if (ReferenceChanges.size() > capacity)
+		{
+			ReferenceChanges.clear();
+			ReferenceChangesAll = true;
+		}
 	}
 
 	void PlaySession::State::TakeInterpolationSnapshot()
 	{
 		if (RuntimeScene->GetRevision() != TransformRevision)
 			UpdateTransforms();
+		PullWorldChanges();
 		entt::registry& registry = RuntimeScene->GetRegistry();
-		for (const auto [entity, world] : registry.view<WorldTransformComponent>().each())
-			registry.emplace_or_replace<PreviousWorldTransformComponent>(entity, world.Matrix);
+		// M43: only the entities whose world matrix changed since the last snapshot; every other one's previous matrix
+		// already equals its current one.
+		if (SnapshotChangesAll)
+		{
+			for (const auto [entity, world] : registry.view<WorldTransformComponent>().each())
+				registry.emplace_or_replace<PreviousWorldTransformComponent>(entity, world.Matrix);
+			SnapshotChangesAll = false;
+		}
+		else
+		{
+			for (const entt::entity entity : SnapshotChanges)
+			{
+				if (!registry.valid(entity))
+					continue;
+				if (const WorldTransformComponent* world = registry.try_get<WorldTransformComponent>(entity))
+					registry.emplace_or_replace<PreviousWorldTransformComponent>(entity, world->Matrix);
+			}
+		}
+		SnapshotChanges.clear();
 		registry.clear<InterpolationResetTag>();
-		registry.clear<SessionDisabledAtSnapshotTag>();
-		for (const entt::entity entity : registry.view<HierarchyDisabledTag>())
-			registry.emplace<SessionDisabledAtSnapshotTag>(entity);
+		// M43: the effectively disabled entities change only with the structure (DisabledTag, reparenting, creation).
+		if (DisabledSnapshotStructure != RuntimeScene->GetStructureRevision())
+		{
+			registry.clear<SessionDisabledAtSnapshotTag>();
+			for (const entt::entity entity : registry.view<HierarchyDisabledTag>())
+				registry.emplace<SessionDisabledAtSnapshotTag>(entity);
+			DisabledSnapshotStructure = RuntimeScene->GetStructureRevision();
+		}
 	}
 
 	void PlaySession::State::RecordReferenceTransforms()
 	{
+		PullWorldChanges();
 		entt::registry& registry = RuntimeScene->GetRegistry();
-		for (const auto [entity, world] : registry.view<WorldTransformComponent>(entt::exclude<PendingDestroyTag>).each())
-			registry.emplace_or_replace<SessionReferenceTransform>(entity, world.Matrix);
+		// M43: only the entities whose world matrix changed since the references were recorded.
+		if (ReferenceChangesAll)
+		{
+			for (const auto [entity, world] : registry.view<WorldTransformComponent>(entt::exclude<PendingDestroyTag>).each())
+				registry.emplace_or_replace<SessionReferenceTransform>(entity, world.Matrix);
+			ReferenceChangesAll = false;
+		}
+		else
+		{
+			for (const entt::entity entity : ReferenceChanges)
+			{
+				if (!registry.valid(entity) || registry.all_of<PendingDestroyTag>(entity))
+					continue;
+				if (const WorldTransformComponent* world = registry.try_get<WorldTransformComponent>(entity))
+					registry.emplace_or_replace<SessionReferenceTransform>(entity, world->Matrix);
+			}
+		}
+		ReferenceChanges.clear();
 	}
 
 	void PlaySession::State::TagWritesOutsideSteps(bool record)
 	{
+		PullWorldChanges();
 		entt::registry& registry = RuntimeScene->GetRegistry();
-		for (const auto [entity, world] : registry.view<WorldTransformComponent>(entt::exclude<PendingDestroyTag>).each())
+		const auto tag = [&registry, record](entt::entity entity, const glm::mat4& world)
 		{
 			const SessionReferenceTransform* reference = registry.try_get<SessionReferenceTransform>(entity);
-			if (reference == nullptr || reference->Matrix != world.Matrix)
+			if (reference == nullptr || reference->Matrix != world)
 				registry.emplace_or_replace<InterpolationResetTag>(entity);
 			if (record)
-				registry.emplace_or_replace<SessionReferenceTransform>(entity, world.Matrix);
+				registry.emplace_or_replace<SessionReferenceTransform>(entity, world);
+		};
+		// M43: only the entities whose world matrix changed since the references were recorded can differ from them; one
+		// written to the same bits still equals its reference and is not tagged.
+		if (ReferenceChangesAll)
+		{
+			for (const auto [entity, world] : registry.view<WorldTransformComponent>(entt::exclude<PendingDestroyTag>).each())
+				tag(entity, world.Matrix);
+			if (record)
+				ReferenceChangesAll = false;
 		}
+		else
+		{
+			for (const entt::entity entity : ReferenceChanges)
+			{
+				if (!registry.valid(entity) || registry.all_of<PendingDestroyTag>(entity))
+					continue;
+				if (const WorldTransformComponent* world = registry.try_get<WorldTransformComponent>(entity))
+					tag(entity, world->Matrix);
+			}
+		}
+		if (record)
+			ReferenceChanges.clear();
 		for (const entt::entity entity : registry.view<SessionDisabledAtSnapshotTag>(entt::exclude<HierarchyDisabledTag, PendingDestroyTag>))
 			registry.emplace_or_replace<InterpolationResetTag>(entity);
 	}
@@ -1373,6 +1496,13 @@ namespace Engine {
 		scene.SetInterpolationAlpha(1.0f);
 		LastFrameAlpha = alpha;
 		++FrameIndex;
+		// M43: the last tick's window closes with its frame phase.
+		if (TickWorkOpen)
+		{
+			LastTickWork = PlaySessionTickWork{ .TransformsUpdated = scene.GetTransformsUpdated() - std::min(TickWorkTransformsStart, scene.GetTransformsUpdated()),
+				.EntitiesVisited = scene.GetEntitiesVisited() - std::min(TickWorkVisitsStart, scene.GetEntitiesVisited()) };
+			TickWorkOpen = false;
+		}
 		ConsumeRequests();
 	}
 
@@ -1728,6 +1858,7 @@ namespace Engine {
 		// §5.6: the serializer path the exported Runtime uses, strict, into a runtime scene with the session's generator.
 		state.RuntimeScene = Scene::Create(
 			SceneSpecification{ .Name = "Play", .Seed = 0, .Registry = specification.Registry, .IdGenerator = &state.IdGenerator, .Runtime = true });
+		state.TrackWorldChanges();
 		LoadOptions options;
 		options.Mode = LoadMode::Strict;
 		options.Schemas = state.Schemas.get();
@@ -1844,6 +1975,10 @@ namespace Engine {
 		// The checkpoint of the completed-tick boundary this step starts from, before anything of the step runs
 		// (ReplayRecorder.h). A step that follows the previous one in the same frame (a grouping scripted clock) starts from
 		// no such boundary, since the previous tick's frame phase has not run, so it captures none.
+		// M43: the tick counters' window opens here and closes at the end of the frame phase after this step.
+		state.TickWorkTransformsStart = state.RuntimeScene->GetTransformsUpdated();
+		state.TickWorkVisitsStart = state.RuntimeScene->GetEntitiesVisited();
+		state.TickWorkOpen = true;
 		const bool completedBoundary = state.PreviousStepFrame != state.FrameIndex;
 		state.PreviousStepFrame = state.FrameIndex;
 		if (completedBoundary && state.Recorder != nullptr && state.Recorder->IsRecording())
@@ -1999,6 +2134,11 @@ namespace Engine {
 	uint64_t PlaySession::GetTick() const
 	{
 		return m_State->Tick;
+	}
+
+	PlaySessionTickWork PlaySession::GetLastTickWork() const
+	{
+		return m_State->LastTickWork;
 	}
 
 	double PlaySession::GetFixedDelta() const

@@ -3,8 +3,11 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 
+#include <entt/entity/entity.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+
+#include <span>
 
 namespace Engine {
 
@@ -22,8 +25,13 @@ namespace Engine {
 	};
 
 	// World transforms (Architecture §5.2). TransformComponent is local TRS; world matrices are derived:
-	//   - Update recomputes WorldTransformComponent for every entity in canonical order (parents before children): O(n), no
-	//     dirty flags, so no stale-cache bugs. Systems read WorldTransformComponent after an Update.
+	//   - Update recomputes WorldTransformComponent for the subtrees whose transforms were written since the last update
+	//     (M43's change tracking, Docs/Decisions/0061-m43-static-scenery.md decision 3: the scene marks every write, see
+	//     Scene::MarkTransformWritten), parents before children, with the same products in the same order as a full pass, so
+	//     every matrix is bit-identical to it. An update of a scene where nothing was written recomputes nothing. Debug
+	//     builds (ENGINE_DEBUG) recompute every matrix after each update and ENGINE_CORE_VERIFY that the incremental ones
+	//     equal them, naming the first stale entity, so a write that bypassed the tracking fails there instead of drawing
+	//     stale in every configuration alike. Systems read WorldTransformComponent after an Update.
 	//   - Between updates, gameplay reads (scripts, automation, the virtual fields) walk the parent chain on demand. The
 	//     getters take a readable entity (Entity::IsReadable), so a script reads the pose of an entity pending destruction
 	//     until the flush (M20, decision 4 of Docs/Decisions/0031-m20-contract.md); the setters take a valid one.
@@ -37,9 +45,12 @@ namespace Engine {
 	{
 	public:
 		// Recomputes WorldTransformComponent (adding it where missing; a runtime-only component, so the scene's revision and
-		// change tracker do not see it) for every entity of `scene`:
-		// World = ParentWorld * T(Translation) * R(Rotation) * S(Scale), with ParentWorld the identity for roots.
-		static void Update(Scene& scene);
+		// change tracker do not see it) for every entity of `scene` written since the last update and its descendants,
+		// pending destruction excluded: World = ParentWorld * T(Translation) * R(Rotation) * S(Scale), with ParentWorld the
+		// identity for roots. Returns the entities whose world matrix changed its bits (a new one included) and the written
+		// entities whose matrix kept them, valid until the scene's next update; the scene's open world-change lists receive
+		// them too (Scene::TakeWorldChanges). Callers that only need the matrices ignore the result.
+		static std::span<const entt::entity> Update(Scene& scene);
 
 		// T(Translation) * R(Rotation) * S(Scale).
 		[[nodiscard]] static glm::mat4 ComputeLocalMatrix(const TransformComponent& transform);

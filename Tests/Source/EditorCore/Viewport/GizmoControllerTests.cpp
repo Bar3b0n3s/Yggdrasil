@@ -455,7 +455,10 @@ namespace Engine {
 			CHECK(runtime.GetComponent<TransformComponent>().Translation.x == 4.0f);
 			REQUIRE(gizmo.Begin(selected, Utils::ViewportTestTranslation(4.0f), {}).has_value());
 			// Physics can write a pose without going through the authored mutation counter.
-			runtime.GetComponent<TransformComponent>().Translation.x = 9.0f;
+			session.GetScene().GetRegistry().patch<TransformComponent>(runtime.GetHandle(), [](TransformComponent& transform)
+			{
+				transform.Translation.x = 9.0f;
+			});
 			const auto conflict = gizmo.End();
 			REQUIRE_FALSE(conflict.has_value());
 			CHECK(conflict.error().GetCode() == ErrorCode::Conflict);
@@ -480,7 +483,10 @@ namespace Engine {
 			REQUIRE(gizmo.Update(Utils::ViewportTestTranslation(4.0f)).has_value());
 			REQUIRE(gizmo.GetPreviewScene() != nullptr);
 			// A parent pose written by simulation changes the child's world matrix without changing its local pose.
-			runtime.FindEntityByID(parentId).GetComponent<TransformComponent>().Translation.x = 12.0f;
+			runtime.GetRegistry().patch<TransformComponent>(runtime.FindEntityByID(parentId).GetHandle(), [](TransformComponent& transform)
+			{
+				transform.Translation.x = 12.0f;
+			});
 			CHECK(editor.GetRevision() == revision);
 			CHECK(gizmo.GetPreviewScene() == nullptr);
 			const auto conflict = gizmo.End();

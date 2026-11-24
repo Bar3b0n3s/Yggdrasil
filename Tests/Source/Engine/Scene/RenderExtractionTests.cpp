@@ -151,6 +151,29 @@ namespace Engine {
 			CHECK(snapshot->Camera.ViewportWidth == 640);
 		}
 
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): FindPrimaryCamera reads the Camera view sorted by canonical
+		// key, so the camera it picks follows a reparent and a sibling move, whatever order the components were added in.
+		TEST_CASE("RenderExtraction: the primary camera follows a reparent and a sibling move")
+		{
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity first = scene.CreateEntity("First");
+			Entity second = scene.CreateEntity("Second");
+			static_cast<void>(scene.CreateEntity("Unrelated"));
+			second.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			first.AddComponent<CameraComponent>(CameraComponent{ .Primary = true });
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(first));
+			REQUIRE(scene.SetParent(second, Entity{}, 0u).has_value());
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(second));
+			// Below a disabled entity the first camera is passed by.
+			Entity holder = scene.CreateEntity("Holder");
+			REQUIRE(scene.SetParent(holder, Entity{}, 0u).has_value());
+			REQUIRE(scene.SetParent(second, holder).has_value());
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(second));
+			holder.SetActive(false);
+			CHECK(FindPrimaryCamera(scene) == ConstEntity(first));
+		}
+
 		TEST_CASE("RenderExtraction: a game view without a primary camera has no camera and is no error")
 		{
 			Test::SceneTestFixture fixture;

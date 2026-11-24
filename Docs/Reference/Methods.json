@@ -3501,6 +3501,9 @@
 							"PrefabLink": {
 								"$ref": "#/$defs/PrefabLink"
 							},
+							"Static": {
+								"$ref": "#/$defs/Static"
+							},
 							"MeshRenderer": {
 								"$ref": "#/$defs/MeshRenderer"
 							},
@@ -3912,6 +3915,17 @@
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Static": {
+						"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+						"type": "object",
+						"properties": {
+							"Scope": {
+								"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+								"enum": ["Subtree", "EntityOnly", "NotStatic"]
 							}
 						},
 						"additionalProperties": false
@@ -8442,6 +8456,9 @@
 							"PrefabLink": {
 								"$ref": "#/$defs/PrefabLink"
 							},
+							"Static": {
+								"$ref": "#/$defs/Static"
+							},
 							"MeshRenderer": {
 								"$ref": "#/$defs/MeshRenderer"
 							},
@@ -8860,6 +8877,17 @@
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Static": {
+						"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+						"type": "object",
+						"properties": {
+							"Scope": {
+								"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+								"enum": ["Subtree", "EntityOnly", "NotStatic"]
 							}
 						},
 						"additionalProperties": false
@@ -19760,6 +19788,9 @@
 							"PrefabLink": {
 								"$ref": "#/$defs/PrefabLink"
 							},
+							"Static": {
+								"$ref": "#/$defs/Static"
+							},
 							"MeshRenderer": {
 								"$ref": "#/$defs/MeshRenderer"
 							},
@@ -20167,6 +20198,17 @@
 								"description": "On a nested instance root: its id in the prefab of the instance that encloses it; null on every other entity.",
 								"type": ["string", "null"],
 								"pattern": "^([0-9a-fA-F]{6,16}|/.+)$"
+							}
+						},
+						"additionalProperties": false
+					},
+					"Static": {
+						"description": "Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.",
+						"type": "object",
+						"properties": {
+							"Scope": {
+								"description": "What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree).",
+								"enum": ["Subtree", "EntityOnly", "NotStatic"]
 							}
 						},
 						"additionalProperties": false

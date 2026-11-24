@@ -203,6 +203,9 @@ export type Space = "Local" | "World"
 -- The sample count of screen-space ambient occlusion (GTAO).
 export type SsaoQuality = "Low" | "Medium" | "High"
 
+-- The part of the hierarchy a Static component covers.
+export type StaticScope = "Subtree" | "EntityOnly" | "NotStatic"
+
 -- What a terrain stroke does.
 export type TerrainTool = "Raise" | "Lower" | "Smooth" | "Flatten" | "Paint"
 
@@ -712,6 +715,7 @@ declare extern type Entity with
 	GetChildren: (self: Entity) -> {Entity}
 	-- Get a component proxy, or nil when absent. [All modes; Runtime|Test; pure/read]
 	function GetComponent(self, name: "Transform"): Transform?
+	function GetComponent(self, name: "Static"): Static?
 	function GetComponent(self, name: "MeshRenderer"): MeshRenderer?
 	function GetComponent(self, name: "Camera"): Camera?
 	function GetComponent(self, name: "DirectionalLight"): DirectionalLight?
@@ -843,6 +847,8 @@ declare extern type Entity with
 	SpriteAnimator: SpriteAnimator?
 	-- The entity's SpriteRenderer component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	SpriteRenderer: SpriteRenderer?
+	-- The entity's Static component, or nil when absent. [All modes; Runtime|Test; pure/read]
+	Static: Static?
 	-- The entity's Terrain component, or nil when absent. [All modes; Runtime|Test; pure/read]
 	Terrain: Terrain?
 	-- The entity's TerrainCollider component, or nil when absent. [All modes; Runtime|Test; pure/read]
@@ -1583,6 +1589,12 @@ declare extern type SpriteRenderer with
 	SortingLayer: string
 	-- The texture drawn whole, pivoted at its centre, when Sheet is null; null draws the built-in white square. [All modes; Runtime|Test; pure/read; setter mutates]
 	Texture: AssetRef?
+end
+
+-- Marks scenery that rarely moves, so the renderer keeps its meshes in the static set instead of extracting them every frame; moving a static entity is correct but rebuilds its cell and renders it without interpolation.
+declare extern type Static with
+	-- What the component covers: the entity and its descendants, the entity alone, or nothing below it (an opt-out inside a static subtree). [All modes; Runtime|Test; pure/read; setter mutates]
+	Scope: StaticScope
 end
 
 -- An opaque coroutine handle owned by one script VM.

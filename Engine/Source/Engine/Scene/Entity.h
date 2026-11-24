@@ -291,4 +291,13 @@ namespace Engine {
 		}
 	}
 
+	template<typename... T>
+	void Scene::CollectCanonical(std::vector<entt::entity>& out) const
+	{
+		out.clear();
+		for (const entt::entity entity : m_Registry.view<T...>(entt::exclude<PendingDestroyTag>))
+			out.push_back(entity);
+		SortCanonical(out);
+	}
+
 }

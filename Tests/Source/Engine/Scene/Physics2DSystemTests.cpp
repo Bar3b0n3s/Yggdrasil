@@ -1258,6 +1258,159 @@ namespace Engine {
 			crate.SetActive(false);
 			CHECK_FALSE((*system)->GetBodyInfo(crate.GetUUID()).has_value());
 		}
+
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3): a pre-step visits the owners of kinematic bodies and the
+		// owners whose transforms changed since the last one, its shape check the bodies that bake a written entity in, and the
+		// write-back the owners of dynamic bodies, whatever static scenery the scene holds; a Transform written outside the
+		// steps (a script's Entity::Patch, a teleport) still places its body, and a world-change list that overflowed visits
+		// every body owner, as every pre-step did before.
+		TEST_CASE("Physics2DSystem: a tick visits only the moving bodies and the bodies whose transforms changed")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			// Static scenery, Static RigidBody2Ds and implicit static bodies, and props without a body, away from the moving
+			// bodies.
+			std::vector<Entity> walls;
+			const auto addWall = [&scene, &walls](int index)
+			{
+				std::optional<BodyType> type;
+				if (index % 2 == 0)
+					type = BodyType::Static;
+				walls.push_back(Create2DBox(scene, "Wall", glm::vec2(3.0f * static_cast<float>(index), -10.0f), glm::vec2(0.5f), type));
+			};
+			for (int index = 0; index < 12; ++index)
+				addWall(index);
+			std::vector<Entity> props;
+			for (int index = 0; index < 8; ++index)
+				props.push_back(Create2DEntity(scene, "Prop", glm::vec2(3.0f * static_cast<float>(index), 20.0f)));
+			static_cast<void>(Create2DBox(scene, "Platform", glm::vec2(0.0f, 10.0f), glm::vec2(1.0f, 0.25f), BodyType::Kinematic));
+			// A ball that never stops, so it writes its pose back every step.
+			Entity ball = Create2DEntity(scene, "Ball", glm::vec2(-20.0f, 0.0f));
+			ball.AddComponent<RigidBody2DComponent>(
+				RigidBody2DComponent{ .LinearDamping = 0.0f, .GravityFactor = 0.0f, .AllowSleeping = false, .InitialLinearVelocity = glm::vec2(1.0f, 0.0f) });
+			ball.AddComponent<CircleCollider2DComponent>(CircleCollider2DComponent{ .Radius = 0.25f });
+			TransformSystem::Update(scene);
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene, .Gravity = glm::vec2(0.0f) });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			REQUIRE((*system)->GetStats().BodyCount == 14);
+			// The transform update, then one step: the entities the step's passes visited.
+			const auto stepVisits = [&scene, &system](uint64_t tick)
+			{
+				TransformSystem::Update(scene);
+				const uint64_t visited = scene.GetEntitiesVisited();
+				StepBoth(**system, tick);
+				return scene.GetEntitiesVisited() - visited;
+			};
+			const auto centerOf = [&system](const Entity entity)
+			{
+				const std::optional<Aabb> bounds = (*system)->GetBodyBounds(entity.GetUUID());
+				REQUIRE(bounds.has_value());
+				return glm::vec2(bounds->GetCenter());
+			};
+
+			// The first step: the platform's move and the ball's write-back. From then on the Transform the ball wrote back adds
+			// its shape check and its pre-step visit: four visits a step, none for the walls and the props.
+			CHECK(stepVisits(0) == 2);
+			uint64_t tick = 1;
+			for (; tick < 4; ++tick)
+				CHECK(stepVisits(tick) == 4);
+			// Thirty more walls: the step that creates their bodies visits them (their Transforms are new), the next ones four
+			// entities again.
+			for (int index = 12; index < 42; ++index)
+				addWall(index);
+			static_cast<void>(stepVisits(tick++));
+			REQUIRE((*system)->GetStats().BodyCount == 44);
+			CHECK(stepVisits(tick++) == 4);
+
+			// A script's write of a wall's Transform: the wall's shape check and pre-step visit, which places it.
+			walls[3].Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = -5.0f;
+			});
+			CHECK(stepVisits(tick++) == 6);
+			CHECK(centerOf(walls[3]).x == doctest::Approx(9.0f));
+			CHECK(centerOf(walls[3]).y == doctest::Approx(-5.0f));
+			CHECK(stepVisits(tick++) == 4);
+
+			// A teleport of another wall, and a write that teleports the ball: each body is where its Transform is.
+			REQUIRE((*system)->Teleport(walls[6].GetUUID(), glm::vec2(18.0f, -2.0f), std::nullopt).has_value());
+			ball.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = 4.0f;
+			});
+			CHECK(stepVisits(tick++) == 6);
+			CHECK(centerOf(walls[6]).x == doctest::Approx(18.0f));
+			CHECK(centerOf(walls[6]).y == doctest::Approx(-2.0f));
+			CHECK(centerOf(ball).y == doctest::Approx(4.0f));
+			CHECK(stepVisits(tick++) == 4);
+
+			// Transform updates without a step that change more world matrices than the list holds (eight props each, past
+			// 4,096 entries): the next pre-step checks every body's shape (44) and visits every body owner (44), the ball's
+			// write-back one more, and still places the wall written meanwhile.
+			for (int update = 0; update < 600; ++update)
+			{
+				for (const Entity prop : props)
+				{
+					prop.Patch<TransformComponent>([update](TransformComponent& transform)
+					{
+						transform.Translation.z = static_cast<float>(update);
+					});
+				}
+				TransformSystem::Update(scene);
+			}
+			walls[9].Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation.y = -3.0f;
+			});
+			CHECK(stepVisits(tick++) == 89);
+			CHECK(centerOf(walls[9]).y == doctest::Approx(-3.0f));
+			CHECK(stepVisits(tick++) == 4);
+		}
+
+		// M43: the physics2d hash block lists the bodies in canonical order of their owners (a parent before its children, then
+		// the next root), whatever the order of their UUIDs.
+		TEST_CASE("Physics2DSystem: the state hash block lists the bodies in canonical order of their owners")
+		{
+			Test::SceneTestFixture fixture(1, true);
+			Scene& scene = fixture.GetScene();
+			// Canonical order First, Child, Second; their UUIDs in the reverse order.
+			Entity first = scene.CreateEntityWithID(UUID(300), "First");
+			Entity second = scene.CreateEntityWithID(UUID(100), "Second");
+			Entity child = scene.CreateEntityWithID(UUID(200), "Child", first);
+			const auto addStaticBox = [](const Entity entity, const glm::vec2& position)
+			{
+				entity.Patch<TransformComponent>([&position](TransformComponent& transform)
+				{
+					transform.Translation = glm::vec3(position, 0.0f);
+				});
+				entity.AddComponent<RigidBody2DComponent>(RigidBody2DComponent{ .Type = BodyType::Static });
+				entity.AddComponent<BoxCollider2DComponent>(BoxCollider2DComponent{ .HalfExtents = glm::vec2(0.5f) });
+			};
+			addStaticBox(first, glm::vec2(0.0f));
+			addStaticBox(second, glm::vec2(-6.0f, 0.0f));
+			addStaticBox(child, glm::vec2(6.0f, 0.0f));
+			TransformSystem::Update(scene);
+			Result<Scope<Physics2DSystem>> system = Physics2DSystem::Create({ .RuntimeScene = &scene });
+			REQUIRE_MESSAGE(system.has_value(), system.error().ToString());
+			REQUIRE((*system)->GetStats().BodyCount == 3);
+
+			std::vector<std::byte> canonical;
+			AppendRestingHashEntry(canonical, first.GetUUID(), glm::vec2(0.0f), true);
+			AppendRestingHashEntry(canonical, child.GetUUID(), glm::vec2(6.0f, 0.0f), true);
+			AppendRestingHashEntry(canonical, second.GetUUID(), glm::vec2(-6.0f, 0.0f), true);
+			std::vector<std::byte> byUuid;
+			AppendRestingHashEntry(byUuid, second.GetUUID(), glm::vec2(-6.0f, 0.0f), true);
+			AppendRestingHashEntry(byUuid, child.GetUUID(), glm::vec2(6.0f, 0.0f), true);
+			AppendRestingHashEntry(byUuid, first.GetUUID(), glm::vec2(0.0f), true);
+			XXH64Hasher block(0);
+			(*system)->AppendStateHash(block);
+			XXH64Hasher expected(0);
+			expected.Update(canonical);
+			XXH64Hasher reversed(0);
+			reversed.Update(byUuid);
+			CHECK(block.Digest() == expected.Digest());
+			CHECK(block.Digest() != reversed.Digest());
+		}
 	}
 
 }

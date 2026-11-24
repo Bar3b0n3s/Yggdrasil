@@ -47,8 +47,10 @@
 // enum replaces FxaaEnabled (decision 12). M32 (Docs/Decisions/0047-m32-fog-ssr.md decisions 4 and 12; ADR 0042's phase-5
 // ledger) added the fog (RenderFog, Fog) after the terrains and the half-resolution SSR trace to the quality settings after
 // SsaoHalfResolution. M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3; its ledger) added the planar
-// reflections (PlanarReflectionItem, PlanarReflections) after the fog. Additions are frozen-header changes reviewed by their
-// contract owner; no member here changes meaning.
+// reflections (PlanarReflectionItem, PlanarReflections) after the fog. M43 (Docs/Decisions/0061-m43-static-scenery.md
+// decision 3; phase 8's ledger) added the static set (StaticSet, Renderer/RenderStaticSet.h) after them: the meshes of the
+// scene's static entities, which Meshes then leaves out. Additions are frozen-header changes reviewed by their contract
+// owner; no member here changes meaning.
 // A plain value type: copyable, movable, thread-compatible.
 //
 // Containers (M18, R-ARENA): the snapshot's own containers that grow with the scene (Meshes, Lights, Texts, PickTable,
@@ -59,7 +61,8 @@
 // resource. SelectedEntities (a handful of UUIDs, copied from the host's selection) and the nested containers (a mesh
 // item's Materials, JointPalette and MorphWeights, a text's Text, the annotations' label list, a terrain item's Layers)
 // keep the default allocator; M26's ParticleEmitters, Particles, IrradianceVolumes, ReflectionProbes and Terrains and M42's
-// PlanarReflections are the snapshot's own containers and follow the rule.
+// PlanarReflections are the snapshot's own containers and follow the rule. M43's StaticSet is no container of the
+// snapshot's: it is shared, immutable data (Ref<const RenderStaticSet>) that snapshots of the same scene hold together.
 //
 // The output stage (M18, decisions 5 to 8): a view renders its scene at the scene resolution of RenderOutputSettings (the
 // view's size by default, which renders exactly as before the output stage), then the output stage upscales the scene image
@@ -320,6 +323,9 @@ namespace Engine {
 		[[nodiscard]] bool IsNeutral() const { return *this == MeshMaterialParameters{}; }
 		bool operator==(const MeshMaterialParameters&) const = default;
 	};
+
+	// M43: the scene's static set (Renderer/RenderStaticSet.h), which RenderSnapshot::StaticSet holds.
+	struct RenderStaticSet;
 
 	// One MeshRenderer to draw (§8.2 "world matrix, mesh handle+version, material per submesh, flags"). The renderer resolves
 	// the asset versions, the mesh's default materials and placeholders through the AssetManager and its GpuResourceCache,
@@ -875,6 +881,10 @@ namespace Engine {
 		// the view, each rendered by the Forward stage's PlanarReflections pass for a Lit view outside the wireframe, at most
 		// MaxPlanarReflectionsPerView of them (Renderer/PlanarReflections.h).
 		std::pmr::vector<PlanarReflectionItem> PlanarReflections{};
+		// M43 (Docs/Decisions/0061-m43-static-scenery.md decision 3; phase 8's ledger: after the planar reflections): the
+		// scene's static set (Renderer/RenderStaticSet.h), shared between snapshots and immutable; null when the scene holds no
+		// Static. Its items are not in Meshes, which keeps the dynamic items.
+		Ref<const RenderStaticSet> StaticSet{};
 	};
 
 	// World ray through pixel centre (x + 0.5, y + 0.5), top-left origin, in Camera.ViewportWidth/Height: scene pixels (M18:

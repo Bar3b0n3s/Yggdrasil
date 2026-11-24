@@ -56,7 +56,10 @@ namespace Engine {
 				if (phase != PlaySessionPhase::FixedUpdate || tick != m_Tick)
 					return;
 				Entity player = session.GetScene().FindEntityByPath("/Player");
-				player.GetComponent<TransformComponent>().Translation = m_Position;
+				player.Patch<TransformComponent>([this](TransformComponent& transform)
+				{
+					transform.Translation = m_Position;
+				});
 			}
 		private:
 			uint64_t m_Tick = 0;
@@ -169,7 +172,10 @@ namespace Engine {
 			// A Transform written beyond MaxPhysicsCoordinate is no teleport: the character moves on from where it was, and its
 			// write-back replaces the value.
 			const glm::vec3 before = Test::GetWorldPosition(*session, "/Player");
-			session->GetScene().FindEntityByPath("/Player").GetComponent<TransformComponent>().Translation = glm::vec3(0.0f, 0.0f, 1.0e30f);
+			session->GetScene().FindEntityByPath("/Player").Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, 0.0f, 1.0e30f);
+			});
 			session->Tick();
 			CHECK(Test::GetWorldPosition(*session, "/Player").z == doctest::Approx(before.z - MaxCharacterSpeed / 60.0f).epsilon(0.05));
 		}
