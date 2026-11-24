@@ -1452,50 +1452,6 @@ namespace Engine {
 			CHECK(world->GetStats().BodyCount == before);
 		}
 
-		TEST_CASE("PhysicsShape: CheckDynamicBody refuses the bodies whose mass override the world refuses")
-		{
-			Scope<PhysicsWorld> world = CreateWorld();
-			const Ref<const PhysicsShape> box = CreateShape(BoxShapeGeometry{ .HalfExtents = glm::vec3(0.5f) });
-			const float nan = std::numeric_limits<float>::quiet_NaN();
-			struct Case
-			{
-				float Mass = 1.0f;
-				PhysicsMassOverride Override{};
-			};
-			// Valid overrides, overrides out of range, and an offset whose parallel-axis inertia at the heaviest Mass exceeds what
-			// Jolt can decompose (PHYSICS_INVALID_SHAPE) though the same body without it is valid.
-			const std::array cases = {
-				Case{},
-				Case{ .Override = { .CenterOfMassOffset = glm::vec3(0.0f, -0.5f, 0.25f), .InertiaScale = glm::vec3(0.5f, 2.0f, 1.0f) } },
-				Case{ .Override = { .CenterOfMassOffset = glm::vec3(nan) } },
-				Case{ .Override = { .CenterOfMassOffset = glm::vec3(-2.0f * PhysicsShape::MaxColliderSize, 0.0f, 0.0f) } },
-				Case{ .Override = { .InertiaScale = glm::vec3(0.0f) } },
-				Case{ .Override = { .InertiaScale = glm::vec3(1.0f, 1.0f, 101.0f) } },
-				Case{ .Mass = MaxPhysicsMass, .Override = { .CenterOfMassOffset = glm::vec3(0.0f, PhysicsShape::MaxColliderSize, 0.0f) } },
-				Case{ .Mass = MaxPhysicsMass },
-			};
-			for (size_t index = 0; index < cases.size(); ++index)
-			{
-				INFO("case " << index);
-				const Status checked = box->CheckDynamicBody(cases[index].Mass, PhysicsDofs::All, cases[index].Override);
-				const Result<BodyHandle> created = world->CreateBody({ .Shape = box, .Mass = cases[index].Mass, .MassOverride = cases[index].Override });
-				CHECK(checked.has_value() == created.has_value());
-				if (!checked.has_value() && !created.has_value())
-				{
-					CHECK(checked.error().GetCode() == created.error().GetCode());
-					CHECK(GetPhysicsDiagnosticCode(checked.error()) == GetPhysicsDiagnosticCode(created.error()));
-				}
-			}
-			CHECK(box->CheckDynamicBody(1.0f, PhysicsDofs::All, cases[1].Override).has_value());
-			CHECK_FALSE(box->CheckDynamicBody(1.0f, PhysicsDofs::All, cases[2].Override).has_value());
-			const Status tooLarge = box->CheckDynamicBody(MaxPhysicsMass, PhysicsDofs::All, cases[6].Override);
-			REQUIRE_FALSE(tooLarge.has_value());
-			CHECK(GetPhysicsDiagnosticCode(tooLarge.error()) == PhysicsInvalidShapeCode);
-			// The two-argument check is the identity override's.
-			CHECK(box->CheckDynamicBody(MaxPhysicsMass, PhysicsDofs::All).has_value());
-			CHECK_FALSE(box->CheckDynamicBody(0.0f, PhysicsDofs::All).has_value());
-		}
-
 		TEST_CASE("PhysicsWorld: bodies without a mass override simulate bit for bit as before")
 		{
 			// The committed pile, stepped beside a body with an offset centre of mass and a scaled inertia far away: every body

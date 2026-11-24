@@ -39,8 +39,9 @@ namespace Engine {
 
 	namespace Utils {
 
-		// How far a vehicle's differentials' engine torque shares may sum from 1.
-		constexpr float TorqueRatioTolerance = 1.0e-3f;
+		// How far the engine torque shares of a vehicle's driven differentials may sum from 1: Jolt's own assert in
+		// WheeledVehicleController::PostCollide, at every step.
+		constexpr float TorqueRatioTolerance = 1.0e-6f;
 		// The smallest length of a wheel's Forward x Up (the axle) before the two count as parallel.
 		constexpr float MinAxleLength = 1.0e-3f;
 		// The largest magnitude of a wheel curve's X: a slip ratio, or a slip angle in degrees.
@@ -173,7 +174,9 @@ namespace Engine {
 
 			if (settings.Differentials.size() > MaxPhysicsVehicleDifferentials)
 				return MakeError(ErrorCode::InvalidArgument, "a vehicle has at most {} differentials (got {})", MaxPhysicsVehicleDifferentials, settings.Differentials.size());
-			double torqueRatios = 0.0;
+			// As Jolt sums them: in float, in list order, over the driven differentials (those that name a wheel).
+			float torqueRatios = 0.0f;
+			bool driven = false;
 			for (size_t index = 0; index < settings.Differentials.size(); ++index)
 			{
 				const PhysicsVehicleDifferential& differential = settings.Differentials[index];
@@ -186,10 +189,19 @@ namespace Engine {
 				ENGINE_TRY(CheckRange(name + "'s LeftRightSplit", differential.LeftRightSplit, 0.0f, 1.0f));
 				ENGINE_TRY(CheckLimitedSlip(name + "'s LimitedSlipRatio", differential.LimitedSlipRatio));
 				ENGINE_TRY(CheckRange(name + "'s EngineTorqueRatio", differential.EngineTorqueRatio, 0.0f, 1.0f));
-				torqueRatios += differential.EngineTorqueRatio;
+				if (differential.LeftWheel != -1 || differential.RightWheel != -1)
+				{
+					torqueRatios += differential.EngineTorqueRatio;
+					driven = true;
+				}
 			}
-			if (!settings.Differentials.empty() && std::abs(torqueRatios - 1.0) > static_cast<double>(TorqueRatioTolerance))
-				return MakeError(ErrorCode::InvalidArgument, "the differentials' EngineTorqueRatio sum to {}; they must sum to 1", torqueRatios);
+			if (!driven)
+				return MakeError(ErrorCode::InvalidArgument, "a vehicle needs a differential that names a wheel (Jolt drives the wheels through one)");
+			if (!(std::abs(torqueRatios - 1.0f) < TorqueRatioTolerance))
+			{
+				return MakeError(ErrorCode::InvalidArgument, "the driven differentials' EngineTorqueRatio sum to {}; they must sum to 1 within {}", torqueRatios,
+					TorqueRatioTolerance);
+			}
 			ENGINE_TRY(CheckLimitedSlip("DifferentialLimitedSlipRatio", settings.DifferentialLimitedSlipRatio));
 
 			if (settings.AntiRollBars.size() > MaxPhysicsVehicleAntiRollBars)
@@ -202,7 +214,7 @@ namespace Engine {
 				ENGINE_TRY(CheckWheelIndex(name, bar.RightWheel, wheelCount, false));
 				if (bar.LeftWheel == bar.RightWheel)
 					return MakeError(ErrorCode::InvalidArgument, "{} names wheel {} twice", name, bar.LeftWheel);
-				ENGINE_TRY(CheckRange(name + "'s Stiffness", bar.Stiffness, 0.0f, 1000.0f * MaxPhysicsVehicleRate));
+				ENGINE_TRY(CheckRange(name + "'s Stiffness", bar.Stiffness, 0.0f, MaxPhysicsVehicleBarStiffness));
 			}
 			ENGINE_TRY(CheckRange("MaxPitchRollAngle", settings.MaxPitchRollAngle, 0.0f, JPH::JPH_PI));
 			return {};
@@ -231,9 +243,30 @@ namespace Engine {
 			engine.mAngularDamping = description.AngularDamping;
 		}
 
+		[[nodiscard]] static JPH::ETransmissionMode ToTransmissionMode(PhysicsVehicleTransmissionMode mode)
+		{
+			return mode == PhysicsVehicleTransmissionMode::Manual ? JPH::ETransmissionMode::Manual : JPH::ETransmissionMode::Auto;
+		}
+
+		// Ends a gear change in progress through Jolt's public state layout (VehicleTransmission::SaveState: the gear, the
+		// clutch friction, then the switch, clutch release and latency times left): the gear stays, the clutch is engaged and no
+		// timer runs. The timers are private; a change of the transmission's mode or times mid-change would otherwise divide the
+		// time left by a new release time of 0, make the clutch negative, or (Manual) freeze them.
+		static void EndGearChange(JPH::VehicleTransmission& transmission)
+		{
+			JPH::StateRecorderImpl recorder;
+			recorder.Write(transmission.GetCurrentGear());
+			recorder.Write(1.0f);
+			recorder.Write(0.0f);
+			recorder.Write(0.0f);
+			recorder.Write(0.0f);
+			recorder.Rewind();
+			transmission.RestoreState(recorder);
+		}
+
 		static void FillTransmission(JPH::VehicleTransmissionSettings& transmission, const PhysicsVehicleTransmission& description)
 		{
-			transmission.mMode = description.Mode == PhysicsVehicleTransmissionMode::Manual ? JPH::ETransmissionMode::Manual : JPH::ETransmissionMode::Auto;
+			transmission.mMode = ToTransmissionMode(description.Mode);
 			transmission.mGearRatios.assign(description.GearRatios.begin(), description.GearRatios.end());
 			transmission.mReverseGearRatios.assign(description.ReverseGearRatios.begin(), description.ReverseGearRatios.end());
 			transmission.mSwitchTime = description.SwitchTime;
@@ -513,8 +546,9 @@ namespace Engine {
 			return;
 		JPH::WheeledVehicleController& controller = Utils::GetController(*found->second.Constraint);
 		JPH::VehicleTransmission& transmission = controller.GetTransmission();
-		// An automatic transmission without a reverse gear never shifts into one: its Forward stays at 0 or above.
-		const bool canReverse = !transmission.mReverseGearRatios.empty() || transmission.mMode == JPH::ETransmissionMode::Manual;
+		// Reverse is a negative Forward only in Auto, and only with a reverse gear (Jolt would shift into gear -1 and read a ratio
+		// it does not have); Manual drives by Forward's magnitude in its gear's direction (Jolt's [0, 1]).
+		const bool canReverse = transmission.mMode == JPH::ETransmissionMode::Auto && !transmission.mReverseGearRatios.empty();
 		controller.SetDriverInput(std::clamp(input.Forward, canReverse ? -1.0f : 0.0f, 1.0f), std::clamp(input.Right, -1.0f, 1.0f),
 			std::clamp(input.Brake, 0.0f, 1.0f), std::clamp(input.HandBrake, 0.0f, 1.0f));
 		if (transmission.mMode == JPH::ETransmissionMode::Manual)
@@ -529,27 +563,47 @@ namespace Engine {
 			return MakeError(ErrorCode::InvalidArgument, "vehicle {} names no live vehicle of this world", vehicle.GetValue());
 		Detail::PhysicsVehicleRecord& record = found->second;
 		ENGINE_TRY(Utils::CheckSettings(settings, record.Wheels.size()));
-
+		// A bar's wheels never change in place: Jolt writes a wheel's anti-roll impulse only while a bar covers it, and the
+		// impulse stays in the wheel's suspension constraint otherwise, a force no state hash sees.
 		JPH::VehicleConstraint& constraint = *record.Constraint;
+		JPH::VehicleAntiRollBars& bars = constraint.GetAntiRollBars();
+		const bool samePairs = std::equal(bars.begin(), bars.end(), settings.AntiRollBars.begin(), settings.AntiRollBars.end(),
+			[](const JPH::VehicleAntiRollBar& current, const PhysicsVehicleAntiRollBar& wanted)
+		{
+			return current.mLeftWheel == wanted.LeftWheel && current.mRightWheel == wanted.RightWheel;
+		});
+		if (!samePairs)
+		{
+			return MakeError(ErrorCode::InvalidArgument,
+				"vehicle {}'s anti-roll bars name other wheels than its own; only their stiffness changes in place (make the vehicle again)", vehicle.GetValue());
+		}
+
 		JPH::WheeledVehicleController& controller = Utils::GetController(constraint);
 		JPH::VehicleEngine& engine = controller.GetEngine();
 		Utils::FillEngine(engine, settings.Engine);
 		engine.ClampRPM();
 		JPH::VehicleTransmission& transmission = controller.GetTransmission();
+		const bool timingChanged = Utils::ToTransmissionMode(settings.Transmission.Mode) != transmission.mMode
+			|| settings.Transmission.SwitchTime != transmission.mSwitchTime || settings.Transmission.ClutchReleaseTime != transmission.mClutchReleaseTime
+			|| settings.Transmission.SwitchLatency != transmission.mSwitchLatency;
+		if (timingChanged && !transmission.AllowSleep())
+			Utils::EndGearChange(transmission);
 		Utils::FillTransmission(transmission, settings.Transmission);
 		// The current gear stays within the new gears (Jolt indexes the ratios by it).
 		const int gear = Utils::ClampGear(transmission.GetCurrentGear(), transmission);
 		if (gear != transmission.GetCurrentGear())
 			transmission.Set(gear, transmission.GetClutchFriction());
+		// The driver's Forward Jolt keeps follows the new transmission (SetVehicleInput's rule): Auto without reverse gears never
+		// shifts into gear -1 at the next step, and Manual never drives a negative Forward.
+		if (controller.GetForwardInput() < 0.0f && (transmission.mMode == JPH::ETransmissionMode::Manual || transmission.mReverseGearRatios.empty()))
+			controller.SetForwardInput(0.0f);
 		JPH::WheeledVehicleController::Differentials& differentials = controller.GetDifferentials();
 		differentials.clear();
 		for (const PhysicsVehicleDifferential& differential : settings.Differentials)
 			differentials.push_back(Utils::MakeDifferential(differential));
 		controller.SetDifferentialLimitedSlipRatio(Utils::ToJoltLimitedSlip(settings.DifferentialLimitedSlipRatio));
-		JPH::VehicleAntiRollBars& bars = constraint.GetAntiRollBars();
-		bars.clear();
-		for (const PhysicsVehicleAntiRollBar& bar : settings.AntiRollBars)
-			bars.push_back(Utils::MakeAntiRollBar(bar));
+		for (size_t index = 0; index < bars.size(); ++index)
+			bars[index].mStiffness = settings.AntiRollBars[index].Stiffness;
 		constraint.SetMaxPitchRollAngle(settings.MaxPitchRollAngle);
 		Utils::WakeBody(*state.System, record.Body);
 		return {};
@@ -649,7 +703,7 @@ namespace Engine {
 		{
 			JPH::Wheel& wheel = *constraint.GetWheel(static_cast<JPH::uint>(index));
 			wheel.SetAngularVelocity(state.Wheels[index].AngularVelocity);
-			// Jolt keeps the angle in [0, 2 pi) by fmod; a carried angle is already there.
+			// Jolt's own angle, signed in (-2 pi, 2 pi) (fmod keeps the sign of a wheel turning backward), carried as it is.
 			wheel.SetRotationAngle(state.Wheels[index].Angle);
 		}
 	}

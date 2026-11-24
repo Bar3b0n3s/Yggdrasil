@@ -387,8 +387,9 @@ namespace Engine {
 		// not unit, or the two parallel; SuspensionMinLength above SuspensionMaxLength; MinRpm above MaxRpm; a gear ratio of
 		// the wrong sign; ShiftUpRpm not above ShiftDownRpm, or in Auto not below MaxRpm; a limited-slip ratio in (0, 1]), a
 		// curve whose X does not increase strictly or that has more than MaxPhysicsVehicleCurveKeys keys, a differential or bar
-		// naming a wheel the vehicle lacks or one wheel twice, more differentials, bars or gears than their caps, or
-		// differentials whose EngineTorqueRatio do not sum to 1 within 1e-3.
+		// naming a wheel the vehicle lacks or one wheel twice, more differentials, bars or gears than their caps, no driven
+		// differential (one that names a wheel), or driven differentials whose EngineTorqueRatio, summed in float in list order,
+		// are not within 1e-6 of 1 (Jolt's own check).
 		[[nodiscard]] Result<VehicleHandle> CreateVehicle(const PhysicsVehicleDescription& description);
 		// Destroys a vehicle (its constraint and step listener removed) and wakes its body. A handle that names no live
 		// vehicle of this world (one destroyed with its body included) is ignored.
@@ -402,10 +403,15 @@ namespace Engine {
 		// decides; Jolt only keeps a vehicle awake while its wheels spin). A dead handle or a value that is not finite is a
 		// programmer error (asserted) and ignored.
 		void SetVehicleInput(VehicleHandle vehicle, const PhysicsVehicleInput& input);
-		// Applies `settings` to a live vehicle in place (Jolt's writable engine, transmission, differentials and anti-roll
-		// bars, and SetMaxPitchRollAngle; its RPM is clamped to the new range and its gear to the new counts) and wakes its
-		// body. Errors: InvalidArgument for a dead handle or invalid settings (as CreateVehicle, against the vehicle's wheel
-		// count), with nothing changed.
+		// Applies `settings` to a live vehicle in place (Jolt's writable engine, transmission and differentials, the anti-roll
+		// bars' stiffness, and SetMaxPitchRollAngle) and wakes its body. Its RPM is clamped to the new range and its gear to the
+		// new counts; a gear change in progress ends first when the transmission's mode or times change (so a clutch release
+		// never divides by a new time of 0 and a Manual transmission never keeps an Auto shift's timers); an Auto transmission
+		// without reverse gears drops a stored negative Forward. A bar's wheels never change in place: Jolt keeps each wheel's
+		// last anti-roll impulse while no bar covers it, so a vehicle whose bars name other wheels is made again (Scene/
+		// PhysicsSystem does). Errors: InvalidArgument for a dead handle, invalid settings (as CreateVehicle, against the
+		// vehicle's wheel count) or bars whose (LeftWheel, RightWheel) pairs differ from the vehicle's, in order, with nothing
+		// changed.
 		[[nodiscard]] Status SetVehicleSettings(VehicleHandle vehicle, const PhysicsVehicleSettings& settings);
 		// Sets a live vehicle's solver priority (PhysicsVehicleDescription::Priority); a dead handle is ignored.
 		void SetVehiclePriority(VehicleHandle vehicle, uint32_t priority);
@@ -418,8 +424,9 @@ namespace Engine {
 		// Jolt's VehicleConstraint::SaveState, whose body IDs and step counter depend on the world's history.
 		void AppendVehicleState(VehicleHandle vehicle, std::vector<std::byte>& bytes) const;
 		// Restores a live vehicle's engine RPM, gear, clutch and each wheel's angular velocity and angle (wheels past the
-		// vehicle's count are ignored): what a vehicle made again on the same body carries over (Scene/PhysicsSystem). A dead
-		// handle or a value that is not finite is ignored after an assert.
+		// vehicle's count are ignored; the timers of a gear change are not carried, so it starts with none in progress): what a
+		// vehicle made again on the same body carries over (Scene/PhysicsSystem). A dead handle or a value that is not finite is
+		// ignored after an assert.
 		void RestoreVehicleMotion(VehicleHandle vehicle, const PhysicsVehicleState& state);
 		// The number of live vehicles.
 		[[nodiscard]] uint32_t GetVehicleCount() const;

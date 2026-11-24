@@ -381,7 +381,7 @@ namespace Engine {
 			const Buggy buggy{};
 			const BodyHandle body = CreateChassis(*world, buggy);
 			using Edit = void (*)(PhysicsVehicleDescription&);
-			const std::array<Edit, 33> refused = {
+			const std::array<Edit, 36> refused = {
 				[](PhysicsVehicleDescription& d)
 			{
 				d.Body = BodyHandle();
@@ -514,6 +514,24 @@ namespace Engine {
 			{
 				d.Settings.MaxPitchRollAngle = std::numeric_limits<float>::infinity();
 			},
+				// The W44.1 review's finding 1: Jolt asserts at every step that the driven differentials' shares sum to 1 within
+				// 1e-6, in float: no differential at all; one that names no wheel beside a driven one (the engine's own sum would be
+				// 1, Jolt's 0.5); and three thirds 1e-4 short of 1.
+				[](PhysicsVehicleDescription& d)
+			{
+				d.Settings.Differentials.clear();
+			},
+				[](PhysicsVehicleDescription& d)
+			{
+				d.Settings.Differentials = { PhysicsVehicleDifferential{ .LeftWheel = 2, .RightWheel = 3, .EngineTorqueRatio = 0.5f },
+					PhysicsVehicleDifferential{ .EngineTorqueRatio = 0.5f } };
+			},
+				[](PhysicsVehicleDescription& d)
+			{
+				d.Settings.Differentials = { PhysicsVehicleDifferential{ .LeftWheel = 0, .EngineTorqueRatio = 0.3333f },
+					PhysicsVehicleDifferential{ .RightWheel = 1, .EngineTorqueRatio = 0.3333f },
+					PhysicsVehicleDifferential{ .LeftWheel = 2, .RightWheel = 3, .EngineTorqueRatio = 0.3333f } };
+			},
 			};
 			for (size_t index = 0; index < refused.size(); ++index)
 			{
@@ -542,6 +560,19 @@ namespace Engine {
 				PhysicsVehicleDescription description = MakeBuggy(body, buggy);
 				refused[index](description);
 				CHECK(world->SetVehicleSettings(*vehicle, description.Settings).error().GetCode() == ErrorCode::InvalidArgument);
+			}
+			// The W44.1 review's finding 2: a bar's wheels never change in place (Jolt would keep the impulse of a wheel a bar
+			// leaves); its stiffness does.
+			{
+				PhysicsVehicleSettings moved = MakeBuggy(body, buggy).Settings;
+				moved.AntiRollBars[1].LeftWheel = 0;
+				CHECK(world->SetVehicleSettings(*vehicle, moved).error().GetCode() == ErrorCode::InvalidArgument);
+				PhysicsVehicleSettings removed = MakeBuggy(body, buggy).Settings;
+				removed.AntiRollBars.pop_back();
+				CHECK(world->SetVehicleSettings(*vehicle, removed).error().GetCode() == ErrorCode::InvalidArgument);
+				PhysicsVehicleSettings stiffer = MakeBuggy(body, buggy).Settings;
+				stiffer.AntiRollBars[0].Stiffness = 20000.0f;
+				CHECK(world->SetVehicleSettings(*vehicle, stiffer).has_value());
 			}
 			// Valid settings apply in place: fewer gears move the gear into range, and the RPM into the new engine's range.
 			world->SetVehicleInput(*vehicle, { .Forward = 1.0f });
@@ -600,6 +631,243 @@ namespace Engine {
 			const float slick = stop(true);
 			CHECK(rough > 1.0f);
 			CHECK(slick > 3.0f * rough);
+		}
+
+		TEST_CASE("PhysicsWorld: a vehicle whose differential drives one side only steps")
+		{
+			// The review's finding 1's companion: a differential with one side -1 is driven, and Jolt's sum is its share.
+			Scope<PhysicsWorld> world = CreateWorld();
+			static_cast<void>(CreateGround(*world));
+			PhysicsVehicleSettings settings;
+			settings.Differentials = { PhysicsVehicleDifferential{ .LeftWheel = 2, .RightWheel = -1 } };
+			const LiveBuggy live = CreateBuggy(*world, {}, settings);
+			world->SetVehicleInput(live.Vehicle, { .Forward = 1.0f });
+			StepWorld(*world, 60);
+			const PhysicsVehicleState state = world->GetVehicleState(live.Vehicle);
+			CHECK(GetForwardSpeed(*world, live.Body) > 1.0f);
+			CHECK(state.Wheels[2].AngularVelocity > state.Wheels[3].AngularVelocity);
+		}
+
+		TEST_CASE("PhysicsWorld: a vehicle's readings give its wheels' pose, steer, spin and slips, and its clutch and gear changes")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			static_cast<void>(CreateGround(*world));
+			const Buggy buggy{ .Cast = PhysicsVehicleCast::Ray };
+			const LiveBuggy live = CreateBuggy(*world, buggy);
+			StepWorld(*world, 120);
+			// Full right lock: Jolt's steer angle is positive to the left, so the front wheels read -MaxSteerAngle, the rear ones 0.
+			world->SetVehicleInput(live.Vehicle, { .Right = 1.0f });
+			StepWorld(*world, 1);
+			const PhysicsVehicleDescription description = MakeBuggy(live.Body, buggy);
+			PhysicsVehicleState state = world->GetVehicleState(live.Vehicle);
+			REQUIRE(state.Wheels.size() == 4);
+			for (size_t index = 0; index < 4; ++index)
+			{
+				INFO("wheel " << index);
+				const PhysicsVehicleWheelState& wheel = state.Wheels[index];
+				const float steer = index < 2 ? -buggy.MaxSteer : 0.0f;
+				CHECK(wheel.SteerAngle == doctest::Approx(steer).epsilon(1.0e-4));
+				// The pose: the attachment point minus the suspension's length along the body's Y.
+				const glm::vec3 position = glm::vec3(wheel.LocalPose[3]);
+				const glm::vec3 expected = description.Wheels[index].Position - glm::vec3(0.0f, wheel.SuspensionLength, 0.0f);
+				CHECK(position.x == doctest::Approx(expected.x).epsilon(1.0e-4));
+				CHECK(position.y == doctest::Approx(expected.y).epsilon(1.0e-4));
+				CHECK(position.z == doctest::Approx(expected.z).epsilon(1.0e-4));
+				// Its first column, the axle (the wheel's +X), turns with the steer and not with the spin.
+				const glm::vec3 axle = glm::normalize(glm::vec3(wheel.LocalPose[0]));
+				CHECK(axle.x == doctest::Approx(std::cos(steer)).epsilon(1.0e-3));
+				CHECK(axle.y == doctest::Approx(0.0f).epsilon(1.0e-3));
+				CHECK(axle.z == doctest::Approx(-std::sin(steer)).epsilon(1.0e-3));
+				CHECK(wheel.ContactSubShape == state.Wheels[0].ContactSubShape);
+			}
+
+			// Driving forward (the body woken: the world's input never wakes it): every wheel spins forward and its angle advances;
+			// the slips are finite; the Auto transmission shifts through its gears, the clutch slipping in [0, 1] while it does.
+			world->SetVehicleInput(live.Vehicle, { .Forward = 1.0f });
+			world->WakeUp(live.Body);
+			StepWorld(*world, 30);
+			const float angle = world->GetVehicleState(live.Vehicle).Wheels[2].Angle;
+			bool shifted = false;
+			bool slipped = false;
+			for (int step = 0; step < 600; ++step)
+			{
+				StepWorld(*world, 1);
+				state = world->GetVehicleState(live.Vehicle);
+				shifted = shifted || state.Shifting;
+				slipped = slipped || (state.ClutchFriction > 0.0f && state.ClutchFriction < 1.0f);
+				CHECK(state.ClutchFriction >= 0.0f);
+				CHECK(state.ClutchFriction <= 1.0f);
+			}
+			CHECK(shifted);
+			CHECK(slipped);
+			CHECK(state.Gear >= 2);
+			for (const PhysicsVehicleWheelState& wheel : state.Wheels)
+			{
+				CHECK(wheel.AngularVelocity > 0.0f);
+				CHECK(std::isfinite(wheel.LongitudinalSlip));
+				CHECK(std::isfinite(wheel.LateralSlip));
+				CHECK(wheel.Angle >= 0.0f);
+				CHECK(wheel.Angle < 2.0f * std::numbers::pi_v<float>);
+			}
+			CHECK(state.Wheels[2].Angle != angle);
+		}
+
+		TEST_CASE("PhysicsWorld: a vehicle made again takes the motion RestoreVehicleMotion carries over")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			static_cast<void>(CreateGround(*world));
+			const LiveBuggy source = CreateBuggy(*world, {});
+			world->SetVehicleInput(source.Vehicle, { .Forward = 1.0f });
+			StepWorld(*world, 90);
+			const PhysicsVehicleState carried = world->GetVehicleState(source.Vehicle);
+			REQUIRE(carried.Wheels[2].AngularVelocity > 1.0f);
+			const LiveBuggy target = CreateBuggy(*world, { .Position = glm::vec3(20.0f, 1.0f, 0.0f) });
+			world->RestoreVehicleMotion(target.Vehicle, carried);
+			const PhysicsVehicleState restored = world->GetVehicleState(target.Vehicle);
+			CHECK(std::bit_cast<uint32_t>(restored.EngineRpm) == std::bit_cast<uint32_t>(carried.EngineRpm));
+			CHECK(restored.Gear == carried.Gear);
+			CHECK(std::bit_cast<uint32_t>(restored.ClutchFriction) == std::bit_cast<uint32_t>(carried.ClutchFriction));
+			for (size_t index = 0; index < 4; ++index)
+			{
+				INFO("wheel " << index);
+				CHECK(std::bit_cast<uint32_t>(restored.Wheels[index].AngularVelocity) == std::bit_cast<uint32_t>(carried.Wheels[index].AngularVelocity));
+				CHECK(std::bit_cast<uint32_t>(restored.Wheels[index].Angle) == std::bit_cast<uint32_t>(carried.Wheels[index].Angle));
+			}
+		}
+
+		TEST_CASE("PhysicsWorld: a Manual vehicle drives in its clamped gear, and an Auto one without reverse gears never reverses")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			static_cast<void>(CreateGround(*world));
+			PhysicsVehicleSettings manual;
+			manual.Transmission.Mode = PhysicsVehicleTransmissionMode::Manual;
+			manual.Differentials = { PhysicsVehicleDifferential{ .LeftWheel = 2, .RightWheel = 3 } };
+			const LiveBuggy reversing = CreateBuggy(*world, {}, manual);
+			// Gear -1 with a full throttle drives backward; a negative Forward drives nothing in Manual (Jolt's [0, 1]).
+			world->SetVehicleInput(reversing.Vehicle, { .Forward = 1.0f, .Gear = -1 });
+			StepWorld(*world, 60);
+			CHECK(world->GetVehicleState(reversing.Vehicle).Gear == -1);
+			CHECK(GetForwardSpeed(*world, reversing.Body) < -1.0f);
+			// Turning backward, a wheel's angle reads signed: Jolt keeps it by fmod.
+			for (const PhysicsVehicleWheelState& wheel : world->GetVehicleState(reversing.Vehicle).Wheels)
+			{
+				CHECK(wheel.Angle <= 0.0f);
+				CHECK(wheel.Angle > -2.0f * std::numbers::pi_v<float>);
+			}
+			world->SetVehicleInput(reversing.Vehicle, { .Forward = 1.0f, .Gear = 9 });
+			CHECK(world->GetVehicleState(reversing.Vehicle).Gear == 5);
+
+			// In gear with the clutch engaged, an idling engine creeps forward; a negative Forward is that idle, not a throttle.
+			const LiveBuggy idle = CreateBuggy(*world, { .Position = glm::vec3(20.0f, 1.0f, 0.0f) }, manual);
+			const LiveBuggy negative = CreateBuggy(*world, { .Position = glm::vec3(40.0f, 1.0f, 0.0f) }, manual);
+			world->SetVehicleInput(idle.Vehicle, { .Gear = 1 });
+			world->SetVehicleInput(negative.Vehicle, { .Forward = -1.0f, .Gear = 1 });
+			StepWorld(*world, 60);
+			CHECK(GetForwardSpeed(*world, negative.Body) == doctest::Approx(GetForwardSpeed(*world, idle.Body)).epsilon(1.0e-3));
+
+			PhysicsVehicleSettings forwardOnly;
+			forwardOnly.Transmission.ReverseGearRatios.clear();
+			forwardOnly.Differentials = manual.Differentials;
+			const LiveBuggy forwardOnlyBuggy = CreateBuggy(*world, { .Position = glm::vec3(-20.0f, 1.0f, 0.0f) }, forwardOnly);
+			world->SetVehicleInput(forwardOnlyBuggy.Vehicle, { .Forward = -1.0f });
+			StepWorld(*world, 60);
+			CHECK(world->GetVehicleState(forwardOnlyBuggy.Vehicle).Gear >= 0);
+			CHECK(GetForwardSpeed(*world, forwardOnlyBuggy.Body) > -0.05f);
+		}
+
+		TEST_CASE("PhysicsWorld: a stored reverse input never shifts into a reverse gear the transmission no longer has")
+		{
+			// The review's finding 4: Jolt keeps the last Forward, so new settings without reverse gears (or Manual) drop a
+			// negative one; otherwise the next step shifts into gear -1 and reads a ratio that is not there.
+			Scope<PhysicsWorld> world = CreateWorld();
+			static_cast<void>(CreateGround(*world));
+			const LiveBuggy live = CreateBuggy(*world, {});
+			world->SetVehicleInput(live.Vehicle, { .Forward = -0.5f });
+			StepWorld(*world, 30);
+			REQUIRE(world->GetVehicleState(live.Vehicle).Gear == -1);
+			PhysicsVehicleSettings settings = MakeBuggy(live.Body, Buggy{}).Settings;
+			settings.Transmission.ReverseGearRatios.clear();
+			REQUIRE(world->SetVehicleSettings(live.Vehicle, settings).has_value());
+			StepWorld(*world, 30);
+			CHECK(world->GetVehicleState(live.Vehicle).Gear >= 0);
+			// Manual to Auto keeps none either: a Manual vehicle never stores a negative Forward.
+			settings.Transmission.Mode = PhysicsVehicleTransmissionMode::Manual;
+			REQUIRE(world->SetVehicleSettings(live.Vehicle, settings).has_value());
+			world->SetVehicleInput(live.Vehicle, { .Forward = -1.0f, .Gear = 1 });
+			settings.Transmission.Mode = PhysicsVehicleTransmissionMode::Auto;
+			REQUIRE(world->SetVehicleSettings(live.Vehicle, settings).has_value());
+			StepWorld(*world, 30);
+			CHECK(world->GetVehicleState(live.Vehicle).Gear >= 0);
+		}
+
+		TEST_CASE("PhysicsWorld: a transmission change during a gear change ends it, and the clutch stays finite in [0, 1]")
+		{
+			// The review's finding 3: the clutch is released over ClutchReleaseTime after an Auto shift (Jolt divides the time left
+			// by it), and Manual keeps no timers; a change of either during a gear change ends the change first.
+			const auto shiftUp = [](PhysicsWorld& world, const LiveBuggy& live, bool releasing)
+			{
+				world.SetVehicleInput(live.Vehicle, { .Forward = 1.0f });
+				for (int step = 0; step < 900; ++step)
+				{
+					StepWorld(world, 1);
+					const PhysicsVehicleState state = world.GetVehicleState(live.Vehicle);
+					if (state.Gear >= 2 && (releasing ? !state.Shifting && state.ClutchFriction < 0.5f : state.Shifting))
+						return true;
+				}
+				return false;
+			};
+			SUBCASE("a ClutchReleaseTime of 0, or shorter than the time left, while the clutch is released")
+			{
+				for (const float release : { 0.0f, 0.01f })
+				{
+					INFO("release " << release);
+					Scope<PhysicsWorld> world = CreateWorld();
+					static_cast<void>(CreateGround(*world));
+					const LiveBuggy live = CreateBuggy(*world, {});
+					REQUIRE(shiftUp(*world, live, true));
+					PhysicsVehicleSettings settings = MakeBuggy(live.Body, Buggy{}).Settings;
+					settings.Transmission.ClutchReleaseTime = release;
+					REQUIRE(world->SetVehicleSettings(live.Vehicle, settings).has_value());
+					for (int step = 0; step < 60; ++step)
+					{
+						StepWorld(*world, 1);
+						const PhysicsVehicleState state = world->GetVehicleState(live.Vehicle);
+						CHECK(std::isfinite(state.EngineRpm));
+						CHECK(state.ClutchFriction >= 0.0f);
+						CHECK(state.ClutchFriction <= 1.0f);
+						CHECK(std::isfinite(GetForwardSpeed(*world, live.Body)));
+					}
+				}
+			}
+			SUBCASE("Auto to Manual while switching")
+			{
+				Scope<PhysicsWorld> world = CreateWorld();
+				static_cast<void>(CreateGround(*world));
+				const LiveBuggy live = CreateBuggy(*world, {});
+				REQUIRE(shiftUp(*world, live, false));
+				PhysicsVehicleSettings settings = MakeBuggy(live.Body, Buggy{}).Settings;
+				settings.Transmission.Mode = PhysicsVehicleTransmissionMode::Manual;
+				REQUIRE(world->SetVehicleSettings(live.Vehicle, settings).has_value());
+				CHECK_FALSE(world->GetVehicleState(live.Vehicle).Shifting);
+				// Stopped, it sleeps: no gear change keeps it awake.
+				world->SetVehicleInput(live.Vehicle, { .Brake = 1.0f, .HandBrake = 1.0f });
+				StepWorld(*world, 900);
+				CHECK(world->IsSleeping(live.Body));
+			}
+		}
+
+		TEST_CASE("PhysicsWorld: a new shape on a vehicle's body keeps its vehicle")
+		{
+			Scope<PhysicsWorld> world = CreateWorld();
+			static_cast<void>(CreateGround(*world));
+			const LiveBuggy live = CreateBuggy(*world, {});
+			StepWorld(*world, 60);
+			REQUIRE(world->SetShape(live.Body, CreateBoxShape(glm::vec3(0.9f, 0.4f, 2.2f))).has_value());
+			CHECK(world->IsVehicleValid(live.Vehicle));
+			CHECK(world->FindVehicle(live.Body) == live.Vehicle);
+			StepWorld(*world, 60);
+			for (const PhysicsVehicleWheelState& wheel : world->GetVehicleState(live.Vehicle).Wheels)
+				CHECK(wheel.Touching);
 		}
 	}
 

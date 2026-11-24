@@ -93,9 +93,10 @@ namespace Engine {
 	inline constexpr float MaxPhysicsVehicleRpm = 100000.0f;
 	//   - a gear's or a differential's ratio, in magnitude;
 	inline constexpr float MaxPhysicsVehicleRatio = 100.0f;
-	//   - damping rates, spring frequencies (Hz) and damping ratios, the clutch's strength, a bar's stiffness divided by 1000 (so
-	//     a bar's is at most 1e6 N/m) and a curve's Y;
+	//   - damping rates, spring frequencies (Hz) and damping ratios, the clutch's strength and a curve's Y;
 	inline constexpr float MaxPhysicsVehicleRate = 1000.0f;
+	//   - an anti-roll bar's stiffness, N/m;
+	inline constexpr float MaxPhysicsVehicleBarStiffness = 1.0e6f;
 	//   - a transmission's switch, release and latency times, seconds;
 	inline constexpr float MaxPhysicsVehicleTime = 100.0f;
 	//   - a differential's limited-slip ratio (0 is open, else above 1);
@@ -192,7 +193,8 @@ namespace Engine {
 		// 0 for an open differential (Jolt's FLT_MAX), else in (1, MaxPhysicsVehicleSlipRatio]: the largest ratio of the faster
 		// wheel's speed to the slower's before all torque goes to the slower one.
 		float LimitedSlipRatio = 1.4f;
-		// [0, 1]: this differential's share of the engine torque; a vehicle's shares sum to 1 within 1e-3.
+		// [0, 1]: this differential's share of the engine torque. The shares of a vehicle's driven differentials (those that name
+		// a wheel) sum to 1 within 1e-6, summed in float in list order (Jolt's own check, WheeledVehicleController::PostCollide).
 		float EngineTorqueRatio = 1.0f;
 
 		bool operator==(const PhysicsVehicleDifferential&) const = default;
@@ -204,19 +206,21 @@ namespace Engine {
 		// Wheel indices of the vehicle, both valid and different.
 		int32_t LeftWheel = 0;
 		int32_t RightWheel = 1;
-		// N/m in [0, 1000 * MaxPhysicsVehicleRate].
+		// N/m in [0, MaxPhysicsVehicleBarStiffness].
 		float Stiffness = 1000.0f;
 
 		bool operator==(const PhysicsVehicleAntiRollBar&) const = default;
 	};
 
-	// What a vehicle drives with, changeable in place (PhysicsWorld::SetVehicleSettings): every member but the wheels and the
-	// cast.
+	// What a vehicle drives with, changeable in place (PhysicsWorld::SetVehicleSettings): every member but the wheels, the cast
+	// and the anti-roll bars' wheels (a bar's Stiffness changes in place).
 	struct PhysicsVehicleSettings
 	{
 		PhysicsVehicleEngine Engine{};
 		PhysicsVehicleTransmission Transmission{};
-		// At most MaxPhysicsVehicleDifferentials; none drives no wheel.
+		// 1 to MaxPhysicsVehicleDifferentials, at least one naming a wheel (a driven differential): Jolt drives the wheels through
+		// them and asserts on a vehicle that drives none. A vehicle that drives no wheel (a trailer) has one differential and a
+		// Manual transmission in gear 0.
 		std::vector<PhysicsVehicleDifferential> Differentials{};
 		// The ratio between the differentials' speeds (Jolt's mDifferentialLimitedSlipRatio): 0 open, else in
 		// (1, MaxPhysicsVehicleSlipRatio].
@@ -248,7 +252,8 @@ namespace Engine {
 	// Every float finite; each is clamped to its range.
 	struct PhysicsVehicleInput
 	{
-		// [-1, 1]: the accelerator, negative to reverse (Auto) or with a reverse gear (Manual).
+		// The accelerator: in Auto [-1, 1], negative to reverse (clamped to [0, 1] without a reverse gear); in Manual [0, 1] (a
+		// negative value is clamped to 0), the gear giving the direction.
 		float Forward = 0.0f;
 		// [-1, 1]: the steering, +1 a full right lock.
 		float Right = 0.0f;
@@ -279,7 +284,8 @@ namespace Engine {
 		// step (Jolt's suspension lambda over that step's duration).
 		float SuspensionLength = 0.0f;
 		float SuspensionForce = 0.0f;
-		// Radians: the spin in [0, 2 pi) and the steer (Jolt's: positive to the left); rad/s, positive rolling forward.
+		// Radians: the spin, signed in (-2 pi, 2 pi) (Jolt keeps it by fmod, which keeps the sign of a wheel that turned backward;
+		// a reader wraps it), and the steer (Jolt's: positive to the left); rad/s, positive rolling forward.
 		float Angle = 0.0f;
 		float SteerAngle = 0.0f;
 		float AngularVelocity = 0.0f;

@@ -31,6 +31,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <span>
 #include <tuple>
 #include <vector>
 
@@ -1046,6 +1047,25 @@ namespace Engine {
 			session->Tick();
 			CHECK(Test::ApproxEqual(centerOffset(), glm::vec3(0.0f), 1.0e-5f));
 			CHECK(physics.GetBodyInfo(id)->LinearVelocity.x == doctest::Approx(1.0f).epsilon(1.0e-5));
+		}
+
+		TEST_CASE("PhysicsSystem: a Dynamic body that only its MassProperties makes too large for Jolt is refused on the MassProperties")
+		{
+			// The W44.1 review's nit 7, at run time: the refusal names the offset, not the RigidBody's Mass.
+			Test::SceneTestFixture fixture;
+			Entity heavy = Test::AddBoxBody(fixture.GetScene(), "Heavy", glm::vec3(0.0f), glm::vec3(0.5f), BodyType::Dynamic);
+			Test::PatchRigidBody(heavy, [](RigidBodyComponent& body)
+			{
+				body.Mass = MaxPhysicsMass;
+			});
+			heavy.AddComponent<MassPropertiesComponent>(MassPropertiesComponent{ .CenterOfMassOffset = glm::vec3(0.0f, PhysicsShape::MaxColliderSize, 0.0f) });
+			const Test::ExpectLog refused(LogLevel::Error, "PHYSICS_INVALID_SHAPE");
+			Scope<PlaySession> session = StartSession(fixture);
+			const std::span<const PhysicsDiagnostic> diagnostics = session->GetPhysics().GetDiagnostics();
+			REQUIRE(diagnostics.size() == 1);
+			CHECK(diagnostics[0].Component == "MassProperties");
+			CHECK(diagnostics[0].Field == "CenterOfMassOffset");
+			CHECK_FALSE(session->GetPhysics().GetBodyInfo(heavy.GetUUID()).has_value());
 		}
 
 		TEST_CASE("PhysicsSystem: reparenting and scale changes rebuild the bodies they affect")

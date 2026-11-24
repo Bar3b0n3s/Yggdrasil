@@ -353,8 +353,12 @@ namespace Engine {
 		// Records a diagnostic once per (code, severity, entity, subject) and logs it, unless `alreadyLogged` (the world's own
 		// PHYSICS_LIMIT_EXCEEDED warning near a limit, PhysicsWorldLimits; the body limit's refusals after the first).
 		void RaiseDiagnostic(PhysicsDiagnostic diagnostic, bool alreadyLogged = false);
-		// The diagnostic of a body or character that `error` refused, on the component (and `field`, when given) at fault.
-		void RaiseBodyError(const PhysicsBodyPlan& plan, const Error& error, std::string_view field = {});
+		// The diagnostic of a body or character that `error` refused, on the component (and `field`, when given) at fault: a
+		// RigidBody plan's `fieldComponent` when given (M44: MassProperties), else the RigidBody.
+		void RaiseBodyError(const PhysicsBodyPlan& plan, const Error& error, std::string_view field = {}, std::string_view fieldComponent = {});
+		// M44: the diagnostic of a Dynamic body that PhysicsShape::CheckDynamicBody refused with `settings`' mass, degrees of
+		// freedom and mass override, on the MassProperties when only its override causes the refusal (GetDynamicBodyFault).
+		void RaiseDynamicBodyError(const PhysicsBodyPlan& plan, const PhysicsShape& shape, const BodyDescription& settings, const Error& error);
 		void DeliverPendingDiagnostics();
 
 		[[nodiscard]] const PhysicsBodyEntry* FindOwnedBody(UUID owner, PhysicsBodyOrigin origin) const;

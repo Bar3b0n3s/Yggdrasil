@@ -617,7 +617,7 @@ namespace Engine {
 		PendingListenerDiagnostics.push_back(std::move(diagnostic));
 	}
 
-	void PhysicsSystem::State::RaiseBodyError(const PhysicsBodyPlan& plan, const Error& error, std::string_view field)
+	void PhysicsSystem::State::RaiseBodyError(const PhysicsBodyPlan& plan, const Error& error, std::string_view field, std::string_view fieldComponent)
 	{
 		const Scene& scene = *Specification.RuntimeScene;
 		std::string_view code = GetPhysicsDiagnosticCode(error);
@@ -633,6 +633,8 @@ namespace Engine {
 		std::string component;
 		if (plan.Origin == PhysicsBodyOrigin::Character)
 			component = "CharacterController";
+		else if (plan.Origin == PhysicsBodyOrigin::RigidBody && !fieldComponent.empty())
+			component = std::string(fieldComponent);
 		else if (plan.Origin == PhysicsBodyOrigin::RigidBody && (code != PhysicsInvalidShapeCode || !carriesCode || !field.empty()))
 			component = "RigidBody";
 		if (component.empty() && code == PhysicsInvalidShapeCode)
@@ -666,6 +668,16 @@ namespace Engine {
 		if (code == PhysicsLimitExceededCode)
 			diagnostic.Subject = "bodies";
 		RaiseDiagnostic(std::move(diagnostic));
+	}
+
+	void PhysicsSystem::State::RaiseDynamicBodyError(const PhysicsBodyPlan& plan, const PhysicsShape& shape, const BodyDescription& settings, const Error& error)
+	{
+		// M44: a refusal that only the MassProperties' override causes names it, with a hint to change it.
+		const Utils::DynamicBodyFault fault = Utils::GetDynamicBodyFault(shape, settings.Mass, settings.AllowedDofs, settings.MassOverride, error);
+		if (fault.Hint.empty())
+			RaiseBodyError(plan, error, fault.Field, fault.Component);
+		else
+			RaiseBodyError(plan, Error(error).WithHint(std::string(fault.Hint)), fault.Field, fault.Component);
 	}
 
 	void PhysicsSystem::State::DeliverPendingDiagnostics()
@@ -1029,7 +1041,7 @@ namespace Engine {
 			// The world checks the same; checked here, the refusal names the RigidBody's field.
 			if (const Status checked = (*shape)->CheckDynamicBody(body.Mass, body.AllowedDofs, body.MassOverride); !checked)
 			{
-				RaiseBodyError(plan, checked.error(), Utils::GetDynamicBodyField(checked.error()));
+				RaiseDynamicBodyError(plan, **shape, body, checked.error());
 				return false;
 			}
 		}
@@ -1209,7 +1221,7 @@ namespace Engine {
 			{
 				if (const Status checked = (*shape)->CheckDynamicBody(entry.Settings.Mass, entry.Settings.AllowedDofs, entry.Settings.MassOverride); !checked)
 				{
-					RaiseBodyError(plan, checked.error(), Utils::GetDynamicBodyField(checked.error()));
+					RaiseDynamicBodyError(plan, **shape, entry.Settings, checked.error());
 					RemoveBody(handle, woken);
 					return false;
 				}
