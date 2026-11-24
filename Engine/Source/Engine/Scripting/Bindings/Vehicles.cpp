@@ -49,7 +49,7 @@ namespace Engine {
 		// of the physics system's state, refused for an entity pending destruction as RigidBody's are). Errors: the receiver's;
 		// "physics is unavailable" without the session's physics (an edit evaluation); "entity has no vehicle in force" for a
 		// vehicle that is refused, disabled or not yet created, and for a wheel that is not one of its vehicle's wheels in force.
-		static PhysicsVehicleReport ReadVehicleReport(ScriptCall& call, std::string_view component, UUID& entity)
+		static PhysicsVehicleReport ReadVehicleReport(ScriptCall& call, std::string_view component)
 		{
 			const auto proxy = Lua::Check<ScriptProxyIdentity>(call, 1);
 			IScriptHost& host = call.Engine->GetHost();
@@ -63,15 +63,13 @@ namespace Engine {
 			std::optional<PhysicsVehicleReport> report = physics->GetVehicleInfo(proxy.Entity.ID);
 			if (!report.has_value() || !report->Created)
 				Lua::RaiseError(call, "entity has no vehicle in force");
-			entity = proxy.Entity.ID;
 			return std::move(*report);
 		}
 
 		template<VehicleReading Reading>
 		static int VehicleRead(ScriptCall& call)
 		{
-			UUID entity{};
-			const PhysicsVehicleReport report = ReadVehicleReport(call, "WheeledVehicle", entity);
+			const PhysicsVehicleReport report = ReadVehicleReport(call, "WheeledVehicle");
 			switch (Reading)
 			{
 				case VehicleReading::Speed:     Lua::Push(call, report.Speed); break;
@@ -85,8 +83,8 @@ namespace Engine {
 		template<WheelReading Reading>
 		static int WheelRead(ScriptCall& call)
 		{
-			UUID entity{};
-			const PhysicsVehicleReport report = ReadVehicleReport(call, "VehicleWheel", entity);
+			const PhysicsVehicleReport report = ReadVehicleReport(call, "VehicleWheel");
+			const UUID entity = Lua::Check<ScriptProxyIdentity>(call, 1).Entity.ID;
 			const auto found = std::find_if(report.Wheels.begin(), report.Wheels.end(), [entity](const PhysicsVehicleWheelReport& wheel)
 			{
 				return wheel.Entity == entity;

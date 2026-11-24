@@ -390,7 +390,9 @@ namespace Engine {
 					"RigidBody":{"Type":"Dynamic"},"BoxCollider":{"HalfExtents":[0.5,0.25,1]}}}},
 				{"method":"entity.create","params":{"name":"Runner","parent":"/Sled","components":{"Transform":{"Translation":[0,-0.5,0]},
 					"VehicleWheel":{}}}},
-				{"method":"entity.update","params":{"entity":"/Sled","components":{"WheeledVehicle":{}}}}]})"))
+				{"method":"entity.update","params":{"entity":"/Sled","components":{"WheeledVehicle":{}}}},
+				{"method":"entity.create","params":{"name":"Plinth","components":{"Transform":{"Translation":[-20,1,0]},
+					"RigidBody":{"Type":"Static"},"BoxCollider":{},"WheeledVehicle":{}}}}]})"))
 					.has_value());
 			// The sled names no differential: PHYSICS_VEHICLE_INVALID "differential".
 			const Test::ExpectLog invalid(LogLevel::Error, "PHYSICS_VEHICLE_INVALID");
@@ -452,6 +454,13 @@ namespace Engine {
 			CHECK((*sled)["wheels"][0]["entity"]["name"] == Json("Runner"));
 			CHECK((*sled)["wheels"][0]["touching"] == Json(false));
 			CHECK((*sled)["wheels"][0]["collider"].is_null());
+			// A vehicle on a Static body has no body to drive (the W44.3 review's nit 5): body is null.
+			const Result<Json> plinth = setup.Call("physics.vehicleInfo", Json{ { "entity", "/Plinth" } });
+			REQUIRE_MESSAGE(plinth.has_value(), plinth.error().ToString());
+			CHECK((*plinth)["entity"]["name"] == Json("Plinth"));
+			CHECK((*plinth)["body"].is_null());
+			CHECK((*plinth)["created"] == Json(false));
+			CHECK((*plinth)["wheels"].empty());
 			CHECK(invalid.GetMatchCount() >= 1);
 		}
 

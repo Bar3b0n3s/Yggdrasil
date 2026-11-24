@@ -379,6 +379,7 @@ Phase 8's reservation ledger, committed in `Docs/Decisions/0060-skerries-engine-
   - `RenderAnnotations.cpp` (M45's file for the phase): one call after line 135;
   - `PhysicsMethods.{h,cpp}`, `PhysicsMethodsTests.cpp` and `test_physics.py` (M44's for the phase: `physics.vehicleInfo`, and `centerOfMass` before `tick`, M47's and M48's fields after it);
   - `SceneTargetTests.cpp`: M44's row, then M47's;
+  - `ScriptProxyTests.cpp`'s pending-entity read list: M44's twelve vehicle reads, then M46's `Wind:Sample` and M47's four `Water` methods (the lead's ledger amendment on main, `54b2d6b7`, after the W44.3 review's nit 3);
   - `Scene/StaticScenery.cpp` (M43's new file): `VehicleWheel` appended to `SCENE_STATIC_MOVES`' list at M44's merge;
   - `MakeValidationFixtures.py`, `Scaffolds.json` and `Suites.jsonl`, after M43's entries;
   - the generated references, regenerated and never merged.
@@ -554,7 +555,7 @@ W44.2 brings the vehicles into the play session: the two components, the composi
 
 - `Scene/PhysicsVehiclesTests.cpp` (the composition): which body and wheels, nested vehicles and disabled entities; "PhysicsVehicles: each vehicle that cannot be made gets one PHYSICS_VEHICLE_INVALID naming its reason" (every subject, the first of several); a reference to a disabled wheel; the components in the world's units; a wheel's frame with the vehicle's scale.
 - `Scene/PhysicsSystemVehiclesTests.cpp` (the session): the Acceptance cases "PhysicsVehicles: every path that removes a vehicle's body removes its vehicle first" (a RigidBody change, a refusal after an edit, the disable flush with a disabled wheel, the destroy flush, a destroyed wheel, the session's end), "PhysicsSystem: random vehicles and edits never reach a Jolt assert", "PhysicsVehicles: a vehicle keeps its wheels' frames when its body is created again", "PhysicsVehicles: wheel entities take their wheel's suspension, steer and spin, written only when they change", "PhysicsVehicles: a driver-input write wakes a sleeping vehicle and composes nothing", "PhysicsVehicles: the same buggy stops shorter on a rough surface than on a slick one, a ColliderSurface's and a TerrainCollider's alike", "PhysicsVehicles: one state reached through two histories steps identically" and "PhysicsVehicles: a scene without vehicles hashes as before"; the lead's two bar cases, "an anti-roll bar's stiffness changes in place, keeping the vehicle's motion, at one hash with 0, 1 and 8 Jolt threads" (twenty-four buggies) and "a removed anti-roll bar makes the vehicle again and leaves no stale force"; a vehicle that cannot be made raising once; the reads by either entity.
-- `Session/VehicleDeterminismTests.cpp`: "PhysicsVehicles: a convoy driven by planned input ends in one state with 0, 1 and 8 Jolt threads" (twenty-four vehicles of every cast and transmission) and "PhysicsVehicles: the convoy's state hash equals the committed constant in every configuration" (`CommittedConvoyHash` `0xed9a4a11609ae85b`, recorded in Debug and verified in Release).
+- `Session/VehicleDeterminismTests.cpp`: "PhysicsVehicles: a convoy driven by planned input ends in one state with 0, 1 and 8 Jolt threads" (twenty-four vehicles of every cast and transmission) and "PhysicsVehicles: the convoy's state hash equals the committed constant in every configuration" (`CommittedConvoyHash` `0xf3cdac7de44dc587`, re-recorded by the W44.2 review's fixes for the appended authored poses; recorded in Debug, verified in Release).
 - What the cases observe: the carried motion and the in-place bar stiffness are read at a start flush's synchronization (`SynchronizeBodies`, no step in between), where they must equal the readings before exactly; the wheels' "written only when they change" is observed as a resting wheel's bits staying (with its spin damped to nothing, since Jolt turns a sleeping vehicle's wheels by their last spin), and from M44's merge M43's change tracking makes the writes themselves observable.
 - `ProjectValidatorTests.cpp`: "ProjectValidator: PHYSICS_VEHICLE_INVALID reports a vehicle without a Dynamic body, without wheels or with a collider on a wheel".
 
@@ -618,11 +619,23 @@ Architecture §9.11 (new), §9.2 (a vehicle on its body), §9.7 (the vehicle cas
 
 None: M44 adds no metric (decision 4.3), so `Perf.py` has no part of M44's to run.
 
+### The W44.3 review
+
+`bin/Reviews/P8/M44-W3-review.md`: 0 blocker, 0 major, 2 minor, 5 nit, all fixed in one pass, in a checkpoint of their own; the W44.2 fixes and the five W44.3 departures accepted.
+
+1. "VehicleDebugDraw: a play view draws each wheel where its mesh is drawn, at the view's alpha" (each wheel at its rendered pose, its contact carried by the vehicle's, half a step behind the step's pose) and "VehicleDebugDraw: a wheel whose transform does not decompose is drawn at its entity, refused". The first failed with the view's alpha ignored (`w3fix-prove.log`).
+2. "VehicleBindings: a vehicle not in force and a session without physics raise instead of reading" disables a wheel nothing names: its vehicle in force reads, and the wheel's reads raise "entity has no vehicle in force". It failed with the check replaced by a read of the first wheel (`w3fix-prove.log`).
+3. `ScriptProxyTests.cpp`'s read list in decision 8, after the lead's ledger amendment on main (`54b2d6b7`).
+4. The two consequences of session-long frames, accepted limits by the lead's ruling, in §9.11, the Backlog §6 row and the `vehicles` page: scaling a vehicle in play scales its chassis but not where its wheels hang; a wheel moved to another vehicle hangs by its first local pose.
+5. `physics.vehicleInfo`'s `body` is asserted null for a vehicle on a Static body.
+6. `ReadVehicleReport` returns the report alone; the wheel read takes its receiver from its own argument.
+7. The W44.2 record's "Tests" names the re-recorded `CommittedConvoyHash`.
+
 ## Before milestone completion
 
 - [x] W44.1 committed: its first checkpoint `MassProperties`, then the world's vehicles. [x] The lead's review pass taken and every finding fixed.
 - [x] W44.2 committed. [x] The lead's review pass taken and every finding fixed.
-- [x] W44.3 committed. [ ] The lead's review pass taken and every finding fixed.
+- [x] W44.3 committed. [x] The lead's review pass taken and every finding fixed.
 - [ ] The milestone end: `milestone/m44` merged current main, and one independent review of the milestone diff, with every finding fixed.
 - [ ] The landing:
   - phase 8's batch, second in train order, merged over M43's regions;

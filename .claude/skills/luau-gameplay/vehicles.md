@@ -104,6 +104,9 @@ to an agent (`skills/game-debugging`).
   its speed, revs, gear and wheels' spin; writing the driver input every tick never does. Each wheel's authored pose is
   kept for the session, so a vehicle made again, a wheel moved under another child of the chassis, or a component removed
   and added back finds its wheels where they were authored.
+- Scale a vehicle before play, or instantiate it at its new scale: scaling it in play scales its chassis, but its wheels
+  keep hanging where they hung at the scale it was made with. A wheel moved under another vehicle hangs there by the
+  local pose it was first placed with.
 - A parked vehicle's wheels keep turning by their last spin, slowed by their `AngularDamping`, while its body sleeps: the
   wheel meshes creep briefly. Brake to stop them, or raise `AngularDamping`.
 - A wheel turning more than half a turn per tick (about 188 rad/s at 60 Hz) aliases on screen: the physics is exact.

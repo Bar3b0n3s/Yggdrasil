@@ -2,6 +2,7 @@
 
 #include "Engine/Scene/VehicleDebugDraw.h"
 
+#include "Engine/Core/Time.h"
 #include "Engine/Physics/PhysicsTypes.h"
 #include "Engine/Renderer/DebugDrawList.h"
 #include "Engine/Scene/ColliderDebugDraw.h"
@@ -21,6 +22,7 @@
 #include "Support/InMemoryAssetManager.h"
 #include "Support/PhysicsTestScene.h"
 
+#include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
@@ -206,6 +208,84 @@ namespace Engine {
 				CHECK(wheel->State == VehicleDebugState::Refused);
 				CHECK_FALSE(wheel->Touching);
 			}
+		}
+
+		TEST_CASE("VehicleDebugDraw: a play view draws each wheel where its mesh is drawn, at the view's alpha")
+		{
+			// The W44.3 review's finding 1 (as M37's joint view): between two fixed steps a wheel is drawn at its entity's rendered
+			// pose, and its contact moves with the vehicle's, not up to a step ahead of the meshes.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddGround(scene));
+			Entity buggy = AddDebugBuggy(scene, "Buggy", glm::vec3(0.0f, 1.0f, 0.0f));
+			buggy.Patch<WheeledVehicleComponent>([](WheeledVehicleComponent& vehicle)
+			{
+				vehicle.Throttle = 1.0f;
+			});
+			Result<Scope<PlaySession>> session = Test::StartPhysicsSession(fixture, Test::MakePhysicsSessionSpecification(fixture));
+			REQUIRE(session.has_value());
+			Test::RunTicks(**session, 90);
+			constexpr float ViewAlpha = 0.5f;
+			(*session)->FixedStep();
+			(*session)->FrameUpdate(FrameTime{ .DeltaTime = 1.0 / 120.0, .UnscaledDeltaTime = 1.0 / 120.0, .Alpha = ViewAlpha, .FrameIndex = 92 });
+			const Scene& runtime = (*session)->GetScene();
+			const PhysicsSystem& physics = (*session)->GetPhysics();
+			const std::optional<PhysicsVehicleReport> report = physics.GetVehicleInfo(Test::GetEntityId(runtime, "/Buggy"));
+			REQUIRE(report.has_value());
+			REQUIRE(report->Created);
+			REQUIRE(report->Speed > 2.0f);
+			// Half a step's travel at the buggy's speed.
+			const float halfStep = report->Speed / 60.0f * 0.5f;
+			const std::vector<VehicleWheelDebugShape> atView = BuildVehicleDebugDraw(runtime, PhysicsLayerTable(), &physics, ViewAlpha);
+			const std::vector<VehicleWheelDebugShape> atStep = BuildVehicleDebugDraw(runtime, PhysicsLayerTable(), &physics);
+			const ConstEntity vehicle = runtime.FindEntityByID(report->Entity);
+			const glm::mat4 vehicleStep = TransformSystem::ComputeWorldMatrix(vehicle);
+			const glm::mat4 vehicleView = ComputeRenderedWorldMatrix(vehicle, ViewAlpha);
+			for (const PhysicsVehicleWheelReport& reading : report->Wheels)
+			{
+				const ConstEntity wheel = runtime.FindEntityByID(reading.Entity);
+				INFO(wheel.GetName());
+				const VehicleWheelDebugShape* view = FindWheelShape(atView, reading.Entity);
+				const VehicleWheelDebugShape* step = FindWheelShape(atStep, reading.Entity);
+				REQUIRE(view != nullptr);
+				REQUIRE(step != nullptr);
+				CHECK(IsNearVector(view->Center, glm::vec3(ComputeRenderedWorldMatrix(wheel, ViewAlpha)[3])));
+				REQUIRE(view->Touching);
+				const glm::vec3 local = glm::vec3(glm::affineInverse(vehicleStep) * glm::vec4(reading.Point, 1.0f));
+				CHECK(IsNearVector(view->ContactPoint, glm::vec3(vehicleView * glm::vec4(local, 1.0f))));
+				CHECK(IsNearVector(step->ContactPoint, reading.Point));
+				// The view draws them about half a step behind the step's pose.
+				CHECK(glm::length(step->Center - view->Center) == doctest::Approx(halfStep).epsilon(0.25));
+				CHECK(glm::length(step->ContactPoint - view->ContactPoint) == doctest::Approx(halfStep).epsilon(0.25));
+			}
+		}
+
+		TEST_CASE("VehicleDebugDraw: a wheel whose transform does not decompose is drawn at its entity, refused")
+		{
+			// The W44.3 review's finding 1: a wheel below an axle of Scale 0 has no frame; it is drawn at its entity's position in
+			// the refused colour, while the vehicle's other wheels are drawn in force.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			Entity buggy = AddDebugBuggy(scene, "Buggy", glm::vec3(0.0f, 1.0f, 0.0f));
+			Entity axle = scene.CreateEntity("Axle", buggy);
+			axle.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, -0.5f, 3.0f);
+				transform.Scale = glm::vec3(0.0f);
+			});
+			Entity flat = scene.CreateEntity("Flat", axle);
+			flat.AddComponent<VehicleWheelComponent>();
+			TransformSystem::Update(scene);
+			const std::vector<VehicleWheelDebugShape> shapes = BuildVehicleDebugDraw(scene, PhysicsLayerTable(), nullptr);
+			REQUIRE(shapes.size() == 5);
+			const VehicleWheelDebugShape* shape = FindWheelShape(shapes, flat.GetUUID());
+			REQUIRE(shape != nullptr);
+			CHECK(shape->State == VehicleDebugState::Refused);
+			CHECK(IsNearVector(shape->Center, glm::vec3(TransformSystem::ComputeWorldMatrix(flat)[3])));
+			CHECK(IsNearVector(shape->Center, glm::vec3(0.0f, 0.5f, 3.0f)));
+			const VehicleWheelDebugShape* front = FindWheelShape(shapes, Test::GetEntityId(scene, "/Buggy/FL"));
+			REQUIRE(front != nullptr);
+			CHECK(front->State == VehicleDebugState::InForce);
 		}
 
 		TEST_CASE("VehicleDebugDraw: AppendVehicleDebugDraw draws the circle, the spoke, the suspension and the contact's normal on top")

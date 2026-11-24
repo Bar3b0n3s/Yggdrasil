@@ -221,6 +221,25 @@ return true
 			REQUIRE(fixture.Start());
 			fixture.Step(1);
 			CHECK(refused.GetMatchCount() >= 1);
+			// The W44.3 review's finding 2: a wheel its vehicle in force does not hold (the front left, disabled; no differential or
+			// bar names it, so the buggy is made again on its three other wheels) raises, while the vehicle and its other wheels read.
+			CheckVehicleBinding(fixture.Script, R"(
+Scene.FindByName("Buggy"):FindChild("FL"):SetActive(false)
+return true
+)");
+			fixture.Step(1);
+			fixture.System->FlushDestroyed(1);
+			fixture.Step(1);
+			CheckVehicleBinding(fixture.Script, R"(
+local buggy = Scene.FindByName("Buggy")
+assert(buggy.WheeledVehicle:GetEngineRpm() >= 1000, "the buggy is in force")
+assert(buggy:FindChild("RL").VehicleWheel:IsTouching() ~= nil, "its other wheels read")
+local ok, message = pcall(function() return buggy:FindChild("FL").VehicleWheel:IsTouching() end)
+assert(not ok and string.find(tostring(message), "entity has no vehicle in force", 1, true), tostring(message))
+ok, message = pcall(function() return buggy:FindChild("FL").VehicleWheel:GetContact() end)
+assert(not ok and string.find(tostring(message), "entity has no vehicle in force", 1, true), tostring(message))
+return true
+)");
 			CheckVehicleBinding(fixture.Script, R"(
 local refused = Scene.FindByName("Refused")
 for _, read in {
