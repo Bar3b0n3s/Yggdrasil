@@ -2396,7 +2396,7 @@ All modes; Runtime|Test; pure/read.
 
 `(self: CharacterController) -> vector`
 
-Velocity after the last update.
+The velocity the last update asked for (its step velocity), not the distance it covered: a blocked character still reports it.
 
 All modes; Runtime|Test; pure/read.
 
@@ -2469,6 +2469,14 @@ All modes; Runtime|Test; pure/read; setter mutates.
 `(self: CharacterController, velocity: vector) -> ()`
 
 Supply desired velocity for the next fixed character update.
+
+All modes; Runtime|Test; mutates.
+
+### CharacterController.MoveFree
+
+`(self: CharacterController, velocity: vector) -> ()`
+
+Supply the velocity of the next fixed character update as a free move: in the air the character takes it whole, its vertical part included, with no gravity and no floor sticking (swimming, climbing, gliding); on the ground it is Move. Call it every OnFixedUpdate; the last Move or MoveFree of a tick wins.
 
 All modes; Runtime|Test; mutates.
 

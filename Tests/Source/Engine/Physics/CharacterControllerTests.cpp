@@ -1328,6 +1328,212 @@ namespace Engine {
 				CHECK(character->GetPose().Position.x > -4.1f);
 			}
 		}
+
+		// --- Free moves (M48 W48.1, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3) -----
+
+		// Skerries' brief S17: before M48 a script could not give a character in the air a vertical velocity, so it could not
+		// swim, climb or glide.
+		TEST_CASE("CharacterController: a free move in the air takes the whole velocity asked, and no gravity acts")
+		{
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 20.0f, 0.0f));
+			// Falling first, so the free move replaces a velocity of its own.
+			Walk(*world, *character, glm::vec3(0.0f), 30);
+			REQUIRE(character->GetVelocity().y < -4.0f);
+			CHECK(character->GetLastMove() == CharacterMoveMode::Walk);
+			const glm::vec3 asked(2.0f, 3.0f, -1.0f);
+			const glm::vec3 start = character->GetPose().Position;
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				character->Update(FixedDelta, asked, Gravity, CharacterMoveMode::Free);
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				CHECK(character->GetVelocity() == asked);
+				CHECK(character->GetLastMove() == CharacterMoveMode::Free);
+			}
+			// A second at the velocity asked: no gravity bent the path.
+			CHECK(Test::ApproxEqual(character->GetPose().Position - start, asked, 1.0e-3f));
+			CHECK_FALSE(character->GetGroundState().IsGrounded);
+		}
+
+		TEST_CASE("CharacterController: a free move while grounded is a Move")
+		{
+			// Two identical worlds: one character walks, the other free-moves with the same velocities, a walk and then a
+			// jump, both on the ground. Every update of the free mover is the walker's, bit for bit.
+			Scope<PhysicsWorld> walkWorld = CreateCharacterWorld();
+			Scope<PhysicsWorld> freeWorld = CreateCharacterWorld();
+			for (PhysicsWorld* world : { walkWorld.get(), freeWorld.get() })
+			{
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				static_cast<void>(CreateBlock(*world, glm::vec3(3.0f, 0.2f, 0.0f), glm::vec3(1.0f, 0.1f, 2.0f)));
+			}
+			Scope<CharacterController> walker = CreateCharacter(*walkWorld, glm::vec3(0.0f, 0.05f, 0.0f));
+			Scope<CharacterController> mover = CreateCharacter(*freeWorld, glm::vec3(0.0f, 0.05f, 0.0f));
+			Walk(*walkWorld, *walker, glm::vec3(0.0f), 30);
+			Walk(*freeWorld, *mover, glm::vec3(0.0f), 30);
+			REQUIRE(mover->GetGroundState().IsGrounded);
+			// Up onto a 0.2 m step at 2 m/s (stairs and floor sticking as a walk has them), then a jump.
+			std::vector<glm::vec3> velocities(60, glm::vec3(2.0f, 0.0f, 0.0f));
+			velocities.push_back(glm::vec3(0.0f, 5.0f, 0.0f));
+			for (const glm::vec3& velocity : velocities)
+			{
+				walker->Update(FixedDelta, velocity, Gravity);
+				mover->Update(FixedDelta, velocity, Gravity, CharacterMoveMode::Free);
+				REQUIRE(walkWorld->Step(FixedDelta, 1).has_value());
+				REQUIRE(freeWorld->Step(FixedDelta, 1).has_value());
+				CHECK(mover->GetPose().Position == walker->GetPose().Position);
+				CHECK(mover->GetVelocity() == walker->GetVelocity());
+				CHECK(mover->GetLastMove() == CharacterMoveMode::Walk);
+			}
+			CHECK(mover->GetPose().Position.y > 0.15f);
+			CHECK(mover->GetVelocity().y == doctest::Approx(5.0f).epsilon(1.0e-3));
+			CHECK_FALSE(mover->GetGroundState().IsGrounded);
+		}
+
+		TEST_CASE("CharacterController: a free move in the air is not stuck to the floor")
+		{
+			// A character in the air that leans on a 60 degree slope (a steep contact supports it without its being grounded)
+			// and then moves off it level, with the floor 0.2 m below its feet: within StepHeight, where floor sticking pulls
+			// a character down the moment it loses its support. A free move keeps its height; a walk in the same place is
+			// stuck to the floor at once.
+			for (const CharacterMoveMode mode : { CharacterMoveMode::Free, CharacterMoveMode::Walk })
+			{
+				CAPTURE(static_cast<int>(mode));
+				Scope<PhysicsWorld> world = CreateCharacterWorld();
+				static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+				// The slope's toe at x 0 on the floor, rising at 60 degrees to 1.73 m at x 1.
+				const std::vector<glm::vec3> points = { glm::vec3(0.0f, 0.0f, -2.0f), glm::vec3(0.0f, 0.0f, 2.0f), glm::vec3(1.0f, 0.0f, -2.0f),
+					glm::vec3(1.0f, 0.0f, 2.0f), glm::vec3(1.0f, 1.7320508f, -2.0f), glm::vec3(1.0f, 1.7320508f, 2.0f) };
+				Result<Ref<const PhysicsShape>> shape = PhysicsShape::Create({ .Colliders = { ColliderShapeDescription{ .Geometry = ConvexHullShapeGeometry{ .Points = points } } } });
+				REQUIRE_MESSAGE(shape.has_value(), shape.error().ToString());
+				REQUIRE(world->CreateBody({ .Shape = *shape, .MotionType = PhysicsMotionType::Static }).has_value());
+				// Hovering 0.2 m above the floor, then drifting into the slope at 0.6 m/s.
+				Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(-0.2f, 0.2f, 0.0f));
+				for (uint32_t tick = 0; tick < 30; ++tick)
+				{
+					character->Update(FixedDelta, glm::vec3(0.6f, 0.0f, 0.0f), Gravity, CharacterMoveMode::Free);
+					REQUIRE(world->Step(FixedDelta, 1).has_value());
+				}
+				const float height = character->GetPose().Position.y;
+				REQUIRE(height > 0.15f);
+				REQUIRE(height < 0.3f);
+				REQUIRE_FALSE(character->GetGroundState().IsGrounded);
+				// Off the slope, level.
+				character->Update(FixedDelta, glm::vec3(-6.0f, 0.0f, 0.0f), Gravity, mode);
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				if (mode == CharacterMoveMode::Free)
+				{
+					CHECK(character->GetPose().Position.y == doctest::Approx(height).epsilon(1.0e-5));
+					CHECK_FALSE(character->GetGroundState().IsGrounded);
+					CHECK(character->GetLastMove() == CharacterMoveMode::Free);
+				}
+				else
+				{
+					CHECK(character->GetPose().Position.y < 0.05f);
+				}
+			}
+		}
+
+		TEST_CASE("CharacterController: a character free-moved toward a moving target height follows it within 1 mm")
+		{
+			// S17's swimmer held at a depth under a swell: each tick asks for the vertical velocity that reaches the target
+			// height of the next tick, while it swims 20 m along X.
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			Scope<CharacterController> swimmer = CreateCharacter(*world, glm::vec3(0.0f, 10.0f, 0.0f));
+			const auto target = [](uint32_t tick)
+			{
+				const double seconds = static_cast<double>(tick) * static_cast<double>(FixedDelta);
+				return static_cast<float>(10.0 + 0.5 * std::sin(seconds * 1.5));
+			};
+			float worst = 0.0f;
+			for (uint32_t tick = 0; tick < 600; ++tick)
+			{
+				const float vertical = (target(tick + 1) - swimmer->GetPose().Position.y) / FixedDelta;
+				swimmer->Update(FixedDelta, glm::vec3(2.0f, vertical, 0.0f), Gravity, CharacterMoveMode::Free);
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+				worst = std::max(worst, std::abs(swimmer->GetPose().Position.y - target(tick + 1)));
+			}
+			CHECK(worst < 1.0e-3f);
+			CHECK(swimmer->GetPose().Position.x == doctest::Approx(20.0f).epsilon(1.0e-3));
+		}
+
+		TEST_CASE("CharacterController: a climber free-moved along a wall rises along it and steps off at the top onto the floor")
+		{
+			// S17's ladder: a 6 m wall whose face is at x 1 and whose top is the floor of a platform. The climber presses into
+			// it and rises at 2 m/s with free moves, then walks off forwards at the top and lands on the platform.
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			static_cast<void>(CreateBlock(*world, glm::vec3(0.0f), glm::vec3(20.0f, 0.5f, 20.0f)));
+			static_cast<void>(CreateBlock(*world, glm::vec3(3.0f, 6.0f, 0.0f), glm::vec3(2.0f, 3.0f, 2.0f)));
+			Scope<CharacterController> climber = CreateCharacter(*world, glm::vec3(0.68f, 0.05f, 0.0f));
+			Walk(*world, *climber, glm::vec3(0.0f), 30);
+			REQUIRE(climber->GetGroundState().IsGrounded);
+			float nearest = -std::numeric_limits<float>::infinity();
+			float farthest = std::numeric_limits<float>::infinity();
+			bool climbedFree = true;
+			bool atTop = false;
+			uint32_t ticks = 0;
+			for (; ticks < 300; ++ticks)
+			{
+				const glm::vec3 base = climber->GetPose().Position;
+				// Up until the feet are above the top, then forwards until it stands on the platform.
+				atTop = atTop || base.y > 6.05f;
+				if (atTop && base.x > 1.5f && climber->GetGroundState().IsGrounded)
+					break;
+				if (!atTop)
+				{
+					climber->Update(FixedDelta, glm::vec3(0.5f, 2.0f, 0.0f), Gravity, CharacterMoveMode::Free);
+					// After the first update, which leaves the floor as a jump does, the climb is a free move.
+					climbedFree = climbedFree && (ticks == 0 || climber->GetLastMove() == CharacterMoveMode::Free);
+					// Along the wall's face, below its top edge.
+					if (climber->GetPose().Position.y < 5.5f)
+					{
+						nearest = std::max(nearest, climber->GetPose().Position.x);
+						farthest = std::min(farthest, climber->GetPose().Position.x);
+					}
+				}
+				else
+				{
+					climber->Update(FixedDelta, glm::vec3(2.0f, 0.0f, 0.0f), Gravity);
+				}
+				REQUIRE(world->Step(FixedDelta, 1).has_value());
+			}
+			// Six metres at 2 m/s, then a short walk: well within five seconds.
+			CHECK(ticks < 300);
+			CHECK(climbedFree);
+			// Pressed against the wall all the way up, never into it.
+			CHECK(nearest < 1.0f - 0.3f);
+			CHECK(farthest > 1.0f - 0.35f);
+			CHECK(climber->GetGroundState().IsGrounded);
+			CHECK(climber->GetPose().Position.y == doctest::Approx(6.0f).epsilon(0.01));
+			CHECK(climber->GetLastMove() == CharacterMoveMode::Walk);
+		}
+
+		TEST_CASE("CharacterController: a Move in the air after a free move continues from its velocity plus gravity")
+		{
+			// A swimmer surging out of the water keeps rising briefly once it moves as a walker again.
+			Scope<PhysicsWorld> world = CreateCharacterWorld();
+			Scope<CharacterController> character = CreateCharacter(*world, glm::vec3(0.0f, 10.0f, 0.0f));
+			character->Update(FixedDelta, glm::vec3(1.0f, 3.0f, 0.0f), Gravity, CharacterMoveMode::Free);
+			REQUIRE(world->Step(FixedDelta, 1).has_value());
+			REQUIRE(character->GetVelocity() == glm::vec3(1.0f, 3.0f, 0.0f));
+			// The walk's own vertical part is ignored in the air, as ever; its horizontal part steers.
+			const float before = character->GetPose().Position.y;
+			character->Update(FixedDelta, glm::vec3(0.0f, 50.0f, 0.0f), Gravity);
+			REQUIRE(world->Step(FixedDelta, 1).has_value());
+			CHECK(character->GetLastMove() == CharacterMoveMode::Walk);
+			CHECK(character->GetVelocity().y == doctest::Approx(3.0f + Gravity.y * FixedDelta).epsilon(1.0e-5));
+			CHECK(character->GetVelocity().x == doctest::Approx(0.0f));
+			CHECK(character->GetPose().Position.y - before == doctest::Approx((3.0f + Gravity.y * FixedDelta) * FixedDelta).epsilon(1.0e-3));
+			// It rises to v^2 / 2g above, then falls.
+			float apex = character->GetPose().Position.y;
+			for (uint32_t tick = 0; tick < 60; ++tick)
+			{
+				Walk(*world, *character, glm::vec3(0.0f), 1);
+				apex = std::max(apex, character->GetPose().Position.y);
+			}
+			CHECK(apex - before > 0.4f);
+			CHECK(apex - before < 0.5f);
+			CHECK(character->GetVelocity().y < 0.0f);
+		}
 	}
 
 }

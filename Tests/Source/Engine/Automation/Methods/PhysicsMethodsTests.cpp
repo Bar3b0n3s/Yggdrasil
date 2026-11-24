@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 
 // physics.bodyInfo (Architecture §13.5 "physics.bodyInfo {entity} (velocity, sleeping, contacts, layer)", Runtime subset;
 // Docs/Decisions/0014-m11-decisions.md decision 18), in process through the editor's AutomationFixture (§15.2): a falling
@@ -174,6 +175,35 @@ namespace Engine {
 					CHECK((*info)["squeezedBy"]["path"] == Json("/Press"));
 			}
 			CHECK(squeezed);
+		}
+
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): lastMove, after
+		// squeezedBy.
+		TEST_CASE("PhysicsMethods: physics.bodyInfo reports a character's last move")
+		{
+			Test::AutomationFixture setup("PhysicsBodyInfoLastMove");
+			REQUIRE(setup.Call("entity.create", ParsePhysicsMethodJson(R"({"name":"Swimmer","components":{"Transform":{"Translation":[0,10,0]},
+				"CharacterController":{}}})"))
+					.has_value());
+			StartPhysicsScene(setup, 1);
+			const auto lastMove = [&setup](std::string_view entity)
+			{
+				const Result<Json> info = setup.Call("physics.bodyInfo", Json{ { "entity", std::string(entity) } });
+				REQUIRE_MESSAGE(info.has_value(), info.error().ToString());
+				return (*info)["lastMove"];
+			};
+			CHECK(lastMove("/Swimmer") == Json("Walk"));
+			// A free move in the air, which the next step consumes.
+			const Result<Json> evaluated = setup.Call("script.eval",
+				Json{ { "context", "play" }, { "code", "Scene.FindByName('Swimmer').CharacterController:MoveFree(vector.create(0, 1, 0))" } });
+			REQUIRE_MESSAGE(evaluated.has_value(), evaluated.error().ToString());
+			StepPhysicsScene(setup, 1);
+			CHECK(lastMove("/Swimmer") == Json("Free"));
+			// Without another call the next update walks.
+			StepPhysicsScene(setup, 1);
+			CHECK(lastMove("/Swimmer") == Json("Walk"));
+			// Empty for a body that is no character.
+			CHECK(lastMove("/Ball") == Json(""));
 		}
 
 		TEST_CASE("PhysicsMethods: physics.bodyInfo needs a play session and an entity with a body")

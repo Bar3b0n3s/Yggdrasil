@@ -5,6 +5,7 @@
 #include "Engine/Core/Result.h"
 #include "Engine/Core/Time.h"
 #include "Engine/Core/UUID.h"
+#include "Engine/Physics/CharacterController.h"
 #include "Engine/Physics/PhysicsDiagnostics.h"
 #include "Engine/Physics/PhysicsJoint.h"
 #include "Engine/Physics/PhysicsLayers.h"
@@ -69,7 +70,9 @@
 //          A pose that is not IsPlaceablePhysicsPose (a Transform written beyond MaxPhysicsCoordinate) is not applied:
 //          the entity's local Translation and Rotation go back to the body's (the values PostStep last wrote, or those
 //          the body was placed from; a Kinematic body's current pose, where it then stops).
-//       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes.
+//       5. Characters run CharacterController::Update with the velocity of their last MoveCharacter, which it consumes,
+//          and (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3) that call's
+//          CharacterMoveMode, consumed with it: Walk when the tick made no call.
 //     M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 3): between items 1-2 and 3, the collider surfaces. A
 //     ColliderSurface's signals mark its entity (never ComponentsChanged, so a surface write never recomposes the scene), and
 //     PreStep sends the surfaces of every body holding a marked collider (PhysicsWorld::SetColliderSurfaces, the velocity
@@ -162,8 +165,10 @@
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decisions 11 to 13); M20, which owns the contact path in
 // phase 1, extends it (the M20 paragraph above; Docs/Decisions/0031-m20-contract.md); M36 adds the collider surfaces (the
 // step's M36 paragraph), PhysicsCharacterState's GroundCollider, IsSqueezed and SqueezedBy, PhysicsSurfaceInfo and GetSurface
-// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), and M37 appends its joints (the M37 paragraph
-// above), each reviewed as a change to a frozen interface.
+// (Docs/Decisions/0053-m36-contact-surfaces.md decisions 3 to 5 and 12), M37 appends its joints (the M37 paragraph
+// above), and M48 adds MoveCharacter's mode and PhysicsCharacterState's LastMove
+// (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3), each reviewed as a change to a
+// frozen interface.
 
 namespace Engine {
 
@@ -380,6 +385,10 @@ namespace Engine {
 		// is not squeezed, or when that owner is disabled or pending destruction now.
 		bool IsSqueezed = false;
 		UUID SqueezedBy{};
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): how the last update moved
+		// the character (CharacterController::GetLastMove): Free for a free move in the air, Walk otherwise. Derived, like
+		// IsSqueezed, and not hashed.
+		CharacterMoveMode LastMove = CharacterMoveMode::Walk;
 	};
 
 	// M36 (Docs/Decisions/0053-m36-contact-surfaces.md decision 5; §11.5 Physics.GetSurface's SurfaceInfo): what contacts
@@ -512,10 +521,12 @@ namespace Engine {
 
 		// --- Characters (§9.6, §11.5 CharacterController) -------------------------------------------------------------------
 		// Sets the velocity of the character's next PreStep update (CharacterController::Update's desired velocity), which
-		// is consumed by that update: a script calls Move in every OnFixedUpdate it wants the character to move. Errors:
-		// NotFound "entity <id> has no character" when the entity owns no created character (or is disabled); InvalidArgument
-		// for a non-finite velocity or one with a component above MaxCharacterSpeed (Physics/CharacterController.h).
-		[[nodiscard]] Status MoveCharacter(UUID entity, const glm::vec3& velocity);
+		// is consumed by that update: a script calls Move in every OnFixedUpdate it wants the character to move. M48: and
+		// that update's mode (CharacterMoveMode::Free for CharacterController:MoveFree), consumed with it; the last call of
+		// a tick decides both. Errors, with nothing changed: NotFound "entity <id> has no character" when the entity owns no
+		// created character (or is disabled); InvalidArgument for a non-finite velocity or one with a component above
+		// MaxCharacterSpeed (Physics/CharacterController.h).
+		[[nodiscard]] Status MoveCharacter(UUID entity, const glm::vec3& velocity, CharacterMoveMode mode = CharacterMoveMode::Walk);
 		// The state after the last update. Errors: as MoveCharacter.
 		[[nodiscard]] Result<PhysicsCharacterState> GetCharacterState(UUID entity) const;
 

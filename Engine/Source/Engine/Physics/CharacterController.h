@@ -52,9 +52,16 @@
 // update, the body's push this step would leave it more than CharacterSqueezeTolerance inside the character's padded
 // capsule (GetSqueeze). The engine makes no escape and deals no damage: the game decides.
 //
+// Free moves (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3; Skerries' brief
+// S17). An Update in CharacterMoveMode::Free gives a character in the air the whole desired velocity, its vertical part
+// included, with no gravity and no floor sticking, so a script swims, climbs, glides or holds a ledge by asking for it
+// every fixed step; on the ground it is a Walk update, so a swimmer reaching the bottom stands and a climber steps off
+// at the top.
+//
 // Frozen by the M11 contract (Docs/Decisions/0014-m11-decisions.md decision 8); M34 changes what it documents of Mass,
 // Update and the inner body, reviewed as a change to a frozen interface (ADR 0049 decision 1); M36 adds the ground's body,
-// collider and surface velocity and the squeeze, reviewed as such a change too (ADR 0053 decisions 4 and 12).
+// collider and surface velocity and the squeeze, reviewed as such a change too (ADR 0053 decisions 4 and 12); M48 adds
+// CharacterMoveMode, Update's mode and GetLastMove, reviewed as such a change too (ADR 0066 decision 3).
 
 namespace Engine {
 
@@ -71,6 +78,14 @@ namespace Engine {
 	// tick of a press at 1 m/s (1.6 cm at 60 Hz), above what Jolt's solver leaves of a push it follows (its tolerances are a
 	// millimetre).
 	inline constexpr float CharacterSqueezeTolerance = 0.01f;
+
+	// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): how an Update moves the
+	// character (see Update).
+	enum class CharacterMoveMode : uint8_t
+	{
+		Walk, // every update before M48: in the air the desired vertical part is ignored and gravity acts
+		Free  // a free move: in the air the whole desired velocity, with no gravity and no floor sticking; Walk on the ground
+	};
 
 	// What a controller is created with (CharacterControllerComponent, §5.3). Every float finite.
 	struct CharacterControllerDescription
@@ -179,7 +194,13 @@ namespace Engine {
 		// beyond MaxPhysicsCoordinate leaves it where it was with no velocity (a warning is logged once per controller), so
 		// the character always stays where the world places bodies. `deltaTime` > 0 and every vector finite (asserted;
 		// Scene/PhysicsSystem validates script input first).
-		void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity);
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): `mode` Walk is all of the
+		// above. A Free update that is not grounded (as above) is a free move: the step's velocity is the whole of
+		// `desiredVelocity`, its vertical part included, clamped to MaxCharacterSpeed, with no gravity and with stick-to-floor
+		// off for the update; the walk-stairs step stays. The velocity is then the one asked for, so a Walk update in the air
+		// after it continues from it plus gravity. A grounded Free update is exactly a Walk one (an upward part leaves the
+		// ground as a jump does).
+		void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity, CharacterMoveMode mode = CharacterMoveMode::Walk);
 
 		// The character's base position and rotation.
 		[[nodiscard]] PhysicsPose GetPose() const;
@@ -203,6 +224,9 @@ namespace Engine {
 		// character's capsule against the pushing bodies alone, only in an update that met one. A teleport keeps the last
 		// update's value.
 		[[nodiscard]] CharacterSqueeze GetSqueeze() const;
+		// M48: how the last Update moved the character: Free for a free move in the air, Walk otherwise (a grounded Free update
+		// is a Walk one); Walk before the first update. A teleport keeps it.
+		[[nodiscard]] CharacterMoveMode GetLastMove() const;
 		// The kinematic inner body (§9.6) that raycasts, overlaps and sensors see; its object layer has the Character kind
 		// (M34), so no other body meets it in the solver.
 		[[nodiscard]] BodyHandle GetInnerBody() const;

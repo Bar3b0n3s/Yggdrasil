@@ -361,9 +361,59 @@ The Roadmap's M48 acceptance, each a named test or check:
   - `Components.cpp`, `PhysicsRegistration.cpp`, and Architecture §9.6 and §13.5 are shared.
 - **The game's part.** The swim over real water needs M47, and replays with a character on a moving light body are re-recorded. Both go to the Skerries and World Tree sessions through the product owner.
 
+## The W48.1 record
+
+W48.1 makes decision 3's S17 part exact. Its checkpoint fixes the frozen header's change, M34's way: every existing call keeps its meaning, and a scene that never calls `MoveFree` simulates bit for bit as before.
+
+- **The header** (`Physics/CharacterController.h`, a reviewed change to M11's frozen interface, ADR 0014 decision 8):
+  - `enum class CharacterMoveMode : uint8_t { Walk, Free }`, before `CharacterControllerDescription`.
+  - `void Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity, CharacterMoveMode mode = CharacterMoveMode::Walk)`. Its comment states the free move.
+  - **Departure (an addition): `[[nodiscard]] CharacterMoveMode GetLastMove() const`**, after `GetSqueeze`. It returns `Free` for a free move in the air and `Walk` otherwise, `Walk` before the first update; a teleport keeps it.
+    - Why: decision 3 derives `PhysicsCharacterState::LastMove` "like `IsSqueezed`". Whether an update was in the air is decided inside `Update` (Jolt's `OnGround` while not leaving faster than `LeavingGroundSpeed`). The session reads the answer from the controller, as it reads the squeeze, rather than repeat that test from outside.
+  - The file comment gains a "Free moves" paragraph, and its frozen list gains M48's sentence.
+- **The update** (`CharacterController.cpp`, `Update`):
+  - `free = mode == Free && !grounded`, with today's grounded test.
+  - A free update's step velocity is `ClampSpeed(desired)`, horizontal and vertical, with no gravity and no ground velocity. Otherwise it is computed exactly as before.
+  - `mStickToFloorStepDown` is zero for a free update; `WalkStairs`, `PushGround`, the range check, the contacts and the squeeze run as for any update.
+  - `State::LastMove` records which of the two the update was.
+  - The `.cpp` file comment gains the "Free moves" paragraph.
+- **The session:**
+  - `PhysicsSystem::MoveCharacter(UUID, const glm::vec3&, CharacterMoveMode mode = CharacterMoveMode::Walk)` checks both modes alike. An error changes nothing, so the last valid call of the tick stays.
+  - `PhysicsCharacterEntry::DesiredMode` (Walk) is set with `DesiredVelocity`, and PreStep's item 5 passes it to `Update` and resets it to Walk with the velocity.
+  - `PhysicsCharacterState::LastMove` is `GetLastMove()`, derived and not hashed.
+  - `PhysicsSystem.h` includes `CharacterController.h` for the enum. Its item 5, `MoveCharacter` and frozen paragraph say what M48 adds.
+- **Scripts:**
+  - `CharacterController:MoveFree(velocity: vector) -> ()` is registered after `Move`, so the proxy has 8 methods. It is mutating, in every run mode and at run time, with decision 3's description.
+  - One template, `Utils::CharacterMove<CharacterMoveMode>`, serves `Move` and `MoveFree`. Both share `BoundedVector(MaxCharacterSpeed)` and the session's check.
+  - `GetVelocity`'s description is decision 3's.
+  - Like every member, it is a visual-scripting node, `Call.CharacterController.MoveFree`: a statement, as `Move` is.
+- **Automation:** `physics.bodyInfo`'s result gains `lastMove`, a string after `squeezedBy` and before `tick`: "Walk" or "Free" for a character, empty for other bodies. M44's `centerOfMass` and M47's `buoyancy` go before it at the landing. It is still 126 methods and 86 tools.
+- **Tests:**
+  - `CharacterControllerTests.cpp`:
+    - "a free move in the air takes the whole velocity asked, and no gravity acts": a falling character, then a second of free moves at (2, 3, -1).
+    - "a free move while grounded is a Move": two identical worlds, a walker and a free mover, compared bit for bit for every update of a walk up a 0.2 m step and a jump.
+    - "a free move in the air is not stuck to the floor". A character in the air leans on a 60-degree slope; that steep contact supports it (`OnSteepGround`) without its being grounded, with the floor 0.2 m below its feet. It then moves off level. A free move keeps its height to 1e-5, while a walk in the same place is stuck to the floor at once (the case's control).
+    - "a character free-moved toward a moving target height follows it within 1 mm": 600 ticks of a sine swell while swimming 20 m.
+    - "a climber free-moved along a wall rises along it and steps off at the top onto the floor": a 6 m wall at 2 m/s, pressed into it (0.68 m from the face below its top), then a forward `Move` onto the platform.
+    - "a Move in the air after a free move continues from its velocity plus gravity".
+  - `PhysicsSystemCharactersTests.cpp`: "a free move faster than MaxCharacterSpeed is refused" (refusals keep the earlier free move) and "the last Move or MoveFree of a tick decides the next update" (both orders, then a tick with no call).
+  - `Scripting/Bindings/PhysicsTests.cpp`: "PhysicsBindings: CharacterController:MoveFree reaches the next update as a free move and refuses what Move refuses". `MoveFree` also joins the coverage script, the malformed list and the read-only list.
+  - `ScriptProxyTests.cpp`'s write list and `ScriptBindingFuzzTests.cpp`'s families gain `MoveFree`.
+  - `PhysicsMethodsTests.cpp`: "PhysicsMethods: physics.bodyInfo reports a character's last move", the free move made with `script.eval` in the play VM.
+  - `Tests/Automation/test_physics.py`: `test_body_info_reports_a_characters_last_move`.
+- **FeatureTest:** lands with W48.3. Until then gate 2 names `CharacterController.MoveFree` uncovered, as M42's W42.1 left its own, and the milestone gate runs on W48.3's tree.
+- **Documents:** the header comments above. Architecture §9.6, §11.5 and §13.5, the Backlog and the skills land with W48.3, as decision 2 orders them. The generated references are regenerated with this wave.
+- **Runs** (2026-11-24, the wave's checkpoint on `milestone/m48`):
+  - Debug build: 27 projects, 0 warnings.
+  - unit, Debug, the wave's cases (`CharacterController`'s six, `PhysicsSystem`'s two, `PhysicsBindings:*`, `PhysicsMethods`' case, `ScriptProxy*`, `ScriptBindingFuzz*`): 32 passed after one fix of the climber case's own script (it climbed on past the top edge it had already stepped over).
+  - unit, Debug, unfiltered (`--parallel 4`): 5,390 passed, 48 skipped, all child-process targets. (An earlier unsharded run reached Test.py's 3,600 s limit on the loaded machine with no failure.)
+  - automation, Debug, `test_physics`: 15 passed.
+  - `Lint.py`, `Format.py --check` and `GenerateDocs.py --config Debug --check`: passed.
+  - No GPU run: nothing W48.1 adds renders.
+
 ## Before milestone completion
 
-- [ ] W48.1 committed; [ ] the lead's review pass taken and every finding fixed.
+- [x] W48.1 committed; [ ] the lead's review pass taken and every finding fixed.
 - [ ] W48.2 committed, its record holding the base run (the bridge case failing, its sink and stall, the cause); [ ] the lead's review pass taken and every finding fixed.
 - [ ] W48.3 committed; [ ] the lead's review pass taken and every finding fixed.
 - [ ] The landing: phase 8's batch, M48 last, appending after M43 to M47 in every shared file; FeatureTest regenerated and `EngineVersionString` 0.9.0; `CI.py --require-clang-cl` green; main fast-forwarded and pushed.

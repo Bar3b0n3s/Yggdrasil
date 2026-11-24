@@ -239,6 +239,9 @@ namespace Engine {
 			ComponentChecked(call, physics.WakeUp(entity.GetUUID()));
 			return 0;
 		}
+		// Move (Walk) and M48's MoveFree (Free; Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md
+		// decision 3): one check for both, so MoveFree refuses exactly what Move refuses.
+		template<CharacterMoveMode Mode>
 		static int CharacterMove(ScriptCall& call)
 		{
 			const Entity entity = ComponentSelf(call, "CharacterController");
@@ -248,7 +251,7 @@ namespace Engine {
 			if (!state)
 				return Lua::RaiseError(call, state.error());
 			ComponentMutation(call);
-			ComponentChecked(call, physics.MoveCharacter(entity.GetUUID(), velocity));
+			ComponentChecked(call, physics.MoveCharacter(entity.GetUUID(), velocity, Mode));
 			return 0;
 		}
 		template<int Field>
@@ -530,10 +533,16 @@ namespace Engine {
 				.Method("IsSleeping", Utils::BodyRead<&PhysicsSystem::IsSleeping>, "(self: RigidBody) -> boolean", "Whether the body is sleeping.", read)
 				.Method("WakeUp", Utils::BodyWake, "(self: RigidBody) -> ()", "Wake a sleeping body.", write);
 			api.Type("CharacterController")
-				.Method("Move", Utils::CharacterMove, "(self: CharacterController, velocity: vector) -> ()", "Supply desired velocity for the next fixed character update.", write)
+				.Method("Move", Utils::CharacterMove<CharacterMoveMode::Walk>, "(self: CharacterController, velocity: vector) -> ()", "Supply desired velocity for the next fixed character update.", write)
+				.Method("MoveFree", Utils::CharacterMove<CharacterMoveMode::Free>, "(self: CharacterController, velocity: vector) -> ()",
+					"Supply the velocity of the next fixed character update as a free move: in the air the character takes it whole, its vertical "
+					"part included, with no gravity and no floor sticking (swimming, climbing, gliding); on the ground it is Move. Call it every "
+					"OnFixedUpdate; the last Move or MoveFree of a tick wins.",
+					write)
 				.Method("IsGrounded", Utils::CharacterRead<0>, "(self: CharacterController) -> boolean", "Whether the last character update found supporting ground.", read)
 				.Method("GetGroundNormal", Utils::CharacterRead<1>, "(self: CharacterController) -> vector", "Ground normal from the last update.", read)
-				.Method("GetVelocity", Utils::CharacterRead<2>, "(self: CharacterController) -> vector", "Velocity after the last update.", read)
+				.Method("GetVelocity", Utils::CharacterRead<2>, "(self: CharacterController) -> vector",
+					"The velocity the last update asked for (its step velocity), not the distance it covered: a blocked character still reports it.", read)
 				.Method("GetGroundCollider", Utils::CharacterEntityRead<0>, "(self: CharacterController) -> Entity?",
 					"The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when "
 					"that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity.",

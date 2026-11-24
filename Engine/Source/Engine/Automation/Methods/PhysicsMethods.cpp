@@ -5,6 +5,7 @@
 #include "Engine/Automation/Methods/SharedMethodSupport.h"
 #include "Engine/Automation/Protocol/MethodRegistry.h"
 #include "Engine/Core/Assert.h"
+#include "Engine/Physics/CharacterController.h"
 #include "Engine/Reflection/TypeRegistry.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/PhysicsSystem.h"
@@ -146,6 +147,7 @@ namespace Engine {
 				result.Squeezed = report->Character->IsSqueezed;
 				if (report->Character->SqueezedBy.IsValid())
 					result.SqueezedBy = Utils::SummarizeEntityId(context, scene, report->Character->SqueezedBy);
+				result.LastMove = report->Character->LastMove == CharacterMoveMode::Free ? "Free" : "Walk";
 			}
 			result.Tick = ToAutomationCounter(session->GetTick());
 			return result;
@@ -230,6 +232,9 @@ namespace Engine {
 			.Field("squeezedBy", &PhysicsBodyInfoResult::SqueezedBy,
 				"The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty "
 				"when it is not squeezed, for other bodies, and when that entity is disabled or destroyed.")
+			.Field("lastMove", &PhysicsBodyInfoResult::LastMove,
+				"How a character's last update moved it: \"Free\" for a free move in the air (CharacterController:MoveFree, which on the "
+				"ground is a Move), \"Walk\" otherwise; empty for other bodies.")
 			.Field("tick", &PhysicsBodyInfoResult::Tick, "The play session's tick when the body was read.");
 
 		// M37 (Docs/Decisions/0054-m37-joints.md decision 10).

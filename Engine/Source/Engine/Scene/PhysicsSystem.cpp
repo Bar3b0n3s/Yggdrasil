@@ -1578,8 +1578,8 @@ namespace Engine {
 		}
 		state.WakeOwners(woken);
 
-		// 5. Characters: a Transform write teleports them, then each runs its update with the velocity of its last
-		// MoveCharacter, which the update consumes.
+		// 5. Characters: a Transform write teleports them, then each runs its update with the velocity and mode of its last
+		// MoveCharacter, which the update consumes (M48: Walk when the tick made no call).
 		const glm::vec3 gravity = state.World->GetGravity();
 		for (const UUID id : order)
 		{
@@ -1610,8 +1610,9 @@ namespace Engine {
 			glm::vec3 characterGravity = gravity * entry.GravityFactor;
 			if (!Utils::IsFinite(characterGravity))
 				characterGravity = glm::vec3(0.0f);
-			entry.Controller->Update(deltaTime, entry.DesiredVelocity, characterGravity);
+			entry.Controller->Update(deltaTime, entry.DesiredVelocity, characterGravity, entry.DesiredMode);
 			entry.DesiredVelocity = glm::vec3(0.0f);
+			entry.DesiredMode = CharacterMoveMode::Walk;
 		}
 
 		// Dormant contacts a body of which is awake now: the step will report them again if they still touch.

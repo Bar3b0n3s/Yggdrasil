@@ -547,7 +547,7 @@ declare extern type CharacterController with
 	GetGroundNormal: (self: CharacterController) -> vector
 	-- The owner of the body that squeezed the character in its last update (the one with the lowest body handle when several did, a deterministic choice), or nil while it is not squeezed or that entity is disabled or destroyed. [All modes; Runtime|Test; pure/read]
 	GetSqueezingBody: (self: CharacterController) -> Entity?
-	-- Velocity after the last update. [All modes; Runtime|Test; pure/read]
+	-- The velocity the last update asked for (its step velocity), not the distance it covered: a blocked character still reports it. [All modes; Runtime|Test; pure/read]
 	GetVelocity: (self: CharacterController) -> vector
 	-- The multiplier of the project's gravity for the character. [All modes; Runtime|Test; pure/read; setter mutates]
 	GravityFactor: number
@@ -567,6 +567,8 @@ declare extern type CharacterController with
 	MaxSlopeAngle: number
 	-- Supply desired velocity for the next fixed character update. [All modes; Runtime|Test; mutates]
 	Move: (self: CharacterController, velocity: vector) -> ()
+	-- Supply the velocity of the next fixed character update as a free move: in the air the character takes it whole, its vertical part included, with no gravity and no floor sticking (swimming, climbing, gliding); on the ground it is Move. Call it every OnFixedUpdate; the last Move or MoveFree of a tick wins. [All modes; Runtime|Test; mutates]
+	MoveFree: (self: CharacterController, velocity: vector) -> ()
 	-- The radius of the character's capsule, in metres. [All modes; Runtime|Test; pure/read; setter mutates]
 	Radius: number
 	-- The highest step the character climbs without jumping, in metres. [All modes; Runtime|Test; pure/read; setter mutates]

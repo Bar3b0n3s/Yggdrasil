@@ -691,7 +691,7 @@ Script members of `CharacterController`:
 | `GetGroundCollider` | method | `(self: CharacterController) -> Entity?` |  | All | The collider entity the last update stood on (another character's entity when it stood on one), or nil while not grounded or when that entity is disabled or destroyed; Physics.GetSurface reads its friction and surface velocity. |
 | `GetGroundNormal` | method | `(self: CharacterController) -> vector` |  | All | Ground normal from the last update. |
 | `GetSqueezingBody` | method | `(self: CharacterController) -> Entity?` |  | All | The owner of the body that squeezed the character in its last update (the one with the lowest body handle when several did, a deterministic choice), or nil while it is not squeezed or that entity is disabled or destroyed. |
-| `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | Velocity after the last update. |
+| `GetVelocity` | method | `(self: CharacterController) -> vector` |  | All | The velocity the last update asked for (its step velocity), not the distance it covered: a blocked character still reports it. |
 | `GravityFactor` | proxy field | `number` | read/write | All | The multiplier of the project's gravity for the character. |
 | `Height` | proxy field | `number` | read/write | All | The character's total height, in metres. |
 | `InheritGroundVelocity` | proxy field | `boolean` | read/write | All | While grounded, the character also moves with the horizontal velocity of what it stands on, so a moving platform carries it; a Dynamic platform lighter than the character never does. A ColliderSurface's SurfaceVelocity carries it either way. |
@@ -701,6 +701,7 @@ Script members of `CharacterController`:
 | `Mass` | proxy field | `number` | read/write | All | The character's mass in kilograms, used when it pushes bodies; a Dynamic body lighter than it never moves, lifts or carries the character. |
 | `MaxSlopeAngle` | proxy field | `number` | read/write | All | The steepest slope the character can walk up, in degrees. |
 | `Move` | method | `(self: CharacterController, velocity: vector) -> ()` |  | All | Supply desired velocity for the next fixed character update. |
+| `MoveFree` | method | `(self: CharacterController, velocity: vector) -> ()` |  | All | Supply the velocity of the next fixed character update as a free move: in the air the character takes it whole, its vertical part included, with no gravity and no floor sticking (swimming, climbing, gliding); on the ground it is Move. Call it every OnFixedUpdate; the last Move or MoveFree of a tick wins. |
 | `Radius` | proxy field | `number` | read/write | All | The radius of the character's capsule, in metres. |
 | `StepHeight` | proxy field | `number` | read/write | All | The highest step the character climbs without jumping, in metres. |
 

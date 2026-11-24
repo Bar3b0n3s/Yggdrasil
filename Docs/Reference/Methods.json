@@ -17224,6 +17224,10 @@
 						"description": "The owner of the body that squeezed a character in its last update, as CharacterController:GetSqueezingBody reads it; empty when it is not squeezed, for other bodies, and when that entity is disabled or destroyed.",
 						"$ref": "#/$defs/EntitySummary"
 					},
+					"lastMove": {
+						"description": "How a character's last update moved it: \"Free\" for a free move in the air (CharacterController:MoveFree, which on the ground is a Move), \"Walk\" otherwise; empty for other bodies.",
+						"type": "string"
+					},
 					"tick": {
 						"description": "The play session's tick when the body was read.",
 						"type": "integer",

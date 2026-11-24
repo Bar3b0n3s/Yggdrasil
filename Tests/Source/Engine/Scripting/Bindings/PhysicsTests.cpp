@@ -147,6 +147,7 @@ assert(character:GetGroundCollider() == nil)
 assert(Physics.GetSurface(character:GetGroundCollider()) == nil)
 assert(character:IsSqueezed() == false and character:GetSqueezingBody() == nil)
 character:Move(vector.create(1,0,0))
+character:MoveFree(vector.create(0,1,0))
 return true
 )");
 		const auto step = SimStep::FromTick(0, 1.0 / 60.0);
@@ -218,6 +219,7 @@ for _, fn in {
 	function() fixed:SetAngularVelocity(up) end,
 	function() dynamic:Teleport(vector.create(1e30,0,0)) end,
 	function() Scene.FindByName("Character").CharacterController:Move(vector.create(1e30,0,0)) end,
+	function() Scene.FindByName("Character").CharacterController:MoveFree(vector.create(1e30,0,0)) end,
 } do
 	local ok, message = pcall(fn)
 	assert(not ok and type(message) == "string")
@@ -226,6 +228,50 @@ assert(dynamic:GetLinearVelocity() == zero and Physics.GetGravity() == zero)
 return true
 )");
 			CHECK(fixture.Script.ExternalMutations.empty());
+			CHECK(fixture.System->GetDiagnostics().empty());
+		}
+
+		// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3): MoveFree shares Move's
+		// check, and its velocity reaches the next update with the Free mode.
+		TEST_CASE("PhysicsBindings: CharacterController:MoveFree reaches the next update as a free move and refuses what Move refuses")
+		{
+			PhysicsBindingFixture fixture;
+			REQUIRE(fixture.Start());
+			CheckPhysicsBinding(fixture.Script, R"(
+local character = Scene.FindByName("Character").CharacterController
+for _, value in { vector.create(1e30,0,0), vector.create(0,501,0), vector.create(0/0,0,0), vector.create(0,0,-math.huge), "fast", 42, Color.New(1,1,1) } do
+	local moved, moveError = pcall(function() character:Move(value :: any) end)
+	local freed, freeError = pcall(function() character:MoveFree(value :: any) end)
+	assert(not moved and not freed and type(moveError) == "string" and type(freeError) == "string")
+end
+assert(not pcall(function() (character :: any):MoveFree() end))
+return true
+)");
+			CHECK(fixture.Script.ExternalMutations.empty());
+			const UUID character = fixture.Script.GetScene().FindEntityByPath("/Character").GetUUID();
+			const auto step = [&fixture](uint64_t tick)
+			{
+				const auto simStep = SimStep::FromTick(tick, 1.0 / 60.0);
+				fixture.System->PreStep(simStep);
+				fixture.System->Step(simStep);
+				fixture.System->PostStep(simStep);
+			};
+			// Nothing reached the update: it walks, with no gravity in the fixture's world.
+			step(0);
+			Result<PhysicsCharacterState> state = fixture.System->GetCharacterState(character);
+			REQUIRE(state.has_value());
+			CHECK(state->LastMove == CharacterMoveMode::Walk);
+			CHECK(state->Velocity == glm::vec3(0.0f));
+
+			CheckPhysicsBinding(fixture.Script, R"(
+Scene.FindByName("Character").CharacterController:MoveFree(vector.create(0,2,1))
+return true
+)");
+			step(1);
+			state = fixture.System->GetCharacterState(character);
+			REQUIRE(state.has_value());
+			CHECK(state->LastMove == CharacterMoveMode::Free);
+			CHECK(state->Velocity == glm::vec3(0.0f, 2.0f, 1.0f));
 			CHECK(fixture.System->GetDiagnostics().empty());
 		}
 
@@ -249,6 +295,7 @@ for _, fn in {
 	function() body:WakeUp() end,
 	function() Scene.FindByName("Kinematic").RigidBody:MoveKinematic(vector.zero,Quat.Identity()) end,
 	function() Scene.FindByName("Character").CharacterController:Move(vector.one) end,
+	function() Scene.FindByName("Character").CharacterController:MoveFree(vector.one) end,
 } do assert(not pcall(fn)) end
 assert(body:GetLinearVelocity() == vector.zero)
 return true

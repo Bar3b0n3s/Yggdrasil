@@ -102,6 +102,8 @@ namespace Engine {
 		Scope<CharacterController> Controller{};
 		// The velocity of the last MoveCharacter, consumed by the next PreStep.
 		glm::vec3 DesiredVelocity = glm::vec3(0.0f);
+		// M48: the mode of the last MoveCharacter, consumed with DesiredVelocity.
+		CharacterMoveMode DesiredMode = CharacterMoveMode::Walk;
 		// The owner's local Translation and Rotation that PostStep last wrote (as for Dynamic bodies).
 		glm::vec3 WrittenTranslation = glm::vec3(0.0f);
 		glm::quat WrittenRotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);

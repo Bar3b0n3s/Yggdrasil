@@ -321,6 +321,8 @@ return true
 				{ "RigidBody2D.Teleport", "holders.RigidBody2D.RigidBody2D:Teleport(vector.zero)" },
 				{ "RigidBody2D.WakeUp", "holders.RigidBody2D.RigidBody2D:WakeUp()" },
 				{ "CharacterController.Move", "holders.CharacterController.CharacterController:Move(vector.one)" },
+				// M48 (Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3).
+				{ "CharacterController.MoveFree", "holders.CharacterController.CharacterController:MoveFree(vector.one)" },
 				{ "AudioSource.Play", "holders.AudioSource.AudioSource:Play()" },
 				{ "AudioSource.Stop", "holders.AudioSource.AudioSource:Stop()" },
 				{ "AudioSource.Pause", "holders.AudioSource.AudioSource:Pause()" },

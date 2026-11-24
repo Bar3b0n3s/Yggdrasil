@@ -75,6 +75,12 @@
 // character's capsule against those bodies alone. A body whose push over the step (its speed times the step) would end more
 // than CharacterSqueezeTolerance inside the padded capsule squeezes it; the update could not keep the character ahead of it.
 //
+// Free moves (M48, Docs/Decisions/0066-m48-characters-off-the-ground-and-on-light-bodies.md decision 3). An update in
+// CharacterMoveMode::Free that is not grounded sets the step's velocity to the desired one whole, with no gravity, and
+// turns ExtendedUpdate's stick-to-floor off for that update (a free move gliding past a ledge keeps its height); the
+// controller's own walk-stairs step runs as for any update. A grounded one computes exactly what a Walk update does.
+// GetLastMove reports which of the two the update was.
+//
 // Range. A character never leaves the range physics places bodies in (IsPlaceablePhysicsPose): an update that would
 // carry it beyond MaxPhysicsCoordinate leaves it where it was, with no velocity, and logs a warning once per controller.
 // The weight the character puts on what it stands on (its mass times the gravity times the step, PushGround) is capped at
@@ -299,6 +305,8 @@ namespace Engine {
 
 		// M36 W36.2: the squeeze of the last update (GetSqueeze).
 		CharacterSqueeze Squeeze{};
+		// M48: how the last update moved the character (GetLastMove).
+		CharacterMoveMode LastMove = CharacterMoveMode::Walk;
 
 		// M36: a collider a character stands on (FindGroundCollider).
 		struct GroundColliderInfo
@@ -610,7 +618,7 @@ namespace Engine {
 		return controller;
 	}
 
-	void CharacterController::Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity)
+	void CharacterController::Update(float deltaTime, const glm::vec3& desiredVelocity, const glm::vec3& gravity, CharacterMoveMode mode)
 	{
 		const bool valid = std::isfinite(deltaTime) && deltaTime > 0.0f && Detail::IsFinite(desiredVelocity) && Detail::IsFinite(gravity);
 		ENGINE_CORE_ASSERT(valid, "CharacterController::Update needs a finite delta time > 0 and finite vectors");
@@ -659,14 +667,17 @@ namespace Engine {
 			const JPH::Vec3 surface = Detail::ToJolt(*groundSurface);
 			carried = surface - surface.Dot(up) * up;
 		}
-		const JPH::Vec3 stepVelocity = Utils::ClampSpeed(desired - desiredVertical + carried + vertical);
+		// M48: a free move in the air takes the desired velocity whole (see the file comment).
+		const bool free = mode == CharacterMoveMode::Free && !grounded;
+		const JPH::Vec3 stepVelocity = Utils::ClampSpeed(free ? desired : desired - desiredVertical + carried + vertical);
 		character.SetLinearVelocity(stepVelocity);
+		state.LastMove = free ? CharacterMoveMode::Free : CharacterMoveMode::Walk;
 
-		// Stick to the floor over steps and slopes down to StepHeight; the stairs up to it are the controller's own step
-		// (State::WalkStairs), which leaves light bodies out.
+		// Stick to the floor over steps and slopes down to StepHeight, but in a free move; the stairs up to it are the
+		// controller's own step (State::WalkStairs), which leaves light bodies out.
 		JPH::CharacterVirtual::ExtendedUpdateSettings update;
 		update.mWalkStairsStepUp = JPH::Vec3::sZero();
-		update.mStickToFloorStepDown = -up * state.StepHeight;
+		update.mStickToFloorStepDown = free ? JPH::Vec3::sZero() : -up * state.StepHeight;
 
 		JPH::PhysicsSystem& system = *state.World->m_State->System;
 		const JPH::ObjectLayer layer = MakePhysicsObjectLayer(state.Layer, PhysicsObjectKind::Moving);
@@ -767,6 +778,11 @@ namespace Engine {
 	CharacterSqueeze CharacterController::GetSqueeze() const
 	{
 		return m_State->Squeeze;
+	}
+
+	CharacterMoveMode CharacterController::GetLastMove() const
+	{
+		return m_State->LastMove;
 	}
 
 	BodyHandle CharacterController::GetInnerBody() const
