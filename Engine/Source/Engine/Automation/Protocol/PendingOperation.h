@@ -10,7 +10,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <string_view>
 #include <variant>
 
 // Requests that take more than one frame (Architecture §13.2 "Pending operations"): play.step, play.waitFor,
@@ -21,19 +20,16 @@ namespace Engine {
 
 	class MethodContext;
 
-	// What a run reports it is doing (PendingProgress::Stage; Architecture §13.2 "Progress"). A recording's three runs are
-	// Record, Verify and InputCheck, in that order.
+	// What a run reports it is doing (PendingProgress::Stage; Architecture §13.2 "Progress"). A recording's runs are
+	// Record, Verify and, for one with input events, InputCheck, in that order (PendingProgress::Runs).
 	enum class PendingProgressStage : uint8_t
 	{
 		Suite,     // test.run: a selected suite's cases run
 		Replay,    // test.run: a committed replay plays; input.replay
-		Record,    // test.run {record}: the recorded run, the suite whose input the replay keeps (run 1 of 3)
-		Verify,    // the recording replayed with its input, strictly (run 2 of 3): test.run {record}, input.record stop
-		InputCheck // the recording replayed without its input (run 3 of 3): the same
+		Record,    // test.run {record}: the recorded run, the suite whose input the replay keeps (run 1)
+		Verify,    // the recording replayed with its input, strictly (run 2): test.run {record}, input.record stop
+		InputCheck // the recording replayed without its input (run 3, only with input events): the same
 	};
-
-	// The wire name of a stage ("suite", "replay", "record", "verify", "inputCheck").
-	[[nodiscard]] std::string_view PendingProgressStageToString(PendingProgressStage stage);
 
 	// A long operation's report of its work (Architecture §13.2 "Progress"), which the Dispatcher sends its client as a
 	// $/progress notification (MakeProgressNotification): when the handler returns the operation, after a Poll that reached
@@ -52,8 +48,12 @@ namespace Engine {
 		std::string Subject{};
 		uint64_t Tick = 0;      // the tick the stage's session reached
 		uint64_t FinalTick = 0; // the tick the stage ends at when known (a replay's final tick), else 0
-		uint32_t Step = 0;      // which of Steps the stage belongs to (1-based: a test run's selected suites, then its replays)
+		uint32_t Step = 0;      // which of Steps the stage belongs to (1-based: the selected suites, then the replays)
 		uint32_t Steps = 0;     // 0 when the operation has no such count
+		// A recording's runs once known: 3, or 2 for one without input events, which has no input check (Verify ends
+		// it); 0 while not known (test.run's recorded run, whose input events are known only at its end) and for any
+		// other stage.
+		uint32_t Runs = 0;
 	};
 
 	// One running request. Created by a pending handler (MethodRegistry::AddPending) and owned by the Dispatcher until it

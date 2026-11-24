@@ -2749,11 +2749,13 @@ end))");
 				{
 					sawCase = sawCase || (progress.Subject == "Pilot/drive" && progress.Tick > 0);
 					CHECK(progress.FinalTick == 0);
+					CHECK(progress.Runs == 0); // its input events are known only at its end
 					continue;
 				}
-				// The recording's runs name the recorded suite and the recording's final tick.
+				// The recording's runs name the recorded suite, the recording's final tick and its three runs.
 				CHECK(progress.Subject == "Pilot");
 				CHECK(progress.FinalTick == recording->FinalTick);
+				CHECK(progress.Runs == 3);
 				CHECK(progress.Tick <= recording->FinalTick);
 				uint64_t& reached = progress.Stage == FeatureTestStage::Verify ? verifiedTo : checkedTo;
 				CHECK(progress.Tick >= reached);
@@ -2762,6 +2764,20 @@ end))");
 			CHECK(sawCase);
 			CHECK(verifiedTo > 0);
 			CHECK(checkedTo > 0);
+		}
+
+		TEST_CASE("TestRunner: a recording without input events reports two runs, the verification its last")
+		{
+			RunnerHost host;
+			host.Suite(R"(return Test.Suite("Idle",function() Test.Case("wait",function() Test.WaitTicks(3) end) end))");
+			FeatureTestRunner runner;
+			const std::vector<FeatureTestProgress> seen = RunNotingProgress(host, runner, { .Record = true });
+			const Result<ReplayDocument> recording = runner.TakeRecording();
+			REQUIRE(recording);
+			CHECK(recording->Events.empty());
+			CHECK(StagesOf(seen) == std::vector<FeatureTestStage>{ FeatureTestStage::Record, FeatureTestStage::Verify });
+			for (const FeatureTestProgress& progress : seen)
+				CHECK(progress.Runs == (progress.Stage == FeatureTestStage::Verify ? 2U : 0U));
 		}
 
 		TEST_CASE("TestRunner: a run reports each selected suite, then each replay with its place among them")

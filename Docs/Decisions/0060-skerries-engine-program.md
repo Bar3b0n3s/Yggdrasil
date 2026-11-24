@@ -96,10 +96,10 @@ All of it goes straight to main, with ADR 0051's targeted checks.
 
 1. **Shard the ASan unit run,** as the fuzz step is sharded: `Hardening.py`'s `asan-unit` step and `Test.py`'s sanitized unit run, with their tests. This closes `Docs/Backlog.md` §3's row. It needs one builder session.
 2. **S20, long runs through the bridge** (about 1.5 to 2 sessions; ADR 0051's targeted checks: the automation and MCP suites, the references):
-   - `test.run`, `input.record` and `input.replay` report progress from the editor: the suite or replay, its tick, and which of a recording's three runs it is in;
+   - `test.run`, `input.record` and `input.replay` report progress from the editor: the suite or replay, its tick, and which of a recording's three runs it is in (a recording without input events has two, with no input check; corrected at S20's review);
    - the bridge ends such a call when the editor finishes, however long that takes, and times it out only when its progress stops advancing;
    - the files such a run writes (the replay and a new `.meta`) are transcribed like any bridge write, so `AuditProvenance.py` passes with no re-import;
-   - a second client refused while a run holds the main thread is told to retry when the run ends.
+   - a second client refused while a run holds the main thread is told to retry once the current step of the run ends (corrected at S20's review: the main thread answers again after that step, a suite's collection or a scene load, while the run itself may go on for hours, so waiting for the whole run would be wrong; Architecture §13.2 "Watchdog").
 3. **This ADR,** with the Roadmap's phase 8 sections (M43 to M48), Architecture §18's rows, the approvals rows and AGENTS.md's gate line for the program.
 4. **Phase 8's reservation ledger,** the section "Phase 8 reservation ledger" below, read from the code at main `3aaf4b10` (ADR 0028 decision 17's form). It covers:
    - components, categories, validation codes, settings sections and script namespaces;

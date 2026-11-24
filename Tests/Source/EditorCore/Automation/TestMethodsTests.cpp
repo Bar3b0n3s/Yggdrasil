@@ -706,6 +706,7 @@ namespace Engine {
 				{
 					CHECK(params["subject"] == Json("Record.Paddle"));
 					CHECK(params["finalTick"] == finalTick);
+					CHECK(params["runs"] == Json(3));
 				}
 			}
 		}

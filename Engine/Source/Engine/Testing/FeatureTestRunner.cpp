@@ -1763,6 +1763,8 @@ namespace Engine {
 				progress.Subject = suiteName(0);
 				progress.Step = std::min<uint32_t>(1, progress.Steps);
 				progress.FinalTick = state.Recording.has_value() ? state.Recording->FinalTick : state.PlayingFinalTick;
+				// A recording without input events has no input check, so its verification is its last run.
+				progress.Runs = state.Recording.has_value() && state.Recording->Events.empty() ? 2 : 3;
 				break;
 			case State::Phase::Idle:
 			case State::Phase::Done:

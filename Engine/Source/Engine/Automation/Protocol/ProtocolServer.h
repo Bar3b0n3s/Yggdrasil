@@ -88,11 +88,11 @@ namespace Engine {
 	//     answer; an incompatible major version is answered Unsupported (listing both versions) and closes it. A good hello:
 	//       - when MaxClients connections are already authenticated, is answered InvalidState "too many automation clients"
 	//         and the connection is closed;
-	//       - while the watchdog reports a stall (Watchdog::GetStall), is answered at once with MakeBusyResponse (naming the
-	//         phase and the request whose step holds the main thread, Watchdog::GetRequest, and to retry once that step
-	//         ends) and leaves
-	//         the connection unauthenticated, without counting as a failure and with its handshake deadline restarted, so
-	//         the client retries session.hello and never hangs on a frozen editor (§13.2);
+	//       - while the watchdog reports a stall (Watchdog::GetStall), is answered at once with MakeBusyResponse
+	//         (naming the phase and the request whose step holds the main thread, Watchdog::GetRequest, and to retry
+	//         once that step ends) and leaves the connection unauthenticated, without counting as a failure and with
+	//         its handshake deadline restarted, so the client retries session.hello and never hangs on a frozen editor
+	//         (§13.2);
 	//       - otherwise marks the connection authenticated and queues a Connected event and then the hello itself, which
 	//         the main thread answers (session.hello handler);
 	//   - after authentication: a second session.hello is answered InvalidState; while the watchdog reports a stall, every

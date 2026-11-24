@@ -753,19 +753,29 @@ class EngineCallTests(BridgeTestCase):
 
 class AdvancingProgress(connection_module.EditorProgress):
     """The bridge's EditorProgress, which moves `clock` by `gap` with every report the editor sends: each report then
-    arrives most of the call's bound after the last one, as in a recording that runs for hours."""
+    arrives most of the call's bound after the last one, as in a recording that runs for hours. `consumed` counts the
+    reports the bridge has read, so a stand-in sends its next one only then and none waits unread in the client's
+    buffer, where a frozen deadline would never be checked against it (wait_until_consumed)."""
 
     def __init__(self, clock: fake_editor.FakeClock, gap: float) -> None:
         super().__init__()
         self.clock = clock
         self.gap = gap
         self.reports: list[dict[str, Any]] = []
+        self.consumed = threading.Semaphore(0)
 
     def set(self, report: dict[str, Any] | None) -> None:
         super().set(report)
         if report is not None:
             self.reports.append(report)
             self.clock.advance(self.gap)
+            self.consumed.release()
+
+    def wait_until_consumed(self) -> None:
+        """From a stand-in's handler: returns once the bridge has read its last report; a bridge that gave up never
+        reads it, and the handler then ends the connection (bounded: only a failure waits this long)."""
+        if not self.consumed.acquire(timeout=60.0):
+            raise fake_editor.CloseConnection()
 
 
 class LongCallTests(BridgeTestCase):
@@ -799,6 +809,7 @@ class LongCallTests(BridgeTestCase):
         def record(params: dict[str, Any]) -> dict[str, Any]:
             for run, (stage, work) in enumerate((("record", 1), ("verify", 2), ("inputCheck", 3)), start=1):
                 editor.send_progress(work, f"recording Record.Hops, run {run} of 3: tick {work * 100}", stage=stage)
+                progress.wait_until_consumed()
             return {"passed": True, "recordingPath": self.RECORDING["path"], "recording": self.RECORDING}
 
         editor.handlers["test.run"] = record

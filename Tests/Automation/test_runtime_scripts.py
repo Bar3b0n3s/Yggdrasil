@@ -86,8 +86,14 @@ class RuntimeScriptTests(AutomationTestCase):
                                                       'Audio.GetGroupVolume("Music")'})["value"], 0.25)
         # The second restart exposes a replacement that accidentally captured the first session's gameplay mix.
         for _ in range(2):
-            replayed = runtime.call("input.replay", {"path": path, "verify": True, "strictHash": True})
+            reports: list[dict] = []
+            replayed = runtime.call("input.replay", {"path": path, "verify": True, "strictHash": True},
+                                    progress=reports.append)
             self.assertEqual(replayed["stateHash"], saved["stateHash"])
+            # The Runtime's TCP clients hear a replay's progress as the editor's do (Skerries' brief S20).
+            self.assertTrue(reports)
+            self.assertEqual({(report["stage"], report["subject"], report["finalTick"]) for report in reports},
+                             {("replay", path, saved["tick"])})
             self.assertTrue(replayed["hashMatched"])
             self.assertEqual(runtime.call("script.eval", {"context": "play", "code":
                                                           'Audio.GetGroupVolume("Music")'})["value"], 1)
@@ -105,10 +111,15 @@ class RuntimeScriptTests(AutomationTestCase):
                 with self.assertRaises(engine_client.EngineError):
                     runtime.call("input.record", {"action": "stop", "path": invalid_path})
                 self.assertTrue(runtime.call("play.state")["recording"])
+        reports = []
         recorded = runtime.call("input.record", {"action": "stop", "path": "Nested/Local.replay", "expect": [
             {"tick": 0, "luau": "Scene.GetLoadParameters().level == 7"},
-            {"tick": 2, "luau": "Time.GetTick() == 2"}]})
+            {"tick": 2, "luau": "Time.GetTick() == 2"}]}, progress=reports.append)
         self.assertTrue(recorded["path"].startswith("user://Replays/"))
+        # A recording without input events has no input check: its verification is its last run, run 2 of 2.
+        self.assertTrue(reports)
+        self.assertEqual({(report["stage"], report["subject"], report["runs"]) for report in reports},
+                         {("verify", "Nested/Local.replay", 2)})
         reproduced = runtime.call("input.replay", {"path": recorded["path"], "verify": True, "strictHash": True})
         self.assertEqual(reproduced["stateHash"], recorded["stateHash"])
         self.assertTrue(all(item["satisfied"] for item in reproduced["expect"]))

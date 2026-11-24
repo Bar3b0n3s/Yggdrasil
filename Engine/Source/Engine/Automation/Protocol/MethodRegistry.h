@@ -161,7 +161,9 @@ namespace Engine {
 		// A test hook (debug.*): registered only with --automation-test-hooks, never a tool, never in the catalogue, and
 		// excluded from method coverage (Roadmap M4). Requires !ExposeAsTool (asserted).
 		bool TestHook = false;
-		// How long the MCP bridge waits for the call (§13.8, default 60); a pending method sets its own bound.
+		// How long the MCP bridge waits for the call (§13.8, default 60); a pending method sets its own bound. For an
+		// operation that reports progress (PendingOperation::GetProgress) it bounds only a stretch without progress:
+		// the wait counts from the request or from the last $/progress whose work grew (§13.2 "Progress").
 		uint32_t TimeoutSeconds = 60;
 		std::vector<MethodExample> Examples{};
 	};

@@ -65,11 +65,12 @@ namespace Engine {
 		// unsaved changes, among every open scene (Docs/Decisions/0031-m20-contract.md decision 14), that a selected suite or
 		// replay plays, since the run plays the saved file (the runner's GetSelection; Docs/Decisions/0027-m17-contract.md
 		// decision 3, A2); the errors of Preflight and Begin come first.
-		// Each Poll advances at least one bounded runner unit and then stops when the 50 ms wall budget is consumed, or when
-		// the runner's stage (FeatureTestRunner::GetStage) changed, so a recording's next run or the replays after the suites
-		// begin in a frame of their own and the operation's $/progress reports each (GetProgress: the runner's; Architecture
-		// §13.2 "Progress"); simulated clocks, tick deadlines and outcomes never depend on this partition. OwnsAudioTime is set on every
-		// suite session, including ScriptedClock suites. The regular editor frame loop must not also advance it.
+		// Each Poll advances at least one bounded runner unit and then stops when the 50 ms wall budget is consumed, or
+		// when the runner's stage (FeatureTestRunner::GetStage) changed, so a recording's next run or the replays after
+		// the suites begin in a frame of their own and the operation's $/progress reports each (GetProgress: the
+		// runner's; Architecture §13.2 "Progress"); simulated clocks, tick deadlines and outcomes never depend on this
+		// partition. OwnsAudioTime is set on every suite session, including ScriptedClock suites. The regular editor
+		// frame loop must not also advance it.
 		// Cases failing/timing out are successful RPC reports with Passed=false and locations, not transport failures.
 		// Writes JSON/JUnit outputs and the optional replay through the host's output/project writer with attribution.
 		// Cancel/disconnect unpublishes/destroys the runner sessions, cancels case/tasks/captures, releases audio/time

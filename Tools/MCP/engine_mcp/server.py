@@ -59,7 +59,7 @@ whose call runs (queued_message); once it runs on the worker thread, the message
 run, followed, while editor_launch waits for a machine-wide lock, by that wait's report (the lock, its holder's pid,
 worktree and command, the seconds waited, counted when the message is sent, and the bound; launcher.Activity), and,
 while a test_run, input_record or input_replay runs, by the editor's latest $/progress report (the suite or replay, its
-tick, and a recording's run 1, 2 or 3 of 3; connection.EditorProgress; Skerries' brief S20). The
+tick, and a recording's run, 1 to 3; connection.EditorProgress; Skerries' brief S20). The
 heartbeat stops when the call returns, is cancelled or raises. Each notification is bounded by NOTIFY_TIMEOUT_SECONDS,
 and one that cannot be sent ends the heartbeat (logged), never the call. A launch that gives up its wait
 (launcher.LOCK_WAIT_SECONDS, below that client's 30 min) fails with LockUnavailable naming the lock, its holders and the

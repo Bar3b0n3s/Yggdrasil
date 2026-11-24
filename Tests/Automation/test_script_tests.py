@@ -224,12 +224,13 @@ class ScriptTestRunnerTests(AutomationTestCase):
         self.assertEqual([stage for index, stage in enumerate(stages) if index == 0 or stages[index - 1] != stage],
                          ["record", "verify", "inputCheck"])
         first = reports[0]
-        self.assertEqual((first["method"], first["subject"], first["tick"], first["step"], first["steps"]),
-                         ("test.run", "Record.Hops", 0, 1, 1))
+        self.assertEqual([first[key] for key in ("method", "subject", "tick", "step", "steps", "runs")],
+                         ["test.run", "Record.Hops", 0, 1, 1, 0])
         work = [report["work"] for report in reports]
         self.assertEqual(work, sorted(set(work)), "the work grows with every report")
         for report in reports[stages.index("verify"):]:
-            self.assertEqual((report["subject"], report["finalTick"]), ("Record.Hops", result["recording"]["ticks"]))
+            self.assertEqual((report["subject"], report["finalTick"], report["runs"]),
+                             ("Record.Hops", result["recording"]["ticks"], 3))
             self.assertTrue(report["message"])
         self.assertTrue((root / path).is_file())
 

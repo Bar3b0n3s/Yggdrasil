@@ -152,14 +152,17 @@ namespace Engine {
 	// retry later.
 	[[nodiscard]] Json MakeBusyResponse(const Json& id, std::string_view phase, uint64_t stalledMilliseconds, std::string_view request = {});
 
+	// The wire name of a stage ("suite", "replay", "record", "verify", "inputCheck").
+	[[nodiscard]] std::string_view PendingProgressStageToString(PendingProgressStage stage);
+
 	// The $/progress notification of request `id` of `method` (§13.2 "Progress"): {"jsonrpc": "2.0", "method":
 	// "$/progress", "params": {"id", "method", "work", "stage" (PendingProgressStageToString), "subject", "tick",
-	// "finalTick", "step", "steps", "message" (DescribePendingProgress)}}.
+	// "finalTick", "step", "steps", "runs", "message" (DescribePendingProgress)}}.
 	[[nodiscard]] Json MakeProgressNotification(const Json& id, std::string_view method, const PendingProgress& progress);
 
-	// One line saying what `progress` reports: the stage, its subject, a recording's run (1 to 3 of 3) and the tick, such as
-	// "recording Hops, run 2 of 3 (replayed strictly with its input): tick 120 of 480" or "suite 2 of 5, Board/clears a line:
-	// tick 60".
+	// One line saying what `progress` reports: the stage, its subject, a recording's run (of its Runs once known) and
+	// the tick, such as "recording Hops, run 2 of 3 (replayed strictly with its input): tick 120 of 480" or "suite 2 of
+	// 5, Board/clears a line: tick 60".
 	[[nodiscard]] std::string DescribePendingProgress(const PendingProgress& progress);
 
 }

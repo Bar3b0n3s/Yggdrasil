@@ -370,7 +370,12 @@ namespace Engine {
 	{
 		const std::string subject = progress.Subject.empty() ? std::string() : std::format(" {}", progress.Subject);
 		const std::string ticks = progress.FinalTick != 0 ? std::format("tick {} of {}", progress.Tick, progress.FinalTick) : std::format("tick {}", progress.Tick);
-		std::string_view run;
+		// A recording's run, of its runs once known (two for one without input events, which has no input check).
+		const auto run = [&progress](uint32_t number, std::string_view what)
+		{
+			return progress.Runs != 0 ? std::format("run {} of {} ({})", number, progress.Runs, what) : std::format("run {} ({})", number, what);
+		};
+		std::string described;
 		switch (progress.Stage)
 		{
 			case PendingProgressStage::Suite:
@@ -382,11 +387,11 @@ namespace Engine {
 				const std::string separator = counter.empty() || subject.empty() ? std::string() : std::string(",");
 				return std::format("{}{}{}{}: {}", kind, counter, separator, subject, ticks);
 			}
-			case PendingProgressStage::Record:     run = "run 1 of 3 (recorded)"; break;
-			case PendingProgressStage::Verify:     run = "run 2 of 3 (replayed strictly with its input)"; break;
-			case PendingProgressStage::InputCheck: run = "run 3 of 3 (replayed without its input)"; break;
+			case PendingProgressStage::Record:     described = run(1, "recorded"); break;
+			case PendingProgressStage::Verify:     described = run(2, "replayed strictly with its input"); break;
+			case PendingProgressStage::InputCheck: described = run(3, "replayed without its input"); break;
 		}
-		return std::format("recording{}, {}: {}", subject, run, ticks);
+		return std::format("recording{}, {}: {}", subject, described, ticks);
 	}
 
 	Json MakeProgressNotification(const Json& id, std::string_view method, const PendingProgress& progress)
@@ -401,6 +406,7 @@ namespace Engine {
 		params["finalTick"] = progress.FinalTick;
 		params["step"] = progress.Step;
 		params["steps"] = progress.Steps;
+		params["runs"] = progress.Runs;
 		params["message"] = DescribePendingProgress(progress);
 		Json notification = Json::object();
 		notification["jsonrpc"] = "2.0";

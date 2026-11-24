@@ -152,15 +152,16 @@ namespace Engine {
 	[[nodiscard]] RenderExtractionRequest MakeTestScreenshotRequest(const PlaySession& session, uint32_t width, uint32_t height);
 
 	// What a running test run is doing (FeatureTestRunner::GetStage and GetProgress), which test.run reports in its
-	// $/progress (Architecture §13.2 "Progress"; Skerries' brief S20). A recording's three runs are Record, Verify and
-	// InputCheck, in that order. The runner is in Dist, so these types are its own, never the automation protocol's.
+	// $/progress (Architecture §13.2 "Progress"; Skerries' brief S20). A recording's runs are Record, Verify and, with
+	// input events, InputCheck, in that order. The runner is in Dist, so these types are its own, never the automation
+	// protocol's.
 	enum class FeatureTestStage : uint8_t
 	{
 		Suite,     // a selected suite's cases run
 		Replay,    // a committed replay plays
-		Record,    // the recorded suite of a Record run (run 1 of 3)
-		Verify,    // the recording replayed strictly with its input (run 2 of 3)
-		InputCheck // the recording replayed without its input (run 3 of 3)
+		Record,    // the recorded suite of a Record run (run 1)
+		Verify,    // the recording replayed strictly with its input (run 2)
+		InputCheck // the recording replayed without its input (run 3, only with input events)
 	};
 
 	struct FeatureTestProgress
@@ -172,6 +173,7 @@ namespace Engine {
 		uint64_t FinalTick = 0; // the replay's or the recording's final tick, 0 for a suite
 		uint32_t Step = 0;      // the suite's or replay's place among the selected suites, then replays (1-based)
 		uint32_t Steps = 0;     // how many suites and replays are selected
+		uint32_t Runs = 0;      // the recording's runs once known: 3, or 2 without input events (no input check); else 0
 	};
 
 	// Coverage (§15.5, §15.6; Docs/Decisions/0022-m14-contract.md decisions 2 to 6). When the host's project has
@@ -279,15 +281,17 @@ namespace Engine {
 		void Cancel();
 		[[nodiscard]] bool IsRunning() const;
 		[[nodiscard]] std::string GetPhase() const;
-		// What the running run is doing (FeatureTestProgress), for test.run's $/progress (Architecture §13.2 "Progress";
-		// Skerries' brief S20); nullopt when no run is running. Units counts the Advance calls that returned without an
-		// error since Begin, so it grows with every unit (a transition, a tick, a frame). Stage: Suite while a selected suite runs (Record for the
-		// recorded suite of a Record run), Replay while a committed replay plays, then a recording's Verify and InputCheck.
-		// Subject: "<suite>/<case>" while a case runs, else the suite's declared name (sanitized, SanitizeTestReportText);
-		// the replay's path; the recorded suite's name during Verify and InputCheck. Tick: the current session's tick, 0
-		// between sessions. FinalTick: the replay's or the recording's final tick, 0 for a suite. Step of Steps: the
-		// suite's or replay's place among the selected suites, then the selected replays (1-based; the recorded suite's
-		// during Verify and InputCheck).
+		// What the running run is doing (FeatureTestProgress), for test.run's $/progress (Architecture §13.2
+		// "Progress"; Skerries' brief S20); nullopt when no run is running. Units counts the Advance calls that
+		// returned without an error since Begin, so it grows with every unit (a transition, a tick, a frame). Stage:
+		// Suite while a selected suite runs (Record for the recorded suite of a Record run), Replay while a committed
+		// replay plays, then a recording's Verify and, with input events, InputCheck. Subject: "<suite>/<case>" while a
+		// case runs, else the suite's declared name (sanitized, SanitizeTestReportText); the replay's path; the
+		// recorded suite's name during Verify and InputCheck. Tick: the current session's tick, 0 between sessions.
+		// FinalTick: the replay's or the recording's final tick, 0 for a suite. Step of Steps: the suite's or replay's
+		// place among the selected suites, then the selected replays (1-based; the recorded suite's during Verify and
+		// InputCheck). Runs: during Verify and InputCheck, the recording's runs, 3, or 2 for one without input events;
+		// 0 before.
 		[[nodiscard]] std::optional<FeatureTestProgress> GetProgress() const;
 		// GetProgress' Stage alone, without building the rest (an adapter compares it after every Advance: test.run ends
 		// its frame when it changes, so each of a recording's runs is reported); nullopt when no run is running.

@@ -153,11 +153,17 @@ class ConnectionTests(unittest.TestCase):
         # Skerries' brief S20: a recording that outlasted test.run's 900 s ended with Timeout although the editor went
         # on and finished. Each $/progress whose work advanced moves the deadline, so the call outlives its bound.
         server = self.start_server({})
+        consumed = threading.Semaphore(0)
 
         def run(params: dict[str, Any]) -> dict[str, Any]:
             for work in range(1, 5):
-                server.send_progress(work, f"recording Record.Hops, run 1 of 3 (recorded): tick {work * 60}",
+                server.send_progress(work, f"recording Record.Hops, run 1 (recorded): tick {work * 60}",
                                      stage="record")
+                # The next report, and the answer, go only once the client has read this one, so none waits unread in
+                # its buffer, where a deadline that never moved would not be checked against it (bounded: a client that
+                # gave up never reads it, and only that failure waits this long).
+                if not consumed.acquire(timeout=GIVE_UP_WAIT_SECONDS):
+                    raise fake_editor.CloseConnection()
             return {"passed": True}
 
         server.handlers["test.run"] = run
@@ -170,13 +176,14 @@ class ConnectionTests(unittest.TestCase):
             def progress(report: dict[str, Any]) -> None:
                 reports.append(report)
                 clock.advance(PROGRESS_GAP)
+                consumed.release()
 
             result = client.call("test.run", {}, timeout=PROGRESS_BOUND, progress=progress)
             self.assertTrue(result["passed"])
             self.assertGreater(clock.now - started, 2 * PROGRESS_BOUND, "the call outlived its bound")
             # The callback heard every report of the request, as the editor sent it.
             self.assertEqual([report["work"] for report in reports], [1, 2, 3, 4])
-            self.assertEqual(reports[-1]["message"], "recording Record.Hops, run 1 of 3 (recorded): tick 240")
+            self.assertEqual(reports[-1]["message"], "recording Record.Hops, run 1 (recorded): tick 240")
             self.assertEqual({report["id"] for report in reports}, {server.requests[-1].request_id})
 
     def test_a_request_whose_progress_stops_advancing_times_out(self) -> None:

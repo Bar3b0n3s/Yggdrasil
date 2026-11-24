@@ -706,6 +706,7 @@ namespace Engine {
 				INFO(params.dump());
 				CHECK(params["subject"] == Json(path));
 				CHECK(params["finalTick"] == Json(130));
+				CHECK(params["runs"] == Json(3));
 				const uint64_t done = JsonReader(params["work"]).ReadUInt64().value_or(0);
 				CHECK(done > work);
 				work = done;
@@ -717,6 +718,15 @@ namespace Engine {
 			REQUIRE_FALSE(agent.GetReports().empty());
 			const Json& first = agent.GetReports().front();
 			CHECK((first["subject"] == Json(path) && first["tick"] == Json(0) && first["finalTick"] == Json(130)));
+			CHECK(first["runs"] == Json(0));
+
+			// A recording without input events has no input check: its verification is its last run, run 2 of 2.
+			agent.Call("input.record", Json{ { "action", "start" }, { "restart", true } });
+			agent.Call("play.step", Json{ { "ticks", 20 }, { "render", "none" } });
+			agent.Call("input.record", Json{ { "action", "stop" }, { "path", "Assets/Tests/Idle.replay" } });
+			CHECK(agent.GetStages() == std::vector<std::string>{ "verify" });
+			for (const Json& params : agent.GetReports())
+				CHECK(params["runs"] == Json(2));
 		}
 
 		// M38 (Docs/Decisions/0055-m38-runtime-locale.md decisions 5 and 7): input.record's locale is the recording's start locale,
