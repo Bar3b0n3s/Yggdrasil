@@ -60,11 +60,12 @@
 #include "Engine/Scene/Migrations.h"
 #include "Engine/Scene/NavigationValidation.h"
 #include "Engine/Scene/Physics2DValidation.h"
+#include "Engine/Scene/PhysicsComposition.h"
 #include "Engine/Scene/PhysicsJoints.h"
 #include "Engine/Scene/PhysicsMassValidation.h"
-#include "Engine/Scene/PhysicsVehicles.h"
 #include "Engine/Scene/PhysicsSurfaceValidation.h"
 #include "Engine/Scene/PhysicsValidation.h"
+#include "Engine/Scene/PhysicsVehicles.h"
 #include "Engine/Scene/PlanarReflectionValidation.h"
 #include "Engine/Scene/Prefab.h"
 #include "Engine/Scene/RenderAnnotations.h"
@@ -1277,15 +1278,17 @@ namespace Engine {
 			std::vector<PhysicsDiagnostic> surfaces = ValidateSceneSurfaces(*checked.Target, *checked.Layers);
 			found.insert(found.end(), std::make_move_iterator(surfaces.begin()), std::make_move_iterator(surfaces.end()));
 			// M37 (Scene/PhysicsJoints.h, Docs/Decisions/0054-m37-joints.md decision 9): PHYSICS_JOINT_INVALID, from the joint
-			// composition over the scene's bodies, as the play session's PhysicsSystem raises it.
-			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, ComposePhysicsBodies(*checked.Target, *checked.Layers));
+			// composition over the scene's bodies, as the play session's PhysicsSystem raises it. The bodies are composed once, for
+			// the joints and (M44) the vehicles.
+			const PhysicsComposition bodies = ComposePhysicsBodies(*checked.Target, *checked.Layers);
+			PhysicsJointComposition joints = ComposePhysicsJoints(*checked.Target, bodies);
 			found.insert(found.end(), std::make_move_iterator(joints.Diagnostics.begin()), std::make_move_iterator(joints.Diagnostics.end()));
 			// M44 (Scene/PhysicsMassValidation.h, Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): PHYSICS_MASS_UNUSED.
 			std::vector<PhysicsDiagnostic> masses = ValidateSceneMassProperties(*checked.Target, *checked.Layers);
 			found.insert(found.end(), std::make_move_iterator(masses.begin()), std::make_move_iterator(masses.end()));
 			// M44 (Scene/PhysicsVehicles.h): PHYSICS_VEHICLE_INVALID, from the vehicle composition over the scene's bodies, as the
 			// play session's PhysicsSystem raises it.
-			PhysicsVehicleComposition vehicles = ComposePhysicsVehicles(*checked.Target, ComposePhysicsBodies(*checked.Target, *checked.Layers));
+			PhysicsVehicleComposition vehicles = ComposePhysicsVehicles(*checked.Target, bodies);
 			found.insert(found.end(), std::make_move_iterator(vehicles.Diagnostics.begin()), std::make_move_iterator(vehicles.Diagnostics.end()));
 			for (const PhysicsDiagnostic& physics : found)
 			{

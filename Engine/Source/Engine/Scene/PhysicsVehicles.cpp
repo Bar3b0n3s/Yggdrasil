@@ -18,9 +18,12 @@
 #include <format>
 #include <map>
 #include <numbers>
+#include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace Engine {
 
@@ -54,20 +57,6 @@ namespace Engine {
 
 		// Whether `settings`' differentials drive a wheel, with shares that sum, in float in list order over the driven ones (those
 		// that name a wheel), to 1 within VehicleTorqueRatioTolerance: what Jolt asserts at every step.
-		static bool DrivesWheels(const PhysicsVehicleSettings& settings)
-		{
-			float torqueRatios = 0.0f;
-			bool driven = false;
-			for (const PhysicsVehicleDifferential& differential : settings.Differentials)
-			{
-				if (differential.LeftWheel == -1 && differential.RightWheel == -1)
-					continue;
-				torqueRatios += differential.EngineTorqueRatio;
-				driven = true;
-			}
-			return driven && std::abs(torqueRatios - 1.0f) < VehicleTorqueRatioTolerance;
-		}
-
 		static std::string DescribeVehicleEntity(ConstEntity entity)
 		{
 			return std::format("'{}' ({})", entity.GetName(), entity.GetUUID());
@@ -106,18 +95,32 @@ namespace Engine {
 			return std::nullopt;
 		}
 
-		// Whether `id` names an existing VehicleWheel entity that is effectively disabled (a wheel reference to it is no wheel).
-		static bool IsDisabledWheel(const Scene& scene, UUID id)
+		// Whether `id` names an existing VehicleWheel entity of the vehicle `vehicle` (its nearest WheeledVehicle) that is
+		// effectively disabled: a wheel reference to it is no wheel. Another vehicle's disabled wheel is not one.
+		static bool IsDisabledWheel(const Scene& scene, ConstEntity vehicle, UUID id)
 		{
 			const ConstEntity entity = scene.FindEntityByID(id);
-			return entity.IsValid() && entity.HasComponent<VehicleWheelComponent>() && !IsVehicleEntityEnabled(entity);
+			return entity.IsValid() && entity.HasComponent<VehicleWheelComponent>() && !IsVehicleEntityEnabled(entity) && FindPhysicsVehicleEntity(entity) == vehicle;
 		}
 
-		// The first reason a wheel reference of a differential (`allowNone`: null is no wheel) or a bar is refused: it names
-		// an entity that is not one of `wheels` and not a disabled VehicleWheel; nullopt when it is valid.
-		static std::optional<std::string> CheckWheelReference(const Scene& scene, std::span<const UUID> wheels, UUID wheel, std::string_view side)
+		// The names of the entities `ids`, quoted and joined: 'A', 'A' and 'B', or 'A', 'B' and 'C'.
+		static std::string JoinVehicleEntityNames(const Scene& scene, std::span<const UUID> ids)
 		{
-			if (!wheel.IsValid() || std::find(wheels.begin(), wheels.end(), wheel) != wheels.end() || IsDisabledWheel(scene, wheel))
+			std::string joined;
+			for (size_t index = 0; index < ids.size(); ++index)
+			{
+				if (index > 0)
+					joined += index + 1 == ids.size() ? " and " : ", ";
+				joined += std::format("'{}'", scene.FindEntityByID(ids[index]).GetName());
+			}
+			return joined;
+		}
+
+		// The first reason a wheel reference of a differential (null is no wheel) or a bar is refused: it names an entity that
+		// is not one of `wheels` and not a disabled VehicleWheel of the vehicle `vehicle`; nullopt when it is valid.
+		static std::optional<std::string> CheckWheelReference(const Scene& scene, ConstEntity vehicle, std::span<const UUID> wheels, UUID wheel, std::string_view side)
+		{
+			if (!wheel.IsValid() || std::find(wheels.begin(), wheels.end(), wheel) != wheels.end() || IsDisabledWheel(scene, vehicle, wheel))
 				return std::nullopt;
 			const ConstEntity entity = scene.FindEntityByID(wheel);
 			if (!entity.IsValid())
@@ -125,9 +128,10 @@ namespace Engine {
 			return std::format("its {} {} is not a wheel of the vehicle", side, DescribeVehicleEntity(entity));
 		}
 
-		// The first reason the vehicle's own fields or its wheels' are refused (the subjects "suspension" to "curve"; the
-		// hierarchy's subjects come first, in ComposePhysicsVehicles); nullopt when the world accepts them.
-		static std::optional<VehicleRefusal> CheckVehicleFields(const Scene& scene, const WheeledVehicleComponent& vehicle, std::span<const UUID> wheels)
+		// The first reason the fields of `vehicle`, the WheeledVehicle of `owner`, or its wheels' are refused (the subjects
+		// "suspension" to "curve"; the hierarchy's subjects come first, in ComposePhysicsVehicles); nullopt when the world accepts
+		// them. `wheels` are its enabled wheels (the plan's).
+		static std::optional<VehicleRefusal> CheckVehicleFields(const Scene& scene, ConstEntity owner, const WheeledVehicleComponent& vehicle, std::span<const UUID> wheels)
 		{
 			for (const UUID id : wheels)
 			{
@@ -211,15 +215,23 @@ namespace Engine {
 				return differential(std::format("it has {} differentials; at most {}", vehicle.Differentials.size(), MaxPhysicsVehicleDifferentials),
 					"drive the wheels through at most eight differentials");
 			}
-			// As Jolt sums them: in float, in list order, over the differentials that name a wheel.
+			// As Jolt sums them: in float, in list order, over the differentials that name a wheel; and again over those that name
+			// an enabled wheel, since a disabled wheel of the vehicle is no wheel (MakePhysicsVehicleSettings).
 			float torqueRatios = 0.0f;
 			bool driven = false;
+			float enabledTorqueRatios = 0.0f;
+			bool enabledDriven = false;
+			std::vector<UUID> disabled;
+			const auto isEnabledWheel = [wheels](UUID wheel)
+			{
+				return std::find(wheels.begin(), wheels.end(), wheel) != wheels.end();
+			};
 			for (size_t index = 0; index < vehicle.Differentials.size(); ++index)
 			{
 				const VehicleDifferential& entry = vehicle.Differentials[index];
 				for (const auto& [wheel, side] : { std::pair{ entry.LeftWheel, "LeftWheel" }, std::pair{ entry.RightWheel, "RightWheel" } })
 				{
-					if (const std::optional<std::string> reason = CheckWheelReference(scene, wheels, wheel, side))
+					if (const std::optional<std::string> reason = CheckWheelReference(scene, owner, wheels, wheel, side))
 						return differential(std::format("differential {}: {}", index, *reason), "name VehicleWheel entities of this vehicle in the differential, or null");
 				}
 				if (entry.LeftWheel.IsValid() && entry.LeftWheel == entry.RightWheel)
@@ -236,6 +248,16 @@ namespace Engine {
 					torqueRatios += entry.EngineTorqueRatio;
 					driven = true;
 				}
+				if (isEnabledWheel(entry.LeftWheel) || isEnabledWheel(entry.RightWheel))
+				{
+					enabledTorqueRatios += entry.EngineTorqueRatio;
+					enabledDriven = true;
+				}
+				for (const UUID wheel : { entry.LeftWheel, entry.RightWheel })
+				{
+					if (wheel.IsValid() && !isEnabledWheel(wheel) && std::find(disabled.begin(), disabled.end(), wheel) == disabled.end())
+						disabled.push_back(wheel);
+				}
 			}
 			if (!driven)
 			{
@@ -246,6 +268,21 @@ namespace Engine {
 			{
 				return differential(std::format("the EngineTorqueRatio of its differentials that name a wheel sum to {}, not 1", torqueRatios),
 					"give the differentials that name a wheel EngineTorqueRatio shares that sum to 1");
+			}
+			// What its disabled wheels leave (the W44.2 review's finding 3: never a silent vehicle): no driven wheel, or shares
+			// that do not sum to 1.
+			constexpr std::string_view DisabledHint = "enable the wheels, or give the differentials of its enabled wheels shares that sum to 1";
+			if (!enabledDriven)
+			{
+				return differential(std::format("its driven {} {} {} disabled, so no differential drives a wheel", disabled.size() == 1 ? "wheel" : "wheels",
+										JoinVehicleEntityNames(scene, disabled), disabled.size() == 1 ? "is" : "are"),
+					std::string(DisabledHint));
+			}
+			if (!(std::abs(enabledTorqueRatios - 1.0f) < VehicleTorqueRatioTolerance))
+			{
+				return differential(std::format("with {} disabled, its driven differentials' EngineTorqueRatio sum to {}", JoinVehicleEntityNames(scene, disabled),
+										enabledTorqueRatios),
+					std::string(DisabledHint));
 			}
 			if (!IsValidLimitedSlip(vehicle.DifferentialLimitedSlipRatio))
 			{
@@ -268,7 +305,7 @@ namespace Engine {
 				{
 					if (!wheel.IsValid())
 						return bar(std::format("anti-roll bar {}'s {} is null", index, side), "name two VehicleWheel entities of this vehicle in the bar");
-					if (const std::optional<std::string> reason = CheckWheelReference(scene, wheels, wheel, side))
+					if (const std::optional<std::string> reason = CheckWheelReference(scene, owner, wheels, wheel, side))
 						return bar(std::format("anti-roll bar {}: {}", index, *reason), "name two VehicleWheel entities of this vehicle in the bar");
 				}
 				if (entry.LeftWheel == entry.RightWheel)
@@ -454,12 +491,8 @@ namespace Engine {
 				continue;
 			}
 
-			if (const std::optional<VehicleRefusal> refusal = Utils::CheckVehicleFields(scene, *vehicle, plan.Wheels))
+			if (const std::optional<VehicleRefusal> refusal = Utils::CheckVehicleFields(scene, entity, *vehicle, plan.Wheels))
 				refuse(*refusal);
-			// A differential whose wheels are all disabled drives nothing now: when that leaves no driven wheel or shares that do
-			// not sum to 1, the vehicle waits for its wheels without a diagnostic of its own, as a joint waits for its connected end.
-			else if (!Utils::DrivesWheels(MakePhysicsVehicleSettings(*vehicle, plan.Wheels)))
-				plan.IsCreatable = false;
 			composition.Vehicles.push_back(std::move(plan));
 		}
 
@@ -491,7 +524,7 @@ namespace Engine {
 		std::vector<ConstEntity> chain;
 		for (ConstEntity current = entity; current.IsReadable() && current != vehicle; current = current.GetParent())
 			chain.push_back(current);
-		glm::mat4 matrix = glm::scale(glm::mat4(1.0f), vehicle.GetComponent<TransformComponent>().Scale);
+		glm::mat4 matrix = glm::scale(glm::mat4(1.0f), TransformSystem::GetWorldScale(vehicle));
 		for (auto link = chain.rbegin(); link != chain.rend(); ++link)
 			matrix = matrix * TransformSystem::ComputeLocalMatrix(link->GetComponent<TransformComponent>());
 		return matrix;
@@ -499,7 +532,19 @@ namespace Engine {
 
 	std::optional<PhysicsVehicleWheelFrame> MakePhysicsVehicleWheelFrame(ConstEntity vehicle, ConstEntity wheel)
 	{
-		const Result<TransformDecomposition> decomposed = TransformSystem::DecomposeMatrix(GetPhysicsVehicleChainMatrix(vehicle, wheel));
+		const TransformComponent& transform = wheel.GetComponent<TransformComponent>();
+		return MakePhysicsVehicleWheelFrame(vehicle, wheel, transform.Translation, transform.Rotation);
+	}
+
+	std::optional<PhysicsVehicleWheelFrame> MakePhysicsVehicleWheelFrame(ConstEntity vehicle, ConstEntity wheel, const glm::vec3& translation, const glm::quat& rotation)
+	{
+		TransformComponent local = wheel.GetComponent<TransformComponent>();
+		local.Translation = translation;
+		local.Rotation = rotation;
+		// The vehicle's own entity as its wheel (which the composition refuses) is its world scale alone, as the chain matrix's.
+		const glm::mat4 chain = wheel == vehicle ? GetPhysicsVehicleChainMatrix(vehicle, vehicle)
+												 : GetPhysicsVehicleChainMatrix(vehicle, wheel.GetParent()) * TransformSystem::ComputeLocalMatrix(local);
+		const Result<TransformDecomposition> decomposed = TransformSystem::DecomposeMatrix(chain);
 		if (!decomposed.has_value())
 			return std::nullopt;
 		PhysicsVehicleWheelFrame frame;
@@ -513,18 +558,6 @@ namespace Engine {
 		if (!finite(frame.Center) || !finite(frame.Up) || !finite(frame.Forward))
 			return std::nullopt;
 		return frame;
-	}
-
-	std::vector<UUID> GetPhysicsVehicleWheelChain(ConstEntity vehicle, ConstEntity wheel)
-	{
-		std::vector<UUID> chain;
-		for (ConstEntity current = wheel; current.IsReadable(); current = current.GetParent())
-		{
-			chain.push_back(current.GetUUID());
-			if (current == vehicle)
-				break;
-		}
-		return chain;
 	}
 
 	PhysicsVehicleWheelDescription MakePhysicsVehicleWheel(const VehicleWheelComponent& component, const PhysicsVehicleWheelFrame& frame)

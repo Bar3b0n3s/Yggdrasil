@@ -2,6 +2,7 @@
 #include "Engine/Scene/PhysicsSystem.h"
 
 #include "Engine/Scene/Components/IDComponent.h"
+#include "Engine/Scene/Components/TransformComponent.h"
 #include "Engine/Scene/Components/VehicleWheelComponent.h"
 #include "Engine/Scene/Components/WheeledVehicleComponent.h"
 #include "Engine/Scene/Entity.h"
@@ -68,6 +69,14 @@ namespace Engine {
 			AppendVehicleFloat(bytes, value.x);
 			AppendVehicleFloat(bytes, value.y);
 			AppendVehicleFloat(bytes, value.z);
+		}
+
+		static void AppendVehicleQuat(std::vector<std::byte>& bytes, const glm::quat& value)
+		{
+			AppendVehicleFloat(bytes, value.x);
+			AppendVehicleFloat(bytes, value.y);
+			AppendVehicleFloat(bytes, value.z);
+			AppendVehicleFloat(bytes, value.w);
 		}
 
 		static void AppendVehicleUUID(std::vector<std::byte>& bytes, UUID id)
@@ -187,6 +196,18 @@ namespace Engine {
 			}
 		}
 
+		// The vehicle a wheel entity belongs to by the hierarchy: the nearest WheeledVehicle at or above it, whether or not it
+		// holds a VehicleWheel now; invalid without one.
+		const auto ownerOf = [](ConstEntity wheel)
+		{
+			for (ConstEntity current = wheel; current.IsReadable(); current = current.GetParent())
+			{
+				if (current.HasComponent<WheeledVehicleComponent>())
+					return current.GetUUID();
+			}
+			return UUID();
+		};
+
 		bool inForceChanged = false;
 		const auto stop = [this, &inForceChanged](PhysicsVehicleEntry& entry)
 		{
@@ -213,14 +234,30 @@ namespace Engine {
 			PhysicsVehicleEntry& entry = vehicle->second;
 			const UUID id = vehicle->first;
 			const ConstEntity readable = scene.FindReadableEntityByID(id);
-			// A WheeledVehicle that is gone, on an entity that is gone or stays: the vehicle and its frames go.
-			if (!readable.IsReadable() || !readable.HasComponent<WheeledVehicleComponent>())
+			// An entity that is gone: the vehicle and its frames go.
+			if (!readable.IsReadable())
 			{
 				stop(entry);
 				vehicle = Vehicles.erase(vehicle);
 				continue;
 			}
 			++vehicle;
+			// A kept frame lasts while its wheel belongs to this vehicle (the W44.2 review's finding 1: never formed again from a
+			// Transform the engine wrote): it goes only when the wheel's entity is gone or another vehicle holds it now.
+			std::erase_if(entry.Frames, [&scene, &ownerOf, id](const auto& kept)
+			{
+				const ConstEntity wheel = scene.FindReadableEntityByID(kept.first);
+				if (!wheel.IsReadable())
+					return true;
+				const UUID owner = ownerOf(wheel);
+				return owner.IsValid() && owner != id;
+			});
+			// A WheeledVehicle removed: the vehicle is not in force, and its entry keeps its frames for the component's return.
+			if (!readable.HasComponent<WheeledVehicleComponent>())
+			{
+				stop(entry);
+				continue;
+			}
 			// A vehicle whose entity is leaving play keeps what it has until FlushDestroyed; one the last plan did not list (its
 			// entity disabled) has nothing in force.
 			if (!IsPresent(id))
@@ -235,16 +272,6 @@ namespace Engine {
 
 			const PhysicsVehiclePlan& plan = entry.Plan;
 			const ConstEntity entity = scene.FindEntityByID(id);
-			// Frames of wheels the plan no longer lists go, except a disabled wheel's that still belongs to this vehicle through
-			// the same chain: it returns at its kept frame.
-			std::erase_if(entry.Frames, [this, &plan, &scene, entity](const auto& kept)
-			{
-				if (std::find(plan.Wheels.begin(), plan.Wheels.end(), kept.first) != plan.Wheels.end())
-					return false;
-				const ConstEntity wheel = scene.FindEntityByID(kept.first);
-				return !wheel.IsValid() || IsPresent(kept.first) || !wheel.HasComponent<VehicleWheelComponent>() || FindPhysicsVehicleEntity(wheel) != entity
-					|| GetPhysicsVehicleWheelChain(entity, wheel) != kept.second.Chain;
-			});
 
 			const PhysicsBodyEntry* body = plan.IsCreatable ? FindOwnedBody(plan.Body, PhysicsBodyOrigin::RigidBody) : nullptr;
 			if (body == nullptr)
@@ -253,26 +280,27 @@ namespace Engine {
 				continue;
 			}
 
-			// What it is made of now: each wheel at its kept frame, or at a frame formed now from the scene's poses when it has
-			// none or its chain changed (a reparent).
+			// What it is made of now: each wheel at its kept frame, or, for a wheel the session never placed for this vehicle, at a
+			// frame formed now from the wheel's authored pose (its Transform's, or the one it had before the engine first placed
+			// it for another vehicle) under its current chain.
 			const WheeledVehicleComponent& component = entity.GetComponent<WheeledVehicleComponent>();
 			std::vector<PhysicsVehicleWheelDescription> wheels;
-			std::map<UUID, PhysicsVehicleKeptFrame> formed;
+			std::map<UUID, PhysicsVehicleWheelFrame> formed;
 			bool framed = true;
 			for (const UUID wheelId : plan.Wheels)
 			{
 				const ConstEntity wheel = scene.FindEntityByID(wheelId);
-				std::vector<UUID> chain = GetPhysicsVehicleWheelChain(entity, wheel);
 				const auto kept = entry.Frames.find(wheelId);
+				const auto authored = AuthoredWheelPoses.find(wheelId);
+				const std::optional<PhysicsVehicleWheelFrame> made = kept != entry.Frames.end() ? std::optional(kept->second)
+					: authored != AuthoredWheelPoses.end()                                      ? MakePhysicsVehicleWheelFrame(entity, wheel, authored->second.Translation, authored->second.Rotation)
+																								: MakePhysicsVehicleWheelFrame(entity, wheel);
 				PhysicsVehicleWheelFrame frame;
-				if (kept != entry.Frames.end() && kept->second.Chain == chain)
-				{
-					frame = kept->second.Frame;
-				}
-				else if (const std::optional<PhysicsVehicleWheelFrame> made = MakePhysicsVehicleWheelFrame(entity, wheel))
+				if (made.has_value())
 				{
 					frame = *made;
-					formed.emplace(wheelId, PhysicsVehicleKeptFrame{ .Frame = frame, .Chain = std::move(chain) });
+					if (kept == entry.Frames.end())
+						formed.emplace(wheelId, frame);
 				}
 				else
 				{
@@ -334,8 +362,13 @@ namespace Engine {
 			entry.Settings = settings;
 			entry.Cast = cast;
 			entry.LastInput.reset();
-			for (auto& [wheelId, kept] : formed)
-				entry.Frames.insert_or_assign(wheelId, std::move(kept));
+			for (const auto& [wheelId, frame] : formed)
+			{
+				entry.Frames.insert_or_assign(wheelId, frame);
+				// The pose the frame came from, kept before the engine first writes the wheel's Transform.
+				const TransformComponent& transform = scene.FindEntityByID(wheelId).GetComponent<TransformComponent>();
+				AuthoredWheelPoses.try_emplace(wheelId, PhysicsWheelAuthoredPose{ .Translation = transform.Translation, .Rotation = transform.Rotation });
+			}
 			if (entry.Carried.has_value())
 				World->RestoreVehicleMotion(entry.Handle, Utils::MapCarriedMotion(*entry.Carried, entry.CarriedWheels, entry.WheelEntities));
 			inForceChanged = true;
@@ -458,7 +491,7 @@ namespace Engine {
 
 	void PhysicsSystem::State::RemoveLeavingVehicles(const std::set<UUID>& candidates)
 	{
-		if (candidates.empty() || Vehicles.empty())
+		if (candidates.empty() || (Vehicles.empty() && AuthoredWheelPoses.empty()))
 			return;
 		const Scene& scene = *Specification.RuntimeScene;
 		// What left play may have been a vehicle's wheel, kept until now: the plans are composed again at the next
@@ -480,11 +513,20 @@ namespace Engine {
 			if (!scene.FindEntityByID(candidate).IsValid())
 				Vehicles.erase(found);
 		}
+		// A destroyed wheel's frames and authored pose go (an entity created again is a new wheel).
+		for (const UUID candidate : candidates)
+		{
+			if (scene.FindEntityByID(candidate).IsValid())
+				continue;
+			AuthoredWheelPoses.erase(candidate);
+			for (auto& [id, entry] : Vehicles)
+				entry.Frames.erase(candidate);
+		}
 	}
 
 	bool PhysicsSystem::State::HasKeptVehicleFrames() const
 	{
-		return std::any_of(Vehicles.begin(), Vehicles.end(), [](const auto& vehicle)
+		return !AuthoredWheelPoses.empty() || std::any_of(Vehicles.begin(), Vehicles.end(), [](const auto& vehicle)
 		{
 			return !vehicle.second.Frames.empty();
 		});
@@ -501,16 +543,23 @@ namespace Engine {
 				continue;
 			const PhysicsVehicleEntry& entry = found->second;
 			Utils::AppendVehicleUUID(bytes, id);
-			for (const auto& [wheel, kept] : entry.Frames)
+			for (const auto& [wheel, frame] : entry.Frames)
 			{
 				Utils::AppendVehicleUUID(bytes, wheel);
-				Utils::AppendVehicleVector(bytes, kept.Frame.Center);
-				Utils::AppendVehicleVector(bytes, kept.Frame.Up);
-				Utils::AppendVehicleVector(bytes, kept.Frame.Forward);
+				Utils::AppendVehicleVector(bytes, frame.Center);
+				Utils::AppendVehicleVector(bytes, frame.Up);
+				Utils::AppendVehicleVector(bytes, frame.Forward);
 			}
 			// While in force: the engine's, the transmission's and the wheels' state (PhysicsWorld::AppendVehicleState).
 			if (entry.Handle.IsValid())
 				World->AppendVehicleState(entry.Handle, bytes);
+		}
+		// Then each placed wheel's authored pose, in UUID order of its wheel: what a frame of it formed later comes from.
+		for (const auto& [wheel, pose] : AuthoredWheelPoses)
+		{
+			Utils::AppendVehicleUUID(bytes, wheel);
+			Utils::AppendVehicleVector(bytes, pose.Translation);
+			Utils::AppendVehicleQuat(bytes, pose.Rotation);
 		}
 	}
 

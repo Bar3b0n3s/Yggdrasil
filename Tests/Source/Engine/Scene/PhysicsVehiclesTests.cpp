@@ -377,7 +377,7 @@ namespace Engine {
 			}));
 		}
 
-		TEST_CASE("PhysicsVehicles: a reference to a disabled wheel is no wheel, and makes no vehicle invalid")
+		TEST_CASE("PhysicsVehicles: a reference to a disabled wheel is no wheel; a vehicle it leaves drivable stays silent, an undriven one is reported")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
@@ -398,6 +398,59 @@ namespace Engine {
 			CHECK(settings.Differentials[0].LeftWheel == -1);
 			CHECK(settings.Differentials[0].RightWheel == 0);
 			CHECK(settings.AntiRollBars.empty());
+
+			// The W44.2 review's finding 3. A cart driven on its rear pair only, both rear wheels disabled: no differential drives a
+			// wheel, which PHYSICS_VEHICLE_INVALID "differential" names.
+			Entity cart = AddCar(scene, "Cart", 30.0f, [](Scene& owner, Entity body, WheeledVehicleComponent&)
+			{
+				static_cast<void>(AddWheel(owner, body, "FrontLeft", glm::vec3(-0.5f, -0.5f, -1.0f)));
+				static_cast<void>(AddWheel(owner, body, "FrontRight", glm::vec3(0.5f, -0.5f, -1.0f)));
+			});
+			scene.FindEntityByID(Child(cart, 0)).AddComponent<DisabledTag>();
+			CHECK(InvalidSubjects(Compose(scene), cart.GetUUID()).empty());
+			scene.FindEntityByID(Child(cart, 1)).AddComponent<DisabledTag>();
+			const PhysicsVehicleComposition undriven = Compose(scene);
+			REQUIRE(InvalidSubjects(undriven, cart.GetUUID()) == std::vector<std::string>{ "differential" });
+			const auto cartDiagnostic = std::find_if(undriven.Diagnostics.begin(), undriven.Diagnostics.end(), [&cart](const PhysicsDiagnostic& diagnostic)
+			{
+				return diagnostic.Entity == cart.GetUUID();
+			});
+			REQUIRE(cartDiagnostic != undriven.Diagnostics.end());
+			CHECK(cartDiagnostic->Field == "Differentials");
+			CHECK(cartDiagnostic->Message.find("its driven wheels 'Left' and 'Right' are disabled") != std::string::npos);
+			CHECK_FALSE(cartDiagnostic->Hint.empty());
+			CHECK_FALSE(FindVehicle(undriven, cart.GetUUID())->IsCreatable);
+
+			// A four-wheel drive whose front pair is disabled: its driven shares sum to 0.5.
+			Entity truck = AddCar(scene, "Truck", 10.0f, [](Scene& owner, Entity body, WheeledVehicleComponent& vehicle)
+			{
+				const Entity frontLeft = AddWheel(owner, body, "FrontLeft", glm::vec3(-0.5f, -0.5f, -1.0f));
+				const Entity frontRight = AddWheel(owner, body, "FrontRight", glm::vec3(0.5f, -0.5f, -1.0f));
+				vehicle.Differentials[0].EngineTorqueRatio = 0.5f;
+				vehicle.Differentials.push_back(VehicleDifferential{ .LeftWheel = frontLeft.GetUUID(), .RightWheel = frontRight.GetUUID(), .EngineTorqueRatio = 0.5f });
+			});
+			REQUIRE(InvalidSubjects(Compose(scene), truck.GetUUID()).empty());
+			scene.FindEntityByID(Child(truck, 2)).AddComponent<DisabledTag>();
+			CHECK(InvalidSubjects(Compose(scene), truck.GetUUID()).empty());
+			scene.FindEntityByID(Child(truck, 3)).AddComponent<DisabledTag>();
+			const PhysicsVehicleComposition halved = Compose(scene);
+			REQUIRE(InvalidSubjects(halved, truck.GetUUID()) == std::vector<std::string>{ "differential" });
+			const auto truckDiagnostic = std::find_if(halved.Diagnostics.begin(), halved.Diagnostics.end(), [&truck](const PhysicsDiagnostic& diagnostic)
+			{
+				return diagnostic.Entity == truck.GetUUID();
+			});
+			REQUIRE(truckDiagnostic != halved.Diagnostics.end());
+			CHECK(truckDiagnostic->Message.find("with 'FrontLeft' and 'FrontRight' disabled, its driven differentials' EngineTorqueRatio sum to 0.5")
+				!= std::string::npos);
+
+			// Another vehicle's disabled wheel is no wheel of this one: a differential naming it is refused as any foreign wheel.
+			Entity van = AddCar(scene, "Van", 20.0f);
+			van.Patch<WheeledVehicleComponent>([&truck](WheeledVehicleComponent& vehicle)
+			{
+				vehicle.Differentials.push_back(VehicleDifferential{ .LeftWheel = Child(truck, 2), .EngineTorqueRatio = 0.0f });
+			});
+			const PhysicsVehicleComposition foreign = Compose(scene);
+			REQUIRE(InvalidSubjects(foreign, van.GetUUID()) == std::vector<std::string>{ "differential" });
 		}
 
 		TEST_CASE("PhysicsVehicles: the components read in the world's units")
@@ -450,11 +503,18 @@ namespace Engine {
 			CHECK(wheel.MaxSteerAngle == doctest::Approx(0.5f * std::numbers::pi_v<float>));
 		}
 
-		TEST_CASE("PhysicsVehicles: a wheel's frame is its pose in the body's space, the vehicle's scale included")
+		TEST_CASE("PhysicsVehicles: a wheel's frame is its pose in the body's space, the vehicle's world scale included")
 		{
 			Test::SceneTestFixture fixture;
 			Scene& scene = fixture.GetScene();
 			Entity car = AddCar(scene, "Car", 0.0f);
+			// The W44.2 review's finding 2: the body bakes the vehicle's world scale (its own 2 under a group's 1.5).
+			Entity group = scene.CreateEntity("Group");
+			group.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Scale = glm::vec3(1.5f);
+			});
+			REQUIRE(scene.SetParent(car, group, {}, false).has_value());
 			car.Patch<TransformComponent>([](TransformComponent& transform)
 			{
 				transform.Translation = glm::vec3(5.0f, 3.0f, -2.0f);
@@ -475,16 +535,20 @@ namespace Engine {
 			});
 			const std::optional<PhysicsVehicleWheelFrame> frame = MakePhysicsVehicleWheelFrame(car, wheel);
 			REQUIRE(frame.has_value());
-			// The car's rotation and position are the body's own; its scale doubles the offsets; the wheel's own scale is not
-			// part of it.
-			CHECK(frame->Center.x == doctest::Approx(1.0f));
-			CHECK(frame->Center.y == doctest::Approx(-0.5f));
-			CHECK(frame->Center.z == doctest::Approx(2.0f));
+			// The car's rotation and position are the body's own; its world scale (3) triples the offsets; the wheel's own scale is
+			// not part of it.
+			CHECK(frame->Center.x == doctest::Approx(1.5f));
+			CHECK(frame->Center.y == doctest::Approx(-0.75f));
+			CHECK(frame->Center.z == doctest::Approx(3.0f));
 			CHECK(frame->Up.y == doctest::Approx(1.0f));
 			const glm::vec3 forward = glm::angleAxis(glm::radians(10.0f), glm::vec3(0.0f, 1.0f, 0.0f)) * glm::vec3(0.0f, 0.0f, -1.0f);
 			CHECK(frame->Forward.x == doctest::Approx(forward.x));
 			CHECK(frame->Forward.z == doctest::Approx(forward.z));
-			CHECK(GetPhysicsVehicleWheelChain(car, wheel) == std::vector<UUID>{ wheel.GetUUID(), axle.GetUUID(), car.GetUUID() });
+			// The session's authored pose of a wheel it has placed: the given local pose, under the same chain.
+			const std::optional<PhysicsVehicleWheelFrame> authored = MakePhysicsVehicleWheelFrame(car, wheel, glm::vec3(0.5f, -0.25f, 0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+			REQUIRE(authored.has_value());
+			CHECK(authored->Center.x == doctest::Approx(1.5f));
+			CHECK(authored->Forward.z == doctest::Approx(-1.0f));
 		}
 	}
 

@@ -28,8 +28,9 @@ namespace Engine {
 
 		// The convoy's state hash after ConvoyTicks ticks, recorded from M44's W44.2 and verified equal in Debug and Release. A
 		// change of physics or of the scene that legitimately changes the simulation updates it with the reason in the change's
-		// review (§13.6 "Re-recording").
-		constexpr uint64_t CommittedConvoyHash = 0xed9a4a11609ae85b;
+		// review (§13.6 "Re-recording"). Re-recorded by the W44.2 review's fixes: the hash's vehicle part appends each placed
+		// wheel's authored pose (finding 1); the simulation itself is unchanged.
+		constexpr uint64_t CommittedConvoyHash = 0xf3cdac7de44dc587;
 
 		constexpr uint32_t ConvoyTicks = 300;
 		constexpr int ConvoySize = 24;

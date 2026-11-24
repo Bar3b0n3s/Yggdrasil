@@ -171,13 +171,16 @@
 //     description the world refuses raises one with Subject "refused". A vehicle whose entity or one of whose wheels is
 //     leaving play keeps what it has until FlushDestroyed, and a reason its plan has then is raised after the flush.
 //   - Kept frames. Each wheel's neutral frame (its centre, up and forward in the body's space, Scene/PhysicsVehicles.h's
-//     PhysicsVehicleWheelFrame) is formed from the scene's local transforms when its vehicle is first created with it, and
-//     kept once the creation succeeds, so a vehicle made again mid-play (a RigidBody change, a re-enabled entity, a wheel
-//     added) gets each kept wheel back where it was authored, although the engine has since written the wheels' Transforms.
-//     A wheel's frame is formed again when the chain of entities from it up to its vehicle changes (a reparent: from its pose
-//     of that moment); a wheel that is disabled keeps its frame for its return; a destroyed wheel, a removed VehicleWheel
-//     and a wheel that is no longer the vehicle's drop it, and the vehicle's own entity destroyed or its WheeledVehicle
-//     removed drops them all.
+//     PhysicsVehicleWheelFrame, the vehicle's world scale included) is formed from the scene's transforms when its vehicle is
+//     first created with it, and kept once the creation succeeds, so a vehicle made again mid-play (a RigidBody change, a
+//     re-enabled entity, a wheel added) gets each kept wheel back where it was authored, although the engine has since written
+//     the wheels' Transforms. A frame lasts the session while its wheel belongs to that vehicle (the nearest WheeledVehicle
+//     above it): through a reparent below the vehicle, its VehicleWheel or the vehicle's WheeledVehicle removed and added back,
+//     and the wheel disabled; the vehicle's entry, not in force, keeps the frames while its WheeledVehicle is away. A frame
+//     goes when its wheel's entity is destroyed or another vehicle holds the wheel, and all of them when the vehicle's entity is
+//     destroyed. A frame is never formed again from a Transform the engine wrote: a wheel's authored local pose is kept when
+//     its first frame is, and a frame formed for it later (it joins another vehicle) comes from that pose under its chain then.
+//     The authored poses are hashed after the vehicles.
 //   - Driver input (PreStep item 4b, after the kinematic moves, teleports and wakes and before the characters): each vehicle
 //     in force, in canonical order, takes its WheeledVehicle's Throttle, Steering, Brake, HandBrake, Gear and Clutch
 //     (PhysicsWorld::SetVehicleInput); a sleeping body wakes when Throttle is not 0 or the input differs from the last one
@@ -185,7 +188,7 @@
 //     authored input.
 //   - Wheel poses (PostStep, after the write-back and before the pair events): each wheel entity of a vehicle in force gets
 //     its wheel's pose (suspension, steer and spin; PhysicsVehicleWheelState::LocalPose) as its local Translation and
-//     Rotation, through the chain of local matrices from the vehicle's entity (its scale included), written directly and
+//     Rotation, through the chain of local matrices below the vehicle's entity (its world scale included), written directly and
 //     only when they differ bit for bit, so collision callbacks see the wheels placed and render interpolation draws them in
 //     the rendered pose. A wheel's Scale stays its own.
 //   - Bodies first. RemoveBody destroys the body's vehicle before its joints and the body (the world would too), on every
@@ -671,7 +674,9 @@ namespace Engine {
 		// (Docs/Decisions/0062-m44-wheeled-vehicles.md decision 3): then the vehicle part, for every vehicle whose wheel frames
 		// the session keeps, in canonical order of its entity: the entity's UUID, each kept frame in UUID order of its wheel (the
 		// wheel's UUID and the bits of its centre, up and forward), and while it is in force its engine's, transmission's and
-		// wheels' state (PhysicsWorld::AppendVehicleState); nothing without one, so a scene without vehicles hashes as before.
+		// wheels' state (PhysicsWorld::AppendVehicleState); then each placed wheel's authored pose in UUID order of its wheel
+		// (its UUID and the bits of its local Translation and Rotation); nothing without either, so a scene without vehicles
+		// hashes as before.
 		void AppendStateHash(XXH64Hasher& hasher) const;
 
 		// --- Joints (M37, Docs/Decisions/0054-m37-joints.md; Scene/PhysicsSystemJoints.cpp) ---------------------------------

@@ -43,10 +43,11 @@
 //     key's X outside [0, 1] ("curve"). Such a vehicle is listed not creatable, and its body drives as a plain body. A vehicle
 //     whose body a body diagnostic refused (the plan is not creatable while it has colliders) is listed not creatable without
 //     a second diagnostic.
-//   - A differential's or bar's wheel that names a VehicleWheel entity that is effectively disabled is no wheel (the
-//     differential's side drives nothing, the bar is left out), without a diagnostic, so a disabled wheel never makes its
-//     vehicle invalid; a vehicle whose disabled wheels leave it no driven wheel, or shares that do not sum to 1, is listed not
-//     creatable without a diagnostic until its wheels are enabled again.
+//   - A differential's or bar's wheel that names a VehicleWheel of this vehicle that is effectively disabled is no wheel (the
+//     differential's side drives nothing, the bar is left out), without a diagnostic while the vehicle stays drivable; when
+//     its disabled wheels leave it no driven wheel, or driven shares that do not sum to 1, PHYSICS_VEHICLE_INVALID
+//     "differential" names them (the W44.2 review's finding 3: a vehicle never silently fails to exist). A reference to
+//     another vehicle's wheel, disabled or not, is "differential" or "bar" as any wheel that is not this vehicle's.
 //
 // Determinism: a pure function of the scene and the body composition; canonical order throughout. Main thread (the scene).
 
@@ -94,9 +95,10 @@ namespace Engine {
 	[[nodiscard]] ConstEntity FindPhysicsVehicleEntity(ConstEntity entity);
 
 	// A wheel's neutral frame relative to its vehicle's body origin (the body's space, Physics/PhysicsVehicle.h): its authored
-	// centre, its up (its local +Y) and its forward (its local -Z), from the chain of local matrices from the vehicle's entity
-	// (its own scale included, since the body pose has none) down to the wheel (its own transform included, its scale not), so
-	// it does not depend on world matrices. Up and Forward are unit and perpendicular.
+	// centre, its up (its local +Y) and its forward (its local -Z), from the vehicle's world scale (the body's colliders bake it,
+	// and the body pose has none) and the chain of local matrices below the vehicle's entity down to the wheel (its own
+	// transform included, its scale not), so it does not depend on the vehicle's world position and rotation. Up and Forward are
+	// unit and perpendicular.
 	struct PhysicsVehicleWheelFrame
 	{
 		glm::vec3 Center = glm::vec3(0.0f);
@@ -106,15 +108,16 @@ namespace Engine {
 		bool operator==(const PhysicsVehicleWheelFrame&) const = default;
 	};
 
-	// The vehicle's own scale times the local matrices of the entities below `vehicle` down to `entity`, included: what turns
-	// `entity`'s space into the vehicle's body space (the body pose has no scale). `entity` is `vehicle` or a descendant of it;
-	// for `vehicle` itself, its scale alone.
+	// The vehicle's world scale (TransformSystem::GetWorldScale, the scale the body's colliders bake) times the local matrices
+	// of the entities below `vehicle` down to `entity`, included: what turns `entity`'s space into the vehicle's body space (the
+	// body pose has no scale). `entity` is `vehicle` or a descendant of it; for `vehicle` itself, its world scale alone.
 	[[nodiscard]] glm::mat4 GetPhysicsVehicleChainMatrix(ConstEntity vehicle, ConstEntity entity);
-	// The frame of the wheel `wheel` below `vehicle` from the scene's local transforms now; nullopt when the chain does not
-	// decompose (TransformSystem::DecomposeMatrix) or is not finite.
+	// The frame of the wheel `wheel` below `vehicle` from the scene's transforms now; nullopt when the chain does not decompose
+	// (TransformSystem::DecomposeMatrix) or is not finite. The second form takes the wheel's own local Translation and Rotation
+	// as given instead of its Transform's (the session's authored pose of a wheel it has placed).
 	[[nodiscard]] std::optional<PhysicsVehicleWheelFrame> MakePhysicsVehicleWheelFrame(ConstEntity vehicle, ConstEntity wheel);
-	// The entities from `wheel` up to `vehicle`, both included: what a kept frame was formed through.
-	[[nodiscard]] std::vector<UUID> GetPhysicsVehicleWheelChain(ConstEntity vehicle, ConstEntity wheel);
+	[[nodiscard]] std::optional<PhysicsVehicleWheelFrame> MakePhysicsVehicleWheelFrame(ConstEntity vehicle, ConstEntity wheel, const glm::vec3& translation,
+		const glm::quat& rotation);
 
 	// The components in the world's units (degrees become radians, EntityRefs wheel indices; PhysicsVehicle.h):
 	//   - the wheel `component` at `frame` (its attachment point the frame's centre plus SuspensionMaxLength up);

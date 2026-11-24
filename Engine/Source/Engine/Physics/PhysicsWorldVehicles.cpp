@@ -248,10 +248,23 @@ namespace Engine {
 			return mode == PhysicsVehicleTransmissionMode::Manual ? JPH::ETransmissionMode::Manual : JPH::ETransmissionMode::Auto;
 		}
 
+		// The size of VehicleTransmission::SaveState's layout that EndGearChange writes: the gear, then four floats.
+		inline constexpr size_t TransmissionStateSize = sizeof(int) + 4 * sizeof(float);
+
+		// Whether `transmission` saves its state in the layout EndGearChange writes (the vendored Jolt's; the W44.2 review's nit
+		// 8: a Jolt whose layout grew would read past what EndGearChange writes and leave a timer running).
+		[[nodiscard]] static bool HasTransmissionStateLayout(const JPH::VehicleTransmission& transmission)
+		{
+			JPH::StateRecorderImpl probe;
+			transmission.SaveState(probe);
+			return probe.GetDataSize() == TransmissionStateSize;
+		}
+
 		// Ends a gear change in progress through Jolt's public state layout (VehicleTransmission::SaveState: the gear, the
-		// clutch friction, then the switch, clutch release and latency times left): the gear stays, the clutch is engaged and no
-		// timer runs. The timers are private; a change of the transmission's mode or times mid-change would otherwise divide the
-		// time left by a new release time of 0, make the clutch negative, or (Manual) freeze them.
+		// clutch friction, then the switch, clutch release and latency times left; HasTransmissionStateLayout checked first):
+		// the gear stays, the clutch is engaged and no timer runs. The timers are private; a change of the transmission's mode
+		// or times mid-change would otherwise divide the time left by a new release time of 0, make the clutch negative, or
+		// (Manual) freeze them.
 		static void EndGearChange(JPH::VehicleTransmission& transmission)
 		{
 			JPH::StateRecorderImpl recorder;
@@ -579,14 +592,21 @@ namespace Engine {
 		}
 
 		JPH::WheeledVehicleController& controller = Utils::GetController(constraint);
-		JPH::VehicleEngine& engine = controller.GetEngine();
-		Utils::FillEngine(engine, settings.Engine);
-		engine.ClampRPM();
 		JPH::VehicleTransmission& transmission = controller.GetTransmission();
 		const bool timingChanged = Utils::ToTransmissionMode(settings.Transmission.Mode) != transmission.mMode
 			|| settings.Transmission.SwitchTime != transmission.mSwitchTime || settings.Transmission.ClutchReleaseTime != transmission.mClutchReleaseTime
 			|| settings.Transmission.SwitchLatency != transmission.mSwitchLatency;
-		if (timingChanged && !transmission.AllowSleep())
+		const bool endGearChange = timingChanged && !transmission.AllowSleep();
+		if (endGearChange && !Utils::HasTransmissionStateLayout(transmission))
+		{
+			return MakeError(ErrorCode::Unsupported,
+				"vehicle {}'s transmission cannot end its gear change: Jolt's VehicleTransmission state is not the {} bytes this build writes",
+				vehicle.GetValue(), Utils::TransmissionStateSize);
+		}
+		JPH::VehicleEngine& engine = controller.GetEngine();
+		Utils::FillEngine(engine, settings.Engine);
+		engine.ClampRPM();
+		if (endGearChange)
 			Utils::EndGearChange(transmission);
 		Utils::FillTransmission(transmission, settings.Transmission);
 		// The current gear stays within the new gears (Jolt indexes the ratios by it).

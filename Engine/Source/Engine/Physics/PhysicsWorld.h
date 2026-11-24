@@ -410,8 +410,9 @@ namespace Engine {
 		// without reverse gears drops a stored negative Forward. A bar's wheels never change in place: Jolt keeps each wheel's
 		// last anti-roll impulse while no bar covers it, so a vehicle whose bars name other wheels is made again (Scene/
 		// PhysicsSystem does). Errors: InvalidArgument for a dead handle, invalid settings (as CreateVehicle, against the
-		// vehicle's wheel count) or bars whose (LeftWheel, RightWheel) pairs differ from the vehicle's, in order, with nothing
-		// changed.
+		// vehicle's wheel count) or bars whose (LeftWheel, RightWheel) pairs differ from the vehicle's, in order; Unsupported
+		// when a gear change in progress would end through a Jolt VehicleTransmission state layout other than the one this
+		// build writes (the vendored Jolt's: a gear and four floats); each with nothing changed.
 		[[nodiscard]] Status SetVehicleSettings(VehicleHandle vehicle, const PhysicsVehicleSettings& settings);
 		// Sets a live vehicle's solver priority (PhysicsVehicleDescription::Priority); a dead handle is ignored.
 		void SetVehiclePriority(VehicleHandle vehicle, uint32_t priority);

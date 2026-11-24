@@ -1068,6 +1068,26 @@ namespace Engine {
 			CHECK_FALSE(session->GetPhysics().GetBodyInfo(heavy.GetUUID()).has_value());
 		}
 
+		TEST_CASE("PhysicsSystem: a Dynamic body that only its MassProperties' InertiaScale makes too large for Jolt is refused on the InertiaScale")
+		{
+			// The W44.2 review's nit 9, at run time: a body whose offset alone (none) passes, refused for its inertia scale.
+			Test::SceneTestFixture fixture;
+			Entity heavy = Test::AddBoxBody(fixture.GetScene(), "Heavy", glm::vec3(0.0f), glm::vec3(20000.0f), BodyType::Dynamic);
+			Test::PatchRigidBody(heavy, [](RigidBodyComponent& body)
+			{
+				body.Mass = MaxPhysicsMass;
+			});
+			heavy.AddComponent<MassPropertiesComponent>(MassPropertiesComponent{ .InertiaScale = glm::vec3(MaxPhysicsInertiaScale) });
+			const Test::ExpectLog refused(LogLevel::Error, "PHYSICS_INVALID_SHAPE");
+			Scope<PlaySession> session = StartSession(fixture);
+			const std::span<const PhysicsDiagnostic> diagnostics = session->GetPhysics().GetDiagnostics();
+			REQUIRE(diagnostics.size() == 1);
+			CHECK(diagnostics[0].Component == "MassProperties");
+			CHECK(diagnostics[0].Field == "InertiaScale");
+			CHECK(diagnostics[0].Hint.find("InertiaScale") != std::string::npos);
+			CHECK_FALSE(session->GetPhysics().GetBodyInfo(heavy.GetUUID()).has_value());
+		}
+
 		TEST_CASE("PhysicsSystem: reparenting and scale changes rebuild the bodies they affect")
 		{
 			Test::SceneTestFixture fixture;

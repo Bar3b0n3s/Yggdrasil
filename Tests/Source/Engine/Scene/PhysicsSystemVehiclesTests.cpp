@@ -19,6 +19,7 @@
 #include "Engine/Scene/Components/WheeledVehicleComponent.h"
 #include "Engine/Scene/PhysicsVehicles.h"
 #include "Engine/Scene/Scene.h"
+#include "Engine/Scene/TransformSystem.h"
 #include "Engine/Session/PlaySession.h"
 #include "Support/ExpectLog.h"
 #include "Support/InMemoryAssetManager.h"
@@ -375,6 +376,170 @@ namespace Engine {
 			CHECK(Test::GetWorldPosition(*session, "/Buggy").y == doctest::Approx(restHeight).epsilon(0.002));
 		}
 
+		TEST_CASE("PhysicsVehicles: a wheel keeps its frame through a reparent and its components added back")
+		{
+			// The W44.2 review's finding 1 and the lead's amendment of decision 3: a wheel's kept frame lasts the session while the
+			// wheel belongs to its vehicle, so a frame is never formed again from the Transform the engine wrote (its spin, steer and
+			// compression). Each path happens while the rear left wheel's spin reads between 100 and 260 degrees, where a frame formed
+			// from its written pose would point its forward backward, and its suspension is compressed.
+			Test::SceneTestFixture fixture;
+			static_cast<void>(Test::AddGround(fixture.GetScene()));
+			static_cast<void>(AddBuggy(fixture.GetScene(), "Buggy"));
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 240);
+			const float restHeight = Test::GetWorldPosition(*session, "/Buggy").y;
+			const glm::vec3 heading = GetBody(*session, "/Buggy").Pose.Rotation * glm::vec3(0.0f, 0.0f, -1.0f);
+			PatchVehicle(*session, "/Buggy", [](WheeledVehicleComponent& component)
+			{
+				component.Throttle = 1.0f;
+			});
+			bool turned = false;
+			for (int tick = 0; tick < 600 && !turned; ++tick)
+			{
+				Test::RunTicks(*session, 1);
+				const float rotation = GetVehicle(*session, "/Buggy").Wheels[2].Rotation;
+				turned = rotation > 100.0f && rotation < 260.0f;
+			}
+			REQUIRE(turned);
+			REQUIRE(GetVehicle(*session, "/Buggy").Wheels[2].SuspensionLength < 0.49f);
+
+			SUBCASE("a reparent under a new axle of the vehicle")
+			{
+				Entity axle = session->GetScene().CreateEntity("Axle", Find(*session, "/Buggy"));
+				Entity wheel = Find(*session, "/Buggy/RL");
+				REQUIRE(session->GetScene().SetParent(wheel, axle, {}, false).has_value());
+				// A reparent below the vehicle changes no body; a write to the wheel then makes the vehicle again, which keeps the
+				// wheel's frame rather than form one from its written pose under the new chain.
+				wheel.Patch<VehicleWheelComponent>([](VehicleWheelComponent& wheel)
+				{
+					wheel.AngularDamping = 0.25f;
+				});
+				Test::RunTicks(*session, 1);
+			}
+			SUBCASE("its VehicleWheel removed and added back")
+			{
+				const Test::ExpectLog invalid(LogLevel::Error, "PHYSICS_VEHICLE_INVALID");
+				Entity wheel = Find(*session, "/Buggy/RL");
+				const VehicleWheelComponent component = wheel.GetComponent<VehicleWheelComponent>();
+				wheel.RemoveComponent<VehicleWheelComponent>();
+				// Without it, the differential and the bar name an entity that is not a wheel: the vehicle is refused meanwhile.
+				Test::RunTicks(*session, 1);
+				CHECK_FALSE(GetVehicle(*session, "/Buggy").Created);
+				wheel.AddComponent<VehicleWheelComponent>(component);
+				Test::RunTicks(*session, 1);
+			}
+			SUBCASE("the vehicle's WheeledVehicle removed and added back")
+			{
+				Entity buggy = Find(*session, "/Buggy");
+				const WheeledVehicleComponent component = buggy.GetComponent<WheeledVehicleComponent>();
+				buggy.RemoveComponent<WheeledVehicleComponent>();
+				Test::RunTicks(*session, 1);
+				buggy.AddComponent<WheeledVehicleComponent>(component);
+				Test::RunTicks(*session, 1);
+			}
+			REQUIRE(GetVehicle(*session, "/Buggy").Created);
+			REQUIRE(GetVehicle(*session, "/Buggy").Wheels.size() == 4);
+
+			// Braked to rest, the chassis rides at its first rest height: no wheel hangs from a compressed attachment.
+			PatchVehicle(*session, "/Buggy", [](WheeledVehicleComponent& component)
+			{
+				component.Throttle = 0.0f;
+				component.Brake = 1.0f;
+			});
+			Test::RunTicks(*session, 300);
+			CHECK(Test::GetWorldPosition(*session, "/Buggy").y == doctest::Approx(restHeight).epsilon(0.002));
+			// Then at full throttle it drives forward, straight: no wheel's drive points backward or is toed.
+			PatchVehicle(*session, "/Buggy", [](WheeledVehicleComponent& component)
+			{
+				component.Throttle = 1.0f;
+				component.Brake = 0.0f;
+			});
+			Test::RunTicks(*session, 60);
+			CHECK(GetVehicle(*session, "/Buggy").Speed > 2.0f);
+			const glm::vec3 now = GetBody(*session, "/Buggy").Pose.Rotation * glm::vec3(0.0f, 0.0f, -1.0f);
+			CHECK(glm::dot(now, heading) > std::cos(glm::radians(5.0f)));
+		}
+
+		TEST_CASE("PhysicsVehicles: wheels are placed where the body holds them, under a scaled parent and through an axle")
+		{
+			// The W44.2 review's finding 2: the body bakes its entity's world scale, so the wheels' frames and their placement take
+			// the vehicle's world scale, not its local one. A buggy under a group scaled 2, and one whose front left wheel hangs
+			// below an axle entity; ray casts put each contact straight under its wheel.
+			Test::SceneTestFixture fixture;
+			Scene& scene = fixture.GetScene();
+			static_cast<void>(Test::AddGround(scene));
+			Entity group = scene.CreateEntity("Group");
+			group.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Scale = glm::vec3(2.0f);
+			});
+			Entity scaled = AddBuggy(scene, "Scaled", BuggyOptions{ .Position = glm::vec3(0.0f, 0.7f, 0.0f), .Cast = VehicleWheelCast::Ray, .AntiRollBars = false });
+			REQUIRE(scene.SetParent(scaled, group, {}, false).has_value());
+			Entity axled = AddBuggy(scene, "Axled", BuggyOptions{ .Position = glm::vec3(20.0f, 0.8f, 0.0f), .Cast = VehicleWheelCast::Ray, .AntiRollBars = false });
+			Entity axle = scene.CreateEntity("Axle", axled);
+			axle.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(0.0f, -0.25f, -1.4f);
+			});
+			Entity front = scene.FindEntityByPath("/Axled/FL");
+			REQUIRE(scene.SetParent(front, axle, {}, false).has_value());
+			front.Patch<TransformComponent>([](TransformComponent& transform)
+			{
+				transform.Translation = glm::vec3(-0.9f, -0.25f, 0.0f);
+			});
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 240);
+
+			for (const std::string_view vehicle : { "/Group/Scaled", "/Axled" })
+			{
+				INFO(vehicle);
+				const PhysicsVehicleReport report = GetVehicle(*session, vehicle);
+				REQUIRE(report.Created);
+				const PhysicsPose pose = GetBody(*session, vehicle).Pose;
+				const float scale = vehicle == "/Group/Scaled" ? 2.0f : 1.0f;
+				for (const PhysicsVehicleWheelReport& wheel : report.Wheels)
+				{
+					const ConstEntity entity = session->GetScene().FindEntityByID(wheel.Entity);
+					INFO(entity.GetName());
+					REQUIRE(wheel.Touching);
+					// The wheel entity's world centre stands on its contact, one Radius above it, at its authored place scaled by the
+					// vehicle's world scale.
+					const glm::vec3 centre = glm::vec3(TransformSystem::ComputeWorldMatrix(entity)[3]);
+					CHECK(centre.x == doctest::Approx(wheel.Point.x).epsilon(1.0e-4));
+					CHECK(centre.z == doctest::Approx(wheel.Point.z).epsilon(1.0e-4));
+					CHECK(centre.y - wheel.Point.y == doctest::Approx(0.4f).epsilon(1.0e-3));
+					const glm::vec3 local = glm::inverse(pose.Rotation) * (centre - pose.Position);
+					CHECK(std::abs(local.x) == doctest::Approx(0.9f * scale).epsilon(1.0e-3));
+					CHECK(std::abs(local.z) == doctest::Approx(1.4f * scale).epsilon(1.0e-3));
+				}
+			}
+		}
+
+		TEST_CASE("PhysicsVehicles: a vehicle whose disabled wheels leave it undriven raises PHYSICS_VEHICLE_INVALID in play")
+		{
+			// The W44.2 review's finding 3: a vehicle never silently fails to exist. Disabling the driven rear wheels leaves no
+			// wheel the differential drives; the session reports it once, naming them, and the vehicle returns with its wheels.
+			Test::SceneTestFixture fixture;
+			static_cast<void>(Test::AddGround(fixture.GetScene()));
+			static_cast<void>(AddBuggy(fixture.GetScene(), "Buggy"));
+			Scope<PlaySession> session = StartSession(fixture);
+			Test::RunTicks(*session, 30);
+			REQUIRE(GetVehicle(*session, "/Buggy").Created);
+			{
+				const Test::ExpectLog undriven(LogLevel::Error, "its driven wheels 'RL' and 'RR' are disabled");
+				Find(*session, "/Buggy/RL").SetActive(false);
+				Find(*session, "/Buggy/RR").SetActive(false);
+				Test::RunTicks(*session, 30);
+				CHECK_FALSE(GetVehicle(*session, "/Buggy").Created);
+				CHECK(CountDiagnostics(*session, "/Buggy", PhysicsVehicleInvalidCode, "differential") == 1);
+			}
+			Find(*session, "/Buggy/RL").SetActive(true);
+			Find(*session, "/Buggy/RR").SetActive(true);
+			Test::RunTicks(*session, 2);
+			CHECK(GetVehicle(*session, "/Buggy").Created);
+			CHECK(GetVehicle(*session, "/Buggy").Wheels.size() == 4);
+		}
+
 		TEST_CASE("PhysicsVehicles: an anti-roll bar's stiffness changes in place, keeping the vehicle's motion, at one hash with 0, 1 and 8 Jolt threads")
 		{
 			// The lead's rule after the W44.1 review (finding 2): a bar's Stiffness on the same wheels is written in place
@@ -559,13 +724,27 @@ namespace Engine {
 				Test::RunTicks(*session, 30);
 				CHECK_FALSE(session->GetPhysics().GetVehicleInfo(id).has_value());
 			}
-			SUBCASE("a destroyed wheel's vehicle is made again without it, and a differential naming it is invalid")
+			SUBCASE("a destroyed wheel a differential names makes its vehicle invalid")
 			{
 				const Test::ExpectLog dangling(LogLevel::Error, "PHYSICS_VEHICLE_INVALID");
 				session->GetScene().DestroyEntity(Find(*session, "/Buggy/RL"));
 				Test::RunTicks(*session, 2);
 				CHECK_FALSE(GetVehicle(*session, "/Buggy").Created);
 				CHECK(CountDiagnostics(*session, "/Buggy", PhysicsVehicleInvalidCode, "differential") == 1);
+			}
+			SUBCASE("a destroyed wheel nothing names leaves its vehicle made again on the other wheels")
+			{
+				// The W44.2 review's nit 12: a buggy without anti-roll bars, whose front left wheel no differential or bar names.
+				static_cast<void>(AddBuggy(session->GetScene(), "Bare", BuggyOptions{ .Position = glm::vec3(10.0f, 0.8f, 0.0f), .AntiRollBars = false }));
+				Test::RunTicks(*session, 2);
+				REQUIRE(GetVehicle(*session, "/Bare").Created);
+				REQUIRE(GetVehicle(*session, "/Bare").Wheels.size() == 4);
+				session->GetScene().DestroyEntity(Find(*session, "/Bare/FL"));
+				Test::RunTicks(*session, 2);
+				const PhysicsVehicleReport bare = GetVehicle(*session, "/Bare");
+				CHECK(bare.Created);
+				CHECK(bare.Wheels.size() == 3);
+				CHECK(CountDiagnostics(*session, "/Bare", PhysicsVehicleInvalidCode, "differential") == 0);
 			}
 			SUBCASE("the session's end destroys the vehicles before the bodies")
 			{
@@ -636,14 +815,24 @@ namespace Engine {
 		{
 			// History B removes the WheeledVehicle of the buggy whose vehicle was made first and adds it back before the first step,
 			// so Jolt holds its constraint last; the constraints' priorities (the joints', then the vehicles' ranks in UUID order)
-			// keep the solve order, so both reach one state.
+			// keep the solve order, so both reach one state. Jolt sorts constraints by priority, then by index, within an island
+			// only, and the order matters only between constraints that share a Dynamic body (the W44.2 review's finding 4): the
+			// buggies stand on one Dynamic deck, which every vehicle constraint pushes on, so the three are in one island and their
+			// order shows. Without the vehicles' ranks, the case fails.
 			const auto run = [](bool readd)
 			{
 				Test::SceneTestFixture fixture;
 				Scene& scene = fixture.GetScene();
 				static_cast<void>(Test::AddGround(scene));
+				Entity deck = Test::AddBoxBody(scene, "Deck", glm::vec3(6.0f, 0.25f, 0.0f), glm::vec3(16.0f, 0.25f, 16.0f), BodyType::Dynamic);
+				Test::PatchRigidBody(deck, [](RigidBodyComponent& body)
+				{
+					body.Mass = 20000.0f;
+				});
 				for (int index = 0; index < 3; ++index)
-					static_cast<void>(AddBuggy(scene, std::format("Buggy{}", index), BuggyOptions{ .Position = glm::vec3(static_cast<float>(index) * 6.0f, 0.8f, 0.0f) }));
+				{
+					static_cast<void>(AddBuggy(scene, std::format("Buggy{}", index), BuggyOptions{ .Position = glm::vec3(static_cast<float>(index) * 6.0f, 1.3f, 0.0f) }));
+				}
 				Entity door = Test::AddBoxBody(scene, "Door", glm::vec3(-6.0f, 1.0f, 0.0f), glm::vec3(0.5f, 1.0f, 0.05f), BodyType::Dynamic);
 				door.AddComponent<HingeJointComponent>(HingeJointComponent{ .Anchor = glm::vec3(-0.5f, 0.0f, 0.0f), .Axis = glm::vec3(0.0f, 1.0f, 0.0f) });
 				Scope<PlaySession> session = StartSession(fixture);

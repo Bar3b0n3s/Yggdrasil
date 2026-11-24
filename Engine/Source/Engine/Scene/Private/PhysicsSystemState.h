@@ -236,12 +236,12 @@ namespace Engine {
 		PhysicsJointFormation Formation{};
 	};
 
-	// M44: a wheel's kept frame (PhysicsSystem.h's M44 paragraph) and the chain of entities from the wheel up to its vehicle it
-	// was formed through.
-	struct PhysicsVehicleKeptFrame
+	// M44: a wheel entity's local Translation and Rotation before the session first placed it (PhysicsSystem.h's M44
+	// paragraph, "Kept frames"): what a frame of it is formed from once the engine has written its Transform.
+	struct PhysicsWheelAuthoredPose
 	{
-		PhysicsVehicleWheelFrame Frame{};
-		std::vector<UUID> Chain{};
+		glm::vec3 Translation = glm::vec3(0.0f);
+		glm::quat Rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 	};
 
 	// M44: one vehicle entity the session knows (Scene/PhysicsSystemVehicles.cpp): its last plan, its live vehicle, what that was
@@ -263,8 +263,10 @@ namespace Engine {
 		PhysicsVehicleCast Cast = PhysicsVehicleCast::Cylinder;
 		// The driver input applied at the last PreStep (item 4b); unset until the first after a creation.
 		std::optional<PhysicsVehicleInput> LastInput{};
-		// The kept frames by wheel entity, set only by a creation that succeeded.
-		std::map<UUID, PhysicsVehicleKeptFrame> Frames{};
+		// The kept frames by wheel entity, set only by a creation that succeeded, and kept while the wheel belongs to this
+		// vehicle (through any chain, with its components removed and added back, disabled), its WheeledVehicle removed and
+		// added back included: dropped when the wheel's entity is destroyed or it comes to belong to another vehicle.
+		std::map<UUID, PhysicsVehicleWheelFrame> Frames{};
 		// The motion of the live vehicle the session destroyed with its body in this pass (a RigidBody change creating the body
 		// again), for its creation again on the new body (PhysicsWorld::RestoreVehicleMotion), with its wheels' entities;
 		// dropped at the end of every synchronization.
@@ -511,6 +513,10 @@ namespace Engine {
 		// The entities whose vehicle components changed: a vehicle whose fields beyond its driver input are as planned
 		// changes nothing but its input; any other change composes the plan again.
 		std::set<UUID> ChangedVehicles;
+		// Every wheel entity a kept frame was formed for, with its local pose of that moment, before the engine wrote its
+		// Transform: a frame formed for it later (it joins another vehicle) is formed from this pose, never from one the engine
+		// wrote. Dropped when the wheel's entity is destroyed; hashed after the vehicles.
+		std::map<UUID, PhysicsWheelAuthoredPose> AuthoredWheelPoses;
 
 		void OnVehicleChanged(entt::registry& registry, entt::entity entity);
 		void OnVehicleAddedOrRemoved(entt::registry& registry, entt::entity entity);
@@ -532,11 +538,12 @@ namespace Engine {
 		// bit for bit).
 		[[nodiscard]] std::vector<PhysicsWheelPose> CollectWheelPoses() const;
 		// FlushDestroyed's part: the vehicles of `candidates` that left play (a destroyed entity's entry goes, a disabled one's
-		// keeps its frames), and the plans composed again at the next synchronization (a wheel may have left).
+		// keeps its frames), a destroyed wheel's frames and authored pose, and the plans composed again at the next
+		// synchronization (a wheel may have left).
 		void RemoveLeavingVehicles(const std::set<UUID>& candidates);
 		// The vehicle part of the state hash (AppendStateHash), after the joint part.
 		void AppendVehicleHash(std::vector<std::byte>& bytes) const;
-		// Whether any vehicle has kept frames (the hash's vehicle part is not empty).
+		// Whether any vehicle has kept frames or any placed wheel an authored pose (the hash's vehicle part is not empty).
 		[[nodiscard]] bool HasKeptVehicleFrames() const;
 		// Destroys every live vehicle (the session's end, before the joints and the bodies); the world's destructor would too.
 		void DestroyAllVehicles();
