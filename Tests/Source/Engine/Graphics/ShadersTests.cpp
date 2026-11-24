@@ -47,6 +47,7 @@
 #include "Shared/TextVertex.h"
 #include "Shared/TonemapConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Shared/WindConstants.h"
 #include "Support/HeadlessGpuFixture.h"
 #include "Support/MatrixConventionProgram.h"
 #include "Support/SmokeProgram.h"
@@ -494,8 +495,8 @@ namespace Engine {
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, DissolveEdge),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, PlanarReflectionSlot),
 					ENGINE_TEST_SHARED_FIELD(InstanceRecord, UVOffset),
-					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding1),
-					ENGINE_TEST_SHARED_FIELD(InstanceRecord, Padding2),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, LodFade),
+					ENGINE_TEST_SHARED_FIELD(InstanceRecord, WindResponse),
 				},
 				.Program = "Scene",
 				.Entry = "VSMain",
@@ -725,6 +726,38 @@ namespace Engine {
 				.Program = "Smoke",
 				.Entry = "CSMain",
 				.Permutation = { { .Key = "SMOKE_SATURATE", .Value = "0" } },
+			},
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): b8 of every mesh layout.
+			{
+				.Name = "WindConstants",
+				.Size = sizeof(WindConstants),
+				.Fields = {
+					ENGINE_TEST_SHARED_FIELD(WindConstants, Direction),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, Strength),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, GustStrength),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, Turbulence),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, InverseGustWavelength),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, GustPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, HalfGustPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, BranchPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, FlutterPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, Padding0),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, Padding1),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousDirection),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousStrength),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousGustStrength),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousTurbulence),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousInverseGustWavelength),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousGustPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousHalfGustPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousBranchPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, PreviousFlutterPhase),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, Padding2),
+					ENGINE_TEST_SHARED_FIELD(WindConstants, Padding3),
+				},
+				.Program = "Scene",
+				.Entry = "VSMain",
+				.Permutation = { { .Key = "ALPHA_MASK", .Value = "0" } },
 			},
 		};
 	}

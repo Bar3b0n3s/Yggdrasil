@@ -20,6 +20,7 @@
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Shared/WindConstants.h"
 
 #include <glm/matrix.hpp>
 
@@ -120,6 +121,8 @@ namespace Engine {
 					{ .Set = 0, .Register = ProbeConstantsRegister, .ByteSize = sizeof(ProbeConstants) },
 					{ .Set = 0, .Register = FogConstantsRegister, .ByteSize = sizeof(FogConstants) },
 					{ .Set = 0, .Register = PlanarReflectionConstantsRegister, .ByteSize = sizeof(PlanarReflectionConstants) },
+					// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the mesh draws' wind, declared unread.
+					{ .Set = 0, .Register = WindConstantsRegister, .ByteSize = sizeof(WindConstants) },
 					{ .Set = 1, .Register = TerrainConstantsRegister, .ByteSize = sizeof(TerrainConstants) },
 				},
 			};

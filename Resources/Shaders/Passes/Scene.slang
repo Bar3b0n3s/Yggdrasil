@@ -60,6 +60,13 @@
 // same clip (the noise sampled at level 0, outside every per-pixel branch), so the forward pass's depth test keeps
 // exactly the prepass's surface. A Blend material's instance multiplies its alpha by Opacity and drops it to 0 where it
 // dissolves. An instance without the flag reads none of it.
+// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): vertex binding 3 is the mesh's wind
+// stream (MeshVertexWind, R8G8B8A8_UNORM; the cache's shared zero stream for a mesh without one), WIND after COLOR in every
+// entry's inputs (VSOverdraw's also take NORMAL), and an instance with DrawFlagWind is displaced by Common/Wind.slang's
+// ApplyWind after the World product and before the view-projection product (the previous clip position by the previous
+// render's wind and PreviousWorld); a draw without the flag runs exactly its earlier arithmetic. The Mask variants also
+// clip by the record's signed LodFade with Opacity's threshold (Common/LodFade.slang), and a Blend material's alpha drops
+// to 0 where the fade removes a pixel, so two levels cross-fading split their pixels exactly.
 
 #include "Shared/DrawConstants.h"
 #include "Shared/EnvironmentConstants.h"
@@ -72,7 +79,9 @@
 #include "Shared/ShaderLight.h"
 #include "Shared/ViewConstants.h"
 #include "Common/ClipPlane.slang"
+#include "Common/LodFade.slang"
 #include "Common/Shadows.slang"
+#include "Common/Wind.slang"
 
 import Common.Brdf;
 import Common.Environment;
@@ -153,10 +162,11 @@ struct VertexInput
 	float2 TexCoord : TEXCOORD0;
 	float2 TexCoord1 : TEXCOORD1; // M23: the attribute stream (binding 1)
 	float4 Color : COLOR;
+	float4 Wind : WIND; // M46: the wind stream (binding 3), read only with DrawFlagWind
 };
 
 // M26: the prepass entries' inputs: VertexInput's, then the instance's previous local position (vertex binding 2, location
-// 6), read only with DrawFlagPreviousPositions.
+// 7 since M46's WIND took 6), read only with DrawFlagPreviousPositions.
 struct PrepassVertexInput
 {
 	VertexInput Vertex;
@@ -200,13 +210,16 @@ struct PickingVertexOutput
 	nointerpolation uint EntityId : ENTITYID;
 };
 
-// VSOverdraw's inputs: MeshVertex's position and texture coordinates at locations 0 and 1, the attribute stream at 2 and 3.
+// VSOverdraw's inputs: MeshVertex's position and texture coordinates at locations 0 and 1, the attribute stream at 2 and 3,
+// and (M46) MeshVertex's normal and the wind stream at 4 and 5, which the wind's displacement reads.
 struct OverdrawVertexInput
 {
 	float3 Position : POSITION;
 	float2 TexCoord : TEXCOORD0;
 	float2 TexCoord1 : TEXCOORD1;
 	float4 Color : COLOR;
+	float3 Normal : NORMAL;
+	float4 Wind : WIND;
 };
 
 // VSOverdraw's outputs, which PSOverdraw reads: the position, and the texture coordinates and vertex alpha of its alpha test.
@@ -372,6 +385,9 @@ Surface EvaluateSurface(VertexOutput input, bool isFrontFace)
 		if (Material.AlphaMode == MaterialAlphaModeBlend)
 			surface.BaseColor.a *= record.Opacity;
 	}
+	// M46: a Blend material's pixel that its level fade removes is fully transparent.
+	if (Material.AlphaMode == MaterialAlphaModeBlend && IsLodFaded(Instances[input.Instance].LodFade, GetFadeThreshold(uint2(input.Position.xy))))
+		surface.BaseColor.a = 0.0;
 
 	// The tangent frame: the tangent made orthogonal to the interpolated normal (Gram-Schmidt), the bitangent from their
 	// cross product and the tangent's sign.
@@ -418,12 +434,25 @@ InstanceRecord GetInstance(uint instance)
 	return Instances[GetInstanceIndex(instance)];
 }
 
+// M46: the world position `world` (record.World times the vertex's position) of a vertex of `record`, with normal `normal`
+// and wind weights `wind`, displaced by the current render's wind, or with `previous` by the previous render's through
+// record.PreviousWorld, when the instance has DrawFlagWind; `world` itself otherwise.
+float4 ApplyInstanceWind(float4 world, InstanceRecord record, float3 normal, float4 wind, bool previous)
+{
+	if (!HasWind(record.Flags))
+		return world;
+	const float4x4 matrix = previous ? record.PreviousWorld : record.World;
+	return float4(ApplyWind(GetWindFrame(previous), world.xyz, WindTransform(matrix, float4(0.0, 0.0, 0.0, 1.0)).xyz,
+					  WindTransform(matrix, float4(normal, 0.0)).xyz, wind, record.WindResponse),
+		1.0);
+}
+
 // The vertex placed by `record`, the record at `recordIndex` of Instances: every vertex entry's position comes from these
-// two products.
+// two products, and (M46) the wind's displacement between them.
 VertexOutput TransformVertex(VertexInput input, InstanceRecord record, uint recordIndex)
 {
 	const bool mirrored = IsMirrored(record.Flags);
-	const float4 world = MultiplyExact(record.World, float4(input.Position, 1.0));
+	const float4 world = ApplyInstanceWind(MultiplyExact(record.World, float4(input.Position, 1.0)), record, input.Normal, input.Wind, false);
 	VertexOutput output;
 	output.Position = MultiplyExact(View.ViewProjection, world);
 	output.ClipDistance = GetClipDistance(View.ClipPlane, world);
@@ -446,7 +475,8 @@ VertexOutput TransformVertex(VertexInput input, InstanceRecord record, uint reco
 float4 GetPreviousClip(PrepassVertexInput input, InstanceRecord record)
 {
 	const float3 local = (record.Flags & DrawFlagPreviousPositions) != 0 ? input.PreviousPosition : input.Vertex.Position;
-	return MultiplyExact(View.PreviousViewProjection, MultiplyExact(record.PreviousWorld, float4(local, 1.0)));
+	const float4 world = ApplyInstanceWind(MultiplyExact(record.PreviousWorld, float4(local, 1.0)), record, input.Vertex.Normal, input.Vertex.Wind, true);
+	return MultiplyExact(View.PreviousViewProjection, world);
 }
 
 [shader("vertex")]
@@ -483,28 +513,32 @@ OverdrawVertexOutput VSOverdraw(OverdrawVertexInput input, uint instance : SV_Vu
 {
 	const InstanceRecord record = GetInstance(instance);
 	OverdrawVertexOutput output;
-	output.Position = MultiplyExact(View.ViewProjection, MultiplyExact(record.World, float4(input.Position, 1.0)));
+	const float4 world = ApplyInstanceWind(MultiplyExact(record.World, float4(input.Position, 1.0)), record, input.Normal, input.Wind, false);
+	output.Position = MultiplyExact(View.ViewProjection, world);
 	output.TexCoord = input.TexCoord;
 	output.TexCoord1 = input.TexCoord1;
 	output.Alpha = input.Color.a;
 	return output;
 }
 
-// The coverage of a fragment: all of it, or (ALPHA_MASK) none for a Mask material's point below the cutoff and (M31) for
-// a point its instance's dissolve or fade removes. An Opaque material draws with the Mask variants only for its
-// instance's parameters, so only a Mask material tests its alpha. The parameters' clip is evaluated first, under
-// conditions that hold for the whole primitive, and the coverage is returned once at the end.
+// The coverage of a fragment: all of it, or (ALPHA_MASK) none for a Mask material's point below the cutoff, (M31) for a
+// point its instance's dissolve or fade removes and (M46) for a point its level fade removes. An Opaque material draws
+// with the Mask variants only for its instance's parameters or level fade, so only a Mask material tests its alpha. The
+// parameters' and the level fade's clips are evaluated first, under conditions that hold for the whole primitive, and the
+// coverage is returned once at the end.
 uint GetCoverage(VertexOutput input, Surface surface)
 {
 #if ALPHA_MASK
 	bool clipped = false;
+	const InstanceRecord record = Instances[input.Instance];
+	const float threshold = GetFadeThreshold(uint2(input.Position.xy));
 	if (HasMaterialParameters(input))
 	{
-		const InstanceRecord record = Instances[input.Instance];
 		if (record.DissolveAmount > 0.0)
 			clipped = IsDissolved(record, SampleDissolveNoise(input, record));
-		clipped = clipped || record.Opacity < GetFadeThreshold(uint2(input.Position.xy));
+		clipped = clipped || record.Opacity < threshold;
 	}
+	clipped = clipped || IsLodFaded(record.LodFade, threshold);
 	clipped = clipped || (Material.AlphaMode == MaterialAlphaModeMask && surface.BaseColor.a < Material.AlphaCutoff);
 	return clipped ? 0u : 0xFFFFFFFFu;
 #else

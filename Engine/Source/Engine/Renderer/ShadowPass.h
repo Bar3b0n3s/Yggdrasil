@@ -4,6 +4,7 @@
 #include "Engine/Core/Base.h"
 #include "Engine/Core/Result.h"
 #include "Engine/Graphics/PipelineFactory.h"
+#include "Engine/Renderer/MeshWind.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/PointShadowMaps.h"
 #include "Engine/Renderer/RenderPrepare.h"
@@ -41,8 +42,9 @@ namespace Engine {
 	{
 		nvrhi::BufferHandle Vertices{};
 		nvrhi::BufferHandle Attributes{}; // M23 (C-MESH2): vertex binding 1, the mesh's attribute stream (GpuMesh::AttributeBuffer)
+		nvrhi::BufferHandle Wind{};       // M46: vertex binding 3, the mesh's wind stream (GpuMesh::WindBuffer)
 		nvrhi::BufferHandle Indices{};
-		uint32_t IndexOffset = 0;
+		uint32_t IndexOffset = 0; // M46: of the caster's level (ShadowCasterView)
 		uint32_t IndexCount = 0;
 		Aabb Bounds{};                     // the submesh's local bounds
 		glm::mat4 World = glm::mat4(1.0f); // the caster's world matrix, also in its instance record
@@ -56,8 +58,20 @@ namespace Engine {
 		uint32_t Instance = 0; // its instance record's index in the view's Instances buffer
 		// M29 (Docs/Decisions/0044-m29-light-limits.md decision 4): XXH64 of everything the draw puts into a depth map: its
 		// world matrix, mesh handle and GpuMesh::Version, submesh range, variants, a Mask caster's material handle and
-		// GpuMaterial::Generation, and a deformed caster's entity, joint palette and morph weights (PrepareCasters).
+		// GpuMaterial::Generation, and a deformed caster's entity, joint palette and morph weights (PrepareCasters). M46: and its
+		// level, and for a wind caster its wind response and the render's wind (so a map holding one re-renders every frame).
 		uint64_t Signature = 0;
+	};
+
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): the view whose shadows the casters
+	// draw. Camera: the view's camera, by whose distance each caster draws its level (SelectViewShadowLod: the view's level
+	// plus its ShadowLodOffset, never faded) and beyond whose CullDistance it casts nothing; null draws level 0 of every
+	// caster. Wind: the render's wind (Renderer/MeshWind.h), null without a Wind in the snapshot: a caster whose material has
+	// wind enabled then gets DrawFlagWind and its WindResponse, and the wind enters its signature.
+	struct ShadowCasterView
+	{
+		const CameraData* Camera = nullptr; // borrowed for PrepareCasters only
+		const WindFrame* Wind = nullptr;    // borrowed for PrepareCasters only
 	};
 
 	// The view's shadow casters (ShadowPass::PrepareCasters).
@@ -139,6 +153,10 @@ namespace Engine {
 		// instance that dissolves (BuiltinAssetHandles::DissolveNoiseTexture's mirror); null binds the pass's own neutral
 		// white texture, under which only an amount of 1 dissolves anything.
 		nvrhi::ITexture* DissolveNoise = nullptr;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's WindConstants, bound at
+		// b8 of both variants' set 0 for the wind casters' displacement; null binds the pass's own calm constants, under which
+		// nothing moves.
+		nvrhi::IBuffer* Wind = nullptr;
 	};
 
 	struct ShadowRenderResult
@@ -200,8 +218,10 @@ namespace Engine {
 		// M23 (C23.3, decision 27): `sources`, empty or one per caster, are the vertices each caster's draws bind
 		// (SkinningPass.h): a deformed caster's draws bind its deformed vertices, are culled by its deformed bounds and key
 		// its VertexStream, so they batch with no other caster's; a Skipped caster casts nothing.
+		// M46 (decisions 3E and 3G): `view` chooses each caster's level and its wind (ShadowCasterView); the draws' keys gain
+		// the level, so two levels of one submesh never batch together.
 		[[nodiscard]] static Result<ShadowCasterSet> PrepareCasters(GpuResourceCache& cache, std::span<const MeshDrawItem> casters, bool instancing,
-			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {});
+			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {}, const ShadowCasterView& view = {});
 
 		// Culls the prepared casters per face and records shadow passes only. All inputs borrowed for this call;
 		// commandList open, targets match descriptions and Casters' records are in Instances (asserted). Gpu errors from

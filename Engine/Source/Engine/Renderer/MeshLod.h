@@ -2,6 +2,7 @@
 
 #include "Engine/Core/Aabb.h"
 #include "Engine/Core/Base.h"
+#include "Engine/Renderer/RenderSnapshot.h"
 
 #include <glm/glm.hpp>
 
@@ -85,5 +86,19 @@ namespace Engine {
 	// nothing) when the item is at or beyond its CullDistance from the view's camera. Pure.
 	[[nodiscard]] std::optional<uint32_t> SelectShadowLod(std::span<const float> switchSizes, uint32_t viewLevel, float distance,
 		const MeshLodParameters& parameters);
+
+	// The selection parameters of a snapshot item's RenderDistance (MeshDrawItem::Distance).
+	[[nodiscard]] MeshLodParameters ToMeshLodParameters(const MeshDrawDistance& distance);
+
+	// What `camera`'s view draws of an item placed by `world`, whose mesh's level 0 bounds are `bounds` and whose
+	// further levels switch at `switchSizes`: ComputeMeshLodSphere, then ComputeMeshScreenSize with the camera's distance to
+	// the sphere's centre and |Projection[1][1]|, then SelectMeshLod with `distance`'s parameters. Pure.
+	[[nodiscard]] MeshLodSelection SelectViewMeshLod(std::span<const float> switchSizes, const Aabb& bounds, const glm::mat4& world,
+		const MeshDrawDistance& distance, const CameraData& camera);
+
+	// The level a shadow caster draws for `camera`'s view (SelectViewMeshLod's Level plus ShadowLodOffset, clamped), or
+	// nullopt when the item is at or beyond its CullDistance from the camera. Pure.
+	[[nodiscard]] std::optional<uint32_t> SelectViewShadowLod(std::span<const float> switchSizes, const Aabb& bounds, const glm::mat4& world,
+		const MeshDrawDistance& distance, const CameraData& camera);
 
 }

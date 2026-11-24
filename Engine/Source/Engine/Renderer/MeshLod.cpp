@@ -86,4 +86,38 @@ namespace Engine {
 		return static_cast<uint32_t>(std::min<uint64_t>(level, switchSizes.size()));
 	}
 
+	MeshLodParameters ToMeshLodParameters(const MeshDrawDistance& distance)
+	{
+		return { .CullDistance = distance.CullDistance, .LodBias = distance.LodBias, .ShadowLodOffset = distance.ShadowLodOffset, .FadeWidth = distance.FadeWidth };
+	}
+
+	namespace Utils {
+
+		// The item's screen size and distance in `camera`'s view.
+		[[nodiscard]] static std::pair<float, float> MeasureViewItem(const Aabb& bounds, const glm::mat4& world, const CameraData& camera)
+		{
+			const MeshLodSphere sphere = ComputeMeshLodSphere(bounds, world);
+			const float distance = glm::length(sphere.Center - camera.Position);
+			const bool orthographic = camera.ProjectionKind == RenderProjection::Orthographic;
+			return { ComputeMeshScreenSize(sphere.Radius, distance, std::abs(camera.Projection[1][1]), orthographic), distance };
+		}
+
+	}
+
+	MeshLodSelection SelectViewMeshLod(std::span<const float> switchSizes, const Aabb& bounds, const glm::mat4& world, const MeshDrawDistance& distance,
+		const CameraData& camera)
+	{
+		const auto [screenSize, cameraDistance] = Utils::MeasureViewItem(bounds, world, camera);
+		return SelectMeshLod(switchSizes, screenSize, cameraDistance, ToMeshLodParameters(distance));
+	}
+
+	std::optional<uint32_t> SelectViewShadowLod(std::span<const float> switchSizes, const Aabb& bounds, const glm::mat4& world, const MeshDrawDistance& distance,
+		const CameraData& camera)
+	{
+		const auto [screenSize, cameraDistance] = Utils::MeasureViewItem(bounds, world, camera);
+		const MeshLodParameters parameters = ToMeshLodParameters(distance);
+		const MeshLodSelection selection = SelectMeshLod(switchSizes, screenSize, cameraDistance, parameters);
+		return SelectShadowLod(switchSizes, selection.Level, cameraDistance, parameters);
+	}
+
 }

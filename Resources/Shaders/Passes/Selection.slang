@@ -12,6 +12,7 @@
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/Private/SelectionPassConstants.h"
+#include "Common/Wind.slang"
 
 #if !defined(ALPHA_MASK)
 	#define ALPHA_MASK 0
@@ -30,6 +31,10 @@ struct SelectionVertexInput
 	float2 TexCoord : TEXCOORD0;
 	float2 TexCoord1 : TEXCOORD1;
 	float4 Color : COLOR;
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): MeshVertex's normal and the wind stream
+	// (vertex binding 3), so a wind-swept selected item's mask covers the prepass's surface exactly.
+	float3 Normal : NORMAL;
+	float4 Wind : WIND;
 };
 
 struct SelectionVertexOutput
@@ -55,8 +60,15 @@ float4 SelectionMultiplyExact(float4x4 matrix, float4 vector)
 SelectionVertexOutput VSMain(SelectionVertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	SelectionVertexOutput result;
-	const float4x4 world = Instances[MaskDraw.FirstInstance + instance].World;
-	result.Position = SelectionMultiplyExact(MaskDraw.ViewProjection, SelectionMultiplyExact(world, float4(input.Position, 1.0)));
+	const InstanceRecord record = Instances[MaskDraw.FirstInstance + instance];
+	float4 world = SelectionMultiplyExact(record.World, float4(input.Position, 1.0));
+	if (HasWind(record.Flags))
+	{
+		world = float4(ApplyWind(GetWindFrame(false), world.xyz, WindTransform(record.World, float4(0.0, 0.0, 0.0, 1.0)).xyz,
+						   WindTransform(record.World, float4(input.Normal, 0.0)).xyz, input.Wind, record.WindResponse),
+			1.0);
+	}
+	result.Position = SelectionMultiplyExact(MaskDraw.ViewProjection, world);
 	result.TexCoord = input.TexCoord;
 	result.TexCoord1 = input.TexCoord1;
 	result.Color = input.Color;

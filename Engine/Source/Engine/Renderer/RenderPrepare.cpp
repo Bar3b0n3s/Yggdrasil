@@ -239,8 +239,8 @@ namespace Engine {
 	{
 		std::ranges::sort(keys, [](const OpaqueSortKey& left, const OpaqueSortKey& right)
 		{
-			return std::tie(left.Pipeline, left.Material, left.Mesh, left.Submesh, left.DrawIndex)
-				< std::tie(right.Pipeline, right.Material, right.Mesh, right.Submesh, right.DrawIndex);
+			return std::tie(left.Pipeline, left.Material, left.Mesh, left.Submesh, left.Lod, left.DrawIndex)
+				< std::tie(right.Pipeline, right.Material, right.Mesh, right.Submesh, right.Lod, right.DrawIndex);
 		});
 	}
 
@@ -296,11 +296,11 @@ namespace Engine {
 		return record;
 	}
 
-	AlphaMode SelectMeshAlphaMode(AlphaMode material, const MeshMaterialParameters& parameters, bool shadowCaster)
+	AlphaMode SelectMeshAlphaMode(AlphaMode material, const MeshMaterialParameters& parameters, bool shadowCaster, float lodFade)
 	{
 		if (material != AlphaMode::Opaque)
 			return material;
-		const bool clips = parameters.DissolveAmount > 0.0f || (!shadowCaster && parameters.Opacity < 1.0f);
+		const bool clips = parameters.DissolveAmount > 0.0f || (!shadowCaster && (parameters.Opacity < 1.0f || lodFade != 0.0f));
 		return clips ? AlphaMode::Mask : AlphaMode::Opaque;
 	}
 

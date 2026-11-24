@@ -83,6 +83,8 @@ namespace Engine {
 			bool* BlockPathLogged = nullptr;
 			// M23 (decision 9): the cache's shared default attribute stream, which a mesh upload may grow.
 			DefaultAttributeStream* DefaultAttributes = nullptr;
+			// M46 (decision 3L): the cache's shared default wind stream (MeshVertexWind zeros), grown the same way.
+			DefaultAttributeStream* DefaultWind = nullptr;
 		};
 
 		// M18 (C18.4, Docs/Decisions/0029-m18-contract.md decision 43): whether GpuResourceCache::TrimUnused releases the mirror
@@ -471,22 +473,57 @@ namespace Engine {
 
 			[[nodiscard]] static bool HasGpuObjects(const GpuMesh& mirror)
 			{
-				return mirror.VertexBuffer != nullptr && mirror.AttributeBuffer != nullptr && mirror.IndexBuffer != nullptr;
+				return mirror.VertexBuffer != nullptr && mirror.AttributeBuffer != nullptr && mirror.IndexBuffer != nullptr && mirror.WindBuffer != nullptr;
+			}
+
+			// M46 (decision 3E): `levelZero` followed by `levels`, or `levelZero` itself (no copy) without levels.
+			template<typename T>
+			[[nodiscard]] static std::span<const T> JoinLevels(const std::vector<T>& levelZero, const std::vector<T>& levels, std::vector<T>& joined)
+			{
+				if (levels.empty())
+					return levelZero;
+				joined.reserve(levelZero.size() + levels.size());
+				joined.assign(levelZero.begin(), levelZero.end());
+				joined.insert(joined.end(), levels.begin(), levels.end());
+				return joined;
+			}
+
+			// M46 (decision 3L): the wind stream of `mesh` (binding 3): its own buffer of Wind then LodWind, written by
+			// `commandList`; or the shared default stream of zeros, a new one of `count` entries when the current one is
+			// shorter, which `grown` receives (the caller makes it the shared one once the list has executed).
+			[[nodiscard]] static Result<nvrhi::BufferHandle> CreateWindBuffer(const UploadContext& context, nvrhi::ICommandList& commandList,
+				const MeshData& mesh, uint32_t count, const std::string& name, DefaultAttributeStream& grown)
+			{
+				if (!mesh.Wind.empty())
+				{
+					std::vector<MeshVertexWind> joined;
+					const std::span<const MeshVertexWind> wind = JoinLevels(mesh.Wind, mesh.LodWind, joined);
+					return Utils::CreateGeometryBuffer(*context.Device, commandList, wind.data(), wind.size_bytes(), false, std::format("{} (wind)", name));
+				}
+				const DefaultAttributeStream& shared = *context.DefaultWind;
+				if (shared.Buffer != nullptr && shared.Count >= count)
+					return shared.Buffer;
+				const std::vector<MeshVertexWind> zeros(count);
+				ENGINE_TRY_ASSIGN(grown.Buffer, Utils::CreateGeometryBuffer(*context.Device, commandList, zeros.data(), zeros.size() * sizeof(MeshVertexWind), false, "GpuResourceCache.DefaultWind"));
+				grown.Count = count;
+				return grown.Buffer;
 			}
 
 			// The attribute stream of `mesh` (binding 1): its own buffer, written by `commandList`; or the shared default
 			// stream, a new one of the mesh's vertex count written by `commandList` when the current one is shorter. `grown`
 			// receives that new stream, which the caller makes the shared one once the list has executed.
+			// M46 (decision 3L): the stream covers the levels' own vertices too (Attributes then LodAttributes).
 			[[nodiscard]] static Result<nvrhi::BufferHandle> CreateAttributeBuffer(const UploadContext& context, nvrhi::ICommandList& commandList,
-				const MeshData& mesh, const std::string& name, DefaultAttributeStream& grown)
+				const MeshData& mesh, uint32_t count, const std::string& name, DefaultAttributeStream& grown)
 			{
 				if (!mesh.Attributes.empty())
 				{
-					return Utils::CreateGeometryBuffer(*context.Device, commandList, mesh.Attributes.data(),
-						mesh.Attributes.size() * sizeof(MeshVertexAttributes), false, std::format("{} (attributes)", name));
+					std::vector<MeshVertexAttributes> joined;
+					const std::span<const MeshVertexAttributes> attributes = JoinLevels(mesh.Attributes, mesh.LodAttributes, joined);
+					return Utils::CreateGeometryBuffer(*context.Device, commandList, attributes.data(), attributes.size_bytes(), false,
+						std::format("{} (attributes)", name));
 				}
 				const DefaultAttributeStream& shared = *context.DefaultAttributes;
-				const auto count = static_cast<uint32_t>(mesh.Vertices.size());
 				if (shared.Buffer != nullptr && shared.Count >= count)
 					return shared.Buffer;
 				const std::vector<MeshVertexAttributes> defaults(count);
@@ -513,24 +550,33 @@ namespace Engine {
 				ENGINE_TRY_ASSIGN(nvrhi::CommandListHandle commandList,
 					device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 				CommandListRecording recording(device, *commandList);
-				Result<nvrhi::BufferHandle> vertices = Utils::CreateGeometryBuffer(device, *commandList, mesh.Vertices.data(),
-					mesh.Vertices.size() * sizeof(MeshVertex), false, std::format("{} (vertices)", name), skinned || morphed);
+				// M46 (decisions 3E and 3L): the levels' own vertices and indices follow level 0's in the same buffers; a mesh
+				// without levels uploads exactly its earlier bytes.
+				std::vector<MeshVertex> joinedVertices;
+				const std::span<const MeshVertex> allVertices = JoinLevels(mesh.Vertices, mesh.LodVertices, joinedVertices);
+				std::vector<uint32_t> joinedIndices;
+				const std::span<const uint32_t> allIndices = JoinLevels(mesh.Indices, mesh.LodIndices, joinedIndices);
+				const auto vertexCount = static_cast<uint32_t>(allVertices.size());
+				Result<nvrhi::BufferHandle> vertices = Utils::CreateGeometryBuffer(device, *commandList, allVertices.data(), allVertices.size_bytes(), false,
+					std::format("{} (vertices)", name), skinned || morphed);
 				Result<nvrhi::BufferHandle> indices = vertices
-					? Utils::CreateGeometryBuffer(device, *commandList, mesh.Indices.data(), mesh.Indices.size() * sizeof(uint32_t), true,
-						  std::format("{} (indices)", name))
+					? Utils::CreateGeometryBuffer(device, *commandList, allIndices.data(), allIndices.size_bytes(), true, std::format("{} (indices)", name))
 					: Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
 				DefaultAttributeStream grown;
 				Result<nvrhi::BufferHandle> attributes =
-					indices ? CreateAttributeBuffer(context, *commandList, mesh, name, grown) : Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
+					indices ? CreateAttributeBuffer(context, *commandList, mesh, vertexCount, name, grown) : Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
+				DefaultAttributeStream grownWind;
+				Result<nvrhi::BufferHandle> wind =
+					attributes ? CreateWindBuffer(context, *commandList, mesh, vertexCount, name, grownWind) : Result<nvrhi::BufferHandle>(nvrhi::BufferHandle());
 				Result<nvrhi::BufferHandle> skin = nvrhi::BufferHandle();
-				if (attributes && skinned)
+				if (wind && skinned)
 				{
 					skin = Utils::CreateDeformBuffer(device, mesh.Skin.size() * sizeof(MeshSkinVertex), std::format("{} (skin)", name));
 					if (skin)
 						commandList->writeBuffer(*skin, mesh.Skin.data(), mesh.Skin.size() * sizeof(MeshSkinVertex));
 				}
 				Result<nvrhi::BufferHandle> morphs = nvrhi::BufferHandle();
-				if (attributes && skin && morphed)
+				if (wind && skin && morphed)
 				{
 					// Target by target, each of one delta per vertex.
 					morphs = Utils::CreateDeformBuffer(device, morphBytes, std::format("{} (morph targets)", name));
@@ -547,17 +593,22 @@ namespace Engine {
 					return std::unexpected(std::move(indices).error());
 				if (!attributes)
 					return std::unexpected(std::move(attributes).error());
+				if (!wind)
+					return std::unexpected(std::move(wind).error());
 				if (!skin)
 					return std::unexpected(std::move(skin).error());
 				if (!morphs)
 					return std::unexpected(std::move(morphs).error());
 				if (grown.Buffer != nullptr)
 					*context.DefaultAttributes = std::move(grown);
+				if (grownWind.Buffer != nullptr)
+					*context.DefaultWind = std::move(grownWind);
 
 				GpuMesh mirror;
 				mirror.VertexBuffer = std::move(*vertices);
 				mirror.AttributeBuffer = std::move(*attributes);
 				mirror.IndexBuffer = std::move(*indices);
+				mirror.WindBuffer = std::move(*wind);
 				if (skinned || morphed)
 				{
 					mirror.SkinBuffer = std::move(*skin);
@@ -569,15 +620,28 @@ namespace Engine {
 				mirror.VertexCount = static_cast<uint32_t>(mesh.Vertices.size());
 				mirror.IndexCount = static_cast<uint32_t>(mesh.Indices.size());
 				mirror.Submeshes.reserve(mesh.Submeshes.size());
-				for (const MeshSubmesh& submesh : mesh.Submeshes)
+				for (size_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
 				{
-					mirror.Submeshes.push_back({
+					const MeshSubmesh& submesh = mesh.Submeshes[submeshIndex];
+					GpuSubmesh gpu{
 						.IndexOffset = submesh.IndexOffset,
 						.IndexCount = submesh.IndexCount,
 						.MaterialSlot = submesh.MaterialSlot,
 						.Bounds = submesh.Bounds,
-					});
+					};
+					// M46 (decision 3E): each further level's range, past level 0's indices, and bounds over every level.
+					for (const MeshLod& lod : mesh.Lods)
+					{
+						const MeshLodRange& range = lod.Submeshes[submeshIndex];
+						gpu.Lods.push_back({ .IndexOffset = static_cast<uint32_t>(mesh.Indices.size()) + range.IndexOffset, .IndexCount = range.IndexCount });
+						for (uint32_t position = range.IndexOffset; position < range.IndexOffset + range.IndexCount; ++position)
+							gpu.Bounds.Extend(allVertices[mesh.LodIndices[position]].Position);
+					}
+					mirror.Submeshes.push_back(std::move(gpu));
 				}
+				mirror.LodScreenSizes.reserve(mesh.Lods.size());
+				for (const MeshLod& lod : mesh.Lods)
+					mirror.LodScreenSizes.push_back(lod.ScreenSize);
 				mirror.DefaultMaterials.reserve(mesh.Slots.size());
 				for (const MeshMaterialSlot& slot : mesh.Slots)
 					mirror.DefaultMaterials.push_back(slot.DefaultMaterial);
@@ -882,8 +946,9 @@ namespace Engine {
 		size_t UploadFailures = 0;
 		uint64_t NextGeneration = 1; // GpuMaterial::Generation: only increases
 		// M23 (decision 9): the shared default attribute stream of the meshes without one. Dropped with every mirror (Clear,
-		// ReleaseGpuObjects); the next mesh upload creates it again.
+		// ReleaseGpuObjects); the next mesh upload creates it again. M46 (decision 3L): the shared default wind stream, alike.
 		DefaultAttributeStream DefaultAttributes{};
+		DefaultAttributeStream DefaultWind{};
 		// M23 (decision 15): the Info line naming the block-compressed textures' path was logged. Kept across a device loss:
 		// the recovered device has the same specification, so the same path.
 		bool BlockPathLogged = false;
@@ -896,7 +961,8 @@ namespace Engine {
 				.Assets = Assets,
 				.UploadFailures = &UploadFailures,
 				.BlockPathLogged = &BlockPathLogged,
-				.DefaultAttributes = &DefaultAttributes };
+				.DefaultAttributes = &DefaultAttributes,
+				.DefaultWind = &DefaultWind };
 		}
 		// The texture mirror of `slot`, or of the built-in `fallback` when the slot is empty.
 		[[nodiscard]] const GpuTexture& ResolveSlot(const TypedAssetHandle<AssetType::Texture>& slot, AssetHandle fallback);
@@ -910,7 +976,7 @@ namespace Engine {
 		void ReportMirrorFailure(AssetHandle handle, std::string code, std::string message, std::string hint);
 		// M23 (decision 9): drops the shared default attribute stream once no mesh mirror binds it, so a collection or a trim
 		// that released every mesh without a stream leaves none of the cache's buffers alive; the next such mesh creates it
-		// again.
+		// again. M46 (decision 3L): the shared default wind stream, alike.
 		void ReleaseUnboundDefaultAttributes();
 	};
 
@@ -1005,15 +1071,26 @@ namespace Engine {
 
 	void GpuResourceCache::State::ReleaseUnboundDefaultAttributes()
 	{
-		if (DefaultAttributes.Buffer == nullptr)
-			return;
-		const nvrhi::IBuffer* shared = DefaultAttributes.Buffer.Get();
-		const bool bound = Meshes.AnyMirror([shared](const GpuMesh& mirror)
+		if (DefaultAttributes.Buffer != nullptr)
 		{
-			return mirror.AttributeBuffer.Get() == shared;
-		});
-		if (!bound)
-			DefaultAttributes = {};
+			const nvrhi::IBuffer* shared = DefaultAttributes.Buffer.Get();
+			const bool bound = Meshes.AnyMirror([shared](const GpuMesh& mirror)
+			{
+				return mirror.AttributeBuffer.Get() == shared;
+			});
+			if (!bound)
+				DefaultAttributes = {};
+		}
+		if (DefaultWind.Buffer != nullptr)
+		{
+			const nvrhi::IBuffer* shared = DefaultWind.Buffer.Get();
+			const bool bound = Meshes.AnyMirror([shared](const GpuMesh& mirror)
+			{
+				return mirror.WindBuffer.Get() == shared;
+			});
+			if (!bound)
+				DefaultWind = {};
+		}
 	}
 
 	const GpuMaterial& GpuResourceCache::GetMaterial(AssetHandle handle)
@@ -1086,6 +1163,7 @@ namespace Engine {
 		entry.Value.AlphaMode = material->AlphaMode;
 		entry.Value.AlphaCutoff = material->AlphaCutoff;
 		entry.Value.DoubleSided = material->DoubleSided;
+		entry.Value.Wind = material->Wind;
 		entry.Value.Version = key.Version;
 		entry.Value.Generation = state.NextGeneration++;
 		entry.Value.IsPlaceholder = isPlaceholder;
@@ -1189,6 +1267,7 @@ namespace Engine {
 		m_State->Meshes.Clear();
 		m_State->Textures.Clear();
 		m_State->DefaultAttributes = {};
+		m_State->DefaultWind = {};
 	}
 
 	void GpuResourceCache::ReleaseGpuObjects()

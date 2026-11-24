@@ -449,6 +449,40 @@ namespace Engine {
 			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, fading, false) == AlphaMode::Mask);
 			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, fading, true) == AlphaMode::Opaque);
 		}
+
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E): a draw whose level fades (either sign)
+		// takes the Mask variants in the camera's passes, an Opaque caster never fades by level, and Mask and Blend keep their
+		// mode.
+		TEST_CASE("RenderPrepare: an Opaque material takes the Mask variants while its draw's level fades, never as a caster")
+		{
+			const MeshMaterialParameters neutral;
+			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, neutral, false, 0.0f) == AlphaMode::Opaque);
+			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, neutral, false, 0.25f) == AlphaMode::Mask);
+			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, neutral, false, -0.75f) == AlphaMode::Mask);
+			CHECK(SelectMeshAlphaMode(AlphaMode::Opaque, neutral, true, 0.25f) == AlphaMode::Opaque);
+			CHECK(SelectMeshAlphaMode(AlphaMode::Mask, neutral, false, 0.25f) == AlphaMode::Mask);
+			CHECK(SelectMeshAlphaMode(AlphaMode::Blend, neutral, false, -0.25f) == AlphaMode::Blend);
+		}
+
+		// M46 (decision 3E; a reviewed change of the keys M8 and M23 froze): two levels of one submesh sort apart and never
+		// batch together; draws of one level sort and batch as before.
+		TEST_CASE("RenderPrepare: draws of two levels of one submesh sort by level and never share an instanced draw")
+		{
+			std::vector<OpaqueSortKey> keys;
+			for (uint32_t item = 0; item < 4; ++item)
+				keys.push_back({ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0, .Lod = item % 2 == 0 ? 1U : 0U, .DrawIndex = item });
+			SortOpaqueDraws(keys);
+			std::vector<uint32_t> order;
+			for (const OpaqueSortKey& key : keys)
+				order.push_back(key.DrawIndex);
+			CHECK(order == std::vector<uint32_t>{ 1, 3, 0, 2 });
+
+			const MeshInstanceKey fine{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0 };
+			const MeshInstanceKey coarse{ .Pipeline = 0, .Material = AssetHandle(10), .Mesh = AssetHandle(1), .Submesh = 0, .Lod = 1 };
+			const std::vector<MeshInstanceBatch> batches = GroupMeshInstances(std::vector<MeshInstanceKey>{ fine, fine, coarse, coarse, fine });
+			const std::vector<MeshInstanceBatch> expected = { { .First = 0, .Count = 2 }, { .First = 2, .Count = 2 }, { .First = 4, .Count = 1 } };
+			CHECK(batches == expected);
+		}
 	}
 
 	TEST_SUITE(Test::GpuSuite)

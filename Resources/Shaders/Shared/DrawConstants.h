@@ -25,18 +25,23 @@ namespace Engine {
 	// planar reflection's glass in its main view: the forward passes reflect the reflection of slot
 	// InstanceRecord::PlanarReflectionSlot in place of the probe's or environment's specular, and the prepass writes a zero
 	// SceneRoughness multiplier so SSR neither traces nor composites over it. A mirror view's records never carry it.
+	// DrawFlagWind (M46, Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the instance's material has
+	// wind enabled and the scene has a Wind, so every vertex entry displaces its vertices by the view's WindConstants and the
+	// record's WindResponse (Common/Wind.slang); without it no entry reads either, and the instance draws as before M46.
 #if defined(ENGINE_SHADER)
 	static const uint DrawFlagMirrored = 1;
 	static const uint DrawFlagReceiveShadows = 2;
 	static const uint DrawFlagPreviousPositions = 4;
 	static const uint DrawFlagMaterialParameters = 8;
 	static const uint DrawFlagPlanarReflection = 16;
+	static const uint DrawFlagWind = 32;
 #else
 inline constexpr uint32_t DrawFlagMirrored = 1;
 inline constexpr uint32_t DrawFlagReceiveShadows = 2;
 inline constexpr uint32_t DrawFlagPreviousPositions = 4;
 inline constexpr uint32_t DrawFlagMaterialParameters = 8;
 inline constexpr uint32_t DrawFlagPlanarReflection = 16;
+inline constexpr uint32_t DrawFlagWind = 32;
 #endif
 
 	// The Scene program's debug views (§8.5): Vulkan specialization constant SceneDebugViewConstantId of the forward

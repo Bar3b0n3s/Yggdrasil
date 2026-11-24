@@ -10,6 +10,7 @@
 
 #include <nvrhi/nvrhi.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -170,6 +171,11 @@ namespace Engine {
 		// M21's milestone review: the visible tiles (of chunks that meet the view) past SceneRenderer::MaxTileQuadsPerView,
 		// which the Sprites stage did not draw.
 		uint32_t DroppedTiles = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3K): the main view's mesh levels of detail,
+		// which RenderStats' MeshLodDraws, LodCrossFades and DistanceCulledMeshes report.
+		std::array<uint32_t, 5> MeshLodDraws{};
+		uint32_t LodCrossFades = 0;
+		uint32_t DistanceCulledMeshes = 0;
 	};
 
 	// The pipelines of the pass list (see the file comment), created once per device at startup and shared by every

@@ -8,11 +8,13 @@
 #include "Engine/Graphics/CommandListRecording.h"
 #include "Engine/Graphics/GraphicsDevice.h"
 #include "Engine/Renderer/GpuResourceCache.h"
+#include "Engine/Renderer/MeshLod.h"
 #include "Engine/Renderer/Private/ForwardPipelines.h"
 #include "Engine/Renderer/SceneTargetFormats.h"
 #include "Shared/DrawConstants.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/ShadowCasterConstants.h"
+#include "Shared/WindConstants.h"
 
 #include <algorithm>
 #include <array>
@@ -37,8 +39,9 @@ namespace Engine {
 			view.visibility = nvrhi::ShaderType::All;
 			view.registerSpace = 0;
 			view.registerSpaceIsDescriptorSet = true;
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the wind at b8.
 			view.bindings = { nvrhi::BindingLayoutItem::ConstantBuffer(0), nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
-				nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)) };
+				nvrhi::BindingLayoutItem::ConstantBuffer(WindConstantsRegister), nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask)
 			{
 				// M31 (decision 6): the dissolve noise and its sampler.
@@ -51,7 +54,8 @@ namespace Engine {
 			result.Entries = { "VSMain", "PSMain" };
 			result.Permutation = { { .Key = "ALPHA_MASK", .Value = mask ? "1" : "0" } };
 			result.BindingLayouts = { view };
-			result.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(ShadowCasterConstants) } };
+			result.ConstantBuffers = { { .Set = 0, .Register = 0, .ByteSize = sizeof(ShadowCasterConstants) },
+				{ .Set = 0, .Register = WindConstantsRegister, .ByteSize = sizeof(WindConstants) } };
 			if (mask)
 			{
 				nvrhi::BindingLayoutDesc material;
@@ -193,6 +197,8 @@ namespace Engine {
 		nvrhi::SamplerHandle AnisoWrap{};
 		// M31 (decision 6): the 1 x 1 white R8 texture the Mask casters' set binds without ShadowRenderInputs::DissolveNoise.
 		nvrhi::TextureHandle NeutralNoise{};
+		// M46 (decision 3G): the calm WindConstants both variants' set binds without ShadowRenderInputs::Wind.
+		nvrhi::BufferHandle CalmWind{};
 
 		// The Mask casters' material sets (null for Opaque casters), one per draw of `casters`, from the caller's cache.
 		[[nodiscard]] Result<std::vector<nvrhi::IBindingSet*>> ResolveMaterialSets(PassBindingCache& bindings, const ShadowCasterSet& casters);
@@ -200,7 +206,7 @@ namespace Engine {
 		// (`batchOf`: each draw's batch), each one instanced draw. `reflected`: the face's projection is a reflection (a
 		// point-shadow face), so the draws use their ReflectedVariant.
 		[[nodiscard]] Status RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
-			std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IFramebuffer& framebuffer,
+			std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IBuffer& wind, nvrhi::IFramebuffer& framebuffer,
 			const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot, std::span<const uint32_t> visible,
 			std::span<const uint32_t> batchOf, RenderPassCounters& counters, bool reflected);
 
@@ -263,9 +269,12 @@ namespace Engine {
 					.setOffset(offsetof(MeshVertex, TexCoord))
 					.setElementStride(Stride),
 			};
-			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask caster's alpha test reads.
+			// M23 (C-MESH2): the attribute stream at locations 2 and 3, which a Mask caster's alpha test reads; M46: MeshVertex's
+			// normal and the wind stream at 4 and 5, which the wind's displacement reads.
 			const std::array<nvrhi::VertexAttributeDesc, 2> stream = Utils::MakeMeshAttributeStreamAttributes();
 			specification.VertexAttributes.insert(specification.VertexAttributes.end(), stream.begin(), stream.end());
+			specification.VertexAttributes.push_back(Utils::MakeMeshNormalAttribute());
+			specification.VertexAttributes.push_back(Utils::MakeMeshWindStreamAttribute());
 			specification.Framebuffer.setDepthFormat(ShadowDepthFormat);
 			constexpr std::array<nvrhi::RasterCullMode, 3> Modes{ nvrhi::RasterCullMode::Back, nvrhi::RasterCullMode::Front,
 				nvrhi::RasterCullMode::None };
@@ -288,9 +297,18 @@ namespace Engine {
 		noise.keepInitialState = true;
 		noise.debugName = "ShadowPass.NeutralNoise";
 		ENGINE_TRY_ASSIGN(state.NeutralNoise, device.CreateTexture(noise));
+		nvrhi::BufferDesc calm;
+		calm.byteSize = sizeof(WindConstants);
+		calm.isConstantBuffer = true;
+		calm.initialState = nvrhi::ResourceStates::ConstantBuffer;
+		calm.keepInitialState = true;
+		calm.debugName = "ShadowPass.CalmWind";
+		ENGINE_TRY_ASSIGN(state.CalmWind, device.CreateBuffer(calm));
 		ENGINE_TRY_ASSIGN(const nvrhi::CommandListHandle list, device.CreateCommandList(nvrhi::CommandListParameters().setEnableImmediateExecution(false)));
 		CommandListRecording recording(device, *list);
 		list->clearTextureFloat(state.NeutralNoise, nvrhi::AllSubresources, nvrhi::Color(1.0f));
+		const WindConstants calmConstants{};
+		list->writeBuffer(state.CalmWind, &calmConstants, sizeof(calmConstants));
 		recording.Execute();
 		return pass;
 	}
@@ -367,7 +385,7 @@ namespace Engine {
 	}
 
 	Result<ShadowCasterSet> ShadowPass::PrepareCasters(GpuResourceCache& cache, std::span<const MeshDrawItem> casters, bool instancing,
-		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources)
+		std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources, const ShadowCasterView& view)
 	{
 		ENGINE_CORE_ASSERT(sources.empty() || sources.size() == casters.size(), "the casters' vertex sources are none or one per caster");
 		// The draws in caster order with their keys and records, sorted below.
@@ -389,13 +407,20 @@ namespace Engine {
 				return MakeError(ErrorCode::InvalidArgument, "Shadow caster {} has a non-finite world transform", item.Entity);
 			// Cache uploads invalidate borrowed references; own this mesh's handles and value arrays before resolving materials.
 			const GpuMesh mesh = cache.GetMesh(item.Mesh);
-			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer)
+			if (!mesh.VertexBuffer || !mesh.IndexBuffer || !mesh.AttributeBuffer || !mesh.WindBuffer)
+				continue;
+			// M46 (decision 3E): the caster's level for the view's camera, never faded; beyond its CullDistance it casts nothing.
+			const std::optional<uint32_t> level =
+				view.Camera != nullptr ? SelectViewShadowLod(mesh.LodScreenSizes, mesh.Bounds, item.World, item.Distance, *view.Camera) : std::optional<uint32_t>(0U);
+			if (!level.has_value())
 				continue;
 			const bool mirrored = glm::determinant(glm::mat3(item.World)) < 0;
 			for (uint32_t submeshIndex = 0; submeshIndex < mesh.Submeshes.size(); ++submeshIndex)
 			{
 				const GpuSubmesh& submesh = mesh.Submeshes[submeshIndex];
-				if (submesh.IndexCount == 0)
+				const uint32_t indexOffset = *level == 0 ? submesh.IndexOffset : submesh.Lods[*level - 1].IndexOffset;
+				const uint32_t indexCount = *level == 0 ? submesh.IndexCount : submesh.Lods[*level - 1].IndexCount;
+				if (indexCount == 0)
 					continue;
 				AssetHandle materialHandle = BuiltinAssetHandles::DefaultMaterial;
 				if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot].IsValid())
@@ -411,9 +436,10 @@ namespace Engine {
 				Candidate candidate;
 				candidate.Draw = { .Vertices = source.Vertices != nullptr ? nvrhi::BufferHandle(source.Vertices) : mesh.VertexBuffer,
 					.Attributes = mesh.AttributeBuffer,
+					.Wind = mesh.WindBuffer,
 					.Indices = mesh.IndexBuffer,
-					.IndexOffset = submesh.IndexOffset,
-					.IndexCount = submesh.IndexCount,
+					.IndexOffset = indexOffset,
+					.IndexCount = indexCount,
 					.Bounds = source.Vertices != nullptr ? source.Bounds : submesh.Bounds,
 					.World = item.World,
 					.Variant = Utils::GetPrepassVariant(mode, Utils::SelectCullMode(mirrored, material.DoubleSided)),
@@ -425,16 +451,21 @@ namespace Engine {
 					.Material = mask ? materialHandle : AssetHandle(),
 					.Mesh = item.Mesh,
 					.Submesh = submeshIndex,
-					.VertexStream = source.VertexStream };
-				candidate.Record = MakeMeshInstanceRecord(item);
+					.VertexStream = source.VertexStream,
+					.Lod = *level };
+				// M46 (decision 3G): a caster whose material has wind sways in a scene with a Wind.
+				const bool wind = view.Wind != nullptr && material.Wind.Enabled;
+				candidate.Record = MakeMeshInstanceRecord(item, wind ? DrawFlagWind : 0U);
+				candidate.Record.WindResponse = wind ? PackWindResponse(material.Wind) : 0U;
 				// M29 (decision 4): what this draw puts into a depth map. An Opaque caster binds no material, so its material does
 				// not count; a deformed caster's vertices are its entity's, posed by its palette and weights.
 				XXH64Hasher signature;
 				Utils::HashShadowValue(signature, item.World);
 				signature.UpdateU64(item.Mesh.GetValue());
 				signature.UpdateU64(mesh.Version);
-				signature.UpdateU64(submesh.IndexOffset);
-				signature.UpdateU64(submesh.IndexCount);
+				signature.UpdateU64(indexOffset);
+				signature.UpdateU64(indexCount);
+				signature.UpdateU64(*level);
 				signature.UpdateU64(candidate.Draw.Variant);
 				signature.UpdateU64(candidate.Draw.ReflectedVariant);
 				signature.UpdateU64(mask ? materialHandle.GetValue() : 0U);
@@ -456,6 +487,13 @@ namespace Engine {
 					if (material.AlphaMode == AlphaMode::Mask)
 						Utils::HashShadowValue(signature, candidate.Record.UVOffset);
 				}
+				// M46 (decision 3E): a wind caster's response and the render's wind, which change its depth every frame.
+				signature.UpdateU64(wind ? 1U : 0U);
+				if (wind)
+				{
+					signature.UpdateU64(candidate.Record.WindResponse);
+					Utils::HashShadowValue(signature, *view.Wind);
+				}
 				signature.UpdateU64(source.Vertices != nullptr ? 1U : 0U);
 				if (source.Vertices != nullptr)
 				{
@@ -475,7 +513,8 @@ namespace Engine {
 		{
 			const MeshInstanceKey& a = candidates[left].Key;
 			const MeshInstanceKey& b = candidates[right].Key;
-			return std::tie(a.Pipeline, a.Material, a.Mesh, a.Submesh, a.VertexStream, left) < std::tie(b.Pipeline, b.Material, b.Mesh, b.Submesh, b.VertexStream, right);
+			return std::tie(a.Pipeline, a.Material, a.Mesh, a.Submesh, a.Lod, a.VertexStream, left)
+				< std::tie(b.Pipeline, b.Material, b.Mesh, b.Submesh, b.Lod, b.VertexStream, right);
 		});
 		ShadowCasterSet set;
 		set.Draws.reserve(candidates.size());
@@ -517,7 +556,7 @@ namespace Engine {
 	}
 
 	Status ShadowPass::State::RecordView(nvrhi::ICommandList& commandList, PassBindingCache& bindings, const ShadowCasterSet& casters,
-		std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IFramebuffer& framebuffer,
+		std::span<nvrhi::IBindingSet* const> materialSets, nvrhi::IBuffer& instances, nvrhi::ITexture& noise, nvrhi::IBuffer& wind, nvrhi::IFramebuffer& framebuffer,
 		const nvrhi::Viewport& viewport, nvrhi::IBuffer& casterConstants, uint32_t slot, std::span<const uint32_t> visible,
 		std::span<const uint32_t> batchOf, RenderPassCounters& counters, bool reflected)
 	{
@@ -531,6 +570,7 @@ namespace Engine {
 			nvrhi::BindingSetDesc desc;
 			desc.bindings = { nvrhi::BindingSetItem::ConstantBuffer(0, &casterConstants, range),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, &instances),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, &wind),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)) };
 			if (mask != 0)
 			{
@@ -554,6 +594,9 @@ namespace Engine {
 				state.bindings.push_back(materialSets[first]);
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(0));
 			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Attributes).setSlot(Utils::MeshAttributeStreamSlot));
+			// M46: slot 2 (no attribute reads it) holds the vertices again, since NVRHI binds the slots as one contiguous range.
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Vertices).setSlot(Utils::PreviousPositionSlot));
+			state.addVertexBuffer(nvrhi::VertexBufferBinding().setBuffer(draw.Wind).setSlot(Utils::MeshWindStreamSlot));
 			state.setIndexBuffer(nvrhi::IndexBufferBinding().setBuffer(draw.Indices).setFormat(nvrhi::Format::R32_UINT));
 			commandList.setGraphicsState(state);
 			DrawConstants push{};
@@ -617,6 +660,7 @@ namespace Engine {
 		state.EveryDraw.resize(casters.Draws.size());
 		std::iota(state.EveryDraw.begin(), state.EveryDraw.end(), 0U);
 		nvrhi::ITexture& noise = inputs.DissolveNoise != nullptr ? *inputs.DissolveNoise : *state.NeutralNoise;
+		nvrhi::IBuffer& wind = inputs.Wind != nullptr ? *inputs.Wind : *state.CalmWind; // M46 (decision 3G)
 
 		// Every slot this record uses, written with one command before any draw: cascades in slots [0, 4), spot tiles from
 		// slot MaxShadowCascades, point faces from ShadowCasterFirstPointSlot. Each slot is ShadowCasterSlotStride bytes, so
@@ -686,7 +730,7 @@ namespace Engine {
 				if (!casters.Draws.empty())
 				{
 					Utils::CullShadowView(casters, state.EveryDraw, constants[index].ViewProjection, constants[index].Bias.z != 0.0f, state.FaceVisible[0]);
-					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *framebuffer,
+					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, wind, *framebuffer,
 						nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, index,
 						state.FaceVisible[0], state.BatchOf, scope.Counters, false));
 				}
@@ -736,7 +780,7 @@ namespace Engine {
 				const float size = static_cast<float>(tile.Size - 2 * SpotShadowGuardTexels);
 				if (!casters.Draws.empty())
 				{
-					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *inputs.AtlasFramebuffer,
+					ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, wind, *inputs.AtlasFramebuffer,
 						nvrhi::Viewport(left, left + size, top, top + size, 0, 1), *inputs.CasterConstants, slot, state.TileVisible[index], state.BatchOf,
 						scope.Counters, false));
 				}
@@ -813,7 +857,7 @@ namespace Engine {
 					const uint32_t slot = ShadowCasterFirstPointSlot + static_cast<uint32_t>(index) * PointShadowFaceCount + face;
 					if (!casters.Draws.empty())
 					{
-						ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, *framebuffer,
+						ENGINE_TRY(state.RecordView(commandList, bindings, casters, materialSets, *inputs.Instances, noise, wind, *framebuffer,
 							nvrhi::Viewport(static_cast<float>(desc.width), static_cast<float>(desc.height)), *inputs.CasterConstants, slot,
 							state.FaceVisible[face], state.BatchOf, scope.Counters, true));
 					}

@@ -14,6 +14,7 @@
 #include "Shared/ProbeConstants.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Shared/WindConstants.h"
 
 #include <array>
 #include <cstddef>
@@ -47,6 +48,7 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::Texture_SRV(BrdfLutRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
 										nvrhi::BindingLayoutItem::Texture_SRV(DissolveNoiseRegister),
+										nvrhi::BindingLayoutItem::ConstantBuffer(WindConstantsRegister),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
 										nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)),
@@ -58,6 +60,7 @@ namespace Engine {
 			return MakeSetLayout(0, {
 										nvrhi::BindingLayoutItem::ConstantBuffer(ViewConstantsRegister),
 										nvrhi::BindingLayoutItem::StructuredBuffer_SRV(InstancesRegister),
+										nvrhi::BindingLayoutItem::ConstantBuffer(WindConstantsRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
 										nvrhi::BindingLayoutItem::PushConstants(DrawConstantsSlot, sizeof(DrawConstants)),
 									});
@@ -94,6 +97,7 @@ namespace Engine {
 										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 1),
 										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 2),
 										nvrhi::BindingLayoutItem::Texture_SRV(PlanarReflectionsRegister + 3),
+										nvrhi::BindingLayoutItem::ConstantBuffer(WindConstantsRegister),
 										nvrhi::BindingLayoutItem::Sampler(LinearClampRegister),
 										nvrhi::BindingLayoutItem::Sampler(ShadowCompareRegister),
 										nvrhi::BindingLayoutItem::Sampler(AnisoWrapRegister),
@@ -125,6 +129,7 @@ namespace Engine {
 				.BindingLayouts = { MakePrepassViewLayout(), MakeMaterialLayout() },
 				.ConstantBuffers = {
 					{ .Set = 0, .Register = ViewConstantsRegister, .ByteSize = sizeof(ViewConstants) },
+					{ .Set = 0, .Register = WindConstantsRegister, .ByteSize = sizeof(WindConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
 				},
 			};
@@ -141,6 +146,7 @@ namespace Engine {
 				.BindingLayouts = { MakeOverdrawViewLayout(), MakeMaterialLayout() },
 				.ConstantBuffers = {
 					{ .Set = 0, .Register = ViewConstantsRegister, .ByteSize = sizeof(ViewConstants) },
+					{ .Set = 0, .Register = WindConstantsRegister, .ByteSize = sizeof(WindConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
 				},
 			};
@@ -165,6 +171,7 @@ namespace Engine {
 					{ .Set = 0, .Register = ProbeConstantsRegister, .ByteSize = sizeof(ProbeConstants) },
 					{ .Set = 0, .Register = FogConstantsRegister, .ByteSize = sizeof(FogConstants) },
 					{ .Set = 0, .Register = PlanarReflectionConstantsRegister, .ByteSize = sizeof(PlanarReflectionConstants) },
+					{ .Set = 0, .Register = WindConstantsRegister, .ByteSize = sizeof(WindConstants) },
 					{ .Set = 1, .Register = MaterialConstantsRegister, .ByteSize = sizeof(MaterialConstants) },
 				},
 			};
@@ -187,6 +194,7 @@ namespace Engine {
 			};
 			const std::array<nvrhi::VertexAttributeDesc, 2> stream = MakeMeshAttributeStreamAttributes();
 			attributes.insert(attributes.end(), stream.begin(), stream.end());
+			attributes.push_back(MakeMeshWindStreamAttribute()); // M46: location 6
 			return attributes;
 		}
 
@@ -262,6 +270,26 @@ namespace Engine {
 				attribute("TEXCOORD1", nvrhi::Format::RG32_FLOAT, offsetof(MeshVertexAttributes, TexCoord1)),
 				attribute("COLOR", nvrhi::Format::RGBA32_FLOAT, offsetof(MeshVertexAttributes, Color)),
 			};
+		}
+
+		nvrhi::VertexAttributeDesc MakeMeshWindStreamAttribute()
+		{
+			static_assert(sizeof(MeshVertexWind) == 4, "the wind stream is R8G8B8A8_UNORM");
+			return nvrhi::VertexAttributeDesc()
+				.setName("WIND")
+				.setFormat(nvrhi::Format::RGBA8_UNORM)
+				.setBufferIndex(MeshWindStreamSlot)
+				.setOffset(0)
+				.setElementStride(sizeof(MeshVertexWind));
+		}
+
+		nvrhi::VertexAttributeDesc MakeMeshNormalAttribute()
+		{
+			return nvrhi::VertexAttributeDesc()
+				.setName("NORMAL")
+				.setFormat(nvrhi::Format::RGB32_FLOAT)
+				.setOffset(static_cast<uint32_t>(offsetof(MeshVertex, Normal)))
+				.setElementStride(sizeof(MeshVertex));
 		}
 
 		MeshCullMode SelectCullMode(bool mirrored, bool doubleSided)
@@ -354,7 +382,7 @@ namespace Engine {
 			auto specification = MakeMeshPipelineSpecification(MakeOverdrawDescription(cullMode), layouts, true, cullMode);
 			specification.SharedBindingLayouts = { layouts.OverdrawView, layouts.Material };
 			// VSOverdraw reads only MeshVertex's position and texture coordinates (Scene.slang's OverdrawVertexInput), then the
-			// attribute stream (M23) at locations 2 and 3.
+			// attribute stream (M23) at locations 2 and 3, and (M46) MeshVertex's normal and the wind stream at 4 and 5.
 			constexpr uint32_t Stride = sizeof(MeshVertex);
 			specification.VertexAttributes = {
 				nvrhi::VertexAttributeDesc().setName("POSITION").setFormat(nvrhi::Format::RGB32_FLOAT).setOffset(offsetof(MeshVertex, Position)).setElementStride(Stride),
@@ -362,6 +390,8 @@ namespace Engine {
 			};
 			const std::array<nvrhi::VertexAttributeDesc, 2> stream = MakeMeshAttributeStreamAttributes();
 			specification.VertexAttributes.insert(specification.VertexAttributes.end(), stream.begin(), stream.end());
+			specification.VertexAttributes.push_back(MakeMeshNormalAttribute());
+			specification.VertexAttributes.push_back(MakeMeshWindStreamAttribute());
 			specification.Framebuffer = nvrhi::FramebufferInfo().addColorFormat(nvrhi::Format::RGBA16_FLOAT);
 			specification.RenderState.depthStencilState.setDepthTestEnable(false).setDepthWriteEnable(false);
 			specification.RenderState.blendState.targets[0].setBlendEnable(true).setSrcBlend(nvrhi::BlendFactor::One).setDestBlend(nvrhi::BlendFactor::One).setBlendOp(nvrhi::BlendOp::Add).setSrcBlendAlpha(nvrhi::BlendFactor::One).setDestBlendAlpha(nvrhi::BlendFactor::One).setBlendOpAlpha(nvrhi::BlendOp::Add);

@@ -17,6 +17,7 @@
 #include "Shared/InstanceRecord.h"
 #include "Shared/MaterialConstants.h"
 #include "Shared/ShadowCasterConstants.h"
+#include "Common/Wind.slang"
 
 #ifndef ALPHA_MASK
 #define ALPHA_MASK 0
@@ -38,6 +39,10 @@ struct VertexInput
 	float2 TexCoord : TEXCOORD0;
 	float2 TexCoord1 : TEXCOORD1;
 	float4 Color : COLOR;
+	// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): MeshVertex's normal and the wind stream
+	// (vertex binding 3), which the wind's displacement reads for an instance with DrawFlagWind.
+	float3 Normal : NORMAL;
+	float4 Wind : WIND;
 };
 
 struct VertexOutput
@@ -59,7 +64,17 @@ struct VertexOutput
 VertexOutput VSMain(VertexInput input, uint instance : SV_VulkanInstanceID)
 {
 	VertexOutput output;
-	float4 clip = mul(Caster.ViewProjection, mul(Instances[Draw.FirstInstance + instance].World, float4(input.Position, 1.0)));
+	const InstanceRecord record = Instances[Draw.FirstInstance + instance];
+	float4 world = mul(record.World, float4(input.Position, 1.0));
+	// M46: a wind caster's world position is displaced as the camera's passes displace theirs (Common/Wind.slang); a calm wind
+	// adds exactly 0, so its map equals the map without wind. Any other caster keeps its earlier arithmetic.
+	if (HasWind(record.Flags))
+	{
+		world = float4(ApplyWind(GetWindFrame(false), world.xyz, WindTransform(record.World, float4(0.0, 0.0, 0.0, 1.0)).xyz,
+						   WindTransform(record.World, float4(input.Normal, 0.0)).xyz, input.Wind, record.WindResponse),
+			1.0);
+	}
+	float4 clip = mul(Caster.ViewProjection, world);
 #if ALPHA_MASK
 	output.Instance = Draw.FirstInstance + instance;
 #endif

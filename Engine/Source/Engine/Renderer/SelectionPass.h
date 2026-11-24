@@ -27,6 +27,7 @@ namespace Engine {
 	{
 		nvrhi::BufferHandle Vertices{};
 		nvrhi::BufferHandle Attributes{}; // M23 (C-MESH2): vertex binding 1, the mesh's attribute stream (GpuMesh::AttributeBuffer)
+		nvrhi::BufferHandle Wind{};       // M46: vertex binding 3, the mesh's wind stream (GpuMesh::WindBuffer)
 		nvrhi::BufferHandle Indices{};
 		uint32_t IndexOffset = 0;
 		uint32_t IndexCount = 0;
@@ -53,6 +54,9 @@ namespace Engine {
 		// borrowed only for Record; both are required when a selection is drawn.
 		const SelectionDrawSet* Draws = nullptr;
 		nvrhi::IBuffer* Instances = nullptr;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's WindConstants at b8, which
+		// displace a selected wind draw as the prepass does; null binds the pass's own calm constants.
+		nvrhi::IBuffer* Wind = nullptr;
 		nvrhi::ITexture* SceneDepth = nullptr;
 		nvrhi::ITexture* Mask = nullptr;                      // R8_UNORM, full view extent; 1 visible, 0.5 occluded
 		nvrhi::ITexture* Scratch = nullptr;                   // R8_UNORM dilation intermediate, distinct from Mask
@@ -88,8 +92,12 @@ namespace Engine {
 		// `instances` into the buffer Record reads. M23 (C23.3, decision 27): `sources`, empty or one per snapshot item, are
 		// the vertices each item's draws bind (SkinningPass.h): a deformed item's draws bind its deformed vertices and key
 		// its VertexStream, so they batch with no other item's; a Skipped item draws no mask.
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): each selected item draws the
+		// level the camera's view holds most of its pixels with (SelectViewMeshLod's Level), unfaded, and nothing beyond its
+		// CullDistance; with `wind` (the snapshot has a Wind), a draw whose material has wind gets DrawFlagWind and its
+		// WindResponse, so its mask covers the prepass's displaced surface.
 		[[nodiscard]] static SelectionDrawSet PrepareDraws(GpuResourceCache& cache, const RenderSnapshot& snapshot, bool instancing,
-			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {});
+			std::vector<InstanceRecord>& instances, std::span<const DeformedVertexSource> sources = {}, bool wind = false);
 		// Empty selection clears mask and does no composite; invalid/deleted ids are ignored. InvalidArgument for invalid
 		// radius/descriptors, or a selection without its prepared draws or instance buffer; Gpu from resources/bindings.
 		// commandList open asserted; all inputs borrowed for this call. Every mask draw is instanced (Selection.slang reads its

@@ -14,6 +14,7 @@
 #include "Engine/Renderer/LightClusterPass.h"
 #include "Engine/Renderer/LightClusters.h"
 #include "Engine/Renderer/Lights2DPass.h"
+#include "Engine/Renderer/MeshWind.h"
 #include "Engine/Renderer/ParticlePass.h"
 #include "Engine/Renderer/PassBindingCache.h"
 #include "Engine/Renderer/PlanarReflectionPass.h"
@@ -46,6 +47,7 @@
 #include "Shared/ShaderLight.h"
 #include "Shared/ShadowConstants.h"
 #include "Shared/ViewConstants.h"
+#include "Shared/WindConstants.h"
 
 #include <array>
 #include <cstddef>
@@ -93,6 +95,15 @@ namespace Engine {
 			// the prepass variants bind as vertex binding 2 (Utils::PreviousPositionSlot); null for every other draw, which
 			// binds VertexBuffer there instead (ForwardPipelines.h).
 			nvrhi::IBuffer* PreviousPositions = nullptr;
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3E and 3G): the mesh's wind stream
+			// (GpuMesh::WindBuffer, held by the cache for the render), vertex binding 3 of every mesh pipeline; the draw's level
+			// (its index range is that level's) and signed fade (InstanceRecord::LodFade); and, for a draw whose material has wind
+			// in a scene with a Wind, its record's WindResponse (Renderer/MeshWind.h) with DrawFlagWind.
+			nvrhi::IBuffer* WindBuffer = nullptr;
+			uint32_t Lod = 0;
+			float LodFade = 0.0f;
+			bool Wind = false;
+			uint32_t WindResponse = 0;
 			// Sort keys (§8.3 pass 1).
 			AssetHandle MaterialHandle{};
 			AssetHandle Mesh{};
@@ -112,6 +123,7 @@ namespace Engine {
 			nvrhi::IBindingSet* Set = nullptr;
 			Engine::AlphaMode Mode = Engine::AlphaMode::Opaque; // the type is spelled Engine:: (GCC's "changes meaning")
 			bool DoubleSided = false;
+			MaterialWind Wind{}; // M46 (decision 3G): the material's wind block (GpuMaterial::Wind)
 		};
 
 		// M23 (C23.3, C-SKEL, C-MORPH; Docs/Decisions/0034-m23-contract.md decision 27; stream C): one deformed item's GPU
@@ -407,6 +419,11 @@ namespace Engine {
 			// M32 (Docs/Decisions/0047-m32-fog-ssr.md decision 5): the view's fog (Renderer/Fog.h), Enabled only in a Lit view
 			// with a camera outside the wireframe whose snapshot holds fog.
 			FogConstants Fog{};
+			// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3G): the renderer's wind (b8 of every mesh
+			// layout, written with the per-view constants) and whether the snapshot has a Wind, which sets DrawFlagWind on the
+			// draws of the materials with wind.
+			WindConstants Wind{};
+			bool HasWind = false;
 			ShadowConstants Shadow{};
 			ShadowCascadeSet Cascades{};
 			SpotShadowAtlas Spots{};
@@ -716,6 +733,12 @@ namespace Engine {
 		// (once per renderer).
 		nvrhi::BufferHandle PlanarReflectionConstantsBuffer{};
 		std::array<Detail::SceneRendererReflectionSlot, MaxPlanarReflectionsPerView> ReflectionSlots{};
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decisions 3G and 3L): the renderer's WindConstants
+		// (b8 of every mesh layout, created with the other per-view buffers and written by every Render), and the last render's
+		// wind (Renderer/MeshWind.h), the next render's previous wind unless its camera starts a new history.
+		nvrhi::BufferHandle WindConstantsBuffer{};
+		WindFrame PreviousWind{};
+		bool HasPreviousWind = false;
 		std::vector<Detail::SceneRendererReflectionScratch> ReflectionScratch{};
 		PassBindingCache ReflectionBindings{};
 		bool PlanarReflectionLimitLogged = false;

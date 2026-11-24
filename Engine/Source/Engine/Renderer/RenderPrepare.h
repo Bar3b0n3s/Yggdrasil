@@ -89,12 +89,15 @@ namespace Engine {
 		// of one submesh of one mesh and material are adjacent and batch into one instanced draw (GroupMeshInstances). The
 		// Prepare stage fills it from the draw's submesh.
 		uint32_t Submesh = 0;
+		// M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E; a reviewed change of the frozen key):
+		// the draw's level of detail (0 for a mesh without levels), so two levels of one submesh never batch together.
+		uint32_t Lod = 0;
 		uint32_t DrawIndex = 0; // the draw's position before sorting (snapshot order)
 
 		bool operator==(const OpaqueSortKey&) const = default;
 	};
 
-	// Sorts by (Pipeline, Material, Mesh, Submesh, DrawIndex), so equal keys keep snapshot order. Pure.
+	// Sorts by (Pipeline, Material, Mesh, Submesh, Lod, DrawIndex), so equal keys keep snapshot order. Pure.
 	void SortOpaqueDraws(std::span<OpaqueSortKey> keys);
 
 	// A draw's place in the transparent order (§8.3 pass 1: "transparent back-to-front, ties by UUID").
@@ -125,6 +128,8 @@ namespace Engine {
 		// stage gives each deformed draw (a skinned or morphed entity's, whose deformed vertices are its own) a value of its
 		// own, so two deformed draws of one mesh and material never share an instanced draw.
 		uint32_t VertexStream = 0;
+		// M46 (decision 3E): the draw's level of detail, whose index range the draw reads.
+		uint32_t Lod = 0;
 
 		bool operator==(const MeshInstanceKey&) const = default;
 	};
@@ -162,7 +167,8 @@ namespace Engine {
 	// forward passes) or, with `shadowCaster`, among the shadow casters. A Blend or Mask material keeps its mode; an Opaque
 	// material takes the Mask variants (whose fragment shaders clip by the parameters) while the item dissolves
 	// (DissolveAmount > 0) and, in the camera's passes only, while it fades (Opacity < 1), since a faded item keeps its
-	// shadow. Pure.
-	[[nodiscard]] AlphaMode SelectMeshAlphaMode(AlphaMode material, const MeshMaterialParameters& parameters, bool shadowCaster);
+	// shadow. M46 (Docs/Decisions/0064-m46-mesh-lods-draw-distance-and-wind.md decision 3E): and, in the camera's passes, while
+	// its draw's level fade `lodFade` (InstanceRecord::LodFade) is not 0; a caster never fades by level. Pure.
+	[[nodiscard]] AlphaMode SelectMeshAlphaMode(AlphaMode material, const MeshMaterialParameters& parameters, bool shadowCaster, float lodFade = 0.0f);
 
 }

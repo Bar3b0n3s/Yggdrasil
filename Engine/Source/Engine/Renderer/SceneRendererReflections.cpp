@@ -369,6 +369,7 @@ namespace Engine {
 				nvrhi::BindingSetItem::Texture_SRV(Utils::BrdfLutRegister, Pipelines->DfgLut->GetTexture()),
 				nvrhi::BindingSetItem::StructuredBuffer_SRV(Utils::InstancesRegister, InstanceBuffer),
 				nvrhi::BindingSetItem::Texture_SRV(Utils::DissolveNoiseRegister, frame.DissolveNoise),
+				nvrhi::BindingSetItem::ConstantBuffer(Utils::WindConstantsRegister, WindConstantsBuffer),
 				nvrhi::BindingSetItem::Sampler(Utils::LinearClampRegister, Pipelines->LinearClamp),
 				nvrhi::BindingSetItem::Sampler(Utils::AnisoWrapRegister, Pipelines->AnisoWrap),
 				nvrhi::BindingSetItem::PushConstants(Utils::DrawConstantsSlot, sizeof(DrawConstants)),
