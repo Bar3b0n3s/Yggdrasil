@@ -170,6 +170,8 @@ namespace Engine {
 				Utils::DrawSupportingMetric("Skinned meshes", std::to_string(view.SkinnedMeshes));
 				// M42 (Docs/Decisions/0059-m42-planar-reflections.md decision 3).
 				Utils::DrawSupportingMetric("Planar reflections", std::format("{} drawn / {} dropped", view.PlanarReflections, view.DroppedPlanarReflections));
+				// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: the fourth phase 8 row, after M46's).
+				Utils::DrawSupportingMetric("Water", std::format("{} surfaces{}", view.WaterSurfaces, view.Underwater ? " (under water)" : ""));
 				Utils::DrawSupportingMetric("Shadow draws", std::to_string(view.ShadowDraws));
 				Utils::DrawSupportingMetric("Shadowed spot lights", std::to_string(view.ShadowedSpotLights));
 				Utils::DrawSupportingMetric("Dropped spot shadows", std::to_string(view.DroppedSpotShadows));

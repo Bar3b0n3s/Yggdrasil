@@ -106,6 +106,8 @@ namespace Engine {
 		result.CulledPlanarReflections = stats.CulledPlanarReflections;
 		for (const UUID& entity : stats.PlanarReflectionEntities)
 			result.PlanarReflectionEntities.push_back(entity.ToString());
+		result.WaterSurfaces = stats.WaterSurfaces;
+		result.Underwater = stats.Underwater;
 		for (const RenderPassStats& pass : stats.Passes)
 		{
 			const bool available = stats.GpuAvailable && pass.GpuAvailable;
@@ -189,7 +191,14 @@ namespace Engine {
 				"Planar reflections the frame did not consider: out of view, seen from behind their reflecting side, or in a view that draws "
 				"none (a debug view or the wireframe); they cost nothing.")
 			.Field("planarReflectionEntities", &StatsViewSummary::PlanarReflectionEntities,
-				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.");
+				"The entities of the drawn planar reflections, in slot order (the largest on screen first), their ids as text.")
+			.Field("waterSurfaces", &StatsViewSummary::WaterSurfaces,
+				"Water surfaces the frame drew: every effectively enabled Water of the view's snapshot (one Ocean at most) in a Lit view with "
+				"a camera outside the wireframe; 0 in data and debug views, the wireframe and a frame whose Water pass failed. Their cost is "
+				"the WaterRefraction and Water rows.")
+			.Field("underwater", &StatsViewSummary::Underwater,
+				"Whether the frame recorded the Underwater pass: the camera's near plane may lie under a water's surface (its cost is the "
+				"Underwater row).");
 		registry.Struct<StatsGetResult>("StatsGetResult", "A nonblocking copy of host observations; unavailable services are identified explicitly.")
 			.Field("fps", &StatsGetResult::Fps, "Approximate observed host frames per second.")
 			.Field("cpuMilliseconds", &StatsGetResult::CpuMilliseconds, "Approximate observed host CPU frame time in milliseconds.")

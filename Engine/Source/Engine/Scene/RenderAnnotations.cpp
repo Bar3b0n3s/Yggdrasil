@@ -15,12 +15,16 @@
 #include "Engine/Scene/Components/MeshRendererComponent.h"
 #include "Engine/Scene/Components/PointLightComponent.h"
 #include "Engine/Scene/Components/SpotLightComponent.h"
+#include "Engine/Scene/Components/WaterComponent.h"
 #include "Engine/Scene/Entity.h"
 #include "Engine/Scene/JointDebugDraw.h"
 #include "Engine/Scene/NavigationDebugDraw.h"
 #include "Engine/Scene/RenderExtraction.h"
 #include "Engine/Scene/Scene.h"
 #include "Engine/Scene/UiExtraction.h"
+#include "Engine/Scene/WaterQueries.h"
+
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -39,6 +43,23 @@ namespace Engine {
 		static bool HasPositiveComponent(const glm::vec3& value)
 		{
 			return std::max({ value.x, value.y, value.z }) > 0;
+		}
+
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3): the outline's colour, a water blue no collider category uses.
+		constexpr glm::vec4 WaterVolumeColor = glm::vec4(0.2f, 0.65f, 1.0f, 1.0f);
+
+		// A Rectangle water's volume as a box: its footprint (the frame's axes, the half extents in world metres) from Depth
+		// below its base to Headroom above it. The frame's X and Z axes and +Y are a rotation (MakeWaterFrame), turned into a
+		// quaternion without a CRT transcendental (Scene is on the simulation path's lint rule).
+		static void AddWaterVolumeOutline(DebugDrawList& debug, const ResolvedWater& water)
+		{
+			const WaterFrame& frame = water.Surface.Frame;
+			const glm::vec3 center(glm::dvec3(frame.Origin.x, frame.Origin.y + (water.Headroom - water.Depth) * 0.5, frame.Origin.z));
+			const glm::vec3 halfExtents(glm::dvec3(water.HalfExtents.x, (water.Depth + water.Headroom) * 0.5, water.HalfExtents.y));
+			const glm::mat3 axes(glm::vec3(static_cast<float>(frame.AxisX.x), 0.0f, static_cast<float>(frame.AxisX.y)), glm::vec3(0.0f, 1.0f, 0.0f),
+				glm::vec3(static_cast<float>(frame.AxisZ.x), 0.0f, static_cast<float>(frame.AxisZ.y)));
+			if (IsFiniteAnnotationVector(center) && IsFiniteAnnotationVector(halfExtents))
+				debug.AddBox(center, halfExtents, glm::normalize(glm::quat_cast(axes)), WaterVolumeColor);
 		}
 
 		static bool IsContributingRenderLight(const LightData& light)
@@ -124,6 +145,14 @@ namespace Engine {
 				// M21 (C21.2, Docs/Decisions/0032-m21-contract.md decision 20): a 2D light shows where it is in its own colour.
 				if (const auto* light2D = entity.TryGetComponent<Light2DComponent>())
 					add(RenderIconKind::PointLight, glm::vec4(light2D->Color, 1.0f));
+			}
+			// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M45's region): with the editor's overlays, a
+			// Rectangle Water's volume is outlined at its rendered pose, where it masks the Ocean and holds its own water; an
+			// Ocean is unbounded and draws no outline.
+			if (HasFlag(snapshot.Flags, RenderViewFlags::EditorOverlays))
+			{
+				if (const auto* water = entity.TryGetComponent<WaterComponent>(); water != nullptr && water->Shape == WaterShape::Rectangle)
+					Utils::AddWaterVolumeOutline(debug, ResolveWater(*water, world, id));
 			}
 		}
 		if (HasFlag(snapshot.Flags, RenderViewFlags::Colliders))

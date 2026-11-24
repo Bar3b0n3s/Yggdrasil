@@ -31493,6 +31493,16 @@
 								"items": {
 									"type": "string"
 								}
+							},
+							"waterSurfaces": {
+								"description": "Water surfaces the frame drew: every effectively enabled Water of the view's snapshot (one Ocean at most) in a Lit view with a camera outside the wireframe; 0 in data and debug views, the wireframe and a frame whose Water pass failed. Their cost is the WaterRefraction and Water rows.",
+								"type": "integer",
+								"minimum": 0,
+								"maximum": 4294967295
+							},
+							"underwater": {
+								"description": "Whether the frame recorded the Underwater pass: the camera's near plane may lie under a water's surface (its cost is the Underwater row).",
+								"type": "boolean"
 							}
 						},
 						"additionalProperties": false

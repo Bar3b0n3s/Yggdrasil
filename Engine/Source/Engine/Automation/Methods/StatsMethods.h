@@ -84,6 +84,10 @@ namespace Engine {
 		uint32_t DroppedPlanarReflections = 0;
 		uint32_t CulledPlanarReflections = 0;
 		std::vector<std::string> PlanarReflectionEntities{};
+		// M47 (Docs/Decisions/0065-m47-water.md decision 3; phase 8's ledger: after M46's fields): RenderStats::WaterSurfaces and
+		// Underwater.
+		uint32_t WaterSurfaces = 0;
+		bool Underwater = false;
 	};
 
 	struct StatsGetResult
